@@ -698,6 +698,7 @@ def build_app(
     actor_tokens: dict[str, str] | None = None,
     data_dir: str | None = None,
     dir_lock: DataDirLock | None = None,
+    startup_sleep: Callable[[float], None] | None = None,
 ) -> FastAPI:
     if not service_token:
         raise RuntimeError("service token required (fail closed)")
@@ -732,7 +733,10 @@ def build_app(
     try:
         # Wave F (M-1): every consequential entity is rebuilt from the log's state deltas, in log order (fail closed)
         state = build_tracker(zbm, zbc, registry, rights)
-        replay(recorder, state, zbc, ledger)
+        if startup_sleep is None:
+            import time as _time_mod
+            startup_sleep = _time_mod.sleep
+        replay(recorder, state, zbc, ledger, sleep=startup_sleep)
         recorder.state = state
         # AEGIS C-2: server-assigned ids resume past every one ALREADY on the ledger -- an attempt whose reply was
         # lost (the id burned) and whose line was still owed when the process stopped is on the ledger only

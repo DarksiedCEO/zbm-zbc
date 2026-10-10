@@ -110,7 +110,7 @@ class LedgerPagingUnsupported(Exception):
 
 
 def select_paged(get_page, department: str, event_type: str | None, page_size: int = ENTRIES_PAGE_SIZE,
-                 want: set | None = None, read_all=None) -> list[dict]:
+                 want: set | None = None, read_all=None, after_seq: int | None = None) -> list[dict]:
     """This department's entries (of one event type), page by page, in ledger order. With ``want`` (event ids) the
     read stops at the page where every wanted id has been seen. ``get_page(params)`` raises
     ``LedgerPagingUnsupported`` on a ledger without the paged read: then ``read_all()`` (the whole ledger) is filtered
@@ -120,7 +120,8 @@ def select_paged(get_page, department: str, event_type: str | None, page_size: i
         return isinstance(e, dict) and e.get("department") == department and (
             event_type is None or e.get("event_type") == event_type)
     out: list[dict] = []
-    after = None
+    after = after_seq
+    start = after_seq
     while True:
         params = {"limit": str(page_size), "department": department}
         if event_type is not None:
@@ -132,12 +133,13 @@ def select_paged(get_page, department: str, event_type: str | None, page_size: i
         except LedgerPagingUnsupported:
             if read_all is None:
                 raise LedgerQueryFailed("the ledger has no paged read") from None
-            return [e for e in read_all() if keep(e)]
+            return [e for e in read_all() if keep(e) and (start is None or e.get("seq", 0) > start)]
         seqs = [e.get("seq") for e in page]
         if not all(isinstance(q, int) and not isinstance(q, bool) for q in seqs):
             raise LedgerQueryFailed("ledger entries carry no integer seq")
         if len(page) > page_size or (after is not None and page and seqs[0] <= after):
-            return [e for e in page if keep(e)]           # an older ledger ignored the query: the whole ledger
+            # an older ledger ignored the query: the whole ledger
+            return [e for e in page if keep(e) and (start is None or e.get("seq", 0) > start)]
         out += [e for e in page if keep(e)]
         if len(page) < page_size:
             return out
@@ -322,10 +324,10 @@ class HttpLedgerClient:
         return self._get_list(None)
 
     def entries_filtered(self, department: str, event_type: str | None = None, page_size: int = ENTRIES_PAGE_SIZE,
-                         want: set | None = None) -> list[dict]:
+                         want: set | None = None, after_seq: int | None = None) -> list[dict]:
         """Wave F: this department's entries (of one type) through ledger-rust's paged, filtered read
         (``select_paged``); a ledger without it is read in full and filtered here."""
-        return select_paged(self._get_list, department, event_type, page_size, want, self.entries)
+        return select_paged(self._get_list, department, event_type, page_size, want, self.entries, after_seq)
 
     def _get_list(self, params: dict | None) -> list[dict]:
         try:
@@ -452,7 +454,7 @@ class FakeLedgerClient:
         return [{k: v for k, v in e.items() if k != "payload"} | {"seq": i + 1} for i, e in enumerate(self.events)]
 
     def entries_filtered(self, department: str, event_type: str | None = None, page_size: int = ENTRIES_PAGE_SIZE,
-                         want: set | None = None) -> list[dict]:
+                         want: set | None = None, after_seq: int | None = None) -> list[dict]:
         """ledger-rust's paged filtered read, with the same paging (``pages_read`` counts the pages served)."""
         def page(params):
             if self.fail_all:
@@ -463,7 +465,7 @@ class FakeLedgerClient:
                    and e["department"] == params["department"]
                    and ("event_type" not in params or e["event_type"] == params["event_type"])]
             return sel[:int(params["limit"])]
-        return select_paged(page, department, event_type, page_size, want)
+        return select_paged(page, department, event_type, page_size, want, after_seq=after_seq)
 
 
 def _clean_summary(summary: str) -> str:
@@ -655,13 +657,14 @@ class EvidenceRecorder:
             return self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
 
     def record(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any], summary: str,
-               op_key: Any = None) -> str:
+               op_key: Any = None, event_id: str | None = None) -> str:
         """`op_key` (optional) is the operation's identity when the caller
         has a client-chosen idempotency key (e.g. a clip's submission_id);
         by default the canonical payload is the identity."""
         clean = _clean_summary(summary)
         with self.lock:
-            event_id = self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
+            if event_id is None:
+                event_id = self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
             problems = event_field_problems(event_id, DEPARTMENT, event_type, actor, subject_id, clean)
             if problems:
                 raise LedgerFieldInvalid(
@@ -708,6 +711,12 @@ class EvidenceRecorder:
 
 
 MAX_PENDING_CREATIONS = 10_000
+
+
+def stable_event_id(*parts: Any) -> str:
+    """Wave F (AEGIS F-3): an event id that does not depend on this process (no instance id, no sequence): the same
+    decision about the same object always records the same event (the ledger answers 200 for a repeat)."""
+    return "cp:s-" + hashlib.sha256(_canonical(list(parts)).encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def content_sha256(obj: Any) -> str:

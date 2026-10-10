@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
+import time as _time_mod
 from datetime import datetime, timezone
 
 import shared
@@ -31,6 +32,10 @@ from shared.ledger import DEPARTMENT, LedgerQueryFailed, UnconfiguredLedgerClien
 from shared.statelog import Codec, StateCodecError, StateReplayError, StateTracker
 
 log = logging.getLogger("creative.replay")
+
+# AEGIS F-3: how long a write of a stopped process may still be on its way to the ledger (twice the client's 5 s
+# timeout); an open intent not yet on the ledger is re-checked once this has passed since its line, never closed sooner
+LEDGER_INFLIGHT_GRACE_S = 10.0
 
 SIGN_EVENT = "campaign_kit_signed_by_andre"
 INTENT_KIND = "kit_signature_intent"
@@ -55,25 +60,29 @@ def build_tracker(zbm_wf, zbc_wf, registry, rights) -> StateTracker:
     st.add_whole("zbm_rounds_used", lambda: zbm_wf._rounds_used, lambda v: setattr(zbm_wf, "_rounds_used", v))
     st.add_whole("zbm_escalated_chains", lambda: zbm_wf._escalated_chains,
                  lambda v: setattr(zbm_wf, "_escalated_chains", v))
-    st.add_whole("zbm_memory", lambda: zbm_wf.memory, lambda v: setattr(zbm_wf, "memory", v))
+    # AEGIS F-1: the memories are per-key append-only lists; a line carries only the new entries (never the store)
+    for attr in ("winners", "brand_notes", "feedback"):
+        st.add_keyed_lists(f"zbm_memory_{attr}", zbm_wf.memory, attr)
     st.add_keyed("zbc_rulebooks", zbc_wf.rulebooks, "_by_key")
     for attr in ("goals", "rights_checks", "moment_maps", "hook_sheets", "kits", "submissions", "decisions",
                  "_kit_sha", "_submission_content"):
         st.add_keyed(f"zbc_{attr.lstrip('_')}", zbc_wf, attr)
-    st.add_whole("zbc_memory", lambda: zbc_wf.memory, lambda v: setattr(zbc_wf, "memory", v))
+    st.add_keyed_lists("zbc_memory_library", zbc_wf.memory, "library")
     st.add_keyed("registry_rows", registry, "rows")
     st.add_keyed("rights_records", rights, "records")
     st.add_keyed("rights_licenses", rights, "licenses")
     return st
 
 
-def replay(recorder, state: StateTracker, zbc_wf, ledger) -> None:
+def replay(recorder, state: StateTracker, zbc_wf, ledger, sleep=_time_mod.sleep,
+           grace_s: float = LEDGER_INFLIGHT_GRACE_S) -> None:
     """Apply every line's state in log order, refuse start on a line this build cannot interpret, check every signed
     kit against its committed signature, then resolve open signature intents. Writes nothing unless an intent was
     open (idempotent: a second restart replays the same lines to the same state)."""
     committed: set[str] = set()
     signed_by_evidence: set[str] = set()
     intents: dict[str, dict] = {}
+    intent_at: dict[str, str] = {}
     closed: set[str] = set()
     for r in recorder.journal.log.iter_records():
         where = f"local log line {r.get('seq')} ({r.get('kind')!r})"
@@ -96,12 +105,15 @@ def replay(recorder, state: StateTracker, zbc_wf, ledger) -> None:
             if not isinstance(i, dict) or not {"campaign_id", "kit_id", "rulebook_version", "event_id"} <= set(i):
                 raise StateReplayError(f"refusing to start: {where}: malformed kit signature intent")
             intents[i["event_id"]] = i
+            intent_at[i["event_id"]] = r.get("at", "")
         closed.update(d.get("kit_signatures_closed") or [])
         signed_by_evidence.update(d.get("kit_signatures_applied") or [])
     try:
         state.baseline()
     except StateCodecError as exc:
         raise StateReplayError(f"refusing to start: the replayed state cannot be re-encoded ({exc})") from None
+    if not isinstance(ledger, UnconfiguredLedgerClient):
+        recorder.journal.reanchor_tail()      # AEGIS F-2: the last line may be on disk without its anchor
     for cid in state.keyed["zbc_kits"].raw_keys():
         kit = state.keyed["zbc_kits"].raw_get(cid)
         if kit.status == "signed" and (kit.signed_by != FOUNDER_ACTOR or kit.kit_id not in signed_by_evidence):
@@ -110,18 +122,38 @@ def replay(recorder, state: StateTracker, zbc_wf, ledger) -> None:
                 "signature names it; a restart never signs a kit (inspect the log)")
     open_ = {eid: i for eid, i in intents.items() if eid not in closed and eid not in committed}
     if open_:
-        _resolve_intents(recorder, state, zbc_wf, ledger, open_)
+        _resolve_intents(recorder, state, zbc_wf, ledger, open_, intent_at, sleep, grace_s)
 
 
-def _resolve_intents(recorder, state: StateTracker, zbc_wf, ledger, open_: dict[str, dict]) -> None:
+def _read_signatures(ledger, want: set) -> set:
+    if isinstance(ledger, UnconfiguredLedgerClient):
+        raise LedgerQueryFailed("ledger not configured")
+    if hasattr(ledger, "entries_filtered"):
+        found = ledger.entries_filtered(DEPARTMENT, SIGN_EVENT, want=want)
+    else:
+        found = ledger.entries()
+    return {e.get("event_id") for e in found if isinstance(e, dict) and e.get("event_type") == SIGN_EVENT}
+
+
+def _resolve_intents(recorder, state: StateTracker, zbc_wf, ledger, open_: dict[str, dict], intent_at: dict,
+                     sleep, grace_s: float) -> None:
     try:
-        if isinstance(ledger, UnconfiguredLedgerClient):
-            raise LedgerQueryFailed("ledger not configured")
-        if hasattr(ledger, "entries_filtered"):
-            found = ledger.entries_filtered(DEPARTMENT, SIGN_EVENT, want=set(open_))
-        else:
-            found = ledger.entries()
-        held = {e.get("event_id") for e in found if isinstance(e, dict) and e.get("event_type") == SIGN_EVENT}
+        held = _read_signatures(ledger, set(open_))
+        missing = [eid for eid in open_ if eid not in held]
+        if missing:
+            # AEGIS F-3: a record of the stopped process may still be in flight; "not on the ledger" is final only
+            # once the grace has passed since the newest missing intent's line (one bounded wait, then one re-read)
+            now = datetime.now(timezone.utc)
+            ages = []
+            for eid in missing:
+                try:
+                    ages.append((now - datetime.fromisoformat(intent_at.get(eid, ""))).total_seconds())
+                except ValueError:
+                    ages.append(0.0)
+            young = [a for a in ages if a < grace_s]
+            if young:
+                sleep(min(grace_s, grace_s - max(0.0, min(young))))
+                held = _read_signatures(ledger, set(open_))
     except (LedgerQueryFailed, AttributeError) as exc:
         raise StateReplayError(f"refusing to start: {len(open_)} Andre kit signature(s) may be on the ledger without a "
                                f"committed local line, and the ledger cannot be read ({exc}); a signature would be "

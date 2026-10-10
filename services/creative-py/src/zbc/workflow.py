@@ -82,6 +82,7 @@ from shared.ledger import (
     check_subject,
     content_sha256,
     serialized,
+    stable_event_id,
 )
 from shared.registry import PlatformRulesRegistry
 from shared.rights import RightsRegistry
@@ -531,12 +532,15 @@ class ZbcWorkflow:
                    "seed_clips_produced": kit.seed_clips_produced}
         # Wave F (M-1): the verified signature's intent is in the local log BEFORE its record, so a restart applies it
         # exactly when the ledger holds the record (state_replay), whatever happens to this decision's own line
+        # AEGIS F-3: Andre's signature of THIS kit has one event id whatever process records it, so signing again
+        # (e.g. after a restart whose resolution line failed) is the ledger's 200, never a second signature event
+        sig_id = stable_event_id("campaign_kit_signed_by_andre", kit.kit_id, kit.rulebook_version, campaign_id)
         self.recorder.write_intent("kit_signature_intent", {
             "campaign_id": campaign_id, "kit_id": kit.kit_id, "rulebook_version": kit.rulebook_version,
-            "event_id": self.recorder.planned_event_id("campaign_kit_signed_by_andre", FOUNDER_ACTOR, kit.kit_id,
-                                                       payload)})
+            "event_id": sig_id})
         self.recorder.record("campaign_kit_signed_by_andre", FOUNDER_ACTOR, kit.kit_id, payload,
-                             f"Andre signed kit {kit.kit_id} for {campaign_id} v{kit.rulebook_version}")
+                             f"Andre signed kit {kit.kit_id} for {campaign_id} v{kit.rulebook_version}",
+                             event_id=sig_id)
         signed = kit.model_copy(update={"status": "signed", "signed_by": FOUNDER_ACTOR})
         self.kits[campaign_id] = signed
         return signed

@@ -1757,3 +1757,14 @@ Not carried (recorded): the per-process retry caches (`_attempts`, `PendingCreat
 instance id, so a cross-restart retry is a new record anyway; burned server ids are still resumed past) and the HTTP
 `Idempotency-Key` store (a client retrying a creation across a restart gets a new server id). The id floor still reads
 every event of this department at each start (not the whole ledger); a persisted high-water mark would bound it.
+
+### AEGIS review of Wave F (038fa93..0928711) — fixes
+
+Pinned by `tests/test_wave_f_restart.py` (`test_f1_*`, `test_f3_*`) and `tests/test_wave_f_aegis_probes.py` (the
+reviewer's signature probes, ported).
+
+| Id | Finding | Fix |
+|---|---|---|
+| F-1 (Medium) | `zbm_memory` / `zbc_memory` were carried whole: every change carried the store (2 000 feedback entries: 212.9 MB of deltas, quadratic) | The memories' winners, brand notes, feedback and library are per-key append-only lists (`StateTracker.add_keyed_lists`): a line carries only each touched key's new entries (`extend`); the delta for one entry is the same size at the 10th and the 2 000th entry (asserted in bytes). No natural cap exists in the memories; none is invented. |
+| F-2 (Medium, same rule) | A decision whose line was owed at a crash was lost | The shared journal appends locally first, then anchors (onboarding-py's fix): a decision whose anchor failed survives the crash; the last line's anchor is re-sent at start. Kit signatures were already covered by their intent lines. Not added here: onboarding's quarantine (a creative decision lost between its record and its local line is `attempted` and is redone; no money or identity rides on it). |
+| F-3 (Low) | An open signature intent was closed `not_on_ledger` while its record could still be in flight; signing again after a failed resolution line recorded a second `campaign_kit_signed_by_andre` | An intent not found on the first read is re-checked once after the rest of `LEDGER_INFLIGHT_GRACE_S` (10 s) since its line (`build_app(startup_sleep=...)`, injectable; tests never wait). Andre's signature of a kit has a process-independent event id (`stable_event_id(type, kit, version, campaign)`), so signing again is the ledger's 200: one signature event. |

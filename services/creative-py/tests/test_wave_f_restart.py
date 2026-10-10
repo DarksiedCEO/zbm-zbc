@@ -18,7 +18,7 @@ from samples import (CAMPAIGN, ZBC_ASSETS, zbc_goal, zbc_kit_request, zbc_licens
 from shared.departments import Departments
 from shared.ledger import FakeLedgerClient, LedgerNotRecorded
 from shared.statelog import StateReplayError
-from shared.store import DataDirLock, RecordLog
+from shared.store import DataDirLock, RecordLog, StoreWriteError
 
 
 class Ledger(FakeLedgerClient):
@@ -222,3 +222,103 @@ def test_id_resumption_reads_only_this_department_through_the_paged_read(box):
     box.led.whole_reads = box.led.pages_read = 0
     box.restart()
     assert box.led.whole_reads == 0 and box.led.pages_read >= 1
+
+
+# ============================================================================================ AEGIS review of Wave F
+
+
+def _lose_the_next_decision_line(box):
+    """The intent line lands, the signature is recorded, then the decision's local append fails (the process dies)."""
+    log_ = box.api.app.state.recorder.journal.log
+    real, n = log_.append_prepared, []
+
+    def append(rec, line):
+        n.append(rec["kind"])
+        if rec["kind"] == "decision" and n.count("decision") == 1:
+            raise StoreWriteError("simulated disk failure (test double)")
+        return real(rec, line)
+    log_.append_prepared = append
+
+
+def test_f3_signing_again_after_a_failed_resolution_line_records_no_second_signature(box):
+    """The decision's line is lost (its append fails), the restart's resolution line cannot be written (the kit stays a
+    draft in that process), Andre signs again: the same signature event id (ledger 200), one event, signed after the
+    next restart."""
+    _kit_to_draft(box)
+    _lose_the_next_decision_line(box)
+    assert box.api.post(f"{C}/kit/sign", andre=TEST_FOUNDER_TOKEN).status_code == 503
+    assert box.led.of_type("campaign_kit_signed_by_andre")
+    box.led.fail_type, box.led.countdown = "log_anchor", 2                 # tail re-anchor passes, resolution's fails
+    box.restart(check=False)
+    assert box.api.zbc.kits[CAMPAIGN].status == "draft"                    # not served before its line is anchored
+    ok(box.api.post(f"{C}/kit/sign", andre=TEST_FOUNDER_TOKEN))
+    box.restart(check=False)
+    assert box.api.zbc.kits[CAMPAIGN].status == "signed"
+    assert len(box.led.of_type("campaign_kit_signed_by_andre")) == 1
+    box.restart()
+
+
+def test_f3_an_intent_not_yet_on_the_ledger_is_rechecked_after_the_grace_before_it_is_closed(box, make_api):
+    """The signature's record was still in flight when the process stopped; it lands while start-up waits out the
+    grace: the signature is applied, not closed as "not on the ledger"."""
+    _kit_to_draft(box)
+    led = box.led
+    held = []
+    orig = type(led).record_event
+
+    def in_flight(self, event_id, department, event_type, *a, **k):
+        if event_type == "campaign_kit_signed_by_andre" and not held:
+            held.append((event_id, department, event_type, a, k))
+            raise LedgerNotRecorded("no reply yet (in flight, test double)")
+        return orig(self, event_id, department, event_type, *a, **k)
+    type(led).record_event = in_flight
+    try:
+        assert box.api.post(f"{C}/kit/sign", andre=TEST_FOUNDER_TOKEN).status_code == 503
+    finally:
+        type(led).record_event = orig
+    box.api.app.state.close()
+    waited = []
+
+    def sleep(s):
+        waited.append(s)
+        eid, dep, et, a, k = held[0]
+        orig(led, eid, dep, et, *a, **k)                                    # the in-flight record lands
+    box.api = make_api(ledger=led, data_dir=box.d, dir_lock=box.lock, departments=box.depts, startup_sleep=sleep)
+    assert waited and 0 < waited[0] <= 10
+    assert box.api.zbc.kits[CAMPAIGN].status == "signed"
+
+
+def test_f1_memory_deltas_stay_the_same_size_as_the_store_grows():
+    """AEGIS F-1: 2,000 feedback entries made each line carry the whole memory (212.9 MB of deltas). Now a line
+    carries only the new entry: its size is the same at the 10th and the 2,000th entry (bytes, not time)."""
+    import json as _json
+
+    import state_replay
+    from shared.statelog import Codec, StateTracker
+    from zbc.creative_memory import ZbcCreativeMemory
+    from zbm.creative_memory import ZbmCreativeMemory
+
+    class Owner:
+        memory = ZbmCreativeMemory()
+        zmem = ZbcCreativeMemory()
+    o = Owner()
+    st = StateTracker(Codec(state_replay._state_modules()))
+    for attr in ("winners", "brand_notes", "feedback"):
+        st.add_keyed_lists(f"m_{attr}", o.memory, attr)
+    st.baseline()
+    sizes, lines = [], []
+    for i in range(2000):
+        o.memory.add_feedback(f"client_{i % 50:02d}", "zbm_creative_lead", "feedback text " * 5)
+        d, mark = st.delta()
+        lines.append(_json.loads(_json.dumps(d)))
+        sizes.append(len(_json.dumps(d)))
+        mark()
+    assert sizes[1999] == sizes[9] and max(sizes) <= sizes[0] + 16, (sizes[0], sizes[9], max(sizes))
+    copy = Owner()
+    copy.memory = ZbmCreativeMemory()
+    st2 = StateTracker(Codec(state_replay._state_modules()))
+    for attr in ("winners", "brand_notes", "feedback"):
+        st2.add_keyed_lists(f"m_{attr}", copy.memory, attr)
+    for ln in lines:
+        st2.apply(ln, "test")
+    assert st2.snapshot() == st.snapshot() and len(copy.memory.feedback["client_07"]) == 40
