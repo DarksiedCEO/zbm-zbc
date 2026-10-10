@@ -1741,3 +1741,19 @@ Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
 restart they are gone (ids no longer collide, C-2), and every ledger event of the old process stays visible as
 committed or attempted in `GET /audit/evidence`. Plan: make the log state-bearing (each decision's line carries the
 state it applied; start-up replays it), workflow by workflow, pre-replay lines kept as evidence only.
+
+## Wave F fixes (Oct 9 2026, branch fix-mediums-wave-f)
+
+Pinned by `tests/test_wave_f_restart.py` (restart round trips compare the whole consequential state of the live app
+with its restarted copy after every step and carry on on the copy).
+
+| Id | Finding | Fix |
+|---|---|---|
+| M-1 | Briefs, jobs, work, rulebooks, kits (with Andre's signatures) and decisions lived in memory only: a restart lost them | Every decision line carries a `state` delta (`src/shared/statelog.py`, the same module as onboarding-py's; `EvidenceRecorder.state`) and `src/state_replay.py` replays it in log order at start: ZBM briefs, jobs, work, review rounds, escalated chains and memory; ZBC rulebooks, goals, rights checks, moment maps, hook sheets, kits, submissions, decisions, kit/submission content hashes and memory; the platform-rules registry rows; rights records and licences. Registry and rights writes now run inside a decision (`recorder.op`), so a record and the state it commits are one line. Deterministic, idempotent (a second restart: same state, nothing written), fail closed (an unknown line kind, field, state version, container, type tag or a value that does not re-encode identically refuses start-up, naming the line). |
+| M-1 (signatures) | A restart must never lose or forge Andre's kit signature | Never forged: after replay every `signed` kit must be signed by `andre` AND named by a committed `campaign_kit_signed_by_andre` record or a resolved signature intent, else start-up is refused; a sign whose record failed is never committed, so an unsigned kit cannot become signed. Never lost: `sign_kit` writes an anchored `kit_signature_intent` line (after the founder token is verified) BEFORE the ledger record; if the decision's own line is owed when the process stops, the next start applies the signature exactly when the ledger holds that record and the kit is still the draft it was made for, and closes the intent with a `kit_signature_resolved` line carrying the state (a resolution that cannot be written leaves the kit a draft in that process and is retried at the next start). |
+| M-1b | Every start read the whole ledger for id resumption (C-2) | `ledger_id_floor` and the intent resolution read this department only, through ledger-rust's paged filtered read (`HttpLedgerClient.entries_filtered`, `select_paged`), with the client-side fallback for a ledger without it; reads are size-capped (256 MB) like onboarding's. |
+
+Not carried (recorded): the per-process retry caches (`_attempts`, `PendingCreations`: event ids carry the random
+instance id, so a cross-restart retry is a new record anyway; burned server ids are still resumed past) and the HTTP
+`Idempotency-Key` store (a client retrying a creation across a restart gets a new server id). The id floor still reads
+every event of this department at each start (not the whole ledger); a persisted high-water mark would bound it.

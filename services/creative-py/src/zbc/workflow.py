@@ -527,9 +527,15 @@ class ZbcWorkflow:
                 f"kit {kit.kit_id} is {kit.status} for v{kit.rulebook_version}; Andre signs a draft kit made for the live version"),
                 FOUNDER_ACTOR, kit.kit_id, "kit signature")
         self._guard(lambda: self.founder.verify(founder_token), FOUNDER_ACTOR, kit.kit_id, "kit signature")
-        self.recorder.record("campaign_kit_signed_by_andre", FOUNDER_ACTOR, kit.kit_id,
-                             {"campaign_id": campaign_id, "rulebook_version": kit.rulebook_version,
-                              "seed_clips_produced": kit.seed_clips_produced},
+        payload = {"campaign_id": campaign_id, "rulebook_version": kit.rulebook_version,
+                   "seed_clips_produced": kit.seed_clips_produced}
+        # Wave F (M-1): the verified signature's intent is in the local log BEFORE its record, so a restart applies it
+        # exactly when the ledger holds the record (state_replay), whatever happens to this decision's own line
+        self.recorder.write_intent("kit_signature_intent", {
+            "campaign_id": campaign_id, "kit_id": kit.kit_id, "rulebook_version": kit.rulebook_version,
+            "event_id": self.recorder.planned_event_id("campaign_kit_signed_by_andre", FOUNDER_ACTOR, kit.kit_id,
+                                                       payload)})
+        self.recorder.record("campaign_kit_signed_by_andre", FOUNDER_ACTOR, kit.kit_id, payload,
                              f"Andre signed kit {kit.kit_id} for {campaign_id} v{kit.rulebook_version}")
         signed = kit.model_copy(update={"status": "signed", "signed_by": FOUNDER_ACTOR})
         self.kits[campaign_id] = signed
