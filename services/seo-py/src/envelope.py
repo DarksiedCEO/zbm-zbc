@@ -83,14 +83,18 @@ def envelope(agent: str, task: str, outcome: str, findings: Iterable[dict] = (),
 
 
 def worst_outcome(outcomes: Iterable[str]) -> str:
-    """The audit's overall outcome: OK only when every agent is OK."""
+    """The audit's overall outcome: OK only when every agent is OK; KILLED whenever a kill switch stopped any agent;
+    PARTIAL when something was observed and nothing failed; otherwise the most serious outcome."""
     s = set(outcomes)
     if not s:
         return "INSUFFICIENT_EVIDENCE"
+    if "KILLED" in s:
+        return "KILLED"
     if s == {"OK"}:
         return "OK"
-    if s <= {"OK", "PARTIAL", "NOT_CONNECTED"}:
+    if s & {"OK", "PARTIAL"} and s <= {"OK", "PARTIAL", "NOT_CONNECTED", "INSUFFICIENT_EVIDENCE"}:
         return "PARTIAL"
-    if "OK" in s or "PARTIAL" in s:
-        return "PARTIAL"
-    return sorted(s, key=OUTCOMES.index)[-1]
+    for o in ("QUARANTINED", "FAILED", "BLOCKED", "INSUFFICIENT_EVIDENCE", "NOT_CONNECTED", "PARTIAL"):
+        if o in s:
+            return o
+    return "INSUFFICIENT_EVIDENCE"

@@ -80,6 +80,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin):
         self.volatile_kills: list[dict] = []           # engaged while the ledger could not record them (fail closed)
         self.entities: dict[str, dict] = {}
         self.audits: dict[str, dict] = {}
+        self.prompt_sets: dict[str, dict] = {}
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now

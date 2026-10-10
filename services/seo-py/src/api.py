@@ -439,6 +439,31 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         return svc.update_entity_field(_id(eid, ENTITY_ID), req)
 
 
+    # ------------------------------------------------------------------ prompt sets and audits
+
+    @app.post(P + "/tenants/{tid}/prompt-sets", dependencies=auth, status_code=201)
+    def create_prompt_set(req: dict = Depends(body(m.PromptSetCreate)),
+                          scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.create_prompt_set(scope[0], scope[1], req)
+
+    @app.get(P + "/tenants/{tid}/prompt-sets/{psid}", dependencies=auth)
+    def prompt_set(psid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "compliance_38"))) -> dict:
+        return svc.prompt_set_view(scope[1], _id(psid))
+
+    @app.post(P + "/tenants/{tid}/audits", dependencies=auth, status_code=201)
+    def request_audit(request: Request, req: dict = Depends(body(m.AuditCreate)),
+                      scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.request_audit(scope[0], scope[1], req, andre=andre_if_presented(request))
+
+    @app.get(P + "/tenants/{tid}/audits", dependencies=auth)
+    def audits(scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31", "compliance_38"))) -> list:
+        return svc.audits_view(scope[1])
+
+    @app.get(P + "/tenants/{tid}/audits/{aid}", dependencies=auth)
+    def audit(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31",
+                                                      "compliance_38"))) -> dict:
+        return svc.audit_view(scope[1], _id(aid), full=scope[0] != "finance_31")
+
     # ------------------------------------------------------------------ jobs and audit
 
     @app.post(P + "/jobs/{name}/run", dependencies=auth)
