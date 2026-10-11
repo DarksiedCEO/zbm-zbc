@@ -141,6 +141,17 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - **M1 (Medium) — ADR 0004 claimed no key churn for names without a sigma.** Corrected (this commit; ADR 0004 and the
   WR-F003 entry above): 266 code points key differently; W-9 reconciliation is the backstop. Key code unchanged.
 
+## AEGIS round 3 (review of the round-2 fixes)
+
+- **R3-M1 (Medium) — the shared fold's per-word cache was bounded by entries, not size.** `lookalikes.Table` emptied
+  its cache at 50,000 entries; a hostile email of 19,990 x U+FDF2 plus a random tail is one unique ~80,000-letter word
+  per message, so service-py grew ~0.33 MB per message. FIXED (`ad46ea4`; ADR 0014 "War room fixes"): a piece longer
+  than 64 characters is never kept, and the cache is emptied before it would hold more than 1,000,000 characters or
+  50,000 entries (same file in every service that has it). Tests show the bound structurally (no character more
+  after 25 hostile messages), not by RSS; the 20,000 x U+FDFA email costs what it did.
+- **R3-L1 (Low) — the per-code-point script cache had no bound.** FIXED (`ad46ea4`): emptied before it passes 4,096
+  code points.
+
 ## SHOULD-level observations for Andre (scored, not gate-blocking)
 
 These are outside what the departments' documents promise today, so the war room scores them and does not block on
@@ -154,7 +165,15 @@ them. Each may deserve a decision.
 - **service-py opt-out in the middle of a very long message.** A text over the inbound cap (20,000 characters for
   email) is cut to its head and its tail (`models.py`, `INBOUND_TAIL`); an opt-out in the middle is dropped. The
   documented promise covers an opt-out at the end only. Not changed (not local: the cut is the gateway model's); ADR 0014 "War room fixes" records it and a
-  way to fix it.
+  way to fix it. Investigated again in fix wave G, still not changed, because no version of it is decision-free:
+  the cut runs in request validation (`models._lenient_inbound`, before the service lock, up to the 128 KiB route
+  cap, i.e. a middle of ~100,000 characters); scanning it means running the opt-out rules (~2.5-2.8 s for a hostile
+  20,000-character email today) inside validation on up to five times that much text, so the work needs a new bound;
+  and the middle of a long email is usually the quoted thread, so whether a middle line counts as the person's own
+  words (revoke), as quoted text (alert only, ADR 0014 R2) or is surfaced without either is the scope rule's
+  decision, which carrying lines into the kept text would change. Options for Andre: (a) scan the dropped middle
+  with the strong-wording list only and raise `OPT_OUT_IN_QUOTED_TEXT` (alert, never revoke), bounded by an ASCII
+  pre-filter; (b) raise the cap.
 - **service-py opt-out wording below an unmarked quote.** Below an Outlook "Original Message" / "From: Date:" block,
   "Dont call me or email me anymore" or "I want to be removed from your email list" raises nothing (ADR 0014 R2 says
   "any other opt-out wording raises OPT_OUT_IN_QUOTED_TEXT"; the code reads only multi-word listed phrases there).
@@ -176,3 +195,14 @@ them. Each may deserve a decision.
 - **sales-py, onboarding-py** (not in this fix wave): sales-py misses some `homoglyph_wide` opt-outs (no suppression)
   and onboarding-py's legal-name key does not join a letter-spaced name (`1099-name-variant`, `letter_spacing`); both scored SHOULD by their
   libraries.
+  sales-py FIXED (`dde2e16`; ADR 0013 "War room fixes"): sales-py vendors the shared lookalike fold (five identical
+  copies) and reads opt-out wording through it with the WR-F006 single-script rule; HTML replies are read with tags
+  as spaces (`<p>StoP</p>` had been read as `pstopp`). MUST scenarios `sales-py/email-reply-disguised-opt-out`,
+  `sms-reply-disguised-opt-out` (suppressed) and `foreign-script-ordinary-sms` / `-email` (nothing suppressed).
+  Left as it is: on email, `cancel` / `end` / `quit` count only as the whole reply (ADR 0013 decision 13), so
+  `cancel` above a quote or at the end of a long reply is held for a person, not suppressed (still SHOULD).
+  onboarding-py NOT changed (fix wave G): joining spaced letters changes the stored-key text of every name that
+  already has three or more single letters in a row (`J. R. R. Tolkien`, `Mary A B C Smith` key as `j r r tolkien`
+  today and would key as `jrr tolkien`): an existing record keeps its stored pk2- key, so the same person's next
+  signup would start a separate 1099 total, which ADR 0004 forbids doing silently. A key-preserving way exists but
+  is a decision for Andre: keep the pk2- key and add a second, joined key that a payment's 1099 total also sums over.
