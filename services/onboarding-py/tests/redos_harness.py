@@ -154,3 +154,109 @@ def best_time_back_to_back(fn: Callable[[str], object], items: list[str], runs: 
             if was:
                 gc.enable()
     return best
+
+
+# ---------------------------------------------------------------------------------------------- structure and review
+# Fix wave G (Oct 10 2026): the per-run absolute CPU bounds of test_r1_every_pattern_linear_on_adversarial_input
+# failed under machine load (6.90 ms against a scaled 6.88 ms bound on 10 KB). Every run re-measured a constant of
+# (pattern, flags, CPython's sre engine); the test now pins each pattern's content (``pin``) and judges its structure
+# (``structure``) deterministically, and keeps the same-work growth check. The absolute cost of a pinned pattern is
+# measured once, when it is reviewed, by ``review`` (``python tests/redos_harness.py``), on each supported Python.
+
+PER_100KB_S = 0.050   # the finding's bound: 50 ms per 100 KB of hostile input (worst pattern ~25 ms on the dev box)
+# fix wave 6: the bound is scaled by how much slower THIS machine is than the dev box it was derived on, measured on a
+# known linear reference regex (~8 ms of CPU there), never below 1 and never past 8
+_REF = re.compile(r"(?i)\bcan(?:no|')?t\s+(?:\w+\s+){0,3}?zzz\b")
+_REF_INPUT = "cannot " * (100_000 // 7) + "!"
+REF_NOMINAL_S = 0.008
+SLOWDOWN_CAP = 8.0
+
+
+def slowdown() -> float:
+    t = best_time(lambda s: _drain_matches(_REF.finditer(s)), _REF_INPUT, runs=5)
+    return min(SLOWDOWN_CAP, max(1.0, t / REF_NOMINAL_S))
+
+
+def pin(p: re.Pattern) -> str:
+    """The content hash a pattern is reviewed under: its flags and its source (SHA-256, 16 hex digits)."""
+    import hashlib
+    return hashlib.sha256(f"{p.flags}:{p.pattern}".encode()).hexdigest()[:16]
+
+
+def structure(p: re.Pattern) -> list[str]:
+    """The super-linear-capable constructs in ``p`` (sre's own parse tree, as creative-py's fix wave 4 test): an
+    unbounded repeat inside another unbounded repeat, and a backreference. Possessive repeats and atomic groups never
+    backtrack into, so they are not walked."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            from re import _constants as C, _parser as P
+        except ImportError:  # pragma: no cover - before 3.11
+            import sre_constants as C
+            import sre_parse as P
+    found: list[str] = []
+
+    def walk(items, depth: int) -> None:
+        for op, av in items:
+            name = str(op)
+            if name in ("MAX_REPEAT", "MIN_REPEAT"):
+                _lo, hi, sub = av
+                unbounded = hi == C.MAXREPEAT
+                if unbounded and depth:
+                    found.append("nested unbounded repeat")
+                walk(sub, depth + unbounded)
+            elif name == "SUBPATTERN":
+                walk(av[-1], depth)
+            elif name == "BRANCH":
+                for b in av[1]:
+                    walk(b, depth)
+            elif name in ("ASSERT", "ASSERT_NOT"):
+                walk(av[1], depth)
+            elif name in ("GROUPREF", "GROUPREF_EXISTS"):
+                found.append("backreference")
+    walk(P.parse(p.pattern, p.flags), 0)
+    return found
+
+
+def worst_shapes(fn: Callable[[str], object], p: re.Pattern, k: int = 3) -> list[tuple[float, str, str]]:
+    """Every hostile shape at 4 KB, ranked by this thread's CPU (best of 1): the ``k`` costliest (time, unit, tail).
+    The ranking only picks the shapes the growth check scales; no bound is asserted on these readings."""
+    ranked = [(best_time(fn, s, 1), u, tail) for u, tail, s in inputs(p, 4_000)]
+    ranked.sort(reverse=True)
+    return ranked[:k]
+
+
+def review(names: list[str] | None = None) -> int:
+    """The review measurement for pinned patterns: per pattern, the three worst shapes' best-of-5 CPU on 100 KB
+    against the finding's bound (scaled by ``slowdown``, as the per-run test did). Run on an unloaded machine, once
+    per supported Python, when a pattern is added or changed; then pin it in test_fix_wave4.PATTERN_PINS. Prints
+    every pattern's pin. Exit status 1 when any pattern is over the bound."""
+    pats = collect_patterns()
+    slow = slowdown()
+    worst, over = (0.0, ""), []
+    for name in names or sorted(pats):
+        p = pats[name]
+        fn = use_of(name, p)
+        for _t, unit, tail in worst_shapes(fn, p):
+            t100 = best_time(fn, unit * (100_000 // len(unit)) + tail, runs=5)
+            worst = max(worst, (t100, f"{name} {unit!r}+{tail!r}"))
+            if t100 >= PER_100KB_S * slow:
+                over.append(f"{name} {unit!r}+{tail!r}: {t100 * 1000:.2f} ms / 100 KB")
+        print(f"{pin(p)}  {name}")
+    print(f"slowdown {slow:.2f}x; worst 100 KB CPU {worst[0] * 1000:.2f} ms at {worst[1]} "
+          f"(bound {PER_100KB_S * slow * 1000:.1f} ms)")
+    for line in over:
+        print("OVER", line)
+    return 1 if over else 0
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path[:0] = [here, os.path.join(os.path.dirname(here), "src")]
+    os.environ.setdefault("ONBOARDING_SERVICE_TOKEN", "redos-review-" + "0" * 32)   # api.py refuses to import without
+    raise SystemExit(review(sys.argv[1:] or None))

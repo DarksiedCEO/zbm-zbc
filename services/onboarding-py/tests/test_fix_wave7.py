@@ -302,10 +302,15 @@ def real_stack7(ledger_bin):
     s.close()
 
 
-def _serial_scenario(base: str, nbig: int, nsmall: int, dur: float) -> dict:
+def _serial_scenario(base: str, nbig: int, nsmall: int, dur: float, need: dict | None = None,
+                     cap: float = 0.0) -> dict:
     """AEGIS round 6 ``onb_serial6.py``: NBIG clients each push the 416 KB
     body back-to-back, NSMALL other clients send a tiny message every 0.3 s;
-    small-client latency and status codes are what matter."""
+    small-client latency and status codes are what matter.
+
+    Fix wave G: ``need`` (answers per kind: "small", "health", and "scans" = large scans finished) makes the run last
+    at least ``dur`` seconds AND until every count is reached, or until ``cap`` seconds: how many samples a run takes
+    is no longer up to how fast the machine is (a loaded box answered 32 small messages in 8 s, against 40 needed)."""
     stamp = int(time.time() * 1000) % 10_000_000
     stop = threading.Event()
     lock = threading.Lock()
@@ -373,7 +378,15 @@ def _serial_scenario(base: str, nbig: int, nsmall: int, dur: float) -> dict:
            + [threading.Thread(target=smallw, args=(i,)) for i in range(nsmall)] + [threading.Thread(target=health)])
     for t in ths:
         t.start()
-    time.sleep(dur)
+    started = time.monotonic()
+    need = need or {}
+    while True:
+        with lock:
+            have = {"small": len(lat["small"]), "health": len(lat["health"]), "scans": len(scans_done)}
+        ran = time.monotonic() - started
+        if ran >= dur and all(have[k] >= n for k, n in need.items()) or ran >= max(cap, dur):
+            break
+        stop.wait(0.05)        # a polling rate, not a synchronisation
     stop.set()
     for t in ths:
         t.join(200)
@@ -431,11 +444,19 @@ _HEALTH_OVER_SCAN_GAP_MAX = 0.25
 # a run with fewer large scans than this (or almost no /health answers) measured nothing
 _MIN_SCANS_DONE = 3
 _MIN_HEALTH = 10
+# Fix wave G: the small-message sample the p50 is taken over. The run lasts at least 8 s (the AEGIS scenario) and until
+# it has _MIN_SMALL small answers, _MIN_SCANS_DONE large scans and _MIN_HEALTH /health answers: it used to stop at 8 s
+# and then require 40 small answers, which a loaded box missed (32) with every latency bound holding. The bounds
+# on the latencies are unchanged; the counts are now reached by construction. _RUN_CAP_S only stops a run that can
+# never get there (the counts are then asserted and fail).
+_MIN_SMALL = 40
+_RUN_CAP_S = 120.0
 
 
 @pytest.mark.parametrize("nbig,nsmall", [(1, 4), (4, 4), (12, 4)])
 def test_new5_live_small_messages_stay_fast_beside_large_uploaders(real_stack7, nbig, nsmall):
-    r = _serial_scenario(real_stack7.base, nbig, nsmall, 8.0)
+    r = _serial_scenario(real_stack7.base, nbig, nsmall, 8.0,
+                         need={"small": _MIN_SMALL, "scans": _MIN_SCANS_DONE, "health": _MIN_HEALTH}, cap=_RUN_CAP_S)
     small_over_health = r["small"]["p50"] / r["health"]["p50"]
     health_over_gap = r["health"]["p50"] / r["scan_gap"]
     summary = (f"big={nbig}x{len(BIG_BODY) // 1024}KB small={nsmall}: codes={r['codes']} "
@@ -450,12 +471,13 @@ def test_new5_live_small_messages_stay_fast_beside_large_uploaders(real_stack7, 
     codes = r["codes"]
     if r["scans_done"] < _MIN_SCANS_DONE or r["health"]["n"] < _MIN_HEALTH:
         pytest.fail(f"INVALID run: {r['scans_done']} large scans finished (need {_MIN_SCANS_DONE}), "
-                    f"{r['health']['n']} /health answers (need {_MIN_HEALTH}), so nothing was measured -- {summary}")
+                    f"{r['health']['n']} /health answers (need {_MIN_HEALTH}) in {_RUN_CAP_S:.0f} s, so nothing was "
+                    f"measured -- {summary}")
     # the finding's numbers: small p50 294 ms (1 uploader), 1.6 s (4), 6 s (12), each message waiting for the
     # large scans ahead of it; /health 4-7 ms beside them on the same Linux box
     if nbig >= _RATIO_FROM_NBIG:
         assert small_over_health < _SMALL_OVER_HEALTH_MAX, summary
-    assert r["small"]["n"] >= 40, summary
+    assert r["small"]["n"] >= _MIN_SMALL, summary      # reached by construction unless the server never got there
     assert codes.get("small_200", 0) == r["small"]["n"], summary  # never 503, never an error
     assert health_over_gap < _HEALTH_OVER_SCAN_GAP_MAX, summary
     # large bodies are still admitted (serialized), busy ones are 503 with nothing else
