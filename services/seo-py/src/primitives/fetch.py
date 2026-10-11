@@ -325,6 +325,8 @@ class Fetcher:
             host = host.encode("idna").decode("ascii").lower() if not _is_ip_literal(host) else host
         except UnicodeError:
             raise _Refused("REFUSED_URL", "host is not a valid domain name") from None
+        if _numeric_host_not_canonical(host):
+            raise _Refused("REFUSED_URL", "a numeric host must be a canonical IP address")
         port = port or (443 if scheme == "https" else 80)
         if port not in self.ports:
             raise _Refused("REFUSED_PORT", "only the standard web ports are fetched")
@@ -499,3 +501,19 @@ def _is_ip_literal(host: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _numeric_host_not_canonical(host: str) -> bool:
+    """True for a host whose last label is a number (decimal, or 0x hex) but which is not a canonical IP address.
+
+    Such a host is an IPv4 address in a legacy spelling (``0177.0.0.1``, ``127.1``, ``2130706433``, ``0x7f000001``)
+    and what it resolves to is up to the platform's C library: glibc reads ``0177`` as octal (127.0.0.1) while the
+    macOS CI runner resolved it to a different, public address. An attacker-chosen URL must not mean different
+    addresses on different hosts, and no real site is addressed this way, so these spellings are refused before any
+    resolution (the WHATWG URL rule: a host whose last label is numeric is an IPv4 address, never a domain name)."""
+    if _is_ip_literal(host):
+        return False
+    last = host.rsplit(".", 1)[-1].lower()
+    if not last or not last.isascii():
+        return False
+    return last.isdigit() or (last.startswith("0x") and all(c in "0123456789abcdef" for c in last[2:]))

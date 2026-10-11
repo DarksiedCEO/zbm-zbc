@@ -31,7 +31,7 @@ the check.
 | `python:onboarding-py` | 848 | pytest collection | — |
 | `python:sales-py` | 806 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
-| `python:seo-py` | 418 | pytest collection | — |
+| `python:seo-py` | 435 | pytest collection | — |
 | `python:service-py` | 815 | pytest collection | — |
 | `python:verification-py` | 350 | pytest collection | — |
 | `rust:ledger-rust` | 159 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

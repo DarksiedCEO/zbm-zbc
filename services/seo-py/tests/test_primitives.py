@@ -75,6 +75,32 @@ def test_ssrf_direct_and_after_redirect_is_refused(srv, target):
     assert len(srv.seen) == n + 1                 # only the first hop reached the server
 
 
+@pytest.mark.parametrize("host", ["0177.0.0.1", "0177.1", "127.1", "2130706433", "0x7f000001", "0X7F.0.0.1",
+                                  "1.2.3", "00000000177.0.0.1", "93.184.216.034", "example.0x1", "example.123"])
+def test_legacy_numeric_hosts_are_refused_before_any_resolution(host):
+    """A host whose last label is a number is an IPv4 address in some spelling; anything but the canonical dotted
+    quad is refused before the resolver is asked, so the answer can't depend on the platform's C library (macOS CI
+    resolved 0177.0.0.1 differently from glibc) — directly and as a redirect target."""
+    asked: list[str] = []
+
+    def resolver(h, port):
+        asked.append(h)
+        return ["93.184.216.34"]
+
+    def handler(request: httpx.Request):
+        return httpx.Response(301, headers={"Location": f"http://{host}/"})
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=resolver, transport=httpx.MockTransport(handler))
+    assert f.fetch(f"http://{host}/").state == "REFUSED_URL" and asked == []
+    r = f.fetch("http://site.test/")
+    assert r.state == "REFUSED_URL" and asked == ["site.test"]
+
+
+@pytest.mark.parametrize("host", ["93.184.216.34", "example.com", "1.example", "0x.example", "123abc.com",
+                                  "xn--80ak6aa92e.com"])
+def test_ordinary_hosts_are_not_taken_for_numeric_ones(host):
+    assert fetch_mod._numeric_host_not_canonical(host) is False
+
+
 def test_production_policy_refuses_the_fixture_itself(srv):
     srv.html("site.test", "/", PAGE)
     f = fetch_mod.Fetcher(timeout_s=1, resolver=srv.resolver(), policy=fetch_mod.default_policy,
