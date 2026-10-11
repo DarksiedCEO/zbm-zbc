@@ -301,7 +301,7 @@ What a red step's annotations hold (title = the suite, e.g. `python:creative-py`
 
 GitHub keeps 10 error and 10 warning annotations per step and 50 per job, so a step gets at most 10 errors (the
 summary always the last of them), then up to 10 warnings for further failures; any failure beyond that is named in
-the summary. Each quoted line is cut at 300 characters. A green step gets one notice (count line, slowest test,
+the summary. Each quoted line is cut at 500 characters. A green step gets one notice (count line, slowest test,
 hygiene line) and no error. The log is untrusted: quoted lines are redacted (Bearer/Basic/authorization values,
 `key=value` secrets, URL credentials, known token shapes, long high-entropy strings — 32+ hex digits included),
 control characters are dropped, a leading `::` or `##[` is neutralised, and messages and titles are escaped as

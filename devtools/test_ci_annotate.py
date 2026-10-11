@@ -476,6 +476,19 @@ class Caps(unittest.TestCase):
         first = split(run(text, "1")[0])[2].splitlines()
         self.assertLessEqual(len(first), 1 + ca.MAX_REASON_LINES)
 
+    def test_a_long_reason_cut_in_the_header_survives_in_its_e_line(self):
+        reason = "AssertionError: baseline 74 MiB; per-round peaks [" + ", ".join(["209"] * 120) + "]; tail END"
+        text = "____ test_n2 ____\nE   " + reason + "\nE   assert 25 < 24\n" \
+            "==== short test summary info ====\n" f"FAILED tests/t.py::test_n2 - {reason}\n"
+        msg = split(run(text, "1")[0])[2].splitlines()
+        self.assertTrue(msg[0].endswith("…"), msg[0])          # the header line is cut ...
+        self.assertTrue(msg[1].startswith("AssertionError: baseline 74 MiB"))   # ... its E line is quoted too
+        self.assertIn("assert 25 < 24", msg)
+        short = "____ test_s ____\nE   AssertionError: short\n==== short test summary info ====\n" \
+            "FAILED tests/t.py::test_s - AssertionError: short\n"
+        self.assertEqual(split(run(short, "1")[0])[2].splitlines(),
+                         ["FAILED tests/t.py::test_s - AssertionError: short"])   # a short one is not repeated
+
     def test_a_timeout_dump_keeps_an_error_slot_among_many_failures(self):
         text = "".join(f"FAILED t.py::test_{i} - e\n" for i in range(30))
         text = "Timeout (0:10:00)!\nThread 0x01 (most recent call first):\n  File \"t.py\", line 3 in test_hang\n" + \

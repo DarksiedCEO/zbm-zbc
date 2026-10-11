@@ -62,7 +62,7 @@ MAX_ERRORS = 10               # GitHub keeps 10 error annotations per step
 MAX_WARNINGS = 10             # ... and 10 warning annotations per step
 MAX_TIMEOUT_ERRORS = 2        # error slots a faulthandler dump may take ahead of further failures
 MAX_MESSAGE = 1800            # characters of one annotation message (before escaping)
-MAX_LINE = 300                # characters of one quoted log line
+MAX_LINE = 500                # characters of one quoted log line
 MAX_REASON_LINES = 6          # reason lines quoted under one failure
 MAX_SCAN_LINE = 20000         # a longer log line is cut before any pattern sees it
 TAIL_LINES = 25               # last log lines quoted when no failure is recognised
@@ -205,7 +205,10 @@ class Failure:
             self.reasons.append(line)
 
     def lines(self) -> list[str]:
-        return [self.header] + [r for r in self.reasons if r not in self.header]
+        # a reason the header already shows is dropped, unless the header is long enough to be cut (then the
+        # reason line is the only place its end survives: CI proof run 38163019846, creative-py on macos-26)
+        shown = self.header if len(self.header) < MAX_LINE - 1 else ""
+        return [self.header] + [r for r in self.reasons if r not in shown]
 
 
 class Parser:
