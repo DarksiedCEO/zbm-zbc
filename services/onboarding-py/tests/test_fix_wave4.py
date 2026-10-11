@@ -60,11 +60,13 @@ PATTERNS = H.collect_patterns()
 # redos_harness.pin: flags and source), and was measured under the same bound when pinned
 # (python tests/redos_harness.py = redos_harness.review: three worst shapes, best of 5 on 100 KB, scaled by the
 # same slowdown; Oct 10 2026 on the 2-vCPU box, both Pythons: worst 39.6 ms on 3.13, 35.4 ms on 3.12, against
-# 68-70 ms). A new or changed pattern fails PATTERN_PINS until it is measured and pinned again. Its structure is
-# judged deterministically too: sre's parse tree has no unbounded repeat inside another and no backreference, or the
-# pattern is in STRUCTURE_REVIEWED (name, pin, why it is linear). The same-work growth check on the three worst shapes
-# is kept as it was (ratios of the same work, not wall-clock bounds), and the whole scanners keep their absolute CPU
-# bounds below (10 KB < 0.25 s, 1 MB < 4 s), so a gross constant-factor regression still fails on every run.
+# 68-70 ms). A new or changed pattern fails PATTERN_PINS until it is measured and pinned again (the pin only detects
+# change; it proves nothing about cost). Its structure is checked deterministically too: sre's parse tree has no
+# unbounded repeat inside another and no backreference, or the pattern is in STRUCTURE_REVIEWED (name, pin, why it is
+# linear). That is NOT a linearity proof (AEGIS G-L1): `\w+@` passes it and is quadratic when searched. The guard
+# against super-linear patterns is the same-work growth check on the three worst shapes, kept as it was (ratios of the
+# same work, not wall-clock bounds); the whole scanners keep their absolute CPU bounds below (10 KB < 0.25 s,
+# 1 MB < 4 s), so a gross constant-factor regression still fails on every run.
 LINEAR_RATIO = 20.0  # 10 KB -> 100 KB, i.e. 2x the linear ideal of 10
 SAME_WORK_RATIO = LINEAR_RATIO / 10
 SAME_WORK_ATTEMPTS = 3   # fix wave 26b (R25B-1): an over-bound same-work reading is measured again, up to this often
@@ -240,6 +242,10 @@ def test_r1_the_structure_check_flags_nested_repeats_and_backreferences_only():
         assert H.structure(re.compile(bad)), bad
     for good in (r"[^\w#@]+", r"[\s/]+", r"(?:ab){2,5}c+", r"\w++(?:\s\w++)*+", r"(?>\w+)\.\w+", r"(?:x|y)z+"):
         assert not H.structure(re.compile(good)), good
+    # the check's limit, stated (AEGIS G-L1): one unbounded repeat that can fail after it is quadratic when searched
+    # (10 000 "a": ~0.36 s, 20 000: ~1.4 s) and passes; only the same-work growth check catches that class
+    # (test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own)
+    assert not H.structure(re.compile(r"\w+@"))
 
 
 def test_r1_a_pin_changes_with_the_source_and_the_flags():

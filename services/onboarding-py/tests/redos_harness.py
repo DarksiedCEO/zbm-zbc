@@ -186,7 +186,8 @@ def pin(p: re.Pattern) -> str:
 def structure(p: re.Pattern) -> list[str]:
     """The super-linear-capable constructs in ``p`` (sre's own parse tree, as creative-py's fix wave 4 test): an
     unbounded repeat inside another unbounded repeat, and a backreference. Possessive repeats and atomic groups never
-    backtrack into, so they are not walked."""
+    backtrack into, so they are not walked. Not a linearity proof: a single unbounded repeat that can fail after it
+    (``\\w+@``) is quadratic when searched and passes; the same-work growth check is what catches that."""
     import warnings
 
     with warnings.catch_warnings():
