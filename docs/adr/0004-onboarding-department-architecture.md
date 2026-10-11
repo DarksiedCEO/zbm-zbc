@@ -795,3 +795,28 @@ Pinned by `services/onboarding-py/tests/test_warroom_fixes.py`; the replay cases
 | Id | Finding | Fix |
 |---|---|---|
 | WR-F003 | `ᴊօsé ɡαrςía` for `José García` keyed as `jose garoia` (and `JoᏚé ʛaгϲíα`: the lunate sigma is NFKC'd to the final sigma): casefold ran before the lookalike table and turned the final sigma `ς` (the shared table's `c`) into `σ` (`o`), so a second creator id under that spelling started a separate 1099 total | `name_key_text` folds with the shared lookalike fold (`src/lookalikes.py`, byte-identical in four services; ADR 0007 "War room fixes"): the hand-table letters casefold would turn into another letter (the final sigma) are folded as written, a capital sigma ending a word is read as the final sigma (`str.lower`'s Final_Sigma rule, so `ΓΙΏΡΓΟΣ` and `Γιώργος` still key alike), then casefold and this module's own table (`CONFUSABLES` + the generated Latin-letter folds, unchanged, on top) over the Unicode confusables.txt 15.1.0 skeleton. Key churn (corrected after AEGIS round 2, M1): NOT none. Pinned pk2- keys of already-normalised names (Latin, Latin-1 / Extended-A, Vietnamese, a Cyrillic name) are unchanged, and every code point the old key folded to ASCII keys the same way except the final sigma family (`ς`, `ϲ`, a word-final `Σ` and their mathematical forms), which is the fix. But the confusables skeleton now folds letters the old key left as they were: 266 code points in U+0080..U+2FFFF give a different key than at 2cedde8 (measured name by name, `ab<letter>cd`), among them Arabic (66: alef `ا`, heh `ه`, ...), Hebrew (9: vav `ו`, final nun `ן`, samekh `ס`, tet `ט`, ...), Armenian, Coptic, Cyrillic (6), Georgian, Lisu, Warang Citi, Canadian syllabics and other scripts. So a legal name written in Arabic or Hebrew script, for example, can get a new pk2- key. Consequence: only the hash is stored, so an existing record cannot be re-keyed at load and keeps the key it was stored with; a second signup by the same person after this deploy can key differently from that stored record and start a separate 1099 running total. The W-9 holder reconciliation is the backstop for that split, as for any pk- record (bug sweep D). The key code is not changed in this round. Letter spacing in a legal name ("J o s é") stays a SHOULD in the war room: initials cannot be told from spaced-out letters |
+
+## Fix wave G (Oct 10 2026) — two load-dependent tests made deterministic
+
+Both failed under load on a shared box on Oct 10 with every property holding. What each proves is unchanged.
+
+- `test_r1_every_pattern_linear_on_adversarial_input` (6.90 ms against a scaled 6.88 ms bound on 10 KB). The per-run
+  absolute CPU bounds (5 ms / 10 KB, 50 ms / 100 KB, scaled by a reference regex) re-measured, every run, a constant
+  of (pattern, flags, CPython's sre engine). Now: (1) every pattern is pinned by content (`PATTERN_PINS`,
+  `redos_harness.pin`: SHA-256 of flags and source); the pinned forms were measured under the same scaled 100 KB
+  bound when pinned (`python tests/redos_harness.py`, `redos_harness.review`: the three worst shapes, best of 5; Oct
+  10 2026, both Pythons, the same pins: worst 39.6 ms on 3.13 and 35.4 ms on 3.12 against 68-70 ms), and a new or
+  changed pattern fails the test, before anything is timed, until it is measured and pinned; (2) sre's parse tree
+  of each pattern has no unbounded repeat inside another and no backreference, or the pattern is reviewed by name and
+  pin with the reason it is linear (`STRUCTURE_REVIEWED`: `redaction._REDACTED_RUN` only), deterministic, as
+  creative-py's fix wave 4 test; (3) the same-work growth check on the three worst shapes is unchanged (a quadratic
+  pattern fails it on its own: `test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own`). The whole scanners
+  keep their absolute CPU bounds (`test_r1_scanners_linear_up_to_1mb`, `test_r1_the_aegis_probe_shapes_are_fast`),
+  so a gross constant-factor regression of the engine still fails on every run. Not proven per run any more: that a
+  pinned pattern's CPU on this machine today is under 50 ms per 100 KB; it was measured when pinned, and only the
+  engine can change it.
+- `test_new5_live_small_messages_stay_fast_beside_large_uploaders` (32 small answers in 8 s against 40 needed). The run
+  now lasts at least 8 s AND until it has 40 small answers, 3 large scans and 10 `/health` answers (a 120 s cap stops
+  a run that can never get there; the counts are then asserted and fail), as fulfillment-py's `/health` test took its
+  samples while the condition was verified rather than in whatever time the machine allowed. The latency assertions
+  (small p50 / health p50, health p50 / scan gap) and the status-code assertions are unchanged.

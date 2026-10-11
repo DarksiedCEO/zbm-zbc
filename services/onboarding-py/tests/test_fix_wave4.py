@@ -48,42 +48,112 @@ from onboarding_schema import requests as rq
 SRC = Path(__file__).resolve().parents[1] / "src"
 PATTERNS = H.collect_patterns()
 
-# The per-pattern bound from the finding: 50 ms per 100 KB of hostile input,
-# on an unloaded dev box (the worst pattern measures ~25 ms there: 2x margin).
-PER_100KB_S = 0.050
-# Early-out at 10 KB (the same rate) so a quadratic pattern fails in
-# milliseconds instead of running for minutes at 100 KB.
-PER_10KB_S = 0.005
-
-# Fix wave 6: an AEGIS run under a concurrent cargo build measured
-# _NEGATED_OK at 5.4 ms/10 KB against the 5 ms bound (2.3 ms unloaded). Two
-# changes. (1) The harness times the thread's own CPU (``time.thread_time``),
-# so pre-emption by other processes no longer counts. (2) The absolute bounds
-# are scaled by how much slower THIS machine is than the dev box they were
-# derived on: a known LINEAR reference regex is timed right before each
-# pattern on the same 100 KB shape (~8 ms of CPU on the dev box); the factor
-# never tightens the bounds (min 1) and never relaxes them past 8x. A
-# machine-independent linearity check (10x the input may cost at most 20x
-# the CPU, never ~100x) is asserted in addition, so a quadratic pattern can
-# never hide behind a slow machine.
-_REF = re.compile(r"(?i)\bcan(?:no|')?t\s+(?:\w+\s+){0,3}?zzz\b")
-_REF_INPUT = "cannot " * (100_000 // 7) + "!"
-REF_NOMINAL_S = 0.008
-SLOWDOWN_CAP = 8.0
+# Fix wave 6: a known LINEAR reference regex measured this machine against the dev box, and the per-pattern absolute
+# bounds (50 ms per 100 KB, 5 ms per 10 KB) were scaled by it; the machine-independent linearity check (10x the input
+# may cost at most 20x the CPU) was asserted in addition. Fix wave 23 / 26b: an over-bound ratio is re-measured as one
+# 100 KB input against ten 10 KB inputs back to back (the same bytes, the same duration; linear ideal 1, bound 2x),
+# up to SAME_WORK_ATTEMPTS times; a quadratic pattern costs ~10x there.
+#
+# Fix wave G (Oct 10 2026): the absolute bounds still failed under load (6.90 ms against a scaled 6.88 ms on 10 KB,
+# twice in one day on a shared box). They re-measured, on every run, a constant of (pattern, flags, CPython's sre
+# engine). That constant is now fixed deterministically instead: every pattern is pinned by content (PATTERN_PINS,
+# redos_harness.pin: flags and source), and was measured under the same bound when pinned
+# (python tests/redos_harness.py = redos_harness.review: three worst shapes, best of 5 on 100 KB, scaled by the
+# same slowdown; Oct 10 2026 on the 2-vCPU box, both Pythons: worst 39.6 ms on 3.13, 35.4 ms on 3.12, against
+# 68-70 ms). A new or changed pattern fails PATTERN_PINS until it is measured and pinned again. Its structure is
+# judged deterministically too: sre's parse tree has no unbounded repeat inside another and no backreference, or the
+# pattern is in STRUCTURE_REVIEWED (name, pin, why it is linear). The same-work growth check on the three worst shapes
+# is kept as it was (ratios of the same work, not wall-clock bounds), and the whole scanners keep their absolute CPU
+# bounds below (10 KB < 0.25 s, 1 MB < 4 s), so a gross constant-factor regression still fails on every run.
 LINEAR_RATIO = 20.0  # 10 KB -> 100 KB, i.e. 2x the linear ideal of 10
-# Fix wave 23: a ratio over the bound is re-measured as one 100 KB input
-# against ten 10 KB inputs timed back to back (the same bytes, the same
-# duration; see redos_harness.best_time_back_to_back) before it fails. Its
-# linear ideal is 1 and the bound keeps the same 2x tolerance; a quadratic
-# pattern costs ~10x the ten 10 KB inputs
-# (test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own).
 SAME_WORK_RATIO = LINEAR_RATIO / 10
 SAME_WORK_ATTEMPTS = 3   # fix wave 26b (R25B-1): an over-bound same-work reading is measured again, up to this often
 
+STRUCTURE_REVIEWED = {   # name -> (pin of the reviewed pattern, why it is linear)
+    "redaction._REDACTED_RUN": ("4df38cc7a3a61af6", "each outer iteration must start with the literal '[REDACTED]', whose '[' the inner class excludes: any input splits one way only"),
+}
 
-def slowdown() -> float:
-    t = H.best_time(lambda s: H._drain_matches(_REF.finditer(s)), _REF_INPUT, runs=5)
-    return min(SLOWDOWN_CAP, max(1.0, t / REF_NOMINAL_S))
+# Every pattern of the service as reviewed (redos_harness.review), by its content pin.
+PATTERN_PINS = {
+    "guardrails._DOLLAR": "d84f53e020d2df77",
+    "guardrails._GUARANTEE": "0309cb95074d2171",
+    "guardrails._GUARANTEE_REQUEST": "0901beedb41b761f",
+    "guardrails._HUMAN_REQUEST": "7826e402a0f9e5a6",
+    "guardrails._INJECTION[0][1]": "9449d0786eab594b",
+    "guardrails._INJECTION[1][1]": "01dcec56264bc427",
+    "guardrails._INJECTION[2][1]": "30b5eb8d217dbfb1",
+    "guardrails._INJECTION[3][1]": "3d320939527395c8",
+    "guardrails._INJECTION[4][1]": "f9f444f2254a938f",
+    "guardrails._INJECTION[5][1]": "67939734cab45c7e",
+    "guardrails._INJECTION[6][1]": "2d9d893460e1f48c",
+    "guardrails._INJECTION[7][1]": "83a07e4ab4f3015a",
+    "guardrails._LABEL_SUFFIX": "16ce44d1d7842daf",
+    "guardrails._NEGATED_OK": "c5a4eb4a0495422f",
+    "guardrails._WORD_DOLLAR": "aa9a29c4d76c2e71",
+    "intelligences.i02_conversation._CHANGE_OBJECT": "648b295e21847e82",
+    "intelligences.i02_conversation._CHANGE_VERB": "b9cddcd2f545b96f",
+    "intelligences.i02_conversation._CREDENTIAL_ASK": "84b203c08719cb80",
+    "intelligences.i02_conversation._SPANISH_REQUEST": "cdda5487bbfdf2b3",
+    "intelligences.i04_platform_access.TAG_PATTERNS[0][1]": "a323a09793184c33",
+    "intelligences.i04_platform_access.TAG_PATTERNS[1][1]": "3d7a5454dc930c68",
+    "intelligences.i04_platform_access.TAG_PATTERNS[2][1]": "d9934d3a52b00309",
+    "intelligences.i04_platform_access.TAG_PATTERNS[3][1]": "a0b9de988ed589c6",
+    "intelligences.i04_platform_access.TAG_PATTERNS[4][1]": "7b802024901a3f2b",
+    "intelligences.i04_platform_access.TAG_PATTERNS[5][1]": "015a7dce971be633",
+    "intelligences.i04_platform_access._META_FILE": "f3f5994fb9a8ab3b",
+    "intelligences.i04_platform_access._META_HOST": "fe653b76100c7d7b",
+    "intelligences.i04_platform_access._QUOTE": "b683600134208e4f",
+    "ledger._HEX64": "e95a2856b9a7b554",
+    "ledger._ID": "62c14ef943c8fe48",
+    "ledger._NAME": "e83e9dfe0419fc84",
+    "memory._EMAIL": "cfd659d770854d21",
+    "memory._EMAIL_AT": "b23e21aa9a0cf7e1",
+    "memory._LONG_NUM": "2e4180243fd60f50",
+    "memory._PHONE": "29e9e3e32d9dd44c",
+    "memory._URL": "7b840699d6305321",
+    "onboarding_schema.money.WIRE_PATTERN": "bb8e7516783d4493",
+    "onboarding_schema.money._STATED_PATTERN": "9be162b7561b0312",
+    "practices.ad_disclosure._MARKER": "09f8ae8ecc7eb5bd",
+    "redaction._ACCOUNT_LONG": "e2e5e7478b6520a5",
+    "redaction._BANK_VALUE": "dc82ba6626fcda5c",
+    "redaction._BEARER": "771a917b8e8c354c",
+    "redaction._CARD": "7d19ee7a7d0f3c89",
+    "redaction._CREDS_PAIR": "0217111a28e4960e",
+    "redaction._CREDS_VALUE": "3e2344b4dbd1e7a2",
+    "redaction._CUE": "8c3b3c174f49226b",
+    "redaction._CUE_STRONG": "e08b362c50f01ff5",
+    "redaction._EMAIL_PAIR": "b8cb2b3eec29c161",
+    "redaction._EMAIL_TOKEN": "a315dd55359675fa",
+    "redaction._GET_IN_WITH": "080889689d48631b",
+    "redaction._IBAN": "deddcf0b1cb08bf4",
+    "redaction._JWT": "c4076ee1bb185a64",
+    "redaction._KEYWORD": "6972819ec017d936",
+    "redaction._LOGIN_NEAR": "8b42211b68f06aef",
+    "redaction._LOGIN_PAIR": "c9ad43f898e7b867",
+    "redaction._LONG_DIGITS": "d70a950b37483e6f",
+    "redaction._PASS_EXPLICIT": "7c2c44ec3132e24e",
+    "redaction._PIN_VALUE": "b45fca886ac17749",
+    "redaction._PREFIXED": "ec536e739c643c5c",
+    "redaction._PW_EXPLICIT": "77f848c5c1a9873c",
+    "redaction._PW_SPACE": "67757057132d3a76",
+    "redaction._PW_VERB": "1d33fa02e971d65a",
+    "redaction._QUERY_PAIR": "642b418452c6a0ca",
+    "redaction._REDACTED_RUN": "4df38cc7a3a61af6",
+    "redaction._SECRET_VALUE": "a1215c537ee2cbc2",
+    "redaction._SEPARATED": "f61bd7d2e60052c3",
+    "redaction._SLASH_PAIR": "c774a63f57eaf03f",
+    "redaction._SSN": "b456d441eb991653",
+    "redaction._SSN_VALUE": "170dc6da1b19e022",
+    "redaction._TOKENISH": "f979f56dcd3f6df2",
+    "redaction._TO_LOGIN": "3508f15c32ee4f38",
+    "redaction._URL_HEAD": "93b0023627e30a6b",
+    "redaction._URL_PART": "350e009687848b0d",
+    "redaction._URL_TOKEN": "217cb296b63cb9fc",
+    "redaction._URL_USERINFO": "22a7401fe05aba91",
+    "redaction._URL_USERINFO_SECRET": "4137a7c7bf48e75f",
+    "redaction._USE_TO_LOGIN": "9157aedc45dd7f44",
+    "redaction._WORDISH": "ffcc93d339a70e44",
+}
 
 
 class FailOn(FakeLedgerClient):
@@ -141,30 +211,48 @@ def test_r1_anchored_only_patterns_are_never_searched():
 @pytest.mark.parametrize("name", sorted(PATTERNS))
 def test_r1_every_pattern_linear_on_adversarial_input(name):
     p = PATTERNS[name]
+    # 1. deterministic: the pattern is the one measured under the bound when it was pinned (fix wave G: this replaced
+    #    the per-run absolute CPU bounds) -- a new or changed pattern fails here, before anything is timed
+    assert PATTERN_PINS.get(name) == H.pin(p), (
+        f"{name} is not the reviewed pattern (pin {H.pin(p)}, reviewed {PATTERN_PINS.get(name)}): measure it with "
+        f"`python tests/redos_harness.py {name}` on each supported Python (exit 0: under the bound), then pin it")
+    # 2. deterministic: no super-linear-capable construct, unless reviewed with the reason it is linear
+    risky = H.structure(p)
+    reviewed = STRUCTURE_REVIEWED.get(name)
+    assert not risky or (reviewed is not None and reviewed[0] == H.pin(p)), (name, p.pattern[:80], risky)
+    # 3. the three worst hostile shapes (ranked by CPU at 4 KB; the ranking asserts nothing): 10 KB -> 100 KB must
+    #    scale linearly, as the same work, whatever the machine
     fn = H.use_of(name, p)
-    slow = slowdown()
-    # 1. every hostile shape at 4 KB (a quadratic pattern already fails here), ranked
-    ranked = []
-    for u, tail, s in H.inputs(p, 4_000):
-        t = H.best_time(fn, s, 1)
-        if t > 10 * PER_10KB_S * slow:
-            t = H.best_time(fn, s, 2)  # not a scheduling hiccup?
-            assert t <= 10 * PER_10KB_S * slow, f"{name}: {u!r}+{tail!r} took {t * 1000:.1f} ms on 4 KB (slowdown {slow:.1f}x)"
-        ranked.append((t, u, tail))
-    ranked.sort(reverse=True)
-    # 2. the three worst shapes: 10 KB (fail fast), then 100 KB against the
-    #    bound, and 10 KB -> 100 KB must scale linearly whatever the machine
-    for _, unit, tail in ranked[:3]:
-        _assert_scales_linearly(name, fn, unit, tail, slow)
+    for _, unit, tail in H.worst_shapes(fn, p):
+        _assert_scales_linearly(name, fn, unit, tail)
 
 
-def _assert_scales_linearly(name, fn, unit, tail, slow):
+def test_r1_every_pattern_is_pinned_and_every_pin_is_a_pattern():
+    assert set(PATTERN_PINS) == set(PATTERNS), sorted(set(PATTERN_PINS) ^ set(PATTERNS))
+    assert set(STRUCTURE_REVIEWED) <= set(PATTERNS)
+    assert all(PATTERN_PINS[n] == pin for n, (pin, _why) in STRUCTURE_REVIEWED.items())
+
+
+def test_r1_the_structure_check_flags_nested_repeats_and_backreferences_only():
+    """The structural check on its own (as creative-py's): the textbook catastrophic patterns are flagged; plain
+    character-class runs, bounded repeats, possessive and atomic forms are not."""
+    for bad in (r"(a+)+$", r"(?:\w+\s?)*x", r"(.+)\1", r"(\w*)*", r"(?:a|aa)+(?:b*)+"):
+        assert H.structure(re.compile(bad)), bad
+    for good in (r"[^\w#@]+", r"[\s/]+", r"(?:ab){2,5}c+", r"\w++(?:\s\w++)*+", r"(?>\w+)\.\w+", r"(?:x|y)z+"):
+        assert not H.structure(re.compile(good)), good
+
+
+def test_r1_a_pin_changes_with_the_source_and_the_flags():
+    base = re.compile(r"a+b")
+    assert H.pin(base) == H.pin(re.compile(r"a+b"))
+    assert len({H.pin(base), H.pin(re.compile(r"a+b ")), H.pin(re.compile(r"a+b", re.IGNORECASE))}) == 3
+
+
+def _assert_scales_linearly(name, fn, unit, tail):
     s10 = unit * (10_000 // len(unit)) + tail
     t10 = H.best_time(fn, s10, runs=5)
-    assert t10 < PER_10KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t10 * 1000:.1f} ms on 10 KB (slowdown {slow:.1f}x)"
     s100 = unit * (100_000 // len(unit)) + tail
     t100 = H.best_time(fn, s100, runs=5)
-    assert t100 < PER_100KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t100 * 1000:.1f} ms on 100 KB (slowdown {slow:.1f}x)"
     # timer floor of 0.2 ms so a microsecond t10 does not make the ratio noise
     if t100 < LINEAR_RATIO * max(t10, 0.0002):
         return  # within 2x of linear even against the short run (load only inflates the long one)
@@ -201,22 +289,22 @@ def test_r1_a_transient_same_work_excursion_is_measured_again_a_quadratic_never_
         monkeypatch.setattr(H, "best_time", best_time)
         monkeypatch.setattr(H, "best_time_back_to_back", lambda fn, items, runs=3: next(it1010))
     unit, tail = "x" * 10, ""
-    scripted(1e-5, [0.0061, 0.00614, 0.002], [0.002, 0.002])        # absolute read, then ratio 3.07, then 1.0
-    _assert_scales_linearly("transient", lambda s: None, unit, tail, slow=1.0)
+    scripted(1e-5, [0.0061, 0.00614, 0.002], [0.002, 0.002])        # first 100 KB read, then ratio 3.07, then 1.0
+    _assert_scales_linearly("transient", lambda s: None, unit, tail)
     scripted(1e-5, [0.012] * (SAME_WORK_ATTEMPTS + 1), [0.002] * SAME_WORK_ATTEMPTS)      # 6.0 every time
     with pytest.raises(AssertionError, match="not linear"):
-        _assert_scales_linearly("quadratic", lambda s: None, unit, tail, slow=1.0)
+        _assert_scales_linearly("quadratic", lambda s: None, unit, tail)
 
 
 def test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own():
-    """Fix wave 23: the same-work ratio still catches a quadratic pattern when the absolute bounds cannot (slowdown
-    set absurdly high). Every '?' starts a match whose lookahead scans to the '@' at the end: O(n) per match, n/100
+    """Fix wave 23: the same-work ratio catches a quadratic pattern on its own (no absolute bound: fix wave G removed
+    them from the per-pattern test). Every '?' starts a match whose lookahead scans to the '@' at the end: O(n) per match, n/100
     matches — 10x the input costs ~100x. The linear control (the lookahead stops at the next character) passes."""
     unit, tail = "?" + " " * 99, "@"
     quadratic = re.compile(r"\?(?=[^@]*@)")
     with pytest.raises(AssertionError, match="not linear"):
-        _assert_scales_linearly("quadratic mutant", H.use_of("mutant", quadratic), unit, tail, slow=1e6)
-    _assert_scales_linearly("linear control", H.use_of("control", re.compile(r"\?(?= )")), unit, tail, slow=1e6)
+        _assert_scales_linearly("quadratic mutant", H.use_of("mutant", quadratic), unit, tail)
+    _assert_scales_linearly("linear control", H.use_of("control", re.compile(r"\?(?= )")), unit, tail)
 
 
 # The whole scanners, on the hostile shapes of the finding, up to 1 MB.

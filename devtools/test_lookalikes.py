@@ -29,9 +29,16 @@ SERVICES = generate.SERVICES
 OWN_TABLES = (
     ("clipper-network-py", "src/textguard.py", "CONFUSABLES", False),
     ("onboarding-py", "src/name_key.py", "CONFUSABLES", False),
+    ("sales-py", "src/intelligences/i10_replies.py", "_CONFUSABLE", False),
     ("service-py", "src/triage.py", "CONFUSABLES", True),
     ("verification-py", "src/intelligences/i07_duplicate_identity.py", "_LOOKALIKE", False),
 )
+
+
+# A service whose own table reads a letter otherwise than the shared fold, and that reads opt-out wording a second time
+# with the shared reading of exactly those letters: sales-py's small reply table has Greek mu as "m", the shared fold
+# "u" (i10_replies._SHARED_READS; its own reading is kept for the labels). That second reading is what is compared.
+SHARED_READS = {"sales-py": frozenset({"μ"})}
 
 
 def _literal(path: Path, name: str) -> dict:
@@ -76,7 +83,8 @@ class Lookalikes(unittest.TestCase):
         seen = {}
         for svc, rel, name, cased in OWN_TABLES:
             own = _literal(REPO / "services" / svc / rel, name)
-            table = mod.Table({chr(k) if isinstance(k, int) else k: v for k, v in own.items()})
+            own = {chr(k) if isinstance(k, int) else k: v for k, v in own.items() if k not in SHARED_READS.get(svc, ())}
+            table = mod.Table(own)
             seen[svc] = [(table.fold(p) if cased else table.fold_cased(p)) for p in probes]
         ref = seen[OWN_TABLES[0][0]]
         for svc, got in seen.items():
