@@ -24,14 +24,14 @@ the check.
 | `python:creative-py` | 830 | pytest collection | — |
 | `python:delivery-py` | 735 | pytest collection | — |
 | `python:detection-py` | 599 | pytest collection | — |
-| `python:finance-py` | 621 | pytest collection | — |
+| `python:finance-py` | 625 | pytest collection | — |
 | `python:fulfillment-py` | 1116 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
 | `python:legal-py` | 319 | pytest collection | — |
 | `python:onboarding-py` | 794 | pytest collection | — |
 | `python:sales-py` | 564 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
-| `python:seo-py` | 310 | pytest collection | — |
+| `python:seo-py` | 372 | pytest collection | — |
 | `python:service-py` | 673 | pytest collection | — |
 | `python:verification-py` | 330 | pytest collection | — |
 | `rust:ledger-rust` | 159 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

@@ -90,8 +90,12 @@ def write_key(path) -> str:
 
 
 def base_env(**over) -> dict:
+    """The Wave 1/2 suites predate invoice verification (W3-2) and test the rest of the paid flow, so they run with
+    SEO_INVOICE_VERIFICATION=trust; tests/test_invoice_verification.py drops it (``SEO_INVOICE_VERIFICATION=None``)
+    and tests the default, ``finance``."""
     env = {"SEO_SERVICE_TOKEN": SERVICE_TOKEN, "SEO_NON_PRODUCTION": "1", "SEO_ANDRE_APPROVAL_TOKEN": ANDRE,
-           "SEO_CALLER_TOKENS": json.dumps(CALLERS), "SEO_TENANT_TOKENS": json.dumps(TENANT_TOKENS)}
+           "SEO_CALLER_TOKENS": json.dumps(CALLERS), "SEO_TENANT_TOKENS": json.dumps(TENANT_TOKENS),
+           "SEO_INVOICE_VERIFICATION": "trust"}
     for k, v in over.items():
         if v is None:
             env.pop(k, None)

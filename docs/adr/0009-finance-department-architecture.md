@@ -32,7 +32,9 @@ release, no float, only verified views paid, only Andre approves rules and rate 
    (`FIN_BIND_ADDR`), port 8410 (`FIN_PORT`); no new dependency (pinned versions of BUILD_CONTRACTS §0).
 2. **Identities never interchangeable.** Bearer `FIN_SERVICE_TOKEN` (required to start, ≥ 32 printable ASCII);
    caller `X-FIN-Caller-Token` from `FIN_CALLER_TOKENS` (compliance_38, clipper_network, verification_integrity,
-   creative_production, onboarding, legal_37, scheduler, rail_gateway, bank_feed); Andre's `X-Andre-Approval-Token`
+   creative_production, onboarding, legal_37, scheduler, rail_gateway, bank_feed, and since Oct 10 2026 seo_02 —
+   Search & Answer Intelligence (2) reading `GET /fin/v1/invoices/{id}` to verify a paid audit's invoice, ADR 0017
+   W3-2); Andre's `X-Andre-Approval-Token`
    (FounderGate); optional second approver `X-FIN-Second-Approver-Token` (`FIN_SECOND_APPROVER_TOKEN`). All tokens
    distinct or the service refuses to start; a refused approval token is 403 and recorded
    `founder_approval_refused`.

@@ -146,8 +146,8 @@ credentials for providers are a requirement for whichever adapter is built first
 - Per-engine readiness is an uncalibrated heuristic checklist; it is not a visibility measurement.
 - The append-only log cannot purge by age; retention is by minimisation (no bodies stored). A purge needs a new log
   epoch and an ADR.
-- The paid-audit flow takes an invoice id on trust from the caller; it does not verify payment with Finance (31)
-  (no client built). Andre's approval is the control.
+- (Wave 1/2) The paid-audit flow took an invoice id on trust from the caller; Andre's approval was the control. Wave 3
+  (W3-2) verifies it with Finance (31) by default; `SEO_INVOICE_VERIFICATION=trust` keeps the old behaviour.
 - Tests run against an in-process fixture server; nothing here has been run against a real public site yet.
 - The hard fetch deadline relies on installing a network backend into httpx's connection pool (no public httpx
   parameter exists in 0.28); if a future httpx moves it, the fetcher refuses to run rather than fetch without it.
@@ -246,8 +246,54 @@ W3-1. **Live run against the real ledger** (`services/seo-py/devtools/live_run.p
    fetch stops at the guard (which runs before name resolution). The crawler, SSRF guard and parsers are proven only
    against the in-process fixture server and the war room (W3-3), never against a real public site.
 
+W3-2. **Finance (31) invoice verification** (`src/finance_client.py`, `src/svc_invoices.py`). Behind
+   `SEO_INVOICE_VERIFICATION`, default `finance` (the safe option); `trust` is the Wave 1/2 behaviour and is shown in
+   `/status`. The client calls the one existing read route, finance-py's `GET /fin/v1/invoices/{id}` (service bearer
+   token + this service's own caller token, `X-FIN-Caller-Token`; finance-py gained the caller name `seo_02`, which
+   like every Finance caller reaches only the routes open to any caller and can write nothing). Per-attempt timeout
+   (`SEO_FINANCE_TIMEOUT_SECONDS`), one overall deadline, at most three attempts and only for connect errors,
+   timeouts, 429 and 5xx; no redirects; a 64 KiB body cap; identity encoding only; anything malformed, an answer
+   about another invoice, or a 404 that is not Finance's "no such invoice" is UNVERIFIABLE, never "paid". Only the
+   facts the verdict needs are kept (id, status, entity, client id, kind, currency, refunded / charged back, paid
+   time); amounts, lines and template variables are dropped and never reach the log or the ledger. Andre binds each
+   client tenant to its Finance client id (`POST /tenants/{tid}/finance-client`). A client's audit or schedule then
+   proceeds only when Finance confirms the invoice is Z Best Media's, this client's, USD, `paid`, with nothing
+   refunded or charged back, and the invoice has not paid for another run. The domain, invoice-required and Andre
+   checks come first, so nobody but Andre can make this service look an invoice up. DEFINITIVE answers (not found,
+   another entity or client, unsupported currency, not paid, refunded) are refused 409 and cannot be overridden;
+   UNVERIFIABLE ones (`FINANCE_NOT_CONFIGURED`, `FINANCE_UNAVAILABLE`, `FINANCE_AUTH_REFUSED`,
+   `FINANCE_RESPONSE_INVALID`) are refused 503 with `override_allowed: true`, and Andre may override them on the same
+   request (which already carries his verified approval) by naming `invoice_override` from a closed set
+   (`ANDRE_CONFIRMED_PAYMENT`, `FINANCE_OUTAGE`). A verified invoice is recorded as `invoice_verified`, an override as
+   `invoice_verification_overridden_by_andre`, both in the same record-first commit as the request; a refused attempt
+   records nothing. Finance is asked outside the service lock and every state rule (idempotency, kill switches,
+   reuse) is checked again after the answer. A schedule's invoice is verified when it is created and again before
+   every slot: a definitive refusal skips the slot with Finance's reason (recorded); an unverifiable answer leaves the
+   slot for the next tick (never overridden at a tick: Andre is not there). Tests: `tests/test_invoice_verification.py`
+   (Finance down, timeouts, 5xx, malformed, oversized, encoded, redirected, another invoice's body, wrong tokens,
+   wrong tenant, wrong entity, unpaid, refunded, charged back, replay, a concurrent replay during the Finance call, a
+   kill switch engaged during it, restart); finance-py's `tests/test_seo_invoice_contract.py` runs this client against
+   Finance's real app through an invoice's whole life (draft → issued → paid); the live run (W3-1) runs it against the
+   real Finance process.
+
+Founder-pending defaults added by Wave 3: (12) verification is ON by default, so until Finance is wired every paid run
+needs Andre's override; (13) one invoice pays for one one-off audit or one schedule (with all its slots), and an
+interrupted audit gives its invoice back; (14) any refund or chargeback on the invoice, partial ones included, refuses
+the run; (15) Andre may override only an UNVERIFIABLE answer, never a definitive one, and never a reused invoice; (16)
+no check of the invoice's amount, kind or line code against what was sold — Finance has no SEO line code and no
+per-audit price is set (the locked pricing is managed tiers per month); that is a founder and Finance decision.
+
+Wave 3 limitations: finance-py's invoice route returns the whole invoice record (lines, template variables) to any
+caller including `seo_02`; this service drops all but the verdict's fields, but Finance discloses more than is needed
+— a narrower status route is a Finance (31) change not made here. Invoice consumption is known only to this service
+(Finance does not learn that an invoice paid for an audit), and it is not enforced in `trust` mode. A one-off audit's
+verification is point-in-time: a refund after the run does not touch the recorded audit. The tenant → Finance client
+binding is Andre's statement and is not cross-checked with Legal. The live run cannot reach a PAID invoice through
+Finance's production entrypoint (its bank feed and Legal are fail-closed stand-ins there); the paid path is proven by
+the contract test against Finance's app with its test fakes.
+
 ## Unlock list
 
 Answer-engine adapters with scoped, short-lived credentials; a renderer; Search Console and Bing Webmaster; a
-prompt-volume source; the Finance (31) client to verify invoices; Department 28 clientfix hand-off; the remaining
-agents per the spec's waves; the console pages. (The live run against ledger-rust was built in Wave 3, W3-1.)
+prompt-volume source; Department 28 clientfix hand-off; the remaining agents per the spec's waves; the console pages.
+(Built in Wave 3: the live run against ledger-rust, W3-1; the Finance (31) client to verify invoices, W3-2.)

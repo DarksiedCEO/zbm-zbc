@@ -36,8 +36,9 @@ cd services/ledger-rust && cargo build --locked --release --bin server && cd -
 LEDGER_BIN=services/ledger-rust/target/release/server python3 services/seo-py/devtools/live_run.py
 ```
 
-The real ledger-rust binary and this service's production entrypoint as separate processes over real HTTP with real
-tokens and a durable data directory (CI job `live-run (seo-py, …)`; ADR 0017 Wave 3, W3-1). It makes no outbound
+The real ledger-rust binary, this service's production entrypoint and Finance (31)'s (finance-py, for the invoice
+verification leg) as separate processes over real HTTP with real tokens and durable data directories (CI job
+`live-run (seo-py, …)`; ADR 0017 Wave 3, W3-1 and W3-2). It makes no outbound
 connection: the web provider switch is engaged over the API before the first audit, so every fetch stops at the
 kill-switch guard before name resolution. Exit 0 only when every check held; the script prints its own N/N.
 
@@ -70,6 +71,9 @@ kill-switch guard before name resolution. Exit 0 only when every check held; the
 | `SEO_BOT_VERIFY_MAX` | `200` | DNS verifications per ingest (1..5000); past it hits stay "claimed" |
 | `SEO_SCHEDULE_BUDGET_RUNS` | `8` | scheduled audits per tenant per period (1..100) |
 | `SEO_SCHEDULE_PERIOD_DAYS` | `30` | the budget period (1..365) |
+| `SEO_INVOICE_VERIFICATION` | `finance` | `finance`: a paying client's audit or schedule runs only when Finance (31) confirms its invoice is paid, Z Best Media's, this tenant's Finance client's, not refunded and not used before (ADR 0017 W3-2); `trust`: the Wave 1/2 behaviour (the id is not checked), shown in `/status` |
+| `SEO_FINANCE_URL`, `SEO_FINANCE_TOKEN`, `SEO_FINANCE_CALLER_TOKEN` | unset | Finance (31)'s base URL, its service token and this service's `seo_02` caller token there (all three or none). Unset with `finance`: every paid run is refused `FINANCE_NOT_CONFIGURED` unless Andre overrides |
+| `SEO_FINANCE_TIMEOUT_SECONDS` | `5` | per-attempt timeout of the invoice lookup (1..30); at most three attempts within one overall deadline |
 | `SEO_BIND_ADDR` / `SEO_PORT` | `127.0.0.1` / `8500` | where the API listens |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | the evidence ledger; unset = every write refused (fail closed) |
@@ -80,7 +84,7 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 **Not built — setting any of these refuses start:** `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`,
 `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_PERPLEXITY_API_KEY_FILE`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,
-`SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL`, `SEO_FINANCE_URL`.
+`SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL`.
 
 ## Routes (`/seo/v1`)
 
@@ -92,11 +96,12 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `GET /tenants`, `POST /tenants` | dashboard / Andre | list; create (`own` or `client`) |
 | `GET /tenants/{tid}` | scoped | one tenant (hub: its own only; anything else 404) |
 | `POST /tenants/{tid}/domains` | Andre | the domains this tenant may be audited on |
+| `POST /tenants/{tid}/finance-client` | Andre | bind a client tenant to its Finance (31) client id, against which paid runs' invoices are checked (W3-2) |
 | `GET`, `POST /kill-switches` | dashboard, compliance_38 | engage any switch; releasing needs Andre |
 | `GET /tenants/{tid}/entity` | scoped | the canonical entity record with source, provenance, authority, freshness, history |
 | `POST /entities/{eid}/fields` | Andre | set one field (version-checked; the old value goes to history) |
 | `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets |
-| `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant |
+| `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant and verified with Finance; `invoice_override` (Andre, only when Finance cannot answer) |
 | `GET /tenants/{tid}/audits[/{aid}]` | scoped (finance_31 gets status only) | audits and reports |
 | `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
 | `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |

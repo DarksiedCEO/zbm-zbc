@@ -117,22 +117,26 @@ class AuditsMixin:
             if prev:
                 return self.audit_view(tid, prev[1])
             aid = derived_id("aud", tid, actor, rk)
-            ps = self._open_audit(actor, tid, rk, body, andre, aid, request=body)
+            _authorize(self.tenants[tid], body, andre)
+            plan = self._invoice_plan(tid, body, andre)
+        verification = self._verify_invoice(plan)         # Finance (31), outside the lock (W3-2)
+        with self.lock:
+            self._gate()
+            self.check_kill(tenant=tid, capability="audit", write=True)
+            prev = self._idem(actor, rk, body)
+            if prev:
+                return self.audit_view(tid, prev[1])
+            self._recheck_invoice(plan)
+            ps = self._open_audit(actor, tid, rk, body, andre, aid, request=body, verification=verification)
         return self._execute_audit(aid, tid, body, ps)
 
     def _open_audit(self, actor: str, tid: str, rk: str, body: dict, andre: bool, aid: str,
-                    request: Optional[dict] = None, schedule: Optional[dict] = None) -> Optional[dict]:
-        """Under the lock: the authorisation rules, then ``audit_requested`` record-first. Returns the prompt set."""
+                    request: Optional[dict] = None, schedule: Optional[dict] = None,
+                    verification: Optional[dict] = None) -> Optional[dict]:
+        """Under the lock: the authorisation rules, then ``audit_requested`` record-first. Returns the prompt set.
+        ``verification`` is the invoice check made before (svc_invoices.py), recorded with the request."""
         t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
-        if body["domain"] not in t["domains"]:
-            raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
-        if t["kind"] == "client":
-            if not body.get("invoice_id"):
-                raise Conflict(R("INVOICE_REQUIRED"))
-            if not andre:
-                raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
-        elif body.get("invoice_id"):
-            raise Invalid(R("INVOICE_NOT_FOR_OWN_TENANT"))
+        _authorize(t, body, andre)
         ps = None
         if body.get("prompt_set_id"):
             p = self.prompt_sets.get(body["prompt_set_id"])
@@ -146,7 +150,7 @@ class AuditsMixin:
                 "scheme": body["scheme"], "paths": paths, "invoice_id": body.get("invoice_id"),
                 "prompt_set": None if ps is None else {"prompt_set_id": ps["prompt_set_id"],
                                                        "version": ps["version"], "sha256": ps["sha256"]},
-                "andre_approved": bool(andre)}
+                "andre_approved": bool(andre), "invoice_verification": verification}
         if schedule is not None:
             data.update(schedule_id=schedule["schedule_id"], slot=schedule["slot"])
         ev = [("audit_requested", f"audit:{aid}",
@@ -156,6 +160,8 @@ class AuditsMixin:
         if andre and schedule is None:
             ev.append(("audit_approved_by_andre", f"audit:{aid}",
                        {"audit_id": aid, "invoice_id": body.get("invoice_id")}, ("andre", rk)))
+        ev += self._invoice_evidence(verification, f"audit:{aid}", {"audit_id": aid}, body.get("invoice_id"), actor,
+                                     rk)
         line = self._req(data, actor, rk, request, aid) if request is not None else {**data, "actor": actor}
         self._commit("audit_requested", line, actor, evidence=ev)
         self.running_audits.add(aid)
@@ -321,6 +327,21 @@ def _step(ctx, agent: str, task: str, fn):
                             methodology="not run: the department manager has restricted this agent")
         return envelope(agent, task, "KILLED", [], reason=k.code, methodology="not run: a kill switch is engaged")
     return fn()
+
+
+def _authorize(t: dict, body: dict, andre: bool) -> None:
+    """Who may run what on whose site: the tenant's own registered domain; a client's run needs a Finance (31) invoice
+    id AND Andre; an own-properties run refuses an invoice id. Checked before Finance is asked anything, so nobody
+    but Andre can make this service look an invoice up (W3-2)."""
+    if body["domain"] not in t["domains"]:
+        raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
+    if t["kind"] == "client":
+        if not body.get("invoice_id"):
+            raise Conflict(R("INVOICE_REQUIRED"))
+        if not andre:
+            raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
+    elif body.get("invoice_id"):
+        raise Invalid(R("INVOICE_NOT_FOR_OWN_TENANT"))
 
 
 def _check_paths(paths: list, max_pages: int) -> None:

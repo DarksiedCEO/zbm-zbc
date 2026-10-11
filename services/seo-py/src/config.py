@@ -143,6 +143,11 @@ class Settings:
     bot_verify_max: int = 200
     schedule_budget_runs: int = 8
     schedule_period_days: int = 30
+    invoice_verification: str = "finance"
+    finance_url: Optional[str] = None
+    finance_token: Optional[str] = field(default=None, repr=False)
+    finance_caller_token: Optional[str] = field(default=None, repr=False)
+    finance_timeout_s: int = 5
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -180,8 +185,9 @@ NOT_BUILT = {
     "SEO_ZERO_DAY_URL": "Zero-Day: a port only in Wave 1 (NOT_CONNECTED)",
     "SEO_ORCA_PUBLISH_URL": "ORCA Publish: a port only in Wave 1 (NOT_CONNECTED)",
     "SEO_CLIENTFIX_URL": "Department 28 clientfix (fix execution): not in Wave 1",
-    "SEO_FINANCE_URL": "the Finance (31) client: not built (an invoice id is taken as an input, never looked up)",
 }
+INVOICE_VERIFICATION_MODES = ("finance", "trust")
+_FINANCE_URL = re.compile(r"https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/?")
 
 
 NON_PRODUCTION_LOG_KEY = b"seo-py non-production log ip hash key, never in production"
@@ -238,6 +244,38 @@ def _bot_info_url(env) -> Optional[str]:
     return raw
 
 
+def _finance(env, s: "Settings") -> None:
+    """ADR 0017 W3-2. ``SEO_INVOICE_VERIFICATION``: ``finance`` (the default, the safe option: a paid run needs Finance
+    (31) to confirm the invoice is paid, for this tenant's Finance client, and not used before; if Finance is not
+    configured or cannot answer, the run is refused unless Andre overrides) or ``trust`` (Wave 1/2 behaviour: the
+    invoice id is an unchecked input; shown in /status). ``SEO_FINANCE_URL``, ``SEO_FINANCE_TOKEN`` (Finance's service
+    token) and ``SEO_FINANCE_CALLER_TOKEN`` (this service's ``seo_02`` caller token at Finance) are set together or
+    not at all."""
+    mode = (env.get("SEO_INVOICE_VERIFICATION") or "finance").strip()
+    if mode not in INVOICE_VERIFICATION_MODES:
+        raise RuntimeError("SEO_INVOICE_VERIFICATION must be finance (the default) or trust")
+    s.invoice_verification = mode
+    vals = [(env.get(k) or "").strip() or None for k in ("SEO_FINANCE_URL", "SEO_FINANCE_TOKEN",
+                                                         "SEO_FINANCE_CALLER_TOKEN")]
+    if any(vals) and not all(vals):
+        raise RuntimeError("SEO_FINANCE_URL, SEO_FINANCE_TOKEN and SEO_FINANCE_CALLER_TOKEN must be set together (or "
+                           "none: every paid run is then refused FINANCE_NOT_CONFIGURED unless Andre overrides)")
+    s.finance_timeout_s = _int(env, "SEO_FINANCE_TIMEOUT_SECONDS", 5, 1, 30)
+    if not all(vals):
+        return
+    url, token, caller = vals
+    if not _FINANCE_URL.fullmatch(url):
+        raise RuntimeError("SEO_FINANCE_URL must be an http(s) base URL without credentials, query or fragment")
+    for name, tok in (("SEO_FINANCE_TOKEN", token), ("SEO_FINANCE_CALLER_TOKEN", caller)):
+        if not _PRINTABLE.fullmatch(tok):
+            raise RuntimeError(f"{name} must be 32..512 printable ASCII characters")
+    ours = {s.service_token, s.andre_token, *s.caller_tokens.values(), *s.tenant_tokens.values()}
+    if token == caller or token in ours or caller in ours:
+        raise RuntimeError("SEO_FINANCE_TOKEN and SEO_FINANCE_CALLER_TOKEN must differ from each other and from "
+                           "every token this service accepts")
+    s.finance_url, s.finance_token, s.finance_caller_token = url, token, caller
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ if env is None else env)
     service_token = (env.get("SEO_SERVICE_TOKEN") or "").strip()
@@ -283,6 +321,7 @@ def load(env: Optional[dict] = None) -> Settings:
     s.bot_verify_max = _int(env, "SEO_BOT_VERIFY_MAX", 200, 1, 5000)
     s.schedule_budget_runs = _int(env, "SEO_SCHEDULE_BUDGET_RUNS", 8, 1, 100)
     s.schedule_period_days = _int(env, "SEO_SCHEDULE_PERIOD_DAYS", 30, 1, 365)
+    _finance(env, s)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it

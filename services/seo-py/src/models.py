@@ -12,6 +12,10 @@ TENANT = r"^[a-z][a-z0-9-]{1,39}$"
 DOMAIN = r"^[a-z0-9.-]{4,253}$"
 PATH = r"^/[\x21-\x7e]{0,500}$"
 INVOICE = r"^fin-inv-[0-9A-HJKMNP-TV-Z]{26}$"
+FINANCE_CLIENT = r"^[A-Za-z0-9._-]{1,100}$"          # finance-py models.CLIENT_ID_RE (Legal's party reference)
+# Andre's override of an UNVERIFIABLE invoice check (Finance not configured, down, refusing us, or answering nonsense).
+# It never overrides a definitive answer from Finance, nor a reused invoice (ADR 0017 W3-2).
+InvoiceOverride = Literal["ANDRE_CONFIRMED_PAYMENT", "FINANCE_OUTAGE"]
 
 
 class Strict(BaseModel):
@@ -58,7 +62,13 @@ class AuditCreate(Strict):
     scheme: Literal["https", "http"] = "https"
     paths: Annotated[list[Annotated[StrictStr, Field(pattern=PATH)]], Field(max_length=25)] = ["/"]
     invoice_id: Optional[Annotated[StrictStr, Field(pattern=INVOICE)]] = None
+    invoice_override: Optional[InvoiceOverride] = None
     prompt_set_id: Optional[Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]] = None
+
+
+class FinanceClientBind(Strict):
+    request_id: RequestId
+    finance_client_id: Annotated[StrictStr, Field(pattern=FINANCE_CLIENT)]
 
 
 class LogIngestCreate(Strict):
@@ -82,6 +92,7 @@ class ScheduleCreate(Strict):
     paths: Annotated[list[Annotated[StrictStr, Field(pattern=PATH)]], Field(max_length=25)] = ["/"]
     every_days: Annotated[StrictInt, Field(ge=1, le=90)]
     invoice_id: Optional[Annotated[StrictStr, Field(pattern=INVOICE)]] = None
+    invoice_override: Optional[InvoiceOverride] = None
     prompt_set_id: Optional[Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]] = None
 
 

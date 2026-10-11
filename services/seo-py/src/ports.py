@@ -11,6 +11,9 @@ named NOT_CONNECTED port, and config.NOT_BUILT refuses to start if one is "selec
   first_party            Search Console, Bing Webmaster, server logs, analytics, CRM
   zero_day, orca_publish flag 5: ports only
   clientfix              Department 28 fix execution (not in Wave 1)
+  finance                Finance (31) invoice verification (Wave 3, W3-2: finance_client.py; NOT_CONNECTED unless
+                         SEO_FINANCE_URL / _TOKEN / _CALLER_TOKEN are set). A business gate, not an observation port:
+                         it is listed in /status, never in an audit report's ``not_connected``.
 """
 
 from __future__ import annotations
@@ -162,13 +165,19 @@ class Ports:
     orca_publish: object = None
     clientfix: object = None
     bot_verifier: object = None
+    finance: object = None
 
     @classmethod
     def default(cls, settings=None) -> "Ports":
+        from finance_client import FinanceClient, NotConnectedFinance
         fetcher = None
+        finance = NotConnectedFinance()
         if settings is not None:
             from primitives.fetch import Fetcher
             fetcher = Fetcher.from_settings(settings)
+            if settings.finance_url:
+                finance = FinanceClient(settings.finance_url, settings.finance_token, settings.finance_caller_token,
+                                        timeout_s=settings.finance_timeout_s)
         return cls(fetcher=fetcher, renderer=NotConnectedRenderer(),
                    engines={n: NotConnectedEngine(n) for n in ANSWER_ENGINES},
                    prompt_volume=NotConnectedSource("prompt_volume"),
@@ -176,7 +185,7 @@ class Ports:
                    zero_day=NotConnectedSource("zero_day"), orca_publish=NotConnectedSource("orca_publish"),
                    clientfix=NotConnectedSource("clientfix"),
                    bot_verifier=DnsBotVerifier() if settings is not None and settings.bot_verify_dns
-                   else NotConnectedBotVerifier())
+                   else NotConnectedBotVerifier(), finance=finance)
 
     def status(self) -> dict:
         def st(p) -> str:
@@ -187,7 +196,8 @@ class Ports:
                 "prompt_volume": st(self.prompt_volume),
                 "first_party": {n: st(p) for n, p in self.first_party.items()},
                 "zero_day": st(self.zero_day), "orca_publish": st(self.orca_publish), "clientfix": st(self.clientfix),
-                "bot_dns_verification": st(self.bot_verifier), "bot_ip_range_verification": NOT_CONNECTED}
+                "bot_dns_verification": st(self.bot_verifier), "bot_ip_range_verification": NOT_CONNECTED,
+                "finance": st(self.finance)}
 
     def not_connected(self) -> list:
         s = self.status()

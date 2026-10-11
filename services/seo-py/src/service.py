@@ -36,6 +36,7 @@ from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
 from svc_entity import EntityMixin
+from svc_invoices import InvoicesMixin
 from svc_logs import LogsMixin
 from svc_manager import ManagerMixin
 from svc_schedules import SchedulesMixin
@@ -66,7 +67,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMixin, ManagerMixin):
+class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         import ports as ports_mod
@@ -463,6 +464,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMix
                 "andre_approvals_configured": None,          # filled by the API (the gate lives there)
                 "kill_switches": self.switch_view(),
                 "ports": self.ports.status(),
+                "invoice_verification": self.invoice_verification_status(),
                 "tenants": len(self.tenants),
                 "audits_running": len(self.running_audits),
                 "audits_total": len(self.audits),

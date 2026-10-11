@@ -14,7 +14,8 @@ reconciles or pays. The unlock list is in ADR 0009.
 cd services/finance-py/src
 FIN_SERVICE_TOKEN=... FIN_ANDRE_APPROVAL_TOKEN=... \
 FIN_CALLER_TOKENS='{"scheduler":"...","creative_production":"...","onboarding":"...","clipper_network":"...",
-                    "compliance_38":"...","verification_integrity":"...","rail_gateway":"...","bank_feed":"..."}' \
+                    "compliance_38":"...","verification_integrity":"...","rail_gateway":"...","bank_feed":"...",
+                    "seo_02":"..."}' \
 LEDGER_SERVICE_URL=http://127.0.0.1:8080 LEDGER_SERVICE_TOKEN=... FIN_DATA_DIR=/var/lib/zbc/finance \
 python3 -m api                                   # 127.0.0.1:8410 (FIN_BIND_ADDR, FIN_PORT)
 ```

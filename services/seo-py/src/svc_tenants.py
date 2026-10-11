@@ -189,7 +189,7 @@ class TenantsMixin:
 
     def _a_tenant_created(self, d, at):
         self.tenants[d["tenant_id"]] = {"tenant_id": d["tenant_id"], "kind": d["kind"], "domains": [],
-                                        "killed": False, "created_at": at}
+                                        "killed": False, "created_at": at, "finance_client_id": None}
 
     def set_domains(self, tid: str, body: dict) -> dict:
         domains = body["domains"]
@@ -217,6 +217,27 @@ class TenantsMixin:
 
     def _a_tenant_domains_set(self, d, at):
         self.tenants[d["tenant_id"]]["domains"] = list(d["domains"])
+
+    def set_finance_client(self, tid: str, body: dict) -> dict:
+        """Andre binds a client tenant to its Finance (31) client id (Legal's party reference at Finance), so a paid
+        run can check that the invoice is this client's (ADR 0017 W3-2). Re-binding is allowed and recorded; the
+        id is never read from a page, an invoice or a caller other than Andre."""
+        with self.lock:
+            self._gate()
+            self.check_kill(tenant=tid, write=True)
+            t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            rk = self.rk("finance_client", tid, body)
+            if self._idem("andre", rk, body):
+                return self.tenant_view(tid)
+            if t["kind"] != "client":
+                raise Invalid(R("TENANT_KIND_INVALID"))
+            data = {"tenant_id": tid, "finance_client_id": body["finance_client_id"]}
+            self._commit("tenant_finance_client_set", self._req(data, "andre", rk, body, tid), "andre",
+                         evidence=("tenant_finance_client_set", f"tenant:{tid}", data, ("andre", rk)))
+            return self.tenant_view(tid)
+
+    def _a_tenant_finance_client_set(self, d, at):
+        self.tenants[d["tenant_id"]]["finance_client_id"] = d["finance_client_id"]
 
     def tenant_view(self, tid: str) -> dict:
         with self.lock:

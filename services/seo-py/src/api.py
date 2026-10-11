@@ -415,6 +415,11 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     def tenant_domains(tid: str, req: dict = Depends(body(m.DomainsSet)), who: str = Depends(andre)) -> dict:
         return svc.set_domains(_id(tid, TENANT_RX), req)
 
+    @app.post(P + "/tenants/{tid}/finance-client", dependencies=auth)
+    def tenant_finance_client(tid: str, req: dict = Depends(body(m.FinanceClientBind)),
+                              who: str = Depends(andre)) -> dict:
+        return svc.set_finance_client(_id(tid, TENANT_RX), req)
+
     @app.get(P + "/kill-switches", dependencies=auth)
     def switches(who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
         with svc.lock:

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Search & Answer Intelligence (2) live run: the REAL ledger-rust binary and seo-py's production entrypoint
-(``cd src && python3 -m api``) over real HTTP, with a durable data directory, in production mode.
+Search & Answer Intelligence (2) live run: the REAL ledger-rust binary, seo-py's production entrypoint
+(``cd src && python3 -m api``) and Finance (31)'s production entrypoint (finance-py, the same command) over real HTTP,
+with durable data directories, in production mode.
 
 usage: LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py
 
@@ -10,7 +11,10 @@ tenant and entity record; every port but the fetcher NOT_CONNECTED; a second pro
 tenants and domains are Andre's, a domain belongs to one tenant; the hub sees its own tenant only (another tenant
 answers the same 404 as a missing one); a kill switch engaged over the API stops the crawler at the fetch guard
 before any DNS lookup or socket; only Andre releases it; the audit is recorded first and its report's SHA-256 is on
-the ledger; a client audit needs an invoice id and Andre; Finance (31) sees status, never the report; personal-data
+the ledger; a client audit needs an invoice id and Andre, and the invoice is verified with the real Finance (31)
+process (a draft invoice is refused INVOICE_NOT_PAID, an unknown one INVOICE_NOT_FOUND, another client's
+INVOICE_TENANT_MISMATCH, none of them overridable; Finance stopped is FINANCE_UNAVAILABLE, which only Andre may
+override, recorded; a reused invoice is refused); Finance (31) sees status, never the report; personal-data
 keys are refused; a scheduled re-audit runs its slot once and a second tick is a no-op; the department view counts
 the recorded runs; a restart keeps everything and re-verifies; the evidence view marks each action committed exactly
 once; a truncated log is detected; no domain or NAP in the clear on the ledger; GET /ledger/verify valid.
@@ -18,6 +22,8 @@ once; a truncated log is detected; no domain or NAP in the clear on the ledger; 
 No outbound network: this run never crawls a real site (CI has none to crawl, and a live run must not depend on the
 internet). The web provider switch is engaged before the first audit, so every fetch stops at the kill-switch guard,
 which runs before name resolution. The crawler itself is proven against an in-process fixture in the test suite.
+A PAID invoice is not reachable through Finance's production entrypoint without its bank feed and Legal (both
+fail-closed stand-ins there); that path is finance-py's contract test (tests/test_seo_invoice_contract.py).
 
 No check depends on the wall-clock hour or the machine's time zone. Exit 0 only if every check holds. Kills only the
 PIDs it started. Ports are free ports from bind(0). Tokens are derived here (sha256 of a live-run label), never
@@ -54,6 +60,11 @@ ANDRE = derived("andre approval token")
 CALLERS = {c: derived(f"caller {c}") for c in ("dashboard", "seo_agent", "scheduler", "hub", "finance_31",
                                                "compliance_38")}
 TENANT_TOKENS = {t: derived(f"tenant {t}") for t in ("zbm", "acme-live", "globex-live")}
+FIN_TOKEN = derived("finance service token")
+FIN_ANDRE = derived("finance andre approval token")
+FIN_CALLERS = {c: derived(f"finance caller {c}") for c in ("onboarding", "seo_02")}
+FIN_SRC = SVC.parent / "finance-py" / "src"
+ACME_PARTY = "acme-party-live"
 OWN_DOMAIN = "zbestmedia-live.test"
 CLIENT_DOMAIN = "acme-live.test"
 LOG: list[str] = []
@@ -143,6 +154,38 @@ class Api:
         return self.post(f"/jobs/{name}/run", {"request_id": rid()}, caller="scheduler")
 
 
+class Fin:
+    def __init__(self, base: str):
+        self.base = base
+
+    def h(self, caller=None, andre=False):
+        hd = {"Authorization": f"Bearer {FIN_TOKEN}"}
+        if caller:
+            hd["X-FIN-Caller-Token"] = FIN_CALLERS[caller]
+        if andre:
+            hd["X-Andre-Approval-Token"] = FIN_ANDRE
+        return hd
+
+    def get(self, path, caller="onboarding"):
+        return httpx.get(self.base + path, headers=self.h(caller), timeout=30)
+
+    def post(self, path, body, caller=None, andre=False):
+        return httpx.post(self.base + path, json=body, headers=self.h(caller, andre), timeout=30)
+
+    def approve_rules(self) -> int:
+        seed = [p for p in self.get("/fin/v1/rules").json()["open_proposals"] if p["kind"] == "seed"][0]
+        return self.post("/fin/v1/rules/decisions", {"request_id": f"seo-live-{uuid.uuid4().hex}", "decisions": [
+            {"proposal_id": seed["proposal_id"], "content_sha256": seed["content_sha256"], "decision": "approve"}]},
+            andre=True).status_code
+
+    def draft(self, client: str):
+        body = {"request_id": f"seo-live-{uuid.uuid4().hex}", "entity": "zbm", "client_id": client, "kind": "service",
+                "lines": [{"line_code": "strategy_services", "quantity": 1, "unit_price": "2000.00"}],
+                "payment_methods": ["ach"], "legal_ref": {"doc_id": "msa-live", "version": 1, "doc_sha256": "d" * 64,
+                                                          "acceptance_id": "acc-live"}}
+        return self.post("/fin/v1/invoices", body, caller="onboarding")
+
+
 def _env(work: Path, ps: int, ledger_url: str) -> dict:
     etc = work / "etc"
     etc.mkdir(mode=0o700)
@@ -158,12 +201,21 @@ def _env(work: Path, ps: int, ledger_url: str) -> dict:
             "LEDGER_SERVICE_URL": ledger_url, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN}
 
 
+def _fin_env(work: Path, pf: int, ledger_url: str) -> dict:
+    (work / "finance").mkdir(mode=0o700)
+    return {"FIN_SERVICE_TOKEN": FIN_TOKEN, "FIN_ANDRE_APPROVAL_TOKEN": FIN_ANDRE,
+            "FIN_CALLER_TOKENS": json.dumps(FIN_CALLERS), "FIN_DATA_DIR": str(work / "finance"), "FIN_PORT": str(pf),
+            "LEDGER_SERVICE_URL": ledger_url, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "PYTHONDONTWRITEBYTECODE": "1"}
+
+
 def _main(work: Path) -> int:
     ledger_bin = os.environ["LEDGER_BIN"]
-    pl, ps = free_port(), free_port()
-    L, S = f"http://127.0.0.1:{pl}", f"http://127.0.0.1:{ps}"
+    pl, ps, pf = free_port(), free_port(), free_port()
+    L, S, F = f"http://127.0.0.1:{pl}", f"http://127.0.0.1:{ps}", f"http://127.0.0.1:{pf}"
     lh = {"Authorization": f"Bearer {LEDGER_TOKEN}"}
-    env = _env(work, ps, L)
+    env = {**_env(work, ps, L), "SEO_FINANCE_URL": F, "SEO_FINANCE_TOKEN": FIN_TOKEN,
+           "SEO_FINANCE_CALLER_TOKEN": FIN_CALLERS["seo_02"]}
+    fenv = _fin_env(work, pf, L)
     data = Path(env["SEO_DATA_DIR"])
     src = str(SVC / "src")
     try:
@@ -172,6 +224,11 @@ def _main(work: Path) -> int:
                              "LEDGER_LOG_PATH": str(work / "ledger" / "ledger.jsonl")}, str(work / "ledger"), "ledger",
               work)
         say(f"ledger health: {wait_health(L + '/health')}")
+        fp = start([sys.executable, "-m", "api"], fenv, str(FIN_SRC), "finance", work)
+        wait_health(F + "/health")
+        fin = Fin(F)
+        check("Finance (31) runs from its production entrypoint and Andre approves its rules",
+              fin.approve_rules() == 200)
 
         # --- settings that must refuse start (before anything touches the data directory) ---------------------------
         bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env, "SEO_RENDERER": "chromium"},
@@ -192,8 +249,9 @@ def _main(work: Path) -> int:
               st["in_memory"] is False and st["non_production"] is False and st["integrity"]["ok"] is True
               and st["andre_approvals_configured"] is True)
         ports = st["ports"]
-        check("only the fetcher is connected; render, every answer engine and every first-party source NOT_CONNECTED",
-              ports["fetch"] == "connected" and ports["render"] == "NOT_CONNECTED"
+        check("only the fetcher and Finance are connected; render, every answer engine and first-party source are not; "
+              "invoices are verified with Finance", ports["fetch"] == "connected" and ports["render"] == "NOT_CONNECTED"
+              and ports["finance"] == "connected" and st["invoice_verification"]["mode"] == "finance"
               and set(ports["answer_engines"].values()) == {"NOT_CONNECTED"}
               and set(ports["first_party"].values()) == {"NOT_CONNECTED"} and ports["clientfix"] == "NOT_CONNECTED")
         second = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env, "SEO_PORT": str(free_port())},
@@ -249,21 +307,57 @@ def _main(work: Path) -> int:
               and all(f.get("effect_class") is None for e in rep.get("agents", []) for f in e["findings"]))
         own_aid = au.json()["audit_id"]
 
-        # --- a client's paid audit: invoice id and Andre ------------------------------------------------------------
+        # --- a client's paid audit: invoice id, Andre, and Finance (31) verifies the invoice ------------------------
         body = {"domain": CLIENT_DOMAIN, "paths": ["/"]}
+        draft = fin.draft(ACME_PARTY)
+        other = fin.draft("someone-else-live")
+        check("Finance drafts invoices for the client and for someone else", draft.status_code == 201
+              and other.status_code == 201)
+        draft_iid, other_iid = draft.json()["invoice"]["invoice_id"], other.json()["invoice"]["invoice_id"]
         no_inv = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body}, andre=True)
-        no_andre = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body,
-                                                        "invoice_id": invoice_id("acme 1")})
+        no_andre = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": draft_iid})
         own_inv = a.post("/tenants/zbm/audits", {"request_id": rid(), "domain": OWN_DOMAIN, "paths": ["/"],
                                                  "invoice_id": invoice_id("zbm")})
         check("a client audit needs a Finance (31) invoice id and Andre; an own audit refuses an invoice id",
               no_inv.status_code == 409 and no_inv.json()["detail"] == "INVOICE_REQUIRED"
               and no_andre.status_code == 403 and no_andre.json()["detail"] == "ANDRE_APPROVAL_REQUIRED"
               and own_inv.status_code == 422 and own_inv.json()["detail"] == "INVOICE_NOT_FOR_OWN_TENANT")
-        cl = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": invoice_id("acme 1")},
-                    andre=True)
-        check("with both, the client audit runs and completes", cl.status_code == 201
-              and cl.json()["status"] == "completed" and cl.json()["andre_approved"] is True)
+        unbound = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": draft_iid},
+                         andre=True)
+        bind = a.post("/tenants/acme-live/finance-client", {"request_id": rid(), "finance_client_id": ACME_PARTY},
+                      andre=True)
+        check("a tenant not bound to a Finance client is refused; Andre binds it",
+              unbound.status_code == 409 and unbound.json()["detail"] == "TENANT_FINANCE_CLIENT_UNBOUND"
+              and bind.status_code == 200 and bind.json()["finance_client_id"] == ACME_PARTY)
+        unpaid = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": draft_iid,
+                                                      "invoice_override": "ANDRE_CONFIRMED_PAYMENT"}, andre=True)
+        unknown = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body,
+                                                       "invoice_id": invoice_id("acme unknown")}, andre=True)
+        theirs = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": other_iid},
+                        andre=True)
+        check("the real Finance answers: a draft is INVOICE_NOT_PAID (not overridable), an unknown id "
+              "INVOICE_NOT_FOUND, another client's INVOICE_TENANT_MISMATCH",
+              unpaid.status_code == 409 and unpaid.json() == {"detail": "INVOICE_NOT_PAID", "override_allowed": False}
+              and unknown.status_code == 409 and unknown.json()["detail"] == "INVOICE_NOT_FOUND"
+              and theirs.status_code == 409 and theirs.json()["detail"] == "INVOICE_TENANT_MISMATCH")
+        stop(fp, "finance")
+        over_iid = invoice_id("acme override")
+        down = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": over_iid}, andre=True)
+        none_yet = a.get("/tenants/acme-live/audits").json()
+        check("Finance stopped: the paid run is refused FINANCE_UNAVAILABLE, override allowed; no refused attempt "
+              "recorded an audit", down.status_code == 503 and down.json() == {"detail": "FINANCE_UNAVAILABLE",
+                                                                            "override_allowed": True}
+              and none_yet == [])
+        cl = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": over_iid,
+                                                  "invoice_override": "FINANCE_OUTAGE"}, andre=True)
+        v = cl.json().get("invoice_verification") or {}
+        check("Andre's override of an unverifiable invoice runs the audit and says so",
+              cl.status_code == 201 and cl.json()["status"] == "completed" and cl.json()["andre_approved"] is True
+              and v.get("verdict") == "OVERRIDDEN" and v.get("cause") == "FINANCE_UNAVAILABLE")
+        replay = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": over_iid,
+                                                      "invoice_override": "FINANCE_OUTAGE"}, andre=True)
+        check("the same invoice cannot pay for a second run, override or not",
+              replay.status_code == 409 and replay.json()["detail"] == "INVOICE_ALREADY_USED")
         client_aid = cl.json()["audit_id"]
         fin = a.get(f"/tenants/acme-live/audits/{client_aid}", caller="finance_31")
         hub_other = a.get(f"/tenants/zbm/audits/{own_aid}", caller="hub", tenant="acme-live")
@@ -330,17 +424,20 @@ def _main(work: Path) -> int:
         ents = httpx.get(L + "/ledger/entries", headers=lh, timeout=60).json()
         mine_l = [x for x in ents if x.get("department") == "seo"]
         types = sorted({x["event_type"] for x in mine_l})
-        say(f"ledger: {len(ents)} entries, {len(mine_l)} from seo; types: {', '.join(types)}")
-        check("tenants, domains, switches, audit requests, approvals, reports and schedules are typed events",
-              {"log_anchor", "tenant_created", "tenant_domains_set", "kill_switch_set", "audit_requested",
-               "audit_approved_by_andre", "audit_report_recorded", "schedule_created"} <= set(types))
+        say(f"ledger: {len(ents)} entries, {len(mine_l)} from seo; seo types: {', '.join(types)}")
+        check("tenants, domains, switches, audit requests, approvals, invoice overrides, reports and schedules are "
+              "typed events", {"log_anchor", "tenant_created", "tenant_domains_set", "tenant_finance_client_set",
+                               "kill_switch_set", "audit_requested", "audit_approved_by_andre",
+                               "invoice_verification_overridden_by_andre", "audit_report_recorded",
+                               "schedule_created"} <= set(types))
         reports = [x for x in mine_l if x["event_type"] == "audit_report_recorded"]
         check("every completed audit (two one-off, one own and one client, plus one scheduled) has its report "
               "recorded once", len({x["subject_id"] for x in reports}) == 3)
-        blob = json.dumps(ents)
-        check("no domain, NAP or page content in the clear on the ledger",
+        blob = json.dumps(mine_l)
+        check("no domain, NAP, Finance client id or page content in the clear in seo's ledger events",
               OWN_DOMAIN not in blob and CLIENT_DOMAIN not in blob and "5318 East 2nd" not in blob
-              and "248-6617" not in blob)
+              and "248-6617" not in blob and ACME_PARTY not in blob)
+        say(f"finance events on the shared ledger: {sum(1 for x in ents if x.get('department') == 'finance')}")
         v = httpx.get(L + "/ledger/verify", headers=lh, timeout=120)
         check("ledger verifies valid", v.status_code == 200 and v.json().get("valid") is True)
         failed = [n for n, ok in CHECKS if not ok]

@@ -404,12 +404,16 @@ jobs:
         working-directory: services/ledger-rust
         run: cargo build --locked --release --bin server
       - name: Install pinned requirements
-        # verification-py's live run also starts compliance-py's production entrypoint; the pins are identical
-        # today, and installing both keeps that true by construction.
+        # verification-py's live run also starts compliance-py's production entrypoint, and seo-py's starts
+        # finance-py's (the invoice verification leg, ADR 0017 W3-2); the pins are identical today, and installing
+        # both keeps that true by construction.
         run: |
           python -m pip install -r services/${{ matrix.service }}/requirements.txt
           if [ "${{ matrix.service }}" = "verification-py" ]; then
             python -m pip install -r services/compliance-py/requirements.txt
+          fi
+          if [ "${{ matrix.service }}" = "seo-py" ]; then
+            python -m pip install -r services/finance-py/requirements.txt
           fi
       # Scout C6-2 (fix wave 25; fix wave 26b): a live_run.py removes its mkdtemp work dir (ledger logs, service
       # logs — the run's evidence) when the run ends, unless LIVE_WORK_DIR names a directory to keep it in (every
