@@ -232,8 +232,22 @@ process (a restarted ingest re-verifies up to its budget); a scheduled slot whos
 not retried; SURFACE_DRIFT says only that the intervals separated with the same prompts and models, never why; the
 department manager's "confirmed" means "persisted in the next run", not "verified by a person".
 
+## Wave 3 (decision-free parts; built Oct 10 2026 on `seo-dept-02-wave1`)
+
+W3-1. **Live run against the real ledger** (`services/seo-py/devtools/live_run.py`, CI job `live-run (seo-py, 3.12 /
+   3.13)`). ledger-rust's release binary and `cd src && python3 -m api` as separate processes over real HTTP, durable
+   data directory, production mode: NOT_BUILT and missing-key settings refuse start; start-up integrity against the
+   real ledger and the seed; a second process on the data directory refuses; tenant, domain, hub-scope, invoice and
+   Andre rules over the wire; a kill switch engaged by Compliance (38) holds across a restart until Andre releases
+   it; audit reports recorded first with their SHA-256 on the ledger; one scheduled run per slot; the department
+   scorecard; the evidence view committed-exactly-once; a truncated log detected; nothing identifying in the clear on
+   the ledger; `GET /ledger/verify` valid. **Limitation:** the live run never crawls. CI has no site to crawl and a
+   live run must not depend on the internet, so the web provider switch is engaged before the first audit and every
+   fetch stops at the guard (which runs before name resolution). The crawler, SSRF guard and parsers are proven only
+   against the in-process fixture server and the war room (W3-3), never against a real public site.
+
 ## Unlock list
 
 Answer-engine adapters with scoped, short-lived credentials; a renderer; Search Console and Bing Webmaster; a
 prompt-volume source; the Finance (31) client to verify invoices; Department 28 clientfix hand-off; the remaining
-agents per the spec's waves; the live run against ledger-rust; the console pages.
+agents per the spec's waves; the console pages. (The live run against ledger-rust was built in Wave 3, W3-1.)

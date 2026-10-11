@@ -29,6 +29,18 @@ export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger sec
 cd src && python3 -m api                                # SEO_BIND_ADDR (127.0.0.1), SEO_PORT (8500)
 ```
 
+## Live run
+
+```bash
+cd services/ledger-rust && cargo build --locked --release --bin server && cd -
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/seo-py/devtools/live_run.py
+```
+
+The real ledger-rust binary and this service's production entrypoint as separate processes over real HTTP with real
+tokens and a durable data directory (CI job `live-run (seo-py, …)`; ADR 0017 Wave 3, W3-1). It makes no outbound
+connection: the web provider switch is engaged over the API before the first audit, so every fetch stops at the
+kill-switch guard before name resolution. Exit 0 only when every check held; the script prints its own N/N.
+
 ## Settings
 
 | Variable | Default | Meaning |

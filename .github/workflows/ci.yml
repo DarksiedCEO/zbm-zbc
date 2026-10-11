@@ -2,7 +2,7 @@
 #
 # One job per service (the fourteen pip-managed Python services share one matrix definition and report as separate
 # checks, e.g. "python-tests (finance-py, 3.13)"), the uv-managed delivery-py, ledger-rust, orchestrator-go, the
-# dashboard, the ten self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
+# dashboard, the eleven self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
 # delivery-py, dependency and secret scans, and one `required` job that needs every other job so branch protection
 # has a single check to require. See docs/ci.md for what each job proves and what is deliberately not here yet.
 #
@@ -385,7 +385,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
-        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py]
+        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py, seo-py]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
