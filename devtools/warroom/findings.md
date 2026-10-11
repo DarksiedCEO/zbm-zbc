@@ -152,6 +152,25 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - **R3-L1 (Low) — the per-code-point script cache had no bound.** FIXED (`ad46ea4`): emptied before it passes 4,096
   code points.
 
+## AEGIS review of fix wave G (fd701f9)
+
+- **G-M1 (Medium) — sales-py lost opt-outs with an angle bracket inside the word.** Fix wave G made `<` / `>` always
+  break words: 48 opt-outs the pre-fix classifier read were lost (`st<op`, `un<subscribe`, `ＳＴ＜ＯＰ`, `st≮op`, ...).
+  FIXED (`51d92b2`; ADR 0013 "War room fixes"): punctuation between letters is dropped again in every reading; only a
+  tag-shaped run that opens and closes is a space, in an extra reading. The tests' pre-fix classifier is wholly
+  frozen, its fuzz pool holds the brackets, and two code-point differentials (planes 0-2 + tag block; every
+  non-letter of planes 0-1 in ten templates) pass; with the G-M1 regression put back they fail.
+- **G-L2 (Low) — sales-py over-suppression on email** (`<style>.unsubscribe{...}</style>`, `Stop+Shop order #44
+  arrived`, `x>stop<y`). FIXED (`51d92b2`): `<style>` / `<script>` elements dropped from both readings; the bracket /
+  math-symbol word-break reading removed; `x>stop<y` is not tag-shaped. `Stop+Shop` on SMS stays an opt-out (as before
+  the war room: `stop\w*` anywhere, TCPA's lower bar).
+- **G-M2 (Medium) — onboarding NEW-5 test had no small-latency bound at one uploader.** FIXED (`92d2b49`; ADR 0004
+  "Fix wave G", corrected): the small p50 / health p50 bound is asserted for every number of uploaders; the
+  small-lane-off defect at one uploader now fails on the 2-vCPU Linux box (128 against 12), not on the M4 build box.
+- **G-L1 (docs) — the regex structure check is not a linearity proof.** FIXED (`92d2b49`): ADR 0004, the test and the
+  harness say the same-work growth check is the guard, the pin only detects change, and `\w+@` passes the structure
+  check yet is quadratic (pinned in the self-test).
+
 ## SHOULD-level observations for Andre (scored, not gate-blocking)
 
 These are outside what the departments' documents promise today, so the war room scores them and does not block on
