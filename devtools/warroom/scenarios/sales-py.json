@@ -4,7 +4,7 @@
  "department": "Sales & Lead Generation (department 13)",
  "service": "sales-py",
  "driver": "sales_py.py",
- "basis": "ADR 0013 decision 13 and AEGIS S1-H3 / S2-C1 / S3-C1 (i10_replies.py): an opt-out reply suppresses every channel for both brands; a reply is never refused (sweep A); the label is not what protects the person: any reply holds phone outreach and opens a task for a person unless the label is an opt-out",
+ "basis": "ADR 0013 decision 13 and AEGIS S1-H3 / S2-C1 / S3-C1 (i10_replies.py): an opt-out reply suppresses every channel for both brands; a reply is never refused (sweep A); the label is not what protects the person: any reply holds phone outreach and opens a task for a person unless the label is an opt-out; war room leftover: disguised opt-outs are read through the shared lookalike fold and a word wholly in one non-Latin script is never read as an English opt-out (ADR 0013 'War room fixes')",
  "variants_per_seed": 3,
  "scenarios": [
   {
@@ -367,6 +367,430 @@
        "held",
        "task_id",
        "suppressed"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "email-reply-disguised-opt-out",
+   "persona": "a prospect opting out by email with the words disguised (lookalike letters of another script, full-width or mathematical letters, invisible characters, leetspeak, letter spacing, markup)",
+   "basis": "war room leftover (findings.md, sales-py homoglyph_wide): i10_replies reads opt-out wording through the shared lookalike fold (src/lookalikes.py, as service-py does: ADR 0014 V1-H1, WR-F001..WR-F004); ADR 0013 'War room fixes'",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "DISGUISED_OPT_OUTS"
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "channel": "email"
+   },
+   "steps": [
+    {
+     "action": "replying_lead"
+    },
+    {
+     "action": "other_lead"
+    },
+    {
+     "action": "reply",
+     "args": {
+      "text": "$text",
+      "channel": "$channel"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "html_wrap",
+    "quoted_reply",
+    "signature",
+    "mixed_language",
+    "injection",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "reply",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "other_lead_untouched",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "other_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "no_echo_of_other_lead",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "suppressed",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "reply",
+      "field": "suppressed",
+      "value": true
+     }
+    },
+    {
+     "id": "contact_suppressed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "email_suppressed",
+      "value": true
+     }
+    }
+   ],
+   "downgrade": {
+    "homoglyph_wide": [
+     "suppressed",
+     "contact_suppressed"
+    ]
+   },
+   "downgrade_basis": "homoglyph_wide can turn a short word into one written wholly in one non-Latin script (\"not\" -> Cyrillic \"пот\"): such a word is read as a word of that language (service-py WR-F006: Russian \"по\" is not \"no\") unless it folds to an opt-out word of four letters or more; the reply is still held for a person (AEGIS S3-C1). The seeds' own wide lookalikes are MUST (variant 0)"
+  },
+  {
+   "id": "sms-reply-disguised-opt-out",
+   "persona": "a prospect opting out by text with the words disguised (lookalike letters of another script, full-width or mathematical letters, invisible characters, leetspeak, letter spacing, markup)",
+   "basis": "war room leftover (findings.md, sales-py homoglyph_wide): i10_replies reads opt-out wording through the shared lookalike fold (src/lookalikes.py, as service-py does: ADR 0014 V1-H1, WR-F001..WR-F004); ADR 0013 'War room fixes'",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "DISGUISED_OPT_OUTS"
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "channel": "sms"
+   },
+   "steps": [
+    {
+     "action": "replying_lead"
+    },
+    {
+     "action": "other_lead"
+    },
+    {
+     "action": "reply",
+     "args": {
+      "text": "$text",
+      "channel": "$channel"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "signature",
+    "mixed_language",
+    "injection",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "reply",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "other_lead_untouched",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "other_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "no_echo_of_other_lead",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "suppressed",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "reply",
+      "field": "suppressed",
+      "value": true
+     }
+    },
+    {
+     "id": "contact_suppressed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "email_suppressed",
+      "value": true
+     }
+    }
+   ],
+   "downgrade": {
+    "homoglyph_wide": [
+     "suppressed",
+     "contact_suppressed"
+    ]
+   },
+   "downgrade_basis": "homoglyph_wide can turn a short word into one written wholly in one non-Latin script (\"not\" -> Cyrillic \"пот\"): such a word is read as a word of that language (service-py WR-F006: Russian \"по\" is not \"no\") unless it folds to an opt-out word of four letters or more; the reply is still held for a person (AEGIS S3-C1). The seeds' own wide lookalikes are MUST (variant 0)"
+  },
+  {
+   "id": "foreign-script-ordinary-sms",
+   "persona": "a prospect replying in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek, Hebrew or Arabic, asking to be texted or e-mailed",
+   "basis": "service-py WR-F006 (AEGIS H1) applied to sales-py: a word wholly in one non-Latin script is never read as a Latin opt-out word (Russian \"по\" is \"by\", not \"no\"); an ordinary reply suppresses nothing and is held for a person (AEGIS S3-C1)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "BENIGN_FOREIGN"
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "channel": "sms"
+   },
+   "steps": [
+    {
+     "action": "replying_lead"
+    },
+    {
+     "action": "other_lead"
+    },
+    {
+     "action": "reply",
+     "args": {
+      "text": "$text",
+      "channel": "$channel"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak",
+    "signature",
+    "mixed_language",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "reply",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "other_lead_untouched",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "other_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "no_echo_of_other_lead",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "not_suppressed",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "reply",
+      "field": "suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "email_not_suppressed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "email_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "phone_not_suppressed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "phone_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "held_or_tasked",
+     "severity": "MUST",
+     "check": "any_field_truthy",
+     "args": {
+      "step": "reply",
+      "fields": [
+       "held",
+       "task_id"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "foreign-script-ordinary-email",
+   "persona": "a prospect replying in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek, Hebrew or Arabic, asking to be texted or e-mailed",
+   "basis": "service-py WR-F006 (AEGIS H1) applied to sales-py: a word wholly in one non-Latin script is never read as a Latin opt-out word (Russian \"по\" is \"by\", not \"no\"); an ordinary reply suppresses nothing and is held for a person (AEGIS S3-C1)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "BENIGN_FOREIGN"
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "channel": "email"
+   },
+   "steps": [
+    {
+     "action": "replying_lead"
+    },
+    {
+     "action": "other_lead"
+    },
+    {
+     "action": "reply",
+     "args": {
+      "text": "$text",
+      "channel": "$channel"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak",
+    "signature",
+    "mixed_language",
+    "html_wrap",
+    "quoted_reply",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "reply",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "other_lead_untouched",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "other_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "no_echo_of_other_lead",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "not_suppressed",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "reply",
+      "field": "suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "email_not_suppressed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "email_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "phone_not_suppressed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "phone_suppressed",
+      "value": false
+     }
+    },
+    {
+     "id": "held_or_tasked",
+     "severity": "MUST",
+     "check": "any_field_truthy",
+     "args": {
+      "step": "reply",
+      "fields": [
+       "held",
+       "task_id"
       ]
      }
     }

@@ -33,7 +33,7 @@ REPO = HERE.parent.parent
 SOURCE = HERE / "confusables-15.1.0.txt"
 SOURCE_VERSION = "15.1.0"
 SOURCE_SHA256 = "8289f833e4cf78fde56b2080dc0e42934ef5182c9c3f4dd1fbdf2bced69fd5ed"
-SERVICES = ("clipper-network-py", "onboarding-py", "service-py", "verification-py")
+SERVICES = ("clipper-network-py", "onboarding-py", "sales-py", "service-py", "verification-py")
 BEGIN = "# BEGIN GENERATED SKELETON (devtools/lookalikes/generate.py; do not edit by hand)\n"
 END = "# END GENERATED SKELETON\n"
 

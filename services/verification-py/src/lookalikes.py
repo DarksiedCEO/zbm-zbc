@@ -2,7 +2,8 @@
 Lookalike folding, one copy per service that folds lookalike letters (war room fixes WR-F001..WR-F005, ADR 0018).
 
 Services do not import each other, so this file is copied BYTE-IDENTICAL into ``src/lookalikes.py`` of
-clipper-network-py, onboarding-py, service-py and verification-py: the hygiene lint (rule L4) fails on any difference,
+clipper-network-py, onboarding-py, sales-py, service-py and verification-py: the hygiene lint (rule L4) fails on any
+difference,
 and ``devtools/test_lookalikes.py`` regenerates the data block below from the vendored Unicode data and checks the
 shared hand table against creative-py's. Standard library only.
 
@@ -32,7 +33,7 @@ What a caller gets (``fold`` / ``fold_cased``), in this order:
 
 A word written wholly in one non-Latin script (WR-F006, opt-in: ``fold(text, single_script=...)``). By default every
 letter is folded, whatever the word around it. A caller that must not read a real word of another language as a Latin
-one (service-py's opt-out rules: Russian "по", "by", is not "no") passes a predicate: a word (a run of letters, digits
+one (the opt-out rules of service-py and sales-py: Russian "по", "by", is not "no") passes a predicate: a word (a run of letters, digits
 and combining marks) of two or more letters, with no Latin letter or ASCII digit in it and every letter in ONE
 non-Latin script, then gets layers (b)-(d) only when the predicate accepts its full fold, and the calling service's
 own table (a) alone otherwise (``words`` cuts text into such words). A word that mixes Latin with lookalikes, or two non-Latin scripts ("ЅΤΟΡ"), and a
