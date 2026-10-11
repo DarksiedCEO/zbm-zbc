@@ -35,7 +35,6 @@ Ports: 20300-20319 (this wave's range for creative-py real-socket tests).
 from __future__ import annotations
 
 import json
-import os
 import random
 import statistics
 import string
@@ -48,7 +47,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from _procinfo import rss_kib
+from _procinfo import cpu_seconds, rss_kib
 
 from conftest import NOW, TEST_SERVICE_TOKEN, Api, start_serve, stop_serve
 from flows import ok, zbc_open
@@ -692,11 +691,13 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
     codes: dict = {}
     sizes: list[int] = []
     health: list[float] = []
+    posts: list[float] = []
     stop = threading.Event()
 
     def worker():
         with httpx.Client(timeout=120) as c:
             for _ in range(reps):
+                t = time.perf_counter()
                 try:
                     r = c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                                headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})
@@ -704,6 +705,7 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
                     sizes.append(len(r.content))
                 except Exception as e:  # noqa: BLE001
                     codes[type(e).__name__] = codes.get(type(e).__name__, 0) + 1
+                posts.append(time.perf_counter() - t)
 
     def prober():
         with httpx.Client(timeout=30) as c:
@@ -728,15 +730,19 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
     stop.set()
     if sample_health:
         pr.join()
-    return codes, sizes, sorted(health), time.perf_counter() - t0
+    return codes, sizes, sorted(health), sorted(posts), time.perf_counter() - t0
+
+
+HEALTH_QUEUE_RATIO_MAX = 0.25  # /health p50 over junk-post p50, same flood (measured 0.06-0.12 fixed, >= 0.36 ungated)
 
 
 @pytest.mark.parametrize("name,body", [("1 MiB junk", JUNK_1MIB), ("60k unknown keys", JUNK_60K_KEYS)], ids=["1mib", "60k"])
 def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_served(server, name, body):
     """AEGIS round 5 (probes/cre_amp.py): 20 concurrent 1 MiB junk posts ->
     /health 36 s, RSS 308 MB, two fast clients got 408. Now: every junk
-    post is a small 422, /health stays under 500 ms, a legitimate client
-    is answered (never 408) while the flood runs."""
+    post is a small 422, /health is not queued behind the junk work (its
+    latency is a small fraction of a junk post's in the same flood), and a
+    legitimate client is answered (never 408) while the flood runs."""
     proc, port = server
     legit: dict = {}
 
@@ -753,21 +759,30 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
 
     lt = threading.Thread(target=legit_client)
     lt.start()
-    codes, sizes, health, elapsed = _flood(port, body, nconc=20, reps=3)
+    codes, sizes, health, posts, elapsed = _flood(port, body, nconc=20, reps=3)
     lt.join()
     rss = _rss_kb(proc.pid) // 1024
     print(f"\nN2 {name} x20 conc x3: {codes} in {elapsed:.1f}s; max 422 body {max(sizes)} B; "
           f"/health p50={health[len(health) // 2] * 1000:.0f}ms max={health[-1] * 1000:.0f}ms; RSS {rss} MB; legit {legit}")
     assert codes == {422: 60}, codes
     assert max(sizes) < 8 * 1024
-    # Fix wave 9 (AEGIS round 8 L3): the bound is scaled by how much slower this machine runs a fixed
-    # CPU workload right now than it did when the bound was set (1x on an idle machine, so the 500 ms
-    # guarantee is unchanged there; the flake was 502 ms under a concurrent test run), and the p50 is
-    # bound as well since large-body shape scans run one at a time (p50 was ~390 ms, now ~80 ms).
-    slow = _slowdown()
-    print(f"   machine slowdown {slow:.2f}x -> bounds max {0.5 * slow * 1000:.0f} ms, p50 {0.15 * slow * 1000:.0f} ms")
-    assert health and health[-1] < 0.5 * slow, (health[-1], slow)
-    assert health[len(health) // 2] < 0.15 * slow, (health[len(health) // 2], slow)
+    # fix-flakes-h (macOS CI, Oct 11 2026): the bound is ORDERING within this run, not an absolute wall time scaled by
+    # a calibration taken after the flood (best of 7 json.loads, floored at 1x: on a CPU faster than the reference
+    # it read 1x however contended the flood itself was, so a 500 ms max-of-N bound measured the runner). The defect
+    # (AEGIS round 5 / round 8 L3) is /health QUEUED behind the junk work: large-body shape scans run one at a time
+    # (BodyLimit.scan_gate) and a small request is never queued behind them, so a /health probe waits at most about
+    # one scan while a junk post waits for the queue. Measured on the 2-vCPU Linux host, idle and with a busy loop on
+    # the same core (fix-flakes-h, 24 runs): health p50 / junk p50 = 0.06-0.12, health max / junk p50 = 0.17-0.51;
+    # with the gate removed (Semaphore(1000), the round-8 regression) 0.36-0.50 and 0.47-0.82 — and the old bounds
+    # passed that mutation on the 1 MiB body (p50 108-140 ms < 150 ms). Both ratios are taken in the same run under the
+    # same load, so load scales both sides.
+    assert health and posts, (health, posts)
+    mid = len(health) // 2
+    print(f"   /health p50 / junk p50 = {health[mid] / posts[len(posts) // 2]:.2f} (bound {HEALTH_QUEUE_RATIO_MAX}); "
+          f"/health max / junk p50 = {health[-1] / posts[len(posts) // 2]:.2f} (bound 1)")
+    assert health[mid] < HEALTH_QUEUE_RATIO_MAX * posts[len(posts) // 2], (health[mid], posts[len(posts) // 2])
+    assert health[-1] < posts[len(posts) // 2], ("a /health probe waited as long as a queued junk post",
+                                                 health[-1], posts[len(posts) // 2])
     assert 408 not in legit and sum(v for k, v in legit.items() if isinstance(k, int)) == 10, legit
     # Fix wave 21 (AEGIS N20-M-6): the single absolute RSS sample (rss < 250) that stood here was
     # removed: one number after one flood, with no baseline, can neither see a leak below the ceiling
@@ -811,7 +826,7 @@ def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
         for r in range(1, PLATEAU_ROUNDS + 1):
             peak = 0
             for name, body in (("1mib", JUNK_1MIB), ("60k", JUNK_60K_KEYS)):
-                codes, _, _, _ = _flood(port, body, nconc=20, reps=3, sample_health=False)
+                codes, _, _, _, _ = _flood(port, body, nconc=20, reps=3, sample_health=False)
                 assert codes == {422: 60}, (r, name, codes)
                 rss = _rss_kb(proc.pid) // 1024
                 samples.append((r, name, rss))
@@ -835,50 +850,25 @@ def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
     assert plateau < PLATEAU_CEILING_MIB, line
 
 
-CALIBRATION_S = 0.12  # json.loads of JUNK_60K_KEYS x5, best of 7, on the reference 2-vCPU host, idle (fix wave 9)
-
-
-def _slowdown() -> float:
-    """How much slower than CALIBRATION_S this machine is right now (best
-    of 7), between 1x and 4x (the onboarding-py timing harness, fix wave 6)."""
-    best = min(_time(lambda: [json.loads(JUNK_60K_KEYS) for _ in range(5)]) for _ in range(7))
-    return min(4.0, max(1.0, best / CALIBRATION_S))
-
-
-def _time(fn) -> float:
-    t0 = time.perf_counter()
-    fn()
-    return time.perf_counter() - t0
-
-
-def _proc_cpu_s(pid: int) -> float | None:
-    """utime + stime of process `pid` in seconds (Linux /proc), None elsewhere."""
-    try:
-        with open(f"/proc/{pid}/stat") as fh:
-            f = fh.read().rsplit(")", 1)[1].split()
-        return (int(f[11]) + int(f[12])) / os.sysconf("SC_CLK_TCK")
-    except (OSError, IndexError, ValueError):
-        return None
-
-
 def test_n2_single_junk_post_is_answered_in_under_100ms_on_the_socket(server):
     proc, port = server
     with httpx.Client(timeout=30) as c:
         for body in (JUNK_1MIB, JUNK_60K_KEYS):
             c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                    headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})  # warm
-            # fix wave 25 (scout A C3; R-HYGIENE L1): the SERVER's CPU for the request (Linux /proc: utime+stime of
-            # the server process, 10 ms ticks), not the client's wall clock on a possibly starved box; where /proc is
-            # not available, the wall clock as before.
-            c0, t0 = _proc_cpu_s(proc.pid), time.monotonic()
+            # fix wave 25 (scout A C3; R-HYGIENE L1): the SERVER's CPU for the request, not the client's wall clock on
+            # a possibly starved box. fix-flakes-h (macOS CI, Oct 11 2026): on every OS — _procinfo.cpu_seconds reads
+            # /proc on Linux and `ps -o time=` on macOS (10 ms resolution on both) and raises where it has no source;
+            # this test used to fall back to the WALL clock where /proc was missing (macOS), which a loaded runner
+            # pushed past 100 ms (reproduced on Linux with that branch forced: 2 of 15 under one-core contention).
+            c0 = cpu_seconds(proc.pid)
             r = c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                        headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})
-            wall, c1 = time.monotonic() - t0, _proc_cpu_s(proc.pid)
-            cost = wall if c0 is None or c1 is None else c1 - c0
+            cost = cpu_seconds(proc.pid) - c0
             print(f"\nN2 single {len(body) // 1024} KB junk post: {r.status_code} {len(r.content)} B, server CPU "
-                  f"{cost * 1000:.0f} ms (wall {wall * 1000:.0f} ms)")
+                  f"{cost * 1000:.0f} ms")
             assert r.status_code == 422 and len(r.content) < 8 * 1024
-            assert cost < 0.1, (cost, wall)
+            assert cost < 0.1, cost
 
 
 # =====================================================================================

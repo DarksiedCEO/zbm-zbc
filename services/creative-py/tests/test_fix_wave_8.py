@@ -49,6 +49,7 @@ import itertools
 import json
 import random
 import string
+import threading
 import time
 
 import pytest
@@ -359,7 +360,12 @@ def test_n7_1_heap_is_trimmed_after_a_large_parse(monkeypatch):
     from api import BodyLimit
 
     calls = []
-    monkeypatch.setattr(api_mod, "_malloc_trim", lambda: calls.append(1))
+    trimmed = threading.Event()
+
+    def trim():
+        calls.append(1)
+        trimmed.set()
+    monkeypatch.setattr(api_mod, "_malloc_trim", trim)
     monkeypatch.setattr(api_mod, "TRIM_IDLE_S", 0.05)
     gate = asyncio.Event()
 
@@ -396,7 +402,9 @@ def test_n7_1_heap_is_trimmed_after_a_large_parse(monkeypatch):
         assert calls == [], "the trim waits while another large body is in flight"
         gate.set()
         await slow
-        await asyncio.sleep(0.3)
+        # fix-flakes-h: the trim runs on an executor thread TRIM_IDLE_S after the last large body; wait for that event
+        # (hang guard 30 s) instead of sleeping 0.3 s and hoping the thread was scheduled in time on a loaded box
+        assert await asyncio.to_thread(trimmed.wait, 30), "no trim within the 30 s hang guard"
         assert calls == [1], calls
 
     asyncio.run(run())
