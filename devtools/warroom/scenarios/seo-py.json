@@ -1327,9 +1327,9 @@
    ]
   },
   {
-   "id": "paid-run-hostile-finance",
-   "persona": "a paid client audit while Finance (31) is down, lying, or says no",
-   "basis": "ADR 0017 W3-2: a paid run proceeds only when Finance confirms a paid, unrefunded, unused ZBM invoice of the tenant's client; anything malformed or foreign is unverifiable, never paid; a refused attempt records nothing and crawls nothing",
+   "id": "paid-run-finance-cannot-answer",
+   "persona": "a paid client audit while Finance (31) is down, refusing us, or answering something malformed or foreign",
+   "basis": "ADR 0017 W3-2: an UNVERIFIABLE answer refuses the run 503 with override_allowed; a refused attempt records nothing and crawls nothing (AEGIS SEO Wave 3 L4: split from the definitive answers)",
    "seeds": [
     {
      "literal": [
@@ -1341,22 +1341,13 @@
       "huge",
       "encoded",
       "auth",
-      "not_found",
       "route_404",
       "other_invoice",
-      "float_total",
-      "unpaid",
-      "draft",
-      "void",
-      "refunded",
-      "partial_refund",
-      "charged_back",
-      "wrong_client",
-      "zbc_entity",
-      "eur",
+      "extra_fields",
+      "string_flag",
       "unknown_status"
      ],
-     "basis": "finance_client.py's UNVERIFIABLE and DEFINITIVE answers and founder-pending default 14"
+     "basis": "finance_client.py UNVERIFIABLE (connect error, timeout, 5xx, malformed, oversized, encoded, redirected, auth refused, a 404 that is not Finance's, another invoice, the full record or a mistyped flag instead of the status, an unknown status)"
     }
    ],
    "input_field": "mode",
@@ -1371,15 +1362,22 @@
    ],
    "invariants": [
     {
-     "id": "refused",
+     "id": "refused_503",
      "severity": "MUST",
-     "check": "state_in",
+     "check": "state_equals",
      "args": {
       "key": "audit_http",
-      "values": [
-       409,
-       503
-      ]
+      "value": 503
+     }
+    },
+    {
+     "id": "override_offered",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "paid_run",
+      "field": "override_allowed",
+      "value": true
      }
     },
     {
@@ -1398,6 +1396,138 @@
      "args": {
       "key": "requests",
       "value": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "paid-run-finance-says-no",
+   "persona": "a paid client audit whose invoice Finance (31) does not confirm",
+   "basis": "ADR 0017 W3-2 and founder-pending default 14: a DEFINITIVE answer (not found, not paid, refunded even in part, charged back, another client or entity, unsupported currency) refuses the run 409, never overridable",
+   "seeds": [
+    {
+     "literal": [
+      "not_found",
+      "unpaid",
+      "draft",
+      "void",
+      "refunded",
+      "partial_refund",
+      "charged_back",
+      "wrong_client",
+      "zbc_entity",
+      "eur"
+     ],
+     "basis": "finance_client.py DEFINITIVE"
+    }
+   ],
+   "input_field": "mode",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "paid_run",
+     "args": {
+      "mode": "$mode"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "refused_409",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 409
+     }
+    },
+    {
+     "id": "not_overridable",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "paid_run",
+      "field": "override_allowed",
+      "value": false
+     }
+    },
+    {
+     "id": "nothing_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_recorded",
+      "value": false
+     }
+    },
+    {
+     "id": "nothing_crawled",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "requests",
+      "value": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "paid-run-finance-confirms",
+   "persona": "a paid client audit whose invoice Finance (31) confirms (the control case)",
+   "basis": "ADR 0017 W3-2: Finance confirms a paid, unrefunded ZBM invoice of the tenant's client: the run proceeds, is recorded with invoice_verified, and crawls",
+   "seeds": [
+    {
+     "literal": [
+      "paid"
+     ],
+     "basis": "the honest answer"
+    }
+   ],
+   "input_field": "mode",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "paid_run",
+     "args": {
+      "mode": "$mode"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_recorded",
+      "value": true
+     }
+    },
+    {
+     "id": "verified_on_the_ledger",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "invoice_verified",
+      "value": true
      }
     }
    ]

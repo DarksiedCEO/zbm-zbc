@@ -245,6 +245,9 @@ def _sanitize(errors: list[dict]) -> dict:
 
 
 ID_RE = m.ID_RE
+# Callers that reach only routes naming them explicitly (``caller()`` with no names does not admit them).
+NAMED_ONLY = frozenset({"seo_02"})
+SEO_STATUS_ROUTE = re.compile(r"/fin/v1/invoices/[A-Za-z0-9._:-]{1,128}/status")
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -274,6 +277,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             name = callers.identify(x_fin_caller_token)
             if name is None:
                 raise Forbidden("caller token missing or not recognised")
+            if name in NAMED_ONLY and name not in allowed:
+                raise Forbidden("this caller reaches only the routes that name it")
             if allowed and name not in allowed:
                 raise Forbidden("this caller is not authorized for this route (separation of duties, FIN-19)")
             return name
@@ -349,6 +354,17 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         # AEGIS N17-11: an amount out of range is the caller's input (a rate card, a count), never a 500
         return JSONResponse(status_code=422, content={"detail": "AMOUNT_OUT_OF_RANGE", "reasons": [
             R.item("AMOUNT_OUT_OF_RANGE", str(exc)[:120])]})
+
+    @app.middleware("http")
+    async def _seo_allowlist(request: Request, call_next):
+        # AEGIS SEO Wave 3 M2: Search & Answer Intelligence (seo_02) reaches exactly ONE route, the narrow invoice
+        # status read. Enforced before any route, dependency or body parsing, so no route that forgot to name its
+        # callers (``caller()`` admits any caller) and no Andre-only route can answer it anything but 403.
+        if callers.identify(request.headers.get(CALLER_HEADER)) in NAMED_ONLY and not (
+                request.method == "GET" and SEO_STATUS_ROUTE.fullmatch(request.url.path)):
+            return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
+                                                                   "name it"})
+        return await call_next(request)
 
     @app.middleware("http")
     async def _unhandled(request: Request, call_next):
@@ -465,6 +481,12 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def invoice_draft(who: str = Depends(caller("onboarding", "scheduler")),
                       req: m.InvoiceDraft = Depends(body(m.InvoiceDraft))) -> dict:
         return svc.draft_invoice(who, req.request_id, dump(req))
+
+    @app.get("/fin/v1/invoices/{invoice_id}/status", dependencies=auth)
+    def invoice_status(invoice_id: str, _: str = Depends(caller("seo_02"))) -> dict:
+        """AEGIS SEO Wave 3 M2: what Search & Answer Intelligence (2) needs to verify a paid audit's invoice and
+        nothing more (no lines, amounts, descriptions, template variables or legal references)."""
+        return svc.invoice_status(_id(invoice_id))
 
     @app.get("/fin/v1/invoices/{invoice_id}", dependencies=auth)
     def invoice_get(invoice_id: str, _: str = Depends(caller())) -> dict:

@@ -60,7 +60,7 @@ class InvoicesMixin:
         client = t.get("finance_client_id")
         if getattr(self.ports.finance, "connected", False) and not client:
             raise Conflict(R("TENANT_FINANCE_CLIENT_UNBOUND"))
-        return {"mode": "finance", "invoice_id": body["invoice_id"], "client_id": client,
+        return {"mode": "finance", "invoice_id": body["invoice_id"], "client_id": client, "tenant_id": tid,
                 "override": override if andre else None, "owner": owner}
 
     def _verify_invoice(self, plan: Optional[dict]) -> Optional[dict]:
@@ -86,11 +86,17 @@ class InvoicesMixin:
         raise Unavailable(R(code), override_allowed=True)
 
     def _recheck_invoice(self, plan: Optional[dict]) -> None:
-        """Under the lock again, after the Finance call: the invoice may have been used meanwhile."""
+        """Under the lock again, after the Finance call: the invoice may have been used meanwhile, or the tenant's
+        Finance binding changed."""
         if plan is not None and plan["mode"] == "finance":
             used = self._invoice_owner(plan["invoice_id"])
             if used is not None and used != plan["owner"]:
                 raise Conflict(R("INVOICE_ALREADY_USED"))
+            # AEGIS SEO Wave 3 L1: Finance's answer was judged against the binding read before the call; if Andre
+            # re-bound the tenant meanwhile, that verdict is about the wrong client
+            t = self.tenants.get(plan["tenant_id"]) or {}
+            if t.get("finance_client_id") != plan["client_id"]:
+                raise Conflict(R("TENANT_FINANCE_CLIENT_CHANGED"))
 
     @staticmethod
     def _invoice_evidence(verification: Optional[dict], subject: str, ids: dict, invoice_id: Optional[str],

@@ -200,9 +200,16 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
     if extract is None:
         return out, canon_checked
     canons = extract["canonicals"]
-    if len(canons) > 1:
+    invalid = extract.get("canonicals_invalid") or 0
+    total = (extract.get("canonicals_valid", len(canons)) or 0) + invalid
+    if invalid:
+        # WR-F009: a canonical that is not an http(s) URL this service can read (javascript:, a broken IPv6 literal);
+        # reported whenever there is one (AEGIS SEO Wave 3 M3), beside the other canonical findings
+        out.append(finding("CANONICAL_INVALID", "medium", "measured", "ACT", url=url, detail={"count": invalid}))
+    if total > 1:
+        # M3: an invalid canonical still counts: one valid plus one invalid is two canonicals
         out.append(finding("CANONICAL_MULTIPLE", "high", "measured", "ACT", url=url,
-                           detail={"count": len(canons), "canonicals": canons[:10]}))
+                           detail={"count": total, "invalid": invalid, "canonicals": canons[:10]}))
     elif len(canons) == 1:
         c = canons[0]
         host = host_of(c)
@@ -223,11 +230,7 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
                 out.append(finding("CANONICAL_TARGET_NOT_200", "high", "measured", "ACT", url=url,
                                    detail={"canonical": c, "fetch_state": cf.state, "status": cf.status,
                                            "redirected": bool(cf.redirects)}))
-    elif extract.get("canonicals_invalid"):
-        # WR-F009: a canonical that is not an http(s) URL this service can read (javascript:, a broken IPv6 literal)
-        out.append(finding("CANONICAL_INVALID", "medium", "measured", "ACT", url=url,
-                           detail={"count": extract["canonicals_invalid"]}))
-    else:
+    elif not invalid:
         out.append(finding("CANONICAL_MISSING", "low", "measured", "WATCH", url=url))
     if extract.get("parse_error"):
         out.append(finding("HTML_PARSE_ERROR", "low", "measured", "WATCH", url=url,

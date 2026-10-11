@@ -29,19 +29,10 @@ CLIENT = "acme-party-1"
 
 
 def finance_invoice(iid: str, status: str = "paid", entity: str = "zbm", client: str = CLIENT, **extra) -> dict:
-    """finance-py's invoice record shape (svc_books.draft_invoice + decide_invoice + the payment that marks it paid)."""
-    inv = {"invoice_id": iid, "entity": entity, "client_id": client, "campaign_id": None, "kind": "service",
-           "lines": [{"line_code": "strategy_services", "quantity": 1, "unit_price": "2000.00", "amount": "2000.00",
-                      "description": "SEO audit"}],
-           "total": "2000.00", "currency": "USD", "payment_methods": ["ach"], "due_days": 15,
-           "legal_ref": {"doc_id": "msa-1", "version": 1, "doc_sha256": "b" * 64, "acceptance_id": "acc-1"},
-           "recurring": None, "notes_sha256": None, "template_vars": {"contact": "Pat"}, "drafted_by": "onboarding",
-           "drafted_at": "2026-10-01T17:00:00Z", "status": status,
-           "tax_treatment": {"status": "verified", "basis_row": "FIN-CQ-11"}, "content_sha256": "c" * 64}
-    if status in ("issued", "paid"):
-        inv.update(approved_by="andre", issued_at="2026-10-01T18:00:00Z", due_at="2026-10-16")
-    if status == "paid":
-        inv["paid_at"] = "2026-10-02T17:00:00Z"
+    """finance-py's invoice-status answer (svc_books.invoice_status, GET /fin/v1/invoices/{id}/status)."""
+    inv = {"invoice_id": iid, "entity": entity, "client_id": client, "kind": "service", "status": status,
+           "currency": "USD", "paid_at": "2026-10-02T17:00:00Z" if status == "paid" else None, "refunded": False,
+           "charged_back": False}
     inv.update(extra)
     return inv
 
@@ -83,7 +74,10 @@ class FakeFinance:
             return httpx.Response(401, json={"detail": "invalid token"})
         if request.headers.get(fc.FIN_CALLER_HEADER) != FIN_CALLER:
             return httpx.Response(403, json={"detail": "caller token missing or not recognised"})
-        iid = request.url.path.rsplit("/", 1)[-1]
+        parts = request.url.path.rsplit("/", 2)
+        if parts[-1] != "status":
+            return httpx.Response(403, json={"detail": "this caller reaches only the routes that name it"})
+        iid = parts[-2]
         inv = self.invoices.get(iid)
         if mode == "other":                                # an answer about a different invoice (a replayed body)
             inv = finance_invoice(invoice_id(999))
@@ -120,10 +114,9 @@ def test_paid_invoice_keeps_only_the_minimal_facts_and_sends_both_tokens():
                      "currency": "USD", "refunded": False, "charged_back": False, "paid_at": "2026-10-02T17:00:00Z"}
     assert fc.assess(facts, CLIENT) == fc.PAID
     (req,) = f.calls
-    assert req.method == "GET" and str(req.url) == f"{BASE}/fin/v1/invoices/{iid}"
+    assert req.method == "GET" and str(req.url) == f"{BASE}/fin/v1/invoices/{iid}/status"
     assert req.headers["authorization"] == f"Bearer {FIN_SERVICE}" and req.headers[fc.FIN_CALLER_HEADER] == FIN_CALLER
     assert req.headers["accept-encoding"] == "identity"
-    assert "2000.00" not in json.dumps(facts) and "Pat" not in json.dumps(facts)
 
 
 def test_finance_down_is_retried_a_bounded_number_of_times_then_unavailable():
@@ -184,8 +177,9 @@ def test_wrong_tokens_and_unknown_invoices():
     assert e.value.code == "FINANCE_RESPONSE_INVALID" and len(f.calls) == n      # never sent
 
 
-@pytest.mark.parametrize("change", [{"status": "unknown"}, {"total": 2000.0}, {"total": "-1.00"}, {"client_id": "a b"},
-                                    {"entity": "acme"}, {"currency": "usd"}, {"refunded": 5}, {"paid_at": 3},
+@pytest.mark.parametrize("change", [{"status": "unknown"}, {"total": "2000.00"}, {"lines": []}, {"client_id": "a b"},
+                                    {"entity": "acme"}, {"currency": "usd"}, {"refunded": 5}, {"refunded": "1.00"},
+                                    {"charged_back": None}, {"paid_at": 3},
                                     {"kind": ""}])
 def test_parser_refuses_any_malformed_field(change):
     iid = invoice_id(5)
@@ -203,9 +197,9 @@ def test_parser_refuses_any_malformed_field(change):
                                         ({"status": "issued"}, "INVOICE_NOT_PAID"),
                                         ({"status": "void"}, "INVOICE_NOT_PAID"),
                                         ({"status": "returned"}, "INVOICE_NOT_PAID"),
-                                        ({"refunded": "100.00"}, "INVOICE_REFUNDED"),
-                                        ({"charged_back": "2000.00"}, "INVOICE_REFUNDED"),
-                                        ({"refunded": "0.00"}, "PAID")])
+                                        ({"refunded": True}, "INVOICE_REFUNDED"),
+                                        ({"charged_back": True}, "INVOICE_REFUNDED"),
+                                        ({"refunded": False}, "PAID")])
 def test_verdicts(kw, verdict):
     iid = invoice_id(6)
     assert fc.assess(fc.parse_invoice(finance_invoice(iid, **kw), iid), CLIENT) == verdict
@@ -361,8 +355,8 @@ def test_finance_not_configured_is_the_safe_default(tmp_path, srv):
                                      ({"entity": "zbc"}, "INVOICE_ENTITY_MISMATCH"),
                                      ({"status": "issued"}, "INVOICE_NOT_PAID"),
                                      ({"status": "draft"}, "INVOICE_NOT_PAID"),
-                                     ({"refunded": "2000.00"}, "INVOICE_REFUNDED"),
-                                     ({"charged_back": "2000.00"}, "INVOICE_REFUNDED")])
+                                     ({"refunded": True}, "INVOICE_REFUNDED"),
+                                     ({"charged_back": True}, "INVOICE_REFUNDED")])
 def test_a_definitive_answer_from_finance_cannot_be_overridden(tmp_path, srv, kw, code):
     f = FakeFinance()
     h = harness(tmp_path, srv, f)
@@ -495,7 +489,7 @@ def test_a_schedule_is_verified_at_creation_and_again_before_every_slot(tmp_path
     assert tick(h)["ran"] == 1
     # refunded since: the next slot is skipped with Finance's reason, recorded
     h.clock.advance(days=7)
-    f.invoices[iid]["refunded"] = "2000.00"
+    f.invoices[iid]["refunded"] = True
     t = tick(h)
     assert t["ran"] == 0 and t["refused"] == 1
     slot2 = h.ok(h.get(f"/tenants/acme/schedules/{s['schedule_id']}"))["slots"]["2"]

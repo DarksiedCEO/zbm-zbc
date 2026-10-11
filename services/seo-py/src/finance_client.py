@@ -2,20 +2,21 @@
 Finance (31) invoice verification client (ADR 0017 Wave 3, W3-2).
 
 The paid-audit and paid-schedule flows used to take a Finance (31) invoice id on trust. This module asks Finance:
-``GET /fin/v1/invoices/{invoice_id}`` (finance-py ``api.invoice_get``: the service bearer token plus a caller token
-in ``X-FIN-Caller-Token``; this service's caller name at Finance is ``seo_02``). Nothing else is called, and nothing
-is ever written to Finance.
+``GET /fin/v1/invoices/{invoice_id}/status`` (finance-py ``api.invoice_status``, the narrow read made for this
+service, AEGIS SEO Wave 3 M2: the service bearer token plus a caller token in ``X-FIN-Caller-Token``; this service's
+caller name at Finance is ``seo_02``, and it reaches no other route there). Nothing else is called, and nothing is
+ever written to Finance.
 
 Rules:
   - fail closed: anything that is not a well-formed answer for exactly the invoice asked about is UNVERIFIABLE
     (never "paid");
-  - bounded: a per-phase timeout, an overall deadline over every attempt, at most ``attempts`` tries of this
-    idempotent read, a response body cap, no redirects followed;
+  - bounded: a per-phase timeout, an overall deadline over every attempt AND within each attempt (every socket
+    operation and the body loop; M1), at most ``attempts`` tries of this idempotent read, a response body cap, no
+    redirects followed;
   - retried only when a retry can help (connect error, timeout, 429, 500, 502, 503, 504); a 4xx is never retried;
-  - minimal: of Finance's invoice record only the fields the verdict needs are kept (id, status, entity, client id,
-    kind, currency, whether anything was refunded or charged back, paid_at). Lines, descriptions, amounts, template
-    variables and legal references are validated for shape where needed and then dropped; none reaches this
-    service's log or ledger.
+  - minimal: Finance answers only the fields the verdict needs (id, status, entity, client id, kind, currency,
+    whether anything was refunded or charged back, paid_at); an answer with any other field (the full record) is
+    refused. Nothing of it reaches this service's log or ledger but the verdict and its SHA-256.
 
 Reason codes (a closed set; ``reasons.py`` lists every one):
   UNVERIFIABLE  FINANCE_NOT_CONFIGURED, FINANCE_UNAVAILABLE, FINANCE_AUTH_REFUSED, FINANCE_RESPONSE_INVALID
@@ -32,9 +33,9 @@ from __future__ import annotations
 import json
 import re
 import time
-from decimal import Decimal, InvalidOperation
 from typing import Callable, Optional
 
+import httpcore
 import httpx
 
 CALLER_NAME_AT_FINANCE = "seo_02"
@@ -46,7 +47,8 @@ ENTITIES = ("zbm", "zbc")
 SEO_ENTITY = "zbm"                                          # Search & Answer Intelligence is Z Best Media's
 MAX_RESPONSE_BYTES = 64 * 1024
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
-_MONEY = re.compile(r"-?[0-9]{1,15}\.[0-9]{2}")
+STATUS_FIELDS = frozenset({"invoice_id", "entity", "client_id", "kind", "status", "currency", "paid_at", "refunded",
+                           "charged_back"})                 # finance-py svc_books.invoice_status
 _NOT_FOUND_DETAIL = "no such invoice"                       # finance-py svc_books.get_invoice
 
 UNVERIFIABLE = frozenset({"FINANCE_NOT_CONFIGURED", "FINANCE_UNAVAILABLE", "FINANCE_AUTH_REFUSED",
@@ -66,23 +68,13 @@ class FinanceLookupError(Exception):
         self.code = code
 
 
-def _money(v) -> Optional[Decimal]:
-    if v is None:
-        return None
-    if not isinstance(v, str) or not _MONEY.fullmatch(v):
-        raise ValueError("money")
-    try:
-        return Decimal(v)
-    except InvalidOperation:
-        raise ValueError("money") from None
-
-
 def parse_invoice(obj, invoice_id: str) -> dict:
-    """Finance's invoice record -> the minimal facts. Anything malformed, or an answer about any other invoice, is
-    FINANCE_RESPONSE_INVALID (unverifiable, never "paid")."""
+    """Finance's invoice-status answer (``GET /fin/v1/invoices/{id}/status``) -> the minimal facts. Anything
+    malformed, an extra field, or an answer about any other invoice is FINANCE_RESPONSE_INVALID (unverifiable,
+    never "paid")."""
     try:
-        if not isinstance(obj, dict) or obj.get("invoice_id") != invoice_id:
-            raise ValueError("not this invoice")
+        if not isinstance(obj, dict) or obj.get("invoice_id") != invoice_id or set(obj) != STATUS_FIELDS:
+            raise ValueError("not this invoice's status")
         status, entity, client, kind, cur = (obj.get(k) for k in ("status", "entity", "client_id", "kind", "currency"))
         if status not in STATUSES or entity not in ENTITIES or not isinstance(kind, str) or not 1 <= len(kind) <= 40:
             raise ValueError("status, entity or kind")
@@ -90,17 +82,15 @@ def parse_invoice(obj, invoice_id: str) -> dict:
             raise ValueError("client")
         if not isinstance(cur, str) or not re.fullmatch(r"[A-Z]{3}", cur):
             raise ValueError("currency")
-        total = _money(obj.get("total"))
-        if total is None or total < 0:
-            raise ValueError("total")
-        refunded, charged_back = _money(obj.get("refunded")), _money(obj.get("charged_back"))
+        if not isinstance(obj["refunded"], bool) or not isinstance(obj["charged_back"], bool):
+            raise ValueError("refund flags")
         paid_at = obj.get("paid_at")
         if paid_at is not None and (not isinstance(paid_at, str) or not 10 <= len(paid_at) <= 40):
             raise ValueError("paid_at")
     except ValueError:
         raise FinanceLookupError("FINANCE_RESPONSE_INVALID") from None
     return {"invoice_id": invoice_id, "status": status, "entity": entity, "client_id": client, "kind": kind,
-            "currency": cur, "refunded": bool(refunded), "charged_back": bool(charged_back), "paid_at": paid_at}
+            "currency": cur, "refunded": obj["refunded"], "charged_back": obj["charged_back"], "paid_at": paid_at}
 
 
 def assess(facts: dict, expected_client_id: str, entity: str = SEO_ENTITY) -> str:
@@ -161,7 +151,8 @@ class FinanceClient:
             if left <= 0:
                 break
             try:
-                status, body = self._get(f"{self._base}/fin/v1/invoices/{invoice_id}", min(self.timeout_s, left))
+                status, body = self._get(f"{self._base}/fin/v1/invoices/{invoice_id}/status",
+                                         min(self.timeout_s, left), end)
             except _Retry:
                 last = "FINANCE_UNAVAILABLE"
             else:
@@ -184,15 +175,28 @@ class FinanceClient:
                 self._sleep(pause)
         raise FinanceLookupError(last)
 
-    def _get(self, url: str, timeout: float) -> tuple[int, bytes]:
+    def _get(self, url: str, timeout: float, end: float) -> tuple[int, bytes]:
+        """One GET. AEGIS SEO Wave 3 M1: the overall deadline ``end`` holds WITHIN the attempt too — every socket
+        operation (connect, TLS, each read and write) of the production transport is bounded by the time left
+        (``_DeadlineBackend``), and the body loop stops at the deadline whatever the transport (a body trickled a
+        byte at a time is FINANCE_UNAVAILABLE at the deadline, never minutes later)."""
+        transport = self._transport
+        if transport is None:
+            transport = httpx.HTTPTransport(trust_env=False)
+            pool = getattr(transport, "_pool", None)
+            if pool is None or not hasattr(pool, "_network_backend"):
+                raise FinanceLookupError("FINANCE_NOT_CONFIGURED")     # never look up without a hard deadline
+            pool._network_backend = _DeadlineBackend(self._mono, end)
         try:
-            with httpx.Client(timeout=httpx.Timeout(timeout), transport=self._transport, follow_redirects=False,
+            with httpx.Client(timeout=httpx.Timeout(timeout), transport=transport, follow_redirects=False,
                               trust_env=False) as client:
                 with client.stream("GET", url, headers=self._headers) as resp:
                     if resp.headers.get("content-encoding", "identity").strip().lower() not in ("identity", ""):
                         raise FinanceLookupError("FINANCE_RESPONSE_INVALID")    # never asked for; never decoded
                     chunks, size = [], 0
                     for chunk in resp.iter_bytes():             # identity coding: these are the bytes received
+                        if self._mono() >= end:
+                            raise FinanceLookupError("FINANCE_UNAVAILABLE")      # M1: the deadline, mid-body
                         size += len(chunk)
                         if size > MAX_RESPONSE_BYTES:
                             raise FinanceLookupError("FINANCE_RESPONSE_INVALID")
@@ -208,6 +212,52 @@ class FinanceClient:
 
 class _Retry(Exception):
     pass
+
+
+class _DeadlineStream(httpcore.NetworkStream):
+    """Every operation bounded by the time left until the lookup's overall deadline (the fetcher's pattern,
+    primitives/fetch.py, kept here so this module stays standalone)."""
+
+    def __init__(self, inner, left: Callable[[Optional[float], type], float]):
+        self._s, self._left = inner, left
+
+    def read(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
+        return self._s.read(max_bytes, self._left(timeout, httpcore.ReadTimeout))
+
+    def write(self, buffer: bytes, timeout: Optional[float] = None) -> None:
+        self._s.write(buffer, self._left(timeout, httpcore.WriteTimeout))
+
+    def close(self) -> None:
+        self._s.close()
+
+    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        return _DeadlineStream(self._s.start_tls(ssl_context, server_hostname,
+                                                 self._left(timeout, httpcore.ConnectTimeout)), self._left)
+
+    def get_extra_info(self, info: str):
+        return self._s.get_extra_info(info)
+
+
+class _DeadlineBackend(httpcore.NetworkBackend):
+    def __init__(self, monotonic: Callable[[], float], end: float, inner=None):
+        self._b = inner or httpcore.SyncBackend()
+        self._mono, self._end = monotonic, end
+
+    def left(self, timeout: Optional[float], exc: type) -> float:
+        left = self._end - self._mono()
+        if left <= 0:
+            raise exc("the lookup's overall deadline has passed")
+        return left if timeout is None else min(timeout, left)
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        return _DeadlineStream(self._b.connect_tcp(host, port, self.left(timeout, httpcore.ConnectTimeout),
+                                                   local_address, socket_options), self.left)
+
+    def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        raise httpcore.ConnectError("unix sockets are never used")
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
 
 
 def _json(body: bytes, strict: bool = True):

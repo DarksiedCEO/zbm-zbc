@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 import re
+import traceback
+from pathlib import Path
 from typing import Optional
 
 from agents import RunContext, bots, delia, entity_check, osei, probes, roman, selene
@@ -177,13 +179,18 @@ class AuditsMixin:
                 # War room (WR-F008..F010): whatever a crawled site serves, the run ends in a recorded state. A bug in
                 # an agent closes the audit as interrupted RUN_FAILED (the exception's type is logged, nothing else)
                 # instead of answering 500 and leaving it "running" until the interrupted-audits job.
-                log.error("audit run failed: %s", type(exc).__name__)
+                # AEGIS SEO Wave 3 L2: which step failed and where (module:function:line inside this service), never
+                # the exception's message (it could quote crawled content)
+                agent = getattr(exc, "seo_agent", None) or "report"
+                where = _where(exc)
+                log.error("audit run failed: %s in %s at %s", type(exc).__name__, agent, where)
                 with self.lock:
                     self._gate()
                     code = R("RUN_FAILED")
-                    self._commit("audit_interrupted", {"audit_id": aid, "reason": code}, "seo",
-                                 evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid, "reason": code},
-                                           ("interrupted", aid)))
+                    fail = {"agent": agent, "where": where, "error_type": type(exc).__name__[:60]}
+                    self._commit("audit_interrupted", {"audit_id": aid, "reason": code, "failure": fail}, "seo",
+                                 evidence=("audit_interrupted", f"audit:{aid}",
+                                           {"audit_id": aid, "reason": code, **fail}, ("interrupted", aid)))
                     return self.audit_view(tid, aid)
             with self.lock:
                 self._gate()
@@ -221,6 +228,8 @@ class AuditsMixin:
     def _a_audit_interrupted(self, d, at):
         self.audits[d["audit_id"]].update(status="interrupted", completed_at=at,
                                           interrupted_reason=d.get("reason", "PROCESS_LOST"))
+        if d.get("failure"):
+            self.audits[d["audit_id"]]["failure"] = dict(d["failure"])
 
     def _run_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
         """The run, outside the service lock: Selene, Delia, Roman, the entity check, Callum, Naomi."""
@@ -341,7 +350,33 @@ def _step(ctx, agent: str, task: str, fn):
             return envelope(agent, task, "RESTRICTED", [], reason="AGENT_RESTRICTED",
                             methodology="not run: the department manager has restricted this agent")
         return envelope(agent, task, "KILLED", [], reason=k.code, methodology="not run: a kill switch is engaged")
-    return fn()
+    try:
+        return fn()
+    except Exception as exc:
+        if getattr(exc, "seo_agent", None) is None:
+            try:
+                exc.seo_agent = agent            # L2: the step that failed, for the RUN_FAILED record
+            except (AttributeError, TypeError):
+                pass
+        raise
+
+
+_SRC = Path(__file__).resolve().parent
+_AGENTS = frozenset({"selene", "delia", "roman", "entity_check", "callum", "naomi", "osei"})
+
+
+def _where(exc: BaseException) -> str:
+    """``module:function:line`` of the innermost frame inside this service's source (no message, no values)."""
+    best = "unknown"
+    for fr in traceback.extract_tb(exc.__traceback__):
+        try:
+            rel = Path(fr.filename).resolve().relative_to(_SRC)
+        except ValueError:
+            continue
+        mod = ".".join(rel.with_suffix("").parts)
+        if re.fullmatch(r"[A-Za-z0-9_.]{1,80}", mod) and re.fullmatch(r"[A-Za-z0-9_<>]{1,80}", fr.name or ""):
+            best = f"{mod}:{fr.name}:{fr.lineno}"
+    return best
 
 
 def _authorize(t: dict, body: dict, andre: bool) -> None:

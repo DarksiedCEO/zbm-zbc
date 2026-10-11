@@ -139,7 +139,7 @@ class SchedulesMixin:
 
     def schedule_tick(self) -> dict:
         summary = {"ran": 0, "already_done": 0, "budget_exhausted": 0, "killed": 0, "paused": 0, "refused": 0,
-                   "drift_recorded": 0, "invoice_unverifiable": 0}
+                   "drift_recorded": 0, "invoice_unverifiable": 0, "failed": 0}
         with self.lock:
             due = sorted(self.schedules)
         for sid in due:
@@ -205,13 +205,17 @@ class SchedulesMixin:
                                           aid, schedule={"schedule_id": sid, "slot": slot}, verification=verification)
                 except SeoError as exc:          # tenant changed since (domain removed, prompt set gone, busy), or
                     data = {"schedule_id": sid, "slot": slot, "reason": exc.reason}     # Finance said no
-                    if exc.reason != "AUDIT_RUNNING":
+                    if exc.reason not in ("AUDIT_RUNNING", "TENANT_FINANCE_CLIENT_CHANGED"):     # transient: the
+                        # slot waits for the next tick (L1: the binding moved while Finance was asked)
                         self._commit("schedule_slot_skipped", data, "scheduler",
                                      evidence=("schedule_slot_skipped", f"schedule:{sid}", data,
                                                ("skip", sid, slot)))
                     summary["refused"] += 1
                     continue
             view = self._execute_audit(aid, tid, body, ps)
+            if view.get("interrupted_reason") == "RUN_FAILED":
+                summary["failed"] += 1           # L2: a slot whose run crashed is consumed but is not counted as ran
+                continue
             summary["ran"] += 1
             if view["status"] == "completed" and self._record_drift(sid, aid):
                 summary["drift_recorded"] += 1

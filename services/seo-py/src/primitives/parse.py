@@ -173,6 +173,7 @@ def parse_html(html: str, base_url: str) -> dict:
         "robots_meta": robots_meta, "canonicals": [a for a in canon_abs if a][:10],
         # WR-F009: hrefs that are not readable http(s) URLs are counted, never kept as None
         "canonicals_invalid": sum(1 for a in canon_abs if a is None),
+        "canonicals_valid": sum(1 for a in canon_abs if a),
         "hreflang": hreflang[:200], "headings": p.headings, "links": links,
         "jsonld_raw_count": len(p.scripts_ld), "jsonld": [validate_jsonld(b) for b in p.scripts_ld],
         "text_length": len(text), "text_sample": text[:20_000], "elements": p.elements,

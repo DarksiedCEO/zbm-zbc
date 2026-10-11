@@ -248,9 +248,9 @@ W3-1. **Live run against the real ledger** (`services/seo-py/devtools/live_run.p
 
 W3-2. **Finance (31) invoice verification** (`src/finance_client.py`, `src/svc_invoices.py`). Behind
    `SEO_INVOICE_VERIFICATION`, default `finance` (the safe option); `trust` is the Wave 1/2 behaviour and is shown in
-   `/status`. The client calls the one existing read route, finance-py's `GET /fin/v1/invoices/{id}` (service bearer
-   token + this service's own caller token, `X-FIN-Caller-Token`; finance-py gained the caller name `seo_02`, which
-   like every Finance caller reaches only the routes open to any caller and can write nothing). Per-attempt timeout
+   `/status`. The client calls finance-py's narrow `GET /fin/v1/invoices/{id}/status` (service bearer token + this
+   service's own caller token, `X-FIN-Caller-Token`; finance-py gained the caller name `seo_02`, which since AEGIS SEO
+   Wave 3 M2 reaches that one route and nothing else; W3-5). Per-attempt timeout
    (`SEO_FINANCE_TIMEOUT_SECONDS`), one overall deadline, at most three attempts and only for connect errors,
    timeouts, 429 and 5xx; no redirects; a 64 KiB body cap; identity encoding only; anything malformed, an answer
    about another invoice, or a 404 that is not Finance's "no such invoice" is UNVERIFIABLE, never "paid". Only the
@@ -317,6 +317,29 @@ W3-4. **Not built in Wave 3, and why** (the rest of the unlock list):
    - Andre's approvals through Cybersecurity (22) passkeys: no service has adopted security-py's approval API yet;
      a cross-department change, not this department's alone.
 
+W3-5. **AEGIS SEO Wave 3 review (f9f750d), findings closed.**
+   - M1: the Finance lookup's overall deadline now holds within one attempt: the production transport routes every
+     socket operation (connect, TLS, read, write) through a deadline backend bounded by the time left, and the body
+     loop stops at the deadline (FINANCE_UNAVAILABLE). AEGIS's drip probe (1 byte / 0.4 s, `timeout_s=1`,
+     `attempts=1`) now ends at the 1 s deadline. Tested on an injected monotonic clock.
+   - M2: finance-py gives `seo_02` exactly one route, the new narrow `GET /fin/v1/invoices/{id}/status` (no amounts,
+     lines, descriptions, template variables or legal references; refund and chargeback as flags); a middleware
+     refuses `seo_02` everywhere else before any route runs, and `caller()` with no names no longer admits it. The
+     client reads only that route and refuses an answer carrying any other field. A test enumerates every finance-py
+     route from the app and asserts 403 for `seo_02` on all but that one; other callers' reach is unchanged.
+   - M3: an invalid canonical counts for CANONICAL_MULTIPLE (one valid plus one invalid is two), and
+     CANONICAL_INVALID is reported whenever any canonical is invalid.
+   - L1: after the Finance call the tenant's Finance binding must still be the one the verdict was judged against;
+     otherwise the run is refused `TENANT_FINANCE_CLIENT_CHANGED` (at a tick the slot waits for the next tick).
+   - L2: RUN_FAILED records the failed step (agent) and a safe location (`module:function:line` of the innermost frame
+     in this service's source, plus the exception's type, never its message) in the log line and the ledger evidence.
+     A scheduled slot whose run fails is consumed but counted `failed`, not `ran`.
+   - L3: a redirect target httpx cannot encode or IDNA-encode (full-width host, `xn--`) is REFUSED_URL, not
+     CONNECT_FAILED; nothing is connected to (requests go to checked addresses only).
+   - L4: the war room's paid-run scenario is split: Finance cannot answer → MUST 503 with the override offered;
+     Finance says no → MUST 409, not overridable; Finance confirms → the run completes and `invoice_verified` is on
+     the ledger.
+
 Founder-pending defaults added by Wave 3: (12) verification is ON by default, so until Finance is wired every paid run
 needs Andre's override; (13) one invoice pays for one one-off audit or one schedule (with all its slots), and an
 interrupted audit gives its invoice back; (14) any refund or chargeback on the invoice, partial ones included, refuses
@@ -328,9 +351,7 @@ War room limitations: the fake web replaces the socket, so what only a socket sh
 TLS, a real resolver's behaviour — is proven by the suite's real-socket tests, not by the war room; the chaos is the
 library's (no LLM personas, ADR 0018); each case is one short exchange on a fresh harness (no concurrency or load).
 
-Wave 3 limitations: finance-py's invoice route returns the whole invoice record (lines, template variables) to any
-caller including `seo_02`; this service drops all but the verdict's fields, but Finance discloses more than is needed
-— a narrower status route is a Finance (31) change not made here. Invoice consumption is known only to this service
+Wave 3 limitations: Invoice consumption is known only to this service
 (Finance does not learn that an invoice paid for an audit), and it is not enforced in `trust` mode. A one-off audit's
 verification is point-in-time: a refund after the run does not touch the recorded audit. The tenant → Finance client
 binding is Andre's statement and is not cross-checked with Legal. The live run cannot reach a PAID invoice through

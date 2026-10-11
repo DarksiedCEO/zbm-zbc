@@ -388,6 +388,11 @@ class Fetcher:
             raise _Refused("REFUSED_URL", "the redirect target is not a valid URL") from None
         except httpx.StreamError:
             raise _Refused("PROTOCOL_ERROR", "protocol error: StreamError") from None
+        except UnicodeError:
+            # AEGIS SEO Wave 3 L3: a redirect target httpx cannot encode or IDNA-encode (a full-width host
+            # ``１２７.０.０.１``, ``xn--``) is a URL problem, not a connection failure. Nothing was connected to: the
+            # request goes to the CHECKED address only, and a Location is followed only after _target re-checks it
+            raise _Refused("REFUSED_URL", "the target or redirect target is not a valid URL") from None
         except httpx.TimeoutException:
             raise _Refused("TIMEOUT", "timed out") from None
         except MemoryError:

@@ -67,6 +67,13 @@ second approver sends its OWN request, `POST /fin/v1/payout-batches/{id}/second-
 (`paid` / `failed` / `returned` / `destination_changed`). Andre's token on the release route is refused (403); no
 caller token can approve.
 
+## Search & Answer Intelligence (2): one read
+
+`GET /fin/v1/invoices/{id}/status` (caller `seo_02` only): the invoice's status, entity, client id, kind, currency,
+paid time and whether anything was refunded or charged back — no amounts, lines or legal references. `seo_02`
+reaches no other route (403 everywhere else, `tests/test_seo_route_allowlist.py`; ADR 0009 decision 2, ADR 0017
+W3-2 / W3-5).
+
 ## Money that comes back, and sweeps (AEGIS round 17, ADR 0009 amendment)
 
 - A client deposit the bank returns (ACH return): `POST /fin/v1/receipts/{receipt_id}/return` (bank_feed or Andre)

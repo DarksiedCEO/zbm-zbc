@@ -33,8 +33,10 @@ release, no float, only verified views paid, only Andre approves rules and rate 
 2. **Identities never interchangeable.** Bearer `FIN_SERVICE_TOKEN` (required to start, ≥ 32 printable ASCII);
    caller `X-FIN-Caller-Token` from `FIN_CALLER_TOKENS` (compliance_38, clipper_network, verification_integrity,
    creative_production, onboarding, legal_37, scheduler, rail_gateway, bank_feed, and since Oct 10 2026 seo_02 —
-   Search & Answer Intelligence (2) reading `GET /fin/v1/invoices/{id}` to verify a paid audit's invoice, ADR 0017
-   W3-2); Andre's `X-Andre-Approval-Token`
+   Search & Answer Intelligence (2), ADR 0017 W3-2; since AEGIS SEO Wave 3 M2 it reaches exactly ONE route, the
+   narrow `GET /fin/v1/invoices/{id}/status` (status, ownership, refund / chargeback flags; no amounts or lines),
+   enforced by a middleware before any route and by `caller()` with no names not admitting it; every other route
+   answers it 403, `tests/test_seo_route_allowlist.py`); Andre's `X-Andre-Approval-Token`
    (FounderGate); optional second approver `X-FIN-Second-Approver-Token` (`FIN_SECOND_APPROVER_TOKEN`). All tokens
    distinct or the service refuses to start; a refused approval token is 403 and recorded
    `founder_approval_refused`.

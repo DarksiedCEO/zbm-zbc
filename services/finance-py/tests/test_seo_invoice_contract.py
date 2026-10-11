@@ -1,6 +1,7 @@
 """
 Contract: Search & Answer Intelligence (2)'s invoice verification client (services/seo-py/src/finance_client.py,
-ADR 0017 W3-2) against THIS service's real invoice route and representation.
+ADR 0017 W3-2) against THIS service's real narrow invoice-status route (GET /fin/v1/invoices/{id}/status, AEGIS SEO
+Wave 3 M2) and its representation.
 
 The client is loaded read-only from its source file and driven through Finance's real ASGI app (the TestClient's
 in-process transport: no socket), with the ``seo_02`` caller token, over an invoice walked through Finance's own
@@ -69,6 +70,18 @@ def test_the_seo_client_reads_finance_s_real_invoice_through_its_whole_life(hr):
     assert SEO_FIN.assess(facts, CLIENT) == "PAID"
     assert SEO_FIN.assess(facts, "someone-else") == "INVOICE_TENANT_MISMATCH"
     assert "2000.00" not in repr(facts) and "Search audit" not in repr(facts)      # only what the verdict needs
+    raw = hr.get(f"/fin/v1/invoices/{iid}/status", caller="seo_02")
+    assert raw.status_code == 200 and set(raw.json()) == SEO_FIN.STATUS_FIELDS
+    assert "2000.00" not in raw.text and "Search audit" not in raw.text and "msa-seo" not in raw.text
+
+
+def test_a_refund_is_a_flag_in_the_status_never_an_amount(hr):
+    iid = _draft(hr)["invoice_id"]
+    inv = hr.svc.db["invoices"][iid]
+    hr.svc.db["invoices"][iid] = {**inv, "status": "paid", "refunded": "1.00"}      # as svc_stripe writes it
+    facts = _client(hr).lookup(iid)
+    assert facts["refunded"] is True and SEO_FIN.assess(facts, CLIENT) == "INVOICE_REFUNDED"
+    assert "1.00" not in hr.get(f"/fin/v1/invoices/{iid}/status", caller="seo_02").text
 
 
 def test_finance_s_real_refusals_map_to_the_seo_client_s_codes(hr):
@@ -81,6 +94,13 @@ def test_finance_s_real_refusals_map_to_the_seo_client_s_codes(hr):
         with pytest.raises(SEO_FIN.FinanceLookupError) as e:
             c.lookup(iid)
         assert e.value.code == "FINANCE_AUTH_REFUSED"
+
+
+def test_seo_02_no_longer_reads_the_full_invoice(hr):
+    iid = _draft(hr)["invoice_id"]
+    assert hr.get(f"/fin/v1/invoices/{iid}", caller="seo_02").status_code == 403
+    assert hr.get(f"/fin/v1/invoices/{iid}", caller="onboarding").status_code == 200     # other callers unchanged
+    assert hr.get(f"/fin/v1/invoices/{iid}/status", caller="onboarding").status_code == 403   # status is seo_02's
 
 
 def test_seo_02_cannot_write_anything(hr):

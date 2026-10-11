@@ -439,6 +439,19 @@ class BooksMixin:
                 raise NotFound("no such invoice")
             return dict(inv)
 
+    def invoice_status(self, invoice_id: str) -> dict:
+        """The narrow read for Search & Answer Intelligence (seo_02; AEGIS SEO Wave 3 M2): status, ownership and
+        whether anything was refunded or charged back. Finance does not track which audit an invoice paid for."""
+        with self.lock:
+            inv = self.db["invoices"].get(invoice_id)
+            if inv is None:
+                raise NotFound("no such invoice")
+            return {"invoice_id": inv["invoice_id"], "entity": inv["entity"], "client_id": inv["client_id"],
+                    "kind": inv["kind"], "status": inv["status"], "currency": inv.get("currency", "USD"),
+                    "paid_at": inv.get("paid_at"),
+                    "refunded": bool(inv.get("refunded")) and M.D(inv["refunded"]) > 0,
+                    "charged_back": bool(inv.get("charged_back")) and M.D(inv["charged_back"]) > 0}
+
     # ================================================================== bank statement lines (receipts)
 
     def bank_events(self, principal: str, request_id: str, lines: list[dict]) -> dict:

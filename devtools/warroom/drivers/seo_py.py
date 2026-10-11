@@ -205,22 +205,22 @@ def _bomb(kind: str) -> bytes:
 # ============================================================================================ case setup
 
 class _FakeFinance:
-    """finance-py's GET /fin/v1/invoices/{id}, behind a MockTransport, in one of several hostile or honest modes."""
+    """finance-py's GET /fin/v1/invoices/{id}/status (AEGIS SEO Wave 3 M2), behind a MockTransport, in one of
+    several hostile or honest modes."""
 
     def __init__(self):
         self.mode = "paid"
         self.calls = 0
 
     def invoice(self, iid: str, **kw) -> dict:
-        inv = {"invoice_id": iid, "entity": "zbm", "client_id": CLIENT, "kind": "service", "total": "2000.00",
-               "currency": "USD", "status": "paid", "paid_at": "2026-10-02T17:00:00Z", "lines": [],
-               "template_vars": None}
+        inv = {"invoice_id": iid, "entity": "zbm", "client_id": CLIENT, "kind": "service", "status": "paid",
+               "currency": "USD", "paid_at": "2026-10-02T17:00:00Z", "refunded": False, "charged_back": False}
         inv.update(kw)
         return inv
 
     def handle(self, request):
         self.calls += 1
-        iid = request.url.path.rsplit("/", 1)[-1]
+        iid = request.url.path.rsplit("/", 2)[-2]
         m = self.mode
         if m == "down":
             raise httpx.ConnectError("refused", request=request)
@@ -245,11 +245,13 @@ class _FakeFinance:
             return httpx.Response(404, json={"detail": "Not Found"})
         if m == "other_invoice":
             return httpx.Response(200, json=self.invoice(iid[:-1] + ("A" if iid[-1] != "A" else "B")))
-        if m == "float_total":
-            return httpx.Response(200, json=self.invoice(iid, total=2000.0))
+        if m == "extra_fields":                     # the full record instead of the status: refused, never read
+            return httpx.Response(200, json=self.invoice(iid, total="2000.00", lines=[]))
+        if m == "string_flag":
+            return httpx.Response(200, json=self.invoice(iid, refunded="false"))
         changes = {"unpaid": {"status": "issued", "paid_at": None}, "draft": {"status": "draft", "paid_at": None},
-                   "void": {"status": "void"}, "refunded": {"refunded": "2000.00"},
-                   "partial_refund": {"refunded": "1.00"}, "charged_back": {"charged_back": "2000.00"},
+                   "void": {"status": "void"}, "refunded": {"refunded": True},
+                   "partial_refund": {"refunded": True}, "charged_back": {"charged_back": True},
                    "wrong_client": {"client_id": "someone-else"}, "zbc_entity": {"entity": "zbc"},
                    "eur": {"currency": "EUR"}, "unknown_status": {"status": "settled"}}.get(m, {})
         return httpx.Response(200, json=self.invoice(iid, **changes))
@@ -803,6 +805,7 @@ def observe(ctx) -> dict:
         state["audit_recorded"] = bool(h.ledger.of_type("audit_requested"))
         state["report_recorded"] = bool(h.ledger.of_type("audit_report_recorded"))
         state["audit_interrupted"] = bool(h.ledger.of_type("audit_interrupted"))
+        state["invoice_verified"] = bool(h.ledger.of_type("invoice_verified"))
     if ctx.expected_code is not None:
         state["expected_code"] = ctx.expected_code
     if ctx.switch is not None:
