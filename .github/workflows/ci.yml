@@ -682,9 +682,10 @@ jobs:
             services/verification-py/requirements.txt
             services/clipper-network-py/requirements.txt
             services/onboarding-py/requirements.txt
+            services/seo-py/requirements.txt
       - name: Install the target services' pinned requirements
         run: |
-          for s in service-py sales-py verification-py clipper-network-py onboarding-py; do
+          for s in service-py sales-py verification-py clipper-network-py onboarding-py seo-py; do
             python -m pip install -r "services/$s/requirements.txt"
           done
       - name: The war room engine's own self-test

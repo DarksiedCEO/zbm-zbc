@@ -126,6 +126,45 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   ban lookup compares lock keys. Tests: `services/verification-py/tests/test_warroom_fixes.py` (a pre-fix ban, a
   post-fix ban, a restart from the ledger, an unrelated address).
 
+## Found on branch `seo-dept-02-wave1` (merged with ebc8403), seeds 1-3: the SEO war room (ADR 0017 W3-3)
+
+## WR-F008 — seo-py: a redirect to a URL httpx cannot parse escapes the fetcher (the audit answers 500)
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/primitives/fetch.py` `Fetcher._one`.
+- What happens: a page (or robots.txt, sitemap, llms.txt) answers `302 Location: javascript:alert(1)`. Even with
+  `follow_redirects=False`, httpx builds `response.next_request` and raises `httpx.InvalidURL` ("For absolute URLs,
+  path must be empty or begin with '/'"), which is not an `httpx.HTTPError`, so it leaves `fetch()`, the agent and
+  the audit: `POST /tenants/{tid}/audits` answers 500 and the audit stays `running` until the interrupted-audits job
+  closes it. A hostile site can make every audit of it fail.
+- Why it is a MUST failure: `Fetcher.fetch` promises it "never raises for a network outcome" (ADR 0017 decision 11:
+  redirects followed by hand, every hop checked), and a hostile site's answer is a network outcome.
+- Replay: `seo-py/R0005`, `seo-py/R0007` (seed 1).
+- Status: open.
+
+## WR-F009 — seo-py: an invalid canonical link makes Selene dereference None (the audit answers 500)
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/primitives/parse.py` `_abs` and
+  `services/seo-py/src/agents/selene.py` `_page_findings`.
+- What happens: `<link rel="canonical" href="javascript:alert(1)">`, or a canonical with an unbalanced or non-ASCII
+  IPv6 literal (`http://[fec0::1/]/`, `http://[Ｆe80::１]/`), is turned into `None` by the parser (not http(s), or
+  `urlsplit` refused it) but kept in the list; Selene then calls `None.rstrip`: `AttributeError`, audit 500.
+- Why it is a MUST failure: decision 9 (crawled content is data) and decision 11's fail-closed parsing: a page's
+  markup is never allowed to stop the audit.
+- Replay: `seo-py/R0003`, `seo-py/R0006` (seed 1), `seo-py/R0011` (seed 2), `seo-py/R0013` (seed 3).
+- Status: open.
+
+## WR-F010 — seo-py: an invalid URL in robots.txt or a sitemap index makes Delia raise (the audit answers 500)
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/agents/delia.py` `_sitemaps` / `_url_checks`.
+- What happens: a robots.txt `Sitemap:` line or a sitemap index `<loc>` holding an invalid IPv6 literal
+  (`http://[feff::1/]/`, `http://[64:ｆｆ9b::7ｆ0０:１]/`) makes `urlsplit(u).hostname` raise `ValueError("Invalid IPv6
+  URL")` (or ipaddress's ValueError for non-ASCII inside the brackets), uncaught: audit 500.
+- Why it is a MUST failure: as WR-F009 (decisions 9, 11, 15: malformed input is quarantined or reported, never
+  fatal).
+- Replay: `seo-py/R0001`, `seo-py/R0002`, `seo-py/R0004` (seed 1), `seo-py/R0008`, `seo-py/R0009`, `seo-py/R0010`
+  (seed 2), `seo-py/R0012`, `seo-py/R0014`, `seo-py/R0015` (seed 3).
+- Status: open.
+
 ## AEGIS round 2 (review of the WR-F006 / WR-F007 fixes)
 
 - **N-H1 (High) — service-py: the WR-F006 fold made long non-Latin messages slow under the service lock.** A

@@ -1,0 +1,311 @@
+{
+ "library": "seo-py",
+ "cases": [
+  {
+   "replay_id": "seo-py/R0001",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#014.1@1",
+   "chain": [
+    "vector=sitemap_index_child",
+    "url_host_case",
+    "url_fullwidth"
+   ],
+   "seed_value": "http://[fe80::1]/",
+   "input": {
+    "vector": "sitemap_index_child",
+    "target": "http://[Fｅ80::１]/"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0002",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#017.2@1",
+   "chain": [
+    "vector=robots_sitemap_line",
+    "url_fragment",
+    "url_fullwidth"
+   ],
+   "seed_value": "http://[2002:7f00:1::]/",
+   "input": {
+    "vector": "robots_sitemap_line",
+    "target": "http://[２0０2:７ｆ００:１::]/#cｏｍmｅｎｔｓ"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0003",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#018.2@1",
+   "chain": [
+    "vector=canonical",
+    "url_host_case",
+    "url_trailing_slash"
+   ],
+   "seed_value": "fec0::1",
+   "input": {
+    "vector": "canonical",
+    "target": "fec0::1/"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F009",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0004",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#019.1@1",
+   "chain": [
+    "vector=robots_sitemap_line",
+    "url_trailing_slash",
+    "url_percent_encode"
+   ],
+   "seed_value": "feff::1",
+   "input": {
+    "vector": "robots_sitemap_line",
+    "target": "feff::1/"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0005",
+   "scenario": "ssrf-ports-schemes-credentials",
+   "origin": "seo-py/ssrf-ports-schemes-credentials#004.0@1",
+   "chain": [],
+   "seed_value": "javascript:alert(1)",
+   "input": {
+    "vector": "home_redirect",
+    "target": "javascript:alert(1)"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F008",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0006",
+   "scenario": "ssrf-ports-schemes-credentials",
+   "origin": "seo-py/ssrf-ports-schemes-credentials#004.1@1",
+   "chain": [
+    "vector=canonical",
+    "url_tracking_query"
+   ],
+   "seed_value": "javascript:alert(1)",
+   "input": {
+    "vector": "canonical",
+    "target": "javascript:alert(1)?_r=1"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F009",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0007",
+   "scenario": "ssrf-ports-schemes-credentials",
+   "origin": "seo-py/ssrf-ports-schemes-credentials#004.2@1",
+   "chain": [
+    "vector=sitemap_redirect",
+    "url_host_case"
+   ],
+   "seed_value": "javascript:alert(1)",
+   "input": {
+    "vector": "sitemap_redirect",
+    "target": "javascript:alert(1)"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F008",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0008",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#009.1@2",
+   "chain": [
+    "vector=sitemap_index_child",
+    "url_percent_encode",
+    "url_fullwidth"
+   ],
+   "seed_value": "http://[::ffff:127.0.0.1]:{port}/",
+   "input": {
+    "vector": "sitemap_index_child",
+    "target": "http://[::ｆｆｆｆ:１27.0.０.１]:{pｏｒt}/"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0009",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#016.1@2",
+   "chain": [
+    "vector=sitemap_index_child",
+    "url_fullwidth",
+    "url_host_case"
+   ],
+   "seed_value": "http://[64:ff9b::7f00:1]/",
+   "input": {
+    "vector": "sitemap_index_child",
+    "target": "http://[64:ｆｆ９b::7ｆ0０:１]/"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0010",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#018.1@2",
+   "chain": [
+    "vector=robots_sitemap_line",
+    "url_trailing_slash"
+   ],
+   "seed_value": "fec0::1",
+   "input": {
+    "vector": "robots_sitemap_line",
+    "target": "fec0::1/"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0011",
+   "scenario": "ssrf-ports-schemes-credentials",
+   "origin": "seo-py/ssrf-ports-schemes-credentials#004.1@2",
+   "chain": [
+    "vector=canonical",
+    "url_scheme_case"
+   ],
+   "seed_value": "javascript:alert(1)",
+   "input": {
+    "vector": "canonical",
+    "target": "javascript:alert(1)"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F009",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0012",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#009.2@3",
+   "chain": [
+    "vector=sitemap_index_child",
+    "url_tracking_query",
+    "url_fullwidth"
+   ],
+   "seed_value": "http://[::ffff:127.0.0.1]:{port}/",
+   "input": {
+    "vector": "sitemap_index_child",
+    "target": "http://[::fffｆ:1２７.０.０.1]:{pｏrｔ}/?ｓ=20"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0013",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#013.2@3",
+   "chain": [
+    "vector=canonical",
+    "url_fullwidth",
+    "url_host_case"
+   ],
+   "seed_value": "http://[fd00:ec2::254]/",
+   "input": {
+    "vector": "canonical",
+    "target": "http://[FＤ０0:ＥC2::2５４]/"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F009",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0014",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#018.2@3",
+   "chain": [
+    "vector=sitemap_index_child",
+    "url_trailing_slash",
+    "url_tracking_query"
+   ],
+   "seed_value": "fec0::1",
+   "input": {
+    "vector": "sitemap_index_child",
+    "target": "fec0::1/?_r=1"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  },
+  {
+   "replay_id": "seo-py/R0015",
+   "scenario": "ssrf-internal-targets",
+   "origin": "seo-py/ssrf-internal-targets#019.1@3",
+   "chain": [
+    "vector=sitemap_index_child",
+    "url_tracking_query"
+   ],
+   "seed_value": "feff::1",
+   "input": {
+    "vector": "sitemap_index_child",
+    "target": "feff::1?utm_source=ig&utm_medium=share"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F010",
+   "failed": [
+    "audit_completes: state.audit_http = 500, wanted 201",
+    "audit_status_completed: state.audit_status = None, wanted 'completed'"
+   ]
+  }
+ ]
+}

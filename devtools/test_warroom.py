@@ -102,6 +102,16 @@ class Corpus(unittest.TestCase):
                                  "name": "revoke"}, svc)
         self.assertIn("Do not text or email me", revoke)
 
+    def test_a_module_set_is_read_sorted_and_a_module_string_is_one_seed(self):
+        svc = engine.REPO / "services" / "seo-py"
+        keys = corpus.extract({"file": "src/api.py", "module": "FORBIDDEN_KEYS"}, svc)     # frozenset({...})
+        self.assertEqual(keys, sorted(keys))
+        self.assertIn("ssn", keys)
+        self.assertIn("client_ip", keys)
+        one = corpus.extract({"file": "tests/test_audits.py", "module": "INJECTION"}, svc)
+        self.assertEqual(len(one), 1)
+        self.assertTrue(one[0].startswith("IGNORE ALL PREVIOUS INSTRUCTIONS"))
+
 
 class Generation(unittest.TestCase):
     def test_same_seed_same_cases_other_seed_other_variants(self):

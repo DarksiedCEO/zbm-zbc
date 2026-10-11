@@ -56,7 +56,13 @@ def module_assign(path: Path, name: str):
             v = node.value
             if isinstance(v, ast.Call) and getattr(v.func, "attr", "") == "maketrans" and len(v.args) == 1:
                 v = v.args[0]                   # str.maketrans({...}): the dict literal it is built from
-            return ast.literal_eval(v)
+            if isinstance(v, ast.Call) and getattr(v.func, "id", "") in ("frozenset", "set", "tuple") \
+                    and len(v.args) == 1 and not v.keywords:
+                v = v.args[0]                   # frozenset({...}): the literal it is built from (seo-py FORBIDDEN_KEYS)
+            out = ast.literal_eval(v)
+            if isinstance(out, (set, frozenset)):
+                out = sorted(out)               # a set has no source order; sorted keeps the case ids reproducible
+            return out
     raise CorpusError(f"{name} not found at module level")
 
 
@@ -78,7 +84,8 @@ def extract(ref: dict, service_dir: Path) -> list[str]:
         return all(v[k] == want for k, want in where.items())
 
     if "module" in ref:
-        vals = list(module_assign(path, ref["module"]))
+        got = module_assign(path, ref["module"])
+        vals = [got] if isinstance(got, str) else list(got)     # one module-level string is one seed
         if "after" in ref:
             vals = vals[vals.index(ref["after"]):]
         if "before" in ref:
