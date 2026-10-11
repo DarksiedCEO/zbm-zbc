@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Optional
 from urllib.parse import urlsplit
 
-from agents import bots
+from agents import bots, host_of
 from envelope import envelope, finding
 from primitives import Killed
 from primitives import diff as diff_mod
@@ -205,7 +205,7 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
                            detail={"count": len(canons), "canonicals": canons[:10]}))
     elif len(canons) == 1:
         c = canons[0]
-        host = urlsplit(c).hostname
+        host = host_of(c)
         if not ctx.same_site(host):
             out.append(finding("CANONICAL_OTHER_HOST", "medium", "measured", "TEST", url=url,
                                detail={"canonical": c}))
@@ -223,6 +223,10 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
                 out.append(finding("CANONICAL_TARGET_NOT_200", "high", "measured", "ACT", url=url,
                                    detail={"canonical": c, "fetch_state": cf.state, "status": cf.status,
                                            "redirected": bool(cf.redirects)}))
+    elif extract.get("canonicals_invalid"):
+        # WR-F009: a canonical that is not an http(s) URL this service can read (javascript:, a broken IPv6 literal)
+        out.append(finding("CANONICAL_INVALID", "medium", "measured", "ACT", url=url,
+                           detail={"count": extract["canonicals_invalid"]}))
     else:
         out.append(finding("CANONICAL_MISSING", "low", "measured", "WATCH", url=url))
     if extract.get("parse_error"):

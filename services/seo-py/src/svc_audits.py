@@ -19,6 +19,7 @@ Rules:
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
 
@@ -32,6 +33,7 @@ from primitives import diff as diff_mod
 from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
 
+log = logging.getLogger("seo.audits")
 REPORT_VERSION = "seo-audit-report/1"
 _PATH_OK = re.compile(r"/[\x21-\x7e]{0,500}")
 GLOBAL_LIMITS = [
@@ -169,7 +171,20 @@ class AuditsMixin:
 
     def _execute_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
         try:
-            report = self._run_audit(aid, tid, body, ps)
+            try:
+                report = self._run_audit(aid, tid, body, ps)
+            except Exception as exc:  # noqa: BLE001 - a run that crashes is closed now, never left running
+                # War room (WR-F008..F010): whatever a crawled site serves, the run ends in a recorded state. A bug in
+                # an agent closes the audit as interrupted RUN_FAILED (the exception's type is logged, nothing else)
+                # instead of answering 500 and leaving it "running" until the interrupted-audits job.
+                log.error("audit run failed: %s", type(exc).__name__)
+                with self.lock:
+                    self._gate()
+                    code = R("RUN_FAILED")
+                    self._commit("audit_interrupted", {"audit_id": aid, "reason": code}, "seo",
+                                 evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid, "reason": code},
+                                           ("interrupted", aid)))
+                    return self.audit_view(tid, aid)
             with self.lock:
                 self._gate()
                 stop = self.kill_code(tenant=tid, capability="audit", write=True)

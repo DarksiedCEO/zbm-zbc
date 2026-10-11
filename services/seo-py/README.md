@@ -42,6 +42,12 @@ verification leg) as separate processes over real HTTP with real tokens and dura
 connection: the web provider switch is engaged over the API before the first audit, so every fetch stops at the
 kill-switch guard before name resolution. Exit 0 only when every check held; the script prints its own N/N.
 
+## War room
+
+`python3 devtools/warroom/run.py --department seo-py --seed 1` (from the repo root; CI job `warroom`, ADR 0018 and
+ADR 0017 W3-3): the service's real fetcher against a fake internet of hostile sites, logs and callers, inside a sealed
+worker. Exit 1 on any new MUST failure or ERROR.
+
 ## Settings
 
 | Variable | Default | Meaning |

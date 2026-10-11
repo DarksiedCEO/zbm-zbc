@@ -31,6 +31,7 @@ import unicodedata
 from typing import Callable, Optional
 from urllib.parse import unquote, urlsplit
 
+import lookalikes
 from agents import bots
 
 FORMATS = ("combined", "common", "jsonl")
@@ -49,7 +50,8 @@ _UUID = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]
 _HEX = re.compile(r"[0-9a-fA-F]{16,}")
 _DIGITS = re.compile(r"\d{4,}")
 _TOKENISH = re.compile(r"[A-Za-z0-9_\-=+.~]{20,}")
-TEMPLATE_RULES = ("decode once; NFKC-normalise and fold confusable at-signs; drop query and fragment; per segment: "
+TEMPLATE_RULES = ("invisible characters removed; decode once; NFKC-normalise and fold confusable at-signs; drop query "
+                  "and fragment; per segment, judged on its lookalike fold (the repo's shared table): "
                   "an e-mail in any spelling ('@', '(at)', '[at]', ' at ... dot', %40) -> {email}; UUID -> {uuid}; "
                   "7+ digits in total, whatever separates them -> {number}; only digits -> {id}; a file name with "
                   "a non-code extension -> {file}.ext; 16+ hex, 20+ token characters, 8+ characters mixing letters "
@@ -69,9 +71,23 @@ def _digits(s: str) -> int:
     return sum(c.isdigit() for c in s)
 
 
+_LOOKALIKE = lookalikes.Table()
+
+
 def _segment(seg: str) -> str:
+    """The placeholder for one path segment, or the segment itself when nothing in it looks identifying. Judged on
+    the segment's lookalike fold (war room, ADR 0017 W3-3: ``јαne`` is ``jane``, ``[αT]`` is ``[at]``, ``p\u0501f`` is
+    ``pdf``); a segment kept is kept as written (NFKC, invisible characters removed), never as its fold."""
     if not seg:
         return ""
+    folded = _LOOKALIKE.fold_cased(seg)
+    kind = _kind(folded)
+    if kind is not None:
+        return kind
+    return _DIGITS.sub("{id}", seg)[:40]
+
+
+def _kind(seg: str) -> Optional[str]:
     if "@" in seg or _EMAIL.search(seg) or _AT_WORD.search(seg):
         return "{email}"
     if _UUID.fullmatch(seg):
@@ -86,16 +102,19 @@ def _segment(seg: str) -> str:
     if _HEX.fullmatch(seg) or len(seg) > 40 or _TOKENISH.fullmatch(seg) or (
             len(seg) >= 8 and _digits(seg) >= 2 and any(c.isalpha() for c in seg)):
         return "{token}"
-    return _DIGITS.sub("{id}", seg)[:40]
+    return None
 
 
 def template_path(target: str) -> Optional[str]:
     """A path with every identifier-looking part replaced by a typed placeholder; None when not a path.
     NFKC-normalised and confusables folded first (fullwidth digits and at-signs become ASCII)."""
-    p = _path(target)
+    # war room (W3-3): invisible characters (format characters and every default-ignorable code point: zero-width
+    # space and joiners, soft hyphen, word joiner, BOM) are removed BEFORE the one decode, so they can neither hide
+    # an identifier from the rules nor break a percent escape (%EF%B<ZWSP>C%A0 is still a full-width at-sign)
+    p = _path(lookalikes.strip_invisible(target))
     if p is None:
         return None
-    p = unicodedata.normalize("NFKC", p).translate(_FOLD)
+    p = lookalikes.strip_invisible(unicodedata.normalize("NFKC", p)).translate(_FOLD)
     segs = p.split("/")[1:]
     out = [_segment(s) for s in segs]
     # digits split over several short numeric segments (/123/45/6789) count together

@@ -18,6 +18,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+from urllib.parse import SplitResult, urlsplit
+
+
+def split_url(url) -> Optional[SplitResult]:
+    """``urlsplit`` that answers None for a URL it cannot read (an unbalanced or non-ASCII IPv6 literal raises
+    ValueError there, and from ``.hostname`` / ``.port``): a crawled URL is data and never stops a run (WR-F010)."""
+    if not isinstance(url, str):
+        return None
+    try:
+        p = urlsplit(url)
+        p.hostname, p.port                                  # both parse lazily and may raise
+    except ValueError:
+        return None
+    return p
+
+
+def host_of(url) -> Optional[str]:
+    p = split_url(url)
+    return None if p is None else p.hostname
 
 
 @dataclass

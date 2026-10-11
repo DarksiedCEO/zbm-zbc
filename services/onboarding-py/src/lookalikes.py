@@ -2,9 +2,9 @@
 Lookalike folding, one copy per service that folds lookalike letters (war room fixes WR-F001..WR-F005, ADR 0018).
 
 Services do not import each other, so this file is copied BYTE-IDENTICAL into ``src/lookalikes.py`` of
-clipper-network-py, onboarding-py, service-py and verification-py: the hygiene lint (rule L4) fails on any difference,
-and ``devtools/test_lookalikes.py`` regenerates the data block below from the vendored Unicode data and checks the
-shared hand table against creative-py's. Standard library only.
+clipper-network-py, onboarding-py, seo-py (log path templating, ADR 0017 W3-3), service-py and verification-py: the
+hygiene lint (rule L4) fails on any difference, and ``devtools/test_lookalikes.py`` regenerates the data block below
+from the vendored Unicode data and checks the shared hand table against creative-py's. Standard library only.
 
 What a caller gets (``fold`` / ``fold_cased``), in this order:
 

@@ -21,8 +21,8 @@ import xml.etree.ElementTree as ET
 import zlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import urlsplit
 
+from agents import host_of, split_url
 from envelope import envelope, finding
 from primitives import Killed
 
@@ -113,7 +113,7 @@ def _fetch(ctx, url: str, accept: str):
 def _sitemaps(ctx, facts: dict) -> list:
     out = []
     declared = list(ctx.robots["parsed"].sitemaps) if ctx.robots and ctx.robots.get("parsed") else []
-    same = [u for u in declared if ctx.same_site(urlsplit(u).hostname)]
+    same = [u for u in declared if ctx.same_site(host_of(u))]
     facts["sitemaps_declared"] = declared[:50]
     facts["sitemaps_cross_host_not_read"] = [u for u in declared if u not in same][:50]
     queue = same[:MAX_CHILDREN] or [ctx.url("/sitemap.xml")]
@@ -156,7 +156,7 @@ def _sitemaps(ctx, facts: dict) -> list:
                 loc = child.find(f"{{{ns}}}loc") if ns else child.find("loc")
                 if loc is not None and loc.text and children_followed < MAX_CHILDREN:
                     u = loc.text.strip()
-                    if ctx.same_site(urlsplit(u).hostname):
+                    if ctx.same_site(host_of(u)):
                         queue.append(u)
                         children_followed += 1
             continue
@@ -182,8 +182,9 @@ def _sitemaps(ctx, facts: dict) -> list:
                  sitemap_children_followed=children_followed)
     sample = []
     for u, _ in urls:
-        p = urlsplit(u)
-        if p.scheme in ("http", "https") and ctx.same_site(p.hostname) and len(sample) < SAMPLE_PATHS:
+        p = split_url(u)
+        if p is not None and p.scheme in ("http", "https") and ctx.same_site(p.hostname) \
+                and len(sample) < SAMPLE_PATHS:
             sample.append((p.path or "/")[:300])
     facts["sitemap_paths_sample"] = sample          # for the log task's "important but uncrawled" (Wave 2)
     out += _url_checks(ctx, urls)
@@ -195,8 +196,8 @@ def _url_checks(ctx, urls: list) -> list:
     out, bad_abs, other_host, blocked = [], [], [], []
     parsed = ctx.robots.get("parsed") if ctx.robots else None
     for i, (u, sm) in enumerate(urls):
-        p = urlsplit(u)
-        if p.scheme not in ("http", "https") or not p.hostname:
+        p = split_url(u)
+        if p is None or p.scheme not in ("http", "https") or not p.hostname:
             bad_abs.append(u[:300])
             continue
         if not ctx.same_site(p.hostname):

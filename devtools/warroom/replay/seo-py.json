@@ -16,11 +16,12 @@
     "target": "http://[Fｅ80::１]/"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0002",
@@ -37,11 +38,12 @@
     "target": "http://[２0０2:７ｆ００:１::]/#cｏｍmｅｎｔｓ"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0003",
@@ -58,11 +60,12 @@
     "target": "fec0::1/"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F009",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F009"
   },
   {
    "replay_id": "seo-py/R0004",
@@ -79,11 +82,12 @@
     "target": "feff::1/"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0005",
@@ -96,11 +100,12 @@
     "target": "javascript:alert(1)"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F008",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F008"
   },
   {
    "replay_id": "seo-py/R0006",
@@ -116,11 +121,12 @@
     "target": "javascript:alert(1)?_r=1"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F009",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F009"
   },
   {
    "replay_id": "seo-py/R0007",
@@ -136,11 +142,12 @@
     "target": "javascript:alert(1)"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F008",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F008"
   },
   {
    "replay_id": "seo-py/R0008",
@@ -157,11 +164,12 @@
     "target": "http://[::ｆｆｆｆ:１27.0.０.１]:{pｏｒt}/"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0009",
@@ -178,11 +186,12 @@
     "target": "http://[64:ｆｆ９b::7ｆ0０:１]/"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0010",
@@ -198,11 +207,12 @@
     "target": "fec0::1/"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0011",
@@ -218,11 +228,12 @@
     "target": "javascript:alert(1)"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F009",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F009"
   },
   {
    "replay_id": "seo-py/R0012",
@@ -239,11 +250,12 @@
     "target": "http://[::fffｆ:1２７.０.０.1]:{pｏrｔ}/?ｓ=20"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0013",
@@ -260,11 +272,12 @@
     "target": "http://[FＤ０0:ＥC2::2５４]/"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F009",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F009"
   },
   {
    "replay_id": "seo-py/R0014",
@@ -281,11 +294,12 @@
     "target": "fec0::1/?_r=1"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   },
   {
    "replay_id": "seo-py/R0015",
@@ -301,11 +315,12 @@
     "target": "feff::1?utm_source=ig&utm_medium=share"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F010",
+   "known_failure": null,
    "failed": [
     "audit_completes: state.audit_http = 500, wanted 201",
     "audit_status_completed: state.audit_status = None, wanted 'completed'"
-   ]
+   ],
+   "fixed": "WR-F010"
   }
  ]
 }

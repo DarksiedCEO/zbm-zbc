@@ -760,7 +760,7 @@
   {
    "id": "log-identifiers",
    "persona": "a client uploading an access log whose paths carry people's identifiers",
-   "basis": "ADR 0017 W2-2 (amended for AEGIS 1472041 H1 and 4c0a805 T1): raw lines, paths, query strings, IPs and User-Agents never reach the log, the ledger, a report or an error; paths are templated ({email}, {number}, {token}, {file}...). Needles: the suite's PII / T1_PII (tests/test_aegis_1472041.py)",
+   "basis": "ADR 0017 W2-2 (amended for AEGIS 1472041 H1 and 4c0a805 T1): raw lines, paths, query strings, IPs and User-Agents never reach the log, the ledger, a report or an error; paths are templated ({email}, {number}, {token}, {file}...). Needles: the suite's PII / T1_PII (tests/test_aegis_1472041.py); since the war room fixes (W3-3) invisible characters are removed before the one decode and every segment is judged on its lookalike fold, so those transforms are MUST too",
    "seeds": [
     {
      "extract": {
@@ -833,19 +833,7 @@
       "value": true
      }
     }
-   ],
-   "downgrade": {
-    "zero_width": [
-     "nothing_identifying_retained"
-    ],
-    "soft_hyphen": [
-     "nothing_identifying_retained"
-    ],
-    "homoglyph": [
-     "nothing_identifying_retained"
-    ]
-   },
-   "downgrade_basis": "W2-2 / T1 document NFKC, confusable at-signs and the listed e-mail and digit spellings; invisible characters and letter lookalikes inside an identifier are in no seo-py document (they are scored, not gate-blocking)"
+   ]
   },
   {
    "id": "log-hostile-content",

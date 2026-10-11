@@ -156,6 +156,7 @@ def parse_html(html: str, base_url: str) -> dict:
         elif name == "description" and description is None:
             description = mt.get("content")
     canonicals = [lk["href"] for lk in p.links_rel if "canonical" in lk["rel"].split() and lk["href"]]
+    canon_abs = [_abs(base_url, c) for c in canonicals[:1000]]
     hreflang = [{"hreflang": lk["hreflang"], "href": _abs(base_url, lk["href"])} for lk in p.links_rel
                 if "alternate" in lk["rel"].split() and lk["hreflang"] and lk["href"]]
     links = []
@@ -169,7 +170,9 @@ def parse_html(html: str, base_url: str) -> dict:
     text = " ".join(" ".join(p.text_parts).split())
     return {
         "title": _s(p.title, 1000), "description": description, "lang": p.html_lang,
-        "robots_meta": robots_meta, "canonicals": [_abs(base_url, c) for c in canonicals][:10],
+        "robots_meta": robots_meta, "canonicals": [a for a in canon_abs if a][:10],
+        # WR-F009: hrefs that are not readable http(s) URLs are counted, never kept as None
+        "canonicals_invalid": sum(1 for a in canon_abs if a is None),
         "hreflang": hreflang[:200], "headings": p.headings, "links": links,
         "jsonld_raw_count": len(p.scripts_ld), "jsonld": [validate_jsonld(b) for b in p.scripts_ld],
         "text_length": len(text), "text_sample": text[:20_000], "elements": p.elements,

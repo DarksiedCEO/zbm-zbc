@@ -276,12 +276,42 @@ W3-2. **Finance (31) invoice verification** (`src/finance_client.py`, `src/svc_i
    Finance's real app through an invoice's whole life (draft → issued → paid); the live run (W3-1) runs it against the
    real Finance process.
 
+W3-3. **War room** (ADR 0018; `devtools/warroom/drivers/seo_py.py`, `scenarios/seo-py.json`, CI job `warroom`). The
+   war room merged in from `wire-bugfix-wave-2026-10-07` (ebc8403) now gates this department too. The driver wires the
+   service's REAL fetcher (production address policy, ports, redirect handling, decoding, deadline) to a fake
+   internet inside the sealed worker: a fake DNS (public names; names answering private, mixed, IPv4-mapped, NAT64
+   and CGNAT addresses; a rebinding name whose second answer is loopback; the numeric spellings `inet_aton` accepts)
+   and an in-process web server that records every request; an internal address that is ever reached answers a
+   secret marker. Fifteen scenarios: SSRF targets through redirects, canonical links and robots / sitemap / llms.txt
+   (the suite's pinned targets plus names and spellings), odd ports / schemes / credentials, compression bombs and
+   odd codings, trickled bodies, giant and malformed files, XML entity quarantine, crawled prompt injection,
+   identifiers and hostile content in uploaded logs (leaks judged with the suite's own PII needles through the shared
+   lookalike fold, independent of the templater), cross-tenant access by a hub token (a 404 must be byte-identical to
+   a missing object's), personal-data keys, kill switches before / during / against crawling, and paid runs against
+   a hostile Finance (31). Every invariant is MUST. Seeds 1-3 found three MUST failures, each an audit answering 500
+   and left `running` because of what a hostile site served — WR-F008 (a redirect Location httpx cannot parse raised
+   `httpx.InvalidURL` out of the fetcher), WR-F009 (an unreadable canonical became `None` and was dereferenced),
+   WR-F010 (an invalid IPv6 URL in robots.txt or a sitemap index raised in Delia) — promoted to the replay library
+   (`replay/seo-py.json`, R0001-R0015), filed in `findings.md` and fixed: the fetcher refuses such targets
+   (REFUSED_URL), the parser counts an unreadable canonical (`CANONICAL_INVALID` finding), the agents read crawled
+   URLs through `agents.split_url` / `host_of`, and a run that raises anyway is closed `interrupted` with reason
+   `RUN_FAILED` at once (no 500, nothing left running). The war room also showed identifiers disguised with invisible
+   characters or letter lookalikes surviving log templating (scored SHOULD then); fixed as well: invisible characters
+   are removed before the one decode, and each path segment is judged on the repo's shared lookalike fold (seo-py now
+   carries the byte-identical `src/lookalikes.py`, hygiene rule L4), while a segment that is kept is kept as written
+   (a real Cyrillic path is not rewritten). Over-minimisation, stated: a non-Latin segment whose fold is 20+ letters
+   is now `{token}`.
+
 Founder-pending defaults added by Wave 3: (12) verification is ON by default, so until Finance is wired every paid run
 needs Andre's override; (13) one invoice pays for one one-off audit or one schedule (with all its slots), and an
 interrupted audit gives its invoice back; (14) any refund or chargeback on the invoice, partial ones included, refuses
 the run; (15) Andre may override only an UNVERIFIABLE answer, never a definitive one, and never a reused invoice; (16)
 no check of the invoice's amount, kind or line code against what was sold — Finance has no SEO line code and no
 per-audit price is set (the locked pricing is managed tiers per month); that is a founder and Finance decision.
+
+War room limitations: the fake web replaces the socket, so what only a socket shows — a HEADER trickled byte by byte,
+TLS, a real resolver's behaviour — is proven by the suite's real-socket tests, not by the war room; the chaos is the
+library's (no LLM personas, ADR 0018); each case is one short exchange on a fresh harness (no concurrency or load).
 
 Wave 3 limitations: finance-py's invoice route returns the whole invoice record (lines, template variables) to any
 caller including `seo_02`; this service drops all but the verdict's fields, but Finance discloses more than is needed

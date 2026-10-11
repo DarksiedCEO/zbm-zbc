@@ -382,6 +382,12 @@ class Fetcher:
                     return resp.status_code, kept, dec.body(), url
         except _Refused:
             raise
+        except httpx.InvalidURL:
+            # WR-F008: httpx parses a redirect's Location itself (``response.next_request``) even when it does not
+            # follow it, and raises InvalidURL (not an HTTPError) for one it cannot parse (``javascript:alert(1)``)
+            raise _Refused("REFUSED_URL", "the redirect target is not a valid URL") from None
+        except httpx.StreamError:
+            raise _Refused("PROTOCOL_ERROR", "protocol error: StreamError") from None
         except httpx.TimeoutException:
             raise _Refused("TIMEOUT", "timed out") from None
         except MemoryError:
@@ -424,7 +430,10 @@ class Fetcher:
                     raise _Refused("BLOCKED_BY_ROBOTS", f"robots.txt disallows this path for {PRODUCT_TOKEN}")
                 status, headers, body, _ = self._one(current, target, user_agent, deadline, accept)
                 if 300 <= status < 400 and headers.get("location"):
-                    nxt = urljoin(current, headers["location"])
+                    try:
+                        nxt = urljoin(current, headers["location"])
+                    except ValueError:                    # WR-F008: an unparseable target is refused, never raised
+                        raise _Refused("REFUSED_URL", "the redirect target is not a valid URL") from None
                     res.redirects.append({"url": current, "status": status})
                     current = nxt
                     if hop == self.max_redirects:
