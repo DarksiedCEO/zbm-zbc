@@ -103,10 +103,14 @@ def make_service(*, all_fakes=False, config=None, findings=None, ledger=None, cl
             payouts=FakePayoutsDepartment(), handoff=FakeHandoff(), notifier=FakePushNotifier(),
         )
         kw.update(probe=FakePlatformProbe(True), platform_knowledge=verified_knowledge())
+    clock = clock or Clock()
+    # Wave F (F-3): start-up may wait out the ledger in-flight grace; in tests that wait moves the test clock (never
+    # wall-clock time)
+    kw["sleep"] = (lambda s: clock.advance(seconds=s)) if hasattr(clock, "advance") else (lambda s: None)
     kw.update(overrides)
     return OnboardingService(
         cfg, ledger or FakeLedgerClient(), FakeRevenueRecovery(findings if findings is not None else DEFAULT_FINDINGS),
-        departments=kw.pop("departments", depts), clock=clock or Clock(), andre_approval_key=ANDRE_KEY, **kw,
+        departments=kw.pop("departments", depts), clock=clock, andre_approval_key=ANDRE_KEY, **kw,
     )
 
 

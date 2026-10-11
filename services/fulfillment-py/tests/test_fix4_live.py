@@ -89,33 +89,77 @@ def _pieces(body: bytes, size: int = 1 << 20):
         yield body[i:i + size]
 
 
+def _held(parts, hold_after: int, arrived: threading.Event, gate: threading.Event):
+    """Yield ``parts``; once ``hold_after`` bytes are out, say so (``arrived``) and wait for ``gate`` before the rest:
+    the request stays in flight, unfinished, for as long as the test needs."""
+    sent, holding = 0, hold_after <= 0
+    for part in parts:
+        if not holding and sent + len(part) > hold_after:
+            holding = True
+            arrived.set()
+            gate.wait(60)
+        sent += len(part)
+        yield part
+    if not holding:
+        arrived.set()
+
+
+HELD_SAMPLES = 5
+
+
 def test_health_answers_within_1s_while_max_size_and_oversized_requests_are_in_flight(server):
+    """The guarantee: /health answers within 1 s while big requests are in flight. Annotated CI (Oct 10 2026, macOS
+    3.13): only 2 samples were taken, because how long the requests stayed in flight was up to the machine. Now the
+    max-size body and the chunked oversized body are HELD open part-way (their senders wait on a gate before the
+    rest), so exactly HELD_SAMPLES health samples are taken while both are verified in flight (sender alive, no
+    answer yet); then the gate opens and sampling goes on, as before, while the server receives and parses the rest
+    (the parse is what stalled the loop before fix wave 4). Every sample keeps the 1 s bound."""
     host, port = server
     max_body = _max_size_body()
     results: dict[str, int | None] = {}
-    workers = [
-        threading.Thread(target=_raw_post, args=(host, port, f"Content-Length: {len(max_body)}\r\n".encode(),
-                                                 _pieces(max_body), results, "max")),
-        threading.Thread(target=_raw_post, args=(host, port, f"Content-Length: {len(OVERSIZED)}\r\n".encode(),
-                                                 _pieces(OVERSIZED), results, "oversized_cl")),
-        threading.Thread(target=_raw_post, args=(host, port, b"Transfer-Encoding: chunked\r\n",
-                                                 _chunked(OVERSIZED), results, "oversized_chunked")),
-    ]
-    latencies = []
-    for w in workers:
-        w.start()
-    while any(w.is_alive() for w in workers):
+    gate = threading.Event()
+    arrived = {"max": threading.Event(), "oversized_chunked": threading.Event()}
+    workers = {
+        "max": threading.Thread(target=_raw_post, args=(
+            host, port, f"Content-Length: {len(max_body)}\r\n".encode(),
+            _held(_pieces(max_body), len(max_body) - (1 << 20), arrived["max"], gate), results, "max")),
+        "oversized_cl": threading.Thread(target=_raw_post, args=(
+            host, port, f"Content-Length: {len(OVERSIZED)}\r\n".encode(), _pieces(OVERSIZED), results,
+            "oversized_cl")),
+        "oversized_chunked": threading.Thread(target=_raw_post, args=(
+            host, port, b"Transfer-Encoding: chunked\r\n",
+            _held(_chunked(OVERSIZED), LIMIT // 2, arrived["oversized_chunked"], gate), results,
+            "oversized_chunked")),
+    }
+
+    def sample() -> float:
         t = time.perf_counter()
         conn = http.client.HTTPConnection(host, port, timeout=30)
         conn.request("GET", "/health")
         assert conn.getresponse().status == 200
         conn.close()
-        latencies.append(time.perf_counter() - t)
-        time.sleep(0.02)
-    for w in workers:
+        return time.perf_counter() - t
+
+    for w in workers.values():
+        w.start()
+    held, latencies = [], []
+    try:
+        for name, ev in arrived.items():
+            assert ev.wait(30), f"{name} never reached its hold point"
+        for _ in range(HELD_SAMPLES):
+            # the condition the guarantee is about, verified at every sample: both held requests are mid-body
+            assert all(workers[n].is_alive() and n not in results for n in arrived), results
+            held.append(sample())
+            time.sleep(0.02)   # a sampling rate, not a synchronisation
+    finally:
+        gate.set()
+    while any(w.is_alive() for w in workers.values()):
+        latencies.append(sample())
+        time.sleep(0.02)       # a sampling rate, not a synchronisation
+    for w in workers.values():
         w.join()
-    assert len(latencies) >= 3
-    assert max(latencies) < 1.0, (max(latencies), results)
+    assert len(held) == HELD_SAMPLES
+    assert max(held + latencies) < 1.0, (held, latencies, results)
     assert results["max"] == 200, results
     assert results["oversized_cl"] in (413, None), results   # None: closed before we could read
     assert results["oversized_chunked"] in (413, None), results

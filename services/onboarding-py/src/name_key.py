@@ -3,10 +3,11 @@ The 1099 payee key for a legal name (bug sweep D, AEGIS O-1). Stdlib only.
 
 Two spellings of ONE person's legal name must give ONE key, or the person's 1099 total is split and under-reported:
 zero-width and other format characters (Unicode Cf: U+200B, the soft hyphen U+00AD, bidi controls...) and the other
-default-ignorables are removed; NFKC; casefold; apostrophe, hyphen and dash variants fold to ``'`` and ``-``; every
-other punctuation and whitespace run is one space; lookalike letters fold to Latin with the SAME table creative-py's
-``shared/text.py`` uses (``CONFUSABLES`` + the generated Latin-letter folds, copied here: services share no code), so
-"Pаt" (Cyrillic a) and "Pát" key as "pat". Over-merging two different people is the safe direction for a 1099
+default-ignorables are removed; NFKC; casefold (a final sigma is read as ``c`` first: war room WR-F003); apostrophe,
+hyphen and dash variants fold to ``'`` and ``-``; every other punctuation and whitespace run is one space; lookalike
+letters fold to Latin with the SAME table creative-py's ``shared/text.py`` uses (``CONFUSABLES`` + the generated
+Latin-letter folds, copied here: services share no code), over the shared lookalike fold's Unicode confusables.txt
+skeleton (``src/lookalikes.py``), so "Pаt" (Cyrillic a) and "Pát" key as "pat" and "ɡαrςía" as "garcia". Over-merging two different people is the safe direction for a 1099
 threshold (it can only raise a total); the W-9 holder at ZBC payouts/tax reconciles the final filing.
 """
 
@@ -14,6 +15,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+
+import lookalikes
 
 # copied from services/creative-py/src/shared/text.py (keep in step)
 CONFUSABLES: dict[str, str] = {
@@ -75,7 +78,10 @@ def _generated_latin_folds() -> dict[str, str]:
     return out
 
 
-_FOLDS = str.maketrans({**_generated_latin_folds(), **CONFUSABLES})
+# War room WR-F003: the fold is the shared lookalike fold (src/lookalikes.py) with this table on top, so every letter
+# folded before folds the same way (no pk2- key churn); letters it left alone get the shared layers (the Unicode
+# confusables.txt skeleton), and the final sigma is read before casefolding (it was casefolded to sigma, "o").
+_TABLE = lookalikes.Table({**_generated_latin_folds(), **CONFUSABLES})
 # apostrophes / quotes and hyphens / dashes / minus signs that a name may carry in any of their forms
 _APOSTROPHES = "\u2018\u2019\u201b\u02bc\u02bb\u02bd\u2032\u00b4\u0060\uff07\u055a\ua78c"
 _DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe58\ufe63\uff0d\u2e3a\u2e3b\u058a\u05be"
@@ -90,8 +96,8 @@ def has_format_chars(value: str) -> bool:
 def name_key_text(legal_name: str) -> str:
     """The canonical text a legal name is keyed on."""
     t = "".join(ch for ch in legal_name if ch not in _IGNORABLE and unicodedata.category(ch) != "Cf")
-    t = unicodedata.normalize("NFKC", t).casefold()
-    t = t.translate(_PUNCT_FOLD).translate(_FOLDS)
+    t = _TABLE.casefold(unicodedata.normalize("NFKC", t))
+    t = _TABLE.map(t.translate(_PUNCT_FOLD))
     t = unicodedata.normalize("NFKC", t)
     out, prev_space = [], True
     for ch in t:

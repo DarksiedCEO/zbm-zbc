@@ -50,3 +50,23 @@ test("DASHBOARD_BIND_ADDR is an explicit override; -H in passthrough args is ref
   }
   assert.throws(() => nextArgs("build", {}, []), /mode/);
 });
+
+test("AEGIS A-4: serve.mjs writes the socket address into x-zbm-peer-addr over any client-sent value", async () => {
+  const { installPeerHeader, PEER_HEADER } = await import("../scripts/serve.mjs");
+  const http = await import("node:http");
+  installPeerHeader();
+  assert.equal(process.env.ZBM_DASHBOARD_PEER_HEADER, "1");
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push(req.headers[PEER_HEADER]);
+    res.end("ok");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/`, { headers: { [PEER_HEADER]: "203.0.113.66" } });
+    assert.equal(await res.text(), "ok");
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+  assert.deepEqual(seen, ["127.0.0.1"], "a client-sent peer header survived");
+});

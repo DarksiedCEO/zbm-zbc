@@ -102,6 +102,7 @@ class Api:
             actor_tokens = {**{a: f"test-actor-token-{a}-do-not-use" for a in (actors.actors if actors else ())},
                             **TEST_ACTOR_TOKENS}
         self.actor_tokens = dict(actor_tokens)
+        build_kw.setdefault("startup_sleep", lambda s: None)   # Wave F (F-3): never a wall-clock wait in tests
         self.app = build_app(service_token=TEST_SERVICE_TOKEN, ledger=ledger, founder_token=founder_token,
                              clock=clock, departments=departments, actors=actors, actor_tokens=self.actor_tokens,
                              **build_kw)

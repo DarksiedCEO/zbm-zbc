@@ -75,7 +75,9 @@ CN_NAMESPACE = "clipper_network"
 LEGACY_NAMESPACE = "legacy"
 # the identity HMACs a minor lock follows (spec C.5, VI-CQ-03); bug sweep C: "email_base" is the HMAC of the canonical
 # mailbox (plus-tag dropped; Gmail dots folded), so kid+1@ cannot split off from a minor's kid@
-IDENTITY_LOCK_KINDS = ("email", "payout", "email_base")
+# WR-F005: "email_base_v0" is the HMAC (computed as "email_base") of the frozen pre-fix mailbox fold, kept when it
+# differs from the new one, so a minor recorded before the fix keeps every match it had (``_lock_key``)
+IDENTITY_LOCK_KINDS = ("email", "payout", "email_base", "email_base_v0")
 FINAL_OR_WATCHED = ("certified", "revised", "voided", "suspended")    # the certify job leaves these alone
 _SHA64 = re.compile(r"[0-9a-f]{64}")
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -91,6 +93,12 @@ ACCESS_LOST_AFTER_FAILED_CHECKS = 2
 HOLD_CODES_FROM_FINDING = {"bought_engagement": "BOUGHT_ENGAGEMENT", "platform_stripped": "PLATFORM_STRIPPED",
                            "duplicate_identity": "DUPLICATE_IDENTITY", "account_shared": "ACCOUNT_SHARED",
                            "stolen_content": "STOLEN_MATCH"}
+
+
+def _lock_key(k: tuple) -> tuple:
+    """The key a minor-lock HMAC is compared on: an ``email_base_v0`` HMAC is an ``email_base`` HMAC of the pre-fix
+    fold (WR-F005), so it is compared as one."""
+    return ("email_base", k[1]) if k[0] == "email_base_v0" else k
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -381,7 +389,7 @@ class VIService:
         self.findings: dict[str, dict] = {}
         self.strikes: dict[str, dict] = {}
         self.bans: dict[str, dict] = {}
-        self.banned: set[tuple[str, str]] = set()
+        self.banned: set[tuple[str, str]] = set()        # every banned HMAC as its _lock_key (WR-F007)
         self.ages: dict[str, dict] = {}
         self.latest_age: dict[tuple[str, str], str] = {}     # (caller namespace, subject id) -> attestation id
         self.identities: dict[str, dict] = {}
@@ -587,7 +595,10 @@ class VIService:
         elif kind == "ban":
             self.bans[r["clipper_id"]] = r
             for k in r["blocked"]:
-                self.banned.add(tuple(k))
+                # WR-F007: kept as the minor lock compares keys, so an email_base_v0 HMAC and the email_base HMAC
+                # a ban recorded before WR-F005 stored are one key (a banned clipper cannot re-enter with a variant
+                # only the old or only the new fold reads as the same mailbox)
+                self.banned.add(_lock_key(tuple(k)))
         elif kind == "age":
             self.ages[r["attestation_id"]] = r
             self.latest_age[(r.get("namespace") or LEGACY_NAMESPACE, r["subject_id"])] = r["attestation_id"]
@@ -1102,7 +1113,7 @@ class VIService:
                 # AEGIS L3-R: a minor recorded before email_base existed is matched by everything V&I keeps for it
                 # (exact e-mail and payout HMACs, and its platform account HMACs), never by a global freeze
                 if k[0] in IDENTITY_LOCK_KINDS or (legacy and k[0].startswith("account:")):
-                    out.setdefault(k, aid)
+                    out.setdefault(_lock_key(k), aid)
         return out
 
     def _minors_without_base(self) -> list[str]:
@@ -1145,7 +1156,7 @@ class VIService:
                                              "ledger_event_ids": op.events})
 
     def _identity_minor(self, subject_id: str) -> Optional[str]:
-        mine = {k for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
+        mine = {_lock_key(k) for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
         if not mine:
             return None
         locked = self._minor_identities(exclude=subject_id)
@@ -1322,7 +1333,7 @@ class VIService:
                                                           "account with at least 100 followers", (), rules))
                             kind = f"account:{platform}"
                             other = self.hmac_owner.get((kind, acct_hmac))
-                            banned = (kind, acct_hmac) in self.banned
+                            banned = _lock_key((kind, acct_hmac)) in self.banned
                             if banned or (other is not None and other != clipper_id):
                                 finding, held = self._identity_finding(op, "account_shared", "ACCOUNT_SHARED", clipper_id,
                                                                        other, kind, now, (cid,))
@@ -3212,6 +3223,9 @@ class VIService:
             else:
                 hm["email"] = i07.hmac_hex(key_b, "email", i07.normalize_email(email))
                 hm["email_base"] = i07.hmac_hex(key_b, "email_base", i07.mailbox_base(email))
+                v0 = i07.hmac_hex(key_b, "email_base", i07.mailbox_base_v0(email))
+                if v0 != hm["email_base"]:
+                    hm["email_base_v0"] = v0        # WR-F005: an older minor's email_base still matches
             if pay.available and isinstance(pay.identity_hmac, str) and len(pay.identity_hmac) == 64:
                 hm["payout"] = pay.identity_hmac
             else:
@@ -3224,7 +3238,7 @@ class VIService:
                 if f["status"] != "overturned":
                     found.append(f["finding_id"])
             for kind, hv in hm.items():
-                if hv and (kind, hv) in self.banned and not found:
+                if hv and _lock_key((kind, hv)) in self.banned and not found:   # WR-F007
                     f, _ = self._identity_finding(op, "duplicate_identity", "DUPLICATE_IDENTITY", clipper_id, None,
                                                   kind, now, (chk,))
                     if f["status"] != "overturned":

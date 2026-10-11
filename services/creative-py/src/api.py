@@ -156,6 +156,7 @@ from zbm import placement_spec as zbm_placement_spec
 from zbm.brief_writer import ClientRequirements
 from zbm.results import PerformanceResult
 from zbm.workflow import WorkSubmission, ZbmWorkflow
+from state_replay import build_tracker, replay
 
 FOUNDER_HEADER = "X-Andre-Approval-Token"
 IDEMPOTENCY_HEADER = "Idempotency-Key"
@@ -697,6 +698,7 @@ def build_app(
     actor_tokens: dict[str, str] | None = None,
     data_dir: str | None = None,
     dir_lock: DataDirLock | None = None,
+    startup_sleep: Callable[[float], None] | None = None,
 ) -> FastAPI:
     if not service_token:
         raise RuntimeError("service token required (fail closed)")
@@ -728,6 +730,21 @@ def build_app(
     zbm = ZbmWorkflow(**common)
     zbc = ZbcWorkflow(**common, superseded_grace_hours=superseded_grace_hours)
     lock = recorder.lock
+    try:
+        # Wave F (M-1): every consequential entity is rebuilt from the log's state deltas, in log order (fail closed)
+        state = build_tracker(zbm, zbc, registry, rights)
+        if startup_sleep is None:
+            import time as _time_mod
+            startup_sleep = _time_mod.sleep
+        replay(recorder, state, zbc, ledger, sleep=startup_sleep)
+        recorder.state = state
+        # AEGIS C-2: server-assigned ids resume past every one ALREADY on the ledger -- an attempt whose reply was
+        # lost (the id burned) and whose line was still owed when the process stopped is on the ledger only
+        floor = ledger_id_floor(ledger)
+    except BaseException:
+        if dir_lock is not None:
+            dir_lock.release_claim(lock_token)
+        raise
     # Bug sweep D (M): server-assigned ids (brief-0001, kit-0001...) resume past every id a committed line recorded,
     # so a restart never hands out an id the ledger already holds for other content
     saved: dict = {}
@@ -735,9 +752,6 @@ def build_app(
         saved = (r.get("data") or {}).get("counters") or saved
     zbm._n = max(zbm._n, int(saved.get("zbm", 1)))
     zbc._n = max(zbc._n, int(saved.get("zbc", 1)))
-    # AEGIS C-2: and past every server-assigned id ALREADY on the ledger -- an attempt whose reply was lost (the id
-    # burned) and whose line was still owed when the process stopped is on the ledger only
-    floor = ledger_id_floor(ledger)
     zbm._n = max(zbm._n, floor["zbm"])
     zbc._n = max(zbc._n, floor["zbc"])
     recorder.counters = {"zbm": lambda: zbm._n, "zbc": lambda: zbc._n}
@@ -979,7 +993,7 @@ def build_app(
 
         who = acting(body.actor_id, who)
         actor = actors.get(who)
-        with lock:
+        with lock, recorder.op("registry_write"):   # Wave F: the record and the row it commits in ONE line
             if Role.REGISTRY_ZBM_PLACEMENT_SPEC in actor.roles:
                 eid = zbm_placement_spec.write_spec_row(registry, recorder, actors, who, body.row)
             elif Role.REGISTRY_ZBC_PLATFORM_RULES in actor.roles:
@@ -995,7 +1009,8 @@ def build_app(
         actor = acting(body.actor_id, who)
 
         def create() -> dict:
-            eid = record_clearance(rights, recorder, actors, actor, body.record)
+            with recorder.op("record_clearance"):      # Wave F: the record and the clearance it commits in ONE line
+                eid = record_clearance(rights, recorder, actors, actor, body.record)
             return {"record": body.record.model_dump(mode="json"), "ledger_event_id": eid}
 
         return creating(response, "clearance", {}, actor, idempotency_key, body.record.model_dump(mode="json"),
@@ -1007,7 +1022,8 @@ def build_app(
         actor = acting(body.actor_id, who)
 
         def create() -> dict:
-            eid = record_license(rights, recorder, actors, actor, body.license)
+            with recorder.op("record_license"):        # Wave F: the record and the licence it commits in ONE line
+                eid = record_license(rights, recorder, actors, actor, body.license)
             return {"license": body.license.model_dump(mode="json"), "ledger_event_id": eid}
 
         return creating(response, "license", {}, actor, idempotency_key, body.license.model_dump(mode="json"),
@@ -1246,7 +1262,9 @@ def ledger_id_floor(ledger) -> dict:
     if isinstance(ledger, UnconfiguredLedgerClient) or not hasattr(ledger, "entries"):
         return {"zbm": 1, "zbc": 1}
     try:
-        entries = ledger.entries()
+        # Wave F: this department's entries only, through ledger-rust's paged filtered read (not the whole ledger)
+        entries = (ledger.entries_filtered("creative_production") if hasattr(ledger, "entries_filtered")
+                   else ledger.entries())
     except LedgerQueryFailed as exc:
         raise RuntimeError(f"refusing to start: the evidence ledger cannot be read to resume server-assigned ids past "
                            f"the ones it holds ({exc})") from None

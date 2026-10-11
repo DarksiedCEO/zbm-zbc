@@ -655,6 +655,56 @@ jobs:
           "$RUNNER_TEMP/gitleaks/gitleaks" git --no-banner --redact --exit-code 1 --config .gitleaks.toml .
 
   # ---------------------------------------------------------------------------------------------------------------
+  # War room (ADR 0018, founder approval 2026-10-07): the red-team launch gate for public-facing departments. Per
+  # release, not continuously: devtools/warroom/run.py drives each seeded department's own in-process harness (one
+  # worker process per service, network sealed, recording fakes: nothing is sent, charged or revoked) through its
+  # scenario library and seeded chaos variants plus the replay library (every failure ever promoted), and fails when
+  # any MUST invariant fails outside a triaged known failure, or any case ERRORs. Seed 1 is fixed so the gate is
+  # reproducible; other seeds are for exploration (devtools/warroom/README.md). The engine's own self-test runs first.
+  # The reports go to $RUNNER_TEMP/warroom (outside the checkout and the wrapper's private TMPDIR), are printed, and
+  # removed.
+  # ---------------------------------------------------------------------------------------------------------------
+  warroom:
+    name: warroom
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            services/service-py/requirements.txt
+            services/sales-py/requirements.txt
+            services/verification-py/requirements.txt
+            services/clipper-network-py/requirements.txt
+            services/onboarding-py/requirements.txt
+      - name: Install the target services' pinned requirements
+        run: |
+          for s in service-py sales-py verification-py clipper-network-py onboarding-py; do
+            python -m pip install -r "services/$s/requirements.txt"
+          done
+      - name: The war room engine's own self-test
+        run: python -B -m unittest devtools/test_warroom.py -v
+      - name: The shared lookalike fold is one file, generated from the pinned Unicode data, read alike by every service
+        run: python -B -m unittest devtools/test_lookalikes.py -v
+      - name: War room gate (seed 1, every seeded department, under the hygiene check)
+        run: |
+          mkdir -p "$RUNNER_TEMP/warroom"
+          python devtools/hygiene_check.py run --suite warroom:all --kind none \
+            -- python -B devtools/warroom/run.py --all --seed 1 --out "$RUNNER_TEMP/warroom"
+      - name: War room report (listed in this log, then removed)
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/warroom" ]; then
+            ls -l "$RUNNER_TEMP/warroom"
+            rm -rf "$RUNNER_TEMP/warroom"
+          fi
+
+  # ---------------------------------------------------------------------------------------------------------------
   # Hygiene, static half (fix wave 25, R-HYGIENE): over the whole tree, always — wall-clock upper bounds in tests
   # (L1), hard-coded test ports (L2), hand-written test counts in the docs (L3; counts live in the generated
   # docs/test-counts.md), and the shared files byte-identical across services (L4). The dynamic half runs inside
@@ -703,6 +753,7 @@ jobs:
       - audit-node
       - secret-scan
       - hygiene-static
+      - warroom
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

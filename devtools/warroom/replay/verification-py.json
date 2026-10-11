@@ -1,0 +1,44 @@
+{
+ "library": "verification-py",
+ "cases": [
+  {
+   "replay_id": "verification-py/R0001",
+   "scenario": "minor-lookalike-email",
+   "origin": "verification-py/minor-lookalike-email#000.4@2",
+   "chain": [
+    "email_homoglyph"
+   ],
+   "seed_value": "kid.name@gmail.com",
+   "input": {
+    "variant": "kiԁ.ηame@gmail.com",
+    "base": "kid.name@gmail.com"
+   },
+   "added": "2026-10-10",
+   "known_failure": null,
+   "failed": [
+    "still_a_minor: again: HTTP 200; again.status = 'adult', wanted 'minor'"
+   ],
+   "fixed": "WR-F005"
+  },
+  {
+   "replay_id": "verification-py/R0002",
+   "scenario": "minor-lookalike-email",
+   "origin": "verification-py/minor-lookalike-email#000.14@2",
+   "chain": [
+    "email_homoglyph",
+    "dash_tag"
+   ],
+   "seed_value": "kid.name@gmail.com",
+   "input": {
+    "variant": "kιd.ηamе-x@gmail.com",
+    "base": "kid.name@gmail.com"
+   },
+   "added": "2026-10-10",
+   "known_failure": null,
+   "failed": [
+    "still_a_minor: again: HTTP 200; again.status = 'adult', wanted 'minor'"
+   ],
+   "fixed": "WR-F005"
+  }
+ ]
+}

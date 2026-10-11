@@ -469,3 +469,20 @@ Regressions: `apps/dashboard-ts/tests/auth.test.ts` (limiter, same-origin) and t
 | M-2 (Medium) | 50 bad attempts from any addresses locked out every login, the right password included | The global budget is a backoff, never a block: once 50 failures are spent in the window, password checks are serialised (one scrypt at a time per process), which bounds the guess rate from rotating or spoofed client keys while the owner still signs in. The per-client hard limit stays |
 | L-1 (Low) | Logout had no Origin check | `POST /api/logout` requires a same-origin `Origin` (403 otherwise) |
 | L-2 (Low) | A login without `Origin` was accepted, and only the host was compared | `Origin` is required on login (403 without it), and scheme AND host must match: the `Host` header with the scheme from `X-Forwarded-Proto` (Vercel) or the request's own |
+
+### Wave F fixes (Oct 9 2026, branch fix-mediums-wave-f)
+
+Regressions: `apps/dashboard-ts/tests/auth.test.ts` ("Wave F M-3": order and outcome asserted, no wall clock).
+
+| Id | Finding | Fix |
+|---|---|---|
+| M-3 (Medium) | Past the global budget the serialised login queue (`FailureLimiter.throttled`) had no cap: a flood queued every guess (each a real scrypt check) and the owner waited behind all of them (25 s seen) | `throttled(check, clean)` holds at most `maxQueued` (8) waiting checks; past it the request is answered 429 with `Retry-After: 1` at once (`ThrottleQueueFull`; no password check, the reservation is given back, nothing counted). `cleanSlots` (2) further places form a lane for clients with ZERO failures and no attempt in flight (`Reservation.clean`, decided synchronously in `reserve`), served before the general queue, so a flood from clients that already failed never starves the owner. The per-client limit (5) is unchanged. Limit (on record): a flood from ever-fresh client keys also looks clean; the clean lane is bounded too, so the owner's worst case is a prompt 429, never an unbounded wait |
+
+#### AEGIS review of Wave F — A-4 (Oct 10 2026)
+
+Regressions: `tests/auth.test.ts` ("AEGIS A-4"), `tests/bind.test.mjs` (the peer header) and the "AEGIS A-4" case of
+`tests/status.live.test.mjs` (the built server).
+
+| Id | Finding | Fix |
+|---|---|---|
+| A-4 (Medium) | `clientKey` trusted the first `X-Forwarded-For` entry, which the client writes: rotating it from one host made a new client per request and could lock the owner out | The key is the SOCKET address: `scripts/serve.mjs` (Next runs in its process) writes it into `x-zbm-peer-addr` over any client-sent value, and the limiter trusts that header only when serve.mjs set its flag. `X-Forwarded-For` counts only with `DASHBOARD_TRUSTED_PROXY_HOPS` (1..5 proxies that append to it; the entry that many hops from the right). Neither: one shared key. A successful sign-in sets `__Host-zbm_dashboard_device` (90 days, HttpOnly, Secure, SameSite=Strict, signed with a key derived from the session signing key, a new device id at every sign-in): a device that signed in before is keyed by its device id and waits in its own lane (`deviceSlots`, 2), served before every other, so no flood takes its place. Vercel's `X-Forwarded-For` behaviour is UNVERIFIED: set the hops only after checking it on the deployment. |

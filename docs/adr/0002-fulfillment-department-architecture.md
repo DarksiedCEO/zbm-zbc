@@ -1026,3 +1026,11 @@ Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
 | Id | Finding (AEGIS, second pass) | Fix |
 |---|---|---|
 | M | The write-back reconcile was gated by the service token: any department could trigger a second client write or record a false success | `src/founder.py` (finance-py's `FounderGate`, ported minimally): `POST /agents/resolution-writeback/reconcile` needs `X-Andre-Approval-Token` = `FULFILLMENT_ANDRE_APPROVAL_TOKEN`, checked before the body is read; unset or equal to the service token = not configured = refused (403). |
+
+### Annotated CI (Oct 10 2026): /health while big requests are in flight
+
+`tests/test_fix4_live.py::test_health_answers_within_1s_while_max_size_and_oversized_requests_are_in_flight` took only
+2 samples on macOS 3.13 (it needed 3): the number of samples depended on how long the big requests happened to stay in
+flight. The max-size body and the chunked oversized body are now held open part-way by their senders (a gate), and
+exactly 5 health samples are taken while both are verified mid-body (sender alive, no answer); then the gate opens and
+sampling continues while the server receives and parses the rest. Every sample keeps the 1 s bound. Test-side only.

@@ -1,0 +1,45 @@
+{
+ "library": "onboarding-py",
+ "cases": [
+  {
+   "replay_id": "onboarding-py/R0001",
+   "scenario": "1099-name-variant",
+   "origin": "onboarding-py/1099-name-variant#002.1@1",
+   "chain": [
+    "homoglyph_wide",
+    "punct_variants"
+   ],
+   "seed_value": "José García",
+   "input": {
+    "variant": "ᴊօsé ɡαrςía",
+    "base": "José García"
+   },
+   "added": "2026-10-10",
+   "known_failure": null,
+   "failed": [
+    "one_person_one_total: variant: HTTP 201; p2.paid_to_date_usd = '600.00', wanted '2100.00'"
+   ],
+   "fixed": "WR-F003"
+  },
+  {
+   "replay_id": "onboarding-py/R0002",
+   "scenario": "1099-name-variant",
+   "origin": "onboarding-py/1099-name-variant#002.3@2",
+   "chain": [
+    "punct_variants",
+    "homoglyph_wide"
+   ],
+   "seed_value": "José García",
+   "input": {
+    "variant": "JoᏚé ʛaгϲíα",
+    "base": "José García"
+   },
+   "added": "2026-10-10",
+   "known_failure": null,
+   "failed": [
+    "one_person_one_total: variant: HTTP 201; p2.paid_to_date_usd = '600.00', wanted '2100.00'"
+   ],
+   "fixed": "WR-F003"
+  }
+ ]
+}

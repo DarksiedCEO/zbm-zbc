@@ -1,5 +1,17 @@
-import { authConfig, issueSession, MAX_PASSWORD_BYTES, nowSeconds, sessionCookie, verifyPassword } from "@/lib/auth";
-import { clientKey, FailureLimiter, sameOrigin } from "@/lib/rate-limit";
+import {
+  authConfig,
+  cookieValue,
+  DEVICE_COOKIE,
+  deviceCookie,
+  issueDevice,
+  issueSession,
+  MAX_PASSWORD_BYTES,
+  nowSeconds,
+  sessionCookie,
+  verifyDevice,
+  verifyPassword,
+} from "@/lib/auth";
+import { clientKey, FailureLimiter, sameOrigin, ThrottleQueueFull, trustedHops } from "@/lib/rate-limit";
 
 // Bug sweep E, F-5: POST /api/login. Public (src/proxy.ts), and refused with
 // 503 there when authentication is not configured. Accepts a form post (the
@@ -10,6 +22,13 @@ import { clientKey, FailureLimiter, sameOrigin } from "@/lib/rate-limit";
 // a client has 5 failures or attempts in flight; once the global budget is
 // spent, checks are serialised, never refused (AEGIS M-2: the owner still gets
 // in). The Origin header is required and must match scheme and host (L-2).
+// Wave F (M-3): the serialised queue is bounded: past it a request is answered
+// 429 (Retry-After: 1) without a password check, and clients with no failure
+// (the owner) have their own lane, served first.
+// AEGIS A-4: the client key is the socket address (X-Forwarded-For only with
+// DASHBOARD_TRUSTED_PROXY_HOPS), and a device that signed in before (device
+// cookie, re-issued at every sign-in) is keyed by its device id and has its own
+// lane, served before all others.
 export const dynamic = "force-dynamic";
 
 const limiter = new FailureLimiter();
@@ -45,7 +64,8 @@ export async function POST(req: Request) {
   if (!sameOrigin(req)) {
     return Response.json({ error: "login needs a same-origin Origin header" }, { status: 403, headers: NO_STORE });
   }
-  const key = clientKey(req.headers);
+  const device = verifyDevice(cfg, cookieValue(req.headers.get("cookie"), DEVICE_COOKIE), nowSeconds());
+  const key = device ? `device:${device}` : clientKey(req.headers, trustedHops(process.env), process.env);
   const r = limiter.reserve(key); // synchronous: parallel requests cannot all pass (M-1)
   if ("retryAfterS" in r) {
     return Response.json(
@@ -54,23 +74,39 @@ export async function POST(req: Request) {
     );
   }
   let ok = false;
+  let full = false;
   try {
     const password = await readPassword(req, isJson);
     ok =
       password !== null &&
       Buffer.byteLength(password, "utf8") <= MAX_PASSWORD_BYTES &&
-      (await limiter.throttled(() => verifyPassword(password, cfg.hash)));
+      (await limiter.throttled(() => verifyPassword(password, cfg.hash), device ? "device" : r.clean ? "clean" : "general"));
+  } catch (e) {
+    if (!(e instanceof ThrottleQueueFull)) throw e;
+    full = true;
   } finally {
     if (ok) limiter.succeed(r);
+    else if (full) limiter.release(r); // nothing was checked: not a guess, not a failure
     else limiter.fail();
+  }
+  if (full) {
+    return Response.json(
+      { error: "too many login attempts in progress; try again shortly" },
+      { status: 429, headers: { ...NO_STORE, "retry-after": "1" } }
+    );
   }
   if (!ok) {
     return isJson
       ? Response.json({ error: "invalid credentials" }, { status: 401, headers: NO_STORE })
       : new Response(null, { status: 303, headers: { ...NO_STORE, location: "/login?error=1" } });
   }
-  const cookie = sessionCookie(issueSession(cfg, nowSeconds()), cfg.ttlS);
-  return isJson
-    ? Response.json({ ok: true }, { status: 200, headers: { ...NO_STORE, "set-cookie": cookie } })
-    : new Response(null, { status: 303, headers: { ...NO_STORE, location: "/", "set-cookie": cookie } });
+  const headers = new Headers(NO_STORE);
+  headers.append("set-cookie", sessionCookie(issueSession(cfg, nowSeconds()), cfg.ttlS));
+  headers.append("set-cookie", deviceCookie(issueDevice(cfg, nowSeconds()))); // rotated at every sign-in (A-4)
+  if (isJson) {
+    headers.set("content-type", "application/json");
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+  }
+  headers.set("location", "/");
+  return new Response(null, { status: 303, headers });
 }

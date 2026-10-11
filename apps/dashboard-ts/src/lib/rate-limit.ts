@@ -13,16 +13,74 @@
 // global failure budget is spent, password checks are serialised (one scrypt
 // at a time, per process), which bounds the guess rate from rotating or
 // spoofed client keys while the right password still gets through.
+//
+// Wave F (dashboard M-3): the serialised queue is BOUNDED. Unbounded, a flood
+// queued every guess (each one a real scrypt check) and the owner waited behind
+// all of them (25 s seen). Past ``maxQueued`` waiting checks a request is
+// answered 429 at once (no password check, not counted as a failure), and
+// ``cleanSlots`` further places are kept for clients with ZERO failures and no
+// attempt in flight (the owner): they wait in their own lane, which is served
+// first, so a flood from clients that already failed can never starve them.
+// The per-client hard limit is unchanged. A flood from ever-fresh client keys
+// looks clean too: the clean lane is bounded as well, so the worst case for the
+// owner is a prompt 429 (Retry-After: 1), never an unbounded wait.
+//
+// Wave F (AEGIS A-4): the first X-Forwarded-For entry is whatever the client
+// wrote, so rotating it from one host made a new "client" per request and the
+// owner could be locked out. Now:
+//   * the client key is the SOCKET address (``x-zbm-peer-addr``, set over any
+//     client-sent value by scripts/serve.mjs, which runs Next in this process),
+//     and X-Forwarded-For is trusted only when DASHBOARD_TRUSTED_PROXY_HOPS
+//     (1..5) says that many proxies in front append to it: the entry that many
+//     hops from the right is the client. Without either, every request shares
+//     the key "unknown" (one budget for all). Vercel's X-Forwarded-For handling
+//     is UNVERIFIED here: set the hops only after checking it.
+//   * a device that signed in before (a valid device cookie, src/lib/auth.ts)
+//     is keyed by its device id and waits in its own lane (``deviceSlots``),
+//     served before every other, so no flood can take its place.
 
-export type LimiterOptions = { windowMs: number; perKey: number; global: number; maxKeys: number };
-export const LOGIN_LIMITS: LimiterOptions = { windowMs: 15 * 60_000, perKey: 5, global: 50, maxKeys: 10_000 };
+export type LimiterOptions = {
+  windowMs: number;
+  perKey: number;
+  global: number;
+  maxKeys: number;
+  maxQueued?: number;
+  cleanSlots?: number;
+  deviceSlots?: number;
+};
+export const LOGIN_LIMITS: LimiterOptions = {
+  windowMs: 15 * 60_000,
+  perKey: 5,
+  global: 50,
+  maxKeys: 10_000,
+  maxQueued: 8,
+  cleanSlots: 2,
+  deviceSlots: 2,
+};
 
-export type Reservation = { key: string; at: number; released: boolean };
+/** Which queue a serialised check waits in: a known device, a client with no failure, or everyone else. */
+export type Lane = "device" | "clean" | "general";
+
+/** ``clean``: this client had no failure and no attempt in flight when the reservation was taken. */
+export type Reservation = { key: string; at: number; released: boolean; clean: boolean };
+
+/** The serialised queue is full: answer 429 without checking the password. */
+export class ThrottleQueueFull extends Error {
+  constructor() {
+    super("login checks are queued at capacity; try again shortly");
+    this.name = "ThrottleQueueFull";
+  }
+}
+
+type Waiter = { go: () => void };
 
 export class FailureLimiter {
   private readonly byKey = new Map<string, Reservation[]>();
   private all: number[] = [];
-  private gate: Promise<void> = Promise.resolve();
+  private busy = false;
+  private readonly queue: Waiter[] = [];
+  private readonly cleanQueue: Waiter[] = [];
+  private readonly deviceQueue: Waiter[] = [];
   private readonly opts: LimiterOptions;
   private readonly now: () => number;
 
@@ -48,7 +106,7 @@ export class FailureLimiter {
       const until = mine[mine.length - this.opts.perKey].at + this.opts.windowMs;
       return { retryAfterS: Math.max(1, Math.ceil((until - t) / 1000)) };
     }
-    const r: Reservation = { key, at: t, released: false };
+    const r: Reservation = { key, at: t, released: false, clean: mine.length === 0 };
     mine.push(r);
     this.byKey.delete(key); // re-insert: Map order = least recently active first
     this.byKey.set(key, mine);
@@ -65,6 +123,16 @@ export class FailureLimiter {
     this.live(r.key, this.now());
   }
 
+  /** No password was checked (the queue was full): the reservation is given back and nothing is counted. */
+  release(r: Reservation): void {
+    this.succeed(r);
+  }
+
+  /** Waiting checks: [general queue, clean lane, device lane] (tests). */
+  queued(): [number, number, number] {
+    return [this.queue.length, this.cleanQueue.length, this.deviceQueue.length];
+  }
+
   /** The password was wrong: the reservation stays (it is the failure) and the global count grows. */
   fail(): void {
     this.all.push(this.now());
@@ -78,28 +146,52 @@ export class FailureLimiter {
     return this.all.length >= this.opts.global;
   }
 
-  /** Runs ``check`` directly, or one at a time once the global budget is spent (backoff, never a block). */
-  async throttled<T>(check: () => Promise<T>): Promise<T> {
-    if (!this.globalSpent()) return check();
-    const prev = this.gate;
-    let done: () => void = () => {};
-    this.gate = new Promise<void>((resolve) => {
-      done = resolve;
-    });
-    await prev;
+  /** Runs ``check`` directly, or one at a time once the global budget is spent (backoff, never a block). Past
+   * the global budget at most ``maxQueued`` checks wait (plus ``cleanSlots`` for clean clients, served first);
+   * beyond that it rejects with ``ThrottleQueueFull`` before checking anything (the caller answers 429). */
+  async throttled<T>(check: () => Promise<T>, lane: Lane | boolean = "general"): Promise<T> {
+    const want: Lane = lane === true ? "clean" : lane === false ? "general" : lane;
+    if (!this.globalSpent() && !this.busy) return check();
+    if (this.busy) {
+      let q: Waiter[] | null = null;
+      if (want === "device" && this.deviceQueue.length < (this.opts.deviceSlots ?? 0)) q = this.deviceQueue;
+      else if (want !== "general" && this.cleanQueue.length < (this.opts.cleanSlots ?? 0)) q = this.cleanQueue;
+      else if (this.queue.length < (this.opts.maxQueued ?? Infinity)) q = this.queue;
+      if (q === null) throw new ThrottleQueueFull();
+      const lineUp = q;
+      await new Promise<void>((resolve) => lineUp.push({ go: resolve }));
+    }
+    this.busy = true; // held from here (or handed over by the previous check) until this check settles
     try {
       return await check();
     } finally {
-      done();
+      const next = this.deviceQueue.shift() ?? this.cleanQueue.shift() ?? this.queue.shift();
+      if (next) next.go();
+      else this.busy = false;
     }
   }
 }
 
-export function clientKey(headers: Headers): string {
-  const xff = headers.get("x-forwarded-for");
-  const first = xff ? xff.split(",")[0].trim() : "";
-  const ip = first || (headers.get("x-real-ip") ?? "").trim();
-  return ip ? ip.slice(0, 64) : "unknown";
+/** Set by scripts/serve.mjs on every request from the socket (over any client-sent value). */
+export const PEER_HEADER = "x-zbm-peer-addr";
+/** scripts/serve.mjs sets this in its own process: only then is PEER_HEADER the server's, never a client's. */
+export const PEER_HEADER_ENV = "ZBM_DASHBOARD_PEER_HEADER";
+
+/** DASHBOARD_TRUSTED_PROXY_HOPS: 1..5 proxies in front that append to X-Forwarded-For; anything else: none. */
+export function trustedHops(env: Record<string, string | undefined>): number {
+  const raw = (env.DASHBOARD_TRUSTED_PROXY_HOPS ?? "").trim();
+  return /^[1-5]$/.test(raw) ? Number(raw) : 0;
+}
+
+/** The login limiter's client key (AEGIS A-4): never a value the client chose. */
+export function clientKey(headers: Headers, hops = 0, env: Record<string, string | undefined> = {}): string {
+  if (hops > 0) {
+    const parts = (headers.get("x-forwarded-for") ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+    const ip = parts.length >= hops ? parts[parts.length - hops] : "";
+    return ip ? ip.slice(0, 64) : "unknown";
+  }
+  const peer = env[PEER_HEADER_ENV] === "1" ? (headers.get(PEER_HEADER) ?? "").trim() : "";
+  return peer ? `peer:${peer.slice(0, 64)}` : "unknown";
 }
 
 /** AEGIS L-1/L-2: a login or logout POST must carry an Origin whose scheme AND host are this site's: the

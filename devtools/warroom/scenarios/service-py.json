@@ -1,0 +1,1071 @@
+{
+ "library": "service-py",
+ "version": 1,
+ "department": "Customer Service & Success (department 14)",
+ "service": "service-py",
+ "driver": "service_py.py",
+ "basis": "ADR 0014; services/service-py/src/channels.py (OPT_OUT_TERMS, the opt-out scope rules); the phrases pinned by tests/test_sweep_fixes.py (sweep A and the AEGIS re-reviews H-*, N-*, R-*), extracted by AST, never retyped",
+ "variants_per_seed": 2,
+ "scenarios": [
+  {
+   "id": "email-clear-opt-out",
+   "persona": "a customer replying by email to stop all contact",
+   "basis": "every phrase the pinned tests say is an email opt-out (email_opt_out / decision revoke); channels.py documents that S T O P, zero-width, full-width, leet digits and confusables are read through (V1-H1, V1-H3)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_scope_corpus_all_rounds_at_once",
+      "name": "revoke"
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_h1_scope_comes_from_the_phrase_itself",
+      "loop": 1
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_h1_residual_an_email_word_in_the_phrase_makes_it_an_email_opt_out",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_r3_an_email_word_anywhere_in_the_persons_words_widens_the_opt_out",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hc_text_or_email_me_is_an_email_opt_out",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hh_call_or_email_opt_outs_revoke_email",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hj_not_wanting_emails_is_an_email_opt_out",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hn_take_me_off_your_email_list_widens_to_email",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_n4_html_tags_never_merge_words",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_m1_a_misspelled_unsubscribe_by_email_revokes_email",
+      "loop": 0
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "letter_spacing",
+    "letter_punct",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "mixed_language",
+    "injection",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "opt_out_honoured_or_surfaced",
+     "severity": "MUST",
+     "check": "opt_out_honoured_or_surfaced"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "email_revoked",
+     "severity": "SHOULD",
+     "check": "consent_is",
+     "args": {
+      "channel": "email",
+      "status": "revoked"
+     }
+    }
+   ],
+   "downgrade": {
+    "homoglyph_wide": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "quoted_tail": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "long_body_middle": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "letter_punct": [
+     "opt_out_honoured_or_surfaced"
+    ]
+   },
+   "downgrade_basis": "outside what ADR 0014 promises, so scored (SHOULD), not gate-blocking: wide lookalikes (Cherokee, insular, small capitals) are in no service-py document; below an unmarked quote only OPT_OUT_STRONG wording, a bare stop line or a multi-word listed phrase is read (N1, R2, M-1: single words are not); a text over the cap keeps its head and its tail, not its middle (models.py INBOUND_TAIL); digits are read as letters for the listed opt-out terms, not for the OPT_OUT_POSSIBLE wording; a word spelled out with spaces is read (\"S T O P\", V1-H3), with dots / underscores / hyphens is not promised (a dot is a clause end for the scope rules)"
+  },
+  {
+   "id": "email-me-instead",
+   "persona": "a customer asking to be emailed instead of texted",
+   "basis": "the pinned 'keep' phrases: asking to be reached by email never revokes email (AEGIS H-A, H-D, H-F)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_scope_corpus_all_rounds_at_once",
+      "name": "keep"
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_ha_asking_to_be_reached_by_email_keeps_email_consent",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hd_asking_to_be_emailed_is_not_an_email_opt_out",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hf_a_request_to_be_called_or_emailed_keeps_email",
+      "loop": 0
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "mixed_language",
+    "injection",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "email_kept",
+     "severity": "MUST",
+     "check": "consent_is",
+     "args": {
+      "channel": "email",
+      "status": "active"
+     }
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    }
+   ]
+  },
+  {
+   "id": "email-ordinary-support",
+   "persona": "a customer with an ordinary support question (some of it in list-like or channel words)",
+   "basis": "AEGIS H-K / H-L pins: ordinary mail changes no consent; the hours questions of tests/helpers.py",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hl_ordinary_mail_with_list_like_words_changes_no_consent",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hk_other_things_named_email_text_or_mail_are_not_opt_outs",
+      "loop": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/helpers.py",
+      "module": "HOURS_QUESTIONS"
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "mixed_language",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "consent_unchanged",
+     "severity": "MUST",
+     "check": "consent_unchanged"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "no_false_opt_out_alert",
+     "severity": "SHOULD",
+     "check": "no_opt_out_alert"
+    }
+   ]
+  },
+  {
+   "id": "foreign-script-ordinary-sms",
+   "persona": "a customer writing in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek, Hebrew or Arabic, asking to be texted or e-mailed",
+   "basis": "WR-F006 (AEGIS H1): a word wholly in one non-Latin script is never read as a Latin opt-out word; Russian \"по\" (\"by\") was read as \"no\" and \"Пожалуйста, отправьте код по SMS\" revoked SMS consent",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "BENIGN_FOREIGN"
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_sms",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak",
+    "signature",
+    "mixed_language",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "consent_unchanged",
+     "severity": "MUST",
+     "check": "consent_unchanged"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "no_false_opt_out_alert",
+     "severity": "SHOULD",
+     "check": "no_opt_out_alert"
+    }
+   ]
+  },
+  {
+   "id": "foreign-script-ordinary-email",
+   "persona": "a customer writing in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek, Hebrew or Arabic, asking to be texted or e-mailed",
+   "basis": "WR-F006 (AEGIS H1): a word wholly in one non-Latin script is never read as a Latin opt-out word; Russian \"по\" (\"by\") was read as \"no\" and \"Пожалуйста, отправьте код по SMS\" revoked SMS consent",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "BENIGN_FOREIGN"
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "mixed_language",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "consent_unchanged",
+     "severity": "MUST",
+     "check": "consent_unchanged"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "no_false_opt_out_alert",
+     "severity": "SHOULD",
+     "check": "no_opt_out_alert"
+    }
+   ]
+  },
+  {
+   "id": "email-complaint",
+   "persona": "an angry customer complaining that nobody calls or emails back",
+   "basis": "AEGIS H-I: complaints and time limits never revoke email",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hi_complaints_and_time_limits_never_revoke_email",
+      "loop": 0
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "mixed_language",
+    "injection",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "email_kept",
+     "severity": "MUST",
+     "check": "consent_is",
+     "args": {
+      "channel": "email",
+      "status": "active"
+     }
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    }
+   ]
+  },
+  {
+   "id": "email-possible-opt-out",
+   "persona": "a customer whose wording is often, but not always, an opt-out",
+   "basis": "the pre-existing wordings pin (OPT_OUT_POSSIBLE): honoured or surfaced to Andre",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_pre_existing_opt_out_wordings_are_honoured_or_surfaced",
+      "loop": 1
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "mixed_language",
+    "injection",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "opt_out_honoured_or_surfaced",
+     "severity": "MUST",
+     "check": "opt_out_honoured_or_surfaced"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    }
+   ],
+   "downgrade": {
+    "homoglyph_wide": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "quoted_tail": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "long_body_middle": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "leetspeak": [
+     "opt_out_honoured_or_surfaced"
+    ]
+   },
+   "downgrade_basis": "outside what ADR 0014 promises, so scored (SHOULD), not gate-blocking: wide lookalikes (Cherokee, insular, small capitals) are in no service-py document; below an unmarked quote only OPT_OUT_STRONG wording, a bare stop line or a multi-word listed phrase is read (N1, R2, M-1: single words are not); a text over the cap keeps its head and its tail, not its middle (models.py INBOUND_TAIL); digits are read as letters for the listed opt-out terms, not for the OPT_OUT_POSSIBLE wording"
+  },
+  {
+   "id": "email-foreign-opt-out",
+   "persona": "a Spanish-, French- or Portuguese-speaking customer opting out by email",
+   "basis": "the Spanish / French / Portuguese entries of channels.py OPT_OUT_TERMS (from 'alto' on)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "src/channels.py",
+      "module": "OPT_OUT_TERMS",
+      "after": "alto"
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "letter_spacing",
+    "letter_punct",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "injection"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "opt_out_honoured_or_surfaced",
+     "severity": "MUST",
+     "check": "opt_out_honoured_or_surfaced"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    }
+   ],
+   "downgrade": {
+    "homoglyph_wide": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "quoted_tail": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "letter_punct": [
+     "opt_out_honoured_or_surfaced"
+    ]
+   },
+   "downgrade_basis": "outside what ADR 0014 promises, so scored (SHOULD), not gate-blocking: wide lookalikes (Cherokee, insular, small capitals) are in no service-py document; below an unmarked quote only OPT_OUT_STRONG wording, a bare stop line or a multi-word listed phrase is read (N1, R2, M-1: single words are not); a text over the cap keeps its head and its tail, not its middle (models.py INBOUND_TAIL); digits are read as letters for the listed opt-out terms, not for the OPT_OUT_POSSIBLE wording; a word spelled out with spaces is read (\"S T O P\", V1-H3), with dots / underscores / hyphens is not promised (a dot is a clause end for the scope rules)"
+  },
+  {
+   "id": "sms-opt-out",
+   "persona": "a texter replying with any listed opt-out word",
+   "basis": "channels.py OPT_OUT_TERMS: any of them anywhere in an inbound SMS revokes SMS consent (V1-H3), normalised like triage (S T O P, zero-width, full-width)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "src/channels.py",
+      "module": "OPT_OUT_TERMS"
+     }
+    }
+   ],
+   "variants_per_seed": 1,
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_sms",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "letter_spacing",
+    "letter_punct",
+    "signature",
+    "mixed_language",
+    "injection",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "opt_out_honoured_or_surfaced",
+     "severity": "MUST",
+     "check": "opt_out_honoured_or_surfaced"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "sms_revoked",
+     "severity": "SHOULD",
+     "check": "consent_is",
+     "args": {
+      "channel": "sms",
+      "status": "revoked"
+     }
+    }
+   ],
+   "downgrade": {
+    "homoglyph_wide": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "long_body_middle": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "letter_punct": [
+     "opt_out_honoured_or_surfaced"
+    ]
+   },
+   "downgrade_basis": "outside what ADR 0014 promises, so scored (SHOULD), not gate-blocking: wide lookalikes (Cherokee, insular, small capitals) are in no service-py document; below an unmarked quote only OPT_OUT_STRONG wording, a bare stop line or a multi-word listed phrase is read (N1, R2, M-1: single words are not); a text over the cap keeps its head and its tail, not its middle (models.py INBOUND_TAIL); digits are read as letters for the listed opt-out terms, not for the OPT_OUT_POSSIBLE wording; a word spelled out with spaces is read (\"S T O P\", V1-H3), with dots / underscores / hyphens is not promised (a dot is a clause end for the scope rules)"
+  },
+  {
+   "id": "chat-opt-out",
+   "persona": "a client in the portal chat asking to stop all contact",
+   "basis": "channels.py opt_out_level: on chat an exact opt-out revokes, a suspected one pauses SMS and asks Andre",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_scope_corpus_all_rounds_at_once",
+      "name": "revoke"
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_chat",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "letter_spacing",
+    "letter_punct",
+    "signature",
+    "mixed_language",
+    "injection"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "opt_out_honoured_or_surfaced",
+     "severity": "MUST",
+     "check": "opt_out_honoured_or_surfaced"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    }
+   ],
+   "downgrade": {
+    "homoglyph_wide": [
+     "opt_out_honoured_or_surfaced"
+    ],
+    "letter_punct": [
+     "opt_out_honoured_or_surfaced"
+    ]
+   },
+   "downgrade_basis": "outside what ADR 0014 promises, so scored (SHOULD), not gate-blocking: wide lookalikes (Cherokee, insular, small capitals) are in no service-py document; below an unmarked quote only OPT_OUT_STRONG wording, a bare stop line or a multi-word listed phrase is read (N1, R2, M-1: single words are not); a text over the cap keeps its head and its tail, not its middle (models.py INBOUND_TAIL); digits are read as letters for the listed opt-out terms, not for the OPT_OUT_POSSIBLE wording; a word spelled out with spaces is read (\"S T O P\", V1-H3), with dots / underscores / hyphens is not promised (a dot is a clause end for the scope rules)"
+  },
+  {
+   "id": "injection-ordinary-mail",
+   "persona": "an attacker hiding instructions in an ordinary support email",
+   "basis": "ADR 0014: inbound text is data; injection text never changes consent or another contact, and no response carries another contact's data",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/helpers.py",
+      "module": "HOURS_QUESTIONS"
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_fixes.py",
+      "test": "test_hl_ordinary_mail_with_list_like_words_changes_no_consent",
+      "loop": 0
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "injection",
+    "case_flip",
+    "html_wrap",
+    "quoted_reply",
+    "signature",
+    "homoglyph"
+   ],
+   "require": [
+    "injection"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "consent_unchanged",
+     "severity": "MUST",
+     "check": "consent_unchanged"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    }
+   ]
+  }
+ ]
+}

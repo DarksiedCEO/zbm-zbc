@@ -1,0 +1,152 @@
+{
+ "library": "clipper-network-py",
+ "version": 1,
+ "department": "Clipper Network (department 32)",
+ "service": "clipper-network-py",
+ "driver": "clipper_network_py.py",
+ "basis": "ADR 0008 CN-26 / spec 0.1.8: no money value or earnings promise in client text; textguard.money_or_earnings folds NFKC, invisible characters, diacritics and creative-py's confusables (bug sweep C) and leetspeak, letter spacing and separators (L4); a display name that trips it is refused (422)",
+ "variants_per_seed": 4,
+ "scenarios": [
+  {
+   "id": "money-words-display-name",
+   "persona": "an applicant smuggling an earnings promise into their display name",
+   "basis": "tests/test_sweep_c.py money-blocklist pins (homoglyphs, invisible characters, leetspeak, spacing) and their plain forms",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_c.py",
+      "test": "test_m_the_money_blocklist_sees_through_homoglyphs_and_invisible_characters",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_c.py",
+      "test": "test_l4_leetspeak_letter_spacing_and_line_separators_are_folded",
+      "parametrize": true
+     }
+    },
+    {
+     "literal": [
+      "earn cash fast",
+      "payout every week",
+      "guaranteed views",
+      "earn more",
+      "earnings",
+      "5 usd",
+      "Earn Cash"
+     ],
+     "basis": "the plain forms of the pinned variants above"
+    }
+   ],
+   "input_field": "name",
+   "steps": [
+    {
+     "action": "apply",
+     "as": "application",
+     "args": {
+      "display_name": "$name"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "leetspeak",
+    "letter_spacing",
+    "letter_punct",
+    "diacritic_toggle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "application",
+      "codes": [
+       422
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "ordinary-display-name",
+   "persona": "an ordinary applicant whose name looks a little like a money word",
+   "basis": "tests/test_sweep_c.py: ordinary names and text are not flagged (money_or_earnings == [])",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_sweep_c.py",
+      "test": "test_m_ordinary_names_still_pass",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_sweep_c.py",
+      "test": "test_l4_folding_does_not_flag_ordinary_text",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "name",
+   "steps": [
+    {
+     "action": "apply",
+     "as": "application",
+     "args": {
+      "display_name": "$name"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "fullwidth",
+    "diacritic_toggle"
+   ],
+   "chain_max": 1,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "answered",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "application",
+      "codes": [
+       201,
+       422
+      ]
+     }
+    },
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "application",
+      "codes": [
+       201
+      ]
+     }
+    }
+   ],
+   "downgrade": {
+    "case_flip": [
+     "accepted"
+    ],
+    "diacritic_toggle": [
+     "accepted"
+    ]
+   },
+   "downgrade_basis": "the pinned names are accepted as written and full-width (MUST; N-L1: a full-width . ' - is that mark); a case-flipped or re-accented variant is outside the pinned set, so its acceptance is SHOULD; every variant is answered, never a server error"
+  }
+ ]
+}

@@ -70,7 +70,8 @@ def test_o2_a_payment_whose_line_was_owed_at_a_restart_is_counted_from_the_ledge
     svc.close()                                        # restart before the owed line is written
     svc2 = make_service(all_fakes=True, ledger=led, log=RecordLog(d), dir_lock=lock)
     c2 = client_for(svc2)
-    assert c2.post("/zbc/creators/applications", json=_app()).status_code == 201
+    # Wave F (M-1): the creator survived the restart (rebuilt from the log): no re-application, the same one is 409
+    assert c2.post("/zbc/creators/applications", json=_app()).status_code == 409
     r = c2.post("/zbc/creators/clip_1/payments", json={"request_id": "p3", "amount_usd": "1.00"}).json()
     tracked = [e for e in led.events if e["event_type"] == "creator_payment_tracked"]
     assert len(tracked) == 3 and r["paid_to_date_usd"] == "1101.00", r
@@ -203,8 +204,13 @@ def _two_restart_repro(tmp_path, close_at_first_restart: bool):
     assert c2.post("/zbc/creators/clip_1/payments", json={"request_id": "p2", "amount_usd": "1.00"}).json()[
         "paid_to_date_usd"] == "551.00"
     svc2.close()
-    # every intent is closed now: the next start does not read the ledger at all
+    # every intent is closed now. Wave F (AEGIS F-2) supersedes "the next start does not read the ledger": every start
+    # of an on-disk log reads this department's events past the last scanned seq (evidence a crash left unapplied),
+    # so an unreadable ledger refuses start-up; a readable one gives the same totals
     led.fail = True
+    with pytest.raises(RuntimeError, match="cannot be read to check for evidence"):
+        make_service(all_fakes=True, ledger=led, log=RecordLog(d), dir_lock=lock)
+    led.fail = False
     svc3 = make_service(all_fakes=True, ledger=led, log=RecordLog(d), dir_lock=lock)
     assert sum(svc3._paid.values()) == 551
     svc3.close()

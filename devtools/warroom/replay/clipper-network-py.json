@@ -1,0 +1,62 @@
+{
+ "library": "clipper-network-py",
+ "cases": [
+  {
+   "replay_id": "clipper-network-py/R0001",
+   "scenario": "money-words-display-name",
+   "origin": "clipper-network-py/money-words-display-name#009.4@1",
+   "chain": [
+    "leetspeak",
+    "letter_spacing"
+   ],
+   "seed_value": "g u a r a n t e e d",
+   "input": {
+    "name": "g u 4 r 4 n 7 3 e d"
+   },
+   "added": "2026-10-10",
+   "known_failure": null,
+   "failed": [
+    "refused: application: HTTP 201, wanted one of [422]"
+   ],
+   "fixed": "WR-F002"
+  },
+  {
+   "replay_id": "clipper-network-py/R0002",
+   "scenario": "money-words-display-name",
+   "origin": "clipper-network-py/money-words-display-name#009.3@2",
+   "chain": [
+    "leetspeak",
+    "diacritic_toggle"
+   ],
+   "seed_value": "g u a r a n t e e d",
+   "input": {
+    "name": "g ú a r a n t 3 e d"
+   },
+   "added": "2026-10-10",
+   "known_failure": null,
+   "failed": [
+    "refused: application: HTTP 201, wanted one of [422]"
+   ],
+   "fixed": "WR-F002"
+  },
+  {
+   "replay_id": "clipper-network-py/R0003",
+   "scenario": "money-words-display-name",
+   "origin": "clipper-network-py/money-words-display-name#013.1@2",
+   "chain": [
+    "letter_punct",
+    "leetspeak"
+   ],
+   "seed_value": "c a s h",
+   "input": {
+    "name": "c 4 5 h"
+   },
+   "added": "2026-10-10",
+   "known_failure": null,
+   "failed": [
+    "refused: application: HTTP 201, wanted one of [422]"
+   ],
+   "fixed": "WR-F002"
+  }
+ ]
+}

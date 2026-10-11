@@ -19,6 +19,7 @@
 // port, and the next run talked to that stale server. With one process there
 // is nothing to orphan for `next start`. (`next dev` still forks its own
 // worker; that is Next's design and dev is not used by the tests or in CI.)
+import http from "node:http";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
@@ -41,6 +42,19 @@ export function nextArgs(mode, env, extra) {
   return [mode, "-H", host, ...extra];
 }
 
+// Wave F (AEGIS A-4): Next runs in THIS process, so every request it serves passes through http.Server's "request"
+// event here first. The socket address is written into x-zbm-peer-addr (over anything the client sent), and the
+// env flag tells the login limiter (src/lib/rate-limit.ts) that the header is the server's own.
+export const PEER_HEADER = "x-zbm-peer-addr";
+export function installPeerHeader() {
+  process.env.ZBM_DASHBOARD_PEER_HEADER = "1";
+  const emit = http.Server.prototype.emit;
+  http.Server.prototype.emit = function (event, req, ...rest) {
+    if (event === "request" && req && req.headers) req.headers[PEER_HEADER] = req.socket?.remoteAddress ?? "";
+    return emit.call(this, event, req, ...rest);
+  };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [mode, ...extra] = process.argv.slice(2);
   let args;
@@ -58,6 +72,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         "serve it only behind HTTPS."
     );
   }
+  installPeerHeader();
   const require = createRequire(import.meta.url);
   const nextBin = require.resolve("next/dist/bin/next");
   process.argv = [process.execPath, nextBin, ...args];

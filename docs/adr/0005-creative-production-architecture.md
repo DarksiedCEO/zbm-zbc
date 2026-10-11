@@ -1741,3 +1741,40 @@ Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
 restart they are gone (ids no longer collide, C-2), and every ledger event of the old process stays visible as
 committed or attempted in `GET /audit/evidence`. Plan: make the log state-bearing (each decision's line carries the
 state it applied; start-up replays it), workflow by workflow, pre-replay lines kept as evidence only.
+
+## Wave F fixes (Oct 9 2026, branch fix-mediums-wave-f)
+
+Pinned by `tests/test_wave_f_restart.py` (restart round trips compare the whole consequential state of the live app
+with its restarted copy after every step and carry on on the copy).
+
+| Id | Finding | Fix |
+|---|---|---|
+| M-1 | Briefs, jobs, work, rulebooks, kits (with Andre's signatures) and decisions lived in memory only: a restart lost them | Every decision line carries a `state` delta (`src/shared/statelog.py`, the same module as onboarding-py's; `EvidenceRecorder.state`) and `src/state_replay.py` replays it in log order at start: ZBM briefs, jobs, work, review rounds, escalated chains and memory; ZBC rulebooks, goals, rights checks, moment maps, hook sheets, kits, submissions, decisions, kit/submission content hashes and memory; the platform-rules registry rows; rights records and licences. Registry and rights writes now run inside a decision (`recorder.op`), so a record and the state it commits are one line. Deterministic, idempotent (a second restart: same state, nothing written), fail closed (an unknown line kind, field, state version, container, type tag or a value that does not re-encode identically refuses start-up, naming the line). |
+| M-1 (signatures) | A restart must never lose or forge Andre's kit signature | Never forged: after replay every `signed` kit must be signed by `andre` AND named by a committed `campaign_kit_signed_by_andre` record or a resolved signature intent, else start-up is refused; a sign whose record failed is never committed, so an unsigned kit cannot become signed. Never lost: `sign_kit` writes an anchored `kit_signature_intent` line (after the founder token is verified) BEFORE the ledger record; if the decision's own line is owed when the process stops, the next start applies the signature exactly when the ledger holds that record and the kit is still the draft it was made for, and closes the intent with a `kit_signature_resolved` line carrying the state (a resolution that cannot be written leaves the kit a draft in that process and is retried at the next start). |
+| M-1b | Every start read the whole ledger for id resumption (C-2) | `ledger_id_floor` and the intent resolution read this department only, through ledger-rust's paged filtered read (`HttpLedgerClient.entries_filtered`, `select_paged`), with the client-side fallback for a ledger without it; reads are size-capped (256 MB) like onboarding's. |
+
+Not carried (recorded): the per-process retry caches (`_attempts`, `PendingCreations`: event ids carry the random
+instance id, so a cross-restart retry is a new record anyway; burned server ids are still resumed past) and the HTTP
+`Idempotency-Key` store (a client retrying a creation across a restart gets a new server id). The id floor still reads
+every event of this department at each start (not the whole ledger); a persisted high-water mark would bound it.
+
+### AEGIS review of Wave F (038fa93..0928711) — fixes
+
+Pinned by `tests/test_wave_f_restart.py` (`test_f1_*`, `test_f3_*`) and `tests/test_wave_f_aegis_probes.py` (the
+reviewer's signature probes, ported).
+
+| Id | Finding | Fix |
+|---|---|---|
+| F-1 (Medium) | `zbm_memory` / `zbc_memory` were carried whole: every change carried the store (2 000 feedback entries: 212.9 MB of deltas, quadratic) | The memories' winners, brand notes, feedback and library are per-key append-only lists (`StateTracker.add_keyed_lists`): a line carries only each touched key's new entries (`extend`); the delta for one entry is the same size at the 10th and the 2 000th entry (asserted in bytes). No natural cap exists in the memories; none is invented. |
+| F-2 (Medium, same rule) | A decision whose line was owed at a crash was lost | The shared journal appends locally first, then anchors (onboarding-py's fix): a decision whose anchor failed survives the crash; the last line's anchor is re-sent at start. Kit signatures were already covered by their intent lines. Not added here: onboarding's quarantine (a creative decision lost between its record and its local line is `attempted` and is redone; no money or identity rides on it). |
+| F-3 (Low) | An open signature intent was closed `not_on_ledger` while its record could still be in flight; signing again after a failed resolution line recorded a second `campaign_kit_signed_by_andre` | An intent not found on the first read is re-checked once after the rest of `LEDGER_INFLIGHT_GRACE_S` (10 s) since its line (`build_app(startup_sleep=...)`, injectable; tests never wait). Andre's signature of a kit has a process-independent event id (`stable_event_id(type, kit, version, campaign)`), so signing again is the ledger's 200: one signature event. |
+
+### Annotated CI (Oct 10 2026): the regex linearity test
+
+`test_lim_every_regex_in_text_module_is_linear_time` failed on ubuntu 3.12 on every reading: the confusables class
+read 11.7x the reference pattern (bound 9) on a short input. A ratio to an unrelated pattern measures the runner's
+constant factors, not linearity, so it is no longer asserted (printed only). Linearity is now asserted structurally
+(sre's parse tree: no nested unbounded repeat and no backreference unless the pattern, by name and content hash, is in
+`STRUCTURE_REVIEWED` with the reason it is linear; self-test `test_lim_the_structure_check_flags_*`) plus the existing
+loose scaling check (same work on 16x longer adversarial inputs within 4x the CPU, best of 5). Constant factors stay
+judged per pattern against its own reviewed form (`PIN_RATIO_MAX`) and by the 50 ms bound.

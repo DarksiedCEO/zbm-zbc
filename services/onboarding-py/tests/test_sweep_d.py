@@ -66,7 +66,8 @@ def test_d1_a_ruling_recorded_for_a_start_that_never_happened_is_attempted_not_c
     assert c.post("/onboarding/clients", json=start_body()).status_code == 201
     ev = _evidence(c)
     assert ev["counts"]["attempted"] == 0 and ev["counts"]["committed"] >= 2, ev
-    assert all(e["rk"] == "start_client" and e["seq"] == 1 for e in ev["events"])
+    # Wave F (AEGIS F-2): line 1 is the failed attempt's ``attempt`` line (it never commits); line 2 is the retry's
+    assert all(e["rk"] == "start_client" and e["seq"] == 2 for e in ev["events"])
 
 
 def test_d1_a_refused_activation_keeps_its_evidence_committed_and_a_lost_line_is_owed_not_lost():

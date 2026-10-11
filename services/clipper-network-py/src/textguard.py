@@ -26,6 +26,8 @@ import re
 import unicodedata
 from typing import Any, Iterator
 
+import lookalikes
+
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\ud800-\udfff]")
 _CONTROL_STRICT = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 
@@ -190,7 +192,10 @@ def _generated_latin_folds() -> dict[str, str]:
     return out
 
 
-_FOLD_TABLE = str.maketrans({**_generated_latin_folds(), **CONFUSABLES})
+# War room fixes (ADR 0018): the shared lookalike fold (src/lookalikes.py) with this table on top (nothing it folded
+# changes): every Default_Ignorable character out, the final sigma read before casefolding, the Unicode
+# confusables.txt skeleton under the table
+_TABLE = lookalikes.Table({**_generated_latin_folds(), **CONFUSABLES})
 
 
 def fold_for_matching(text: str) -> str:
@@ -198,10 +203,9 @@ def fold_for_matching(text: str) -> str:
     every format / Default_Ignorable character removed (zero-width space and joiners, soft hyphen, bidi controls,
     variation selectors), diacritics stripped (NFKD, combining marks dropped), casefold, lookalike letters mapped to
     the Latin letter they imitate. Currency signs and digits are left as they are (their own patterns match them)."""
-    t = unicodedata.normalize("NFKC", text)
-    t = "".join(ch for ch in t if unicodedata.category(ch) != "Cf" and ch not in "\u034f\u115f\u1160\u3164\uffa0")
+    t = unicodedata.normalize("NFKC", lookalikes.strip_invisible(text))
     t = "".join(ch for ch in unicodedata.normalize("NFKD", t) if not unicodedata.combining(ch))
-    return unicodedata.normalize("NFC", t).casefold().translate(_FOLD_TABLE)
+    return _TABLE.map(_TABLE.casefold(unicodedata.normalize("NFC", t)))
 
 
 def money_or_earnings(text: str) -> list[str]:
@@ -226,6 +230,7 @@ def money_or_earnings(text: str) -> list[str]:
 
 _WORD_PATTERNS = ("currency_code", "earnings_word", "guarantee_word")
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+_LEET_CHARS = frozenset("013457@$")
 
 
 def _collapse(t: str) -> str:
@@ -239,10 +244,15 @@ def _collapse(t: str) -> str:
     t = re.sub(r"(?<=[^\W\d_])[^\w\s]+(?=[^\W\d_])", "", t)        # e.a.r.n -> earn
     out, run = [], []
     for w in t.split() + [""]:                                        # g u a r a n t e e d -> guaranteed
-        if len(w) == 1 and w.isalpha():
+        # WR-F002: a leet digit spelled out on its own ("g u 4 r 4 n 7 3 e d", "c 4 5 h") is a letter of the run;
+        # a run is joined only when it has a real letter, and its digits are then read as letters (2 0 2 4 stays)
+        if len(w) == 1 and (w.isalpha() or w in _LEET_CHARS):
             run.append(w)
             continue
-        out += ["".join(run)] if len(run) >= 3 else run
+        if len(run) >= 3 and any(c.isalpha() for c in run):
+            out.append("".join(run).translate(_LEET))
+        else:
+            out += run
         run = []
         if w:
             out.append(w)
@@ -252,6 +262,7 @@ def _collapse(t: str) -> str:
 # --- display names (AEGIS N16-11) -------------------------------------------------------------------------------
 DISPLAY_NAME_MAX = 80
 _NAME_PUNCT = " .'-"
+_NAME_MARKS = (".", "'", "-")
 _DOMAINISH = re.compile(r"[^\W_]\.[^\W\d_]{2,}")          # "evil.example", "www.x.com" (not "J.R. Smith")
 
 
@@ -266,12 +277,16 @@ def display_name_problem(value: str) -> str | None:
         return "no leading, trailing or doubled spaces"
     for ch in value:
         cat = unicodedata.category(ch)
-        if cat[0] in "LM" or cat == "Nd" or ch in _NAME_PUNCT:
+        # war room N-L1: a full-width (or other compatibility) form of . ' - counts as that mark ("Ｍａｒｙ－Ｊａｎｅ");
+        # never a compatibility space (U+3000 would step around the doubled-space rule)
+        if cat[0] in "LM" or cat == "Nd" or ch in _NAME_PUNCT or unicodedata.normalize("NFKC", ch) in _NAME_MARKS:
             continue
         return f"character U+{ord(ch):04X} ({cat}) is not a letter, digit, space or . ' -"
     if not any(unicodedata.category(ch)[0] == "L" for ch in value):
         return "a name needs at least one letter"
-    if _DOMAINISH.search(value) or re.search(r"(?i)\b(?:https?|www)\b", value):
+    # the web-address checks read the name as written AND after NFKC ("ｅｖｉｌ．ｅｘａｍｐｌｅ", "ｗｗｗ")
+    if any(_DOMAINISH.search(v) or re.search(r"(?i)\b(?:https?|www)\b", v)
+           for v in (value, unicodedata.normalize("NFKC", value))):
         return "no web addresses in a display name"
     if money_or_earnings(value):
         return "no money or earnings words (CN-26)"

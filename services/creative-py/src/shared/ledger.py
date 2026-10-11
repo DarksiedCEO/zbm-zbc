@@ -99,6 +99,55 @@ class LedgerQueryFailed(LedgerNotRecorded):
     """A READ of the ledger (find_event) failed; nothing was changed."""
 
 
+# Wave F: reads are size-capped, and paged + filtered through ledger-rust's ``GET /ledger/entries?after_seq=&limit=
+# &department=&event_type=`` (fix-ledger, sweep F-2; its page maximum is 10 000)
+LEDGER_ENTRIES_MAX_BYTES = 256 * 1024 * 1024
+ENTRIES_PAGE_SIZE = 1000
+
+
+class LedgerPagingUnsupported(Exception):
+    """The ledger has no paged read (before fix-ledger: 404; a stricter one: 400)."""
+
+
+def select_paged(get_page, department: str, event_type: str | None, page_size: int = ENTRIES_PAGE_SIZE,
+                 want: set | None = None, read_all=None, after_seq: int | None = None) -> list[dict]:
+    """This department's entries (of one event type), page by page, in ledger order. With ``want`` (event ids) the
+    read stops at the page where every wanted id has been seen. ``get_page(params)`` raises
+    ``LedgerPagingUnsupported`` on a ledger without the paged read: then ``read_all()`` (the whole ledger) is filtered
+    here. An older ledger that ignores the query answers the whole ledger: recognised (more than a page, or a page
+    that does not move past ``after_seq``)."""
+    def keep(e):
+        return isinstance(e, dict) and e.get("department") == department and (
+            event_type is None or e.get("event_type") == event_type)
+    out: list[dict] = []
+    after = after_seq
+    start = after_seq
+    while True:
+        params = {"limit": str(page_size), "department": department}
+        if event_type is not None:
+            params["event_type"] = event_type
+        if after is not None:
+            params["after_seq"] = str(after)
+        try:
+            page = get_page(params)
+        except LedgerPagingUnsupported:
+            if read_all is None:
+                raise LedgerQueryFailed("the ledger has no paged read") from None
+            return [e for e in read_all() if keep(e) and (start is None or e.get("seq", 0) > start)]
+        seqs = [e.get("seq") for e in page]
+        if not all(isinstance(q, int) and not isinstance(q, bool) for q in seqs):
+            raise LedgerQueryFailed("ledger entries carry no integer seq")
+        if len(page) > page_size or (after is not None and page and seqs[0] <= after):
+            # an older ledger ignored the query: the whole ledger
+            return [e for e in page if keep(e) and (start is None or e.get("seq", 0) > start)]
+        out += [e for e in page if keep(e)]
+        if len(page) < page_size:
+            return out
+        if want is not None and want <= {e.get("event_id") for e in out}:
+            return out
+        after = seqs[-1]
+
+
 class LedgerConflict(LedgerRecordError):
     """409: the ledger already holds a different record under this
     decision's deterministic event id. The outcome is uncertain/conflicting
@@ -270,21 +319,38 @@ class HttpLedgerClient:
         return None
 
     def entries(self) -> list[dict]:
-        """GET /ledger/entries: every entry in ledger order (bug sweep D: /audit/evidence). LedgerQueryFailed."""
+        """GET /ledger/entries: every entry in ledger order (bug sweep D: /audit/evidence), size-capped (Wave F).
+        LedgerQueryFailed."""
+        return self._get_list(None)
+
+    def entries_filtered(self, department: str, event_type: str | None = None, page_size: int = ENTRIES_PAGE_SIZE,
+                         want: set | None = None, after_seq: int | None = None) -> list[dict]:
+        """Wave F: this department's entries (of one type) through ledger-rust's paged, filtered read
+        (``select_paged``); a ledger without it is read in full and filtered here."""
+        return select_paged(self._get_list, department, event_type, page_size, want, self.entries, after_seq)
+
+    def _get_list(self, params: dict | None) -> list[dict]:
         try:
             with httpx.Client(timeout=max(self._timeout, 30.0), transport=self._transport) as client:
-                resp = client.get(f"{self._base_url}/ledger/entries",
-                                  headers={"Authorization": f"Bearer {self._token}"})
-        except (httpx.HTTPError, ValueError) as exc:
+                with client.stream("GET", f"{self._base_url}/ledger/entries", params=params,
+                                   headers={"Authorization": f"Bearer {self._token}"}) as resp:
+                    if params and resp.status_code in (400, 404, 405):
+                        raise LedgerPagingUnsupported("the ledger has no paged read")
+                    if resp.status_code != 200:
+                        raise LedgerQueryFailed(f"ledger could not be read: HTTP {resp.status_code}")
+                    chunks, size = [], 0
+                    for chunk in resp.iter_bytes():
+                        size += len(chunk)
+                        if size > LEDGER_ENTRIES_MAX_BYTES:
+                            raise LedgerQueryFailed("ledger entries larger than the read cap")
+                        chunks.append(chunk)
+            entries = json.loads(b"".join(chunks))
+        except (LedgerQueryFailed, LedgerPagingUnsupported):
+            raise
+        except (httpx.HTTPError, ValueError, RecursionError) as exc:
             raise LedgerQueryFailed(f"ledger could not be read: {type(exc).__name__}") from exc
-        if resp.status_code != 200:
-            raise LedgerQueryFailed(f"ledger could not be read: HTTP {resp.status_code}")
-        try:
-            entries = resp.json()
-        except ValueError as exc:
-            raise LedgerQueryFailed("ledger entries were not JSON") from exc
-        if not isinstance(entries, list):
-            raise LedgerQueryFailed("ledger entries were not a list")
+        if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+            raise LedgerQueryFailed("ledger entries were not a list of objects")
         return entries
 
 
@@ -387,6 +453,20 @@ class FakeLedgerClient:
             raise LedgerQueryFailed("simulated ledger outage (test double)")
         return [{k: v for k, v in e.items() if k != "payload"} | {"seq": i + 1} for i, e in enumerate(self.events)]
 
+    def entries_filtered(self, department: str, event_type: str | None = None, page_size: int = ENTRIES_PAGE_SIZE,
+                         want: set | None = None, after_seq: int | None = None) -> list[dict]:
+        """ledger-rust's paged filtered read, with the same paging (``pages_read`` counts the pages served)."""
+        def page(params):
+            if self.fail_all:
+                raise LedgerQueryFailed("simulated ledger outage (test double)")
+            self.pages_read = getattr(self, "pages_read", 0) + 1
+            after = int(params.get("after_seq", 0))
+            sel = [e for e in FakeLedgerClient.entries(self) if e["seq"] > after
+                   and e["department"] == params["department"]
+                   and ("event_type" not in params or e["event_type"] == params["event_type"])]
+            return sel[:int(params["limit"])]
+        return select_paged(page, department, event_type, page_size, want, after_seq=after_seq)
+
 
 def _clean_summary(summary: str) -> str:
     """Make any text acceptable to ledger-rust: control chars (C0, DEL, C1)
@@ -431,6 +511,9 @@ class EvidenceRecorder:
     # name -> callable returning a server-assigned id counter; every line carries them, a restart resumes past them
     counters: dict = field(default_factory=dict, repr=False)
     closed: bool = False
+    # Wave F (M-1): the service's consequential state (``shared.statelog.StateTracker``); every line carries the state
+    # change since the previous one, and start-up replays it. None = no state is carried (unit tests of the recorder)
+    state: Any = field(default=None, repr=False)
     _depth: int = field(default=0, repr=False)
     _written: list = field(default_factory=list, repr=False)
     _calls: list = field(default_factory=list, repr=False)
@@ -521,22 +604,40 @@ class EvidenceRecorder:
     def _commit_line(self, name: str, partial: bool, ids_only: bool = False):
         written = [] if ids_only else list(self._written)
         counters = self._counters_now()
-        if not written and counters == self._saved_counters:
+        state, mark_held = (None, None)
+        if not ids_only and self.state is not None:
+            state, mark_held = self.state.delta()
+        if not written and counters == self._saved_counters and state is None:
             return None
         extra = {"op": name, "outside_calls": list(self._calls), "counters": counters}
         if partial:
             extra["partial"] = True
+        if state is not None:
+            extra["state"] = state
         kind = "ids" if ids_only else ("partial" if partial else "decision")
         try:
             self.journal.commit(kind, _now_iso(), name, written, extra, owe_on_failure=True)
         except Exception as exc:  # noqa: BLE001 - ledger or local log: the line is owed
             if ids_only:
                 return None
+            if mark_held is not None:
+                mark_held()      # owed: the identical line (with this state) is written before anything else
             return EvidenceLinePending(
                 f"the decision took effect; its local evidence line could not be written yet ({type(exc).__name__})",
                 getattr(exc, "took_effect", False), list(self._calls))
+        if mark_held is not None:
+            mark_held()
         self._saved_counters = counters
         return None
+
+    def write_intent(self, kind: str, data: dict) -> None:
+        """Wave F: an anchored local line written BEFORE a record whose effect a restart must never lose (Andre's kit
+        signature). Raises LedgerNotRecorded when it cannot be written: then nothing is recorded or changed."""
+        try:
+            self.journal.commit(kind, _now_iso(), kind, [], {kind: data})
+        except Exception as exc:  # noqa: BLE001 - the ledger (anchor) or the local log refused
+            raise LedgerNotRecorded(f"the {kind.replace('_', ' ')} could not be written ({type(exc).__name__}); "
+                                    "nothing was recorded or changed") from None
 
     def note_call(self, department: str) -> None:
         """RecordedPort: an outside department is about to be called (its request is already recorded)."""
@@ -556,13 +657,14 @@ class EvidenceRecorder:
             return self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
 
     def record(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any], summary: str,
-               op_key: Any = None) -> str:
+               op_key: Any = None, event_id: str | None = None) -> str:
         """`op_key` (optional) is the operation's identity when the caller
         has a client-chosen idempotency key (e.g. a clip's submission_id);
         by default the canonical payload is the identity."""
         clean = _clean_summary(summary)
         with self.lock:
-            event_id = self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
+            if event_id is None:
+                event_id = self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
             problems = event_field_problems(event_id, DEPARTMENT, event_type, actor, subject_id, clean)
             if problems:
                 raise LedgerFieldInvalid(
@@ -609,6 +711,12 @@ class EvidenceRecorder:
 
 
 MAX_PENDING_CREATIONS = 10_000
+
+
+def stable_event_id(*parts: Any) -> str:
+    """Wave F (AEGIS F-3): an event id that does not depend on this process (no instance id, no sequence): the same
+    decision about the same object always records the same event (the ledger answers 200 for a repeat)."""
+    return "cp:s-" + hashlib.sha256(_canonical(list(parts)).encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def content_sha256(obj: Any) -> str:
