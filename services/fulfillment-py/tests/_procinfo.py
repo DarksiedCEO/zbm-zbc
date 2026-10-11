@@ -6,7 +6,7 @@ alias 127.0.0.2, so they crashed on macOS before checking anything. Every
 live test now goes through this one module:
 
 - Linux: the same /proc files as before (nothing changes there).
-- macOS / BSD: ``ps -o rss= -p <pid>`` (/bin/ps) and
+- macOS / BSD: ``ps -o rss= -p <pid>`` and ``ps -o time= -p <pid>`` (/bin/ps) and
   ``lsof -nP -iTCP:<port> -sTCP:LISTEN -Ftn`` (/usr/sbin/lsof); both ship
   with the OS. ``ss`` does not exist on macOS and is not used.
 
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -79,6 +80,57 @@ def rss_kib_ps(pid: int) -> int:
 
 def rss_mib(pid: int) -> int:
     return rss_kib(pid) // 1024
+
+
+# --- CPU time (fix-flakes-h) -------------------------------------------------
+# A live test that bounds what a request COSTS the server reads the server's
+# CPU time, never the wall clock of a possibly starved box. Linux: utime +
+# stime from /proc/<pid>/stat (clock ticks, 10 ms). Elsewhere (macOS/BSD):
+# ``ps -o time= -p <pid>`` (user + system, 10 ms on macOS). There is NO
+# wall-clock fallback: without a source this raises, so a CPU bound can never
+# silently become a wall-clock bound (the creative-py macOS flake of Oct 11
+# 2026: a per-test helper fell back to the wall clock where /proc is missing).
+
+
+def cpu_seconds(pid: int) -> float:
+    """User + system CPU time of exactly ONE process, in seconds. Raises
+    (never returns a wall time or 0) when the process is gone."""
+    stat = Path(f"/proc/{pid}/stat")
+    if Path("/proc/self/stat").exists():  # Linux (a /proc with per-pid stat files)
+        try:
+            fields = stat.read_text().rsplit(")", 1)[1].split()
+            return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+        except (OSError, IndexError, ValueError) as exc:
+            raise AssertionError(f"no CPU time for pid {pid} in {stat} (exited?): {exc!r}") from None
+    return cpu_seconds_ps(pid)
+
+
+def cpu_seconds_ps(pid: int) -> float:
+    """CPU time of ``pid`` via ``ps -o time=`` (the macOS/BSD path; on Linux
+    procps prints whole seconds, so Linux uses /proc)."""
+    ps = shutil.which("ps") or "/bin/ps"
+    r = subprocess.run([ps, "-o", "time=", "-p", str(pid)], capture_output=True, text=True, timeout=30,
+                       check=False)
+    value = r.stdout.strip()
+    if r.returncode != 0 or not value:
+        raise AssertionError(f"ps reports no CPU time for pid {pid} (exited?): rc={r.returncode} {r.stderr.strip()!r}")
+    return parse_ps_time(value)
+
+
+_PS_TIME = re.compile(r"(?:(\d+)-)?(?:(?:(\d+):)?(\d+):)?(\d+(?:\.\d+)?)")
+
+
+def parse_ps_time(text: str) -> float:
+    """``ps``'s cumulative CPU time in seconds: ``[DD-][[HH:]MM:]SS[.frac]``.
+    macOS prints ``M:SS.cc`` (minutes past 59 too, e.g. ``75:03.21``) or
+    ``H:MM:SS.cc``; procps prints ``[DD-]HH:MM:SS``. Anything else raises."""
+    m = _PS_TIME.fullmatch(text.strip())
+    if m is None:
+        raise ValueError(f"not a ps CPU time: {text!r}")
+    days, hours, minutes, seconds = m.groups()
+    if days is not None and hours is None:
+        raise ValueError(f"not a ps CPU time (days without hours): {text!r}")
+    return int(days or 0) * 86400 + int(hours or 0) * 3600 + int(minutes or 0) * 60 + float(seconds)
 
 
 # --- listening sockets -------------------------------------------------------

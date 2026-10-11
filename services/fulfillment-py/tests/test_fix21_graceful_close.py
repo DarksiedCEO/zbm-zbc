@@ -12,6 +12,7 @@ The server here is the service's own protocol class under uvicorn, in a child pr
 """
 from __future__ import annotations
 
+import errno
 import os
 import select
 import socket
@@ -238,6 +239,11 @@ def _module():
         sys.path.remove(str(SRC))
 
 
+# How a send fails once the server has closed (reset) the connection: ECONNRESET / EPIPE / ECONNABORTED everywhere, and
+# EPROTOTYPE on macOS while the RST is tearing the socket down (a known XNU send() race; CPython bpo msg316328).
+CUT_ERRNOS = frozenset({errno.ECONNRESET, errno.EPIPE, errno.ECONNABORTED, errno.EPROTOTYPE})
+
+
 def test_the_drain_is_bounded_in_bytes_a_client_that_keeps_sending_is_cut(one_slot):
     """The drain is bounded (DRAIN_MAX_BYTES): a client still sending long after the answer is closed on, by design —
     it is not read forever. The child's drain WINDOW is 30 s here, so the cut can only come from the byte bound; it
@@ -255,12 +261,16 @@ def test_the_drain_is_bounded_in_bytes_a_client_that_keeps_sending_is_cut(one_sl
             try:
                 sent += s.send(b"x" * 65536)
             except OSError as exc:
-                cut = type(exc).__name__
+                cut = exc
                 break
         assert cut is not None, f"{sent} bytes accepted after the answer: the drain is not bounded in bytes"
         # The server's close, not the client's own hang guard (fix wave 25, E-C review): a server that simply stopped
-        # reading would block this send until the socket timeout, and a TimeoutError is not a cut.
-        assert cut in ("ConnectionResetError", "BrokenPipeError", "ConnectionAbortedError"), (cut, sent)
+        # reading would block this send until the socket timeout, and a TimeoutError is not a cut. The cut is judged
+        # by errno, not by exception class (fix-flakes-h): macOS can fail a send on a socket the peer's RST is tearing
+        # down with EPROTOTYPE ("Protocol wrong type for socket"), which Python raises as a plain OSError — the same
+        # server close as ECONNRESET/EPIPE. A timeout has no errno (None), so it still fails here.
+        assert not isinstance(cut, TimeoutError), (repr(cut), sent)
+        assert cut.errno in CUT_ERRNOS, (repr(cut), cut.errno, sent)
     finally:
         s.close()
         hold.close()
