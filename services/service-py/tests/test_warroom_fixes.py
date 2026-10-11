@@ -294,3 +294,52 @@ def test_n_h1_the_c_level_deletions_equal_the_per_character_tests_they_replace()
         assert triage._fold(t) == "".join(c for c in u.normalize("NFKD", t) if not u.combining(c)).lower()
         assert lookalikes.strip_invisible(t) == "".join(
             c for c in t if c not in lookalikes._IGNORABLE and u.category(c) != "Cf")
+
+
+# AEGIS round 3, R3-M1 (no RSS or wall clock; the cache is shown bounded by what it holds): the per-word cache of the
+# opt-out fold was capped by entries only, and each hostile message kept one unique ~80,000-letter word (19,990 x
+# U+FDF2 NFKC-expanded, plus a random tail), ~0.33 MB per message. A piece longer than CACHE_PIECE_MAX is no longer
+# kept, and the cache never holds more than CACHE_CHARS_MAX characters or CACHE_ENTRIES_MAX entries.
+def test_r3_m1_hostile_unique_long_words_do_not_grow_the_word_cache():
+    import random
+
+    import lookalikes
+    rng = random.Random(1)
+    arabic = [chr(x) for x in range(0x0628, 0x063A)]
+    tables = (triage._OPT_OUT_FOLD, ch._CASEFOLD_FIRST)
+    sizes = []
+    for _ in range(25):
+        text = "ﷲ" * 19_990 + "".join(rng.choice(arabic) for _ in range(10))
+        ch.opt_out_level(text)
+        ch.email_opt_out_decision(text)
+        ch.possible_opt_out(text)
+        ch.quoted_tail_opt_out(text)
+        ch.typo_opt_out(text)
+        sizes.append([t.cache_size() for t in tables])
+        for t in tables:
+            assert all(len(k[0]) <= lookalikes.CACHE_PIECE_MAX for k in t._words)
+    assert sizes[-1] == sizes[0], (sizes[0], sizes[-1])      # 25 hostile messages later: not one character more
+    # what is not cached is still read the same way: the same text through a fresh table folds alike
+    text = "ﷲ" * 19_990 + "stop"
+    assert triage._OPT_OUT_FOLD.fold(text, triage._opt_out_disguise) == \
+        lookalikes.Table({chr(k): v for k, v in triage.CONFUSABLES.items()}).fold(text, triage._opt_out_disguise)
+
+
+def test_r3_m1_the_word_cache_is_bounded_by_characters_and_entries():
+    import lookalikes
+    table = lookalikes.Table({"а": "a"})
+    for i in range(40_000):     # 40,000 distinct 40-letter Cyrillic words: 3.2 M characters with their folds
+        w = "".join(chr(0x0430 + (i >> s & 31)) for s in range(0, 40 * 5, 5))
+        table.fold(f"{w} {w}", single_script=lambda f: False)
+        entries, chars = table.cache_size()
+        assert entries <= lookalikes.CACHE_ENTRIES_MAX and chars <= lookalikes.CACHE_CHARS_MAX, (i, entries, chars)
+    assert table.cache_size()[1] == sum(len(k[0]) + len(v) for k, v in table._words.items())
+
+
+def test_r3_l1_the_script_cache_is_bounded():
+    import lookalikes
+    letters = [chr(cp) for cp in range(0x4E00, 0x4E00 + 3 * lookalikes.SCRIPT_CACHE_MAX)]   # CJK: all one script
+    for i in range(0, len(letters), 50):
+        assert lookalikes.one_script("".join(letters[i:i + 50]))
+        assert len(lookalikes._SCRIPT) <= lookalikes.SCRIPT_CACHE_MAX
+    assert lookalikes._script("п") == "CYRILLIC" and lookalikes._script("a") == "LATIN"

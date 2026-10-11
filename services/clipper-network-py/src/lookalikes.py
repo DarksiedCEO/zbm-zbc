@@ -302,10 +302,17 @@ def _latin_named() -> dict[str, str]:
 LATIN_NAMED: dict[str, str] = _latin_named()
 
 
+# AEGIS round 3 (R3-M1): bounds of a Table's per-word cache (``Table._remember``). A word of an ordinary message is far
+# shorter than CACHE_PIECE_MAX; the run between two words (spaces, punctuation) is a piece too.
+CACHE_PIECE_MAX = 64
+CACHE_ENTRIES_MAX = 50_000
+CACHE_CHARS_MAX = 1_000_000
+
+
 class Table:
     """A service's fold: its own table over the shared layers (see the module docstring, step 5)."""
 
-    __slots__ = ("_early", "_full", "_own_early", "_own", "_words", "mapping")
+    __slots__ = ("_early", "_full", "_own_early", "_own", "_words", "_cached_chars", "mapping")
 
     def __init__(self, own: dict[str, str] | None = None) -> None:
         own = dict(own or {})
@@ -314,6 +321,7 @@ class Table:
                                          if len(k) == 1 and k.lower() == k and k.casefold() != k})
         self._own = str.maketrans(own)
         self._words: dict[tuple[str, Optional[Callable[[str], bool]]], str] = {}
+        self._cached_chars = 0                  # characters held by _words (pieces and their folds)
         hand = {**SHARED, **own}
         # step 3: hand-table letters that casefold would turn into ANOTHER letter (the final sigma), and upper-case
         # skeleton letters whose casefold nothing maps (folding them as written cannot change an existing fold)
@@ -331,8 +339,6 @@ class Table:
         if single_script is None or t.isascii():
             return self._fold_all(t)
         cache = self._words
-        if len(cache) > 50_000:                     # bounded: a hostile text of all-different words cannot grow it
-            cache.clear()
         out = []
         for i, p in enumerate(_WORD.split(t)):
             key = (p, single_script if i % 2 else None)
@@ -340,9 +346,29 @@ class Table:
             if got is None:                         # N-H1: each distinct piece is classified and folded once
                 full = self._fold_all(p)
                 # between words (even index) there are no letters to choose a reading for
-                got = cache[key] = full if not i % 2 or not one_script(p) or single_script(full) else self._fold_own(p)
+                got = full if not i % 2 or not one_script(p) or single_script(full) else self._fold_own(p)
+                self._remember(key, got)
             out.append(got)
         return "".join(out)
+
+    def _remember(self, key: tuple[str, Optional[Callable[[str], bool]]], got: str) -> None:
+        """AEGIS round 3 (R3-M1): the per-word cache is bounded by SIZE, not only by entries. A piece longer than
+        ``CACHE_PIECE_MAX`` is not kept (folding it again is one linear pass; ordinary words are short and repeat, a
+        hostile unique 20,000-letter word kept per message grew the process ~0.33 MB a message); the cache is
+        emptied before it would hold more than ``CACHE_ENTRIES_MAX`` entries or ``CACHE_CHARS_MAX`` characters."""
+        p = key[0]
+        if len(p) > CACHE_PIECE_MAX:
+            return
+        size = len(p) + len(got)
+        if len(self._words) >= CACHE_ENTRIES_MAX or self._cached_chars + size > CACHE_CHARS_MAX:
+            self._words.clear()
+            self._cached_chars = 0
+        self._words[key] = got
+        self._cached_chars += size
+
+    def cache_size(self) -> tuple[int, int]:
+        """(entries, characters) the per-word cache holds now (for the tests that bound it)."""
+        return len(self._words), self._cached_chars
 
     def fold_cased(self, text: str) -> str:
         """Steps 1-5: invisible characters out, NFKC, the early letters, casefold, the table."""
@@ -391,12 +417,15 @@ def _mark_ranges() -> str:
 # group gives the text back as [between, word, between, word, ..., between] (N-H1: one C-level pass, not a loop).
 _WORD = re.compile(f"((?:[^\\W_]|[{_mark_ranges()}])+)")
 _SCRIPT: dict[str, str] = {}
+# AEGIS round 3 (R3-L1): the per-code-point cache is bounded (emptied before it would pass this many entries); a
+# message cycling through every assigned code point can no longer grow it to the whole code space
+SCRIPT_CACHE_MAX = 4096
 
 
 def _script(ch: str) -> str:
     """"LATIN" for an ASCII letter or digit and every letter Unicode names LATIN; otherwise the first word of the
     character's name (CYRILLIC, GREEK, HEBREW, ARABIC, CHEROKEE, ...); "" for a mark or a digit outside ASCII
-    (they belong to no script for this purpose). Cached per code point."""
+    (they belong to no script for this purpose). Cached per code point (at most ``SCRIPT_CACHE_MAX`` of them)."""
     got = _SCRIPT.get(ch)
     if got is None:
         if ch.isascii():
@@ -405,6 +434,8 @@ def _script(ch: str) -> str:
             got = ""
         else:
             got = unicodedata.name(ch, "?").split(" ", 1)[0]
+        if len(_SCRIPT) >= SCRIPT_CACHE_MAX:
+            _SCRIPT.clear()
         _SCRIPT[ch] = got
     return got
 
