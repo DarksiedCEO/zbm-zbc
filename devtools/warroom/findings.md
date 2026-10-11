@@ -139,7 +139,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Why it is a MUST failure: `Fetcher.fetch` promises it "never raises for a network outcome" (ADR 0017 decision 11:
   redirects followed by hand, every hop checked), and a hostile site's answer is a network outcome.
 - Replay: `seo-py/R0005`, `seo-py/R0007` (seed 1).
-- Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; the commit after `85601fc` on branch `seo-dept-02-wave1`): `fetch._one` maps `httpx.InvalidURL` to REFUSED_URL (and `httpx.StreamError` to PROTOCOL_ERROR), and the redirect loop refuses a Location `urljoin` cannot read. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
+- Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; commit `be9093c` on branch `seo-dept-02-wave1`): `fetch._one` maps `httpx.InvalidURL` to REFUSED_URL (and `httpx.StreamError` to PROTOCOL_ERROR), and the redirect loop refuses a Location `urljoin` cannot read. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
 
 ## WR-F009 — seo-py: an invalid canonical link makes Selene dereference None (the audit answers 500)
 
@@ -151,7 +151,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Why it is a MUST failure: decision 9 (crawled content is data) and decision 11's fail-closed parsing: a page's
   markup is never allowed to stop the audit.
 - Replay: `seo-py/R0003`, `seo-py/R0006` (seed 1), `seo-py/R0011` (seed 2), `seo-py/R0013` (seed 3).
-- Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; the commit after `85601fc` on branch `seo-dept-02-wave1`): the parser drops an unreadable canonical and counts it (`canonicals_invalid`); Selene reports `CANONICAL_INVALID` and reads hosts through `agents.host_of`. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
+- Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; commit `be9093c` on branch `seo-dept-02-wave1`): the parser drops an unreadable canonical and counts it (`canonicals_invalid`); Selene reports `CANONICAL_INVALID` and reads hosts through `agents.host_of`. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
 
 ## WR-F010 — seo-py: an invalid URL in robots.txt or a sitemap index makes Delia raise (the audit answers 500)
 
@@ -163,7 +163,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   fatal).
 - Replay: `seo-py/R0001`, `seo-py/R0002`, `seo-py/R0004` (seed 1), `seo-py/R0008`, `seo-py/R0009`, `seo-py/R0010`
   (seed 2), `seo-py/R0012`, `seo-py/R0014`, `seo-py/R0015` (seed 3).
-- Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; the commit after `85601fc` on branch `seo-dept-02-wave1`): Delia reads every crawled URL through `agents.split_url` / `host_of`, which answer None for a URL `urlsplit` cannot read. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
+- Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; commit `be9093c` on branch `seo-dept-02-wave1`): Delia reads every crawled URL through `agents.split_url` / `host_of`, which answer None for a URL `urlsplit` cannot read. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
 
 ## AEGIS round 2 (review of the WR-F006 / WR-F007 fixes)
 

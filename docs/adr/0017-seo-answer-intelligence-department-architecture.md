@@ -302,6 +302,21 @@ W3-3. **War room** (ADR 0018; `devtools/warroom/drivers/seo_py.py`, `scenarios/s
    (a real Cyrillic path is not rewritten). Over-minimisation, stated: a non-Latin segment whose fold is 20+ letters
    is now `{token}`.
 
+W3-4. **Not built in Wave 3, and why** (the rest of the unlock list):
+   - Department 28 clientfix hand-off: the only Department 28 service in the repository (`services/delivery-py`,
+     ADR 0011) is the AEGIS fix engine for this repository's own code; it has no intake for fixes on a client's
+     site, so a port would invent its contract. Needs Department 28's design and a founder decision.
+   - Console pages: `apps/dashboard-ts` is one page for Revenue Recovery findings; no department has console pages
+     and there is no pattern to follow. The evidence views exist on the API (`/audit/evidence`, `/department`,
+     `/status`).
+   - Answer-engine adapters, Search Console, Bing Webmaster: need provider credentials (and the scoped, short-lived
+     credential design the security model requires).
+   - A renderer, a prompt-volume source, listing writes (GBP, Apple Business Connect, Bing Places): founder decisions
+     pending (which renderer and where it runs; which data source; Legal wording for non-reverting listings, flag 6).
+   - Marcus and Julian (flags 2 and 3) and the spec's remaining agents: founder decisions or data sources pending.
+   - Andre's approvals through Cybersecurity (22) passkeys: no service has adopted security-py's approval API yet;
+     a cross-department change, not this department's alone.
+
 Founder-pending defaults added by Wave 3: (12) verification is ON by default, so until Finance is wired every paid run
 needs Andre's override; (13) one invoice pays for one one-off audit or one schedule (with all its slots), and an
 interrupted audit gives its invoice back; (14) any refund or chargeback on the invoice, partial ones included, refuses
