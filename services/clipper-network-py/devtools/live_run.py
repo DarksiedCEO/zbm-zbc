@@ -78,6 +78,10 @@ def expect(what: str, ok: bool, observed=None) -> None:
     if not ok:
         MISMATCHES.append(what)
         say(f"MISMATCH: {what} (observed: {observed!r})"[:1500])
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # an annotation: readable through the check-run API when the job log is not
+            msg = what.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::error title=clipper-network-py live run::check failed: {msg}", flush=True)
 
 
 def wait_health(url: str, proc: subprocess.Popen, timeout: float = 25.0) -> dict:
@@ -353,6 +357,7 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
+                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
                 say(f"stopped pid={p.pid}")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 

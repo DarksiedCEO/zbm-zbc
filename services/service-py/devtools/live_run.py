@@ -50,6 +50,10 @@ def say(msg: str) -> None:
 def check(name: str, ok: bool) -> None:
     CHECKS.append((name, bool(ok)))
     say(f"  CHECK {'PASS' if ok else 'FAIL'}: {name}")
+    if not ok and os.environ.get("GITHUB_ACTIONS") == "true":
+        # an annotation: readable through the check-run API when the job log is not
+        msg = name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=service-py live run::check failed: {msg}", flush=True)
 
 
 def free_port() -> int:
@@ -332,6 +336,7 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
+                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 
 

@@ -84,6 +84,10 @@ def finish_work_dir(work: Path, keep: bool) -> None:
 def check(name: str, ok: bool) -> None:
     CHECKS.append((name, bool(ok)))
     say(f"  CHECK {'PASS' if ok else 'FAIL'}: {name}")
+    if not ok and os.environ.get("GITHUB_ACTIONS") == "true":
+        # an annotation: readable through the check-run API when the job log is not
+        msg = name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=finance-py live run::check failed: {msg}", flush=True)
 
 
 def rid(p="live") -> str:

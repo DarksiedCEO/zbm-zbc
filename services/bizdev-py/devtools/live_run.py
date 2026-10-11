@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -63,6 +64,39 @@ def say(msg: str) -> None:
 def check(name: str, ok: bool) -> None:
     CHECKS.append((name, bool(ok)))
     say(f"  CHECK {'PASS' if ok else 'FAIL'}: {name}")
+    if not ok and os.environ.get("GITHUB_ACTIONS") == "true":
+        # an annotation: readable through the check-run API when the job log is not
+        msg = name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=bizdev-py live run::check failed: {msg}", flush=True)
+
+
+# The fields ledger-rust itself writes on every entry. bizdev-py cannot put anything in them, and they carry the
+# ledger's own values: recorded_at has nanoseconds ("...T04:09:12.501234567Z" holds "12.50"), hash/prev_hash are
+# hex. A probe for leaked text is matched against the entries WITHOUT these fields, and each is held to its exact
+# shape instead, so leaving them out of the text scan cannot hide anything.
+LEDGER_WRITTEN = ("kind", "seq", "recorded_at", "prev_hash", "hash")
+RFC3339_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", re.ASCII)
+HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def ledger_leaks(entries: list[dict], probes: tuple[str, ...]) -> list[str]:
+    """Every problem with ``entries`` (GET /ledger/entries): a probe found in the fields the department wrote, or a
+    ledger-written field not of its exact shape. Empty: nothing leaked."""
+    problems = []
+    for e in entries:
+        where = f"entry seq {e.get('seq')!r}"
+        if not (type(e.get("seq")) is int and e["seq"] >= 0):
+            problems.append(f"{where}: seq is not a non-negative integer")
+        if e.get("kind") not in ("event", "finding"):
+            problems.append(f"{where}: kind {e.get('kind')!r} is not event or finding")
+        if not (isinstance(e.get("recorded_at"), str) and RFC3339_UTC.fullmatch(e["recorded_at"])):
+            problems.append(f"{where}: recorded_at {e.get('recorded_at')!r} is not an RFC 3339 UTC timestamp")
+        for k in ("hash", "prev_hash"):
+            if not (isinstance(e.get(k), str) and HEX64.fullmatch(e[k])):
+                problems.append(f"{where}: {k} is not 64 lowercase hex digits")
+    text = json.dumps([{k: v for k, v in e.items() if k not in LEDGER_WRITTEN} for e in entries])
+    problems += [f"{probe!r} is on the ledger" for probe in probes if probe in text]
+    return problems
 
 
 def free_port() -> int:
@@ -403,10 +437,10 @@ def _main(work: Path) -> int:
               {"log_anchor", "pursuit_opened", "bid_decided", "block_approved", "response_approved",
                "submission_queued", "checklist_attested", "rate_approved", "template_approved", "reply_holds_applied",
                "contact_created"} <= set(types))
-        blob = json.dumps(ents)
-        check("no email, name, amount, rate or reply text on the ledger",
-              "pat@livewest.test" not in blob and "Live West" not in blob and "6000.00" not in blob
-              and "12.50" not in blob and "Sounds good" not in blob and "Live Acme" not in blob)
+        leaks = ledger_leaks(ents, ("pat@livewest.test", "Live West", "6000.00", "12.50", "Sounds good", "Live Acme"))
+        for problem in leaks:
+            say(f"  ledger: {problem}")
+        check("no email, name, amount, rate or reply text on the ledger", not leaks)
         v = httpx.get(L + "/ledger/verify", headers=lh, timeout=120)
         check("ledger verifies valid", v.status_code == 200 and v.json().get("valid") is True)
         failed = [n for n, ok in CHECKS if not ok]
@@ -420,6 +454,7 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
+                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 
 
