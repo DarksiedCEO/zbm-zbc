@@ -91,10 +91,13 @@ def _squeeze(w: str) -> str:
 _DISGUISE_SQUEEZED = frozenset(_squeeze(w) for w in OPT_OUT_DISGUISE_WORDS)
 
 
-# brackets, quotation marks and mathematical symbols (Ps Pe Pi Pf Sm: "(", "«", "≪", "＜" ...), for the reading in which
-# they separate words (``split_brackets``)
-_BRACKETS = re.compile("[" + lookalikes.char_class([cp for cp in range(0x110000) if unicodedata.category(chr(cp))
-                                                    in ("Ps", "Pe", "Pi", "Pf", "Sm")]) + "]+")
+# A tag-shaped run: an opening angle bracket (or a lookalike that survives NFKC: "≪", "‹", "«", "〈", "⟨"; "＜", "﹤" and
+# "≮" are "<" by then), at most 200 characters without another bracket or a line end, and a closing one. In the
+# ``tags_as_spaces`` reading such a run is a space: a tag the HTML reading does not know ("<b>" disguised as "<в>",
+# an entity disguised by its case, "&Lt;b&Gt;", which decodes to "≪b≫") must not glue "b>unsubscribe</b" into one
+# word. Only a run that opens AND closes counts (fix wave G, G-L2): a lone "<" or ">" inside a word ("st<op", AEGIS
+# G-M1) is dropped between letters as before the war room, and "x>stop<y" is not a tag.
+_TAG_SPAN = re.compile(r"[<≪‹«〈⟨][^<>≪≫‹›«»〈〉⟨⟩\n]{0,200}[>≫›»〉⟩]")
 # every character with a non-zero canonical combining class, as one regex class (the whole code space scanned once;
 # one C-level deletion instead of a Python loop per character, as service-py's triage._COMBINING_CHARS)
 _COMBINING = re.compile("[" + lookalikes.char_class([cp for cp in range(0x110000)
@@ -119,11 +122,27 @@ _HTML_TAGS = ("a|abbr|b|big|blockquote|body|center|cite|code|col|colgroup|dd|del
               "html|i|img|ins|kbd|label|link|main|mark|meta|nav|o:p|pre|q|s|section|small|span|strike|strong|style|sub|"
               "sup|tbody|td|tfoot|th|thead|title|tt|u|var|wbr|v:[a-z]+|w:[a-z]+")
 _ANY_TAG = re.compile(r"<!--.{0,2000}?-->|<\s*/?\s*(?:" + _HTML_TAGS + r")\b[^<>]{0,500}>", re.IGNORECASE | re.DOTALL)
+# service-py's channels._STYLE_SCRIPT (AEGIS M-7: bounded, never scans an unclosed flood): a <style> or <script>
+# element's content is a mail client's, never the person's words (fix wave G, G-L2: ".unsubscribe{color:red}" in a
+# style sheet suppressed)
+_STYLE_SCRIPT = re.compile(r"<(style|script)\b[^<>]{0,500}>[^<]{0,50000}(?:<(?!/\1)[^<]{0,50000}){0,200}</\1\s*>",
+                           re.IGNORECASE)
+
+
+def drop_style_script(text: str) -> str:
+    """Every closed <style> / <script> element read as a space (text without one is returned unchanged)."""
+    if "<" not in text:
+        return text
+    low = text.lower()
+    if "</style" not in low and "</script" not in low:
+        return text
+    return _STYLE_SCRIPT.sub(" ", text)
 
 
 def html_as_text(text: str) -> str:
-    """Entities decoded (a double-escaped one too: service-py's triage.clean order), then tags read as spaces (a block
-    tag as a line end). Text without an entity or a tag is returned unchanged."""
+    """Entities decoded (a double-escaped one too: service-py's triage.clean order), then <style> / <script> elements
+    dropped and tags read as spaces (a block tag as a line end). Text without an entity or a tag is returned
+    unchanged."""
     t = text
     for _ in range(3):
         if "&" not in t:
@@ -133,7 +152,7 @@ def html_as_text(text: str) -> str:
             break
         t = u
     if "<" in t and ">" in t:
-        t = _ANY_TAG.sub(" ", _BLOCK_TAG.sub("\n", t))
+        t = _ANY_TAG.sub(" ", _BLOCK_TAG.sub("\n", drop_style_script(t)))
     return t
 
 
@@ -148,14 +167,14 @@ def _fold_word(w: str, leet: dict = _LEET) -> str:
     return w
 
 
-def normalise(text: str, shared: bool = False, casefold_first: bool = False, split_brackets: bool = False,
+def normalise(text: str, shared: bool = False, casefold_first: bool = False, tags_as_spaces: bool = False,
               one_as_i: bool = False) -> str:
     """The text as the rules read it (step 0 above). ``shared``: the letters in ``_SHARED_READS`` read as the shared
     fold reads them. ``casefold_first``: case folded before the lookalike fold, as this module read text before the
     war room (a capital Greek eta "Η" is then "η", "n"; folded as written it is the "H" it looks like).
-    ``split_brackets``: brackets, quotation marks and mathematical symbols separate words instead of being dropped
-    between letters ("≪b≫unsubscribe" -> "b unsubscribe"). ``one_as_i``: a "1" read as a letter is "i", not "l"."""
-    return _finish(_prepare(text, shared, casefold_first), split_brackets, one_as_i)
+    ``tags_as_spaces``: a tag-shaped run (``_TAG_SPAN``) is a space ("≪b≫unsubscribe" -> "unsubscribe").
+    ``one_as_i``: a "1" read as a letter is "i", not "l"."""
+    return _finish(_prepare(text, shared, casefold_first), tags_as_spaces, one_as_i)
 
 
 @functools.lru_cache(maxsize=16)     # a pure function; classify reads one reply in several readings
@@ -170,15 +189,14 @@ def _prepare(text: str, shared: bool, casefold_first: bool) -> str:
     return t.translate(_CONFUSABLE_SHARED if shared else _CONFUSABLE).replace("_", " ")
 
 
-def _finish(t: str, split_brackets: bool, one_as_i: bool) -> str:
+def _finish(t: str, tags_as_spaces: bool, one_as_i: bool) -> str:
     leet = _LEET_I if one_as_i else _LEET
     if _LEET_CHAR.search(t):
         t = " ".join(_fold_word(w, leet) for w in t.split())
-    if split_brackets:
-        t = _BRACKETS.sub(" ", t)
-    # S.T.O.P -> stop, don't -> dont, opt-out -> optout; "<" and ">" always separate words (a tag the HTML reading does
-    # not know, "<b>" disguised as "<в>", must not glue "b>unsubscribe</b" into one word)
-    t = re.sub(r"(?<=[^\W\d_])[^\w\s<>]+(?=[^\W\d_])", "", t)
+    if tags_as_spaces:
+        t = _TAG_SPAN.sub(" ", t)
+    # S.T.O.P -> stop, don't -> dont, opt-out -> optout, st<op -> stop (punctuation between letters dropped)
+    t = re.sub(r"(?<=[^\W\d_])[^\w\s]+(?=[^\W\d_])", "", t)
     t = re.sub(r"[^\w\s]+", " ", t)
     words, out, run = t.split(), [], []
     for w in words + [""]:
@@ -210,13 +228,13 @@ def classify(text: str, channel: str = "email") -> str:
     t = normalise(as_text)
     # sweep A: repeated letters collapsed too ("stoooop", "unsubbbscribe"); only for opt-out wording (over-suppressing
     # is the safe side), never for the other labels. War room: opt-out wording is read in every reading below, and an
-    # opt-out in any of them suppresses: the text as HTML read as text and as written; capitals as written and case
-    # folded first (the reading before the war room); when the text holds one of _SHARED_READS, with the shared fold's
-    # reading of it; with brackets / quotation marks / math symbols as word separators (an entity disguised by its
-    # case, "&Lt;b&Gt;", decodes to "≪b≫"); and with a "1" as "i". The other labels read the HTML as text, capitals as
-    # written, with this module's table.
+    # opt-out in any of them suppresses: the text as HTML read as text and as written (<style> / <script> content
+    # dropped from both); capitals as written and case folded first (the reading before the war room); when the text
+    # holds one of _SHARED_READS, with the shared fold's reading of it; with tag-shaped runs as spaces (and, always,
+    # without: punctuation inside a word, "st<op", is dropped as before the war room); and with a "1" as "i". The
+    # other labels read the HTML as text, capitals as written, with this module's table.
     readings = []
-    for source in dict.fromkeys((as_text, text)):
+    for source in dict.fromkeys((as_text, drop_style_script(text))):
         options = [(False, False)]
         nfkc = source if source.isascii() else unicodedata.normalize("NFKC", source)
         if not nfkc.isascii():
@@ -226,11 +244,10 @@ def classify(text: str, channel: str = "email") -> str:
                 options += [(True, False)] + ([(True, True)] if cased else [])
         for shared, cf in options:
             p = _prepare(source, shared, cf)
-            readings.append(t if (source, shared, cf) == (as_text, False, False) else _finish(p, False, False))
-            if _BRACKETS.search(p):
-                readings.append(_finish(p, True, False))
-            if "1" in p:
-                readings.append(_finish(p, False, True))
+            tags = (False, True) if _TAG_SPAN.search(p) else (False,)
+            ones = (False, True) if "1" in p else (False,)
+            readings += [t if (source, shared, cf, tg, one) == (as_text, False, False, False, False) else
+                         _finish(p, tg, one) for tg in tags for one in ones]
     for v in dict.fromkeys(x for r in readings for x in (r, _collapse(r))):
         if v in _CARRIER or _UNSUB.search(v):
             return "unsubscribe"
