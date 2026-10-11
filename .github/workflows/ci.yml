@@ -195,9 +195,15 @@ jobs:
         env:
           SERVICE: ${{ matrix.service }}
         run: |
+          set +e
           python devtools/hygiene_check.py run --suite "python:$SERVICE" --kind pytest --cwd "services/$SERVICE" \
             --allow-ignored services/ledger-rust/target \
-            -- python -m pytest -q -rs -p no:cacheprovider
+            -- python -m pytest -q -rfEs -p no:cacheprovider > "$RUNNER_TEMP/out.txt" 2>&1
+          code=$?
+          tail -5 "$RUNNER_TEMP/out.txt"
+          grep -E "^(FAILED|ERROR) |HYGIENE|hygiene|violation|exited" "$RUNNER_TEMP/out.txt" | head -20 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          grep -E "^E  " "$RUNNER_TEMP/out.txt" | head -15 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          exit $code
 
   # ---------------------------------------------------------------------------------------------------------------
   # delivery-py is uv-managed: `uv sync --frozen` (the dev group holds pytest; the READMEs' `--no-dev` leaves no
@@ -426,10 +432,15 @@ jobs:
           LEDGER_BIN: ${{ github.workspace }}/services/ledger-rust/target/release/server
           SERVICE: ${{ matrix.service }}
         run: |
+          set +e
           mkdir -p "$RUNNER_TEMP/live-work"
           LIVE_WORK_DIR="$RUNNER_TEMP/live-work" \
             python devtools/hygiene_check.py run --suite "live:$SERVICE" --kind none --cwd "services/$SERVICE" \
-            -- python devtools/live_run.py
+            -- python devtools/live_run.py > "$RUNNER_TEMP/live.txt" 2>&1
+          code=$?
+          grep -iE "fail|error|violation|traceback|assert|exited" "$RUNNER_TEMP/live.txt" | head -25 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          tail -8 "$RUNNER_TEMP/live.txt" | while IFS= read -r l; do echo "::error::TAIL ${l:0:900}"; done
+          exit $code
       - name: Live-run work dir (listed as evidence in this log, then removed)
         if: always()
         run: |
