@@ -71,7 +71,7 @@ caller token can approve.
 
 `GET /fin/v1/invoices/{id}/status` (caller `seo_02` only): the invoice's status, entity, client id, kind, currency,
 paid time and whether anything was refunded or charged back — no amounts, lines or legal references. `seo_02`
-reaches no other route (403 everywhere else, `tests/test_seo_route_allowlist.py`; ADR 0009 decision 2, ADR 0017
+reaches no other route but the token-free `GET /health` (403 everywhere else, `tests/test_seo_route_allowlist.py`; ADR 0009 decision 2, ADR 0017
 W3-2 / W3-5).
 
 ## Money that comes back, and sweeps (AEGIS round 17, ADR 0009 amendment)

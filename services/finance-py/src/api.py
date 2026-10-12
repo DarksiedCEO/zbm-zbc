@@ -360,8 +360,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         # AEGIS SEO Wave 3 M2: Search & Answer Intelligence (seo_02) reaches exactly ONE route, the narrow invoice
         # status read. Enforced before any route, dependency or body parsing, so no route that forgot to name its
         # callers (``caller()`` admits any caller) and no Andre-only route can answer it anything but 403.
+        # /health is open to anyone without any token (no bearer, no caller), so refusing it to seo_02 would protect
+        # nothing; it answers seo_02 exactly what it answers an anonymous caller (AEGIS SEO Wave 3 round 2)
         if callers.identify(request.headers.get(CALLER_HEADER)) in NAMED_ONLY and not (
-                request.method == "GET" and SEO_STATUS_ROUTE.fullmatch(request.url.path)):
+                request.method == "GET" and (SEO_STATUS_ROUTE.fullmatch(request.url.path)
+                                             or request.url.path == "/health")):
             return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
                                                                    "name it"})
         return await call_next(request)
@@ -534,7 +537,7 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
 
     @app.post("/fin/v1/bank/events", dependencies=auth)
     def bank_events(who: str = Depends(caller("bank_feed")), req: m.BankEvents = Depends(body(m.BankEvents))) -> dict:
-        return svc.bank_events(who, req.request_id, [dump(l) for l in req.lines])
+        return svc.bank_events(who, req.request_id, [dump(line) for line in req.lines])
 
     @app.post("/fin/v1/receipts/{receipt_id}/apply", dependencies=auth)
     def receipt_apply(receipt_id: str, _: str = Depends(andre("receipts/apply")),

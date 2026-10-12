@@ -36,7 +36,7 @@ release, no float, only verified views paid, only Andre approves rules and rate 
    Search & Answer Intelligence (2), ADR 0017 W3-2; since AEGIS SEO Wave 3 M2 it reaches exactly ONE route, the
    narrow `GET /fin/v1/invoices/{id}/status` (status, ownership, refund / chargeback flags; no amounts or lines),
    enforced by a middleware before any route and by `caller()` with no names not admitting it; every other route
-   answers it 403, `tests/test_seo_route_allowlist.py`); Andre's `X-Andre-Approval-Token`
+   but the token-free `/health` answers it 403, `tests/test_seo_route_allowlist.py`); Andre's `X-Andre-Approval-Token`
    (FounderGate); optional second approver `X-FIN-Second-Approver-Token` (`FIN_SECOND_APPROVER_TOKEN`). All tokens
    distinct or the service refuses to start; a refused approval token is 403 and recorded
    `founder_approval_refused`.

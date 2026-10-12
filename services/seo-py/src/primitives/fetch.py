@@ -2,7 +2,8 @@
 Primitive: fetch (ADR 0017 decision 11). The one outbound web client of this service.
 
 SSRF-safe by construction:
-  - only ``http`` and ``https``; no userinfo; an IDNA host;
+  - only ``http`` and ``https``; no userinfo; the host is an IP literal or, after IDNA, plain LDH labels (anything
+    else, a control character or a space among them, is refused before any resolver call);
   - the host is resolved HERE, every resolved address is checked (loopback, private, link-local incl. the cloud
     metadata address 169.254.169.254, CGNAT, multicast, reserved, unspecified, IPv4-mapped / 6to4 / NAT64 IPv6
     embedding any of those: refused), and the connection is made to the CHECKED address (the URL carries the IP
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import re
 import socket
 import ssl
 import threading
@@ -321,10 +323,24 @@ class Fetcher:
         host = (parts.hostname or "").rstrip(".")
         if not host:
             raise _Refused("REFUSED_URL", "no host")
-        try:
-            host = host.encode("idna").decode("ascii").lower() if not _is_ip_literal(host) else host
-        except UnicodeError:
-            raise _Refused("REFUSED_URL", "host is not a valid domain name") from None
+        if _is_ip_literal(host):
+            if "%" in host:                       # a scoped (zone id) address is never a public one; never resolved
+                raise _Refused("REFUSED_URL", "an IPv6 zone id is refused")
+            host = str(ipaddress.ip_address(host.strip("[]")))
+        else:
+            try:
+                host = host.encode("idna").decode("ascii").lower()
+            except UnicodeError:
+                raise _Refused("REFUSED_URL", "host is not a valid domain name") from None
+            # AEGIS SEO Wave 3 round 2 (host strictness): after IDNA a name is plain LDH labels or it is refused here,
+            # before any resolver call: no whitespace or control character (``127.0.0.1\x0bevil``; glibc's inet_aton
+            # reads ``0177.0.0.1\x0b`` as 127.0.0.1), no Unicode space that IDNA maps to an ASCII space, no empty
+            # label. A real IDN is xn-- labels and passes. An underscore is refused too: it is not a host name
+            # character (RFC 952 / RFC 1123 section 2.1); DNS carries it only in service labels (``_dmarc``,
+            # ``_sip._tcp``) that are never a web origin, and a site published under one is reported REFUSED_URL
+            # (visible in the report), not fetched.
+            if not _ldh_host(host):
+                raise _Refused("REFUSED_URL", "host is not a valid domain name")
         if _numeric_host_not_canonical(host):
             raise _Refused("REFUSED_URL", "a numeric host must be a canonical IP address")
         port = port or (443 if scheme == "https" else 80)
@@ -352,7 +368,8 @@ class Fetcher:
         lit = f"[{ip}]" if ":" in ip else ip
         default = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
         target = f"{scheme}://{lit}:{port}{path}"
-        host_header = host if default else f"{host}:{port}"
+        name = f"[{host}]" if ":" in host else host               # an IPv6 literal is bracketed in Host
+        host_header = name if default else f"{name}:{port}"
         headers = {"Host": host_header, "User-Agent": ua, "Accept": accept,
                    "Accept-Encoding": "gzip, deflate", "Connection": "close"}
         ext = {"sni_hostname": host} if scheme == "https" else {}
@@ -493,6 +510,15 @@ class Fetcher:
         else:
             out["status_class"] = "unreachable"
         return out
+
+
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+def _ldh_host(host: str) -> bool:
+    """Letters-digits-hyphen labels only (RFC 1123 host names, after IDNA): 1-63 characters a label, no leading or
+    trailing hyphen, at most 253 characters in all, no empty label."""
+    return 0 < len(host) <= 253 and all(_LABEL.fullmatch(lb) for lb in host.split("."))
 
 
 def _is_ip_literal(host: str) -> bool:

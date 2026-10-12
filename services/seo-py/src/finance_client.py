@@ -11,7 +11,8 @@ Rules:
   - fail closed: anything that is not a well-formed answer for exactly the invoice asked about is UNVERIFIABLE
     (never "paid");
   - bounded: a per-phase timeout, an overall deadline over every attempt AND within each attempt (every socket
-    operation and the body loop; M1), at most ``attempts`` tries of this idempotent read, a response body cap, no
+    operation and the body loop; M1; the Finance host's name lookup too, on at most two resolver threads in the
+    process, Wave 3 round 2), at most ``attempts`` tries of this idempotent read, a response body cap, no
     redirects followed;
   - retried only when a retry can help (connect error, timeout, 429, 500, 502, 503, 504); a 4xx is never retried;
   - minimal: Finance answers only the fields the verdict needs (id, status, entity, client id, kind, currency,
@@ -30,8 +31,12 @@ and run its parser and verdict against Finance's real invoice representation.
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
 import re
+import socket
+import threading
 import time
 from typing import Callable, Optional
 
@@ -56,6 +61,10 @@ UNVERIFIABLE = frozenset({"FINANCE_NOT_CONFIGURED", "FINANCE_UNAVAILABLE", "FINA
 DEFINITIVE = frozenset({"INVOICE_NOT_FOUND", "INVOICE_ENTITY_MISMATCH", "INVOICE_TENANT_MISMATCH",
                         "INVOICE_CURRENCY_UNSUPPORTED", "INVOICE_NOT_PAID", "INVOICE_REFUNDED"})
 PAID = "PAID"
+
+
+def _system_resolve(host: str, port: int) -> list:
+    return [i[4][0] for i in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
 
 
 class FinanceLookupError(Exception):
@@ -123,7 +132,8 @@ class FinanceClient:
 
     def __init__(self, base_url: str, service_token: str, caller_token: str, timeout_s: float = 5.0,
                  attempts: int = 3, backoff_s: tuple = (0.2, 0.5), transport: Optional[httpx.BaseTransport] = None,
-                 sleep: Callable[[float], None] = time.sleep, monotonic: Callable[[], float] = time.monotonic):
+                 sleep: Callable[[float], None] = time.sleep, monotonic: Callable[[], float] = time.monotonic,
+                 resolve: Callable[[str, int], list] = _system_resolve, dns_gate: Optional["_DnsGate"] = None):
         if not base_url or not service_token or not caller_token:
             raise ValueError("FinanceClient needs a base URL, the Finance service token and this caller's token")
         if not 1 <= attempts <= 5:
@@ -138,6 +148,7 @@ class FinanceClient:
         self._transport = transport
         self._sleep = sleep
         self._mono = monotonic
+        self._resolver = _Resolver(resolve, dns_gate)          # the URL's host, resolved inside the deadline
 
     def lookup(self, invoice_id: str) -> dict:
         """The minimal facts of one invoice, or ``FinanceLookupError``. Never raises anything else for a network or
@@ -186,7 +197,7 @@ class FinanceClient:
             pool = getattr(transport, "_pool", None)
             if pool is None or not hasattr(pool, "_network_backend"):
                 raise FinanceLookupError("FINANCE_NOT_CONFIGURED")     # never look up without a hard deadline
-            pool._network_backend = _DeadlineBackend(self._mono, end)
+            pool._network_backend = _DeadlineBackend(self._mono, end, resolver=self._resolver)
         try:
             with httpx.Client(timeout=httpx.Timeout(timeout), transport=transport, follow_redirects=False,
                               trust_env=False) as client:
@@ -238,10 +249,134 @@ class _DeadlineStream(httpcore.NetworkStream):
         return self._s.get_extra_info(info)
 
 
+class _DnsGate:
+    """The process-wide bound on Finance name lookups in flight (AEGIS SEO Wave 3 round 2). A lookup takes a slot
+    before its resolver thread starts and the thread gives it back when getaddrinfo returns or raises, so at most
+    ``workers`` resolver threads exist at any time, whatever a hung resolver does; with every slot taken a lookup is
+    refused at once (fail closed), never queued. Every slot is released exactly once (``_Slot``)."""
+
+    def __init__(self, workers: int = 2):
+        if workers < 1:
+            raise ValueError("workers must be at least 1")
+        self.workers = workers
+        self._cond = threading.Condition(threading.Lock())
+        self._busy = 0
+
+    @property
+    def busy(self) -> int:
+        with self._cond:
+            return self._busy
+
+    def try_take(self) -> Optional["_Slot"]:
+        with self._cond:
+            if self._busy >= self.workers:
+                return None
+            self._busy += 1
+        return _Slot(self)
+
+    def _give_back(self) -> None:
+        with self._cond:
+            self._busy -= 1
+            self._cond.notify_all()
+
+    def wait_idle(self, timeout: float) -> bool:
+        """True once no slot is held (tests and shutdown; never on a lookup's path)."""
+        with self._cond:
+            return self._cond.wait_for(lambda: self._busy == 0, timeout)
+
+    def _after_fork_in_child(self) -> None:
+        # a forked child has none of the parent's resolver threads: their slots would never come back
+        self._cond = threading.Condition(threading.Lock())
+        self._busy = 0
+
+
+class _Slot:
+    def __init__(self, gate: _DnsGate):
+        self._gate, self._lock, self._held = gate, threading.Lock(), True
+
+    def release(self) -> None:
+        with self._lock:
+            held, self._held = self._held, False
+        if held:
+            self._gate._give_back()
+
+
+_DNS_GATE = _DnsGate()
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_DNS_GATE._after_fork_in_child)
+
+
+class _Resolver:
+    """Name resolution for the Finance URL INSIDE the lookup's deadline (AEGIS SEO Wave 3 round 2). getaddrinfo runs
+    on its own daemon thread under a slot of the shared ``_DnsGate`` and is waited for only for the time left; late,
+    failed, refused (every slot busy) or empty answers are ConnectTimeout / ConnectError, which the client reports
+    FINANCE_UNAVAILABLE (fail closed). A hung resolver keeps its thread and slot until the system resolver gives up,
+    never the lookup. An IP literal is used as it is, without any lookup. Returns the addresses (validated IP
+    literals, in the resolver's order, without repeats); the backend connects to those, never to the name."""
+
+    _thread = threading.Thread
+
+    def __init__(self, resolve: Callable[[str, int], list] = _system_resolve, gate: Optional[_DnsGate] = None):
+        self._resolve = resolve
+        self._gate = gate if gate is not None else _DNS_GATE
+
+    def __call__(self, host: str, port: int, timeout: float) -> list:
+        literal = _ip_literal(host)
+        if literal is not None:
+            return [literal]
+        if timeout <= 0:
+            raise httpcore.ConnectTimeout("the lookup's overall deadline has passed")
+        slot = self._gate.try_take()
+        if slot is None:
+            raise httpcore.ConnectError("every Finance DNS worker is busy")
+        box: dict = {}
+        done = threading.Event()
+
+        def work() -> None:
+            try:
+                box["addrs"] = self._resolve(host, port)
+            except BaseException as exc:  # noqa: BLE001 - reported to the waiting lookup as a connect error
+                box["error"] = exc
+            finally:
+                slot.release()
+                done.set()
+
+        try:
+            self._thread(target=work, name="seo-finance-dns", daemon=True).start()
+        except BaseException:
+            slot.release()                       # never started (or interrupted while starting): give the slot back
+            raise httpcore.ConnectError("could not start a Finance DNS lookup") from None
+        if not done.wait(timeout):
+            raise httpcore.ConnectTimeout("the Finance host did not resolve within the deadline")
+        if "error" in box:
+            raise httpcore.ConnectError("the Finance host does not resolve")
+        out: list = []
+        try:
+            for a in box.get("addrs") or ():
+                ip = _ip_literal(a) if isinstance(a, str) else None
+                if ip is None:
+                    raise httpcore.ConnectError("the Finance host resolved to something that is not an address")
+                if ip not in out:
+                    out.append(ip)
+        except TypeError:
+            raise httpcore.ConnectError("the Finance host resolved to something that is not an address") from None
+        if not out:
+            raise httpcore.ConnectError("the Finance host does not resolve")
+        return out
+
+
+def _ip_literal(host: str) -> Optional[str]:
+    try:
+        return str(ipaddress.ip_address(host[1:-1] if host.startswith("[") and host.endswith("]") else host))
+    except ValueError:
+        return None
+
+
 class _DeadlineBackend(httpcore.NetworkBackend):
-    def __init__(self, monotonic: Callable[[], float], end: float, inner=None):
+    def __init__(self, monotonic: Callable[[], float], end: float, inner=None, resolver: Optional[_Resolver] = None):
         self._b = inner or httpcore.SyncBackend()
         self._mono, self._end = monotonic, end
+        self._resolver = resolver or _Resolver()
 
     def left(self, timeout: Optional[float], exc: type) -> float:
         left = self._end - self._mono()
@@ -250,8 +385,21 @@ class _DeadlineBackend(httpcore.NetworkBackend):
         return left if timeout is None else min(timeout, left)
 
     def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-        return _DeadlineStream(self._b.connect_tcp(host, port, self.left(timeout, httpcore.ConnectTimeout),
-                                                   local_address, socket_options), self.left)
+        """Resolve ``host`` inside the deadline, then connect to the RESOLVED addresses in order, each attempt bounded
+        by the time left. The socket layer is handed IP literals only, so it makes no second name lookup; httpcore
+        keeps the URL's name for the Host header, TLS SNI and certificate verification (the origin, not this host
+        argument), so HTTPS behaves exactly as before."""
+        addrs = self._resolver(host, port, self.left(timeout, httpcore.ConnectTimeout))
+        last: Optional[Exception] = None
+        for ip in addrs:
+            left = self.left(timeout, httpcore.ConnectTimeout)            # past the deadline: no further address
+            try:
+                inner = self._b.connect_tcp(ip, port, left, local_address, socket_options)
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last = exc                                                  # the next address, if time is left
+                continue
+            return _DeadlineStream(inner, self.left)
+        raise last if last is not None else httpcore.ConnectError("the Finance host does not resolve")
 
     def connect_unix_socket(self, path, timeout=None, socket_options=None):
         raise httpcore.ConnectError("unix sockets are never used")

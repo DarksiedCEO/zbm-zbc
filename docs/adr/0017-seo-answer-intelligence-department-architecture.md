@@ -340,6 +340,39 @@ W3-5. **AEGIS SEO Wave 3 review (f9f750d), findings closed.**
      Finance says no → MUST 409, not overridable; Finance confirms → the run completes and `invoice_verified` is on
      the ledger.
 
+W3-6. **AEGIS SEO Wave 3, round 2 Lows (after the certified c60e1c7 and 73fe3cc).**
+   - Host strictness (`primitives/fetch.py`): after IDNA a host is either an IP literal (normalised; an IPv6 zone id
+     is refused) or plain LDH labels (`[a-z0-9-]`, 1-63 characters a label, no leading or trailing hyphen, at most
+     253 in all); anything else is REFUSED_URL before any resolver call, so a control character
+     (`127.0.0.1\x0bevil`; glibc's `inet_aton` reads `0177.0.0.1\x0b` as 127.0.0.1), a Unicode space IDNA maps to an
+     ASCII space (U+3000, U+00A0, U+2003, U+205F), an underscore or an empty label never reaches getaddrinfo. A real
+     IDN becomes xn-- labels and passes; characters IDNA maps to nothing (a zero-width space) give the same name,
+     which then meets the address policy like any other; the legacy-numeric refusal is unchanged. Underscores are
+     refused on purpose: they are not host-name characters (RFC 952, RFC 1123 section 2.1), DNS uses them for
+     service labels (`_dmarc`, `_sip._tcp`) that are never a web origin, and the rare site published under one gets
+     a visible REFUSED_URL rather than a fetch; revisit only if a real client needs it. While normalising literals,
+     an IPv6 literal's Host header is now bracketed (`[2606:4700::1]`), as RFC 9110 requires.
+   - Finance client DNS (`finance_client.py`): the Finance host is resolved INSIDE the lookup's deadline. getaddrinfo
+     runs on its own daemon thread under a slot of one process-wide gate of two; the lookup waits only for the time
+     left. With both slots held a lookup is refused at once (never queued), so at most two resolver threads exist,
+     whatever the resolver does. A slot is taken before the thread starts and given back exactly once (a guarded
+     release in the thread's `finally`, or by the caller when the thread cannot start); a forked child starts with
+     every slot free. A late, failed, refused, empty or non-address answer is ConnectTimeout / ConnectError, i.e.
+     FINANCE_UNAVAILABLE (fail closed). An IP literal is used without any lookup. The connection goes to the resolved
+     addresses in order, each attempt bounded by the time left, and the socket layer is handed only IP literals (a
+     test with a getaddrinfo that refuses every name proves no second lookup); httpcore takes Host, TLS SNI and the
+     certificate hostname from the URL's origin, not from the connect address, so HTTPS is unchanged (tested: SNI
+     and Host stay `finance.internal`). Chosen over requiring an IP literal in `SEO_FINANCE_URL`: it keeps service
+     names and DNS-based failover usable and puts the same hard bound on every phase. Residual: a hung system
+     resolver keeps its thread and slot until the C library gives up (glibc: `timeout` x `attempts` per name server,
+     resolv.conf), and while both slots are held every Finance lookup is FINANCE_UNAVAILABLE; it never holds a lookup
+     past its deadline. Daemon threads, so a hung lookup never delays process exit.
+   - Finance `/health` for `seo_02`: allowed. `/health` needs no token at all, so refusing it to `seo_02` protected
+     nothing; `seo_02` gets exactly the anonymous answer (status, service, rules version and pinning, storage mode,
+     entities, reconcile mode and flag, log-fault flag, Stripe-wiring flags; no client, invoice or money data, and a
+     test pins that key set). Only `GET /health` is admitted; any other method or spelling, and every other route
+     but the invoice status, stays 403.
+
 Founder-pending defaults added by Wave 3: (12) verification is ON by default, so until Finance is wired every paid run
 needs Andre's override; (13) one invoice pays for one one-off audit or one schedule (with all its slots), and an
 interrupted audit gives its invoice back; (14) any refund or chargeback on the invoice, partial ones included, refuses
