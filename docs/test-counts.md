@@ -18,18 +18,18 @@ the check.
 |---|---|---|---|
 | `go:orchestrator-go` | 112 | go test -v | — |
 | `node:dashboard-ts` | 53 | node --test | — |
-| `python:bizdev-py` | 353 | pytest collection | — |
+| `python:bizdev-py` | 358 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
 | `python:compliance-py` | 644 | pytest collection | — |
-| `python:creative-py` | 867 | pytest collection | — |
+| `python:creative-py` | 868 | pytest collection | — |
 | `python:delivery-py` | 735 | pytest collection | — |
 | `python:detection-py` | 599 | pytest collection | — |
 | `python:finance-py` | 621 | pytest collection | — |
-| `python:fulfillment-py` | 1117 | pytest collection | — |
+| `python:fulfillment-py` | 1118 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
 | `python:legal-py` | 319 | pytest collection | — |
-| `python:onboarding-py` | 848 | pytest collection | — |
-| `python:sales-py` | 837 | pytest collection | — |
+| `python:onboarding-py` | 849 | pytest collection | — |
+| `python:sales-py` | 874 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
 | `python:service-py` | 815 | pytest collection | — |
 | `python:verification-py` | 350 | pytest collection | — |
