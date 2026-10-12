@@ -105,6 +105,46 @@ def test_ordinary_replies_are_not_opt_outs_on_email(text):
     assert i10_replies.classify(text, "email") != "unsubscribe", i10_replies.normalise(text)
 
 
+# AEGIS G2-M1: a bracketed word in an ordinary reply is not a tag that lets its neighbours meet. Read as a bare space,
+# "not «that» interested" was "not interested" and "Do not «hesitate» contact me" was "do not contact"; the tag reading
+# now puts a word of its own there (i10_replies._TAG_WORD), so no opt-out phrase forms across it.
+BENIGN_BRACKETED = [
+    "I am not «that» interested in the premium tier, but tell me more",
+    "We are not <yet> interested",
+    "I'm not ‹quite› interested yet",
+    "No «Gold plan» thanks, Silver is fine",
+    "Please, no 〈A4〉 thanks — Letter size",
+    "Do not «hesitate» contact me",
+]
+
+
+@pytest.mark.parametrize("text", BENIGN_BRACKETED)
+@pytest.mark.parametrize("channel", ["email", "sms", "voice"])
+def test_a_bracketed_word_does_not_join_its_neighbours_into_an_opt_out(text, channel):
+    assert i10_replies.classify(text, channel) != "unsubscribe", i10_replies.normalise(text, tags_as_spaces=True)
+
+
+@pytest.mark.parametrize("text", ["≪b≫unsubscribe", "<p>StoP</p>", "‹b›stop‹/b›", "«i»unsubscribe«/i»",
+                                  "〈b〉 opt out 〈/b〉", "≪b≫end≪/b≫", "≪b≫QUIT", "s≪b≫t≪/b≫o≪b≫p", "≪b≫s t o p≪/b≫ now"])
+@pytest.mark.parametrize("channel", ["email", "sms"])
+def test_a_word_the_tags_wrap_is_still_read_on_its_own(text, channel):
+    # single-word disguises, a carrier word that is the whole message once the tags are left out, and single letters
+    # spelled across tags still read as opt-outs
+    assert i10_replies.classify(text, channel) == "unsubscribe", i10_replies.normalise(text, tags_as_spaces=True)
+
+
+def test_the_tag_reading_puts_a_word_between_neighbours_and_looks_through_it_in_a_letter_run():
+    tag = i10_replies._TAG_WORD
+    assert i10_replies.normalise("not «that» interested", tags_as_spaces=True) == f"not {tag} interested"
+    assert i10_replies.normalise("s≪b≫t≪/b≫o≪b≫p", tags_as_spaces=True) == "stop"
+    assert i10_replies.normalise("a ≪b≫ c d≪/b≫ go", tags_as_spaces=True) == f"acd {tag} go"
+    assert i10_replies.normalise("x «y» z", tags_as_spaces=True) == f"x {tag} z"
+    # the placeholder itself matches no rule
+    for rx in (i10_replies._UNSUB, i10_replies._UNSUB_PHONE, i10_replies._OOO, i10_replies._INTERESTED):
+        assert not rx.search(tag)
+    assert tag.isalpha() and tag.isascii() and tag not in i10_replies._CARRIER
+
+
 def _harness(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
     lead = h.vlead(email="jane@acme-shop.test", phone="+13105550100")

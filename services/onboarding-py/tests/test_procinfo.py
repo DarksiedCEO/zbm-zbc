@@ -82,3 +82,29 @@ def test_parse_lsof_fn_macos_formats():
     )
     assert parse_lsof_fn(out, 8091) == {"127.0.0.1", "::1", "0.0.0.0", "::"}
     assert parse_lsof_fn("", 8091) == set()
+
+
+def test_ps_runs_in_the_c_locale_whatever_the_caller_set(monkeypatch):
+    # fix wave I (AEGIS H-L4): ps output is parsed, so it never runs in the caller's locale (a decimal comma in a
+    # CPU time, localised digits); both ps calls pass the C locale and keep the rest of the environment
+    import subprocess
+
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+    monkeypatch.setenv("LANG", "de_DE.UTF-8")
+    monkeypatch.setenv("LC_NUMERIC", "de_DE.UTF-8")
+    seen = []
+    real_run = subprocess.run
+
+    def spy(cmd, *a, **kw):
+        seen.append((cmd[1:3], kw.get("env")))
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(_procinfo.subprocess, "run", spy)
+    if not (shutil.which("ps") or os.path.exists("/bin/ps")):
+        pytest.skip("no ps on this system")
+    assert _procinfo.rss_kib_ps(os.getpid()) > 0
+    assert _procinfo.cpu_seconds_ps(os.getpid()) >= 0
+    assert [args for args, _ in seen] == [["-o", "rss="], ["-o", "time="]], seen
+    for _, env in seen:
+        assert env is not None and env["LC_ALL"] == "C" and env["LANG"] == "C", env
+        assert env["LC_NUMERIC"] == "de_DE.UTF-8" and env.get("PATH") == os.environ.get("PATH")

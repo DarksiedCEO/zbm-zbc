@@ -319,7 +319,7 @@ def _main(work: Path) -> int:
         check("answers, escalations, consent changes, approvals and alerts are on the ledger",
               {"log_anchor", "message_sent", "escalation_opened", "consent_changed", "approval_recorded",
                "alert_raised", "save_plan_started"} <= set(types))
-        blob = json.dumps(ents)
+        blob = json.dumps(ents, ensure_ascii=False)      # a non-ASCII probe must match (AEGIS LV-L2)
         check("no message body, address or phone number on the ledger",
               "refund" not in blob and "creator@live.test" not in blob and "+13105551234" not in blob
               and "We are open" not in blob)
@@ -336,7 +336,12 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
-                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
+                    try:
+                        p.wait(timeout=10)      # reaped here: never alive when the hygiene check looks for leftovers
+                    except subprocess.TimeoutExpired:
+                        # fix wave I (AEGIS LV-L1): bounded like finance-py's stop(); a child SIGKILL has not ended
+                        # (stuck in the kernel) is logged and left to the hygiene check, never waited on forever
+                        say(f"pid {p.pid} did not exit within 10 s of SIGKILL; not reaped")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 
 

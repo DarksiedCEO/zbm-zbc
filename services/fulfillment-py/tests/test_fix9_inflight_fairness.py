@@ -477,8 +477,12 @@ def test_live_q2_max_body_boundary_rate(server):
         # deadline's 408 says "not received within 30s", the stall's "stalled for 5s") and it came before the deadline
         # could have fired (an ordering against the server's own deadline; measured ~5.1 s, the grace). fix-flakes-h:
         # was `took < grace + 2 s`, a wall-clock bound a loaded box can cross while the server's decision is the same.
+        # Fix wave I (AEGIS H-L3): "early" is also bounded again, generously — before HALF the deadline (15 s, three
+        # times the ~5 s grace the rate check fires at). The message proves which check refused; the bound proves the
+        # refusal did not wait out most of the deadline first (a rate check that only fired near 30 s would answer
+        # with its own text and pass the message check alone). Derived from the server's constant, never a literal.
         assert b"cannot complete within" in raw and b"split the batch" in raw, raw[:400]
-        assert took < http_limits.BODY_READ_TIMEOUT_S, (name, summary)
+        assert took < http_limits.BODY_READ_TIMEOUT_S / 2, (name, "refused late", summary)
 
 
 def _legit_probe(port: int, stop: float, small: list, large: list) -> None:

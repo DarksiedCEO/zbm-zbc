@@ -481,7 +481,7 @@ def _main(work: Path) -> int:
             "deal_approved", "material_connection_recorded", "content_approved", "tax_profile_recorded",
             "founder_approval_refused", "first_name_verified", "confirmation_requested",
             "email_confirmed", "creator_session_opened", "creator_session_used"} <= set(types))
-        blob = json.dumps(ents)
+        blob = json.dumps(ents, ensure_ascii=False)      # a non-ASCII probe must match (AEGIS LV-L2)
         mac = tax_ses.split(".")[1]
         check("nothing personal on the ledger (no email, handle, name or tax reference); no session token on the "
               "ledger or in the log", "live-creator.example" not in blob and "live.creator" not in blob
@@ -500,7 +500,12 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
-                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
+                    try:
+                        p.wait(timeout=10)      # reaped here: never alive when the hygiene check looks for leftovers
+                    except subprocess.TimeoutExpired:
+                        # fix wave I (AEGIS LV-L1): bounded like finance-py's stop(); a child SIGKILL has not ended
+                        # (stuck in the kernel) is logged and left to the hygiene check, never waited on forever
+                        say(f"pid {p.pid} did not exit within 10 s of SIGKILL; not reaped")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 
 

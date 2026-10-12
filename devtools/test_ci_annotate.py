@@ -439,6 +439,30 @@ class EscapingAndInjection(unittest.TestCase):
         self.assertNotIn("already annotated", msg.split("last", 1)[0])
         self.assertIn("| ::error title=x::already annotated", msg)     # quoted in the tail behind "| ": inert
 
+    def test_a_bare_carriage_return_in_a_reason_keeps_the_failed_line(self):
+        # fix wave I (AEGIS CI-L2): only the text after the last "\r" was kept, so the FAILED line was lost
+        text = ("==== short test summary info ====\n"
+                "FAILED tests/t.py::test_cr - AssertionError: assert 'a\rb' == 'ab'\n"
+                "progress [ 10%]\rprogress [ 50%]\rprogress [100%]\n"
+                "1 failed in 0.10s\n")
+        # the lines as annotate() reads a log file: split on "\n" only (str.splitlines would split on "\r" itself)
+        p = ca.parse_lines(ln + "\n" for ln in text.split("\n")[:-1])
+        out = [split(c) for c in ca.build(p, "1", "python:demo-py", True)]
+        lvl, _, msg = out[0]
+        self.assertEqual(lvl, "error")
+        self.assertTrue(msg.startswith("FAILED tests/t.py::test_cr - AssertionError: assert 'a"), msg)
+        self.assertEqual(len(p.failures), 1, list(p.failures))
+        tail = list(p.tail)
+        self.assertIn("progress [100%]", tail)                              # the redraw the terminal showed
+        self.assertNotIn("progress [ 10%]", tail)                           # ... and not the ones it overwrote
+        with tempfile.TemporaryDirectory() as d:                            # and through the file path itself
+            log = Path(d) / "step.log"
+            log.write_bytes(text.encode())
+            cmds = ca.annotate(str(log), "1", "python:demo-py")
+        self.assertTrue(split(cmds[0])[2].startswith("FAILED tests/t.py::test_cr - "), cmds[0])
+        for cmd in cmds:
+            self.assertNotIn("\r", cmd)
+
     def test_control_characters_are_removed(self):
         (_, _, msg), _ = [split(c) for c in run("FAILED t.py::test_a - bell\x07 nul\x00 esc\x1b[31mred\n", "1")]
         self.assertEqual(msg, "FAILED t.py::test_a - bell? nul? escred")
@@ -521,6 +545,34 @@ class Redaction(unittest.TestCase):
             self.assertNotIn(s, out)
             self.assertNotIn(s[:20], out)
         self.assertIn("[REDACTED]", out)
+
+    def test_env_style_keys_with_an_underscore_before_the_secret_word(self):
+        # fix wave I (AEGIS CI-L1): "_" is a word character, so the key's \b never matched "DB_PASSWORD"
+        pw = "hunter2" + "hunter2"
+        tok = "abcdef" + "abcdef"
+        forms = [f"DB_PASSWORD={pw}", f"export DB_PASSWORD={pw}", f"DB_PASSWORD: {pw}", f'DB_PASSWORD="{pw}"',
+                 f"'LEDGER_SERVICE_TOKEN': '{tok}'", f'"LEDGER_SERVICE_TOKEN": "{tok}"',
+                 f"{{'LEDGER_SERVICE_TOKEN': '{tok}', 'DB_PASSWORD': '{pw}'}}",
+                 f"environ({{'HOME': '/root', 'LEDGER_SERVICE_TOKEN': '{tok}', 'DB_PASSWORD': '{pw}'}})",
+                 f"STRIPE_CLIENT_SECRET={tok}", f"X-Ledger-Api-Key: {tok}", f"GH_ACCESS_TOKEN = {tok}"]
+        for line in forms:
+            r = ca.redact(line)
+            self.assertNotIn(pw, r, line)
+            self.assertNotIn(tok, r, line)
+            self.assertIn("[REDACTED]", r, line)
+        self.assertEqual(ca.redact(f"{{'HOME': '/root', 'LEDGER_SERVICE_TOKEN': '{tok}'}}"),
+                         "{'HOME': '/root', 'LEDGER_SERVICE_TOKEN': '[REDACTED]'}")      # the key and the rest are kept
+        # end to end, from an E line of a failing test
+        text = ("____ test_env ____\n" f"E   AssertionError: environ({{'DB_PASSWORD': '{pw}', 'LEDGER_SERVICE_TOKEN': "
+                f"'{tok}'}})\n" "==== short test summary info ====\n" f"FAILED t.py::test_env - DB_PASSWORD={pw}\n")
+        out = "\n".join(run(text, "1"))
+        self.assertNotIn(pw, out)
+        self.assertNotIn(tok, out)
+        self.assertIn("DB_PASSWORD=[REDACTED]", out)
+
+    def test_a_secret_word_inside_a_longer_word_is_not_a_key(self):
+        for k in ("tokenizer=wordpiece", "passwords_checked: 1200", "mytoken=abcdefgh", "test_password_reset: passed"):
+            self.assertEqual(ca.redact(k), k)
 
     def test_ordinary_text_is_kept(self):
         keep = ["tests/test_round22.py::test_live_tests_leave_git_status_unchanged",

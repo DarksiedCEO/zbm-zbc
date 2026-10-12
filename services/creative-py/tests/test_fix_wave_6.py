@@ -734,6 +734,11 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
 
 
 HEALTH_QUEUE_RATIO_MAX = 0.25  # /health p50 over junk-post p50, same flood (measured 0.06-0.12 fixed, >= 0.36 ungated)
+# Fix wave I (AEGIS H-L2): a loose absolute cap ALONGSIDE the ratios, never instead of them. The ratios catch /health
+# queued behind the junk work, but both sides of a ratio grow together if the whole server stalls (every request slow,
+# health 30 s and junk 200 s still reads 0.15). The defect this guards was /health at 36 s; the worst /health
+# measured with the gate is well under a second, so 5 s fails only a catastrophe, not a slow or contended runner.
+HEALTH_WORST_CAP_S = 5.0
 
 
 @pytest.mark.parametrize("name,body", [("1 MiB junk", JUNK_1MIB), ("60k unknown keys", JUNK_60K_KEYS)], ids=["1mib", "60k"])
@@ -783,6 +788,8 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
     assert health[mid] < HEALTH_QUEUE_RATIO_MAX * posts[len(posts) // 2], (health[mid], posts[len(posts) // 2])
     assert health[-1] < posts[len(posts) // 2], ("a /health probe waited as long as a queued junk post",
                                                  health[-1], posts[len(posts) // 2])
+    assert health[-1] < HEALTH_WORST_CAP_S, ("the worst /health probe took seconds: the server stalled",
+                                             health[-1], HEALTH_WORST_CAP_S)
     assert 408 not in legit and sum(v for k, v in legit.items() if isinstance(k, int)) == 10, legit
     # Fix wave 21 (AEGIS N20-M-6): the single absolute RSS sample (rss < 250) that stood here was
     # removed: one number after one flood, with no baseline, can neither see a leak below the ceiling
@@ -803,7 +810,10 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
 #       rounds 5-12; "leak" = N bytes retained per json.loads in the shape scan, 120 per round):
 #         no leak: -2.6 .. +2.0 MiB/round (30 runs, idle and with a busy loop on the same core); the macOS CI sample 0.0;
 #         64 KiB/request (7.5 MiB/round): 5.5 .. 8.0 (13 runs, idle and contended) — detected every time;
-#         32 KiB/request: 3.0 .. 4.5 (3 runs) — detected 3/3 here, but it is near the bound: the stated floor is 64 KiB.
+#         32 KiB/request: 3.0 .. 4.5 (3 runs) — below the stated floor, and no longer detected reliably at this bound.
+#       The bound is 4.0 (fix wave I, AEGIS H-L1; it was 3.0): the no-leak maximum +2.0 sat only 1.0 under 3.0, while
+#       the 64 KiB floor's minimum 5.5 sat 2.5 over it. 4.0 leaves 2.0 above the worst no-leak run and 1.5 below the
+#       best 64 KiB run, so a noisy runner does not fail a healthy server and the 64 KiB/request floor is still caught.
 #       (The half-median form: no leak -8 .. +4, 64 KiB 45-55, macOS 25 with no leak — a false failure.)
 #       A synthetic macOS-like ramp lasting to round 8 reads 1.65; a one-off +17 MiB step at round 9 reads 2.8 (a
 #       higher plateau, judged by (b)/(c), not a climb).
@@ -811,7 +821,7 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
 #       MiB, per-round peaks 165-199 (plateau - baseline at most 137); macOS CI baseline 74, plateau 209 (135).
 PLATEAU_ROUNDS = 12
 PLATEAU_WARMUP_ROUNDS = 4
-PLATEAU_SLOPE_MAX_MIB = 3.0
+PLATEAU_SLOPE_MAX_MIB = 4.0
 PLATEAU_BUDGET_MIB = 170
 PLATEAU_CEILING_MIB = 250
 

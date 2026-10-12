@@ -68,10 +68,21 @@ def rss_kib(pid: int) -> int:
     return rss_kib_ps(pid)
 
 
+# Fix wave I (AEGIS H-L4): ``ps`` runs in the C locale. Its output is parsed here (an RSS integer, a CPU time with a
+# "." before the fraction), and a user locale may print it otherwise (a decimal comma: "0:01,25"; localised digits
+# or messages). LC_ALL overrides every LC_* the caller set; LANG is set too for a ps that reads only LANG.
+PS_ENV_OVERRIDES = {"LC_ALL": "C", "LANG": "C"}
+
+
+def ps_env() -> dict[str, str]:
+    """The environment ``ps`` runs with: this process's, in the C locale."""
+    return {**os.environ, **PS_ENV_OVERRIDES}
+
+
 def rss_kib_ps(pid: int) -> int:
     """RSS of ``pid`` in KiB via ``ps`` (the macOS/BSD path; also works on Linux)."""
     ps = shutil.which("ps") or "/bin/ps"
-    r = subprocess.run([ps, "-o", "rss=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+    r = subprocess.run([ps, "-o", "rss=", "-p", str(pid)], capture_output=True, text=True, timeout=10, env=ps_env())
     value = r.stdout.strip()
     if r.returncode != 0 or not value:
         raise AssertionError(f"ps reports no RSS for pid {pid} (exited?): rc={r.returncode} {r.stderr.strip()!r}")
@@ -110,7 +121,7 @@ def cpu_seconds_ps(pid: int) -> float:
     procps prints whole seconds, so Linux uses /proc)."""
     ps = shutil.which("ps") or "/bin/ps"
     r = subprocess.run([ps, "-o", "time=", "-p", str(pid)], capture_output=True, text=True, timeout=30,
-                       check=False)
+                       check=False, env=ps_env())
     value = r.stdout.strip()
     if r.returncode != 0 or not value:
         raise AssertionError(f"ps reports no CPU time for pid {pid} (exited?): rc={r.returncode} {r.stderr.strip()!r}")

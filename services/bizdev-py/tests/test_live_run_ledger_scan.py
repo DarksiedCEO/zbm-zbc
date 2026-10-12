@@ -75,3 +75,12 @@ def test_the_other_ledger_written_fields_are_held_to_their_shape(live_run, over,
 def test_a_finding_entry_and_an_empty_ledger_pass(live_run):
     assert live_run.ledger_leaks([entry(kind="finding")], PROBES) == []
     assert live_run.ledger_leaks([], PROBES) == []
+
+
+@pytest.mark.parametrize("probe", ["Café Lumière", "José Núñez", "Müller GmbH", "東京ストア", "€7 345,00"])
+def test_a_non_ascii_probe_is_found_as_written(live_run, probe):
+    # fix wave I (AEGIS LV-L2): json.dumps escaped every non-ASCII character by default ("é" -> "é"), so a probe
+    # written with one could never match the scanned text, leaked or not
+    leaks = live_run.ledger_leaks([entry(), entry(summary=f"partner {probe} approved")], PROBES + (probe,))
+    assert leaks == [f"{probe!r} is on the ledger"]
+    assert live_run.ledger_leaks([entry()], PROBES + (probe,)) == []
