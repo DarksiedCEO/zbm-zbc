@@ -241,7 +241,7 @@ def _main(work: Path) -> int:
         say(f"ledger: {len(ents)} entries, {len(mine)} from cybersecurity; types: {', '.join(types)}")
         check("every release and credential is on the ledger",
               {"secret_released", "credential_issued", "log_anchor"} <= set(types))
-        check("no secret value anywhere on the ledger", "sk_test_LIVE" not in json.dumps(ents))
+        check("no secret value anywhere on the ledger", "sk_test_LIVE" not in json.dumps(ents, ensure_ascii=False))
         v = httpx.get(L + "/ledger/verify", headers=lh, timeout=120)
         check("ledger verifies valid", v.status_code == 200 and v.json().get("valid") is True)
         failed = [n for n, ok in CHECKS if not ok]
@@ -255,7 +255,12 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
-                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
+                    try:
+                        p.wait(timeout=10)      # reaped here: never alive when the hygiene check looks for leftovers
+                    except subprocess.TimeoutExpired:
+                        # fix wave I (AEGIS LV-L1): bounded like finance-py's stop(); a child SIGKILL has not ended
+                        # (stuck in the kernel) is logged and left to the hygiene check, never waited on forever
+                        say(f"pid {p.pid} did not exit within 10 s of SIGKILL; not reaped")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 
 

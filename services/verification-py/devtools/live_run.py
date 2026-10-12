@@ -456,7 +456,12 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
-                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
+                    try:
+                        p.wait(timeout=10)      # reaped here: never alive when the hygiene check looks for leftovers
+                    except subprocess.TimeoutExpired:
+                        # fix wave I (AEGIS LV-L1): bounded like finance-py's stop(); a child SIGKILL has not ended
+                        # (stuck in the kernel) is logged and left to the hygiene check, never waited on forever
+                        say(f"pid {p.pid} did not exit within 10 s of SIGKILL; not reaped")
                 say(f"stopped pid={p.pid}")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 

@@ -94,7 +94,9 @@ def ledger_leaks(entries: list[dict], probes: tuple[str, ...]) -> list[str]:
         for k in ("hash", "prev_hash"):
             if not (isinstance(e.get(k), str) and HEX64.fullmatch(e[k])):
                 problems.append(f"{where}: {k} is not 64 lowercase hex digits")
-    text = json.dumps([{k: v for k, v in e.items() if k not in LEDGER_WRITTEN} for e in entries])
+    # ensure_ascii=False (fix wave I, AEGIS LV-L2): the default escapes every non-ASCII character ("é" is "\u00e9"),
+    # so a non-ASCII probe could never be found in the text however plainly it was on the ledger
+    text = json.dumps([{k: v for k, v in e.items() if k not in LEDGER_WRITTEN} for e in entries], ensure_ascii=False)
     problems += [f"{probe!r} is on the ledger" for probe in probes if probe in text]
     return problems
 
@@ -454,7 +456,12 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
-                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
+                    try:
+                        p.wait(timeout=10)      # reaped here: never alive when the hygiene check looks for leftovers
+                    except subprocess.TimeoutExpired:
+                        # fix wave I (AEGIS LV-L1): bounded like finance-py's stop(); a child SIGKILL has not ended
+                        # (stuck in the kernel) is logged and left to the hygiene check, never waited on forever
+                        say(f"pid {p.pid} did not exit within 10 s of SIGKILL; not reaped")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 
 

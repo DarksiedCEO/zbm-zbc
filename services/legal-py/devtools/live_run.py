@@ -493,7 +493,7 @@ print(json.dumps(out))
         types = sorted({x["event_type"] for x in lg})
         say(f"ledger: {len(ents)} entries, {len(lg)} from legal; {len(types)} event types")
         say("  event types: " + ", ".join(types))
-        blob = json.dumps(ents)
+        blob = json.dumps(ents, ensure_ascii=False)      # a non-ASCII probe must match (AEGIS LV-L2)
         check("no document or memo text on the ledger",
               "MASTER SERVICES" not in blob and "Counsel memo 1:" not in blob and "Acme Outdoor" not in blob
               and "Counsel answers CQ-11" not in blob)
@@ -512,7 +512,12 @@ print(json.dumps(out))
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
-                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
+                    try:
+                        p.wait(timeout=10)      # reaped here: never alive when the hygiene check looks for leftovers
+                    except subprocess.TimeoutExpired:
+                        # fix wave I (AEGIS LV-L1): bounded like finance-py's stop(); a child SIGKILL has not ended
+                        # (stuck in the kernel) is logged and left to the hygiene check, never waited on forever
+                        say(f"pid {p.pid} did not exit within 10 s of SIGKILL; not reaped")
                 say(f"stopped pid={p.pid}")
         stub.shutdown()
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
