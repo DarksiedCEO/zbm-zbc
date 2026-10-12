@@ -97,8 +97,11 @@ _SECRET_KEYS = (r"authorization|proxy-authorization|x-api-key|api[_-]?key|apikey
 _REDACTIONS = (
     # scheme + credential: "Bearer abc...", "Basic dXNl...", "token ghp_..."
     (re.compile(r"(?i)\b(bearer|basic|digest|token)(\s+)[A-Za-z0-9._~+/=-]{6,}"), r"\1\2[REDACTED]"),
-    # key: value / key=value for secret-looking keys (quoted or not, JSON or header style)
-    (re.compile(r"(?i)(\b(?:" + _SECRET_KEYS + r")\b[\"']?\s*[:=]\s*[\"']?)([^\s\"',;&)}\]]{4,})"), r"\1[REDACTED]"),
+    # key: value / key=value for secret-looking keys (quoted or not, JSON or header style). The key's edges are "no
+    # letter or digit", not \b (fix wave I, AEGIS CI-L1): "_" is a word character, so \b never matched the key of an
+    # env-style name ("DB_PASSWORD=...", "'LEDGER_SERVICE_TOKEN': '...'" in a dict or os.environ repr).
+    (re.compile(r"(?i)((?<![A-Za-z0-9])(?:" + _SECRET_KEYS + r")(?![A-Za-z0-9])[\"']?\s*[:=]\s*[\"']?)"
+                r"([^\s\"',;&)}\]]{4,})"), r"\1[REDACTED]"),
     # URL userinfo: https://user:pass@host
     (re.compile(r"(://[^/\s:@]+:)[^@\s/]+@"), r"\1[REDACTED]@"),
     # well-known token shapes
@@ -259,10 +262,20 @@ class Parser:
     # ---------------------------------------------------------------------------------------------------- feed
     def feed(self, raw: str) -> None:
         raw = raw.rstrip("\n").rstrip("\r")
-        if "\r" in raw:                                  # progress redraws: the last segment is what was shown
-            raw = raw.rsplit("\r", 1)[-1]
+        if "\r" not in raw:
+            self._feed_line(raw, True)
+            return
+        # A bare "\r" separates lines (fix wave I, AEGIS CI-L2): every segment is parsed, so a failure reason that
+        # holds one ("FAILED t.py::test_a - assert 'a\rb' == ...") keeps its FAILED line (keeping only the text after
+        # the last "\r" lost it). Only the last segment goes to the tail: for a progress bar's redraws that is what
+        # the terminal showed, and the redraws do not push the log's real last lines out of it.
+        segments = [x for x in raw.split("\r") if x.strip()]
+        for i, seg in enumerate(segments):
+            self._feed_line(seg, i == len(segments) - 1)
+
+    def _feed_line(self, raw: str, to_tail: bool) -> None:
         line = ANSI_RE.sub("", raw[:MAX_SCAN_LINE])
-        if line.strip():
+        if line.strip() and to_tail:
             self.tail.append(line)
         if line.lstrip().startswith("::"):
             return                                       # already a workflow command; the runner acted on it
