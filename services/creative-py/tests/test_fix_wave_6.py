@@ -790,32 +790,50 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
     # still printed above.
 
 
-# Fix wave 21 (AEGIS N20-M-6): memory under repeated junk floods is judged as a plateau, not as one
-# absolute sample. Derived from the reviewer's plateau data (review20/mac/logs/cre_plateau_*.log,
-# Linux, 12 + 6 rounds of both floods on one server; baseline 62-64 MiB; per-round peak = the larger
-# of the two post-flood samples of a round):
-#   - per-round peaks from round 1 on: 179-192 MiB (default run), 192-199 MiB (second run): a
-#     round-to-round spread of at most 13 MiB with no trend; 10 runs of this test in fix wave 21 gave
-#     RSS[10] - RSS[5] from -7 to +14 MiB. PLATEAU_LEAK_DELTA_MIB = 24 sits above that noise. What (a)
-#     detects is MEASURED (fix wave 22, G8; AEGIS N21-C-5 — the wave-21 comment claimed ">= ~55 KiB per
-#     request always fails", derived, never run): the reviewer's mutation runs (retaining N bytes per
-#     json.loads) — 64 KiB/request: climb 32 and 26 MiB, detected 2/2; 32 KiB: 18 and 16, missed 0/2;
-#     16 KiB: 11 and 11, missed; no leak: 2, 8, 10. The floor lies between 32 and 64 KiB per request;
-#     a slower leak is this test's residual. The old single sample (< 250 MB after two floods) passed a
-#     100 KiB-per-request leak (RSS 93/96 MB); this test fails it (climb 86 MiB).
-#   - plateau - baseline: at most 135 MiB (199 - 64). PLATEAU_BUDGET_MIB = 170 (about 1.25 x that)
-#     for allocator and scheduling variation; with a ~64 MiB baseline that is ~234 MiB, inside the
-#     250 MB absolute ceiling, which is kept.
-PLATEAU_ROUNDS = 10
-PLATEAU_LEAK_DELTA_MIB = 24
+# Fix wave 21 (AEGIS N20-M-6): memory under repeated junk floods is judged as a plateau, not as one absolute sample.
+# fix-flakes-h (macOS CI run 38163019846, Oct 11 2026): the climb is the SLOPE of the per-round peaks after the warm-up,
+# not a difference of half-medians. On macOS the allocator ramps for ~5 rounds before it plateaus (peaks [168, 184,
+# 184, 204, 208, 209, 209, 209, 209, 209]); the first-half median caught that ramp (climb 25 >= 24) although the
+# second half was flat at 209. Now:
+#   (a) the first PLATEAU_WARMUP_ROUNDS rounds are the warm-up and are not judged for a climb; over the rest, the
+#       Theil-Sen slope (the median of the slopes between every pair of rounds) is < PLATEAU_SLOPE_MAX_MIB per round.
+#       A leak grows the peaks linearly, every pair sees it, so the median slope is the leak rate; a plateau has slope
+#       ~0, and the median ignores both noise (Linux: +/-13 MiB round to round) and a ramp that runs a few rounds past
+#       the warm-up (a pair median tolerates ~29% of points off the line). Measured (fix-flakes-h, 2-vCPU Linux,
+#       rounds 5-12; "leak" = N bytes retained per json.loads in the shape scan, 120 per round):
+#         no leak: -2.6 .. +2.0 MiB/round (30 runs, idle and with a busy loop on the same core); the macOS CI sample 0.0;
+#         64 KiB/request (7.5 MiB/round): 5.5 .. 8.0 (13 runs, idle and contended) — detected every time;
+#         32 KiB/request: 3.0 .. 4.5 (3 runs) — detected 3/3 here, but it is near the bound: the stated floor is 64 KiB.
+#       (The half-median form: no leak -8 .. +4, 64 KiB 45-55, macOS 25 with no leak — a false failure.)
+#       A synthetic macOS-like ramp lasting to round 8 reads 1.65; a one-off +17 MiB step at round 9 reads 2.8 (a
+#       higher plateau, judged by (b)/(c), not a climb).
+#   (b) plateau - baseline < PLATEAU_BUDGET_MIB and (c) plateau < PLATEAU_CEILING_MIB, as before: Linux baseline 62-64
+#       MiB, per-round peaks 165-199 (plateau - baseline at most 137); macOS CI baseline 74, plateau 209 (135).
+PLATEAU_ROUNDS = 12
+PLATEAU_WARMUP_ROUNDS = 4
+PLATEAU_SLOPE_MAX_MIB = 3.0
 PLATEAU_BUDGET_MIB = 170
 PLATEAU_CEILING_MIB = 250
 
 
+def theil_sen_slope(ys: list[float]) -> float:
+    """The median of (y[j] - y[i]) / (j - i) over every pair i < j: a line's slope, robust to outliers."""
+    return statistics.median((ys[j] - ys[i]) / (j - i) for i in range(len(ys)) for j in range(i + 1, len(ys)))
+
+
+def test_theil_sen_slope_reads_a_climb_and_ignores_a_plateau_with_noise():
+    assert theil_sen_slope([10, 20, 30, 40]) == 10
+    assert theil_sen_slope([209] * 8) == 0
+    assert theil_sen_slope([190, 177, 192, 199, 192, 190, 194, 193]) == 0.5        # Linux noise around a plateau
+    assert theil_sen_slope([200, 207.5, 215, 222.5, 230, 237.5, 245, 252.5]) == 7.5  # 64 KiB/request x 120
+    assert theil_sen_slope([204, 208, 209, 209, 209, 209, 209, 209]) == 0           # the macOS ramp's tail
+
+
 def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
     """Baseline before any flood; PLATEAU_ROUNDS rounds of both floods (20 concurrent x 3 of the
-    1 MiB junk, then of the 60k-keys junk) on one fresh server; RSS sampled after each flood.
-    (a) RSS[N] - RSS[N/2] < PLATEAU_LEAK_DELTA_MIB (no climb), (b) plateau - baseline <
+    1 MiB junk, then of the 60k-keys junk) on one fresh server; RSS sampled after each flood, a
+    round's peak = the larger of its two samples. (a) after PLATEAU_WARMUP_ROUNDS, the Theil-Sen
+    slope of the peaks < PLATEAU_SLOPE_MAX_MIB per round (no climb), (b) plateau - baseline <
     PLATEAU_BUDGET_MIB, (c) plateau < PLATEAU_CEILING_MIB. Every sample is printed (and is in the
     assertion message) so a failing run on another OS yields the evidence."""
     proc, port = _start()
@@ -834,18 +852,13 @@ def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
             per_round.append(peak)
     finally:
         _stop(proc)
-    half = PLATEAU_ROUNDS // 2
-    # Climb = median of the second half of the rounds minus median of the first half. A single last-round sample minus
-    # a single mid-round sample swings by +/-13 MiB from allocator/OS noise when the host is loaded (CI flaked on it,
-    # Oct 7-9 2026, base and fixed code alike); the medians cancel that noise while a real per-round leak still shows
-    # up in full (5 MiB/round over 10 rounds is a 25 MiB difference of medians).
-    climb = statistics.median(per_round[half:]) - statistics.median(per_round[:half])
+    slope = theil_sen_slope(per_round[PLATEAU_WARMUP_ROUNDS:])
     plateau = max(per_round)
-    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; median(second half) - median(first half) = {climb} MiB "
-            f"(< {PLATEAU_LEAK_DELTA_MIB}); plateau - baseline = {plateau - baseline} MiB (< {PLATEAU_BUDGET_MIB}); "
-            f"plateau {plateau} MiB (< {PLATEAU_CEILING_MIB}); samples {samples}")
+    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; slope after {PLATEAU_WARMUP_ROUNDS} warm-up rounds "
+            f"= {slope:.2f} MiB/round (< {PLATEAU_SLOPE_MAX_MIB}); plateau - baseline = {plateau - baseline} MiB "
+            f"(< {PLATEAU_BUDGET_MIB}); plateau {plateau} MiB (< {PLATEAU_CEILING_MIB}); samples {samples}")
     print("\nN2 plateau: " + line, flush=True)
-    assert climb < PLATEAU_LEAK_DELTA_MIB, line
+    assert slope < PLATEAU_SLOPE_MAX_MIB, line
     assert plateau - baseline < PLATEAU_BUDGET_MIB, line
     assert plateau < PLATEAU_CEILING_MIB, line
 
