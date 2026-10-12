@@ -733,7 +733,88 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
     return codes, sizes, sorted(health), sorted(posts), time.perf_counter() - t0
 
 
-HEALTH_QUEUE_RATIO_MAX = 0.25  # /health p50 over junk-post p50, same flood (measured 0.06-0.12 fixed, >= 0.36 ungated)
+def test_n2_large_body_shape_scans_run_one_at_a_time_and_small_bodies_are_not_queued_behind_them(monkeypatch):
+    """The mechanism behind the live /health check below (AEGIS round 8 L3; fix-ratio-k), in-process and event-driven,
+    no clock: json.loads holds the GIL for a whole parse, so concurrent large-body shape scans starve the event loop;
+    BodyLimit runs them ONE AT A TIME (scan_gate) and never queues a small body behind them. With one large scan held
+    inside the parser and four more large bodies in flight: the gate is closed to them (exactly one scan entered) and a
+    small body's scan still runs and is answered. Released one by one, no two large scans ever overlap. The round-8
+    regression (the gate removed, e.g. Semaphore(1000)) fails this on any machine, fast or slow."""
+    import asyncio
+
+    import api as api_mod
+    from api import BodyLimit
+
+    monkeypatch.setattr(api_mod, "_malloc_trim", lambda: None)
+    large_n, lock = 5, threading.Lock()
+    inside, high, entered = [0], [0], threading.Semaphore(0)
+    release = threading.Semaphore(0)
+    small_scans = []
+
+    def scan(body, cap):
+        if len(body) < 1000:
+            small_scans.append(len(body))   # a small body: never held
+            return
+        with lock:
+            inside[0] += 1
+            high[0] = max(high[0], inside[0])
+        entered.release()
+        try:
+            assert release.acquire(timeout=60), "never released (hang guard)"
+        finally:
+            with lock:
+                inside[0] -= 1
+    monkeypatch.setattr(api_mod, "json_shape_violation", scan)
+
+    async def inner(scope, receive, send):
+        await receive()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    mw = BodyLimit(inner, large=1000)
+
+    async def request(body):
+        msgs = [{"type": "http.request", "body": body, "more_body": False}]
+        sent = []
+
+        async def receive():
+            return msgs.pop(0)
+
+        async def send(msg):
+            sent.append(msg)
+
+        scope = {"type": "http", "method": "POST", "path": "/x", "raw_path": b"/x", "query_string": b"",
+                 "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]}
+        await mw(scope, receive, send)
+        return sent[0]["status"]
+
+    async def run():
+        big = b'{"a": "' + b"x" * 2000 + b'"}'
+        tasks = [asyncio.ensure_future(request(big)) for _ in range(large_n)]
+        assert await asyncio.to_thread(entered.acquire, True, 60), "no large scan started (hang guard)"
+        # every large body has reached the gate: large_in_flight is counted before the gate, with no await between
+        for _ in range(100_000):
+            if mw.large_in_flight == large_n:
+                break
+            await asyncio.sleep(0)
+        assert mw.large_in_flight == large_n, mw.large_in_flight
+        # a small body is answered while the large scan is held: not queued behind the gate (hang guard 60 s)
+        assert await asyncio.wait_for(request(b'{"a": 1}'), 60) == 200
+        assert small_scans == [8], small_scans
+        # the gate is closed to the four waiting bodies: one scan entered, none can start until it is released
+        assert high[0] == 1 and mw.scan_gate is not None and mw.scan_gate.locked(), (high[0], mw.scan_gate)
+        for i in range(large_n):
+            release.release()
+            if i < large_n - 1:   # the next one enters only now
+                assert await asyncio.to_thread(entered.acquire, True, 60), ("the next scan never started", i)
+        assert await asyncio.wait_for(asyncio.gather(*tasks), 60) == [200] * large_n
+        assert high[0] == 1, ("two large-body scans overlapped", high[0])
+
+    asyncio.run(run())
+
+
+HEALTH_QUEUE_RATIO_MAX = 0.25  # /health p50 / junk-post p50, same flood (correct server, 20 senders: 0.05-0.13)
+HEALTH_P50_SINGLES_MAX = 6.0   # /health p50 / one uncontended junk post, same run (correct <= 4.6; ungated 60k >= 6.6)
 # Fix wave I (AEGIS H-L2): a loose absolute cap ALONGSIDE the ratios, never instead of them. The ratios catch /health
 # queued behind the junk work, but both sides of a ratio grow together if the whole server stalls (every request slow,
 # health 30 s and junk 200 s still reads 0.15). The defect this guards was /health at 36 s; the worst /health
@@ -746,8 +827,9 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
     """AEGIS round 5 (probes/cre_amp.py): 20 concurrent 1 MiB junk posts ->
     /health 36 s, RSS 308 MB, two fast clients got 408. Now: every junk
     post is a small 422, /health is not queued behind the junk work (its
-    latency is a small fraction of a junk post's in the same flood), and a
-    legitimate client is answered (never 408) while the flood runs."""
+    p50 is a small fraction of a junk post's in the same flood, or within a
+    few uncontended junk posts of this run), and a legitimate client is
+    answered (never 408) while the flood runs."""
     proc, port = server
     legit: dict = {}
 
@@ -762,32 +844,50 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
                     legit[type(e).__name__] = legit.get(type(e).__name__, 0) + 1
                 time.sleep(0.2)
 
+    def one_post() -> float:
+        """One junk post on its own (no flood): this run's cost of a single junk request, end to end."""
+        with httpx.Client(timeout=30) as c:
+            t = time.perf_counter()
+            r = c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
+                       headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})
+            took = time.perf_counter() - t
+        assert r.status_code == 422, r.status_code
+        return took
+
+    singles = [one_post() for _ in range(3)]
     lt = threading.Thread(target=legit_client)
     lt.start()
     codes, sizes, health, posts, elapsed = _flood(port, body, nconc=20, reps=3)
     lt.join()
+    singles += [one_post() for _ in range(3)]          # before AND after the flood: the same run, the same box
+    single = statistics.median(singles)
     rss = _rss_kb(proc.pid) // 1024
     print(f"\nN2 {name} x20 conc x3: {codes} in {elapsed:.1f}s; max 422 body {max(sizes)} B; "
           f"/health p50={health[len(health) // 2] * 1000:.0f}ms max={health[-1] * 1000:.0f}ms; RSS {rss} MB; legit {legit}")
     assert codes == {422: 60}, codes
     assert max(sizes) < 8 * 1024
-    # fix-flakes-h (macOS CI, Oct 11 2026): the bound is ORDERING within this run, not an absolute wall time scaled by
-    # a calibration taken after the flood (best of 7 json.loads, floored at 1x: on a CPU faster than the reference
-    # it read 1x however contended the flood itself was, so a 500 ms max-of-N bound measured the runner). The defect
-    # (AEGIS round 5 / round 8 L3) is /health QUEUED behind the junk work: large-body shape scans run one at a time
-    # (BodyLimit.scan_gate) and a small request is never queued behind them, so a /health probe waits at most about
-    # one scan while a junk post waits for the queue. Measured on the 2-vCPU Linux host, idle and with a busy loop on
-    # the same core (fix-flakes-h, 24 runs): health p50 / junk p50 = 0.06-0.12, health max / junk p50 = 0.17-0.51;
-    # with the gate removed (Semaphore(1000), the round-8 regression) 0.36-0.50 and 0.47-0.82 — and the old bounds
-    # passed that mutation on the 1 MiB body (p50 108-140 ms < 150 ms). Both ratios are taken in the same run under the
-    # same load, so load scales both sides.
+    # What this live check can and cannot see (fix-ratio-k, CI run 38255819533). The round-8 regression — /health
+    # QUEUED behind the large-body shape scans because they run concurrently — is caught deterministically, on any
+    # machine, by test_n2_large_body_shape_scans_run_one_at_a_time_and_small_bodies_are_not_queued_behind_them. Here,
+    # on a real server, /health's p50 during the flood must be EITHER < 0.25 x a junk post's p50 in the same flood
+    # (the queue a junk post waits in, /health does not) OR <= HEALTH_P50_SINGLES_MAX x one uncontended junk post (the
+    # median of 3 single posts before and 3 after the flood, same run). The first leg alone failed a correct server
+    # on a fast GitHub runner (/health 30.6 ms, junk 57.0 ms: 0.54): cheap junk makes the flood short — a few /health
+    # samples — and the fixed client-side costs big next to the junk queue. Measured on the 2-vCPU Linux host:
+    #   correct server, 20 senders (40 runs, 20 idle and 20 with a busy loop on the same core): leg 1 0.05-0.13;
+    #   correct server, fast-runner imitations (5 senders, or cheap 96 KiB junk; 10 runs): leg 1 0.10-0.74 (failed in
+    #     8 of 20 readings, as on CI) and leg 2 0.47-4.6 — every reading passed;
+    #   gate removed (Semaphore(1000)), 10 runs idle and contended: leg 1 0.37-0.50 and leg 2 5.6-12.1 (60k keys
+    #     6.6-12.1: failed 10/10; 1 MiB 9/10) — and the in-process gate test failed 10/10.
+    # The max-of-N leg (worst /health < junk p50) is gone: it never caught the regression (0.47-0.82 with the gate
+    # removed) and on a fast runner it is the same few-samples race; a stalled server is the 5 s cap's.
     assert health and posts, (health, posts)
     mid = len(health) // 2
-    print(f"   /health p50 / junk p50 = {health[mid] / posts[len(posts) // 2]:.2f} (bound {HEALTH_QUEUE_RATIO_MAX}); "
-          f"/health max / junk p50 = {health[-1] / posts[len(posts) // 2]:.2f} (bound 1)")
-    assert health[mid] < HEALTH_QUEUE_RATIO_MAX * posts[len(posts) // 2], (health[mid], posts[len(posts) // 2])
-    assert health[-1] < posts[len(posts) // 2], ("a /health probe waited as long as a queued junk post",
-                                                 health[-1], posts[len(posts) // 2])
+    hp50, jp50 = health[mid], posts[len(posts) // 2]
+    print(f"   /health p50 {hp50 * 1000:.1f} ms = {hp50 / jp50:.2f} x junk p50 (leg 1: < {HEALTH_QUEUE_RATIO_MAX}) = "
+          f"{hp50 / single:.2f} x a single junk post {single * 1000:.1f} ms (leg 2: <= {HEALTH_P50_SINGLES_MAX})")
+    assert hp50 < HEALTH_QUEUE_RATIO_MAX * jp50 or hp50 <= HEALTH_P50_SINGLES_MAX * single, (
+        "/health queued behind the junk work", hp50, jp50, single)
     assert health[-1] < HEALTH_WORST_CAP_S, ("the worst /health probe took seconds: the server stalled",
                                              health[-1], HEALTH_WORST_CAP_S)
     assert 408 not in legit and sum(v for k, v in legit.items() if isinstance(k, int)) == 10, legit
