@@ -1059,8 +1059,24 @@ money. ZBC's unit of work is a campaign, not a clip.
     json.loads holds the GIL for a whole parse, so 20 at once kept the
     event loop from running between them. /health p50 under 20 junk
     senders: 390-430 → ~80 ms (60,000-key bodies), 88 → ~28 ms (1 MiB
-    bodies). The timing test is scaled by a measured slowdown factor
-    (the onboarding-py harness) and bounds the p50 as well.
+    bodies). How it is tested (fix-ratio-k, after CI run 38255819533,
+    superseding the slowdown-scaled bound and the fix-flakes-h latency
+    ratios): that /health is never QUEUED behind the scans is proven
+    deterministically, in-process and without a clock, by
+    `test_n2_large_body_shape_scans_run_one_at_a_time_and_small_bodies_are_not_queued_behind_them`
+    (one large scan held inside the parser, four more large bodies in
+    flight: the gate is locked, a small body is still scanned and
+    answered, and no two large scans ever overlap; the gate removed —
+    `Semaphore(1000)` — fails it every time, on any machine). The live
+    flood test (`test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_served`)
+    proves the service keeps serving under a real flood with
+    catastrophe bounds only: every junk post a small 422, every
+    /health sent during the flood answered 200 with a median under 1 s
+    and the worst under 5 s, and a legitimate client never 408. A
+    latency ratio in the live flood could not be both sensitive and
+    never flaky: a correct server read /health 30.6 ms against junk
+    posts of 57.0 ms (0.54 > 0.25) on a fast GitHub runner, where junk
+    is cheap and the flood is short.
 
 39. **Authentication before content type (fix wave 9; AEGIS round 8
     L4).** The body gate answered 415 (and 413, 408) before
