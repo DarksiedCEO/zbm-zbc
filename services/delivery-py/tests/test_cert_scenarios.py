@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 
 import pytest
 
@@ -241,23 +242,107 @@ def test_s5b_review_pass_is_terminal():
         h.close()
 
 
+# S6 has two correct orderings once the model's answer moves the clock past the run's wall clock (CI 38193042611):
+# the next tool call reaches the guardrail, which denies it DEADLINE; or the run watchdog (a background thread that
+# polls the injected clock every WATCHDOG_PERIOD_S) sees the expiry first, fails and interrupts the run, and the tool
+# call is never decided at all. Which one happened depended on thread scheduling, so the test pinned to the first one
+# failed on a slow runner. Each ordering is now forced by recorded events, never by timing, and each test proves the
+# same thing: the run fails DEADLINE, keeps its evidence, and nothing the model asked for after the deadline ran.
+
+def _s6_scenario() -> list:
+    return [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
+            {"advance_clock_s": 3000}, FIX_ADD, {"text": "FIXED"}]
+
+
+def _on_event(h: Harness, wanted) -> threading.Event:
+    """An Event set once the ledger records an event ``wanted(event_type, payload)`` accepts (set after the record)."""
+    seen = threading.Event()
+    record = h.ledger.record_event
+
+    def recording(event_id, department, event_type, actor, subject_id, payload, summary):
+        record(event_id, department, event_type, actor, subject_id, payload, summary)
+        if wanted(event_type, payload):
+            seen.set()
+    h.ledger.record_event = recording
+    return seen
+
+
+def _index(h: Harness, pred) -> list[int]:
+    return [i for i, e in enumerate(h.events()) if pred(e)]
+
+
+def _s6_common(h: Harness, run_id: str) -> dict:
+    run = h.run(run_id)
+    assert run["status"] == "failed" and any(r["code"] == "DEADLINE" for r in run["reasons"]), run["reasons"]
+    assert len(h.events("fix_run_deadline")) == 1
+    assert h.findings(run_id)[0]["state"] == "red"
+    assert run["evidence"]
+    for ev in run["evidence"]:
+        assert os.path.isfile(os.path.join(h.svc.evidence_root, run_id, ev["evidence_id"]))
+    assert any(c[:2] == ["rm", "-f"] for c in h.docker.calls) and h.events("sandbox_released")
+    # the model's fix could not run: no tool call was allowed once the deadline was recorded, and nothing was committed
+    expired_at = _index(h, lambda e: e["event_type"] == "fix_run_deadline")[0]
+    for i in _index(h, lambda e: e["event_type"] in ("tool_call_decided", "tool_call_resolved")):
+        p = h.events()[i]["payload"]
+        if p["decision"] != "deny":
+            assert i < expired_at and p["tool"] == "write_file", p          # only the RED test, before the deadline
+    assert not h.events("commit_recorded") and not run["commits"]
+    return run
+
+
 def test_s6_deadline_expiry_mid_round_fails_the_run_and_keeps_evidence():
-    scenario = [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
-                {"advance_clock_s": 3000}, FIX_ADD, {"text": "FIXED"}]
-    h = Harness(scenario=scenario)
+    """The guardrail ordering: the watchdog is held until the guardrail has decided the first post-deadline call."""
+    h = Harness(scenario=_s6_scenario())
+    decided = _on_event(h, lambda t, p: t == "tool_call_decided" and p.get("code") == "DEADLINE")
+    engine = h.svc._engine
+    watchdog = engine._watchdog
+
+    def held(run_id, stop):
+        decided.wait(60)                                     # bounds a stall only (a regression never decides)
+        watchdog(run_id, stop)
+    engine._watchdog = held
     try:
         run_id = h.submit(findings_doc(h.base_sha, [finding("N1-1")])).json()["run_id"]
-        run = h.run(run_id)
-        assert run["status"] == "failed" and any(r["code"] == "DEADLINE" for r in run["reasons"])
-        assert h.events("fix_run_deadline")
-        assert h.findings(run_id)[0]["state"] == "red"
-        for ev in run["evidence"]:
-            assert os.path.isfile(os.path.join(h.svc.evidence_root, run_id, ev["evidence_id"]))
-        assert any(c[:2] == ["rm", "-f"] for c in h.docker.calls) and h.events("sandbox_released")
-        # after the deadline, tool calls were denied (the model's fix could not run)
-        denied = [e for e in h.events("tool_call_decided") if e["payload"]["decision"] == "deny"]
-        assert any(e["payload"]["code"] == "DEADLINE" for e in denied)
+        _s6_common(h, run_id)
+        # after the deadline, the model's tool calls were denied DEADLINE by the guardrail, before the run was failed
+        denied = _index(h, lambda e: e["event_type"] == "tool_call_decided" and e["payload"]["decision"] == "deny"
+                        and e["payload"]["code"] == "DEADLINE")
+        assert denied and h.events()[denied[0]]["payload"]["tool"] == "read_file"
+        assert denied[0] < _index(h, lambda e: e["event_type"] == "fix_run_deadline")[0]
     finally:
+        decided.set()
+        h.close()
+
+
+def test_s6b_watchdog_expiry_before_the_next_tool_call_fails_the_run_and_runs_nothing():
+    """The watchdog ordering (what a slow runner produced): the model's post-deadline answer is held until the
+    watchdog has failed the run, so the interrupt lands while that answer's tool call is still undecided."""
+    h = Harness(scenario=_s6_scenario())
+    expired = _on_event(h, lambda t, p: t == "fix_run_deadline")
+    complete = h.model.complete
+    seen: dict = {}
+
+    def answer_after_expiry(turn):
+        before = h.clock.now()
+        ans = complete(turn)
+        if h.clock.now() != before:                          # this answer was given past the deadline
+            seen["tools"] = [c["name"] for c in ans.tool_calls]
+            seen["watchdog_first"] = expired.wait(60)        # bounds a stall only
+        return ans
+    h.model.complete = answer_after_expiry
+    try:
+        run_id = h.submit(findings_doc(h.base_sha, [finding("N1-1")])).json()["run_id"]
+        assert seen == {"tools": ["read_file"], "watchdog_first": True}, seen
+        _s6_common(h, run_id)
+        interrupted = [e["payload"] for e in h.events("run_interrupted")]
+        assert interrupted and interrupted[0]["why"] == "deadline"
+        # any decision on the held call that still reached the guardrail was a DEADLINE deny
+        expired_at = _index(h, lambda e: e["event_type"] == "fix_run_deadline")[0]
+        for i in _index(h, lambda e: e["event_type"] == "tool_call_decided"):
+            if i > expired_at:
+                assert h.events()[i]["payload"]["code"] == "DEADLINE"
+    finally:
+        expired.set()
         h.close()
 
 
