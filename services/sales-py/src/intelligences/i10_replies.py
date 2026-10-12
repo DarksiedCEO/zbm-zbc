@@ -97,7 +97,14 @@ _DISGUISE_SQUEEZED = frozenset(_squeeze(w) for w in OPT_OUT_DISGUISE_WORDS)
 # an entity disguised by its case, "&Lt;b&Gt;", which decodes to "≪b≫") must not glue "b>unsubscribe</b" into one
 # word. Only a run that opens AND closes counts (fix wave G, G-L2): a lone "<" or ">" inside a word ("st<op", AEGIS
 # G-M1) is dropped between letters as before the war room, and "x>stop<y" is not a tag.
+# The run is read as ``_TAG_WORD``, a word of its own, not as a bare space (fix wave I, AEGIS G2-M1): a space let the
+# words on either side meet, so a bracketed word in an ordinary reply made an opt-out phrase ("not «that» interested"
+# read "not interested", "Do not «hesitate» contact me" read "do not contact"). The placeholder keeps them apart; a
+# word the tags wrap still stands on its own ("≪b≫unsubscribe" reads "<tag> unsubscribe"). Two places look through
+# it, as the bare space let them before: a run of single letters (``_finish``: "s≪b≫t≪b≫o≪b≫p" is "stop") and the
+# whole-message carrier words (``classify``: "≪b≫end≪/b≫" is "end").
 _TAG_SPAN = re.compile(r"[<≪‹«〈⟨][^<>≪≫‹›«»〈〉⟨⟩\n]{0,200}[>≫›»〉⟩]")
+_TAG_WORD = "zxqtagzxq"        # letters only (no leet digit, no "_"); matches no rule below and no word in a reply
 # every character with a non-zero canonical combining class, as one regex class (the whole code space scanned once;
 # one C-level deletion instead of a Python loop per character, as service-py's triage._COMBINING_CHARS)
 _COMBINING = re.compile("[" + lookalikes.char_class([cp for cp in range(0x110000)
@@ -172,7 +179,8 @@ def normalise(text: str, shared: bool = False, casefold_first: bool = False, tag
     """The text as the rules read it (step 0 above). ``shared``: the letters in ``_SHARED_READS`` read as the shared
     fold reads them. ``casefold_first``: case folded before the lookalike fold, as this module read text before the
     war room (a capital Greek eta "Η" is then "η", "n"; folded as written it is the "H" it looks like).
-    ``tags_as_spaces``: a tag-shaped run (``_TAG_SPAN``) is a space ("≪b≫unsubscribe" -> "unsubscribe").
+    ``tags_as_spaces``: a tag-shaped run (``_TAG_SPAN``) is the word ``_TAG_WORD`` ("≪b≫unsubscribe" ->
+    "zxqtagzxq unsubscribe"), so the words on either side never join into one phrase.
     ``one_as_i``: a "1" read as a letter is "i", not "l"."""
     return _finish(_prepare(text, shared, casefold_first), tags_as_spaces, one_as_i)
 
@@ -194,7 +202,7 @@ def _finish(t: str, tags_as_spaces: bool, one_as_i: bool) -> str:
     if _LEET_CHAR.search(t):
         t = " ".join(_fold_word(w, leet) for w in t.split())
     if tags_as_spaces:
-        t = _TAG_SPAN.sub(" ", t)
+        t = _TAG_SPAN.sub(" " + _TAG_WORD + " ", t)
     # S.T.O.P -> stop, don't -> dont, opt-out -> optout, st<op -> stop (punctuation between letters dropped)
     t = re.sub(r"(?<=[^\W\d_])[^\w\s]+(?=[^\W\d_])", "", t)
     t = re.sub(r"[^\w\s]+", " ", t)
@@ -202,8 +210,8 @@ def _finish(t: str, tags_as_spaces: bool, one_as_i: bool) -> str:
     for w in words + [""]:
         # S T O P -> stop: a run of 3+ single letters; a lone leet digit in it counts as a letter when the run holds a
         # real letter (s 7 o p -> stop; 2 0 2 4 stays a number), as clipper-network-py does (WR-F002)
-        if len(w) == 1 and (w.isalpha() or w in _LEET_DIGITS):
-            run.append(w)
+        if (len(w) == 1 and (w.isalpha() or w in _LEET_DIGITS)) or (w == _TAG_WORD and run):
+            run.append(w)              # a tag between single letters does not end their run (s <b> t o p)
             continue
         out += _join_run(run, leet)
         run = []
@@ -213,9 +221,16 @@ def _finish(t: str, tags_as_spaces: bool, one_as_i: bool) -> str:
 
 
 def _join_run(run: list[str], leet: dict) -> list[str]:
-    if len(run) >= 3 and any(c.isalpha() for c in run):
-        return ["".join(run).translate(leet)]
+    letters = [c for c in run if c != _TAG_WORD]
+    if len(letters) >= 3 and any(c.isalpha() for c in letters):
+        # a tag after the last letter still separates the joined word from the next one
+        return ["".join(letters).translate(leet)] + ([_TAG_WORD] if run[-1] == _TAG_WORD else [])
     return run
+
+
+def _without_tags(t: str) -> str:
+    """A reading with its ``_TAG_WORD`` placeholders left out ("<tag> end <tag>" -> "end")."""
+    return " ".join(w for w in t.split() if w != _TAG_WORD)
 
 
 def _collapse(t: str) -> str:
@@ -230,9 +245,9 @@ def classify(text: str, channel: str = "email") -> str:
     # is the safe side), never for the other labels. War room: opt-out wording is read in every reading below, and an
     # opt-out in any of them suppresses: the text as HTML read as text and as written (<style> / <script> content
     # dropped from both); capitals as written and case folded first (the reading before the war room); when the text
-    # holds one of _SHARED_READS, with the shared fold's reading of it; with tag-shaped runs as spaces (and, always,
-    # without: punctuation inside a word, "st<op", is dropped as before the war room); and with a "1" as "i". The
-    # other labels read the HTML as text, capitals as written, with this module's table.
+    # holds one of _SHARED_READS, with the shared fold's reading of it; with each tag-shaped run read as _TAG_WORD
+    # (and, always, without: punctuation inside a word, "st<op", is dropped as before the war room); and with a "1"
+    # as "i". The other labels read the HTML as text, capitals as written, with this module's table.
     readings = []
     for source in dict.fromkeys((as_text, drop_style_script(text))):
         options = [(False, False)]
@@ -249,7 +264,7 @@ def classify(text: str, channel: str = "email") -> str:
             readings += [t if (source, shared, cf, tg, one) == (as_text, False, False, False, False) else
                          _finish(p, tg, one) for tg in tags for one in ones]
     for v in dict.fromkeys(x for r in readings for x in (r, _collapse(r))):
-        if v in _CARRIER or _UNSUB.search(v):
+        if v in _CARRIER or _UNSUB.search(v) or _TAG_WORD in v and _without_tags(v) in _CARRIER:
             return "unsubscribe"
         if channel != "email" and _UNSUB_PHONE.search(v):         # sms, voice, or a channel we do not know
             return "unsubscribe"
