@@ -26,8 +26,25 @@ import pytest
 from conftest import SRC, TEST_SERVICE_TOKEN, free_port
 
 
-def _launch(raw: str | None, timeout: float = 20.0) -> tuple[int | None, str]:
-    """(the /health status from OUR child once it announced its bind, or None if it exited first; its output)."""
+HANG_GUARD_S = 120.0   # waits for an EVENT (the bind announcement or the child's exit); never a measurement
+PORT_ATTEMPTS = 5
+
+
+def _launch(raw: str | None) -> tuple[int | None, str]:
+    """(the /health status from OUR child once it announced its bind, or None if it exited first; its output).
+
+    fix-flakes-h: ends on events only — the child announcing its own bind, or exiting — with a generous hang guard
+    (it was a 15-20 s deadline, which a slow runner's cold start could reach: the refusal check runs only after
+    `import api`); and a child that lost its picked port to another process (exited with "address already in use"
+    before announcing) is retried on another port, as conftest.start_serve does, instead of reading as "refused"."""
+    for _ in range(PORT_ATTEMPTS):
+        status, out, lost_port = _launch_once(raw)
+        if not lost_port:
+            return status, out
+    raise RuntimeError(f"the launcher lost its port {PORT_ATTEMPTS} times: {out[-2000:]}")
+
+
+def _launch_once(raw: str | None) -> tuple[int | None, str, bool]:
     port = free_port()
     env = {**os.environ, "CREATIVE_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "CREATIVE_PORT": str(port),
            "PYTHONDONTWRITEBYTECODE": "1"}
@@ -39,12 +56,15 @@ def _launch(raw: str | None, timeout: float = 20.0) -> tuple[int | None, str]:
         proc = subprocess.Popen([sys.executable, "serve.py"], cwd=SRC, env=env, stdout=out, stderr=subprocess.STDOUT)
         status = None
         try:
-            deadline = time.monotonic() + timeout
+            deadline = time.monotonic() + HANG_GUARD_S
             announced = f"Uvicorn running on http://127.0.0.1:{port}".encode()
-            while time.monotonic() < deadline and proc.poll() is None:
+            while proc.poll() is None:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("the launcher neither announced its bind nor exited within the hang guard: "
+                                       + os.pread(out.fileno(), 4000, 0).decode(errors="replace"))
                 if announced in os.pread(out.fileno(), os.fstat(out.fileno()).st_size, 0):
                     try:
-                        status = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2).status_code
+                        status = httpx.get(f"http://127.0.0.1:{port}/health", timeout=30).status_code
                     except httpx.HTTPError:
                         time.sleep(0.1)
                         continue
@@ -55,12 +75,14 @@ def _launch(raw: str | None, timeout: float = 20.0) -> tuple[int | None, str]:
         finally:
             proc.terminate()
             try:
-                proc.wait(timeout=10)
+                proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
         out.seek(0)
-        return status, out.read().decode(errors="replace")
+        text = out.read().decode(errors="replace")
+    lost_port = status is None and "Uvicorn running on" not in text and "address already in use" in text.lower()
+    return status, text, lost_port
 
 
 @pytest.mark.parametrize("raw,us", [(None, 1000), ("0.0001", 100), ("0.05", 50_000), (" 0.002 ", 2000)])
@@ -72,7 +94,7 @@ def test_the_launcher_serves_with_the_interval_in_force_it_reports(raw, us):
 
 @pytest.mark.parametrize("raw", ["0.0000999", "0.0500001", "0.5", "0", "-0.001", "nan", "inf", "abc"])
 def test_the_launcher_refuses_an_interval_outside_the_range(raw):
-    status, out = _launch(raw, timeout=15)
+    status, out = _launch(raw)
     assert status is None, out[-2000:]
     assert "CREATIVE_SWITCH_INTERVAL_SECONDS" in out and "Uvicorn running on" not in out, out[-2000:]
 

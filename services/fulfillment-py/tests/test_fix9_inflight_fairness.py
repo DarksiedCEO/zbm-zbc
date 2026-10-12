@@ -337,6 +337,12 @@ def _head(path: str, content_length: int) -> bytes:
 
 
 def _status_of(s: socket.socket) -> tuple[int | None, bytes]:
+    """(status, the whole response: head and as much of its Content-Length body as arrived).
+
+    fix-flakes-h: the body is part of what is returned. uvicorn writes the head and the body as two writes, which can
+    reach the client as two segments; this used to return only the bytes read up to the end of the head, so a 408
+    whose body arrived a moment after its head lost its "split the batch" text (seen once in a full-suite run; the
+    split reproduces deterministically in test_status_of_returns_a_body_that_arrives_after_its_head)."""
     data = b""
     try:
         while b"\r\n\r\n" not in data:
@@ -354,9 +360,40 @@ def _status_of(s: socket.socket) -> tuple[int | None, bytes]:
             if not chunk:
                 break
             rest += chunk
+            data += chunk
     except OSError:
         pass
     return (int(data[9:12]) if data.startswith(b"HTTP/1.1 ") else None), data
+
+
+def test_status_of_returns_a_body_that_arrives_after_its_head():
+    """The reader keeps reading to Content-Length: a head and a body sent as two segments, the body only after the
+    reader has seen the head (an event, not a sleep), come back as one response."""
+    a, b = socket.socketpair()
+    try:
+        body = b'{"detail": "...; split the batch into requests of at most ~1 bytes"}'
+        head = b"HTTP/1.1 408 Request Timeout\r\ncontent-length: %d\r\n\r\n" % len(body)
+        a.sendall(head)
+        got: list = []
+        t = threading.Thread(target=lambda: got.append(_status_of(b)))
+        t.start()
+        # the body is sent once the reader has consumed the head (the peer's queue is empty again)
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                peek = b.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+            except BlockingIOError:
+                peek = b""
+            if not peek or time.monotonic() > deadline:
+                break
+            time.sleep(0.005)
+        a.sendall(body)
+        t.join(60)
+        code, raw = got[0]
+        assert code == 408 and raw == head + body, raw
+    finally:
+        a.close()
+        b.close()
 
 
 def _paced_upload(port: int, path: str, body: bytes, rate: float) -> tuple[int | None, float, bytes]:
@@ -411,8 +448,9 @@ def test_live_q2_max_body_boundary_rate(server):
     """A max legal body (~4 MiB) must arrive within the 30 s deadline: it
     needs size / 30 s (~136 KiB/s). Both sides at once on the real launcher:
     at 1.15x that rate it is accepted; at 64 KiB/s (the poor-mobile case,
-    which would need 64 s) and at 0.85x it is refused at ~5 s (the grace),
-    not at 30 s, with a 408 telling the client how far to split."""
+    which would need 64 s) and at 0.85x it is refused by the rate check
+    (at ~5 s, the grace), not by the 30 s deadline, with a 408 telling the
+    client how far to split."""
     _, port = server
     body = _max_legal_body()
     need = len(body) / http_limits.BODY_READ_TIMEOUT_S
@@ -435,8 +473,12 @@ def test_live_q2_max_body_boundary_rate(server):
     for name in ("refuse_0.85x", "mobile_64KiB/s"):
         code, took, raw = results[name]
         assert code == 408, (name, summary, raw[:300])
-        assert b"split the batch" in raw, raw[:400]
-        assert took < http_limits.BODY_MIN_RATE_GRACE_S + 2.0, (name, summary)
+        # Refused EARLY, by the rate check — not by the 30 s deadline: the answer is the rate path's own text (the
+        # deadline's 408 says "not received within 30s", the stall's "stalled for 5s") and it came before the deadline
+        # could have fired (an ordering against the server's own deadline; measured ~5.1 s, the grace). fix-flakes-h:
+        # was `took < grace + 2 s`, a wall-clock bound a loaded box can cross while the server's decision is the same.
+        assert b"cannot complete within" in raw and b"split the batch" in raw, raw[:400]
+        assert took < http_limits.BODY_READ_TIMEOUT_S, (name, summary)
 
 
 def _legit_probe(port: int, stop: float, small: list, large: list) -> None:

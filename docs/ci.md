@@ -108,18 +108,18 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
 | Job | Command(s) run (from the service directory) | Proves |
 |---|---|---|
 | `changes` | `git diff --name-only <base> <head>` + the classification script | which suites a change can affect |
-| `python-tests (<svc>, 3.12/3.13, ubuntu-24.04)` and `(<svc>, 3.13, macos-26)` for detection-py, fulfillment-py, onboarding-py, creative-py, compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py, seo-py | `python -m pip install -r requirements.txt` then `python devtools/hygiene_check.py run --suite python:<svc> --kind pytest --cwd services/<svc> -- python -m pytest -q -rs -p no:cacheprovider` | each department's suite (unit, scenario, attack, guardrail and live-launcher tests) on both interpreters. onboarding-py's entry installs Rust stable first because its conftest runs `cargo build --release --bin server` on ledger-rust and drives the real binary; without cargo those tests skip and the count is a lie. |
+| `python-tests (<svc>, 3.12/3.13, ubuntu-24.04)` and `(<svc>, 3.13, macos-26)` for detection-py, fulfillment-py, onboarding-py, creative-py, compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py, seo-py | `python -m pip install -r requirements.txt` then `python devtools/hygiene_check.py run --suite python:<svc> --kind pytest --cwd services/<svc> -- python -m pytest -q -rfEs -p no:cacheprovider -o faulthandler_timeout=<N> --durations=10`, tee'd and annotated ("Reading a red job" below) | each department's suite (unit, scenario, attack, guardrail and live-launcher tests) on both interpreters. onboarding-py's entry installs Rust stable first because its conftest runs `cargo build --release --bin server` on ledger-rust and drives the real binary; without cargo those tests skip and the count is a lie. |
 | `delivery-py (3.12/3.13, ubuntu-24.04)`, `delivery-py (3.13, macos-26)` | Node 22 (setup-node) + Go (setup-go, version from `fixtures/dlv/toy-go/go.mod`) + Rust stable (`rustup toolchain install stable --profile minimal`) → `uv sync --frozen --python <v>` (uv 0.8.17, the version `uv.lock` was produced with) → `uvx ruff@0.15.11 check src tests devtools` → the same pytest command under the hygiene check (the `.venv` is the one allowlisted ignored path) | the fix-engine suite plus lint, including `tests/test_toolchains.py`, which runs the REAL `go`, `cargo` and `node` on the toy fixtures through the whole loop (fix wave 20 / R15: without the three toolchains those tests fail on a missing binary instead of skipping, so the job installs them first). `tests/test_live_docker.py` skips here with its printed reason — that is expected; the next job is where it must pass. |
 | `ledger-rust (ubuntu-24.04 / macos-26)` | `rustup toolchain install stable --profile minimal --component clippy` → `cargo test --locked` (under the hygiene check; `target/` allowlisted) → `cargo clippy --locked --all-targets -- -D warnings` | the unit and integration tests (counts: docs/test-counts.md; the integration tests spawn the compiled server over a real TCP socket, on a port the server picks and reports back), clippy clean, and `Cargo.lock` matches `Cargo.toml` (`--locked` fails on drift). |
 | `orchestrator-go` | `go vet ./...` → `go test -race -count=1 -v ./...` under the hygiene check (Go version from `go.mod`, 1.24.7; `GOTELEMETRY=off`) | the orchestrator's tests (three packages) with the race detector; no cached results; the binary tests start the real orchestrator on port 0 and read its port file. |
 | `dashboard-ts` | Node 22 → `npm ci` → `npm run lint` (`tsc --noEmit`) → `npm run build` → `npm test` under the hygiene check → `npm run check:dynamic` (job env `NODE_DISABLE_COMPILE_CACHE=1`: npm otherwise leaves `node-compile-cache` in the suite's private TMPDIR, an R3 failure; `NEXT_TELEMETRY_DISABLED=1`) | lockfile-exact install, typecheck, production build, the tests (the live ones start the built server on a port it picks; any skip fails the job; money vectors shared with the other three languages), and the package's own check that `/` and `/healthz` are dynamic routes. |
 | `live-run (<svc>, 3.12/3.13)` for compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py, seo-py | `cargo build --locked --release --bin server` in ledger-rust, then `LEDGER_BIN=<that binary> LIVE_WORK_DIR=$RUNNER_TEMP/live-work python devtools/live_run.py` under the hygiene check (`--kind none`: no test count; temp files and processes must not outlive the run), then the work dir is listed and removed | each department's own live integration run: the real ledger-rust binary and the department's production entrypoint as separate processes over real HTTP with real tokens, every narrated behaviour asserted, a restart with the ledger-anchor check, and `GET /ledger/verify` valid on every ledger at the end. Exit 0 only when every check held (each script prints its own N/N). verification-py's run also starts compliance-py's production entrypoint, so both requirement files are installed. seo-py's run also starts finance-py's production entrypoint (its invoice verification leg, ADR 0017 W3-2), so finance-py's requirements are installed too, and it makes no outbound connection: it engages the web provider switch over the API before its first audit, so every fetch stops at the kill-switch guard before name resolution (the crawler is proven in its pytest suite against an in-process fixture). |
-| `delivery-docker-live` | base digest = the job's `RECORDED_BASE_DIGEST` (= ADR 0011; the `DLV_SANDBOX_BASE_DIGEST` repository variable, if set, must equal it or the step fails; `docker buildx imagetools inspect python:3.12-slim` only reports, as a notice, when upstream has moved — fix wave 26b, R26-4) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… --build-arg NODE_VERSION=… --build-arg NODE_SHA256=… --build-arg GO_VERSION=… --build-arg GO_SHA256=… --build-arg RUSTUP_VERSION=… --build-arg RUSTUP_INIT_SHA256=… --build-arg RUST_TOOLCHAIN=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` (every pin from the job's env = ADR 0011; `devtools/test_ci_docker_args.py` checks both) → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest -q -rs tests/test_live_docker.py --junitxml=…` → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
+| `delivery-docker-live` | base digest = the job's `RECORDED_BASE_DIGEST` (= ADR 0011; the `DLV_SANDBOX_BASE_DIGEST` repository variable, if set, must equal it or the step fails; `docker buildx imagetools inspect python:3.12-slim` only reports, as a notice, when upstream has moved — fix wave 26b, R26-4) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… --build-arg NODE_VERSION=… --build-arg NODE_SHA256=… --build-arg GO_VERSION=… --build-arg GO_SHA256=… --build-arg RUSTUP_VERSION=… --build-arg RUSTUP_INIT_SHA256=… --build-arg RUST_TOOLCHAIN=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` (every pin from the job's env = ADR 0011; `devtools/test_ci_docker_args.py` checks both) → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest tests/test_live_docker.py -q -rfEs -p no:cacheprovider -o faulthandler_timeout=900 --durations=10 --junitxml=…` (tee'd and annotated) → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
 | `audit-python` | `pip-audit==2.10.1`: `pip-audit -r services/<svc>/requirements.txt --strict` for every `*-py/requirements.txt`; for delivery-py, `uv export --frozen --no-hashes --no-emit-project` then `pip-audit -r … --no-deps --disable-pip --strict` on the registry packages | no known advisory against any pinned Python dependency (the two git-sourced deer-flow packages are excluded — see below). |
 | `audit-rust` | `cargo install cargo-audit --locked --version 0.22.2` → `cargo audit` | no RustSec advisory against `Cargo.lock` (70 crates). |
 | `audit-node` | `npm audit --audit-level=high` | no high or critical advisory against `package-lock.json`. |
 | `secret-scan` | gitleaks 8.30.1 release binary (sha256 `551f6fc8…` verified before use) → `gitleaks git --no-banner --redact --exit-code 1 --config .gitleaks.toml .` over the full history | no secret in any commit. `.gitleaks.toml` allowlists exact strings only: four (two fake `AKIA…` shapes, one fake token, one fake cued password) that onboarding-py's redaction tests use as inputs, two fake Stripe test-key shapes used by finance-py's simulated Stripe, the retired test-only PII hash key still in sales-py's history (`tests/helpers.py`, replaced in 6072160), and the fake tax id still in bizdev-py's history (`tests/test_aegis_r1.py` in 22fe413, built from parts since); it exempts no file and no path. |
-| `hygiene-static` | Python 3.13 (setup-python) + `pip install pytest==9.1.1` (the services' pin; the self-test drives a planted pytest suite through the plugin) → `python -B -m unittest devtools/test_hygiene_check.py` (and `devtools/test_ci_docker_args.py`; `-B`: no `devtools/__pycache__/` left in a developer's checkout, F-11) → `python devtools/hygiene_check.py lint --strict-allowlist` → `python devtools/hygiene_check.py counts --check` | the checker's self-test (each rule fails on a planted violation in a throwaway repository, the clean probe passes), then the static hygiene rules over the whole tree (below), then one row per suite in `docs/test-counts.md`; always runs. |
+| `hygiene-static` | Python 3.13 (setup-python) + `pip install pytest==9.1.1` (the services' pin; the self-test drives a planted pytest suite through the plugin) → `python -B -m unittest devtools/test_hygiene_check.py` (and `devtools/test_ci_docker_args.py`, `devtools/test_ci_annotate.py`; `-B`: no `devtools/__pycache__/` left in a developer's checkout, F-11) → `python devtools/hygiene_check.py lint --strict-allowlist` → `python devtools/hygiene_check.py counts --check` | the checker's self-test (each rule fails on a planted violation in a throwaway repository, the clean probe passes), then the static hygiene rules over the whole tree (below), then one row per suite in `docs/test-counts.md`; always runs. |
 | `warroom` | Python 3.13 + the pinned requirements of service-py, sales-py, verification-py, clipper-network-py, onboarding-py and seo-py → `python -B -m unittest devtools/test_warroom.py` → `python devtools/warroom/run.py --all --seed 1 --out $RUNNER_TEMP/warroom` under the hygiene check (`--kind none`) | the war room launch gate (ADR 0018): every seeded public-facing department, driven through its own in-process harness in a sealed sandbox with its scenario library, seeded chaos variants and the replay library, holds every MUST invariant (a triaged known failure in `devtools/warroom/findings.md` excepted) and no case ERRORs; the engine's own self-test passes first. Runs when the Python cluster or a shared path changed. |
 | `required` | reads the result of every job above | one green check for branch protection; red if any job failed or was cancelled; a job skipped by the path filter is fine. |
 
@@ -253,5 +253,79 @@ without the variable leaves nothing.
 - onboarding-py's suite is the slow one (~6 minutes plus a cold ledger-rust release build); the
   `test_procinfo.py` copies in creative-py, fulfillment-py and onboarding-py skip one IPv6 case on hosts without
   an IPv6 loopback and say so (an expected skip in `devtools/hygiene_allowlist.json`).
-- `-rs` is passed everywhere so any skip prints its reason in the log; an unexpected skip fails the job (R5), and a
-  skip in `delivery-docker-live` fails that job.
+- `-rfEs` is passed everywhere (fix wave 26c; was `-rs`, which also suppressed pytest's `FAILED`/`ERROR` summary
+  lines): any skip prints its reason in the log, an unexpected skip fails the job (R5), and a skip in
+  `delivery-docker-live` fails that job.
+
+## Reading a red job: annotations (fix wave 26c)
+
+The job logs of this repository's runs cannot be read from the team's environment (the log blob storage answers
+403), and a failed step's only annotation used to be "Process completed with exit code 1". Check-run annotations
+CAN be read, so every test-running step now writes its own:
+
+```bash
+set +e
+<the suite's command> 2>&1 | tee "$RUNNER_TEMP/<name>.log"
+code=${PIPESTATUS[0]}
+python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/<name>.log" --code "$code" --suite "<suite>"
+exit "$code"
+```
+
+with `shell: bash` on the step. The console still streams every line (tee writes as it reads; the suite's stdout was
+already a pipe, not a terminal, so nothing in the suite behaves differently), the step exits with the suite's own
+exit code, and `ci_annotate.py` itself always exits 0. The log file lives in `$RUNNER_TEMP`
+(`/home/runner/work/_temp` on Linux, `/Users/runner/work/_temp` on macOS): outside the checkout (no R1/R2 change),
+outside `/tmp` (R3 watches new direct entries of `/tmp` only) and outside the wrapper's private TMPDIR
+(`$RUNNER_TEMP/hyg-…/tmp`, removed by the wrapper). No allowlist was widened for it. Wrapped: `python-tests`,
+`delivery-py`, `ledger-rust`, `orchestrator-go`, `dashboard-ts`, `live-runs`, `delivery-docker-live`, the war room's
+self-tests and gate, and `hygiene-static`'s self-tests and lint; `devtools/test_ci_annotate.py` fails if a test step
+of `ci.yml` is not wrapped this way.
+
+What a red step's annotations hold (title = the suite, e.g. `python:creative-py`):
+
+- one error per failing test it recognises, the test's id first, then the first reason lines: pytest
+  `FAILED <nodeid> - <reason>` / `ERROR <nodeid>` with that test's `E` lines and `file.py:N: Error` line; cargo
+  `test <name> ... FAILED` with the panic message; Go `--- FAIL:` with the `x_test.go:N:` lines; node `not ok` with
+  its `error:`; unittest `FAIL:`/`ERROR:` with the exception line; `HYGIENE <rule> …` violations; a live run's
+  `CHECK FAIL:` / `MISMATCH:`; the war room's new MUST failures and errors;
+- a faulthandler dump: the pytest steps pass `-o faulthandler_timeout=<N>`, so a test still running after N seconds
+  writes every thread's stack into the log WITHOUT being stopped; the annotation names the running test's entry
+  frame and the first frames of each thread. N is above the longest subprocess timeout any test of that suite
+  allows: 600 s by default, clipper-network-py 900 (a 600 s contract run), onboarding-py 1500 (its conftest's
+  1200 s `cargo build`), delivery-py 2100 (`tests/test_live_tracked_files.py`'s 1800 s nested run), the Docker live
+  tests 900. `--durations=10` prints the slowest tests, and a green step's notice quotes the slowest one, so these
+  numbers can be checked against measured times;
+- last, the summary: exit code, pytest's count line, `test result: FAILED`, the hygiene wrapper's
+  `hygiene_check: suite … exited N; …` line. When no failure was recognised (a crash, a kill, an unknown format) it
+  carries the last lines of the log instead.
+
+GitHub keeps 10 error and 10 warning annotations per step and 50 per job, so a step gets at most 10 errors (the
+summary always the last of them), then up to 10 warnings for further failures; any failure beyond that is named in
+the summary. Each quoted line is cut at 500 characters. A green step gets one notice (count line, slowest test,
+hygiene line) and no error. The log is untrusted: quoted lines are redacted (Bearer/Basic/authorization values,
+`key=value` secrets, URL credentials, known token shapes, long high-entropy strings — 32+ hex digits included),
+control characters are dropped, a leading `::` or `##[` is neutralised, and messages and titles are escaped as
+GitHub requires, so a log line cannot start a workflow command of its own. Lines that already are workflow commands
+(the live runs print their own `::error` for a failed check) are not repeated.
+
+To read them for a run (`gh` authenticated for the repository):
+
+```bash
+# the run (or take the id from the run's URL)
+gh run list --repo DarksiedCEO/zbm-zbc --workflow ci.yml --branch <branch> --limit 5
+# its jobs that did not succeed; a job id is also its check-run id
+gh api "repos/DarksiedCEO/zbm-zbc/actions/runs/<run_id>/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.conclusion != "success" and .conclusion != "skipped") | "\(.id) \(.conclusion) \(.name)"'
+# a job's annotations
+gh api "repos/DarksiedCEO/zbm-zbc/check-runs/<job_id>/annotations?per_page=100" \
+  --jq '.[] | "\(.annotation_level) | \(.title) | \(.message)"'
+```
+
+The API reports an `::error` as level `failure`. Which step failed, and when, is in
+`gh api repos/DarksiedCEO/zbm-zbc/actions/jobs/<job_id> --jq '.steps[] | "\(.number) \(.name) \(.conclusion) \(.started_at) \(.completed_at)"'`.
+
+Limits: a step stopped by the job's `timeout-minutes` (or cancelled) never reaches the `ci_annotate.py` line, so it
+gets no annotation — the faulthandler dump is in the log, which cannot be read from here; keep `timeout-minutes` well
+above the faulthandler limits (it is). A workflow command a test prints to the console is acted on by the runner as
+before; the converter only guarantees that it adds none of its own.
+

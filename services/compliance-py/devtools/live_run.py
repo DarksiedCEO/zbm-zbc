@@ -287,6 +287,10 @@ def _main(work: Path) -> int:
         say(f"A /compliance/v1/audit/evidence: {ev['counts']}; attempted state changes: {len(stray)}")
         ok = ok and not stray and ev["counts"]["committed"] > 0 and c11_after_restart == "pass"
         say(f"RESULT: {'PASS' if ok else 'FAIL'} (both ledgers verify; C-11 after restart; every state change committed)")
+        if not ok and os.environ.get("GITHUB_ACTIONS") == "true":
+            # an annotation: readable through the check-run API when the job log is not
+            print("::error title=compliance-py live run::check failed: both ledgers verify, C-11 after restart, every "
+                  "state change committed (one of them did not hold)", flush=True)
         return 0 if ok else 1
     finally:
         for p in PROCS:
@@ -296,6 +300,7 @@ def _main(work: Path) -> int:
                     p.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     p.kill()
+                    p.wait()        # reaped here: never alive when the hygiene check looks for leftovers
             say(f"stopped pid={p.pid}")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
 

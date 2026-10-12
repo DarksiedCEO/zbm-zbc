@@ -22,6 +22,12 @@
 # or /tmp, leaves a process running, skips a test for a reason not on the suite's expected list, or runs a number of
 # tests different from docs/test-counts.md. The `hygiene-static` job runs the static rules over the whole tree.
 #
+# Annotations (fix wave 26c): the job logs cannot be read from the team's environment, check-run annotations can.
+# Every test-running step (shell: bash) tees its output to $RUNNER_TEMP, keeps the suite's exit code from PIPESTATUS,
+# runs devtools/ci_annotate.py over the log (failing test ids, their reason lines, faulthandler stack dumps, the
+# summary; a notice on green) and exits with the suite's code. docs/ci.md "Reading a red job" has the gh commands;
+# devtools/test_ci_annotate.py fails if a test step here is not wrapped that way.
+#
 # Path filtering is done by the `changes` job (a plain `git diff`, no third-party action) so an unrelated change
 # does not run every suite. Shared files (root README.md, docs/**, fixtures/**, devtools/**, .github/**) run
 # everything. The fifteen Python services are one cluster: their tests read each other's sources (ports.py,
@@ -191,13 +197,26 @@ jobs:
           workspaces: services/ledger-rust -> target
       - name: Install pinned requirements
         run: python -m pip install -r services/${{ matrix.service }}/requirements.txt
+      # Annotated (see "Reading a red job" in docs/ci.md): the output is tee'd to $RUNNER_TEMP (outside the checkout,
+      # /tmp and the wrapper's private TMPDIR) and devtools/ci_annotate.py turns it into check-run annotations; the step
+      # exits with the suite's own code. -rfEs: FAILED/ERROR summary lines as well as the skips. faulthandler_timeout
+      # dumps every thread's stack into the log when one test runs longer (it does not stop the test): above the
+      # longest subprocess timeout a test in the suite allows (clipper-network-py 600 s, onboarding-py's cargo build
+      # 1200 s). --durations=10 records the slowest tests, so the limit can be checked against measured times.
       - name: Test (under the hygiene check)
+        shell: bash
         env:
           SERVICE: ${{ matrix.service }}
+          FAULTHANDLER_TIMEOUT: ${{ matrix.service == 'onboarding-py' && '1500' || matrix.service == 'clipper-network-py' && '900' || '600' }}
         run: |
+          set +e
           python devtools/hygiene_check.py run --suite "python:$SERVICE" --kind pytest --cwd "services/$SERVICE" \
             --allow-ignored services/ledger-rust/target \
-            -- python -m pytest -q -rs -p no:cacheprovider
+            -- python -m pytest -q -rfEs -p no:cacheprovider -o "faulthandler_timeout=$FAULTHANDLER_TIMEOUT" \
+            --durations=10 2>&1 | tee "$RUNNER_TEMP/test.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test.log" --code "$code" --suite "python:$SERVICE"
+          exit "$code"
 
   # ---------------------------------------------------------------------------------------------------------------
   # delivery-py is uv-managed: `uv sync --frozen` (the dev group holds pytest; the READMEs' `--no-dev` leaves no
@@ -255,12 +274,20 @@ jobs:
         run: uv sync --frozen --python ${{ matrix.python }}
       - name: Lint
         run: uvx ruff@0.15.11 check src tests devtools
+      # Annotated like python-tests. faulthandler_timeout 2100 s: tests/test_live_tracked_files.py runs the live modules
+      # in a nested pytest with a 1800 s subprocess timeout, the longest any test here allows.
       - name: Test (under the hygiene check)
         working-directory: .
+        shell: bash
         run: |
+          set +e
           python devtools/hygiene_check.py run --suite python:delivery-py --kind pytest --cwd services/delivery-py \
             --allow-ignored services/delivery-py/.venv \
-            -- "$GITHUB_WORKSPACE/services/delivery-py/.venv/bin/python" -m pytest -q -rs -p no:cacheprovider
+            -- "$GITHUB_WORKSPACE/services/delivery-py/.venv/bin/python" -m pytest -q -rfEs -p no:cacheprovider \
+            -o faulthandler_timeout=2100 --durations=10 2>&1 | tee "$RUNNER_TEMP/test.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test.log" --code "$code" --suite "python:delivery-py"
+          exit "$code"
 
   # ---------------------------------------------------------------------------------------------------------------
   # ledger-rust: root README "Testing" — `cargo test` (unit tests plus integration tests that spawn the compiled
@@ -292,9 +319,14 @@ jobs:
           workspaces: services/ledger-rust -> target
       - name: Test (under the hygiene check)
         working-directory: .
+        shell: bash
         run: |
+          set +e
           python3 devtools/hygiene_check.py run --suite rust:ledger-rust --kind cargo --cwd services/ledger-rust \
-            --allow-ignored services/ledger-rust/target -- cargo test --locked
+            --allow-ignored services/ledger-rust/target -- cargo test --locked 2>&1 | tee "$RUNNER_TEMP/test.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test.log" --code "$code" --suite "rust:ledger-rust"
+          exit "$code"
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
@@ -324,11 +356,16 @@ jobs:
         run: go vet ./...
       - name: Test (race detector, under the hygiene check; -v so every test and skip is counted)
         working-directory: .
+        shell: bash
         env:
           GOTELEMETRY: "off"
         run: |
+          set +e
           python3 devtools/hygiene_check.py run --suite go:orchestrator-go --kind go --cwd services/orchestrator-go \
-            -- go test -race -count=1 -v ./...
+            -- go test -race -count=1 -v ./... 2>&1 | tee "$RUNNER_TEMP/test.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test.log" --code "$code" --suite "go:orchestrator-go"
+          exit "$code"
 
   # ---------------------------------------------------------------------------------------------------------------
   # Dashboard: root README "Testing" — `npm ci && npm run lint (tsc --noEmit) && npm run build && npm test` (the
@@ -364,7 +401,14 @@ jobs:
         run: npm run build
       - name: Test (under the hygiene check)
         working-directory: .
-        run: python3 devtools/hygiene_check.py run --suite node:dashboard-ts --kind node --cwd apps/dashboard-ts -- npm test
+        shell: bash
+        run: |
+          set +e
+          python3 devtools/hygiene_check.py run --suite node:dashboard-ts --kind node --cwd apps/dashboard-ts \
+            -- npm test 2>&1 | tee "$RUNNER_TEMP/test.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test.log" --code "$code" --suite "node:dashboard-ts"
+          exit "$code"
       - name: Dynamic-route check
         run: npm run check:dynamic
 
@@ -422,14 +466,19 @@ jobs:
       # requested output, not a leftover; the next step prints what it holds and removes it. A temp file or process
       # the run leaves anywhere else still fails the wrapper (R3/R4).
       - name: Live run (under the hygiene check; no temp file or process may outlive it)
+        shell: bash
         env:
           LEDGER_BIN: ${{ github.workspace }}/services/ledger-rust/target/release/server
           SERVICE: ${{ matrix.service }}
         run: |
+          set +e
           mkdir -p "$RUNNER_TEMP/live-work"
           LIVE_WORK_DIR="$RUNNER_TEMP/live-work" \
             python devtools/hygiene_check.py run --suite "live:$SERVICE" --kind none --cwd "services/$SERVICE" \
-            -- python devtools/live_run.py
+            -- python devtools/live_run.py 2>&1 | tee "$RUNNER_TEMP/live-run.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/live-run.log" --code "$code" --suite "live:$SERVICE"
+          exit "$code"
       - name: Live-run work dir (listed as evidence in this log, then removed)
         if: always()
         run: |
@@ -534,9 +583,17 @@ jobs:
         run: uv sync --frozen --python 3.12
       - name: Run the Docker live tests
         working-directory: services/delivery-py
+        shell: bash
         env:
           DLV_LIVE_SANDBOX_IMAGE: ${{ steps.image.outputs.ref }}
-        run: .venv/bin/python -m pytest -q -rs -p no:cacheprovider tests/test_live_docker.py --junitxml="$RUNNER_TEMP/live-docker.xml"
+        run: |
+          set +e
+          .venv/bin/python -m pytest tests/test_live_docker.py -q -rfEs -p no:cacheprovider -o faulthandler_timeout=900 \
+            --durations=10 --junitxml="$RUNNER_TEMP/live-docker.xml" 2>&1 | tee "$RUNNER_TEMP/live-docker.log"
+          code=${PIPESTATUS[0]}
+          python3 "$GITHUB_WORKSPACE/devtools/ci_annotate.py" --log "$RUNNER_TEMP/live-docker.log" --code "$code" \
+            --suite "python:delivery-py docker-live"
+          exit "$code"
       - name: Fail if any Docker live test was skipped
         run: |
           python3 - <<'EOF'
@@ -689,14 +746,33 @@ jobs:
             python -m pip install -r "services/$s/requirements.txt"
           done
       - name: The war room engine's own self-test
-        run: python -B -m unittest devtools/test_warroom.py -v
-      - name: The shared lookalike fold is one file, generated from the pinned Unicode data, read alike by every service
-        run: python -B -m unittest devtools/test_lookalikes.py -v
-      - name: War room gate (seed 1, every seeded department, under the hygiene check)
+        shell: bash
         run: |
+          set +e
+          python -B -m unittest devtools/test_warroom.py -v 2>&1 | tee "$RUNNER_TEMP/test-warroom.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-warroom.log" --code "$code" --suite "devtools:test_warroom"
+          exit "$code"
+      - name: The shared lookalike fold is one file, generated from the pinned Unicode data, read alike by every service
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest devtools/test_lookalikes.py -v 2>&1 | tee "$RUNNER_TEMP/test-lookalikes.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-lookalikes.log" --code "$code" \
+            --suite "devtools:test_lookalikes"
+          exit "$code"
+      - name: War room gate (seed 1, every seeded department, under the hygiene check)
+        shell: bash
+        run: |
+          set +e
           mkdir -p "$RUNNER_TEMP/warroom"
           python devtools/hygiene_check.py run --suite warroom:all --kind none \
-            -- python -B devtools/warroom/run.py --all --seed 1 --out "$RUNNER_TEMP/warroom"
+            -- python -B devtools/warroom/run.py --all --seed 1 --out "$RUNNER_TEMP/warroom" \
+            2>&1 | tee "$RUNNER_TEMP/warroom-gate.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/warroom-gate.log" --code "$code" --suite "warroom:all"
+          exit "$code"
       - name: War room report (listed in this log, then removed)
         if: always()
         run: |
@@ -725,11 +801,40 @@ jobs:
       - name: pytest for the self-test's pytest-plugin cases (the services' pin)
         run: python -m pip install pytest==9.1.1
       - name: The checker's own self-test (every rule fails on a planted violation; the clean probe passes)
-        run: python -B -m unittest devtools/test_hygiene_check.py -v
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest devtools/test_hygiene_check.py -v 2>&1 | tee "$RUNNER_TEMP/test-hygiene.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-hygiene.log" --code "$code" \
+            --suite "devtools:test_hygiene_check"
+          exit "$code"
       - name: Docker builds pass every build argument their Dockerfile requires (pins = ADR 0011)
-        run: python -B -m unittest devtools/test_ci_docker_args.py -v
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest devtools/test_ci_docker_args.py -v 2>&1 | tee "$RUNNER_TEMP/test-docker-args.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-docker-args.log" --code "$code" \
+            --suite "devtools:test_ci_docker_args"
+          exit "$code"
+      - name: The annotation converter's own self-test (every log format, escaping, caps, redaction, ci.yml wiring)
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest devtools/test_ci_annotate.py -v 2>&1 | tee "$RUNNER_TEMP/test-ci-annotate.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-ci-annotate.log" --code "$code" \
+            --suite "devtools:test_ci_annotate"
+          exit "$code"
       - name: Static rules L1-L4
-        run: python devtools/hygiene_check.py lint --strict-allowlist
+        shell: bash
+        run: |
+          set +e
+          python devtools/hygiene_check.py lint --strict-allowlist 2>&1 | tee "$RUNNER_TEMP/hygiene-lint.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/hygiene-lint.log" --code "$code" --suite "hygiene:lint"
+          exit "$code"
       - name: docs/test-counts.md is present and well-formed
         run: python devtools/hygiene_check.py counts --check
 

@@ -32,6 +32,8 @@ DISGUISED_OPT_OUTS = [
     "<p>StoP</p>", "<div>S_T_O_P</div>", "<p>ηoт interеѕteԁ, tнaηκs</p>", "<div>u n s u b</div>",
     "&#83;TOP", "&lt;b&gt;unsubscribe&lt;/b&gt;", "&lt;в&gt;υηѕubѕсriβε&lt;/β&gt;", "&lt;ｂ&gt;ｕｎsuｂｓcｒｉbｅ&lt;／b&gt;",
     "Ꭱ Ꭼ Ꮇ Ꮻ Ꮩ Ꭼ me", "&Lt;Ｂ&Gt;Ｕｎsuｂｓcｒｉbｅ&Lt;／B&Gt;", "≪b≫unsubscribe", "ηοt 1ntеres73d", "Μnsubscribe",
+    # a bracket inside the word was dropped between letters before the war room, and still is (AEGIS G-M1)
+    "st<op", "un>subscribe", "not inte<rested", "rem<ove me", "ＳＴ＜ＯＰ", "st﹤op", "un﹥subscribe", "st≮op", "st≯op",
 ]
 
 # Ordinary replies written in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek, Hebrew and Arabic: requests to
@@ -86,9 +88,16 @@ def test_a_short_word_wholly_in_one_script_is_not_read_as_a_negation(text):
 
 
 # Ordinary English replies the extra readings (HTML as text, brackets as separators, "1" as "i") must leave alone.
+# AEGIS G-L2: a style sheet's words, "Stop+Shop" and "x>stop<y" are not opt-outs on email (before the war room they
+# were not either: a style element is a mail client's, "+" is dropped between letters, and only a tag-shaped run
+# that opens and closes is read as a space).
 ORDINARY = ["I need a non-stop flight to Denver", "Yes, I'm interested (Tuesday works)", "Can you send pricing?",
             "1 more question: what does it cost?", "<p>Sounds good, let's book a call</p>", "Re: «Q4 plan» looks fine",
-            "x ≥ 1 seats, 10 users", "Endless thanks for the info"]
+            "x ≥ 1 seats, 10 users", "Endless thanks for the info",
+            "<style>.unsubscribe{color:red}</style><p>Thanks, see you Friday</p>",
+            "<html><head><style type=\"text/css\">\n.unsubscribe { display: none }\n</style></head><body>Thanks!</body>",
+            "<script>var stop = 1; unsubscribe();</script><p>See you Friday</p>",
+            "Stop+Shop order #44 arrived", "x>stop<y"]
 
 
 @pytest.mark.parametrize("text", ORDINARY)
@@ -173,6 +182,14 @@ def test_html_is_read_as_text_for_every_label_and_as_written_for_opt_outs():
 
 # The pre-war-room classifier (6a4b1e0..ebc8403 i10_replies.normalise / classify), frozen here: everything it read as
 # an opt-out is still one (the war room fix only adds readings).
+_OLD_CARRIER = {"stop", "stopall", "unsubscribe", "unsub", "cancel", "end", "quit", "revoke", "optout", "opt out",
+                "stop all"}
+_OLD_UNSUB = re.compile(r"\b(stop|stopall|unsub\w*|opt ?out|revoke|remove me|take me off|do not (contact|email|"
+                        r"text|call)|dont (contact|email|text|call)|stop (texting|emailing|calling|contacting)|"
+                        r"not interested|no thanks|no thank you|leave me alone|wrong person|no more (emails?|messages?)|"
+                        r"alto|parar|cancelar|baja|no mas mensajes)\b")
+_OLD_UNSUB_PHONE = re.compile(r"\b(cancel\w*|end|quit|stop\w*|unsub\w*|opt ?out|revoke\w*|wrong (number|person)|"
+                              r"lose my number|leave me alone|remove\w*|no more (texts?|messages?|calls?))\b")
 _OLD_CONFUSABLE = str.maketrans({
     "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t", "у": "y",
     "х": "x", "ѕ": "s", "і": "i", "ј": "j", "ԁ": "d", "ԛ": "q", "ԝ": "w", "ɡ": "g",
@@ -180,11 +197,20 @@ _OLD_CONFUSABLE = str.maketrans({
     "τ": "t", "υ": "u", "χ": "x"})
 
 
+_OLD_LEET = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+def _old_fold_word(w: str) -> str:
+    if any(c.isalpha() for c in w) and any(c in "013457@$" for c in w):
+        return w.translate(_OLD_LEET)
+    return w
+
+
 def _old_normalise(text: str) -> str:
     t = unicodedata.normalize("NFKC", text)
     t = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)).casefold()
     t = t.translate(_OLD_CONFUSABLE).replace("_", " ")
-    t = " ".join(i10_replies._fold_word(w) for w in t.split())
+    t = " ".join(_old_fold_word(w) for w in t.split())
     t = re.sub(r"(?<=[^\W\d_])[^\w\s]+(?=[^\W\d_])", "", t)
     t = re.sub(r"[^\w\s]+", " ", t)
     words, out, run = t.split(), [], []
@@ -201,10 +227,10 @@ def _old_normalise(text: str) -> str:
 
 def _old_opt_out(text: str, channel: str) -> bool:
     t = _old_normalise(text)
-    for v in (t, i10_replies._collapse(t)):
-        if v in i10_replies._CARRIER or i10_replies._UNSUB.search(v):
+    for v in (t, re.sub(r"([^\W\d_])\1+", r"\1", t)):
+        if v in _OLD_CARRIER or _OLD_UNSUB.search(v):
             return True
-        if channel != "email" and i10_replies._UNSUB_PHONE.search(v):
+        if channel != "email" and _OLD_UNSUB_PHONE.search(v):
             return True
     return False
 
@@ -215,7 +241,8 @@ def test_everything_the_classifier_read_as_an_opt_out_before_is_still_one():
              "not interested", "no thanks", "no more emails", "leave me alone", "alto", "baja", "please", "thanks",
              "me", "the", "order", "text", "sms", "by", "yes", "по", "нет", "μου"]
     pool = list("abcdefghijklmnopqrstuvwxyz013457 _.-'") + [chr(k) for k in _OLD_CONFUSABLE] + \
-        ["\u200b", "\u00ad", "Ａ", "ｓ", "<p>", "</div>", "&amp;", "п", "ς", "Ꮪ", "ᴛ", "\u0301"]
+        ["\u200b", "\u00ad", "Ａ", "ｓ", "<p>", "</div>", "&amp;", "п", "ς", "Ꮪ", "ᴛ", "\u0301",
+         "<", ">", "＜", "＞", "﹤", "﹥", "≮", "≯", "≪", "≫", "‹", "›", "«", "»", "〈", "〉", "(", ")", "+", "{", "}"]
     checked = 0
     for _ in range(6000):
         parts = [rng.choice(words) for _ in range(rng.randint(1, 4))]
@@ -234,3 +261,37 @@ def test_everything_the_classifier_read_as_an_opt_out_before_is_still_one():
                 checked += 1
                 assert i10_replies.classify(text, channel) == "unsubscribe", (text, channel)
     assert checked > 1000
+
+
+# AEGIS G-M1 asked for a code-point differential: every code point of planes 0-2 and the tag / variation-selector block,
+# inserted inside a word of one of ten opt-out templates (the template by code point, so each code point is tried
+# once and each template ~20,000 times), and every punctuation, symbol, separator, format, control and mark code
+# point of planes 0-1 in all ten templates: whatever the pre-war-room classifier (frozen above) read as an opt-out is
+# still one, on email and on SMS. Deterministic; the old classifier runs first and the new one only where it matters.
+TEMPLATES = ["st{}op", "un{}subscribe", "not inte{}rested", "rem{}ove me", "do not con{}tact", "no tha{}nks",
+             "opt o{}ut", "stop te{}xting", "leave me al{}one", "can{}cel"]
+
+
+def _differential(pairs) -> int:
+    lost, checked = [], 0
+    for cp, tpl in pairs:
+        text = tpl.format(chr(cp))
+        for channel in ("email", "sms"):
+            if _old_opt_out(text, channel):
+                checked += 1
+                if i10_replies.classify(text, channel) != "unsubscribe":
+                    lost.append((hex(cp), text, channel))
+    assert not lost, (len(lost), lost[:20])
+    return checked
+
+
+def test_code_point_differential_one_template_per_code_point():
+    cps = [cp for cp in list(range(0x30000)) + list(range(0xE0000, 0xE1000)) if not 0xD800 <= cp < 0xE000]
+    assert _differential((cp, TEMPLATES[cp % len(TEMPLATES)]) for cp in cps) > 50_000
+
+
+def test_code_point_differential_every_non_letter_in_every_template():
+    cps = [cp for cp in range(0x20000) if not 0xD800 <= cp < 0xE000
+           and (unicodedata.category(chr(cp))[0] in "PSZM" or unicodedata.category(chr(cp)) in ("Cc", "Cf"))]
+    assert len(cps) > 8_000
+    assert _differential((cp, tpl) for cp in cps for tpl in TEMPLATES) > 50_000

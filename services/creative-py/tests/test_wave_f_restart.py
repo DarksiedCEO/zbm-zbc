@@ -8,6 +8,8 @@ kit can never become signed by a replay."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from conftest import TEST_FOUNDER_TOKEN
@@ -258,9 +260,23 @@ def test_f3_signing_again_after_a_failed_resolution_line_records_no_second_signa
     box.restart()
 
 
-def test_f3_an_intent_not_yet_on_the_ledger_is_rechecked_after_the_grace_before_it_is_closed(box, make_api):
+def test_f3_an_intent_not_yet_on_the_ledger_is_rechecked_after_the_grace_before_it_is_closed(box, make_api,
+                                                                                               monkeypatch):
     """The signature's record was still in flight when the process stopped; it lands while start-up waits out the
     grace: the signature is applied, not closed as "not on the ledger"."""
+    import state_replay
+
+    # fix-flakes-h: start-up judges the intent's age by the wall clock (state_replay: datetime.now), and this test
+    # needs the intent to be young (< LEDGER_INFLIGHT_GRACE_S) so the grace wait happens. It used to rely on less than
+    # 10 s of real time passing between the sign and the restart; now start-up's "now" is the instant BEFORE the sign
+    # was sent, so the intent's age is <= 0 however slow the box is (a quick restart: the full grace is waited).
+    before = datetime.now(timezone.utc)
+
+    class _StartupNow(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return before
+
     _kit_to_draft(box)
     led = box.led
     held = []
@@ -277,6 +293,7 @@ def test_f3_an_intent_not_yet_on_the_ledger_is_rechecked_after_the_grace_before_
     finally:
         type(led).record_event = orig
     box.api.app.state.close()
+    monkeypatch.setattr(state_replay, "datetime", _StartupNow)
     waited = []
 
     def sleep(s):

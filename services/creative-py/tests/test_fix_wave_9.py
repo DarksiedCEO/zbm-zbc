@@ -496,6 +496,9 @@ def test_m1_review_cost_at_100_phrases_on_the_aegis_generator(registry):
     assert forced <= FORCED_CPU_BOUND_S * slow, (forced, slow)
 
 
+HANG_GUARD_S = 120
+
+
 def test_m1_clip_review_runs_off_the_workflow_lock(api, monkeypatch):
     """A slow review (held here on an event) must not stall a rulebook draft or a brief: the
     review is pure over its inputs and runs without the lock; the lock is taken to commit."""
@@ -508,7 +511,7 @@ def test_m1_clip_review_runs_off_the_workflow_lock(api, monkeypatch):
 
     def slow(*a, **k):
         entered.set()
-        assert release.wait(20)
+        assert release.wait(2 * HANG_GUARD_S)   # held past the join below: a lock held here shows as a stall
         return real(*a, **k)
 
     monkeypatch.setattr(workflow.clip_review, "review", slow)
@@ -527,7 +530,10 @@ def test_m1_clip_review_runs_off_the_workflow_lock(api, monkeypatch):
 
         w = threading.Thread(target=work)
         w.start()
-        w.join(10)
+        # a hang guard, not a speed bound (fix-flakes-h): the review stays held until `release` below, so a draft or
+        # brief that waits for the workflow lock can never finish inside this join, however long it is; a 10 s join
+        # only let a slow-but-correct run on a loaded box read as "stalled"
+        w.join(HANG_GUARD_S)
         stalled = w.is_alive()
     finally:
         release.set()

@@ -798,7 +798,8 @@ Pinned by `services/onboarding-py/tests/test_warroom_fixes.py`; the replay cases
 
 ## Fix wave G (Oct 10 2026) — two load-dependent tests made deterministic
 
-Both failed under load on a shared box on Oct 10 with every property holding. What each proves is unchanged.
+Both failed under load on a shared box on Oct 10 with every property holding. What each proves changed as follows
+(corrected after the AEGIS review of fix wave G, G-M2 and G-L1; it first said "unchanged").
 
 - `test_r1_every_pattern_linear_on_adversarial_input` (6.90 ms against a scaled 6.88 ms bound on 10 KB). The per-run
   absolute CPU bounds (5 ms / 10 KB, 50 ms / 100 KB, scaled by a reference regex) re-measured, every run, a constant
@@ -810,13 +811,22 @@ Both failed under load on a shared box on Oct 10 with every property holding. Wh
   of each pattern has no unbounded repeat inside another and no backreference, or the pattern is reviewed by name and
   pin with the reason it is linear (`STRUCTURE_REVIEWED`: `redaction._REDACTED_RUN` only), deterministic, as
   creative-py's fix wave 4 test; (3) the same-work growth check on the three worst shapes is unchanged (a quadratic
-  pattern fails it on its own: `test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own`). The whole scanners
-  keep their absolute CPU bounds (`test_r1_scanners_linear_up_to_1mb`, `test_r1_the_aegis_probe_shapes_are_fast`),
-  so a gross constant-factor regression of the engine still fails on every run. Not proven per run any more: that a
-  pinned pattern's CPU on this machine today is under 50 ms per 100 KB; it was measured when pinned, and only the
-  engine can change it.
+  pattern fails it on its own: `test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own`). What each part is
+  worth: the growth check (3) is the guard against super-linear patterns, as before. The pin (1) only detects that a
+  pattern changed (it proves nothing about cost; it forces a re-measurement). The structure check (2) is NOT a
+  linearity proof: it catches nested repeats and backreferences only, and a pattern such as `\w+@` passes it yet is
+  quadratic when searched (every start position runs the repeat to the end of a run of word characters and back);
+  only (3) catches that. The whole scanners keep their absolute CPU bounds (`test_r1_scanners_linear_up_to_1mb`,
+  `test_r1_the_aegis_probe_shapes_are_fast`), so a gross constant-factor regression of the engine still fails on
+  every run. Not proven per run any more: that a pinned pattern's CPU on this machine today is under 50 ms per
+  100 KB; it was measured when pinned, and only the engine can change it.
 - `test_new5_live_small_messages_stay_fast_beside_large_uploaders` (32 small answers in 8 s against 40 needed). The run
   now lasts at least 8 s AND until it has 40 small answers, 3 large scans and 10 `/health` answers (a 120 s cap stops
   a run that can never get there; the counts are then asserted and fail), as fulfillment-py's `/health` test took its
-  samples while the condition was verified rather than in whatever time the machine allowed. The latency assertions
-  (small p50 / health p50, health p50 / scan gap) and the status-code assertions are unchanged.
+  samples while the condition was verified rather than in whatever time the machine allowed. The 40-in-8-s floor was
+  the only bound on small-message latency with one uploader (the small p50 / health p50 ratio was asserted from 4
+  uploaders), so removing it removed that bound (AEGIS G-M2). The ratio (bound 12) is now asserted for every number
+  of uploaders: a correct server reads lowest with one (3.7 / 1.5 on the build box, 4.3 on the 2-vCPU Linux box),
+  and the defect (small lane off, `ONBOARDING_SCAN_SMALL_BODY_BYTES=0`) with one uploader reads 112-128 on the Linux
+  box (the test fails there) but 5.4-5.5 on the build box, where only the 4 and 12 uploader cases catch it. The
+  health p50 / scan gap and status-code assertions are unchanged.

@@ -35,7 +35,6 @@ Ports: 20300-20319 (this wave's range for creative-py real-socket tests).
 from __future__ import annotations
 
 import json
-import os
 import random
 import statistics
 import string
@@ -48,7 +47,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from _procinfo import rss_kib
+from _procinfo import cpu_seconds, rss_kib
 
 from conftest import NOW, TEST_SERVICE_TOKEN, Api, start_serve, stop_serve
 from flows import ok, zbc_open
@@ -692,11 +691,13 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
     codes: dict = {}
     sizes: list[int] = []
     health: list[float] = []
+    posts: list[float] = []
     stop = threading.Event()
 
     def worker():
         with httpx.Client(timeout=120) as c:
             for _ in range(reps):
+                t = time.perf_counter()
                 try:
                     r = c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                                headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})
@@ -704,6 +705,7 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
                     sizes.append(len(r.content))
                 except Exception as e:  # noqa: BLE001
                     codes[type(e).__name__] = codes.get(type(e).__name__, 0) + 1
+                posts.append(time.perf_counter() - t)
 
     def prober():
         with httpx.Client(timeout=30) as c:
@@ -728,15 +730,19 @@ def _flood(port: int, body: bytes, nconc: int, reps: int, sample_health=True):
     stop.set()
     if sample_health:
         pr.join()
-    return codes, sizes, sorted(health), time.perf_counter() - t0
+    return codes, sizes, sorted(health), sorted(posts), time.perf_counter() - t0
+
+
+HEALTH_QUEUE_RATIO_MAX = 0.25  # /health p50 over junk-post p50, same flood (measured 0.06-0.12 fixed, >= 0.36 ungated)
 
 
 @pytest.mark.parametrize("name,body", [("1 MiB junk", JUNK_1MIB), ("60k unknown keys", JUNK_60K_KEYS)], ids=["1mib", "60k"])
 def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_served(server, name, body):
     """AEGIS round 5 (probes/cre_amp.py): 20 concurrent 1 MiB junk posts ->
     /health 36 s, RSS 308 MB, two fast clients got 408. Now: every junk
-    post is a small 422, /health stays under 500 ms, a legitimate client
-    is answered (never 408) while the flood runs."""
+    post is a small 422, /health is not queued behind the junk work (its
+    latency is a small fraction of a junk post's in the same flood), and a
+    legitimate client is answered (never 408) while the flood runs."""
     proc, port = server
     legit: dict = {}
 
@@ -753,21 +759,30 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
 
     lt = threading.Thread(target=legit_client)
     lt.start()
-    codes, sizes, health, elapsed = _flood(port, body, nconc=20, reps=3)
+    codes, sizes, health, posts, elapsed = _flood(port, body, nconc=20, reps=3)
     lt.join()
     rss = _rss_kb(proc.pid) // 1024
     print(f"\nN2 {name} x20 conc x3: {codes} in {elapsed:.1f}s; max 422 body {max(sizes)} B; "
           f"/health p50={health[len(health) // 2] * 1000:.0f}ms max={health[-1] * 1000:.0f}ms; RSS {rss} MB; legit {legit}")
     assert codes == {422: 60}, codes
     assert max(sizes) < 8 * 1024
-    # Fix wave 9 (AEGIS round 8 L3): the bound is scaled by how much slower this machine runs a fixed
-    # CPU workload right now than it did when the bound was set (1x on an idle machine, so the 500 ms
-    # guarantee is unchanged there; the flake was 502 ms under a concurrent test run), and the p50 is
-    # bound as well since large-body shape scans run one at a time (p50 was ~390 ms, now ~80 ms).
-    slow = _slowdown()
-    print(f"   machine slowdown {slow:.2f}x -> bounds max {0.5 * slow * 1000:.0f} ms, p50 {0.15 * slow * 1000:.0f} ms")
-    assert health and health[-1] < 0.5 * slow, (health[-1], slow)
-    assert health[len(health) // 2] < 0.15 * slow, (health[len(health) // 2], slow)
+    # fix-flakes-h (macOS CI, Oct 11 2026): the bound is ORDERING within this run, not an absolute wall time scaled by
+    # a calibration taken after the flood (best of 7 json.loads, floored at 1x: on a CPU faster than the reference
+    # it read 1x however contended the flood itself was, so a 500 ms max-of-N bound measured the runner). The defect
+    # (AEGIS round 5 / round 8 L3) is /health QUEUED behind the junk work: large-body shape scans run one at a time
+    # (BodyLimit.scan_gate) and a small request is never queued behind them, so a /health probe waits at most about
+    # one scan while a junk post waits for the queue. Measured on the 2-vCPU Linux host, idle and with a busy loop on
+    # the same core (fix-flakes-h, 24 runs): health p50 / junk p50 = 0.06-0.12, health max / junk p50 = 0.17-0.51;
+    # with the gate removed (Semaphore(1000), the round-8 regression) 0.36-0.50 and 0.47-0.82 — and the old bounds
+    # passed that mutation on the 1 MiB body (p50 108-140 ms < 150 ms). Both ratios are taken in the same run under the
+    # same load, so load scales both sides.
+    assert health and posts, (health, posts)
+    mid = len(health) // 2
+    print(f"   /health p50 / junk p50 = {health[mid] / posts[len(posts) // 2]:.2f} (bound {HEALTH_QUEUE_RATIO_MAX}); "
+          f"/health max / junk p50 = {health[-1] / posts[len(posts) // 2]:.2f} (bound 1)")
+    assert health[mid] < HEALTH_QUEUE_RATIO_MAX * posts[len(posts) // 2], (health[mid], posts[len(posts) // 2])
+    assert health[-1] < posts[len(posts) // 2], ("a /health probe waited as long as a queued junk post",
+                                                 health[-1], posts[len(posts) // 2])
     assert 408 not in legit and sum(v for k, v in legit.items() if isinstance(k, int)) == 10, legit
     # Fix wave 21 (AEGIS N20-M-6): the single absolute RSS sample (rss < 250) that stood here was
     # removed: one number after one flood, with no baseline, can neither see a leak below the ceiling
@@ -775,32 +790,50 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
     # still printed above.
 
 
-# Fix wave 21 (AEGIS N20-M-6): memory under repeated junk floods is judged as a plateau, not as one
-# absolute sample. Derived from the reviewer's plateau data (review20/mac/logs/cre_plateau_*.log,
-# Linux, 12 + 6 rounds of both floods on one server; baseline 62-64 MiB; per-round peak = the larger
-# of the two post-flood samples of a round):
-#   - per-round peaks from round 1 on: 179-192 MiB (default run), 192-199 MiB (second run): a
-#     round-to-round spread of at most 13 MiB with no trend; 10 runs of this test in fix wave 21 gave
-#     RSS[10] - RSS[5] from -7 to +14 MiB. PLATEAU_LEAK_DELTA_MIB = 24 sits above that noise. What (a)
-#     detects is MEASURED (fix wave 22, G8; AEGIS N21-C-5 — the wave-21 comment claimed ">= ~55 KiB per
-#     request always fails", derived, never run): the reviewer's mutation runs (retaining N bytes per
-#     json.loads) — 64 KiB/request: climb 32 and 26 MiB, detected 2/2; 32 KiB: 18 and 16, missed 0/2;
-#     16 KiB: 11 and 11, missed; no leak: 2, 8, 10. The floor lies between 32 and 64 KiB per request;
-#     a slower leak is this test's residual. The old single sample (< 250 MB after two floods) passed a
-#     100 KiB-per-request leak (RSS 93/96 MB); this test fails it (climb 86 MiB).
-#   - plateau - baseline: at most 135 MiB (199 - 64). PLATEAU_BUDGET_MIB = 170 (about 1.25 x that)
-#     for allocator and scheduling variation; with a ~64 MiB baseline that is ~234 MiB, inside the
-#     250 MB absolute ceiling, which is kept.
-PLATEAU_ROUNDS = 10
-PLATEAU_LEAK_DELTA_MIB = 24
+# Fix wave 21 (AEGIS N20-M-6): memory under repeated junk floods is judged as a plateau, not as one absolute sample.
+# fix-flakes-h (macOS CI run 38163019846, Oct 11 2026): the climb is the SLOPE of the per-round peaks after the warm-up,
+# not a difference of half-medians. On macOS the allocator ramps for ~5 rounds before it plateaus (peaks [168, 184,
+# 184, 204, 208, 209, 209, 209, 209, 209]); the first-half median caught that ramp (climb 25 >= 24) although the
+# second half was flat at 209. Now:
+#   (a) the first PLATEAU_WARMUP_ROUNDS rounds are the warm-up and are not judged for a climb; over the rest, the
+#       Theil-Sen slope (the median of the slopes between every pair of rounds) is < PLATEAU_SLOPE_MAX_MIB per round.
+#       A leak grows the peaks linearly, every pair sees it, so the median slope is the leak rate; a plateau has slope
+#       ~0, and the median ignores both noise (Linux: +/-13 MiB round to round) and a ramp that runs a few rounds past
+#       the warm-up (a pair median tolerates ~29% of points off the line). Measured (fix-flakes-h, 2-vCPU Linux,
+#       rounds 5-12; "leak" = N bytes retained per json.loads in the shape scan, 120 per round):
+#         no leak: -2.6 .. +2.0 MiB/round (30 runs, idle and with a busy loop on the same core); the macOS CI sample 0.0;
+#         64 KiB/request (7.5 MiB/round): 5.5 .. 8.0 (13 runs, idle and contended) — detected every time;
+#         32 KiB/request: 3.0 .. 4.5 (3 runs) — detected 3/3 here, but it is near the bound: the stated floor is 64 KiB.
+#       (The half-median form: no leak -8 .. +4, 64 KiB 45-55, macOS 25 with no leak — a false failure.)
+#       A synthetic macOS-like ramp lasting to round 8 reads 1.65; a one-off +17 MiB step at round 9 reads 2.8 (a
+#       higher plateau, judged by (b)/(c), not a climb).
+#   (b) plateau - baseline < PLATEAU_BUDGET_MIB and (c) plateau < PLATEAU_CEILING_MIB, as before: Linux baseline 62-64
+#       MiB, per-round peaks 165-199 (plateau - baseline at most 137); macOS CI baseline 74, plateau 209 (135).
+PLATEAU_ROUNDS = 12
+PLATEAU_WARMUP_ROUNDS = 4
+PLATEAU_SLOPE_MAX_MIB = 3.0
 PLATEAU_BUDGET_MIB = 170
 PLATEAU_CEILING_MIB = 250
 
 
+def theil_sen_slope(ys: list[float]) -> float:
+    """The median of (y[j] - y[i]) / (j - i) over every pair i < j: a line's slope, robust to outliers."""
+    return statistics.median((ys[j] - ys[i]) / (j - i) for i in range(len(ys)) for j in range(i + 1, len(ys)))
+
+
+def test_theil_sen_slope_reads_a_climb_and_ignores_a_plateau_with_noise():
+    assert theil_sen_slope([10, 20, 30, 40]) == 10
+    assert theil_sen_slope([209] * 8) == 0
+    assert theil_sen_slope([190, 177, 192, 199, 192, 190, 194, 193]) == 0.5        # Linux noise around a plateau
+    assert theil_sen_slope([200, 207.5, 215, 222.5, 230, 237.5, 245, 252.5]) == 7.5  # 64 KiB/request x 120
+    assert theil_sen_slope([204, 208, 209, 209, 209, 209, 209, 209]) == 0           # the macOS ramp's tail
+
+
 def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
     """Baseline before any flood; PLATEAU_ROUNDS rounds of both floods (20 concurrent x 3 of the
-    1 MiB junk, then of the 60k-keys junk) on one fresh server; RSS sampled after each flood.
-    (a) RSS[N] - RSS[N/2] < PLATEAU_LEAK_DELTA_MIB (no climb), (b) plateau - baseline <
+    1 MiB junk, then of the 60k-keys junk) on one fresh server; RSS sampled after each flood, a
+    round's peak = the larger of its two samples. (a) after PLATEAU_WARMUP_ROUNDS, the Theil-Sen
+    slope of the peaks < PLATEAU_SLOPE_MAX_MIB per round (no climb), (b) plateau - baseline <
     PLATEAU_BUDGET_MIB, (c) plateau < PLATEAU_CEILING_MIB. Every sample is printed (and is in the
     assertion message) so a failing run on another OS yields the evidence."""
     proc, port = _start()
@@ -811,7 +844,7 @@ def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
         for r in range(1, PLATEAU_ROUNDS + 1):
             peak = 0
             for name, body in (("1mib", JUNK_1MIB), ("60k", JUNK_60K_KEYS)):
-                codes, _, _, _ = _flood(port, body, nconc=20, reps=3, sample_health=False)
+                codes, _, _, _, _ = _flood(port, body, nconc=20, reps=3, sample_health=False)
                 assert codes == {422: 60}, (r, name, codes)
                 rss = _rss_kb(proc.pid) // 1024
                 samples.append((r, name, rss))
@@ -819,46 +852,15 @@ def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
             per_round.append(peak)
     finally:
         _stop(proc)
-    half = PLATEAU_ROUNDS // 2
-    # Climb = median of the second half of the rounds minus median of the first half. A single last-round sample minus
-    # a single mid-round sample swings by +/-13 MiB from allocator/OS noise when the host is loaded (CI flaked on it,
-    # Oct 7-9 2026, base and fixed code alike); the medians cancel that noise while a real per-round leak still shows
-    # up in full (5 MiB/round over 10 rounds is a 25 MiB difference of medians).
-    climb = statistics.median(per_round[half:]) - statistics.median(per_round[:half])
+    slope = theil_sen_slope(per_round[PLATEAU_WARMUP_ROUNDS:])
     plateau = max(per_round)
-    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; median(second half) - median(first half) = {climb} MiB "
-            f"(< {PLATEAU_LEAK_DELTA_MIB}); plateau - baseline = {plateau - baseline} MiB (< {PLATEAU_BUDGET_MIB}); "
-            f"plateau {plateau} MiB (< {PLATEAU_CEILING_MIB}); samples {samples}")
+    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; slope after {PLATEAU_WARMUP_ROUNDS} warm-up rounds "
+            f"= {slope:.2f} MiB/round (< {PLATEAU_SLOPE_MAX_MIB}); plateau - baseline = {plateau - baseline} MiB "
+            f"(< {PLATEAU_BUDGET_MIB}); plateau {plateau} MiB (< {PLATEAU_CEILING_MIB}); samples {samples}")
     print("\nN2 plateau: " + line, flush=True)
-    assert climb < PLATEAU_LEAK_DELTA_MIB, line
+    assert slope < PLATEAU_SLOPE_MAX_MIB, line
     assert plateau - baseline < PLATEAU_BUDGET_MIB, line
     assert plateau < PLATEAU_CEILING_MIB, line
-
-
-CALIBRATION_S = 0.12  # json.loads of JUNK_60K_KEYS x5, best of 7, on the reference 2-vCPU host, idle (fix wave 9)
-
-
-def _slowdown() -> float:
-    """How much slower than CALIBRATION_S this machine is right now (best
-    of 7), between 1x and 4x (the onboarding-py timing harness, fix wave 6)."""
-    best = min(_time(lambda: [json.loads(JUNK_60K_KEYS) for _ in range(5)]) for _ in range(7))
-    return min(4.0, max(1.0, best / CALIBRATION_S))
-
-
-def _time(fn) -> float:
-    t0 = time.perf_counter()
-    fn()
-    return time.perf_counter() - t0
-
-
-def _proc_cpu_s(pid: int) -> float | None:
-    """utime + stime of process `pid` in seconds (Linux /proc), None elsewhere."""
-    try:
-        with open(f"/proc/{pid}/stat") as fh:
-            f = fh.read().rsplit(")", 1)[1].split()
-        return (int(f[11]) + int(f[12])) / os.sysconf("SC_CLK_TCK")
-    except (OSError, IndexError, ValueError):
-        return None
 
 
 def test_n2_single_junk_post_is_answered_in_under_100ms_on_the_socket(server):
@@ -867,18 +869,19 @@ def test_n2_single_junk_post_is_answered_in_under_100ms_on_the_socket(server):
         for body in (JUNK_1MIB, JUNK_60K_KEYS):
             c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                    headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})  # warm
-            # fix wave 25 (scout A C3; R-HYGIENE L1): the SERVER's CPU for the request (Linux /proc: utime+stime of
-            # the server process, 10 ms ticks), not the client's wall clock on a possibly starved box; where /proc is
-            # not available, the wall clock as before.
-            c0, t0 = _proc_cpu_s(proc.pid), time.monotonic()
+            # fix wave 25 (scout A C3; R-HYGIENE L1): the SERVER's CPU for the request, not the client's wall clock on
+            # a possibly starved box. fix-flakes-h (macOS CI, Oct 11 2026): on every OS — _procinfo.cpu_seconds reads
+            # /proc on Linux and `ps -o time=` on macOS (10 ms resolution on both) and raises where it has no source;
+            # this test used to fall back to the WALL clock where /proc was missing (macOS), which a loaded runner
+            # pushed past 100 ms (reproduced on Linux with that branch forced: 2 of 15 under one-core contention).
+            c0 = cpu_seconds(proc.pid)
             r = c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                        headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})
-            wall, c1 = time.monotonic() - t0, _proc_cpu_s(proc.pid)
-            cost = wall if c0 is None or c1 is None else c1 - c0
+            cost = cpu_seconds(proc.pid) - c0
             print(f"\nN2 single {len(body) // 1024} KB junk post: {r.status_code} {len(r.content)} B, server CPU "
-                  f"{cost * 1000:.0f} ms (wall {wall * 1000:.0f} ms)")
+                  f"{cost * 1000:.0f} ms")
             assert r.status_code == 422 and len(r.content) < 8 * 1024
-            assert cost < 0.1, (cost, wall)
+            assert cost < 0.1, cost
 
 
 # =====================================================================================
