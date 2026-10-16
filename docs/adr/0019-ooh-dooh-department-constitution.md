@@ -188,7 +188,10 @@ refuses start).
 - **Re-funding after a change request.** A campaign sent back through `CHANGE_REQUESTED` and re-approved needs a new
   funds verification with a new evidence reference (a bank statement reference will do; the amount may be 0.00 when
   the money already received covers the new price).
-- **War room:** see the build report for this branch; not part of this ADR's claims.
+- **War room (ADR 0018):** `devtools/warroom/scenarios/ooh-py.json` with `drivers/ooh_py.py` covers five money and
+  authority scenarios (vendor-text injection, an amount off the quote, vendor substitution, someone other than Andre
+  authorizing, a duplicate submission), all MUST. It does not cover the availability machine, the commercial model
+  or the exception states; those are covered by the service's own tests only.
 
 ## Open founder decisions
 

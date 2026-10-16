@@ -1007,6 +1007,32 @@ settings: `services/seo-py/README.md`. Env prefix `SEO_`, default port 8500.
 cd services/seo-py && python3 -m pytest -q   # count: docs/test-counts.md
 ```
 
+## Out-of-Home & DOOH (15) (`services/ooh-py`) — Oct 16, 2026, waves OOH-0 and OOH-1
+
+The OOH department's constitution as enforced data (OOH-0) and its operating spine (OOH-1): campaigns and their state
+machine, inventory availability, the six separate price objects, the per-deal disclosed-markup commercial model,
+client approval, 100% prepaid client funds, the section 12 purchase gate and retry-safe order submission. Founder
+decisions (Oct 16), decisions, limitations and the open founder decisions: `docs/adr/0019-ooh-dooh-department-
+constitution.md`. Routes and settings: `services/ooh-py/README.md`. Env prefix `OOH_`, default port 8510.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** No agent is built (the 23-capability
+  roster is data; names provisional pending the blueprint). Finance (31), vendor ordering, e-signature and inventory
+  data are `NOT_CONNECTED`: Andre verifies client funds through his approval gate with the bank's reference, and
+  places every order with the vendor himself; this service decides whether he may.
+- **Andre only:** Director / P&L, Buyer and signer — the commercial model, the sell price and buy limit, the client's
+  approval, funds verification, purchase authorization, submission and the vendor's answer. Agents prepare, never
+  commit.
+- **Fails closed:** no purchase until cleared client funds cover the approved price in full; the purchase gate refuses
+  an expired quote or hold, a hold that is only requested, a quote-to-order mismatch, overspend, a substituted vendor,
+  a stale or expired authority and changed terms, and re-runs at submission; a timeout is never an outcome and a
+  second submission is `DUPLICATE_ORDER_BLOCKED`; vendor text is untrusted data; evidence classes are never
+  upgraded; kill switches, tenant isolation with cross-tenant 404s, record-first log with the R6-M1 evidence view.
+
+```bash
+cd services/ooh-py && python3 -m pytest -q   # count: docs/test-counts.md
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/ooh-py/devtools/live_run.py
+```
+
 ## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026, fix waves 20-26b applied
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;

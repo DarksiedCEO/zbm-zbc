@@ -161,6 +161,7 @@ jobs:
           - influencer-py
           - bizdev-py
           - seo-py
+          - ooh-py
         # macOS (Apple Silicon): every service once, on Python 3.13
         include:
           - {os: macos-26, python: "3.13", service: detection-py}
@@ -178,6 +179,7 @@ jobs:
           - {os: macos-26, python: "3.13", service: influencer-py}
           - {os: macos-26, python: "3.13", service: bizdev-py}
           - {os: macos-26, python: "3.13", service: seo-py}
+          - {os: macos-26, python: "3.13", service: ooh-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -429,7 +431,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
-        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py, seo-py]
+        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py, seo-py, ooh-py]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -740,9 +742,10 @@ jobs:
             services/clipper-network-py/requirements.txt
             services/onboarding-py/requirements.txt
             services/seo-py/requirements.txt
+            services/ooh-py/requirements.txt
       - name: Install the target services' pinned requirements
         run: |
-          for s in service-py sales-py verification-py clipper-network-py onboarding-py seo-py; do
+          for s in service-py sales-py verification-py clipper-network-py onboarding-py seo-py ooh-py; do
             python -m pip install -r "services/$s/requirements.txt"
           done
       - name: The war room engine's own self-test

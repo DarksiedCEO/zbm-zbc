@@ -1,7 +1,7 @@
 # ADR 0018 — The war room: a red-team launch gate for public-facing departments
 
 Status: accepted for build, approved by Andre on Oct 7 2026; built on branch `warroom-redteam-gate`. In force for the
-six departments it has scenario libraries for (below; seo-py added Oct 10 2026, ADR 0017 W3-3). Owner: department 41, Adversarial Testing & Red Team.
+seven departments it has scenario libraries for (below; seo-py added Oct 10 2026, ADR 0017 W3-3; ooh-py added Oct 16 2026, ADR 0019). Owner: department 41, Adversarial Testing & Red Team.
 
 ## Context
 
@@ -80,6 +80,7 @@ Base cases (no chaos) must all PASS: a base FAIL means the library's expectation
 | clipper-network-py (32) | a money or earnings word in a display name is refused (homoglyph, leet, spacing, invisible characters, full-width, accents) | ordinary names pass |
 | onboarding-py (1) | one person's re-spelled legal name aggregates to one 1099 total (or the variant is refused at the schema); a replayed payment is idempotent and recorded once; the id reused with another amount or creator is 409 and records nothing | a spelled-out name |
 | seo-py (2) | the audit answers (never a server error) whatever a hostile site serves; no request ever reaches a non-public address (private, loopback, link-local, CGNAT, mapped, NAT64, rebinding, numeric spellings; redirects, canonical links, robots / sitemap / llms.txt) and nothing an internal address would answer appears anywhere; odd ports, other schemes and credentials refused; compression bombs and odd codings contained within the byte budget; a trickled body stopped by the deadline; DOCTYPE / ENTITY XML quarantined; crawled or logged instructions change no state; uploaded logs keep nothing identifying (the suite's own PII needles, read through the shared lookalike fold) and quarantine broken lines; the hub never reaches another tenant (404 identical to a missing object, nothing echoed); personal-data keys refused 422 with nothing recorded; kill switches refuse with their own code, stop crawling before any request, interrupt a run mid-way, and only Andre releases them; a paid run is refused, unrecorded and uncrawled unless Finance (31) confirms the invoice | none: every invariant is MUST (the log-identifier downgrade was removed with the W3-3 templating fix) |
+| ooh-py (15) | vendor text carrying instructions (to verify funds, zero the markup, buy) changes nothing and the unfunded purchase is refused FUNDS_NOT_VERIFIED; an authorized amount off the quote or a substituted vendor (lookalikes, leet, invisible characters, full-width) is refused and no authorization exists; only Andre authorizes (agent, console without his token, Compliance, scheduler: 403); a second submission of an open order is DUPLICATE_ORDER_BLOCKED and the vendor commitment is counted once | — |
 
 ### Chaos catalogue
 

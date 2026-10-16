@@ -140,8 +140,8 @@ def test_hold_requested_treated_as_confirmed_is_refused(acme):
 def test_quote_to_order_mismatch(acme):
     h = acme
     ctx = h.funded()
-    h.refused(h.authorize(ctx, authorized_amount="4999.99"), 409, "QUOTE_ORDER_MISMATCH")
-    h.refused(h.authorize(ctx, authorized_amount="5000.01"), 409, "QUOTE_ORDER_MISMATCH")
+    for wrong in ("4999.99", "5000.01", "9999.00", "0.01", "50000.00", "500.00"):   # (war room seeds: loop 0)
+        h.refused(h.authorize(ctx, authorized_amount=wrong), 409, "QUOTE_ORDER_MISMATCH")
     other = h.unit("acme", ctx["cid"])
     h.refused(h.authorize(ctx, inventory_ids=[ctx["uid"], other]), 409, "INVENTORY_MISMATCH")
     h.refused(h.authorize(ctx, exact_quote_refs=[ctx["qid"], ctx["qid"]]), 409, "QUOTES_DUPLICATED")
@@ -201,7 +201,8 @@ def test_stale_or_overlong_authority(acme):
 def test_vendor_substitution(acme):
     h = acme
     ctx = h.funded()
-    h.refused(h.authorize(ctx, vendor="outfront"), 409, "VENDOR_MISMATCH")
+    for vendor in ("outfront", "clear-channel", "lamar-advertising", "lamarr", "1amar"):   # (war room seeds: loop 0)
+        h.refused(h.authorize(ctx, vendor=vendor), 409, "VENDOR_MISMATCH")
     a = h.ok(h.authorize(ctx), 201)
     ctx["aid"] = a["authorization_id"]
     h.refused(h.submit(ctx, vendor="outfront"), 409, "VENDOR_MISMATCH")
