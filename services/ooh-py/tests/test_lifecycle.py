@@ -192,6 +192,6 @@ def test_rejected_order_returns_units_and_campaign_without_promotion(h):
     a = h.ok(h.outcome(ctx, "REJECTED"))
     assert a["submission_state"] == "REJECTED" and a["status"] == "VOID"
     u = h.ok(h.get(f"/tenants/acme/campaigns/{ctx['cid']}/inventory/{ctx['uid']}"))
-    assert u["state"] == "HOLD_CONFIRMED"
+    assert u["state"] == "QUOTED"                             # AEGIS M4: the failed order's hold is not kept
     c = h.view("acme", ctx["cid"])
     assert c["state"] == "FUNDS_VERIFIED" and c["exposure"]["vendor_commitment"] == "0.00"

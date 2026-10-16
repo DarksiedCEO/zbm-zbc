@@ -15,7 +15,9 @@ receives the payload's SHA-256.
 
 The department's work is in mixins: svc_tenants.py (tenants, kill switches) and svc_campaigns.py (the operating
 spine: campaigns, inventory availability, price objects, the commercial model, client approval, funds, the purchase
-gate, submission). No network call is ever made with the lock held; OOH-1 makes none at all besides the ledger.
+gate, submission). As in seo-py, ledger writes (the typed evidence, the anchor, and the best-effort refusal records)
+are made WITH the service lock held, so one change is recorded at a time and in log order; the ledger's chain
+``verify()`` in the integrity route runs outside it. The ledger is the only network peer OOH-1 has.
 """
 
 from __future__ import annotations

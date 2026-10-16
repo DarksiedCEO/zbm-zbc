@@ -127,6 +127,15 @@ class FundsVerify(Strict):
     cleared: Literal[True]                                           # Andre attests the funds are CLEARED
 
 
+class FundsReconfirm(Strict):
+    """Andre re-confirms that cleared funds already recorded cover the re-approved amount (no new money, no new
+    reference: AEGIS M3)."""
+    request_id: RequestId
+    expected_version: Version
+    approved_amount: Amount
+    currency: Annotated[StrictStr, Field(pattern=r"^[A-Z]{3}$")]
+
+
 class Authorize(Strict):
     """Section 12 OOH_PURCHASE_AUTHORIZATION, as Andre signs it. ``funding_state`` is computed, never supplied."""
     request_id: RequestId

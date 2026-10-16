@@ -1,8 +1,8 @@
 # zbm-zbc continuous integration.
 #
-# One job per service (the fourteen pip-managed Python services share one matrix definition and report as separate
+# One job per service (the sixteen pip-managed Python services share one matrix definition and report as separate
 # checks, e.g. "python-tests (finance-py, 3.13)"), the uv-managed delivery-py, ledger-rust, orchestrator-go, the
-# dashboard, the eleven self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
+# dashboard, the twelve self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
 # delivery-py, dependency and secret scans, and one `required` job that needs every other job so branch protection
 # has a single check to require. See docs/ci.md for what each job proves and what is deliberately not here yet.
 #
@@ -30,7 +30,7 @@
 #
 # Path filtering is done by the `changes` job (a plain `git diff`, no third-party action) so an unrelated change
 # does not run every suite. Shared files (root README.md, docs/**, fixtures/**, devtools/**, .github/**) run
-# everything. The fifteen Python services are one cluster: their tests read each other's sources (ports.py,
+# everything. The seventeen Python services are one cluster: their tests read each other's sources (ports.py,
 # requirements.txt, api.py, ledger-rust's server.rs), so a change to any of them, or to ledger-rust, runs all of
 # them. A path no rule knows about runs everything (fail safe).
 

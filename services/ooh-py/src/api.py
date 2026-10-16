@@ -344,9 +344,10 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                 raise RequestValidationError([{"loc": ("body",), "msg": "a JSON body is required", "type": "missing"}])
             bad = forbidden_keys(payload)
             if bad:
-                raise RequestValidationError([{"loc": ("body", b), "msg": "this service never takes an IP, "
-                                               "user-agent, device, date of birth, government or tax id, payment "
-                                               "card or bank account data or a phone-number field",
+                # checked BEFORE the model (whose extra=forbid would otherwise answer a generic extra_forbidden):
+                # the caller learns this service never takes personal or account data (AEGIS L1)
+                raise RequestValidationError([{"loc": ("body", b), "msg": "personal or account data is never taken "
+                                               "here (no IP, device, birth date, id, card, bank account or phone)",
                                                "type": "forbidden_field"} for b in bad[:20]])
             try:
                 return model.model_validate(payload).model_dump(mode="json")
@@ -363,7 +364,12 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
 
     @app.exception_handler(OohError)
     def _domain(_: Request, exc: OohError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.reason, **exc.body})
+        content = {"detail": exc.reason, **exc.body}
+        if exc.status_code == 503:
+            # AEGIS L2: whether the call may still have taken effect (a ledger answer was lost and the pending line
+            # will be rolled forward): never retry it with a new request id
+            content["maybe"] = bool(getattr(exc, "maybe", False))
+        return JSONResponse(status_code=exc.status_code, content=content)
 
     @app.exception_handler(Exception)
     def _unexpected(_: Request, exc: Exception):
@@ -483,6 +489,11 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
     @app.post(C + "/funds-verifications", dependencies=auth)
     def funds(cid: str, scope: tuple = Depends(andre_scoped), req: dict = Depends(body(m.FundsVerify))) -> dict:
         return svc.verify_funds(scope[1], _id(cid), req)
+
+    @app.post(C + "/funds-reconfirmations", dependencies=auth)
+    def funds_reconfirm(cid: str, scope: tuple = Depends(andre_scoped),
+                        req: dict = Depends(body(m.FundsReconfirm))) -> dict:
+        return svc.reconfirm_funds(scope[1], _id(cid), req)
 
     @app.post(C + "/authorizations", dependencies=auth, status_code=201)
     def authorize(cid: str, scope: tuple = Depends(andre_scoped), req: dict = Depends(body(m.Authorize))) -> dict:

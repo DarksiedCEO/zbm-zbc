@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
@@ -53,6 +55,35 @@ def observed(text: Optional[str]) -> Optional[dict]:
     s = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
     return {"untrusted": True, "text": s[:OBSERVED_MAX], "truncated": len(s) > OBSERVED_MAX,
             "sha256": hashlib.sha256(s.encode("utf-8", "surrogatepass")).hexdigest()}
+
+
+# Words a bank or a person puts around a transfer reference (AEGIS H1): they never make two references different.
+METHOD_WORDS = ("ach", "wire", "check", "cheque", "chk", "eft", "transfer", "xfer", "txn", "trace", "ref", "reference",
+                "conf", "confirmation")
+
+
+def _alnum_tokens(value: str) -> list[str]:
+    return [t for t in re.split(r"[^0-9a-z]+", unicodedata.normalize("NFKC", value).casefold()) if t]
+
+
+def funds_ref_key(value: str) -> str:
+    """The key one bank transfer is known by (AEGIS H1): NFKC, case-folded, separators and whitespace removed, and
+    method words (ach, wire, check...) dropped wherever they stand and stripped as a leading prefix. ``BOA-ACH-12345``,
+    ``boa ach 12345`` and ``boa.12345`` are one transfer; so are ``12345``, ``ach:12345`` and ``ACH12345``. A collision
+    only ever refuses (fail closed); an empty key is refused as invalid."""
+    key = "".join(t for t in _alnum_tokens(value) if t not in METHOD_WORDS)
+    stripped = True
+    while stripped:
+        stripped = False
+        for w in sorted(METHOD_WORDS, key=len, reverse=True):
+            if key.startswith(w) and len(key) > len(w):
+                key, stripped = key[len(w):], True
+    return key
+
+
+def unit_ref_key(value: str) -> str:
+    """The key one physical face is known by at its vendor (AEGIS M1): NFKC, case-folded, separators removed."""
+    return "".join(_alnum_tokens(value))
 
 
 def order_key(tenant: str, campaign: str, vendor: str, quotes: list, amount: str, currency: str, version: int) -> str:
@@ -99,6 +130,17 @@ class CampaignsMixin:
 
     def _expired(self, value: Optional[str]) -> bool:
         return value is None or parse_iso(value) <= self.now()
+
+    @staticmethod
+    def _unit_in_two_quotes(qs: list) -> bool:
+        """AEGIS H2: one unit named by more than one of these quotes would be bought (or priced) twice."""
+        seen: set = set()
+        for q in qs:
+            for u in set(q["inventory_ids"]):
+                if u in seen:
+                    return True
+                seen.add(u)
+        return False
 
     def _ev(self, kind: str, cid: str, payload: dict, actor: str, rk: str):
         return (kind, f"campaign:{cid}", payload, (actor, rk))
@@ -187,6 +229,8 @@ class CampaignsMixin:
         live = [u for u in (self.inventory[i] for i in c["inventory_ids"]) if u["state"] != "WITHDRAWN"]
         if to == "QUOTING" and not live:
             return "NO_INVENTORY"
+        if to == "PROPOSAL_SENT" and c["current_sell_price_id"] is None:
+            return "NO_CURRENT_SELL_PRICE"                   # AEGIS L5: a model reset after the price unseated it
         if to == "PROPOSAL_READY":
             if c["commercial"] is None:
                 return "NO_COMMERCIAL_MODEL"
@@ -214,10 +258,17 @@ class CampaignsMixin:
             self._writable(c, PRE_ORDER_WRITABLE)
             if len(c["inventory_ids"]) >= self.settings.inventory_max:
                 raise Conflict(R("INVENTORY_LIMIT"))
+            key = unit_ref_key(body["vendor_unit_ref"])
+            if not key:
+                raise Invalid(R("INVALID"), field="vendor_unit_ref")
+            if any(u["tenant_id"] == tid and u["vendor"] == body["vendor"] and u["unit_key"] == key
+                   and u["state"] != "WITHDRAWN" and self.campaigns[u["campaign_id"]]["state"] != "CANCELLED"
+                   for u in self.inventory.values()):
+                raise Conflict(R("UNIT_ALREADY_REGISTERED"))       # one face, one live record (AEGIS M1)
             uid = derived_id("inv", tid, rk)
             data = {"unit_id": uid, "campaign_id": cid, "tenant_id": tid, "vendor": body["vendor"],
                     "kind": body["kind"], "market": body["market"], "vendor_unit_ref": body["vendor_unit_ref"],
-                    "vendor_text": observed(body.get("vendor_text"))}
+                    "unit_key": key, "vendor_text": observed(body.get("vendor_text"))}
             ev = {"unit_id": uid, "campaign_id": cid, "vendor": body["vendor"],
                   "vendor_text_sha256": (data["vendor_text"] or {}).get("sha256")}
             self._commit("inventory_added", self._req(data, actor, rk, body, uid), actor,
@@ -226,7 +277,7 @@ class CampaignsMixin:
 
     def _a_inventory_added(self, d, at):
         u = {k: d[k] for k in ("unit_id", "campaign_id", "tenant_id", "vendor", "kind", "market", "vendor_unit_ref",
-                               "vendor_text")}
+                               "unit_key", "vendor_text")}
         u.update(state="IDENTIFIED", version=1, vendor_ref=None, hold_expires_at=None, evidence_class=None,
                  pre_booking_state=None, history=[{"from": None, "to": "IDENTIFIED", "actor": d["actor"], "at": at}])
         self.inventory[d["unit_id"]] = u
@@ -343,6 +394,8 @@ class CampaignsMixin:
                     raise Conflict(R("SELL_PRICE_QUOTES_INVALID"))
                 if any(self._expired(q["valid_until"]) for q in qs):
                     raise Conflict(R("QUOTE_EXPIRED"))
+                if self._unit_in_two_quotes(qs):
+                    raise Conflict(R("UNIT_IN_MULTIPLE_QUOTES"))
                 if any(q["currency"] != body["currency"] for q in qs):
                     raise Conflict(R("CURRENCY_MISMATCH"))
                 cost = sum((Decimal(q["amount"]) for q in qs), Decimal(0))
@@ -470,12 +523,18 @@ class CampaignsMixin:
             if c["state"] != "CLIENT_APPROVED":
                 self._refuse("STATE_NOT_ELIGIBLE", c, rk)
             self._expect(c, body)
+            if Decimal(body["amount"]) <= 0:
+                raise Invalid(R("INVALID"), field="amount")             # AEGIS M3: a funds record moves money
             if body["currency"] != c["client_approval"]["currency"]:
                 self._refuse("FUNDS_CURRENCY_MISMATCH", c, rk)
-            if body["evidence_ref"] in self.funds_evidence:
-                self._refuse("FUNDS_EVIDENCE_REUSED", c, rk)
+            key = funds_ref_key(body["evidence_ref"])
+            if not key:
+                raise Invalid(R("INVALID"), field="evidence_ref")
+            if key in self.funds_evidence:
+                self._refuse("FUNDS_EVIDENCE_REUSED", c, rk)          # one transfer, one record (AEGIS H1)
             data = {"campaign_id": cid, "amount": body["amount"], "currency": body["currency"],
-                    "method": body["method"], "evidence_ref": body["evidence_ref"], "source": "ANDRE_GATE",
+                    "method": body["method"], "evidence_ref": body["evidence_ref"], "evidence_key": key,
+                    "source": "ANDRE_GATE",
                     "evidence_class": P.EVIDENCE_ALLOWED["funds_andre_gate"][0]}
             received = Decimal(self.exposure(c)["client_funds_received"]) + Decimal(body["amount"])
             data["clears_in_full"] = received >= Decimal(c["client_approval"]["amount"])
@@ -485,13 +544,42 @@ class CampaignsMixin:
 
     def _a_funds_verified(self, d, at):
         c = self.campaigns[d["campaign_id"]]
-        c["funds"].append({k: d[k] for k in ("amount", "currency", "method", "evidence_ref", "source",
+        c["funds"].append({k: d[k] for k in ("amount", "currency", "method", "evidence_ref", "evidence_key", "source",
                                              "evidence_class")} | {"verified_by": d["actor"], "at": at})
-        self.funds_evidence[d["evidence_ref"]] = d["campaign_id"]
+        self.funds_evidence[d["evidence_key"]] = d["campaign_id"]
         if d["clears_in_full"]:
             self._move(c, "FUNDS_VERIFIED", "CLIENT_FUNDS_CLEARED_IN_FULL", d["actor"], at)
         else:
             c["version"] += 1
+
+    def reconfirm_funds(self, tid: str, cid: str, body: dict) -> dict:
+        """AEGIS M3: after a change request and a new client approval, Andre re-confirms that the cleared funds
+        already recorded on this campaign cover the newly approved amount. No new reference, no new money: the
+        campaign moves to FUNDS_VERIFIED only if what is already recorded covers the approval in full."""
+        with self.lock:
+            self._gate()
+            c = self._campaign(tid, cid)
+            rk = self.rk("funds_reconfirm", cid, body)
+            if self._idem("andre", rk, body):
+                return self.campaign_view(tid, cid)
+            self.check_kill(tenant=tid, capability="funds")
+            if c["state"] != "CLIENT_APPROVED":
+                self._refuse("STATE_NOT_ELIGIBLE", c, rk)
+            self._expect(c, body)
+            ap = c["client_approval"]
+            if body["approved_amount"] != ap["amount"] or body["currency"] != ap["currency"]:
+                self._refuse("CLIENT_APPROVAL_MISMATCH", c, rk)
+            x = self.exposure(c)
+            if Decimal(x["client_funds_received"]) - Decimal(x["vendor_commitment"]) < Decimal(ap["amount"]):
+                self._refuse("FUNDS_INSUFFICIENT", c, rk)
+            data = {"campaign_id": cid, "approval_id": ap["approval_id"], "approved_amount": ap["amount"],
+                    "client_funds_received": x["client_funds_received"]}
+            self._commit("funds_reconfirmed", self._req(data, "andre", rk, body, cid), "andre",
+                         evidence=self._ev("client_funds_reconfirmed_by_andre", cid, data, "andre", rk))
+            return self.campaign_view(tid, cid)
+
+    def _a_funds_reconfirmed(self, d, at):
+        self._move(self.campaigns[d["campaign_id"]], "FUNDS_VERIFIED", "CLEARED_FUNDS_RECONFIRMED", d["actor"], at)
 
     # ================================================================================================ the gate (s. 12)
 
@@ -542,6 +630,8 @@ class CampaignsMixin:
                 return "CURRENCY_MISMATCH"
             if self._expired(q["valid_until"]):
                 return "QUOTE_EXPIRED"
+        if self._unit_in_two_quotes(qs):
+            return "UNIT_IN_MULTIPLE_QUOTES"
         quoted_units = {i for q in qs for i in q["inventory_ids"]}
         if set(a["inventory_ids"]) != quoted_units or len(set(a["inventory_ids"])) != len(a["inventory_ids"]):
             return "INVENTORY_MISMATCH"
@@ -555,6 +645,8 @@ class CampaignsMixin:
                 return "INVENTORY_NOT_HELD"
             if self._expired(u["hold_expires_at"]):
                 return "HOLD_EXPIRED"
+            if self._face_on_open_order(u, a.get("authorization_id")):
+                return "DUPLICATE_ORDER_BLOCKED"
         amount = Decimal(a["authorized_amount"])
         if amount != sum((Decimal(q["amount"]) for q in qs), Decimal(0)):
             return "QUOTE_ORDER_MISMATCH"
@@ -580,6 +672,18 @@ class CampaignsMixin:
         if others + amount > Decimal(x["client_funds_received"]):
             return "FUNDS_INSUFFICIENT"
         return None
+
+    def _face_on_open_order(self, unit: dict, own: Optional[str]) -> bool:
+        """AEGIS M1: the same physical face (tenant, vendor, unit ref) on any open order, in any campaign."""
+        for o in self.authorizations.values():
+            if o["submission_state"] not in P.SUBMISSION_OPEN or o["authorization_id"] == own:
+                continue
+            for uid in o["inventory_ids"]:
+                v = self.inventory[uid]
+                if v["tenant_id"] == unit["tenant_id"] and v["vendor"] == unit["vendor"] \
+                        and v["unit_key"] == unit["unit_key"]:
+                    return True
+        return False
 
     def authorize(self, tid: str, cid: str, body: dict) -> dict:
         with self.lock:
@@ -695,6 +799,8 @@ class CampaignsMixin:
             self.check_kill(tenant=tid)
             if a["submission_state"] != "SUBMISSION_UNKNOWN":
                 self._refuse("SUBMISSION_NOT_PENDING", c, rk)
+            if c["state"] not in ("ORDER_SUBMITTED", "DISPUTED"):
+                self._refuse("STATE_NOT_ELIGIBLE", c, rk)
             data = {"authorization_id": aid, "campaign_id": cid, "outcome": body["outcome"],
                     "vendor_ref": body["vendor_ref"], "evidence_class": P.EVIDENCE_ALLOWED["order_outcome"][0]}
             self._commit("order_outcome", self._req(data, "andre", rk, body, aid), "andre",
@@ -704,18 +810,27 @@ class CampaignsMixin:
     def _a_order_outcome(self, d, at):
         a = self.authorizations[d["authorization_id"]]
         c = self.campaigns[d["campaign_id"]]
+        accepted = d["outcome"] == "ACCEPTED"
         a.update(submission_state=d["outcome"], vendor_ref=d["vendor_ref"], outcome_evidence_class=d["evidence_class"],
                  outcome_at=at)
         for uid in a["inventory_ids"]:
             u = self.inventory[uid]
-            to = "BOOKING_CONFIRMED" if d["outcome"] == "ACCEPTED" else (u["pre_booking_state"] or "HOLD_CONFIRMED")
-            self._unit_move(u, to, d["actor"], at)
+            # AEGIS M4: a rejected order never leaves a confirmed hold behind (the vendor's reference was for the order
+            # that failed): the face goes back to QUOTED and must be held, and confirmed, again
+            self._unit_move(u, "BOOKING_CONFIRMED" if accepted else "QUOTED", d["actor"], at)
             u["pre_booking_state"] = None
-        if d["outcome"] == "ACCEPTED":
-            self._move(c, "BOOKED", "VENDOR_ACCEPTED", d["actor"], at)
-        else:
+            if not accepted:
+                u.update(vendor_ref=None, hold_expires_at=None, evidence_class=None)
+        if not accepted:
             a["status"], a["void_reason"] = "VOID", "VENDOR_REJECTED"
-            self._move(c, "FUNDS_VERIFIED", "VENDOR_REJECTED", d["actor"], at)
+        target = "BOOKED" if accepted else "FUNDS_VERIFIED"
+        if c["state"] == "DISPUTED":
+            # AEGIS M2: a dispute is Andre's to close. The answer is recorded; the campaign stays DISPUTED and will
+            # resume where the answer leads, only when Andre resumes it.
+            c["resume_to"] = target
+            c["version"] += 1
+        else:
+            self._move(c, target, "VENDOR_ACCEPTED" if accepted else "VENDOR_REJECTED", d["actor"], at)
 
     # ================================================================================================ views
 

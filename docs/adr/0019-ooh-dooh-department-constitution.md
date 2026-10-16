@@ -157,6 +157,35 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
     the log replays at start, so live and replayed state cannot diverge (tested: restart and double replay give an
     identical snapshot). `GET /ooh/v1/audit/evidence` marks each event `committed` or `attempted` (R6-M1).
 
+## AEGIS round 1 (Oct 16 2026): fixes
+
+- **H1** One bank transfer, one funds record: the reference is keyed by `funds_ref_key` (NFKC, case-folded,
+  separators and whitespace removed, method words `ach, wire, check, cheque, chk, eft, transfer, xfer, txn, trace,
+  ref, reference, conf, confirmation` dropped and stripped as a prefix). The key is stored on the record and in the
+  log, so replay rebuilds the same registry. A collision only ever refuses; a reference that is nothing but method
+  words is refused as invalid.
+- **H2** A unit named by more than one quote is refused in a sell price and in an authorization
+  (`UNIT_IN_MULTIPLE_QUOTES`).
+- **M1** `(tenant, vendor, unit_key)` is unique among live unit records (not withdrawn, campaign not cancelled):
+  `UNIT_ALREADY_REGISTERED`. The gate also refuses a face that is on any open order in any campaign of the tenant
+  (`DUPLICATE_ORDER_BLOCKED`).
+- **M2** The vendor's answer recorded while the campaign is `DISPUTED` updates the order, the units and `resume_to`
+  (BOOKED or FUNDS_VERIFIED); the campaign stays `DISPUTED` until Andre resumes it. The outcome route refuses any
+  other campaign state.
+- **M3** A funds record must move money (amount > 0). After a change request and a new client approval, Andre
+  re-confirms the cleared funds already recorded (`POST …/funds-reconfirmations`, the approved amount restated, no
+  new reference): only when they cover the new approval, net of open vendor commitments (`FUNDS_INSUFFICIENT`).
+- **M4** A rejected order returns its units to `QUOTED` with the hold's vendor reference and expiry cleared: the
+  quote can only be bought again after a new hold is requested and confirmed.
+- **L1** The personal-data refusal runs before the model and answers `forbidden_field` (now asserted per key and
+  per route; the previous assertion was only the status). The check was already effective on the reviewed code;
+  the stronger test passes there too.
+- **L2** Every 503 carries `maybe`: true when the call may still take effect (a lost ledger answer whose pending line
+  the integrity check will roll forward). Never retry such a call with a new request id.
+- **L3** service.py's docstring now says ledger writes are made with the service lock held; the CI header counts
+  are corrected.
+- **L5** `PROPOSAL_SENT` needs a current sell price (a model reset at the ready stage unseats it).
+
 ## Configuration
 
 Read once at start (`src/config.py`; every variable is also listed in `services/ooh-py/README.md`):
@@ -204,6 +233,12 @@ refuses start).
 5. Whether a check is acceptable client money for a vendor buy (built: `ach` or `check`; card refused).
 6. Whether the client's hub view should ever show cost and fee broken out (built: never cost; the presentation
    choice is recorded for the proposal only).
+7. (AEGIS L4) The agent runtime may record `HOLD_CONFIRMED` with a free-text vendor reference and an expiry; nothing
+   checks that reference against the vendor. Built as is: a confirmed hold is `VENDOR_ASSERTED`, the gate still needs
+   Andre's authorization, and the reference is on the record. Whether a hold confirmation should need Andre (or a
+   vendor port) is his decision.
+8. (AEGIS M1) One live unit record per face per tenant means the same face cannot sit in two of one client's
+   campaigns at once (flights are not modelled until OOH-2). Built: refused `UNIT_ALREADY_REGISTERED`.
 
 ## Unlock list
 
