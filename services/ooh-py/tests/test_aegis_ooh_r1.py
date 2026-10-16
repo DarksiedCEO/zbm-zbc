@@ -13,7 +13,7 @@ from svc_campaigns import funds_ref_key, unit_ref_key
 
 # war room seeds (devtools/warroom/scenarios/ooh-py.json): each is the same transfer as "boa-ach-12345"
 REF_VARIANTS = ("BOA-ACH-12345", "boa.ach.12345", "ach:boa-12345", "BOA_ACH_12345", "boa-12345", "Boa-Ach-12345-ref",
-                "WIRE:BOA-12345", "boa-check-12345")
+                "EFT:BOA-12345", "boa-ach-0012345")
 # war room seeds: each is the same face as vendor "lamar", ref "face-101"
 UNIT_REF_VARIANTS = ("FACE-101", "face_101", "Face.101", "face:101", "FACE101", "f-a-c-e-1-0-1")
 # war room seeds: no funds record may move nothing
@@ -28,19 +28,19 @@ def acme(h):
 
 # ---------------------------------------------------------------------------------------------- H1
 
-@pytest.mark.parametrize("first,second", [("BOA-ACH-12345", "boa-ach-12345"), ("12345", "ach:12345"),
-                                          ("ACH12345", "12345"), ("boa.ach.12345", "BOA_ACH_12345"),
-                                          ("wire-778", "WIRE778"), ("chk:9001", "check-9001")])
-def test_h1_one_transfer_funds_one_campaign_whatever_its_spelling(acme, first, second):
+@pytest.mark.parametrize("first,second,method", [("BOA-ACH-12345", "boa-ach-12345", "ach"), ("12345", "ach:12345", "ach"),
+                                                 ("ACH12345", "12345", "ach"), ("boa.ach.12345", "BOA_ACH_12345", "ach"),
+                                                 ("eft-778", "EFT778", "ach"), ("chk:9001", "check-9001", "check")])
+def test_h1_one_transfer_funds_one_campaign_whatever_its_spelling(acme, first, second, method):
     h = acme
     a = h.to_proposal_sent()
     h.ok(h.approve(a))
-    h.ok(h.funds(a, a["sell"], ref=first))
+    h.ok(h.funds(a, a["sell"], ref=first, method=method))
     b = h.to_proposal_sent()
     h.ok(h.approve(b))
-    h.refused(h.funds(b, b["sell"], ref=second), 409, "FUNDS_EVIDENCE_REUSED")
+    h.refused(h.funds(b, b["sell"], ref=second, method=method), 409, "FUNDS_EVIDENCE_REUSED")
     assert h.view("acme", b["cid"])["state"] == "CLIENT_APPROVED"
-    assert funds_ref_key(first) == funds_ref_key(second)
+    assert funds_ref_key(first, method) == funds_ref_key(second, method)
 
 
 @pytest.mark.parametrize("variant", REF_VARIANTS)
@@ -49,7 +49,7 @@ def test_h1_the_war_room_reference_variants_are_one_transfer(acme, variant):
     a = h.to_proposal_sent()
     h.ok(h.approve(a))
     h.ok(h.funds(a, a["sell"], ref="boa-ach-12345"))
-    assert h.view("acme", a["cid"])["funds"][0]["evidence_key"] == "boa12345"
+    assert h.view("acme", a["cid"])["funds"][0]["evidence_key"] == "ach:boa12345"
     b = h.to_proposal_sent()
     h.ok(h.approve(b))
     h.refused(h.funds(b, "100.00", ref=variant), 409, "FUNDS_EVIDENCE_REUSED")

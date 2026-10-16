@@ -27,7 +27,7 @@ def import_harness() -> None:
 def setup(tmp):
     h = H.Harness(tmp)
     h.tenant("acme")
-    return SimpleNamespace(h=h, steps=[], c=None)
+    return SimpleNamespace(h=h, steps=[], c=None, foreign=[])
 
 
 def teardown(ctx) -> None:
@@ -147,20 +147,52 @@ def outcome(ctx, outcome):
     return ctx.h.outcome(ctx.c, outcome)
 
 
+def funded_sibling_plain(ctx):
+    """Campaign A funded by ACH transfer "12345"; campaign B (the case's target) client-approved, unfunded."""
+    a = ctx.h.to_proposal_sent()
+    ctx.h.ok(ctx.h.approve(a))
+    ctx.h.ok(ctx.h.funds(a, a["sell"], ref="12345"))
+    return approved_unfunded(ctx)
+
+
+def face_ordered_by_another_tenant(ctx):
+    """Tenant globex holds an open order (SUBMISSION_UNKNOWN) on lamar face "face-777" for November."""
+    h = ctx.h
+    h.tenant("globex")
+    g = h.authorized("globex", ref="face-777")
+    h.ok(h.submit(g))
+    ctx.foreign = ["globex", g["cid"], g["aid"], g["uid"], g["qid"]]
+    return {"status": 200, "body": {"setup": "done"}}
+
+
+def funded_same_face(ctx, ref):
+    """acme's campaign on the same face (the case's spelling of its reference), flight overlapping November."""
+    ctx.c = ctx.h.funded("acme", ref=ref, flight=("2026-11-15", "2026-12-15"))
+    return {"status": 200, "body": {"state": "FUNDS_VERIFIED"}}
+
+
+def register_vendor(ctx, vendor_id):
+    return ctx.h.post("/vendors", {"request_id": H.rid(), "vendor_id": vendor_id, "legal_name": "Some Other Name"},
+                      andre=True)
+
+
 ACTIONS = {"approved_unfunded": approved_unfunded, "funded": funded, "authorized": authorized,
            "vendor_text_quote": vendor_text_quote, "authorize": authorize, "authorize_as": authorize_as,
            "submit": submit, "submitted": submitted, "funded_sibling": funded_sibling, "fund": fund, "fund_amount": fund_amount,
            "two_quotes_one_unit": two_quotes_one_unit, "authorize_both_quotes": authorize_both_quotes,
-           "face_registered": face_registered, "add_face": add_face, "dispute": dispute, "outcome": outcome}
+           "face_registered": face_registered, "add_face": add_face, "dispute": dispute, "outcome": outcome,
+           "funded_sibling_plain": funded_sibling_plain, "face_ordered_by_another_tenant": face_ordered_by_another_tenant,
+           "funded_same_face": funded_same_face, "register_vendor": register_vendor}
 
 
 def observe(ctx) -> dict:
     h = ctx.h
+    base = {"vendors": sorted(h.svc.vendors), "foreign_identifiers": list(ctx.foreign)}
     if ctx.c is None:
-        return {}
+        return base
     c = h.view("acme", ctx.c["cid"])
     auths = [h.svc.authorizations[a] for a in c["authorization_ids"]]
-    return {"campaign_state": c["state"], "resume_to": c["resume_to"],
+    return {**base, "campaign_state": c["state"], "resume_to": c["resume_to"],
             "funding_state": c["exposure"]["funding_state"], "funds_count": len(c["funds"]),
             "vendor_commitment": c["exposure"]["vendor_commitment"],
             "markup_pct": (c["commercial"] or {}).get("markup_pct"),

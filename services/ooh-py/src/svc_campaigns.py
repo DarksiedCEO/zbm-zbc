@@ -31,7 +31,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -60,28 +60,73 @@ def observed(text: Optional[str]) -> Optional[dict]:
             "sha256": hashlib.sha256(s.encode("utf-8", "surrogatepass")).hexdigest()}
 
 
-# Words a bank or a person puts around a transfer reference (AEGIS H1): they never make two references different.
-METHOD_WORDS = ("ach", "wire", "check", "cheque", "chk", "eft", "transfer", "xfer", "txn", "trace", "ref", "reference",
-                "conf", "confirmation")
+# Words a bank or a person puts around a transfer reference. RAILS name a payment rail: a rail word in a reference must
+# agree with the structured ``method`` (AEGIS R2-L1: BOA-ACH-12345 and BOA-WIRE-12345 are different transfers on
+# different rails, never merged). NOISE words carry no identity. Either is removed only as a whole token, or as a
+# token's leading prefix directly followed by a digit (ACH12345): never from inside a word (REFUND77 is not UND77).
+RAILS = {"ach": "ach", "eft": "ach", "wire": "wire", "check": "check", "cheque": "check", "chk": "check"}
+NOISE_WORDS = ("transfer", "xfer", "txn", "trace", "ref", "reference", "conf", "confirmation")
+METHOD_WORDS = tuple(RAILS) + NOISE_WORDS
 
 
 def _alnum_tokens(value: str) -> list[str]:
     return [t for t in re.split(r"[^0-9a-z]+", unicodedata.normalize("NFKC", value).casefold()) if t]
 
 
-def funds_ref_key(value: str) -> str:
-    """The key one bank transfer is known by (AEGIS H1): NFKC, case-folded, separators and whitespace removed, and
-    method words (ach, wire, check...) dropped wherever they stand and stripped as a leading prefix. ``BOA-ACH-12345``,
-    ``boa ach 12345`` and ``boa.12345`` are one transfer; so are ``12345``, ``ach:12345`` and ``ACH12345``. A collision
-    only ever refuses (fail closed); an empty key is refused as invalid."""
-    key = "".join(t for t in _alnum_tokens(value) if t not in METHOD_WORDS)
-    stripped = True
-    while stripped:
-        stripped = False
-        for w in sorted(METHOD_WORDS, key=len, reverse=True):
-            if key.startswith(w) and len(key) > len(w):
-                key, stripped = key[len(w):], True
-    return key
+def _split_method(token: str) -> tuple[Optional[str], str]:
+    """(the method word the token is or starts with, the rest), or (None, token)."""
+    if token in METHOD_WORDS:
+        return token, ""
+    for w in sorted(METHOD_WORDS, key=len, reverse=True):
+        if token.startswith(w) and token[len(w):len(w) + 1].isdigit():
+            return w, token[len(w):]
+    return None, token
+
+
+def _spelled_out(value: str) -> list[str]:
+    """The alphanumeric tokens, with a run of one-character tokens joined by one same separator read as one token
+    spelled out: "a.c.h" is "ach", "0-0-12345" is "0012345", and "B.O.A-A.C.H" is "boa", "ach" (the separator
+    changes between the two runs)."""
+    text = unicodedata.normalize("NFKC", value).casefold()
+    parts = [(m.group(1), m.group(2)) for m in re.finditer(r"([^0-9a-z]*)([0-9a-z]+)", text)]
+    out: list[str] = []
+    i = 0
+    while i < len(parts):
+        tok = parts[i][1]
+        j = i + 1
+        if len(tok) == 1:
+            sep = parts[j][0] if j < len(parts) else None
+            while j < len(parts) and len(parts[j][1]) == 1 and parts[j][0] == sep and sep:
+                tok += parts[j][1]
+                j += 1
+            # the next token closes the run when it follows the same separator ("0-0-012345")
+            if j < len(parts) and len(tok) > 1 and parts[j][0] == sep and sep:
+                tok += parts[j][1]
+                j += 1
+        out.append(tok)
+        i = j
+    return out
+
+
+def funds_ref_parts(value: str) -> tuple[set, str]:
+    """(the rails the reference names, its identity without method words). Every digit run of the identity loses its
+    leading zeros (AEGIS R2-H1: 000012345 and 0-0-012345 are 12345; an all-zero run stays "0")."""
+    rails, out = set(), []
+    for t in _spelled_out(value):
+        word, rest = _split_method(t)
+        if word in RAILS:
+            rails.add(RAILS[word])
+        if rest:
+            out.append(rest)
+    return rails, re.sub(r"(?<![0-9])0+(?=[0-9])", "", "".join(out))
+
+
+def funds_ref_key(value: str, method: str) -> str:
+    """The key one bank transfer is known by: ``<rail>:<identity>``, the rail from the structured method (AEGIS H1,
+    R2-H1, R2-L1). ``BOA-ACH-12345`` and ``boa-ach-12345`` are one ACH transfer; so are ``12345``, ``ach:12345``,
+    ``ACH12345`` and ``000012345``. ``REFUND77`` and ``UND77`` are two. An empty identity is refused as invalid; a
+    reference naming another rail than the method is refused by the caller (FUNDS_METHOD_CONFLICT)."""
+    return f"{RAILS.get(method, method)}:{funds_ref_parts(value)[1]}"
 
 
 def unit_ref_key(value: str) -> str:
@@ -261,17 +306,17 @@ class CampaignsMixin:
             self._writable(c, PRE_ORDER_WRITABLE)
             if len(c["inventory_ids"]) >= self.settings.inventory_max:
                 raise Conflict(R("INVENTORY_LIMIT"))
+            self.require_vendor(body["vendor"])
             key = unit_ref_key(body["vendor_unit_ref"])
             if not key:
                 raise Invalid(R("INVALID"), field="vendor_unit_ref")
-            if any(u["tenant_id"] == tid and u["vendor"] == body["vendor"] and u["unit_key"] == key
-                   and u["state"] != "WITHDRAWN" and self.campaigns[u["campaign_id"]]["state"] != "CANCELLED"
-                   for u in self.inventory.values()):
-                raise Conflict(R("UNIT_ALREADY_REGISTERED"))       # one face, one live record (AEGIS M1)
+            flight = self._flight(body)
+            if self._registration_clash(tid, body["vendor"], key, flight, None):
+                raise Conflict(R("UNIT_ALREADY_REGISTERED"))
             uid = derived_id("inv", tid, rk)
             data = {"unit_id": uid, "campaign_id": cid, "tenant_id": tid, "vendor": body["vendor"],
                     "kind": body["kind"], "market": body["market"], "vendor_unit_ref": body["vendor_unit_ref"],
-                    "unit_key": key, "vendor_text": observed(body.get("vendor_text"))}
+                    "unit_key": key, "flight": flight, "vendor_text": observed(body.get("vendor_text"))}
             ev = {"unit_id": uid, "campaign_id": cid, "vendor": body["vendor"],
                   "vendor_text_sha256": (data["vendor_text"] or {}).get("sha256")}
             self._commit("inventory_added", self._req(data, actor, rk, body, uid), actor,
@@ -280,13 +325,76 @@ class CampaignsMixin:
 
     def _a_inventory_added(self, d, at):
         u = {k: d[k] for k in ("unit_id", "campaign_id", "tenant_id", "vendor", "kind", "market", "vendor_unit_ref",
-                               "unit_key", "vendor_text")}
+                               "unit_key", "flight", "vendor_text")}
         u.update(state="IDENTIFIED", version=1, vendor_ref=None, hold_expires_at=None, evidence_class=None,
                  pre_booking_state=None, history=[{"from": None, "to": "IDENTIFIED", "actor": d["actor"], "at": at}])
         self.inventory[d["unit_id"]] = u
         c = self.campaigns[d["campaign_id"]]
         c["inventory_ids"].append(d["unit_id"])
         c["version"] += 1
+
+    # ------------------------------------------------------------------ flights (AEGIS R2-M2)
+
+    @staticmethod
+    def _flight(body: dict) -> Optional[list]:
+        """``[start, end]`` (ISO dates, start <= end), or None when neither is given; one without the other is invalid."""
+        start, end = body.get("flight_start"), body.get("flight_end")
+        if start is None and end is None:
+            return None
+        if start is None or end is None:
+            raise Invalid(R("FLIGHT_INVALID"))
+        try:
+            s, e = date.fromisoformat(start), date.fromisoformat(end)
+        except ValueError:
+            raise Invalid(R("FLIGHT_INVALID")) from None
+        if s > e:
+            raise Invalid(R("FLIGHT_INVALID"))
+        return [s.isoformat(), e.isoformat()]
+
+    @staticmethod
+    def _overlap(a: Optional[list], b: Optional[list]) -> bool:
+        """Two flights share a day. A face with no flight yet may run any day: it overlaps everything (fail closed)."""
+        if a is None or b is None:
+            return True
+        return not (a[1] < b[0] or b[1] < a[0])
+
+    def _registration_clash(self, tid: str, vendor: str, key: str, flight: Optional[list], own: Optional[str]) -> bool:
+        """Within one tenant, one face (vendor, unit ref) has one live record per flight: a duplicate is refused only
+        when the flights overlap, among records not withdrawn and not in a cancelled campaign (AEGIS R2-M2 item 4: a
+        booked face is free again for another flight)."""
+        return any(u["tenant_id"] == tid and u["vendor"] == vendor and u["unit_key"] == key and u["unit_id"] != own
+                   and u["state"] != "WITHDRAWN" and self.campaigns[u["campaign_id"]]["state"] != "CANCELLED"
+                   and self._overlap(u["flight"], flight) for u in self.inventory.values())
+
+    def set_flight(self, actor: str, tid: str, cid: str, uid: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            c = self._campaign(tid, cid)
+            u = self.inventory.get(uid)
+            if u is None or u["campaign_id"] != cid:
+                raise NotFound(R("INVENTORY_NOT_FOUND"))
+            rk = self.rk("flight", uid, body)
+            if self._idem(actor, rk, body):
+                return self.unit_view(uid)
+            self.check_kill(tenant=tid, capability="inventory")
+            self._writable(c, PRE_ORDER_WRITABLE)
+            if u["version"] != body["expected_version"]:
+                raise Conflict(R("VERSION_STALE"))
+            flight = self._flight(body)
+            if flight is None:
+                raise Invalid(R("FLIGHT_INVALID"))
+            if self._registration_clash(tid, u["vendor"], u["unit_key"], flight, uid):
+                raise Conflict(R("UNIT_ALREADY_REGISTERED"))
+            data = {"unit_id": uid, "campaign_id": cid, "flight": flight}
+            self._commit("flight_set", self._req(data, actor, rk, body, uid), actor,
+                         evidence=self._ev("unit_flight_set", cid, data, actor, rk))
+            return self.unit_view(uid)
+
+    def _a_flight_set(self, d, at):
+        u = self.inventory[d["unit_id"]]
+        u["flight"] = list(d["flight"])
+        u["version"] += 1
+        self.campaigns[d["campaign_id"]]["version"] += 1
 
     def move_availability(self, actor: str, tid: str, cid: str, uid: str, body: dict) -> dict:
         to = body["to"]
@@ -351,6 +459,7 @@ class CampaignsMixin:
             if prev:
                 return self.price_view(prev[1])
             self.check_kill(tenant=tid, capability="prices")
+            self.require_vendor(body.get("vendor"))
             if pt in P.PRICE_TYPES_NOT_IN_WAVE:
                 raise Invalid(R("PRICE_TYPE_NOT_IN_WAVE"))
             if pt in P.PRICE_TYPES_ANDRE and not andre:
@@ -383,6 +492,8 @@ class CampaignsMixin:
             if pt == "VENDOR_QUOTE":
                 if not body.get("vendor") or not inv:
                     raise Invalid(R("INVALID"), field="vendor/inventory_ids")
+                if any(self.inventory[i]["flight"] is None for i in inv):
+                    raise Conflict(R("FLIGHT_REQUIRED"))             # a price is for a face AND a flight
                 valid_until = self._future(valid_until, "QUOTE_VALIDITY_REQUIRED")
             elif valid_until is not None:
                 raise Invalid(R("INVALID"), field="valid_until")
@@ -530,9 +641,12 @@ class CampaignsMixin:
                 raise Invalid(R("INVALID"), field="amount")             # AEGIS M3: a funds record moves money
             if body["currency"] != c["client_approval"]["currency"]:
                 self._refuse("FUNDS_CURRENCY_MISMATCH", c, rk)
-            key = funds_ref_key(body["evidence_ref"])
-            if not key:
+            rails, ident = funds_ref_parts(body["evidence_ref"])
+            if not ident:
                 raise Invalid(R("INVALID"), field="evidence_ref")
+            if rails - {RAILS[body["method"]]}:
+                raise Invalid(R("FUNDS_METHOD_CONFLICT"))           # the reference names another rail (R2-L1)
+            key = funds_ref_key(body["evidence_ref"], body["method"])
             if key in self.funds_evidence:
                 self._refuse("FUNDS_EVIDENCE_REUSED", c, rk)          # one transfer, one record (AEGIS H1)
             data = {"campaign_id": cid, "amount": body["amount"], "currency": body["currency"],
@@ -628,6 +742,8 @@ class CampaignsMixin:
             if q["price_type"] != "VENDOR_QUOTE":
                 return "PRICE_TYPE_MISMATCH"
             qs.append(q)
+        if a["vendor"] not in self.vendors:
+            return "VENDOR_UNKNOWN"
         for q in qs:
             if q["vendor"] != a["vendor"]:
                 return "VENDOR_MISMATCH"
@@ -650,8 +766,10 @@ class CampaignsMixin:
                 return "INVENTORY_NOT_HELD"
             if self._expired(u["hold_expires_at"]):
                 return "HOLD_EXPIRED"
+            if u["flight"] is None:
+                return "FLIGHT_REQUIRED"
             if self._face_on_open_order(u, a.get("authorization_id")):
-                return "DUPLICATE_ORDER_BLOCKED"
+                return "FACE_ALREADY_ORDERED"
         amount = Decimal(a["authorized_amount"])
         if amount != sum((Decimal(q["amount"]) for q in qs), Decimal(0)):
             return "QUOTE_ORDER_MISMATCH"
@@ -679,14 +797,16 @@ class CampaignsMixin:
         return None
 
     def _face_on_open_order(self, unit: dict, own: Optional[str]) -> bool:
-        """AEGIS M1: the same physical face (tenant, vendor, unit ref) on any open order, in any campaign."""
+        """AEGIS R2-M3: the same physical face (registered vendor id, unit ref) on any open order (SUBMISSION_UNKNOWN or
+        ACCEPTED) of ANY tenant — ZBM is the one buyer — for a flight that overlaps. The caller answers one code that
+        names no other tenant, campaign or order."""
         for o in self.authorizations.values():
             if o["submission_state"] not in P.SUBMISSION_OPEN or o["authorization_id"] == own:
                 continue
             for uid in o["inventory_ids"]:
                 v = self.inventory[uid]
-                if v["tenant_id"] == unit["tenant_id"] and v["vendor"] == unit["vendor"] \
-                        and v["unit_key"] == unit["unit_key"]:
+                if uid != unit["unit_id"] and v["vendor"] == unit["vendor"] and v["unit_key"] == unit["unit_key"] \
+                        and self._overlap(o["unit_flights"].get(uid), unit["flight"]):
                     return True
         return False
 
@@ -724,7 +844,8 @@ class CampaignsMixin:
         self._move(c, "PURCHASE_AUTHORIZED", "PURCHASE_AUTHORIZED_BY_ANDRE", d["actor"], at)
         a.update(status="AUTHORIZED", void_reason=None, submission_state="NOT_SUBMITTED", channel=None,
                  vendor_ref=None, outcome_evidence_class=None, authorized_at=at, campaign_version=c["version"],
-                 inventory_versions={u: self.inventory[u]["version"] for u in d["inventory_ids"]})
+                 inventory_versions={u: self.inventory[u]["version"] for u in d["inventory_ids"]},
+                 unit_flights={u: self.inventory[u]["flight"] for u in d["inventory_ids"]})
         a["idempotency_key"] = order_key(d["tenant_id"], d["campaign_id"], d["vendor"], d["exact_quote_refs"],
                                          d["authorized_amount"], d["authorized_currency"], c["version"])
         self.authorizations[d["authorization_id"]] = a
@@ -767,7 +888,8 @@ class CampaignsMixin:
                            for q in o["exact_quote_refs"]}
             if open_quotes & set(a["exact_quote_refs"]):
                 self._refuse("DUPLICATE_ORDER_BLOCKED", c, rk, submission_state="DUPLICATE_BLOCKED")
-            if any(self.inventory[u]["version"] != v for u, v in a["inventory_versions"].items()):
+            if any(self.inventory[u]["version"] != v for u, v in a["inventory_versions"].items()) \
+                    or any(self.inventory[u]["flight"] != f for u, f in a["unit_flights"].items()):
                 self._refuse("INVENTORY_CHANGED", c, rk)
             if c["version"] != a["campaign_version"]:
                 self._refuse("STALE_VERSION", c, rk)
@@ -834,6 +956,9 @@ class CampaignsMixin:
             # resume where the answer leads, only when Andre resumes it.
             c["resume_to"] = target
             c["version"] += 1
+            c["history"].append({"from": "DISPUTED", "to": "DISPUTED", "reason": "VENDOR_ACCEPTED_DURING_DISPUTE"
+                                 if accepted else "VENDOR_REJECTED_DURING_DISPUTE", "actor": d["actor"], "at": at,
+                                 "resume_to": target})                 # AEGIS R2-L4
         else:
             self._move(c, target, "VENDOR_ACCEPTED" if accepted else "VENDOR_REJECTED", d["actor"], at)
 
@@ -897,5 +1022,6 @@ class CampaignsMixin:
             return json.loads(json.dumps({"tenants": self.tenants, "switches": self.switches,
                                           "campaigns": self.campaigns, "inventory": self.inventory,
                                           "prices": self.prices, "authorizations": self.authorizations,
-                                          "orders": self.orders, "funds_evidence": self.funds_evidence},
+                                          "orders": self.orders, "funds_evidence": self.funds_evidence,
+                                          "vendors": self.vendors},
                                          sort_keys=True))

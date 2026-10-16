@@ -1,10 +1,10 @@
 {
  "library": "ooh-py",
- "version": 2,
+ "version": 3,
  "department": "Out-of-Home & DOOH (department 15)",
  "service": "ooh-py",
  "driver": "ooh_py.py",
- "basis": "ADR 0019 (founder decisions Oct 16 2026; blueprint sections 12, 50-52, 54): agents prepare and never commit; nothing is bought until cleared client funds cover the approved price in full; the purchase authorization must match the quotes exactly (amount, vendor) and is Andre's alone; a second submission of an open order is DUPLICATE_ORDER_BLOCKED; vendor text is untrusted data; AEGIS round 1 (Oct 16 2026): one bank transfer funds one campaign whatever its spelling (H1), a unit is never priced or bought twice in one order (H2), one face is one live unit record (M1), a vendor answer never promotes a disputed campaign (M2), a funds record must move money (M3)",
+ "basis": "ADR 0019 (founder decisions Oct 16 2026; blueprint sections 12, 50-52, 54): agents prepare and never commit; nothing is bought until cleared client funds cover the approved price in full; the purchase authorization must match the quotes exactly (amount, vendor) and is Andre's alone; a second submission of an open order is DUPLICATE_ORDER_BLOCKED; vendor text is untrusted data; AEGIS round 1 (Oct 16 2026): one bank transfer funds one campaign whatever its spelling (H1), a unit is never priced or bought twice in one order (H2), one face is one live unit record (M1), a vendor answer never promotes a disputed campaign (M2), a funds record must move money (M3); AEGIS round 2: zero padding never makes a second transfer (R2-H1); one face, one overlapping flight, one open order across all tenants, refused without naming the other tenant (R2-M3); free text never gives a registered vendor a second identity (R2-M1)",
  "variants_per_seed": 3,
  "scenarios": [
   {
@@ -658,6 +658,182 @@
      "args": {
       "key": "campaign_state",
       "value": "CLIENT_APPROVED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "funds-zero-padded",
+   "persona": "the same ACH transfer presented again with its number zero-padded or spelled out",
+   "basis": "tests/test_aegis_ooh_r2.py ZERO_PADDED (AEGIS R2-H1)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_aegis_ooh_r2.py",
+      "module": "ZERO_PADDED"
+     }
+    }
+   ],
+   "input_field": "ref",
+   "steps": [
+    {
+     "action": "funded_sibling_plain",
+     "as": "setup"
+    },
+    {
+     "action": "fund",
+     "as": "fund",
+     "args": {
+      "ref": "$ref"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "letter_punct",
+    "zero_width",
+    "fullwidth",
+    "soft_hyphen"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "fund",
+      "codes": [
+       409,
+       422
+      ]
+     }
+    },
+    {
+     "id": "no-funds-recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "funds_count",
+      "value": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "face-clash-across-tenants",
+   "persona": "a second client's campaign buying a face another client already has on order for an overlapping flight",
+   "basis": "tests/test_aegis_ooh_r2.py CLASH_REFS and test_r2m3_one_face_one_flight_one_buyer_across_tenants (AEGIS R2-M3)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_aegis_ooh_r2.py",
+      "module": "CLASH_REFS"
+     }
+    }
+   ],
+   "input_field": "ref",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "face_ordered_by_another_tenant",
+     "as": "setup"
+    },
+    {
+     "action": "funded_same_face",
+     "as": "fund",
+     "args": {
+      "ref": "$ref"
+     }
+    },
+    {
+     "action": "authorize",
+     "as": "authorize"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "authorize",
+      "field": "detail",
+      "value": "FACE_ALREADY_ORDERED"
+     }
+    },
+    {
+     "id": "no-authorization",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "authorizations",
+      "value": 0
+     }
+    },
+    {
+     "id": "no-leak",
+     "severity": "MUST",
+     "check": "no_echo",
+     "args": {}
+    }
+   ]
+  },
+  {
+   "id": "vendor-spoofing",
+   "persona": "a second registration of an existing vendor under a respelt id",
+   "basis": "tests/test_aegis_ooh_r2.py VENDOR_SPOOFS (AEGIS R2-M1)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_aegis_ooh_r2.py",
+      "module": "VENDOR_SPOOFS"
+     }
+    }
+   ],
+   "input_field": "vendor_id",
+   "steps": [
+    {
+     "action": "register_vendor",
+     "as": "register",
+     "args": {
+      "vendor_id": "$vendor_id"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "letter_punct",
+    "zero_width",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "register",
+      "codes": [
+       409,
+       422
+      ]
+     }
+    },
+    {
+     "id": "registry-unchanged",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vendors",
+      "value": [
+       "clear-channel",
+       "lamar",
+       "outfront"
+      ]
      }
     }
    ]

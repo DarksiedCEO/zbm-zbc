@@ -19,6 +19,7 @@ REF = r"^[A-Za-z0-9._:-]{1,100}$"             # an external reference (document 
 VENDOR = r"^[a-z0-9][a-z0-9-]{1,63}$"
 CODE = r"^[A-Z_]{3,40}$"
 ID = r"^ooh-[a-z]{3}-[0-9a-f]{40}$"
+DATE = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
 TIME = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"
 DOC_MAX = 4000
 
@@ -71,8 +72,24 @@ class InventoryAdd(Strict):
     kind: Literal["static", "digital"]
     market: Annotated[StrictStr, Field(pattern=r"^[a-z0-9-]{2,60}$")]
     vendor_unit_ref: Ref
+    flight_start: Optional[Annotated[StrictStr, Field(pattern=DATE)]] = None   # with flight_end, or neither yet
+    flight_end: Optional[Annotated[StrictStr, Field(pattern=DATE)]] = None
     # vendor-supplied description: untrusted data, kept bounded and marked, never read as an instruction (section 52)
     vendor_text: Optional[Annotated[StrictStr, Field(max_length=DOC_MAX)]] = None
+
+
+class FlightSet(Strict):
+    request_id: RequestId
+    expected_version: Version
+    flight_start: Annotated[StrictStr, Field(pattern=DATE)]
+    flight_end: Annotated[StrictStr, Field(pattern=DATE)]
+
+
+class VendorCreate(Strict):
+    """Andre registers a vendor; every unit, quote and authorization names one by its id."""
+    request_id: RequestId
+    vendor_id: Annotated[StrictStr, Field(pattern=VENDOR)]
+    legal_name: Annotated[StrictStr, Field(pattern=r"^[A-Za-z0-9 .,&'()-]{2,120}$")]
 
 
 class AvailabilityMove(Strict):

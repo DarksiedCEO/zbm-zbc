@@ -201,7 +201,9 @@ def test_vendor_substitution(acme):
     h = acme
     ctx = h.funded()
     for vendor in ("outfront", "clear-channel", "lamar-advertising", "lamarr", "1amar"):   # (war room seeds: loop 0)
-        h.refused(h.authorize(ctx, vendor=vendor), 409, "VENDOR_MISMATCH")
+        r = h.authorize(ctx, vendor=vendor)                     # registered elsewhere, or not registered at all
+        assert r.status_code == 409 and r.json()["detail"] == (
+            "VENDOR_MISMATCH" if vendor in h.svc.vendors else "VENDOR_UNKNOWN"), (vendor, r.text)
     a = h.ok(h.authorize(ctx), 201)
     ctx["aid"] = a["authorization_id"]
     h.refused(h.submit(ctx, vendor="outfront"), 409, "VENDOR_MISMATCH")

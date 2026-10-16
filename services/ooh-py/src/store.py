@@ -26,6 +26,10 @@ from typing import Iterator, Optional
 
 GENESIS = "0" * 64
 LOG_NAME = "ooh_log.jsonl"
+# AEGIS R2-L3: every line carries the log format it was written in. A log of another format refuses start with a
+# reason (StoreCorrupt), never a KeyError from a replay handler. There is no migration: the service is unreleased, so
+# an older log is discarded (start from an empty data directory), not converted (ADR 0019).
+FORMAT_VERSION = 2
 
 
 class StoreCorrupt(RuntimeError):
@@ -64,6 +68,10 @@ def verify_lines(lines: list[bytes]) -> list[dict]:
             raise StoreCorrupt(f"log line {i + 1} does not match its own hash")
         if encode(rec) != line:
             raise StoreCorrupt(f"log line {i + 1} is not in canonical form")
+        if rec.get("fmt") != FORMAT_VERSION:
+            raise StoreCorrupt(f"log line {i + 1} is log format {str(rec.get('fmt', 'none (before format 2)'))[:20]}; "
+                               f"this build reads format {FORMAT_VERSION} only and has no migration (the service is "
+                               "unreleased): move the old data directory aside and start from an empty one")
         prev = _line_sha(line)
         out.append(rec)
     return out
@@ -128,7 +136,8 @@ class RecordLog:
         """The exact next line, without writing it (so it can be anchored on the ledger first)."""
         with self.lock:
             prev = _line_sha(self._lines[-1]) if self._lines else GENESIS
-            rec = {"seq": len(self._lines) + 1, "kind": kind, "at": at, "data": data, "prev_line_sha256": prev}
+            rec = {"seq": len(self._lines) + 1, "kind": kind, "at": at, "data": data, "prev_line_sha256": prev,
+                   "fmt": FORMAT_VERSION}
             rec["record_sha256"] = hashlib.sha256(encode(rec)).hexdigest()
             return rec, encode(rec)
 

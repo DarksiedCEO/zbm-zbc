@@ -199,6 +199,17 @@ def _main(work: Path) -> int:
         t2 = a.post("/tenants", {"request_id": rid(), "tenant_id": "globex-live"}, andre=True)
         check("only Andre creates a tenant", agent_t.status_code == 403 and t1.status_code == 201
               and t2.status_code == 201)
+        v_agent = a.post("/vendors", {"request_id": rid(), "vendor_id": "lamar", "legal_name": "Lamar Advertising Company"})
+        v1 = a.post("/vendors", {"request_id": rid(), "vendor_id": "lamar", "legal_name": "Lamar Advertising Company"},
+                    andre=True)
+        v2 = a.post("/vendors", {"request_id": rid(), "vendor_id": "outfront", "legal_name": "Outfront Media"},
+                    andre=True)
+        spoof = a.post("/vendors", {"request_id": rid(), "vendor_id": "la-mar-co", "legal_name": "Other"}, andre=True)
+        listed = a.get("/vendors", caller="ooh_agent")
+        check("the vendor registry is Andre's; a respelt vendor id is refused; agents read it",
+              v_agent.status_code == 403 and v1.status_code == 201 and v2.status_code == 201
+              and spoof.status_code == 409 and spoof.json()["detail"] == "VENDOR_EXISTS"
+              and [v["vendor_id"] for v in listed.json()] == ["lamar", "outfront"])
         T = "/tenants/acme-live"
         cid = a.post(T + "/campaigns", {"request_id": rid(), "name": "Live Billboards", "markets": ["los-angeles"]}
                      ).json()["campaign_id"]
@@ -243,6 +254,7 @@ def _main(work: Path) -> int:
               and skipped.status_code == 409 and skipped.json()["detail"] == "TRANSITION_NOT_ALLOWED")
         uid = a.post(C + "/inventory", {"request_id": rid(), "vendor": "lamar", "kind": "static",
                                         "market": "los-angeles", "vendor_unit_ref": "face-101",
+                                        "flight_start": "2026-11-01", "flight_end": "2026-11-30",
                                         "vendor_text": INJECTION}).json()["unit_id"]
         early = move(uid, "HOLD_CONFIRMED", vendor_ref="h1", hold_expires_at=later(days=7))
         moved = all(move(uid, s).status_code == 200 for s in ("VERIFIED", "AVAILABILITY_REQUESTED"))
@@ -309,7 +321,7 @@ def _main(work: Path) -> int:
               and zero.status_code == 422 and partial.json()["state"] == "FUNDING_REQUIRED"
               and blocked.status_code == 409
               and blocked.json()["detail"] == "FUNDS_NOT_VERIFIED")
-        reused = funds("5000.00", "ACH:BOA_ACH_LIVE.1")
+        reused = funds("5000.00", "ACH:BOA_ACH_LIVE.0001")
         full = funds("5000.00", "boa-ach-live-2")
         fx = full.json().get("exposure", {})
         check("one bank transfer funds one record, however its reference is spelt; 100% prepaid moves it to FUNDS_VERIFIED, labelled OBSERVED",

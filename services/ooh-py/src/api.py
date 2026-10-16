@@ -431,6 +431,14 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
     def tenant(scope: tuple = Depends(scoped("dashboard", "ooh_agent", "hub", "compliance_38"))) -> dict:
         return svc.tenant_view(scope[1])
 
+    @app.get(P + "/vendors", dependencies=auth)
+    def vendors(who: str = Depends(caller("dashboard", "ooh_agent", "compliance_38"))) -> list:
+        return svc.vendors_view()
+
+    @app.post(P + "/vendors", dependencies=auth, status_code=201)
+    def register_vendor(who: str = Depends(andre), req: dict = Depends(body(m.VendorCreate))) -> dict:
+        return svc.register_vendor(req)
+
     @app.get(P + "/kill-switches", dependencies=auth)
     def switches(who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
         with svc.lock:
@@ -473,6 +481,10 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
     def availability(cid: str, uid: str, req: dict = Depends(body(m.AvailabilityMove)),
                      scope: tuple = Depends(scoped(*PREP))) -> dict:
         return svc.move_availability(scope[0], scope[1], _id(cid), _id(uid), req)
+
+    @app.post(C + "/inventory/{uid}/flight", dependencies=auth)
+    def flight(cid: str, uid: str, req: dict = Depends(body(m.FlightSet)), scope: tuple = Depends(scoped(*PREP))):
+        return svc.set_flight(scope[0], scope[1], _id(cid), _id(uid), req)
 
     @app.post(C + "/prices", dependencies=auth, status_code=201)
     def record_price(request: Request, cid: str, req: dict = Depends(body(m.PriceRecord)),

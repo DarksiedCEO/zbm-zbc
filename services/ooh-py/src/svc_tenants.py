@@ -24,6 +24,21 @@ from typing import Optional
 from config import CAPABILITY_SWITCHES, TENANT_ID
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from reasons import R
+from svc_campaigns import _spelled_out
+
+# Corporate-form words that never make a vendor a different vendor (AEGIS R2-M1).
+CORPORATE_FORMS = ("the", "inc", "incorporated", "llc", "llp", "lp", "ltd", "limited", "co", "corp", "corporation",
+                   "company", "plc")
+# Digits written for letters, and letters that read alike, folded to one skeleton (war room R2: "l4mar", "lamar-1nc").
+_SKELETON = str.maketrans({"4": "a", "3": "e", "0": "o", "5": "s", "7": "t", "1": "i", "l": "i", "8": "b", "9": "g"})
+_FORMS = {f.translate(_SKELETON) for f in CORPORATE_FORMS}
+
+
+def vendor_identity_key(value: str) -> str:
+    """One vendor's identity: NFKC, case-folded, spelled-out runs joined, look-alike letters and leetspeak digits
+    folded to one skeleton, separators and corporate-form words removed. ``lamar``, ``la-mar``, ``l4mar``,
+    ``lamar-1nc`` and "The Lamar Company, Inc." are one vendor. A collision only ever refuses a registration."""
+    return "".join(t for t in (x.translate(_SKELETON) for x in _spelled_out(value)) if t not in _FORMS)
 
 
 def parse_switch(name: str) -> tuple[str, Optional[str]]:
@@ -113,6 +128,45 @@ class TenantsMixin:
             self.tenants[arg]["killed"] = on
         if on:
             self.volatile_kills = [v for v in self.volatile_kills if not (v["kind"] == kind and v["arg"] == arg)]
+
+    # ------------------------------------------------------------------ vendors (AEGIS R2-M1)
+
+    def register_vendor(self, body: dict) -> dict:
+        """Andre registers a vendor (an operator ZBM buys from). Global, not per tenant: ZBM is the only buyer. A
+        vendor id or legal name whose identity key matches any registered vendor's id or name is refused, so free
+        text can never give one vendor a second identity."""
+        vid = body["vendor_id"]
+        with self.lock:
+            self._gate()
+            self.check_kill()
+            rk = self.rk("vendor", vid, body)
+            if self._idem("andre", rk, body):
+                return dict(self.vendors[vid])
+            keys = {vendor_identity_key(vid), vendor_identity_key(body["legal_name"])}
+            if "" in keys:
+                raise Invalid(R("INVALID"), field="vendor")
+            taken = {k for v in self.vendors.values() for k in (v["id_key"], v["name_key"])}
+            if vid in self.vendors or keys & taken:
+                raise Conflict(R("VENDOR_EXISTS"))
+            data = {"vendor_id": vid, "legal_name": body["legal_name"], "id_key": vendor_identity_key(vid),
+                    "name_key": vendor_identity_key(body["legal_name"])}
+            self._commit("vendor_registered", self._req(data, "andre", rk, body, vid), "andre",
+                         evidence=("vendor_registered", f"vendor:{vid}", {"vendor_id": vid, "id_key": data["id_key"],
+                                                                          "name_key": data["name_key"]},
+                                   ("andre", rk)))
+            return dict(self.vendors[vid])
+
+    def _a_vendor_registered(self, d, at):
+        self.vendors[d["vendor_id"]] = {k: d[k] for k in ("vendor_id", "legal_name", "id_key", "name_key")} | {
+            "registered_by": d["actor"], "registered_at": at}
+
+    def vendors_view(self) -> list:
+        with self.lock:
+            return [dict(self.vendors[v]) for v in sorted(self.vendors)]
+
+    def require_vendor(self, vid: Optional[str]) -> None:
+        if vid is not None and vid not in self.vendors:
+            raise Conflict(R("VENDOR_UNKNOWN"))
 
     # ------------------------------------------------------------------ tenants
 

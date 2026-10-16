@@ -83,6 +83,7 @@ class OohService(TenantsMixin, CampaignsMixin):
         self.authorizations: dict[str, dict] = {}
         self.orders: dict[str, str] = {}               # idempotency key -> authorization id (duplicate-order block)
         self.funds_evidence: dict[str, str] = {}       # funds evidence ref -> campaign id (one transfer, one campaign)
+        self.vendors: dict[str, dict] = {}             # the vendor registry (Andre's; global: ZBM is the one buyer)
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}

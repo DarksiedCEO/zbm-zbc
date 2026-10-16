@@ -30,6 +30,8 @@ ANDRE = derived("andre approval token")
 CALLERS = {c: derived(f"caller token {c}") for c in config_mod.KNOWN_CALLERS}
 TENANT_TOKENS = {t: derived(f"tenant token {t}") for t in ("acme", "globex")}
 T0 = datetime(2026, 10, 16, 18, 0, tzinfo=timezone.utc)
+FLIGHT = ("2026-11-01", "2026-11-30")
+VENDORS = {"lamar": "Lamar Advertising Company", "outfront": "Outfront Media", "clear-channel": "Clear Channel Outdoor"}
 
 
 def rid() -> str:
@@ -158,7 +160,15 @@ class Harness:
     # ------------------------------------------------------------------ builders (through the API only)
 
     def tenant(self, tid: str = "acme") -> dict:
-        return self.ok(self.post("/tenants", {"request_id": rid(), "tenant_id": tid}, andre=True), 201)
+        t = self.ok(self.post("/tenants", {"request_id": rid(), "tenant_id": tid}, andre=True), 201)
+        for vid, name in VENDORS.items():           # Andre's vendor registry (global): the vendors the suites use
+            if vid not in self.svc.vendors:
+                self.vendor(vid, name)
+        return t
+
+    def vendor(self, vid: str, name: str):
+        return self.ok(self.post("/vendors", {"request_id": rid(), "vendor_id": vid, "legal_name": name}, andre=True),
+                       201)
 
     def campaign(self, tid: str = "acme") -> str:
         c = self.ok(self.post(f"/tenants/{tid}/campaigns", {"request_id": rid(), "name": "Fall Billboards",
@@ -180,9 +190,12 @@ class Harness:
             self.ok(self.go(tid, cid, to))
         self.ok(self.go(tid, cid, "PLAN_APPROVED", andre=True))
 
-    def unit(self, tid: str, cid: str, vendor: str = "lamar", text: Optional[str] = None) -> str:
+    def unit(self, tid: str, cid: str, vendor: str = "lamar", text: Optional[str] = None,
+             ref: Optional[str] = None, flight: Optional[tuple] = FLIGHT) -> str:
         body = {"request_id": rid(), "vendor": vendor, "kind": "static", "market": "los-angeles",
-                "vendor_unit_ref": f"face-{uuid.uuid4().hex[:8]}"}
+                "vendor_unit_ref": ref or f"face-{uuid.uuid4().hex[:8]}"}
+        if flight is not None:
+            body.update(flight_start=flight[0], flight_end=flight[1])
         if text is not None:
             body["vendor_text"] = text
         return self.ok(self.post(f"/tenants/{tid}/campaigns/{cid}/inventory", body), 201)["unit_id"]
@@ -212,9 +225,10 @@ class Harness:
         return self.post(f"/tenants/{tid}/campaigns/{cid}/commercial-model", body, andre=True)
 
     def held_unit(self, tid: str, cid: str, vendor: str = "lamar", amount: str = "5000.00",
-                  valid_until: Optional[str] = None) -> tuple[str, str]:
+                  valid_until: Optional[str] = None, ref: Optional[str] = None,
+                  flight: tuple = FLIGHT) -> tuple[str, str]:
         """A unit walked IDENTIFIED -> HOLD_CONFIRMED with its vendor quote; returns (unit id, quote id)."""
-        uid = self.unit(tid, cid, vendor)
+        uid = self.unit(tid, cid, vendor, ref=ref, flight=flight)
         for to in ("VERIFIED", "AVAILABILITY_REQUESTED"):
             self.ok(self.move(tid, cid, uid, to))
         qid = self.quote(tid, cid, [uid], amount, vendor, valid_until)
@@ -224,11 +238,12 @@ class Harness:
         return uid, qid
 
     def to_proposal_sent(self, tid: str = "acme", amount: str = "5000.00", markup: str = "20.00",
-                         valid_until: Optional[str] = None) -> dict:
+                         valid_until: Optional[str] = None, ref: Optional[str] = None,
+                         flight: tuple = FLIGHT) -> dict:
         """A campaign at PROPOSAL_SENT with one held unit, its quote, the commercial model and the sell price."""
         cid = self.campaign(tid)
         self.plan(tid, cid)
-        uid, qid = self.held_unit(tid, cid, amount=amount, valid_until=valid_until)
+        uid, qid = self.held_unit(tid, cid, amount=amount, valid_until=valid_until, ref=ref, flight=flight)
         self.ok(self.go(tid, cid, "AVAILS_REQUESTED"))
         self.ok(self.commercial(tid, cid, markup))
         from decimal import Decimal
@@ -254,9 +269,10 @@ class Harness:
                 "method": "ach", "evidence_ref": ref or f"boa-ach-{uuid.uuid4().hex[:10]}", "cleared": True, **over}
         return self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/funds-verifications", body, andre=True)
 
-    def funded(self, tid: str = "acme", amount: str = "5000.00", valid_until: Optional[str] = None) -> dict:
+    def funded(self, tid: str = "acme", amount: str = "5000.00", valid_until: Optional[str] = None,
+               ref: Optional[str] = None, flight: tuple = FLIGHT) -> dict:
         """A campaign at FUNDS_VERIFIED: approved by the client and 100% prepaid."""
-        ctx = self.to_proposal_sent(tid, amount, valid_until=valid_until)
+        ctx = self.to_proposal_sent(tid, amount, valid_until=valid_until, ref=ref, flight=flight)
         self.ok(self.approve(ctx))
         self.ok(self.funds(ctx, ctx["sell"]))
         c = self.view(tid, ctx["cid"])
@@ -278,8 +294,9 @@ class Harness:
         return self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/authorizations", self.auth_body(ctx, **over),
                          andre=True)
 
-    def authorized(self, tid: str = "acme", amount: str = "5000.00", valid_until: Optional[str] = None) -> dict:
-        ctx = self.funded(tid, amount, valid_until)
+    def authorized(self, tid: str = "acme", amount: str = "5000.00", valid_until: Optional[str] = None,
+                   ref: Optional[str] = None, flight: tuple = FLIGHT) -> dict:
+        ctx = self.funded(tid, amount, valid_until, ref=ref, flight=flight)
         a = self.ok(self.authorize(ctx), 201)
         ctx.update(aid=a["authorization_id"], auth=a)
         return ctx

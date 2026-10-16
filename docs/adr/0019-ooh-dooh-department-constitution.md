@@ -219,6 +219,42 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
   are corrected.
 - **L5** `PROPOSAL_SENT` needs a current sell price (a model reset at the ready stage unseats it).
 
+## AEGIS round 2 (Oct 16 2026): fixes
+
+- **R2-H1** Zero padding: every digit run of a funds reference loses its leading zeros (an all-zero run keeps one
+  "0"), after one-character runs joined by one same separator are read as one spelled-out token: `000012345`,
+  `0-0-0-012345`, `ach:0000012345` and `12345` are one transfer.
+- **R2-L1** A method word is removed only as a whole token (or a spelled-out one, `a.c.h`) or as a token's leading
+  prefix directly followed by a digit (`ACH12345`); never from inside a word, so `REFUND77`/`UND77`, `CHECKOUT1`/`OUT1`,
+  `TRANSFERWISE-889`/`WISE-889`, `WIRELESS5`/`LESS5` and `TRACEY01`/`Y01` are different transfers. The key is
+  `<rail>:<identity>`, the rail taken from the structured `method` (ach, eft → ach; check, cheque, chk → check;
+  wire → wire). A reference naming another rail than its method is refused `FUNDS_METHOD_CONFLICT`, so
+  `BOA-ACH-12345` and `BOA-WIRE-12345` are never merged (and the second cannot be recorded as ACH). The H1 merges
+  hold: `BOA-ACH-12345` / `boa-ach-12345`, `12345` / `ach:12345`. Residual: a reference spelled out character by
+  character with ONE separator throughout (`b-o-a-a-c-h-1-2-3-4-5`) is read as one token and keeps its method word;
+  the normalisation is a guard, not proof — Finance (31) matching against the bank feed is the real control.
+- **R2-M1** Andre's vendor registry (`POST /ooh/v1/vendors`, Andre; `GET`, readers including the agent runtime):
+  global, not per tenant (ZBM is the only buyer). A vendor id or legal name whose identity key (spelled-out runs
+  joined, leetspeak digits and look-alike letters folded, separators and corporate-form words removed) equals any
+  registered id or name is refused `VENDOR_EXISTS`: `la-mar`, `lamar-co`, `l4mar`, `lamar-1nc`,
+  "Lamar Advertising Co." cannot become a second Lamar. Units, prices and authorizations must name a registered
+  vendor id (`VENDOR_UNKNOWN`).
+- **R2-M2** Every unit has a flight (`flight_start`, `flight_end`, ISO dates, start ≤ end; `FLIGHT_INVALID`), given at
+  registration or set later (`POST …/inventory/{uid}/flight`); it is required before a vendor quote and an
+  authorization (`FLIGHT_REQUIRED`). The authorization binds each unit's flight; a change is `INVENTORY_CHANGED`.
+  Registration is unique per tenant per face (vendor id, normalised face reference) only among live records whose
+  flights overlap (a unit without a flight overlaps everything): a booked face is no longer locked out forever.
+- **R2-M3** The face clash moved to the purchase gate and became cross-tenant: an authorization or submission is
+  refused `FACE_ALREADY_ORDERED` when the same (vendor id, face) is on any open order (SUBMISSION_UNKNOWN or
+  ACCEPTED/BOOKED) of any tenant with an overlapping flight. The body is that code alone: no tenant, campaign,
+  order or flight of the other buyer. Proven through the API (two tenants; overlapping refused, adjacent allowed,
+  re-checked at submission, freed by a rejection).
+- **R2-L3** Every log line carries `fmt` (log format 2). A log of another format refuses start with a reason
+  (`StoreCorrupt`: "log line N is log format …; this build reads format 2 only and has no migration"). There is no
+  migration: the service is unreleased, so an older data directory is moved aside, not converted.
+- **R2-L4** An outcome recorded during a dispute adds a history entry (DISPUTED → DISPUTED with the answer as the
+  reason and the new `resume_to`).
+
 ## Configuration
 
 Read once at start (`src/config.py`; every variable is also listed in `services/ooh-py/README.md`):
@@ -250,10 +286,11 @@ refuses start).
 - **Re-funding after a change request.** A campaign sent back through `CHANGE_REQUESTED` and re-approved needs a new
   funds verification with a new evidence reference (a bank statement reference will do; the amount may be 0.00 when
   the money already received covers the new price).
-- **War room (ADR 0018):** `devtools/warroom/scenarios/ooh-py.json` with `drivers/ooh_py.py` covers ten money and
+- **War room (ADR 0018):** `devtools/warroom/scenarios/ooh-py.json` with `drivers/ooh_py.py` covers thirteen money and
   authority scenarios, all MUST: vendor-text injection, an amount off the quote, vendor substitution, someone other
   than Andre authorizing, a duplicate submission, and (AEGIS round 1) a respelt funds reference, one face in two
-  quotes, a respelt face reference, a vendor answer during a dispute, a funds record of 0.00. It does not cover the availability machine, the commercial model
+  quotes, a respelt face reference, a vendor answer during a dispute, a funds record of 0.00, and (AEGIS round 2)
+  a zero-padded transfer number, a face clash across tenants, vendor spoofing. It does not cover the availability machine, the commercial model
   or the exception states; those are covered by the service's own tests only.
 
 ## Open founder decisions
@@ -271,8 +308,19 @@ refuses start).
    checks that reference against the vendor. Built as is: a confirmed hold is `VENDOR_ASSERTED`, the gate still needs
    Andre's authorization, and the reference is on the record. Whether a hold confirmation should need Andre (or a
    vendor port) is his decision.
-8. (AEGIS M1) One live unit record per face per tenant means the same face cannot sit in two of one client's
-   campaigns at once (flights are not modelled until OOH-2). Built: refused `UNIT_ALREADY_REGISTERED`.
+8. (AEGIS M1, superseded by R2-M2) Registration is now unique per tenant per face per FLIGHT; a booked face is free
+   again for a flight that does not overlap.
+9. (AEGIS R2, founder-confirm) The section 42 cell mapping judgment calls: C04 Inventory/Operator Intelligence is in
+   the cell as the owner of the face records and the vendor registry it reads; C13 Creative Suitability/Specs was
+   chosen over C14 Production/Trafficking as the cell's production / spec-verification seat (C14 does the
+   trafficking itself, later); C20 Billing/Reconciliation carries reconciliation and makegood control in the cell,
+   with C18 Outage/Makegood Control noted as its dependency rather than a cell member.
+10. (AEGIS R2, founder-confirm) A campaign whose client pays the approved price in ONE cleared payment goes
+    CLIENT_APPROVED → FUNDS_VERIFIED directly, never visiting FUNDING_REQUIRED (which is entered only on a partial
+    payment). Built that way; the alternative is to always pass through FUNDING_REQUIRED.
+11. (AEGIS R2-L1) Wire is not an accepted method for client money (`ach` or `check`, founder Oct 5: vendor money is
+    ACH). A wire reference is therefore refused, not recorded under ACH (`FUNDS_METHOD_CONFLICT`). Whether wires
+    should be accepted is his decision.
 
 ## Unlock list
 
