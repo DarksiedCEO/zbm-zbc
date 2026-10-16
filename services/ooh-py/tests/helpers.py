@@ -1,0 +1,297 @@
+"""Test harness: an in-process service over the real ASGI stack, a fake ledger with ledger-rust's contract (seo-py's
+FakeLedger), a settable fixed clock, and builders that walk a campaign to any point of the lifecycle through the API
+only. Every token is DERIVED (sha256 of a test-only label), never written as a secret-shaped literal. Nothing here is
+importable from src/."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+from fastapi.testclient import TestClient
+
+import api
+import config as config_mod
+from clock import FixedClock, iso
+from ledger import LedgerConflict, LedgerNotRecorded, LedgerQueryFailed, LedgerRecordError, Recorder, payload_sha256
+from service import OohService
+from store import RecordLog
+
+
+def derived(label: str) -> str:
+    return hashlib.sha256(f"ooh-py test-only {label}".encode()).hexdigest()
+
+
+SERVICE_TOKEN = derived("service token")
+ANDRE = derived("andre approval token")
+CALLERS = {c: derived(f"caller token {c}") for c in config_mod.KNOWN_CALLERS}
+TENANT_TOKENS = {t: derived(f"tenant token {t}") for t in ("acme", "globex")}
+T0 = datetime(2026, 10, 16, 18, 0, tzinfo=timezone.utc)
+
+
+def rid() -> str:
+    return str(uuid.uuid4())
+
+
+def at(**kw) -> str:
+    return iso(T0 + timedelta(**kw))
+
+
+class FakeLedger:
+    """ledger-rust's contract: idempotent on identical content, 409 on a different record under the same id.
+    ``lose_anchors``: that many ``log_anchor`` records ARE recorded but their answers are lost (the client sees an
+    unknown outcome: a timeout, which is never a failure)."""
+
+    def __init__(self):
+        self.events: list[dict] = []
+        self.by_id: dict[str, dict] = {}
+        self.fail = False
+        self.fail_reads = False
+        self.lose_anchors = 0
+        self.verify_result = True
+
+    def record_event(self, event_id, department, event_type, actor, subject_id, payload, summary) -> None:
+        if self.fail:
+            raise LedgerNotRecorded("fake ledger down")
+        e = {"kind": "event", "seq": len(self.events) + 1, "event_id": event_id, "department": department,
+             "event_type": event_type, "actor": actor, "subject_id": subject_id,
+             "payload_sha256": payload_sha256(payload), "summary": summary, "_payload": payload}
+        prev = self.by_id.get(event_id)
+        if prev is not None:
+            if {k: prev[k] for k in e if k not in ("seq", "_payload")} != \
+                    {k: e[k] for k in e if k not in ("seq", "_payload")}:
+                raise LedgerConflict("409")
+        else:
+            self.events.append(e)
+            self.by_id[event_id] = e
+        if event_type == "log_anchor" and self.lose_anchors:
+            self.lose_anchors -= 1
+            raise LedgerRecordError("answer lost (the ledger recorded it)")
+
+    def entries(self) -> list[dict]:
+        if self.fail_reads:
+            raise LedgerQueryFailed("fake ledger unreadable")
+        return [{k: v for k, v in e.items() if k != "_payload"} for e in self.events]
+
+    def verify(self) -> bool:
+        return self.verify_result and not self.fail_reads
+
+    def of_type(self, t: str) -> list[dict]:
+        return [e for e in self.events if e["event_type"] == t]
+
+
+def base_env(**over) -> dict:
+    env = {"OOH_SERVICE_TOKEN": SERVICE_TOKEN, "OOH_NON_PRODUCTION": "1", "OOH_ANDRE_APPROVAL_TOKEN": ANDRE,
+           "OOH_CALLER_TOKENS": json.dumps(CALLERS), "OOH_TENANT_TOKENS": json.dumps(TENANT_TOKENS)}
+    for k, v in over.items():
+        if v is None:
+            env.pop(k, None)
+        else:
+            env[k] = v
+    return env
+
+
+class Harness:
+    def __init__(self, tmp, data_dir: Optional[str] = None, ledger: Optional[FakeLedger] = None,
+                 clock: Optional[FixedClock] = None, **env_over):
+        self.tmp = tmp
+        self.env = base_env(OOH_DATA_DIR=data_dir, **env_over)
+        self.settings = config_mod.load(self.env)
+        self.ledger = ledger or FakeLedger()
+        self.clock = clock or FixedClock(T0)
+        lock = self.settings.data_dir_lock
+        token = lock.claim() if lock is not None else None
+        try:
+            self.svc = OohService(self.settings, Recorder(self.ledger), RecordLog(self.settings.data_dir), self.clock,
+                                  lock_token=token)
+        except BaseException:
+            if lock is not None:
+                lock.release_claim(token)
+            raise
+        self.client = TestClient(api._wrap(api.create_app(self.svc, self.settings)), raise_server_exceptions=False)
+
+    def restart(self, **env_over) -> "Harness":
+        self.svc.close()
+        return Harness(self.tmp, self.settings.data_dir, self.ledger, self.clock, **env_over)
+
+    # ------------------------------------------------------------------ raw calls
+
+    def headers(self, caller: Optional[str] = "dashboard", andre: bool = False, tenant: Optional[str] = None) -> dict:
+        h = {"Authorization": f"Bearer {SERVICE_TOKEN}"}
+        if caller:
+            h[api.CALLER_HEADER] = CALLERS[caller]
+        if andre:
+            h["X-Andre-Approval-Token"] = ANDRE
+        if tenant:
+            h[api.TENANT_HEADER] = TENANT_TOKENS[tenant]
+        return h
+
+    def post(self, path: str, body: Optional[dict] = None, caller: Optional[str] = "ooh_agent", andre: bool = False,
+             tenant: Optional[str] = None):
+        if andre and caller == "ooh_agent":
+            caller = "dashboard"
+        return self.client.post("/ooh/v1" + path, json=body if body is not None else {},
+                                headers=self.headers(caller, andre, tenant))
+
+    def get(self, path: str, caller: Optional[str] = "dashboard", tenant: Optional[str] = None, **kw):
+        return self.client.get("/ooh/v1" + path, headers=self.headers(caller, tenant=tenant), **kw)
+
+    @staticmethod
+    def ok(resp, code: int = 200):
+        assert resp.status_code == code, (resp.status_code, resp.text)
+        return resp.json()
+
+    @staticmethod
+    def refused(resp, code: int, detail: Optional[str] = None):
+        assert resp.status_code == code, (resp.status_code, resp.text)
+        if detail is not None:
+            assert resp.json()["detail"] == detail, resp.text
+        return resp.json()
+
+    def switch(self, name: str, engaged: bool = True, andre: bool = False, caller: str = "dashboard"):
+        return self.post("/kill-switches", {"request_id": rid(), "switch": name, "engaged": engaged},
+                         caller=caller, andre=andre)
+
+    # ------------------------------------------------------------------ builders (through the API only)
+
+    def tenant(self, tid: str = "acme") -> dict:
+        return self.ok(self.post("/tenants", {"request_id": rid(), "tenant_id": tid}, andre=True), 201)
+
+    def campaign(self, tid: str = "acme") -> str:
+        c = self.ok(self.post(f"/tenants/{tid}/campaigns", {"request_id": rid(), "name": "Fall Billboards",
+                                                            "markets": ["los-angeles"]}), 201)
+        return c["campaign_id"]
+
+    def view(self, tid: str, cid: str) -> dict:
+        return self.ok(self.get(f"/tenants/{tid}/campaigns/{cid}"))
+
+    def go(self, tid: str, cid: str, to: str, andre: bool = False, reason: str = "TEST_STEP"):
+        c = self.view(tid, cid)
+        return self.post(f"/tenants/{tid}/campaigns/{cid}/transitions",
+                         {"request_id": rid(), "to": to, "expected_state": c["state"],
+                          "expected_version": c["version"], "reason": reason}, andre=andre)
+
+    def unit(self, tid: str, cid: str, vendor: str = "lamar", text: Optional[str] = None) -> str:
+        body = {"request_id": rid(), "vendor": vendor, "kind": "static", "market": "los-angeles",
+                "vendor_unit_ref": f"face-{uuid.uuid4().hex[:8]}"}
+        if text is not None:
+            body["vendor_text"] = text
+        return self.ok(self.post(f"/tenants/{tid}/campaigns/{cid}/inventory", body), 201)["unit_id"]
+
+    def move(self, tid: str, cid: str, uid: str, to: str, **extra):
+        u = self.ok(self.get(f"/tenants/{tid}/campaigns/{cid}/inventory/{uid}"))
+        return self.post(f"/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability",
+                         {"request_id": rid(), "to": to, "expected_state": u["state"],
+                          "expected_version": u["version"], **extra})
+
+    def price(self, tid: str, cid: str, price_type: str, amount: str, andre: bool = False, **extra):
+        body = {"request_id": rid(), "price_type": price_type, "amount": amount, "currency": "USD", **extra}
+        return self.post(f"/tenants/{tid}/campaigns/{cid}/prices", body, andre=andre)
+
+    def quote(self, tid: str, cid: str, uids: list, amount: str = "5000.00", vendor: str = "lamar",
+              valid_until: Optional[str] = None, **extra) -> str:
+        r = self.price(tid, cid, "VENDOR_QUOTE", amount, vendor=vendor, inventory_ids=uids,
+                       valid_until=valid_until or at(days=10), source_ref="lamar-q-1", **extra)
+        return self.ok(r, 201)["price_id"]
+
+    def commercial(self, tid: str, cid: str, markup: str = "20.00", pa: str = "PRINCIPAL", **over):
+        c = self.view(tid, cid)
+        body = {"request_id": rid(), "expected_version": c["version"], "principal_agent_state": pa,
+                "pricing_method": "DISCLOSED_MARKUP", "markup_pct": markup, "markup_disclosed": True,
+                "markup_basis_ref": "rate-card-2026", "presentation": "COST_AND_FEE_BROKEN_OUT",
+                "cancellation_terms_ref": "lamar-cxl-30d", **over}
+        return self.post(f"/tenants/{tid}/campaigns/{cid}/commercial-model", body, andre=True)
+
+    def held_unit(self, tid: str, cid: str, vendor: str = "lamar", amount: str = "5000.00",
+                  valid_until: Optional[str] = None) -> tuple[str, str]:
+        """A unit walked IDENTIFIED -> HOLD_CONFIRMED with its vendor quote; returns (unit id, quote id)."""
+        uid = self.unit(tid, cid, vendor)
+        for to in ("VERIFIED", "AVAILABILITY_REQUESTED"):
+            self.ok(self.move(tid, cid, uid, to))
+        qid = self.quote(tid, cid, [uid], amount, vendor, valid_until)
+        for to in ("QUOTED", "HOLD_REQUESTED"):
+            self.ok(self.move(tid, cid, uid, to))
+        self.ok(self.move(tid, cid, uid, "HOLD_CONFIRMED", vendor_ref="lamar-hold-77", hold_expires_at=at(days=7)))
+        return uid, qid
+
+    def to_proposal_sent(self, tid: str = "acme", amount: str = "5000.00", markup: str = "20.00",
+                         valid_until: Optional[str] = None) -> dict:
+        """A campaign at PROPOSAL_SENT with one held unit, its quote, the commercial model and the sell price."""
+        cid = self.campaign(tid)
+        for to in ("BRIEF_CONFIRMED", "PLANNING"):
+            self.ok(self.go(tid, cid, to))
+        uid, qid = self.held_unit(tid, cid, amount=amount, valid_until=valid_until)
+        self.ok(self.go(tid, cid, "QUOTING"))
+        self.ok(self.commercial(tid, cid, markup))
+        from decimal import Decimal
+
+        import policy
+        sell = policy.fmt(policy.apply_markup(Decimal(amount), Decimal(markup)))
+        sp = self.ok(self.price(tid, cid, "CLIENT_SELL_PRICE", sell, andre=True, quote_refs=[qid]), 201)
+        self.ok(self.price(tid, cid, "APPROVED_BUY_LIMIT", amount, andre=True), 201)
+        self.ok(self.go(tid, cid, "PROPOSAL_READY"))
+        self.ok(self.go(tid, cid, "PROPOSAL_SENT", andre=True))
+        return {"tid": tid, "cid": cid, "uid": uid, "qid": qid, "sell_id": sp["price_id"], "sell": sell,
+                "amount": amount}
+
+    def approve(self, ctx: dict, **over):
+        c = self.view(ctx["tid"], ctx["cid"])
+        body = {"request_id": rid(), "expected_version": c["version"], "sell_price_id": ctx["sell_id"],
+                "client_approval_doc_ref": "io-acme-signed-1", **over}
+        return self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/client-approval", body, andre=True)
+
+    def funds(self, ctx: dict, amount: str, ref: Optional[str] = None, **over):
+        c = self.view(ctx["tid"], ctx["cid"])
+        body = {"request_id": rid(), "expected_version": c["version"], "amount": amount, "currency": "USD",
+                "method": "ach", "evidence_ref": ref or f"boa-ach-{uuid.uuid4().hex[:10]}", "cleared": True, **over}
+        return self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/funds-verifications", body, andre=True)
+
+    def funded(self, tid: str = "acme", amount: str = "5000.00", valid_until: Optional[str] = None) -> dict:
+        """A campaign at FUNDS_VERIFIED: approved by the client and 100% prepaid."""
+        ctx = self.to_proposal_sent(tid, amount, valid_until=valid_until)
+        self.ok(self.approve(ctx))
+        self.ok(self.funds(ctx, ctx["sell"]))
+        c = self.view(tid, ctx["cid"])
+        assert c["state"] == "FUNDS_VERIFIED", c["state"]
+        ctx.update(approval_id=c["client_approval"]["approval_id"], terms_id=c["commercial"]["terms_id"])
+        return ctx
+
+    def auth_body(self, ctx: dict, **over) -> dict:
+        c = self.view(ctx["tid"], ctx["cid"])
+        body = {"request_id": rid(), "expected_version": c["version"], "inventory_ids": [ctx["uid"]],
+                "vendor": "lamar", "exact_quote_refs": [ctx["qid"]], "authorized_amount": ctx["amount"],
+                "authorized_currency": "USD", "client_approval_ref": ctx["approval_id"],
+                "commercial_terms_ref": ctx["terms_id"], "cancellation_terms_ref": "lamar-cxl-30d",
+                "signer": "andre", "authority_scope": "OOH_PURCHASE", "expires_at": at(days=2)}
+        body.update(over)
+        return body
+
+    def authorize(self, ctx: dict, **over):
+        return self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/authorizations", self.auth_body(ctx, **over),
+                         andre=True)
+
+    def authorized(self, tid: str = "acme", amount: str = "5000.00", valid_until: Optional[str] = None) -> dict:
+        ctx = self.funded(tid, amount, valid_until)
+        a = self.ok(self.authorize(ctx), 201)
+        ctx.update(aid=a["authorization_id"], auth=a)
+        return ctx
+
+    def submit_body(self, ctx: dict, **over) -> dict:
+        a = self.ok(self.get(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/authorizations/{ctx['aid']}"))
+        body = {"request_id": rid(), "vendor": a["vendor"], "amount": a["authorized_amount"],
+                "currency": a["authorized_currency"], "quote_refs": list(a["exact_quote_refs"]),
+                "campaign_version": a["campaign_version"], "channel": "MANUAL_BY_ANDRE"}
+        body.update(over)
+        return body
+
+    def submit(self, ctx: dict, body: Optional[dict] = None, **over):
+        return self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/authorizations/{ctx['aid']}/submit",
+                         body or self.submit_body(ctx, **over), andre=True)
+
+    def outcome(self, ctx: dict, outcome: str = "ACCEPTED", **over):
+        body = {"request_id": rid(), "outcome": outcome, "vendor_ref": "lamar-io-9001", **over}
+        return self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/authorizations/{ctx['aid']}/outcome", body,
+                         andre=True)
