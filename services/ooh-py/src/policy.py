@@ -56,6 +56,10 @@ EVIDENCE_ALLOWED = {
 }
 
 # ---------------------------------------------------------------------------------------------- section 9
+# The longest flight a unit may carry (AEGIS R3: a flight of 0001-01-01..9999-12-31 must not hold a face forever).
+FLIGHT_MAX_DAYS = 366
+# Why Andre may register a vendor whose normalised name collides with another's (AEGIS R3): closed set.
+VENDOR_DISTINCT_REASONS = ("SEPARATE_LEGAL_ENTITY", "SEPARATE_OPERATOR_VERIFIED", "NAME_COINCIDENCE_VERIFIED")
 SUGGESTED_MARKUP_PCT = "15.00"      # a suggestion shown to Andre, never applied by the service (Oct 16)
 PRICING_METHODS = ("DISCLOSED_MARKUP",)
 PRESENTATIONS = ("COST_AND_FEE_BROKEN_OUT", "BLENDED_WITH_MARKUP_DISCLOSED")

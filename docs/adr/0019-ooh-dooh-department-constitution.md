@@ -255,6 +255,33 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
 - **R2-L4** An outcome recorded during a dispute adds a history entry (DISPUTED → DISPUTED with the answer as the
   reason and the new `resume_to`).
 
+## AEGIS round 3 (Oct 16 2026): fixes
+
+- **R3-H1** A unit's flight is bound to what was agreed for it: every vendor quote records the flight of each unit it
+  prices (`flights`), and a confirmed hold records the flight it was confirmed for (`hold_flight`).
+  - From `PROPOSAL_SENT` on, `POST …/inventory/{uid}/flight` is refused `FLIGHT_LOCKED` (the client approved, and the
+    funds cover, that flight); a change goes through `CHANGE_REQUESTED`.
+  - In planning, a new flight on a unit that is `AVAILABILITY_REQUESTED`, `QUOTED`, `HOLD_REQUESTED` or
+    `HOLD_CONFIRMED` sends it back to `VERIFIED` (vendor reference, hold expiry and hold flight cleared) and retires
+    every quote naming it (`retired`, `FLIGHT_CHANGED`). A sell price built on a retired quote stops being current; a
+    retired quote cannot price a sell price, satisfy `QUOTED` or be authorized (`QUOTE_RETIRED`).
+  - The gate compares, at authorization and again at submission, each quote's recorded flight and the unit's hold
+    flight with the unit's current flight (`QUOTE_FLIGHT_MISMATCH`, `HOLD_FLIGHT_MISMATCH`).
+- **R3-L flights** A flight that has begun (start before the injected clock's UTC date) is neither quoted nor bought
+  (`FLIGHT_IN_PAST`). A flight is at most `policy.FLIGHT_MAX_DAYS` = 366 days (`FLIGHT_INVALID`), so no flight can
+  hold a face forever.
+- **R3-L vendor over-merge** Andre may register a vendor whose identity key collides with others' when it is a
+  genuinely different vendor ("Model Media" / "Mode1 Media"): `distinct_from_ack` names EVERY vendor it collides with
+  and a reason from a closed set (`SEPARATE_LEGAL_ENTITY`, `SEPARATE_OPERATOR_VERIFIED`, `NAME_COINCIDENCE_VERIFIED`).
+  The registration is recorded as `vendor_registered_distinct_by_andre` with the vendors and the reason. A vendor id
+  is never shared, acknowledged or not; an acknowledgement with nothing to acknowledge is refused.
+- **R3-L rail** Different rails never merge (R2-L1). When the same reference identity is already recorded on another
+  rail, the funds record is allowed and carries a warning `SAME_REFERENCE_OTHER_RAIL` (with the other rails), in the
+  response, on the record and in the ledger evidence, so Andre takes a second look.
+- **Test gaps** Vendor registration without Andre's token is refused (403); a new flight that clashes with the same
+  face's live record is refused (`UNIT_ALREADY_REGISTERED`). Both tests fail if their check is removed.
+- **Cosmetic** The old-log refusal message is whole ("log line N has no log format (written before format 2); …").
+
 ## Configuration
 
 Read once at start (`src/config.py`; every variable is also listed in `services/ooh-py/README.md`):

@@ -109,6 +109,14 @@ def rid() -> str:
     return str(uuid.uuid4())
 
 
+def day(days: int) -> str:
+    """A date relative to today (UTC): flights are set ahead of now, so no check depends on the calendar."""
+    return (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat()
+
+
+FLIGHT = (day(30), day(59))
+
+
 def later(**kw) -> str:
     return (datetime.now(timezone.utc) + timedelta(**kw)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -254,7 +262,7 @@ def _main(work: Path) -> int:
               and skipped.status_code == 409 and skipped.json()["detail"] == "TRANSITION_NOT_ALLOWED")
         uid = a.post(C + "/inventory", {"request_id": rid(), "vendor": "lamar", "kind": "static",
                                         "market": "los-angeles", "vendor_unit_ref": "face-101",
-                                        "flight_start": "2026-11-01", "flight_end": "2026-11-30",
+                                        "flight_start": FLIGHT[0], "flight_end": FLIGHT[1],
                                         "vendor_text": INJECTION}).json()["unit_id"]
         early = move(uid, "HOLD_CONFIRMED", vendor_ref="h1", hold_expires_at=later(days=7))
         moved = all(move(uid, s).status_code == 200 for s in ("VERIFIED", "AVAILABILITY_REQUESTED"))
@@ -328,6 +336,12 @@ def _main(work: Path) -> int:
               reused.status_code == 409 and reused.json()["detail"] == "FUNDS_EVIDENCE_REUSED"
               and full.json()["state"] == "FUNDS_VERIFIED" and fx.get("funding_state") == "CLEARED_FULL"
               and {f["evidence_class"] for f in full.json()["funds"]} == {"OBSERVED"})
+        uv = a.get(f"{C}/inventory/{uid}").json()
+        relocked = a.post(f"{C}/inventory/{uid}/flight", {"request_id": rid(), "expected_version": uv["version"],
+                                                           "flight_start": FLIGHT[0], "flight_end": day(394)})
+        check("once the proposal went out the flight is locked: a 12-month flight under a 1-month quote is refused",
+              relocked.status_code == 409 and relocked.json()["detail"] == "FLIGHT_LOCKED"
+              and a.get(f"{C}/inventory/{uid}").json()["flight"] == list(FLIGHT))
         wrong_amount = a.post(C + "/authorizations", auth_body(authorized_amount="5500.00"), andre=True)
         wrong_vendor = a.post(C + "/authorizations", auth_body(vendor="outfront"), andre=True)
         expired = a.post(C + "/authorizations", auth_body(expires_at=later(days=-1)), andre=True)

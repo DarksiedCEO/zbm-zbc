@@ -133,14 +133,13 @@ def test_r2m2_a_flight_is_required_before_quote_and_authorization_and_is_bound(a
          201)
 
 
-def test_r2m2_a_flight_changed_after_authorization_is_inventory_changed(acme):
+def test_r2m2_the_authorization_binds_the_flight_and_it_cannot_change_under_it(acme):
     h = acme
     ctx = h.authorized()
     u = h.ok(h.get(f"/tenants/acme/campaigns/{ctx['cid']}/inventory/{ctx['uid']}"))
-    h.ok(h.post(f"/tenants/acme/campaigns/{ctx['cid']}/inventory/{ctx['uid']}/flight",
-                {"request_id": rid(), "expected_version": u["version"], "flight_start": "2026-11-01",
-                 "flight_end": "2026-12-15"}))
-    h.refused(h.submit(ctx), 409, "INVENTORY_CHANGED")
+    h.refused(h.post(f"/tenants/acme/campaigns/{ctx['cid']}/inventory/{ctx['uid']}/flight",
+                     {"request_id": rid(), "expected_version": u["version"], "flight_start": "2026-11-01",
+                      "flight_end": "2026-12-15"}), 409, "FLIGHT_LOCKED")      # AEGIS R3-H1 (was INVENTORY_CHANGED)
     a = h.ok(h.get(f"/tenants/acme/campaigns/{ctx['cid']}/authorizations/{ctx['aid']}"))
     assert a["unit_flights"] == {ctx["uid"]: ["2026-11-01", "2026-11-30"]}
 

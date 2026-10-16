@@ -47,6 +47,8 @@ PLANNING_STATES = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED",
 PRE_ORDER_WRITABLE = PLANNING_STATES + ("PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED",
                                         "PURCHASE_AUTHORIZED")
 SELL_PRICE_STATES = ("PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED")
+# Unit states that carry something agreed for one flight (availability asked, a quote, a hold): a new flight resets them.
+FLIGHT_BOUND_STATES = ("AVAILABILITY_REQUESTED", "QUOTED", "HOLD_REQUESTED", "HOLD_CONFIRMED")
 VOIDING_STATES = P.HOLD_STATES + ("DISPUTED", "CHANGE_REQUESTED", "CANCELLED")
 FUNDABLE = ("CLIENT_APPROVED", "FUNDING_REQUIRED")
 
@@ -285,6 +287,8 @@ class CampaignsMixin:
             sp = self.prices.get(c["current_sell_price_id"] or "")
             if sp is None:
                 return "NO_CURRENT_SELL_PRICE"
+            if any(self.prices[q].get("retired") for q in sp["quote_refs"]):
+                return "SELL_PRICE_QUOTE_RETIRED"
             if any(self._expired(self.prices[q]["valid_until"]) for q in sp["quote_refs"]):
                 return "SELL_PRICE_QUOTE_EXPIRED"
         return None
@@ -347,9 +351,13 @@ class CampaignsMixin:
             s, e = date.fromisoformat(start), date.fromisoformat(end)
         except ValueError:
             raise Invalid(R("FLIGHT_INVALID")) from None
-        if s > e:
+        if s > e or (e - s).days + 1 > P.FLIGHT_MAX_DAYS:
             raise Invalid(R("FLIGHT_INVALID"))
         return [s.isoformat(), e.isoformat()]
+
+    def _flight_started(self, flight: Optional[list]) -> bool:
+        """The flight begins before today (the injected clock's UTC date): nothing is quoted or bought for it."""
+        return flight is not None and flight[0] < self.today()
 
     @staticmethod
     def _overlap(a: Optional[list], b: Optional[list]) -> bool:
@@ -377,7 +385,10 @@ class CampaignsMixin:
             if self._idem(actor, rk, body):
                 return self.unit_view(uid)
             self.check_kill(tenant=tid, capability="inventory")
-            self._writable(c, PRE_ORDER_WRITABLE)
+            if c["state"] not in PLANNING_STATES:
+                # AEGIS R3-H1: from PROPOSAL_SENT on, the flight is what the client approved and the funds cover;
+                # changing it goes through CHANGE_REQUESTED (which voids approvals and authorizations)
+                raise Conflict(R("FLIGHT_LOCKED"))
             if u["version"] != body["expected_version"]:
                 raise Conflict(R("VERSION_STALE"))
             flight = self._flight(body)
@@ -385,16 +396,32 @@ class CampaignsMixin:
                 raise Invalid(R("FLIGHT_INVALID"))
             if self._registration_clash(tid, u["vendor"], u["unit_key"], flight, uid):
                 raise Conflict(R("UNIT_ALREADY_REGISTERED"))
-            data = {"unit_id": uid, "campaign_id": cid, "flight": flight}
+            # a unit priced or held for another flight goes back to VERIFIED; its quotes are retired
+            reset = u["state"] in FLIGHT_BOUND_STATES and u["flight"] != flight
+            retired = sorted(p for p in c["price_ids"] if self.prices[p]["price_type"] == "VENDOR_QUOTE"
+                             and not self.prices[p].get("retired") and uid in self.prices[p]["inventory_ids"]
+                             and u["flight"] != flight)
+            data = {"unit_id": uid, "campaign_id": cid, "flight": flight, "reset_to_verified": reset,
+                    "retired_quotes": retired}
             self._commit("flight_set", self._req(data, actor, rk, body, uid), actor,
                          evidence=self._ev("unit_flight_set", cid, data, actor, rk))
             return self.unit_view(uid)
 
     def _a_flight_set(self, d, at):
         u = self.inventory[d["unit_id"]]
+        c = self.campaigns[d["campaign_id"]]
         u["flight"] = list(d["flight"])
-        u["version"] += 1
-        self.campaigns[d["campaign_id"]]["version"] += 1
+        if d.get("reset_to_verified"):
+            self._unit_move(u, "VERIFIED", d["actor"], at)
+            u.update(vendor_ref=None, hold_expires_at=None, hold_flight=None, evidence_class=None)
+        else:
+            u["version"] += 1
+        for pid in d.get("retired_quotes", []):
+            self.prices[pid].update(retired=True, retired_reason="FLIGHT_CHANGED")
+        sp = self.prices.get(c["current_sell_price_id"] or "")
+        if sp is not None and set(sp["quote_refs"]) & set(d.get("retired_quotes", [])):
+            c["current_sell_price_id"] = None              # its cost basis no longer exists
+        c["version"] += 1
 
     def move_availability(self, actor: str, tid: str, cid: str, uid: str, body: dict) -> dict:
         to = body["to"]
@@ -419,7 +446,9 @@ class CampaignsMixin:
                 raise Conflict(R("AVAILABILITY_TRANSITION_NOT_ALLOWED"))
             hold_expires_at = None
             if to == "QUOTED" and not any(self.prices[p]["price_type"] == "VENDOR_QUOTE" and uid in
-                                          self.prices[p]["inventory_ids"] for p in c["price_ids"]):
+                                          self.prices[p]["inventory_ids"] and not self.prices[p].get("retired")
+                                          and self.prices[p]["flights"].get(uid) == u["flight"]
+                                          for p in c["price_ids"]):
                 raise Conflict(R("TRANSITION_GUARD_FAILED"), guard="NO_VENDOR_QUOTE_FOR_UNIT")
             if to == "HOLD_CONFIRMED":
                 if not body.get("vendor_ref"):
@@ -438,6 +467,8 @@ class CampaignsMixin:
         u["vendor_ref"] = d["vendor_ref"]
         u["hold_expires_at"] = d["hold_expires_at"]
         u["evidence_class"] = "VENDOR_ASSERTED" if d["to"] == "HOLD_CONFIRMED" else None
+        # the hold is for the flight the unit had when the vendor confirmed it (AEGIS R3-H1)
+        u["hold_flight"] = list(u["flight"]) if d["to"] == "HOLD_CONFIRMED" and u["flight"] else None
         self.campaigns[d["campaign_id"]]["version"] += 1
 
     @staticmethod
@@ -494,6 +525,9 @@ class CampaignsMixin:
                     raise Invalid(R("INVALID"), field="vendor/inventory_ids")
                 if any(self.inventory[i]["flight"] is None for i in inv):
                     raise Conflict(R("FLIGHT_REQUIRED"))             # a price is for a face AND a flight
+                if any(self._flight_started(self.inventory[i]["flight"]) for i in inv):
+                    raise Conflict(R("FLIGHT_IN_PAST"))
+                extra = {"flights": {i: list(self.inventory[i]["flight"]) for i in inv}}
                 valid_until = self._future(valid_until, "QUOTE_VALIDITY_REQUIRED")
             elif valid_until is not None:
                 raise Invalid(R("INVALID"), field="valid_until")
@@ -504,7 +538,8 @@ class CampaignsMixin:
                 if not quotes or len(set(quotes)) != len(quotes):
                     raise Conflict(R("SELL_PRICE_QUOTES_INVALID"))
                 qs = [self.prices.get(q) for q in quotes]
-                if any(q is None or q["campaign_id"] != cid or q["price_type"] != "VENDOR_QUOTE" for q in qs):
+                if any(q is None or q["campaign_id"] != cid or q["price_type"] != "VENDOR_QUOTE" or q.get("retired")
+                       for q in qs):
                     raise Conflict(R("SELL_PRICE_QUOTES_INVALID"))
                 if any(self._expired(q["valid_until"]) for q in qs):
                     raise Conflict(R("QUOTE_EXPIRED"))
@@ -655,14 +690,21 @@ class CampaignsMixin:
                     "evidence_class": P.EVIDENCE_ALLOWED["funds_andre_gate"][0]}
             received = Decimal(self.exposure(c)["client_funds_received"]) + Decimal(body["amount"])
             data["clears_in_full"] = received >= Decimal(c["client_approval"]["amount"])
+            # AEGIS R3-L: different rails never merge, but the same reference already recorded on another rail is
+            # worth Andre's second look: allowed, warned, and the warning is on the ledger and the record
+            ident = key.split(":", 1)[1]
+            other = sorted({k.split(":", 1)[0] for k in self.funds_evidence if k.split(":", 1)[1] == ident} - {
+                key.split(":", 1)[0]})
+            data["warnings"] = [{"code": "SAME_REFERENCE_OTHER_RAIL", "rails": other}] if other else []
             self._commit("funds_verified", self._req(data, "andre", rk, body, cid), "andre",
                          evidence=self._ev("client_funds_verified_by_andre", cid, data, "andre", rk))
-            return self.campaign_view(tid, cid)
+            return {**self.campaign_view(tid, cid), "warnings": data["warnings"]}
 
     def _a_funds_verified(self, d, at):
         c = self.campaigns[d["campaign_id"]]
         c["funds"].append({k: d[k] for k in ("amount", "currency", "method", "evidence_ref", "evidence_key", "source",
-                                             "evidence_class")} | {"verified_by": d["actor"], "at": at})
+                                             "evidence_class")}
+                          | {"verified_by": d["actor"], "at": at, "warnings": list(d.get("warnings", []))})
         self.funds_evidence[d["evidence_key"]] = d["campaign_id"]
         if d["clears_in_full"]:
             self._move(c, "FUNDS_VERIFIED", "CLIENT_FUNDS_CLEARED_IN_FULL", d["actor"], at)
@@ -751,6 +793,8 @@ class CampaignsMixin:
                 return "CURRENCY_MISMATCH"
             if self._expired(q["valid_until"]):
                 return "QUOTE_EXPIRED"
+            if q.get("retired"):
+                return "QUOTE_RETIRED"
         if self._unit_in_two_quotes(qs):
             return "UNIT_IN_MULTIPLE_QUOTES"
         quoted_units = {i for q in qs for i in q["inventory_ids"]}
@@ -768,6 +812,13 @@ class CampaignsMixin:
                 return "HOLD_EXPIRED"
             if u["flight"] is None:
                 return "FLIGHT_REQUIRED"
+            # AEGIS R3-H1: what is bought is what was quoted and held, for the flight it was quoted and held for
+            if any(uid in q["inventory_ids"] and q.get("flights", {}).get(uid) != u["flight"] for q in qs):
+                return "QUOTE_FLIGHT_MISMATCH"
+            if u.get("hold_flight") != u["flight"]:
+                return "HOLD_FLIGHT_MISMATCH"
+            if self._flight_started(u["flight"]):
+                return "FLIGHT_IN_PAST"
             if self._face_on_open_order(u, a.get("authorization_id")):
                 return "FACE_ALREADY_ORDERED"
         amount = Decimal(a["authorized_amount"])
@@ -947,7 +998,7 @@ class CampaignsMixin:
             self._unit_move(u, "BOOKING_CONFIRMED" if accepted else "QUOTED", d["actor"], at)
             u["pre_booking_state"] = None
             if not accepted:
-                u.update(vendor_ref=None, hold_expires_at=None, evidence_class=None)
+                u.update(vendor_ref=None, hold_expires_at=None, hold_flight=None, evidence_class=None)
         if not accepted:
             a["status"], a["void_reason"] = "VOID", "VENDOR_REJECTED"
         target = "BOOKED" if accepted else "FUNDS_VERIFIED"

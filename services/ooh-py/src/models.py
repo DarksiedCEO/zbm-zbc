@@ -85,11 +85,18 @@ class FlightSet(Strict):
     flight_end: Annotated[StrictStr, Field(pattern=DATE)]
 
 
+class DistinctAck(Strict):
+    """Andre's acknowledgement that a vendor whose name normalises onto others' is a different vendor (AEGIS R3)."""
+    vendor_ids: Annotated[list[Annotated[StrictStr, Field(pattern=VENDOR)]], Field(min_length=1, max_length=10)]
+    reason: Literal[policy.VENDOR_DISTINCT_REASONS]                  # type: ignore[valid-type]
+
+
 class VendorCreate(Strict):
     """Andre registers a vendor; every unit, quote and authorization names one by its id."""
     request_id: RequestId
     vendor_id: Annotated[StrictStr, Field(pattern=VENDOR)]
     legal_name: Annotated[StrictStr, Field(pattern=r"^[A-Za-z0-9 .,&'()-]{2,120}$")]
+    distinct_from_ack: Optional[DistinctAck] = None
 
 
 class AvailabilityMove(Strict):

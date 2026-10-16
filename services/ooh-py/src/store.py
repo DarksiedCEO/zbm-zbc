@@ -69,9 +69,12 @@ def verify_lines(lines: list[bytes]) -> list[dict]:
         if encode(rec) != line:
             raise StoreCorrupt(f"log line {i + 1} is not in canonical form")
         if rec.get("fmt") != FORMAT_VERSION:
-            raise StoreCorrupt(f"log line {i + 1} is log format {str(rec.get('fmt', 'none (before format 2)'))[:20]}; "
-                               f"this build reads format {FORMAT_VERSION} only and has no migration (the service is "
-                               "unreleased): move the old data directory aside and start from an empty one")
+            found = rec.get("fmt")
+            what = "has no log format (written before format 2)" if found is None else \
+                "is in an unknown log format" if not isinstance(found, int) else f"is in log format {found}"
+            raise StoreCorrupt(f"log line {i + 1} {what}; this build reads log format {FORMAT_VERSION} only and has no "
+                               "migration (the service is unreleased): move the old data directory aside and start "
+                               "from an empty one")
         prev = _line_sha(line)
         out.append(rec)
     return out

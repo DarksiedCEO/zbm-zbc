@@ -145,19 +145,29 @@ class TenantsMixin:
             keys = {vendor_identity_key(vid), vendor_identity_key(body["legal_name"])}
             if "" in keys:
                 raise Invalid(R("INVALID"), field="vendor")
-            taken = {k for v in self.vendors.values() for k in (v["id_key"], v["name_key"])}
-            if vid in self.vendors or keys & taken:
+            if vid in self.vendors:
+                raise Conflict(R("VENDOR_EXISTS"))                    # an id is never shared, acknowledged or not
+            colliding = sorted(v["vendor_id"] for v in self.vendors.values() if {v["id_key"], v["name_key"]} & keys)
+            ack = body.get("distinct_from_ack")
+            if colliding and (ack is None or sorted(set(ack["vendor_ids"])) != colliding):
                 raise Conflict(R("VENDOR_EXISTS"))
+            if ack is not None and not colliding:
+                raise Invalid(R("INVALID"), field="distinct_from_ack")   # nothing to acknowledge
             data = {"vendor_id": vid, "legal_name": body["legal_name"], "id_key": vendor_identity_key(vid),
-                    "name_key": vendor_identity_key(body["legal_name"])}
+                    "name_key": vendor_identity_key(body["legal_name"]), "distinct_from": colliding,
+                    "distinct_reason": ack["reason"] if ack else None}
+            # AEGIS R3-L: Andre may register a genuinely distinct vendor whose name normalises onto another's
+            # ("Model Media" / "Mode1 Media"), naming every vendor it collides with and a reason from a closed set
+            event = "vendor_registered_distinct_by_andre" if ack else "vendor_registered"
             self._commit("vendor_registered", self._req(data, "andre", rk, body, vid), "andre",
-                         evidence=("vendor_registered", f"vendor:{vid}", {"vendor_id": vid, "id_key": data["id_key"],
-                                                                          "name_key": data["name_key"]},
+                         evidence=(event, f"vendor:{vid}", {k: data[k] for k in ("vendor_id", "id_key", "name_key",
+                                                                                 "distinct_from", "distinct_reason")},
                                    ("andre", rk)))
             return dict(self.vendors[vid])
 
     def _a_vendor_registered(self, d, at):
-        self.vendors[d["vendor_id"]] = {k: d[k] for k in ("vendor_id", "legal_name", "id_key", "name_key")} | {
+        self.vendors[d["vendor_id"]] = {k: d.get(k) for k in ("vendor_id", "legal_name", "id_key", "name_key",
+                                                             "distinct_from", "distinct_reason")} | {
             "registered_by": d["actor"], "registered_at": at}
 
     def vendors_view(self) -> list:
