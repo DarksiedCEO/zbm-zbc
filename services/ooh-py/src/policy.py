@@ -88,28 +88,44 @@ AVAILABILITY_ALLOWED = {
 AVAILABILITY_GATED = ("BOOKING_PENDING", "BOOKING_CONFIRMED")
 
 # ---------------------------------------------------------------------------------------------- sections 3 and 4
-# Campaign states. The blueprint's section 4 names are used wherever the meaning matches (``SECTION_4``). Three states
-# are ADDED BEYOND section 4 (``BEYOND_SECTION_4``, ADR 0019 decision 9 says why each exists). The other states keep
-# their OOH-1 names: the build brief did not restate them, so they are not claimed as section 4 names here
-# (``NAME_UNCONFIRMED``). States after BOOKED are defined but NOT_BUILT: unreachable, refused ``STATE_NOT_BUILT``.
-CAMPAIGN_STATES = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
-                   "PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED",
-                   "ORDER_SUBMITTED", "BOOKED", "IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED")
-EXCEPTION_STATES = ("CLIENT_HOLD", "VENDOR_HOLD", "CHANGE_REQUESTED", "DISPUTED", "CANCELLED")
-ALL_STATES = CAMPAIGN_STATES + EXCEPTION_STATES
-SECTION_4 = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
-             "FUNDING_REQUIRED", "CLIENT_HOLD", "VENDOR_HOLD")
+# The blueprint's section 4 vocabulary, complete (main and exception states), and how this service stores it.
+SECTION_4_MAIN = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+                  "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "HOLD_REQUESTED", "HOLD_CONFIRMED",
+                  "PURCHASE_AUTHORIZED", "BOOKED", "CREATIVE_PENDING", "CREATIVE_ACCEPTED", "PRODUCTION_PENDING", "LIVE",
+                  "DELIVERY_REVIEWED", "RECONCILIATION_PENDING", "RECONCILED", "CLOSED")
+SECTION_4_EXCEPTION = ("EXPIRED", "WITHDRAWN", "UNAVAILABLE", "CLIENT_HOLD", "VENDOR_HOLD", "CANCELLED",
+                       "SUBSTITUTION_PROPOSED", "SUBSTITUTION_REQUIRES_APPROVAL", "PARTIAL_DELIVERY", "UNDERDELIVERY",
+                       "OUTAGE", "MAKEGOOD_PENDING", "CREDIT_PENDING", "DISPUTED", "REFUND_PENDING", "FAILED",
+                       "BLOCKED")
+# HOLD_REQUESTED and HOLD_CONFIRMED are section 4 campaign-level states that this service DERIVES from its units
+# (holds are per face, section 15, and may be requested before any money): the campaign's ``hold_state`` is
+# HOLD_CONFIRMED when every live unit is HOLD_CONFIRMED with an unexpired hold, HOLD_REQUESTED when at least one live
+# unit is HOLD_REQUESTED or HOLD_CONFIRMED but not all are confirmed, and null otherwise. They are never stored as the
+# campaign's ``state``; the purchase gate reads the units themselves.
+DERIVED_STATES = ("HOLD_REQUESTED", "HOLD_CONFIRMED")
+# Added beyond section 4, each for a reason (ADR 0019 decision 9).
 BEYOND_SECTION_4 = {
     "PROPOSAL_SENT": "the moment the price leaves ZBM: the client's approval binds to that exact sell price",
     "ORDER_SUBMITTED": "the order is with the vendor and its answer is unknown (section 51): nothing may be re-sent",
     "CHANGE_REQUESTED": "the client changes the brief after a proposal: approvals and authorizations are voided",
 }
-NAME_UNCONFIRMED = tuple(s for s in ALL_STATES if s not in SECTION_4 and s not in BEYOND_SECTION_4)
+CAMPAIGN_STATES = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+                   "PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED",
+                   "ORDER_SUBMITTED", "BOOKED", "CREATIVE_PENDING", "CREATIVE_ACCEPTED", "PRODUCTION_PENDING", "LIVE",
+                   "DELIVERY_REVIEWED", "RECONCILIATION_PENDING", "RECONCILED", "CLOSED")
+EXCEPTION_STATES = SECTION_4_EXCEPTION + ("CHANGE_REQUESTED",)
+ALL_STATES = CAMPAIGN_STATES + EXCEPTION_STATES
+# Defined, unreachable, refused STATE_NOT_BUILT on any route: production, delivery, reconciliation and every exception
+# state OOH-1 does not handle (OOH-2 and later).
+CAMPAIGN_NOT_BUILT = ("CREATIVE_PENDING", "CREATIVE_ACCEPTED", "PRODUCTION_PENDING", "LIVE", "DELIVERY_REVIEWED",
+                      "RECONCILIATION_PENDING", "RECONCILED", "CLOSED",
+                      "EXPIRED", "WITHDRAWN", "UNAVAILABLE", "SUBSTITUTION_PROPOSED", "SUBSTITUTION_REQUIRES_APPROVAL",
+                      "PARTIAL_DELIVERY", "UNDERDELIVERY", "OUTAGE", "MAKEGOOD_PENDING", "CREDIT_PENDING",
+                      "REFUND_PENDING", "FAILED", "BLOCKED")
+EXCEPTIONS_BUILT = ("CLIENT_HOLD", "VENDOR_HOLD", "DISPUTED", "CANCELLED", "CHANGE_REQUESTED")
 TERMINAL = ("CANCELLED", "CLOSED")
 HOLD_STATES = ("CLIENT_HOLD", "VENDOR_HOLD")
 RESUMABLE = HOLD_STATES + ("DISPUTED",)
-_PRE_ORDER = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
-              "PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED")
 _EXITS = HOLD_STATES + ("CHANGE_REQUESTED", "CANCELLED")
 CAMPAIGN_ALLOWED = {
     "INTAKE": ("BRIEF_VALIDATED",) + HOLD_STATES + ("CANCELLED",),
@@ -125,10 +141,14 @@ CAMPAIGN_ALLOWED = {
     "PURCHASE_AUTHORIZED": ("PURCHASE_AUTHORIZED", "ORDER_SUBMITTED") + _EXITS,
     # an order in flight cannot be held, changed or cancelled here: its outcome is unknown until recorded (section 51)
     "ORDER_SUBMITTED": ("BOOKED", "FUNDS_VERIFIED", "DISPUTED"),
-    "BOOKED": ("IN_PRODUCTION", "DISPUTED"),
-    "IN_PRODUCTION": ("LIVE", "DISPUTED"),
-    "LIVE": ("COMPLETED", "DISPUTED"),
-    "COMPLETED": ("RECONCILED", "DISPUTED"),
+    "BOOKED": ("CREATIVE_PENDING", "DISPUTED"),
+    # NOT_BUILT from here on (the table records the intended order; no transition into them is ever allowed)
+    "CREATIVE_PENDING": ("CREATIVE_ACCEPTED", "DISPUTED"),
+    "CREATIVE_ACCEPTED": ("PRODUCTION_PENDING", "DISPUTED"),
+    "PRODUCTION_PENDING": ("LIVE", "DISPUTED"),
+    "LIVE": ("DELIVERY_REVIEWED", "DISPUTED"),
+    "DELIVERY_REVIEWED": ("RECONCILIATION_PENDING", "DISPUTED"),
+    "RECONCILIATION_PENDING": ("RECONCILED", "DISPUTED"),
     "RECONCILED": ("CLOSED",),
     "CLOSED": (),
     "CHANGE_REQUESTED": ("PLAN_DRAFTED", "CANCELLED"),
@@ -136,6 +156,7 @@ CAMPAIGN_ALLOWED = {
     "VENDOR_HOLD": (),
     "DISPUTED": (),                         # likewise; Andre only
     "CANCELLED": (),
+    **{x: () for x in SECTION_4_EXCEPTION if x not in EXCEPTIONS_BUILT},
 }
 # Reached only through their own gate (client approval, funds, authorization, submission, outcome), never through
 # the generic transition route. "No state may be silently promoted."
@@ -145,8 +166,6 @@ _COMMITTED = ("CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE
 # Transitions the generic route allows only with Andre's approval.
 CAMPAIGN_ANDRE = {("PLAN_DRAFTED", "PLAN_APPROVED"), ("QUOTES_VALIDATED", "PROPOSAL_SENT")} \
     | {(s, "CHANGE_REQUESTED") for s in _COMMITTED} | {(s, "CANCELLED") for s in _COMMITTED}
-# Production, go-live, proof of performance and reconciliation are later waves (OOH-2+): refused, never pretended.
-CAMPAIGN_NOT_BUILT = ("IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED")
 # Leaving a hold or a dispute never restores an authorization: resuming to PURCHASE_AUTHORIZED resumes to
 # FUNDS_VERIFIED (the authorization was voided on the way in).
 RESUME_MAP = {"PURCHASE_AUTHORIZED": "FUNDS_VERIFIED"}

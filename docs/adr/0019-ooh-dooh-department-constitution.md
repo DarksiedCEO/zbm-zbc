@@ -8,12 +8,10 @@ buys media: there is no vendor connection, and every order is placed by Andre ou
 
 **Source caveat.** The blueprint and the directive were not available to this build as files. The sections used
 (3, 4, 9, 10, 11, 12, 15, 19, 40, 42, 48, 50, 51, 52, 54, 56) are the ones restated in the build brief and in the
-AEGIS round 1 direction, which supplied the section 4 state names used here, the section 40 capability names and the
-section 42 initial cell. The roster now carries the blueprint's names exactly. For the campaign states, the names
-supplied are used where the meaning matches (`policy.SECTION_4`); three states are added beyond section 4 with a
-reason each (`policy.BEYOND_SECTION_4`, decision 9); the remaining states keep their OOH-1 names and are not claimed
-as section 4 names (`policy.NAME_UNCONFIRMED`) — the full section 4 list was not restated to this build, so the
-"remaining section 4 states" the direction asked to add as NOT_BUILT could not be added by name (open item 1).
+AEGIS round 1 direction, which supplied the section 40 capability names and the section 42 initial cell, and in the
+coordinator's message of Oct 16 with the complete section 4 list (main and exception states). The roster and the
+state vocabulary now carry the blueprint's names exactly; what this service adds beyond them is marked, with reasons
+(decision 9).
 
 ## Context
 
@@ -74,21 +72,32 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
    `capability:<campaigns|inventory|prices|funds|purchase|submission>`. The dashboard, the agent runtime or
    Compliance may engage; only Andre releases. An engage the ledger cannot record takes effect at once in memory and
    is shown as unrecorded. `OOH_KILL_GLOBAL` and `OOH_KILLED_CAPABILITIES` cannot be released at runtime.
-9. **Campaign states (sections 3-4).** `INTAKE → BRIEF_VALIDATED → PLAN_DRAFTED → PLAN_APPROVED (Andre) →
-   AVAILS_REQUESTED → QUOTES_VALIDATED → PROPOSAL_SENT (Andre) → CLIENT_APPROVED → [FUNDING_REQUIRED →]
-   FUNDS_VERIFIED → PURCHASE_AUTHORIZED → ORDER_SUBMITTED → BOOKED → IN_PRODUCTION → LIVE → COMPLETED → RECONCILED →
-   CLOSED`; exception states `CLIENT_HOLD`, `VENDOR_HOLD`, `CHANGE_REQUESTED`, `DISPUTED`, `CANCELLED`.
-   - Section 4 names (the meaning matches): `INTAKE, BRIEF_VALIDATED, PLAN_DRAFTED, PLAN_APPROVED, AVAILS_REQUESTED,
-     QUOTES_VALIDATED, FUNDING_REQUIRED, CLIENT_HOLD, VENDOR_HOLD`. `FUNDING_REQUIRED` is the state a client-approved
-     campaign enters when cleared funds cover part of the approved price (the exposure view's `PARTIAL`).
-   - Added beyond section 4: `PROPOSAL_SENT` (the moment the price leaves ZBM: the client's approval binds that exact
-     sell price), `ORDER_SUBMITTED` (the order is with the vendor and its answer is unknown, section 51: nothing may
-     be re-sent), `CHANGE_REQUESTED` (the client changes the brief after a proposal: approvals and authorizations are
-     voided).
-   - Kept from OOH-1, not confirmed against section 4: `CLIENT_APPROVED, FUNDS_VERIFIED, PURCHASE_AUTHORIZED, BOOKED,
-     IN_PRODUCTION, LIVE, COMPLETED, RECONCILED, CLOSED, DISPUTED, CANCELLED`.
-   - Defined but NOT_BUILT (unreachable; refused `STATE_NOT_BUILT` from BOOKED, `TRANSITION_NOT_ALLOWED` elsewhere):
-     `IN_PRODUCTION, LIVE, COMPLETED, RECONCILED, CLOSED`.
+9. **Campaign states (sections 3-4)**, the complete section 4 vocabulary (`policy.SECTION_4_MAIN`,
+   `policy.SECTION_4_EXCEPTION`; `GET /ooh/v1/constitution` lists both):
+   - Main, built: `INTAKE → BRIEF_VALIDATED → PLAN_DRAFTED → PLAN_APPROVED (Andre) → AVAILS_REQUESTED →
+     QUOTES_VALIDATED → [PROPOSAL_SENT (Andre)] → CLIENT_APPROVED → [FUNDING_REQUIRED →] FUNDS_VERIFIED →
+     PURCHASE_AUTHORIZED → [ORDER_SUBMITTED] → BOOKED`. `FUNDING_REQUIRED` is the state a client-approved campaign
+     enters when cleared funds cover part of the approved price (the exposure view's `PARTIAL`).
+   - Main, defined but NOT_BUILT: `CREATIVE_PENDING → CREATIVE_ACCEPTED → PRODUCTION_PENDING → LIVE →
+     DELIVERY_REVIEWED → RECONCILIATION_PENDING → RECONCILED → CLOSED` (the table records the order after BOOKED).
+     The OOH-1 placeholders `IN_PRODUCTION` and `COMPLETED` are gone.
+   - Main, derived: `HOLD_REQUESTED` and `HOLD_CONFIRMED` are section 4 campaign-level states, but holds are per face
+     here (section 15, and a hold may be requested before any money), so they are not stored as the campaign's
+     `state`. The campaign view's `hold_state` derives them: `HOLD_CONFIRMED` when every live unit (not withdrawn) is
+     `HOLD_CONFIRMED` with an unexpired hold; `HOLD_REQUESTED` when at least one live unit is `HOLD_REQUESTED` or
+     `HOLD_CONFIRMED` but not all are confirmed; null otherwise. The purchase gate never reads the derived value: it
+     checks every unit of the order itself. Storing them would have put a hold step between FUNDS_VERIFIED and
+     PURCHASE_AUTHORIZED, contradicting "a hold may be requested without funds".
+   - Exceptions, built: `CLIENT_HOLD`, `VENDOR_HOLD`, `DISPUTED`, `CANCELLED` (and `CHANGE_REQUESTED`, below).
+   - Exceptions, defined but NOT_BUILT: `EXPIRED, WITHDRAWN, UNAVAILABLE, SUBSTITUTION_PROPOSED,
+     SUBSTITUTION_REQUIRES_APPROVAL, PARTIAL_DELIVERY, UNDERDELIVERY, OUTAGE, MAKEGOOD_PENDING, CREDIT_PENDING,
+     REFUND_PENDING, FAILED, BLOCKED`. `EXPIRED`, `WITHDRAWN` and `UNAVAILABLE` also exist as per-unit availability
+     states (decision 12), which are built; at campaign level they are not.
+   - Every NOT_BUILT state is unreachable: any route asking for one is refused `STATE_NOT_BUILT`, from any state.
+   - Added beyond section 4, each for a reason (`policy.BEYOND_SECTION_4`): `PROPOSAL_SENT` (the moment the price
+     leaves ZBM: the client's approval binds that exact sell price), `ORDER_SUBMITTED` (the order is with the vendor
+     and its answer is unknown, section 51: nothing may be re-sent), `CHANGE_REQUESTED` (the client changes the brief
+     after a proposal: approvals and authorizations are voided).
    Ledger event types do not carry state names (`campaign_transition` carries from / to in its payload), so the
    rename changes no event type. The allowed transitions are one explicit table (`policy.CAMPAIGN_ALLOWED`); anything
    else is `TRANSITION_NOT_ALLOWED`. Stale callers are refused (`STATE_STALE`, `VERSION_STALE`: every change bumps
@@ -98,7 +107,7 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
     Every state change of a campaign happens in one function (`_move`), called only from a log-replay handler, i.e.
     after the typed evidence and the anchored log line. Guards: `AVAILS_REQUESTED` needs a unit; `QUOTES_VALIDATED`
     needs the commercial model and a current, unexpired sell price; `PROPOSAL_SENT` needs a current sell price.
-    `IN_PRODUCTION` and later are `STATE_NOT_BUILT`.
+    `CREATIVE_PENDING` and later, and the unbuilt exception states, are `STATE_NOT_BUILT`.
 11. **Exception states.** Entering `CLIENT_HOLD`, `VENDOR_HOLD`, `DISPUTED`, `CHANGE_REQUESTED` or `CANCELLED` voids
     every unsubmitted authorization. Leaving a hold or `DISPUTED` goes back only to the state it came from (`RESUME_TARGET_INVALID`
     otherwise), and a campaign held at `PURCHASE_AUTHORIZED` resumes at `FUNDS_VERIFIED`: an authorization is never
@@ -249,9 +258,8 @@ refuses start).
 
 ## Open founder decisions
 
-1. The full section 4 state list: confirm the states kept under their OOH-1 names (decision 9) and name any further
-   section 4 states, which will then be added as defined-but-NOT_BUILT. The roster and the initial cell now match
-   sections 40 and 42.
+1. (Resolved Oct 16: the complete section 4 list was supplied; decision 9 maps every name.) Whether
+   `HOLD_REQUESTED` / `HOLD_CONFIRMED` should become stored campaign states (built: derived from the units).
 2. `OOH_MAX_PURCHASE_AMOUNT` default (10000.00) and `OOH_AUTHORITY_MAX_DAYS` (7) are build defaults, not his numbers.
 3. Whether a purchase may proceed while principal/agent is `UNDETERMINED` (built: no). His Oct 5 statement was
    "ZBM is principal" for media; the blueprint's default is `UNDETERMINED` until counsel confirms.

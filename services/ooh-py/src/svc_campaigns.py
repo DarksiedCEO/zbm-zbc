@@ -212,12 +212,12 @@ class CampaignsMixin:
                 if frm == "DISPUTED" and not andre:
                     raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
             else:
+                if to in P.CAMPAIGN_NOT_BUILT:
+                    raise Conflict(R("STATE_NOT_BUILT"))              # defined in section 4, not built: never reached
                 if to in P.CAMPAIGN_GATED:
                     raise Conflict(R("TRANSITION_GATED"))
                 if to not in P.CAMPAIGN_ALLOWED.get(frm, ()):
                     raise Conflict(R("TRANSITION_NOT_ALLOWED"))
-                if to in P.CAMPAIGN_NOT_BUILT:
-                    raise Conflict(R("STATE_NOT_BUILT"))
                 if (frm, to) in P.CAMPAIGN_ANDRE and not andre:
                     raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
                 guard = self._guard(c, to)
@@ -839,6 +839,16 @@ class CampaignsMixin:
 
     # ================================================================================================ views
 
+    def hold_state(self, c: dict) -> Optional[str]:
+        """The section 4 campaign-level HOLD_REQUESTED / HOLD_CONFIRMED, derived from the units (policy.DERIVED_STATES):
+        never stored, never read by the purchase gate (which checks every unit itself)."""
+        live = [self.inventory[u] for u in c["inventory_ids"] if self.inventory[u]["state"] != "WITHDRAWN"]
+        if live and all(u["state"] == "HOLD_CONFIRMED" and not self._expired(u["hold_expires_at"]) for u in live):
+            return "HOLD_CONFIRMED"
+        if any(u["state"] in ("HOLD_REQUESTED", "HOLD_CONFIRMED") for u in live):
+            return "HOLD_REQUESTED"
+        return None
+
     def campaign_view(self, tid: str, cid: str, hub: bool = False) -> dict:
         with self.lock:
             c = self._campaign(tid, cid)
@@ -850,7 +860,7 @@ class CampaignsMixin:
                         "funding_state": x["funding_state"], "client_funds_received": x["client_funds_received"]}
             return {**{k: v for k, v in c.items() if k not in ("history", "funds")},
                     "history": [dict(h) for h in c["history"]], "funds": [dict(f) for f in c["funds"]],
-                    "exposure": x}
+                    "exposure": x, "hold_state": self.hold_state(c)}
 
     def unit_view(self, uid: str) -> dict:
         with self.lock:

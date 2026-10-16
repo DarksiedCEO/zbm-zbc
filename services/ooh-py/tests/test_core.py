@@ -249,14 +249,30 @@ def test_roster_is_the_section_40_map_and_the_section_42_cell(h):
     assert all("provisional" not in json.dumps(x) for x in r["capabilities"])
 
 
-def test_state_vocabulary_marks_what_is_beyond_section_4(h):
+SECTION_4_MAIN = ["INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+                  "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "HOLD_REQUESTED", "HOLD_CONFIRMED",
+                  "PURCHASE_AUTHORIZED", "BOOKED", "CREATIVE_PENDING", "CREATIVE_ACCEPTED", "PRODUCTION_PENDING", "LIVE",
+                  "DELIVERY_REVIEWED", "RECONCILIATION_PENDING", "RECONCILED", "CLOSED"]
+SECTION_4_EXCEPTION = ["EXPIRED", "WITHDRAWN", "UNAVAILABLE", "CLIENT_HOLD", "VENDOR_HOLD", "CANCELLED",
+                       "SUBSTITUTION_PROPOSED", "SUBSTITUTION_REQUIRES_APPROVAL", "PARTIAL_DELIVERY", "UNDERDELIVERY",
+                       "OUTAGE", "MAKEGOOD_PENDING", "CREDIT_PENDING", "DISPUTED", "REFUND_PENDING", "FAILED", "BLOCKED"]
+
+
+def test_state_vocabulary_is_the_whole_of_section_4_plus_three_marked_additions(h):
     c = h.ok(h.get("/constitution"))
-    assert {"INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
-            "FUNDING_REQUIRED", "CLIENT_HOLD", "VENDOR_HOLD"} == set(c["section_4_states"])
+    assert c["section_4_main"] == SECTION_4_MAIN and c["section_4_exception"] == SECTION_4_EXCEPTION
+    assert c["section_4_derived"] == ["HOLD_REQUESTED", "HOLD_CONFIRMED"]
     assert set(c["beyond_section_4"]) == {"PROPOSAL_SENT", "ORDER_SUBMITTED", "CHANGE_REQUESTED"}
-    assert set(c["not_built"]) == {"IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED"}
-    assert set(c["section_4_states"]) | set(c["beyond_section_4"]) | set(c["names_unconfirmed"]) == \
-        set(c["campaign_states"]) | set(c["exception_states"])
+    stored = set(c["campaign_states"]) | set(c["exception_states"])
+    assert stored == (set(SECTION_4_MAIN) | set(SECTION_4_EXCEPTION) | set(c["beyond_section_4"])) \
+        - set(c["section_4_derived"])
+    assert set(c["not_built"]) == {"CREATIVE_PENDING", "CREATIVE_ACCEPTED", "PRODUCTION_PENDING", "LIVE",
+                                   "DELIVERY_REVIEWED", "RECONCILIATION_PENDING", "RECONCILED", "CLOSED", "EXPIRED",
+                                   "WITHDRAWN", "UNAVAILABLE", "SUBSTITUTION_PROPOSED",
+                                   "SUBSTITUTION_REQUIRES_APPROVAL", "PARTIAL_DELIVERY", "UNDERDELIVERY", "OUTAGE",
+                                   "MAKEGOOD_PENDING", "CREDIT_PENDING", "REFUND_PENDING", "FAILED", "BLOCKED"}
+    assert set(c["exceptions_built"]) == {"CLIENT_HOLD", "VENDOR_HOLD", "DISPUTED", "CANCELLED", "CHANGE_REQUESTED"}
+    assert "IN_PRODUCTION" not in stored and "COMPLETED" not in stored
 
 
 def test_ledger_down_means_nothing_takes_effect(h):

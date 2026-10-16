@@ -23,7 +23,8 @@ def test_every_non_listed_transition_from_draft_is_refused(h):
         if to in policy.CAMPAIGN_ALLOWED["INTAKE"]:
             continue
         r = _post_transition(h, "acme", cid, to, "INTAKE", 1, andre=True)
-        expected = "TRANSITION_GATED" if to in policy.CAMPAIGN_GATED else "TRANSITION_NOT_ALLOWED"
+        expected = "STATE_NOT_BUILT" if to in policy.CAMPAIGN_NOT_BUILT else \
+            "TRANSITION_GATED" if to in policy.CAMPAIGN_GATED else "TRANSITION_NOT_ALLOWED"
         h.refused(r, 409, expected)
     c = h.view("acme", cid)
     assert c["state"] == "INTAKE" and c["version"] == 1 and len(c["history"]) == 1
@@ -89,7 +90,7 @@ def test_production_and_later_states_are_not_in_this_wave(h):
     ctx = h.authorized()
     h.ok(h.submit(ctx))
     h.ok(h.outcome(ctx))
-    h.refused(h.go("acme", ctx["cid"], "IN_PRODUCTION", andre=True), 409, "STATE_NOT_BUILT")
+    h.refused(h.go("acme", ctx["cid"], "CREATIVE_PENDING", andre=True), 409, "STATE_NOT_BUILT")
     h.refused(h.go("acme", ctx["cid"], "CANCELLED", andre=True), 409, "TRANSITION_NOT_ALLOWED")
 
 
@@ -123,9 +124,34 @@ def test_both_holds_resume_only_where_they_were(h, hold):
 def test_not_built_states_exist_but_are_unreachable(h, state):
     assert state in policy.ALL_STATES
     h.tenant("acme")
+    ctx = h.authorized()
+    for cid in (h.campaign(), ctx["cid"]):                    # from the start and from a booked campaign
+        if cid == ctx["cid"]:
+            h.ok(h.submit(ctx))
+            h.ok(h.outcome(ctx))
+        r = h.go("acme", cid, state, andre=True)
+        assert r.status_code == 409 and r.json()["detail"] == "STATE_NOT_BUILT"
+        assert h.view("acme", cid)["state"] in ("INTAKE", "BOOKED")
+
+
+def test_hold_requested_and_confirmed_are_derived_for_the_campaign(h):
+    h.tenant("acme")
     cid = h.campaign()
-    r = h.go("acme", cid, state, andre=True)
-    assert r.status_code == 409 and r.json()["detail"] == "TRANSITION_NOT_ALLOWED"
+    h.plan("acme", cid)
+    assert h.view("acme", cid)["hold_state"] is None
+    uid, _ = h.held_unit("acme", cid)
+    other = h.unit("acme", cid)
+    for to in ("VERIFIED", "AVAILABILITY_REQUESTED"):
+        h.ok(h.move("acme", cid, other, to))
+    h.quote("acme", cid, [other], "100.00")
+    for to in ("QUOTED", "HOLD_REQUESTED"):
+        h.ok(h.move("acme", cid, other, to))
+    assert h.view("acme", cid)["hold_state"] == "HOLD_REQUESTED"    # one face requested, one confirmed
+    h.ok(h.move("acme", cid, other, "HOLD_CONFIRMED", vendor_ref="lamar-h2", hold_expires_at=at(days=3)))
+    c = h.view("acme", cid)
+    assert c["hold_state"] == "HOLD_CONFIRMED" and c["state"] == "PLAN_APPROVED"    # derived, never stored
+    h.clock.advance(days=3)
+    assert h.view("acme", cid)["hold_state"] == "HOLD_REQUESTED"    # an expired hold is not a confirmed one
 
 
 def test_an_order_in_flight_cannot_be_held_changed_or_cancelled(h):

@@ -405,8 +405,9 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                 "decisions": list(policy.DECISIONS), "decision_self_authorizes": False,
                 "campaign_states": list(policy.CAMPAIGN_STATES), "exception_states": list(policy.EXCEPTION_STATES),
                 "campaign_gated": list(policy.CAMPAIGN_GATED), "not_built": list(policy.CAMPAIGN_NOT_BUILT),
-                "section_4_states": list(policy.SECTION_4), "beyond_section_4": dict(policy.BEYOND_SECTION_4),
-                "names_unconfirmed": list(policy.NAME_UNCONFIRMED),
+                "section_4_main": list(policy.SECTION_4_MAIN), "section_4_exception": list(policy.SECTION_4_EXCEPTION),
+                "section_4_derived": list(policy.DERIVED_STATES), "beyond_section_4": dict(policy.BEYOND_SECTION_4),
+                "exceptions_built": list(policy.EXCEPTIONS_BUILT),
                 "availability_states": list(policy.AVAILABILITY_STATES),
                 "submission_states": list(policy.SUBMISSION_STATES)}
 
