@@ -79,17 +79,16 @@ def test_h1_a_reference_that_is_only_method_words_is_refused(acme):
 def test_h2_one_unit_in_two_quotes_is_never_priced_or_bought_twice(acme):
     h = acme
     cid = h.campaign()
-    for to in ("BRIEF_CONFIRMED", "PLANNING"):
-        h.ok(h.go("acme", cid, to))
+    h.plan("acme", cid)
     uid, q1 = h.held_unit("acme", cid, amount="2500.00")
     q2 = h.quote("acme", cid, [uid], "2500.00")
-    h.ok(h.go("acme", cid, "QUOTING"))
+    h.ok(h.go("acme", cid, "AVAILS_REQUESTED"))
     h.ok(h.commercial("acme", cid, "20.00"))
     h.refused(h.price("acme", cid, "CLIENT_SELL_PRICE", "6000.00", andre=True, quote_refs=[q1, q2]), 409,
               "UNIT_IN_MULTIPLE_QUOTES")
     sp = h.ok(h.price("acme", cid, "CLIENT_SELL_PRICE", "3000.00", andre=True, quote_refs=[q1]), 201)
     h.ok(h.price("acme", cid, "APPROVED_BUY_LIMIT", "5000.00", andre=True), 201)
-    h.ok(h.go("acme", cid, "PROPOSAL_READY"))
+    h.ok(h.go("acme", cid, "QUOTES_VALIDATED"))
     h.ok(h.go("acme", cid, "PROPOSAL_SENT", andre=True))
     ctx = {"tid": "acme", "cid": cid, "uid": uid, "qid": q1, "sell_id": sp["price_id"], "sell": "3000.00",
            "amount": "2500.00"}
@@ -170,7 +169,9 @@ def test_m3_a_funds_record_of_nothing_is_refused(acme, amount):
 
 def _back_to_proposal_sent(h, ctx):
     h.ok(h.go("acme", ctx["cid"], "CHANGE_REQUESTED", andre=True))
-    for to in ("PLANNING", "QUOTING", "PROPOSAL_READY"):
+    h.ok(h.go("acme", ctx["cid"], "PLAN_DRAFTED"))
+    h.ok(h.go("acme", ctx["cid"], "PLAN_APPROVED", andre=True))
+    for to in ("AVAILS_REQUESTED", "QUOTES_VALIDATED"):
         h.ok(h.go("acme", ctx["cid"], to))
     h.ok(h.go("acme", ctx["cid"], "PROPOSAL_SENT", andre=True))
 
@@ -201,11 +202,12 @@ def test_m3_reconfirmation_never_covers_a_higher_approved_price(acme):
     h = acme
     ctx = h.funded()
     h.ok(h.go("acme", ctx["cid"], "CHANGE_REQUESTED", andre=True))
-    h.ok(h.go("acme", ctx["cid"], "PLANNING"))
+    h.ok(h.go("acme", ctx["cid"], "PLAN_DRAFTED"))
+    h.ok(h.go("acme", ctx["cid"], "PLAN_APPROVED", andre=True))
     h.ok(h.commercial("acme", ctx["cid"], "30.00"))
     sp = h.ok(h.price("acme", ctx["cid"], "CLIENT_SELL_PRICE", "6500.00", andre=True, quote_refs=[ctx["qid"]]), 201)
     ctx.update(sell_id=sp["price_id"], sell="6500.00")
-    for to in ("QUOTING", "PROPOSAL_READY"):
+    for to in ("AVAILS_REQUESTED", "QUOTES_VALIDATED"):
         h.ok(h.go("acme", ctx["cid"], to))
     h.ok(h.go("acme", ctx["cid"], "PROPOSAL_SENT", andre=True))
     h.ok(h.approve(ctx))
@@ -256,13 +258,12 @@ def test_l2_a_503_says_whether_the_call_may_have_taken_effect(acme):
 def test_l5_no_proposal_goes_out_without_a_current_sell_price(acme):
     h = acme
     cid = h.campaign()
-    for to in ("BRIEF_CONFIRMED", "PLANNING"):
-        h.ok(h.go("acme", cid, to))
+    h.plan("acme", cid)
     uid, qid = h.held_unit("acme", cid)
-    h.ok(h.go("acme", cid, "QUOTING"))
+    h.ok(h.go("acme", cid, "AVAILS_REQUESTED"))
     h.ok(h.commercial("acme", cid, "20.00"))
     h.ok(h.price("acme", cid, "CLIENT_SELL_PRICE", "6000.00", andre=True, quote_refs=[qid]), 201)
-    h.ok(h.go("acme", cid, "PROPOSAL_READY"))
-    h.ok(h.commercial("acme", cid, "25.00"))                  # a reset at PROPOSAL_READY unseats the price
+    h.ok(h.go("acme", cid, "QUOTES_VALIDATED"))
+    h.ok(h.commercial("acme", cid, "25.00"))                  # a reset at QUOTES_VALIDATED unseats the price
     r = h.refused(h.go("acme", cid, "PROPOSAL_SENT", andre=True), 409, "TRANSITION_GUARD_FAILED")
     assert r["guard"] == "NO_CURRENT_SELL_PRICE"

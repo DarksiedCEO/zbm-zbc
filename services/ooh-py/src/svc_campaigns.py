@@ -9,8 +9,8 @@ Rules enforced here, each with its own reason code (reasons.py) and its own test
   authorization, submission, outcome), each of which commits through ``_commit`` — evidence on the ledger first. An
   illegal or skipped transition is refused (``TRANSITION_NOT_ALLOWED``); a gated state can never be reached through
   the generic route (``TRANSITION_GATED``); a stale caller is refused (``STATE_STALE`` / ``VERSION_STALE``).
-* Leaving ON_HOLD or DISPUTED goes back exactly to the state it was entered from, and never restores an
-  authorization (entering ON_HOLD, DISPUTED, CHANGE_REQUESTED or CANCELLED voids every unsubmitted authorization).
+* Leaving CLIENT_HOLD, VENDOR_HOLD or DISPUTED goes back exactly to the state it was entered from, and never restores
+  an authorization (entering a hold, DISPUTED, CHANGE_REQUESTED or CANCELLED voids every unsubmitted authorization).
 * A hold requested is not a hold confirmed: HOLD_CONFIRMED needs the vendor's reference and an expiry, and the gate
   wants every unit HOLD_CONFIRMED and unexpired. Booking states are reached only through the order flow.
 * The six price objects never stand in for each other; an evidence class is fixed when a record is created and no
@@ -42,10 +42,13 @@ from ledger import canonical, derived_id
 from reasons import R
 
 OBSERVED_MAX = 600
-PLANNING_STATES = ("DRAFT", "BRIEF_CONFIRMED", "PLANNING", "QUOTING", "PROPOSAL_READY", "CHANGE_REQUESTED")
-PRE_ORDER_WRITABLE = PLANNING_STATES + ("PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED")
-SELL_PRICE_STATES = ("PLANNING", "QUOTING", "PROPOSAL_READY")
-VOIDING_STATES = ("ON_HOLD", "DISPUTED", "CHANGE_REQUESTED", "CANCELLED")
+PLANNING_STATES = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+                   "CHANGE_REQUESTED")
+PRE_ORDER_WRITABLE = PLANNING_STATES + ("PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED",
+                                        "PURCHASE_AUTHORIZED")
+SELL_PRICE_STATES = ("PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED")
+VOIDING_STATES = P.HOLD_STATES + ("DISPUTED", "CHANGE_REQUESTED", "CANCELLED")
+FUNDABLE = ("CLIENT_APPROVED", "FUNDING_REQUIRED")
 
 
 def observed(text: Optional[str]) -> Optional[dict]:
@@ -164,8 +167,8 @@ class CampaignsMixin:
     def _a_campaign_created(self, d, at):
         self.campaigns[d["campaign_id"]] = {
             "campaign_id": d["campaign_id"], "tenant_id": d["tenant_id"], "name": d["name"], "markets": d["markets"],
-            "state": "DRAFT", "version": 1, "resume_to": None, "created_at": at,
-            "history": [{"from": None, "to": "DRAFT", "reason": "CREATED", "actor": d["actor"], "at": at}],
+            "state": "INTAKE", "version": 1, "resume_to": None, "created_at": at,
+            "history": [{"from": None, "to": "INTAKE", "reason": "CREATED", "actor": d["actor"], "at": at}],
             "commercial": None, "current_sell_price_id": None, "buy_limit_id": None, "client_approval": None,
             "funds": [], "inventory_ids": [], "price_ids": [], "authorization_ids": []}
 
@@ -173,9 +176,9 @@ class CampaignsMixin:
         """The ONE place a campaign's state changes (only ever called from an ``_a_*`` handler, i.e. after the
         evidence and the anchored log line). Entering an exception state voids every unsubmitted authorization."""
         frm = c["state"]
-        if to in ("ON_HOLD", "DISPUTED"):
+        if to in P.RESUMABLE:
             c["resume_to"] = P.RESUME_MAP.get(frm, frm)
-        elif frm in ("ON_HOLD", "DISPUTED"):
+        elif frm in P.RESUMABLE:
             c["resume_to"] = None
         if to in VOIDING_STATES:
             for aid in c["authorization_ids"]:
@@ -203,7 +206,7 @@ class CampaignsMixin:
             if frm != body["expected_state"]:
                 raise Conflict(R("STATE_STALE"))
             self._expect(c, body)
-            if frm in ("ON_HOLD", "DISPUTED"):
+            if frm in P.RESUMABLE:
                 if to != c["resume_to"]:
                     raise Conflict(R("RESUME_TARGET_INVALID"))
                 if frm == "DISPUTED" and not andre:
@@ -213,8 +216,8 @@ class CampaignsMixin:
                     raise Conflict(R("TRANSITION_GATED"))
                 if to not in P.CAMPAIGN_ALLOWED.get(frm, ()):
                     raise Conflict(R("TRANSITION_NOT_ALLOWED"))
-                if to in P.CAMPAIGN_NOT_IN_WAVE:
-                    raise Conflict(R("TRANSITION_NOT_IN_WAVE"))
+                if to in P.CAMPAIGN_NOT_BUILT:
+                    raise Conflict(R("STATE_NOT_BUILT"))
                 if (frm, to) in P.CAMPAIGN_ANDRE and not andre:
                     raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
                 guard = self._guard(c, to)
@@ -227,11 +230,11 @@ class CampaignsMixin:
 
     def _guard(self, c: dict, to: str) -> Optional[str]:
         live = [u for u in (self.inventory[i] for i in c["inventory_ids"]) if u["state"] != "WITHDRAWN"]
-        if to == "QUOTING" and not live:
+        if to == "AVAILS_REQUESTED" and not live:
             return "NO_INVENTORY"
         if to == "PROPOSAL_SENT" and c["current_sell_price_id"] is None:
             return "NO_CURRENT_SELL_PRICE"                   # AEGIS L5: a model reset after the price unseated it
-        if to == "PROPOSAL_READY":
+        if to == "QUOTES_VALIDATED":
             if c["commercial"] is None:
                 return "NO_COMMERCIAL_MODEL"
             sp = self.prices.get(c["current_sell_price_id"] or "")
@@ -520,7 +523,7 @@ class CampaignsMixin:
             if self._idem("andre", rk, body):
                 return self.campaign_view(tid, cid)
             self.check_kill(tenant=tid, capability="funds")
-            if c["state"] != "CLIENT_APPROVED":
+            if c["state"] not in FUNDABLE:
                 self._refuse("STATE_NOT_ELIGIBLE", c, rk)
             self._expect(c, body)
             if Decimal(body["amount"]) <= 0:
@@ -549,6 +552,8 @@ class CampaignsMixin:
         self.funds_evidence[d["evidence_key"]] = d["campaign_id"]
         if d["clears_in_full"]:
             self._move(c, "FUNDS_VERIFIED", "CLIENT_FUNDS_CLEARED_IN_FULL", d["actor"], at)
+        elif c["state"] == "CLIENT_APPROVED":
+            self._move(c, "FUNDING_REQUIRED", "CLIENT_FUNDS_PARTIAL", d["actor"], at)
         else:
             c["version"] += 1
 
@@ -563,7 +568,7 @@ class CampaignsMixin:
             if self._idem("andre", rk, body):
                 return self.campaign_view(tid, cid)
             self.check_kill(tenant=tid, capability="funds")
-            if c["state"] != "CLIENT_APPROVED":
+            if c["state"] not in FUNDABLE:
                 self._refuse("STATE_NOT_ELIGIBLE", c, rk)
             self._expect(c, body)
             ap = c["client_approval"]
@@ -593,7 +598,7 @@ class CampaignsMixin:
         if at_submit:
             if c["state"] != "PURCHASE_AUTHORIZED":
                 return "STATE_NOT_ELIGIBLE"
-        elif c["state"] == "CLIENT_APPROVED":
+        elif c["state"] in FUNDABLE:
             return "FUNDS_NOT_VERIFIED"
         elif c["state"] not in ("FUNDS_VERIFIED", "PURCHASE_AUTHORIZED"):
             return "STATE_NOT_ELIGIBLE"

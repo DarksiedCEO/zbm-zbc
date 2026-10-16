@@ -20,21 +20,21 @@ def test_every_non_listed_transition_from_draft_is_refused(h):
     h.tenant("acme")
     cid = h.campaign()
     for to in policy.ALL_STATES:
-        if to in policy.CAMPAIGN_ALLOWED["DRAFT"]:
+        if to in policy.CAMPAIGN_ALLOWED["INTAKE"]:
             continue
-        r = _post_transition(h, "acme", cid, to, "DRAFT", 1, andre=True)
+        r = _post_transition(h, "acme", cid, to, "INTAKE", 1, andre=True)
         expected = "TRANSITION_GATED" if to in policy.CAMPAIGN_GATED else "TRANSITION_NOT_ALLOWED"
         h.refused(r, 409, expected)
     c = h.view("acme", cid)
-    assert c["state"] == "DRAFT" and c["version"] == 1 and len(c["history"]) == 1
+    assert c["state"] == "INTAKE" and c["version"] == 1 and len(c["history"]) == 1
 
 
-@pytest.mark.parametrize("frm,to", [("DRAFT", "QUOTING"), ("BRIEF_CONFIRMED", "PROPOSAL_SENT"),
-                                    ("PLANNING", "PROPOSAL_READY")])
+@pytest.mark.parametrize("frm,to", [("INTAKE", "AVAILS_REQUESTED"), ("BRIEF_VALIDATED", "PROPOSAL_SENT"),
+                                    ("PLAN_DRAFTED", "QUOTES_VALIDATED")])
 def test_skipping_a_step_is_refused(h, frm, to):
     h.tenant("acme")
     cid = h.campaign()
-    for step in ("BRIEF_CONFIRMED", "PLANNING"):
+    for step in ("BRIEF_VALIDATED", "PLAN_DRAFTED"):
         if h.view("acme", cid)["state"] == frm:
             break
         h.ok(h.go("acme", cid, step))
@@ -52,23 +52,25 @@ def test_gated_states_are_never_reached_through_the_generic_route_even_by_andre(
 def test_stale_state_and_version_are_refused(h):
     h.tenant("acme")
     cid = h.campaign()
-    h.ok(h.go("acme", cid, "BRIEF_CONFIRMED"))
-    h.refused(_post_transition(h, "acme", cid, "PLANNING", "DRAFT", 2), 409, "STATE_STALE")
-    h.refused(_post_transition(h, "acme", cid, "PLANNING", "BRIEF_CONFIRMED", 1), 409, "VERSION_STALE")
+    h.ok(h.go("acme", cid, "BRIEF_VALIDATED"))
+    h.refused(_post_transition(h, "acme", cid, "PLAN_DRAFTED", "INTAKE", 2), 409, "STATE_STALE")
+    h.refused(_post_transition(h, "acme", cid, "PLAN_DRAFTED", "BRIEF_VALIDATED", 1), 409, "VERSION_STALE")
 
 
 def test_guards(h):
     h.tenant("acme")
     cid = h.campaign()
-    h.ok(h.go("acme", cid, "BRIEF_CONFIRMED"))
-    h.ok(h.go("acme", cid, "PLANNING"))
-    r = h.refused(h.go("acme", cid, "QUOTING"), 409, "TRANSITION_GUARD_FAILED")
+    h.ok(h.go("acme", cid, "BRIEF_VALIDATED"))
+    h.ok(h.go("acme", cid, "PLAN_DRAFTED"))
+    h.refused(h.go("acme", cid, "PLAN_APPROVED"), 403, "ANDRE_APPROVAL_REQUIRED")     # the plan is Andre's
+    h.ok(h.go("acme", cid, "PLAN_APPROVED", andre=True))
+    r = h.refused(h.go("acme", cid, "AVAILS_REQUESTED"), 409, "TRANSITION_GUARD_FAILED")
     assert r["guard"] == "NO_INVENTORY"
     h.unit("acme", cid)
-    h.ok(h.go("acme", cid, "QUOTING"))
-    assert h.refused(h.go("acme", cid, "PROPOSAL_READY"), 409)["guard"] == "NO_COMMERCIAL_MODEL"
+    h.ok(h.go("acme", cid, "AVAILS_REQUESTED"))
+    assert h.refused(h.go("acme", cid, "QUOTES_VALIDATED"), 409)["guard"] == "NO_COMMERCIAL_MODEL"
     h.ok(h.commercial("acme", cid))
-    assert h.refused(h.go("acme", cid, "PROPOSAL_READY"), 409)["guard"] == "NO_CURRENT_SELL_PRICE"
+    assert h.refused(h.go("acme", cid, "QUOTES_VALIDATED"), 409)["guard"] == "NO_CURRENT_SELL_PRICE"
 
 
 def test_proposal_sent_and_backing_out_of_approval_are_andres(h):
@@ -79,7 +81,7 @@ def test_proposal_sent_and_backing_out_of_approval_are_andres(h):
     h.refused(h.go("acme", ctx["cid"], "CANCELLED"), 403, "ANDRE_APPROVAL_REQUIRED")
     c = h.ok(h.go("acme", ctx["cid"], "CHANGE_REQUESTED", andre=True))
     assert c["client_approval"] is None                       # the client approves the changed campaign again
-    h.ok(h.go("acme", ctx["cid"], "PLANNING"))
+    h.ok(h.go("acme", ctx["cid"], "PLAN_DRAFTED"))
 
 
 def test_production_and_later_states_are_not_in_this_wave(h):
@@ -87,18 +89,18 @@ def test_production_and_later_states_are_not_in_this_wave(h):
     ctx = h.authorized()
     h.ok(h.submit(ctx))
     h.ok(h.outcome(ctx))
-    h.refused(h.go("acme", ctx["cid"], "IN_PRODUCTION", andre=True), 409, "TRANSITION_NOT_IN_WAVE")
+    h.refused(h.go("acme", ctx["cid"], "IN_PRODUCTION", andre=True), 409, "STATE_NOT_BUILT")
     h.refused(h.go("acme", ctx["cid"], "CANCELLED", andre=True), 409, "TRANSITION_NOT_ALLOWED")
 
 
 def test_on_hold_resumes_only_where_it_was_and_never_restores_an_authorization(h):
     h.tenant("acme")
     ctx = h.authorized()
-    c = h.ok(h.go("acme", ctx["cid"], "ON_HOLD"))
+    c = h.ok(h.go("acme", ctx["cid"], "CLIENT_HOLD"))
     assert c["resume_to"] == "FUNDS_VERIFIED"
     a = h.ok(h.get(f"/tenants/acme/campaigns/{ctx['cid']}/authorizations/{ctx['aid']}"))
-    assert a["status"] == "VOID" and a["void_reason"] == "CAMPAIGN_ON_HOLD"
-    for to in ("PURCHASE_AUTHORIZED", "ORDER_SUBMITTED", "DRAFT", "BOOKED"):
+    assert a["status"] == "VOID" and a["void_reason"] == "CAMPAIGN_CLIENT_HOLD"
+    for to in ("PURCHASE_AUTHORIZED", "ORDER_SUBMITTED", "INTAKE", "BOOKED"):
         h.refused(h.go("acme", ctx["cid"], to, andre=True), 409, "RESUME_TARGET_INVALID")
     h.ok(h.go("acme", ctx["cid"], "FUNDS_VERIFIED"))
     h.refused(h.submit(ctx), 409, "AUTHORIZATION_VOID")
@@ -106,11 +108,31 @@ def test_on_hold_resumes_only_where_it_was_and_never_restores_an_authorization(h
     assert a2["status"] == "AUTHORIZED"
 
 
+@pytest.mark.parametrize("hold", ["CLIENT_HOLD", "VENDOR_HOLD"])
+def test_both_holds_resume_only_where_they_were(h, hold):
+    h.tenant("acme")
+    ctx = h.to_proposal_sent()
+    c = h.ok(h.go("acme", ctx["cid"], hold))
+    assert c["resume_to"] == "PROPOSAL_SENT"
+    other = "VENDOR_HOLD" if hold == "CLIENT_HOLD" else "CLIENT_HOLD"
+    h.refused(h.go("acme", ctx["cid"], other, andre=True), 409, "RESUME_TARGET_INVALID")
+    assert h.ok(h.go("acme", ctx["cid"], "PROPOSAL_SENT"))["state"] == "PROPOSAL_SENT"
+
+
+@pytest.mark.parametrize("state", policy.CAMPAIGN_NOT_BUILT)
+def test_not_built_states_exist_but_are_unreachable(h, state):
+    assert state in policy.ALL_STATES
+    h.tenant("acme")
+    cid = h.campaign()
+    r = h.go("acme", cid, state, andre=True)
+    assert r.status_code == 409 and r.json()["detail"] == "TRANSITION_NOT_ALLOWED"
+
+
 def test_an_order_in_flight_cannot_be_held_changed_or_cancelled(h):
     h.tenant("acme")
     ctx = h.authorized()
     h.ok(h.submit(ctx))
-    for to in ("ON_HOLD", "CHANGE_REQUESTED", "CANCELLED", "FUNDS_VERIFIED"):
+    for to in ("CLIENT_HOLD", "CHANGE_REQUESTED", "CANCELLED", "FUNDS_VERIFIED"):
         r = h.go("acme", ctx["cid"], to, andre=True)
         assert r.status_code == 409 and r.json()["detail"] in ("TRANSITION_NOT_ALLOWED", "TRANSITION_GATED"), to
     c = h.ok(h.go("acme", ctx["cid"], "DISPUTED"))
@@ -126,11 +148,11 @@ def test_history_is_continuous_and_every_change_is_evidenced(h):
     h.ok(h.outcome(ctx))
     c = h.view("acme", ctx["cid"])
     hist = c["history"]
-    assert hist[0]["from"] is None and hist[0]["to"] == "DRAFT"
+    assert hist[0]["from"] is None and hist[0]["to"] == "INTAKE"
     for prev, nxt in zip(hist, hist[1:]):
         assert nxt["from"] == prev["to"]                      # nothing changed state outside a recorded transition
-        assert nxt["to"] in policy.CAMPAIGN_ALLOWED[nxt["from"]] or nxt["from"] in ("ON_HOLD", "DISPUTED")
-    assert [x["to"] for x in hist] == ["DRAFT", "BRIEF_CONFIRMED", "PLANNING", "QUOTING", "PROPOSAL_READY",
+        assert nxt["to"] in policy.CAMPAIGN_ALLOWED[nxt["from"]] or nxt["from"] in ("CLIENT_HOLD", "DISPUTED")
+    assert [x["to"] for x in hist] == ["INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
                                        "PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED",
                                        "ORDER_SUBMITTED", "BOOKED"]
     lines = [r for r in h.svc.log.iter_records() if r["data"].get("campaign_id") == ctx["cid"]]

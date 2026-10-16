@@ -174,6 +174,12 @@ class Harness:
                          {"request_id": rid(), "to": to, "expected_state": c["state"],
                           "expected_version": c["version"], "reason": reason}, andre=andre)
 
+    def plan(self, tid: str, cid: str) -> None:
+        """INTAKE -> BRIEF_VALIDATED -> PLAN_DRAFTED -> PLAN_APPROVED (Andre approves the plan)."""
+        for to in ("BRIEF_VALIDATED", "PLAN_DRAFTED"):
+            self.ok(self.go(tid, cid, to))
+        self.ok(self.go(tid, cid, "PLAN_APPROVED", andre=True))
+
     def unit(self, tid: str, cid: str, vendor: str = "lamar", text: Optional[str] = None) -> str:
         body = {"request_id": rid(), "vendor": vendor, "kind": "static", "market": "los-angeles",
                 "vendor_unit_ref": f"face-{uuid.uuid4().hex[:8]}"}
@@ -221,10 +227,9 @@ class Harness:
                          valid_until: Optional[str] = None) -> dict:
         """A campaign at PROPOSAL_SENT with one held unit, its quote, the commercial model and the sell price."""
         cid = self.campaign(tid)
-        for to in ("BRIEF_CONFIRMED", "PLANNING"):
-            self.ok(self.go(tid, cid, to))
+        self.plan(tid, cid)
         uid, qid = self.held_unit(tid, cid, amount=amount, valid_until=valid_until)
-        self.ok(self.go(tid, cid, "QUOTING"))
+        self.ok(self.go(tid, cid, "AVAILS_REQUESTED"))
         self.ok(self.commercial(tid, cid, markup))
         from decimal import Decimal
 
@@ -232,7 +237,7 @@ class Harness:
         sell = policy.fmt(policy.apply_markup(Decimal(amount), Decimal(markup)))
         sp = self.ok(self.price(tid, cid, "CLIENT_SELL_PRICE", sell, andre=True, quote_refs=[qid]), 201)
         self.ok(self.price(tid, cid, "APPROVED_BUY_LIMIT", amount, andre=True), 201)
-        self.ok(self.go(tid, cid, "PROPOSAL_READY"))
+        self.ok(self.go(tid, cid, "QUOTES_VALIDATED"))
         self.ok(self.go(tid, cid, "PROPOSAL_SENT", andre=True))
         return {"tid": tid, "cid": cid, "uid": uid, "qid": qid, "sell_id": sp["price_id"], "sell": sell,
                 "amount": amount}

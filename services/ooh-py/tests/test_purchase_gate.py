@@ -63,11 +63,11 @@ def test_insufficient_or_partial_funds_block_authorization(acme):
     ctx = h.to_proposal_sent()
     h.ok(h.approve(ctx))
     c = h.ok(h.funds(ctx, "1000.00"))
-    assert c["state"] == "CLIENT_APPROVED" and c["exposure"]["funding_state"] == "PARTIAL"
+    assert c["state"] == "FUNDING_REQUIRED" and c["exposure"]["funding_state"] == "PARTIAL"
     ctx.update(approval_id=c["client_approval"]["approval_id"], terms_id=c["commercial"]["terms_id"])
     h.refused(h.authorize(ctx), 409, "FUNDS_NOT_VERIFIED")
     c = h.ok(h.funds(ctx, "4999.99"))
-    assert c["state"] == "CLIENT_APPROVED"                    # 5999.99 of 6000.00: not 100% prepaid
+    assert c["state"] == "FUNDING_REQUIRED"                   # 5999.99 of 6000.00: not 100% prepaid
     c = h.ok(h.funds(ctx, "0.01"))
     assert c["state"] == "FUNDS_VERIFIED" and c["exposure"]["funding_state"] == "CLEARED_FULL"
     assert [f["evidence_class"] for f in c["funds"]] == ["OBSERVED"] * 3   # never FINANCIALLY_VERIFIED
@@ -169,14 +169,13 @@ def test_overspend_against_the_configured_spend_limit(tmp_path):
 def test_amount_above_the_approved_buy_limit_is_refused(acme):
     h = acme
     cid = h.campaign()
-    for to in ("BRIEF_CONFIRMED", "PLANNING"):
-        h.ok(h.go("acme", cid, to))
+    h.plan("acme", cid)
     uid, qid = h.held_unit("acme", cid, amount="5000.00")
-    h.ok(h.go("acme", cid, "QUOTING"))
+    h.ok(h.go("acme", cid, "AVAILS_REQUESTED"))
     h.ok(h.commercial("acme", cid, "20.00"))
     sp = h.ok(h.price("acme", cid, "CLIENT_SELL_PRICE", "6000.00", andre=True, quote_refs=[qid]), 201)
     h.ok(h.price("acme", cid, "APPROVED_BUY_LIMIT", "4800.00", andre=True), 201)
-    h.ok(h.go("acme", cid, "PROPOSAL_READY"))
+    h.ok(h.go("acme", cid, "QUOTES_VALIDATED"))
     h.ok(h.go("acme", cid, "PROPOSAL_SENT", andre=True))
     ctx = {"tid": "acme", "cid": cid, "uid": uid, "qid": qid, "sell_id": sp["price_id"], "sell": "6000.00",
            "amount": "5000.00"}
@@ -238,14 +237,13 @@ def test_principal_agent_undetermined_blocks_the_purchase(acme):
     assert c["commercial"]["principal_agent_state"] == "PRINCIPAL"
     # the same flow with UNDETERMINED (the blueprint's default)
     c2 = h.campaign()
-    for to in ("BRIEF_CONFIRMED", "PLANNING"):
-        h.ok(h.go("acme", c2, to))
+    h.plan("acme", c2)
     uid, qid = h.held_unit("acme", c2)
-    h.ok(h.go("acme", c2, "QUOTING"))
+    h.ok(h.go("acme", c2, "AVAILS_REQUESTED"))
     h.ok(h.commercial("acme", c2, "20.00", pa="UNDETERMINED"))
     sp = h.ok(h.price("acme", c2, "CLIENT_SELL_PRICE", "6000.00", andre=True, quote_refs=[qid]), 201)
     h.ok(h.price("acme", c2, "APPROVED_BUY_LIMIT", "5000.00", andre=True), 201)
-    h.ok(h.go("acme", c2, "PROPOSAL_READY"))
+    h.ok(h.go("acme", c2, "QUOTES_VALIDATED"))
     h.ok(h.go("acme", c2, "PROPOSAL_SENT", andre=True))
     x = {"tid": "acme", "cid": c2, "uid": uid, "qid": qid, "sell_id": sp["price_id"], "sell": "6000.00",
          "amount": "5000.00"}
@@ -271,8 +269,7 @@ def test_material_terms_and_client_approval_must_match(acme):
 def test_no_markup_is_ever_applied_by_default_and_the_disclosed_markup_must_be_true(acme):
     h = acme
     cid = h.campaign()
-    for to in ("BRIEF_CONFIRMED", "PLANNING"):
-        h.ok(h.go("acme", cid, to))
+    h.plan("acme", cid)
     uid, qid = h.held_unit("acme", cid, amount="1000.00")
     h.refused(h.price("acme", cid, "CLIENT_SELL_PRICE", "1150.00", andre=True, quote_refs=[qid]), 409,
               "COMMERCIAL_MODEL_MISSING")                      # 15% is not assumed
@@ -297,8 +294,7 @@ def test_no_markup_is_ever_applied_by_default_and_the_disclosed_markup_must_be_t
 def test_a_new_commercial_model_unseats_the_sell_price_made_under_the_old_one(acme):
     h = acme
     cid = h.campaign()
-    for to in ("BRIEF_CONFIRMED", "PLANNING"):
-        h.ok(h.go("acme", cid, to))
+    h.plan("acme", cid)
     uid, qid = h.held_unit("acme", cid, amount="100.00")
     h.ok(h.commercial("acme", cid, "10.00"))
     h.ok(h.price("acme", cid, "CLIENT_SELL_PRICE", "110.00", andre=True, quote_refs=[qid]), 201)

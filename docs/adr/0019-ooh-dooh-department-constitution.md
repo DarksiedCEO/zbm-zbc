@@ -7,11 +7,13 @@ v1 (`claude/ooh-dooh-master-blueprint-v1-2026-10-07.md`) with its hardening dire
 buys media: there is no vendor connection, and every order is placed by Andre outside the system and recorded here.
 
 **Source caveat.** The blueprint and the directive were not available to this build as files. The sections used
-(3, 4, 9, 10, 11, 12, 15, 19, 42, 48, 50, 51, 52, 54, 56) are the ones restated in the build brief. Three things the
-brief did not restate were RECONSTRUCTED and are marked `provisional` in `src/policy.py`: the campaign state names
-(section 4), the names of the 23 capabilities (the capability map), and which of them form the initial operating
-cell (section 42). Reconciling them with the blueprint is open item 1 below; the code keeps them as data so the
-reconciliation is an edit to one table, not a redesign.
+(3, 4, 9, 10, 11, 12, 15, 19, 40, 42, 48, 50, 51, 52, 54, 56) are the ones restated in the build brief and in the
+AEGIS round 1 direction, which supplied the section 4 state names used here, the section 40 capability names and the
+section 42 initial cell. The roster now carries the blueprint's names exactly. For the campaign states, the names
+supplied are used where the meaning matches (`policy.SECTION_4`); three states are added beyond section 4 with a
+reason each (`policy.BEYOND_SECTION_4`, decision 9); the remaining states keep their OOH-1 names and are not claimed
+as section 4 names (`policy.NAME_UNCONFIRMED`) — the full section 4 list was not restated to this build, so the
+"remaining section 4 states" the direction asked to add as NOT_BUILT could not be added by name (open item 1).
 
 ## Context
 
@@ -72,19 +74,33 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
    `capability:<campaigns|inventory|prices|funds|purchase|submission>`. The dashboard, the agent runtime or
    Compliance may engage; only Andre releases. An engage the ledger cannot record takes effect at once in memory and
    is shown as unrecorded. `OOH_KILL_GLOBAL` and `OOH_KILLED_CAPABILITIES` cannot be released at runtime.
-9. **Campaign states (sections 3-4; names provisional).** `DRAFT → BRIEF_CONFIRMED → PLANNING → QUOTING →
-   PROPOSAL_READY → PROPOSAL_SENT → CLIENT_APPROVED → FUNDS_VERIFIED → PURCHASE_AUTHORIZED → ORDER_SUBMITTED → BOOKED
-   → IN_PRODUCTION → LIVE → COMPLETED → RECONCILED → CLOSED`; exception states `ON_HOLD`, `CHANGE_REQUESTED`,
-   `DISPUTED`, `CANCELLED`. The allowed transitions are one explicit table (`policy.CAMPAIGN_ALLOWED`); anything
+9. **Campaign states (sections 3-4).** `INTAKE → BRIEF_VALIDATED → PLAN_DRAFTED → PLAN_APPROVED (Andre) →
+   AVAILS_REQUESTED → QUOTES_VALIDATED → PROPOSAL_SENT (Andre) → CLIENT_APPROVED → [FUNDING_REQUIRED →]
+   FUNDS_VERIFIED → PURCHASE_AUTHORIZED → ORDER_SUBMITTED → BOOKED → IN_PRODUCTION → LIVE → COMPLETED → RECONCILED →
+   CLOSED`; exception states `CLIENT_HOLD`, `VENDOR_HOLD`, `CHANGE_REQUESTED`, `DISPUTED`, `CANCELLED`.
+   - Section 4 names (the meaning matches): `INTAKE, BRIEF_VALIDATED, PLAN_DRAFTED, PLAN_APPROVED, AVAILS_REQUESTED,
+     QUOTES_VALIDATED, FUNDING_REQUIRED, CLIENT_HOLD, VENDOR_HOLD`. `FUNDING_REQUIRED` is the state a client-approved
+     campaign enters when cleared funds cover part of the approved price (the exposure view's `PARTIAL`).
+   - Added beyond section 4: `PROPOSAL_SENT` (the moment the price leaves ZBM: the client's approval binds that exact
+     sell price), `ORDER_SUBMITTED` (the order is with the vendor and its answer is unknown, section 51: nothing may
+     be re-sent), `CHANGE_REQUESTED` (the client changes the brief after a proposal: approvals and authorizations are
+     voided).
+   - Kept from OOH-1, not confirmed against section 4: `CLIENT_APPROVED, FUNDS_VERIFIED, PURCHASE_AUTHORIZED, BOOKED,
+     IN_PRODUCTION, LIVE, COMPLETED, RECONCILED, CLOSED, DISPUTED, CANCELLED`.
+   - Defined but NOT_BUILT (unreachable; refused `STATE_NOT_BUILT` from BOOKED, `TRANSITION_NOT_ALLOWED` elsewhere):
+     `IN_PRODUCTION, LIVE, COMPLETED, RECONCILED, CLOSED`.
+   Ledger event types do not carry state names (`campaign_transition` carries from / to in its payload), so the
+   rename changes no event type. The allowed transitions are one explicit table (`policy.CAMPAIGN_ALLOWED`); anything
    else is `TRANSITION_NOT_ALLOWED`. Stale callers are refused (`STATE_STALE`, `VERSION_STALE`: every change bumps
    the campaign's version).
-10. **No state is silently promoted.** `CLIENT_APPROVED`, `FUNDS_VERIFIED`, `PURCHASE_AUTHORIZED`, `ORDER_SUBMITTED`
-    and `BOOKED` are reached only through their own gate (`TRANSITION_GATED` on the generic route, even for Andre).
+10. **No state is silently promoted.** `CLIENT_APPROVED`, `FUNDING_REQUIRED`, `FUNDS_VERIFIED`,
+    `PURCHASE_AUTHORIZED`, `ORDER_SUBMITTED` and `BOOKED` are reached only through their own gate (`TRANSITION_GATED` on the generic route, even for Andre).
     Every state change of a campaign happens in one function (`_move`), called only from a log-replay handler, i.e.
-    after the typed evidence and the anchored log line. Guards: `QUOTING` needs a unit; `PROPOSAL_READY` needs the
-    commercial model and a current, unexpired sell price. `IN_PRODUCTION` and later are `TRANSITION_NOT_IN_WAVE`.
-11. **Exception states.** Entering `ON_HOLD`, `DISPUTED`, `CHANGE_REQUESTED` or `CANCELLED` voids every unsubmitted
-    authorization. Leaving `ON_HOLD` or `DISPUTED` goes back only to the state it came from (`RESUME_TARGET_INVALID`
+    after the typed evidence and the anchored log line. Guards: `AVAILS_REQUESTED` needs a unit; `QUOTES_VALIDATED`
+    needs the commercial model and a current, unexpired sell price; `PROPOSAL_SENT` needs a current sell price.
+    `IN_PRODUCTION` and later are `STATE_NOT_BUILT`.
+11. **Exception states.** Entering `CLIENT_HOLD`, `VENDOR_HOLD`, `DISPUTED`, `CHANGE_REQUESTED` or `CANCELLED` voids
+    every unsubmitted authorization. Leaving a hold or `DISPUTED` goes back only to the state it came from (`RESUME_TARGET_INVALID`
     otherwise), and a campaign held at `PURCHASE_AUTHORIZED` resumes at `FUNDS_VERIFIED`: an authorization is never
     restored. `CHANGE_REQUESTED` clears the client approval. An order in flight cannot be held, changed or cancelled
     (its outcome is unknown); it can be disputed.
@@ -149,10 +165,18 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
 21. **Decision outputs (section 48):** `RECOMMEND_BUY, NEGOTIATE, REQUEST_HOLD, WAIT, DO_NOT_BUY,
     INSUFFICIENT_EVIDENCE` — what an agent may propose. None is an authorization; no model self-authorizes BUY. (No
     agent exists yet to propose one.)
-22. **Agent roster (section 42).** `GET /ooh/v1/roster`: the 23 capabilities as data, every one `built: false`,
-    `authority: PREPARE_ONLY`, `can_commit: false`. The initial operating cell (provisional: C01 campaign intake, C04
-    inventory discovery, C06 availability and holds, C07 vendor quotes, C12 cash exposure and funds readiness) is
-    `INITIAL_CELL_NOT_BUILT`; the other eighteen are `REGISTERED_INACTIVE_READY`.
+22. **Agent roster (sections 40, 42).** `GET /ooh/v1/roster`: the blueprint's 23 capabilities, names and order
+    exactly: 1 Department Coordination, 2 Client Fit, 3 Market/Geography Intelligence, 4 Inventory/Operator
+    Intelligence, 5 Avails/Availability, 6 Audience/Mobility Intelligence, 7 Pricing/Transaction Evidence, 8 Planning,
+    9 Proposal/Estimation, 10 Procurement Liaison, 11 Contract/Terms Control, 12 Purchase Authorization Control,
+    13 Creative Suitability/Specs, 14 Production/Trafficking, 15 Regulatory/Permit Intelligence, 16 Programmatic DOOH,
+    17 Proof-of-Posting/Delivery Verification, 18 Outage/Makegood Control, 19 Measurement/Attribution,
+    20 Billing/Reconciliation, 21 Vendor Relationship Intelligence, 22 Quality/Error/Agent Performance,
+    23 Knowledge/Documentation/Recovery. Every one `built: false`, `build_state: NOT_BUILT_YET`,
+    `authority: PREPARE_ONLY`, `can_commit: false`. The section 42 initial cell — 4, 5, 13, 17 and 20 (20 covering
+    reconciliation and makegood control, with 18 noted) — is `INITIAL_CELL`; the other eighteen are
+    `REGISTERED_INACTIVE_READY`. Mapping from the OOH-1 placeholders: intake → 2, inventory discovery → 4,
+    availability and holds → 5, vendor quotes → 7, cash exposure and funds readiness → 12 (no longer in the cell).
 23. **Evidence and replay.** Typed evidence first, then the anchored log line, then memory, through the same handlers
     the log replays at start, so live and replayed state cannot diverge (tested: restart and double replay give an
     identical snapshot). `GET /ooh/v1/audit/evidence` marks each event `committed` or `attempted` (R6-M1).
@@ -224,8 +248,9 @@ refuses start).
 
 ## Open founder decisions
 
-1. Reconcile the provisional names with the blueprint: the section 4 campaign states, the 23 capabilities, the
-   section 42 initial cell.
+1. The full section 4 state list: confirm the states kept under their OOH-1 names (decision 9) and name any further
+   section 4 states, which will then be added as defined-but-NOT_BUILT. The roster and the initial cell now match
+   sections 40 and 42.
 2. `OOH_MAX_PURCHASE_AMOUNT` default (10000.00) and `OOH_AUTHORITY_MAX_DAYS` (7) are build defaults, not his numbers.
 3. Whether a purchase may proceed while principal/agent is `UNDETERMINED` (built: no). His Oct 5 statement was
    "ZBM is principal" for media; the blueprint's default is `UNDETERMINED` until counsel confirms.

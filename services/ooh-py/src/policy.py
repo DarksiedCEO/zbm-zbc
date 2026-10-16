@@ -4,9 +4,8 @@ fixed rule the service enforces; nothing here is configurable at runtime.
 
 Sources: the founder decisions of Oct 16 2026 and the OOH/DOOH master blueprint v1 (Oct 7 2026) sections named
 below. The blueprint was not available to this build as a file; the section contents used are the ones restated
-in the build brief. Where the blueprint's exact names were not restated (the campaign state names of section 4, the
-23-capability map and the initial operating cell of section 42) the names here are RECONSTRUCTED and marked
-``provisional``: reconciling them with the blueprint is an open item of ADR 0019, not a silent choice.
+in the build brief and in the AEGIS round 1 direction (the section 4 state names, the section 40 capability names
+and the section 42 initial cell). What goes beyond the blueprint is marked here and in ADR 0019.
 """
 
 from __future__ import annotations
@@ -89,25 +88,41 @@ AVAILABILITY_ALLOWED = {
 AVAILABILITY_GATED = ("BOOKING_PENDING", "BOOKING_CONFIRMED")
 
 # ---------------------------------------------------------------------------------------------- sections 3 and 4
-# The lifecycle (section 3) as campaign states. Names reconstructed (provisional), order and gates as briefed.
-CAMPAIGN_STATES = ("DRAFT", "BRIEF_CONFIRMED", "PLANNING", "QUOTING", "PROPOSAL_READY", "PROPOSAL_SENT",
-                   "CLIENT_APPROVED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED", "ORDER_SUBMITTED", "BOOKED",
-                   "IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED")
-EXCEPTION_STATES = ("ON_HOLD", "CHANGE_REQUESTED", "DISPUTED", "CANCELLED")
+# Campaign states. The blueprint's section 4 names are used wherever the meaning matches (``SECTION_4``). Three states
+# are ADDED BEYOND section 4 (``BEYOND_SECTION_4``, ADR 0019 decision 9 says why each exists). The other states keep
+# their OOH-1 names: the build brief did not restate them, so they are not claimed as section 4 names here
+# (``NAME_UNCONFIRMED``). States after BOOKED are defined but NOT_BUILT: unreachable, refused ``STATE_NOT_BUILT``.
+CAMPAIGN_STATES = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+                   "PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED",
+                   "ORDER_SUBMITTED", "BOOKED", "IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED")
+EXCEPTION_STATES = ("CLIENT_HOLD", "VENDOR_HOLD", "CHANGE_REQUESTED", "DISPUTED", "CANCELLED")
 ALL_STATES = CAMPAIGN_STATES + EXCEPTION_STATES
+SECTION_4 = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+             "FUNDING_REQUIRED", "CLIENT_HOLD", "VENDOR_HOLD")
+BEYOND_SECTION_4 = {
+    "PROPOSAL_SENT": "the moment the price leaves ZBM: the client's approval binds to that exact sell price",
+    "ORDER_SUBMITTED": "the order is with the vendor and its answer is unknown (section 51): nothing may be re-sent",
+    "CHANGE_REQUESTED": "the client changes the brief after a proposal: approvals and authorizations are voided",
+}
+NAME_UNCONFIRMED = tuple(s for s in ALL_STATES if s not in SECTION_4 and s not in BEYOND_SECTION_4)
 TERMINAL = ("CANCELLED", "CLOSED")
-_PRE_ORDER = ("DRAFT", "BRIEF_CONFIRMED", "PLANNING", "QUOTING", "PROPOSAL_READY", "PROPOSAL_SENT", "CLIENT_APPROVED",
-              "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED")
+HOLD_STATES = ("CLIENT_HOLD", "VENDOR_HOLD")
+RESUMABLE = HOLD_STATES + ("DISPUTED",)
+_PRE_ORDER = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+              "PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED")
+_EXITS = HOLD_STATES + ("CHANGE_REQUESTED", "CANCELLED")
 CAMPAIGN_ALLOWED = {
-    "DRAFT": ("BRIEF_CONFIRMED", "ON_HOLD", "CANCELLED"),
-    "BRIEF_CONFIRMED": ("PLANNING", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
-    "PLANNING": ("QUOTING", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
-    "QUOTING": ("PROPOSAL_READY", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
-    "PROPOSAL_READY": ("PROPOSAL_SENT", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
-    "PROPOSAL_SENT": ("CLIENT_APPROVED", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
-    "CLIENT_APPROVED": ("FUNDS_VERIFIED", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
-    "FUNDS_VERIFIED": ("PURCHASE_AUTHORIZED", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
-    "PURCHASE_AUTHORIZED": ("PURCHASE_AUTHORIZED", "ORDER_SUBMITTED", "ON_HOLD", "CHANGE_REQUESTED", "CANCELLED"),
+    "INTAKE": ("BRIEF_VALIDATED",) + HOLD_STATES + ("CANCELLED",),
+    "BRIEF_VALIDATED": ("PLAN_DRAFTED",) + _EXITS,
+    "PLAN_DRAFTED": ("PLAN_APPROVED",) + _EXITS,
+    "PLAN_APPROVED": ("AVAILS_REQUESTED",) + _EXITS,
+    "AVAILS_REQUESTED": ("QUOTES_VALIDATED",) + _EXITS,
+    "QUOTES_VALIDATED": ("PROPOSAL_SENT",) + _EXITS,
+    "PROPOSAL_SENT": ("CLIENT_APPROVED",) + _EXITS,
+    "CLIENT_APPROVED": ("FUNDING_REQUIRED", "FUNDS_VERIFIED") + _EXITS,
+    "FUNDING_REQUIRED": ("FUNDS_VERIFIED",) + _EXITS,
+    "FUNDS_VERIFIED": ("PURCHASE_AUTHORIZED",) + _EXITS,
+    "PURCHASE_AUTHORIZED": ("PURCHASE_AUTHORIZED", "ORDER_SUBMITTED") + _EXITS,
     # an order in flight cannot be held, changed or cancelled here: its outcome is unknown until recorded (section 51)
     "ORDER_SUBMITTED": ("BOOKED", "FUNDS_VERIFIED", "DISPUTED"),
     "BOOKED": ("IN_PRODUCTION", "DISPUTED"),
@@ -116,23 +131,24 @@ CAMPAIGN_ALLOWED = {
     "COMPLETED": ("RECONCILED", "DISPUTED"),
     "RECONCILED": ("CLOSED",),
     "CLOSED": (),
-    "CHANGE_REQUESTED": ("PLANNING", "CANCELLED"),
-    "ON_HOLD": (),                          # only back to the state it was entered from (``resume_to``)
+    "CHANGE_REQUESTED": ("PLAN_DRAFTED", "CANCELLED"),
+    "CLIENT_HOLD": (),                      # only back to the state it was entered from (``resume_to``)
+    "VENDOR_HOLD": (),
     "DISPUTED": (),                         # likewise; Andre only
     "CANCELLED": (),
 }
-# Reached only through their own gate (client approval, funds verification, authorization, submission, outcome),
-# never through the generic transition route. "No state may be silently promoted."
-CAMPAIGN_GATED = ("CLIENT_APPROVED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED", "ORDER_SUBMITTED", "BOOKED")
+# Reached only through their own gate (client approval, funds, authorization, submission, outcome), never through
+# the generic transition route. "No state may be silently promoted."
+CAMPAIGN_GATED = ("CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED", "ORDER_SUBMITTED",
+                  "BOOKED")
+_COMMITTED = ("CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED")
 # Transitions the generic route allows only with Andre's approval.
-CAMPAIGN_ANDRE = {("PROPOSAL_READY", "PROPOSAL_SENT")} | {(s, "CHANGE_REQUESTED") for s in
-                                                          ("CLIENT_APPROVED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED")} \
-    | {(s, "CANCELLED") for s in ("CLIENT_APPROVED", "FUNDS_VERIFIED", "PURCHASE_AUTHORIZED")}
+CAMPAIGN_ANDRE = {("PLAN_DRAFTED", "PLAN_APPROVED"), ("QUOTES_VALIDATED", "PROPOSAL_SENT")} \
+    | {(s, "CHANGE_REQUESTED") for s in _COMMITTED} | {(s, "CANCELLED") for s in _COMMITTED}
 # Production, go-live, proof of performance and reconciliation are later waves (OOH-2+): refused, never pretended.
-CAMPAIGN_NOT_IN_WAVE = ("IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED")
-HOLDABLE = tuple(s for s in _PRE_ORDER)
-# Leaving ON_HOLD / DISPUTED / CHANGE_REQUESTED never restores an authorization: resuming to PURCHASE_AUTHORIZED
-# resumes to FUNDS_VERIFIED (the authorization was voided on the way in).
+CAMPAIGN_NOT_BUILT = ("IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED")
+# Leaving a hold or a dispute never restores an authorization: resuming to PURCHASE_AUTHORIZED resumes to
+# FUNDS_VERIFIED (the authorization was voided on the way in).
 RESUME_MAP = {"PURCHASE_AUTHORIZED": "FUNDS_VERIFIED"}
 
 # ---------------------------------------------------------------------------------------------- section 51
@@ -141,42 +157,46 @@ SUBMISSION_OPEN = ("SUBMISSION_UNKNOWN", "ACCEPTED")    # a vendor commitment ex
 OUTCOMES = ("ACCEPTED", "REJECTED")                     # a timeout is not an outcome: it stays SUBMISSION_UNKNOWN
 SUBMISSION_CHANNELS = ("MANUAL_BY_ANDRE",)              # the vendor port is NOT_CONNECTED in OOH-1
 
-# ---------------------------------------------------------------------------------------------- section 42 (roster)
-ROSTER_ACTIVE_STATUS = "INITIAL_CELL_NOT_BUILT"
+# ---------------------------------------------------------------------------------------------- sections 40, 42
+ROSTER_CELL_STATUS = "INITIAL_CELL"
 ROSTER_INACTIVE_STATUS = "REGISTERED_INACTIVE_READY"
-# The 23-capability map (provisional names: see the module docstring). ``cell``: the initial operating cell.
+# The 23-capability map (section 40), names and order exactly as the blueprint. ``cell``: the section 42 initial
+# operating cell. No agent is built in waves 0-1, so every cell member is also ``NOT_BUILT_YET``.
 CAPABILITIES = (
-    ("C01", "campaign_intake_and_brief", True),
-    ("C02", "audience_and_market_research", False),
-    ("C03", "geo_market_planning", False),
-    ("C04", "inventory_discovery", True),
-    ("C05", "inventory_verification", False),
-    ("C06", "availability_and_holds", True),
-    ("C07", "vendor_quotes_and_rate_cards", True),
-    ("C08", "negotiation_preparation", False),
-    ("C09", "media_plan_and_proposal_assembly", False),
-    ("C10", "disclosed_markup_preparation", False),
-    ("C11", "client_approval_packaging", False),
-    ("C12", "cash_exposure_and_funds_readiness", True),
-    ("C13", "purchase_readiness_check", False),
-    ("C14", "contract_and_terms_preparation", False),
-    ("C15", "order_submission_tracking", False),
-    ("C16", "creative_specs_and_production_coordination", False),
-    ("C17", "creative_compliance_and_vendor_approval", False),
-    ("C18", "installation_and_go_live_verification", False),
-    ("C19", "dooh_play_log_intake", False),
-    ("C20", "proof_of_performance", False),
-    ("C21", "measurement_and_attribution", False),
-    ("C22", "reconciliation_and_invoice_matching", False),
-    ("C23", "vendor_relationship_and_performance", False),
+    ("C01", "Department Coordination", False),
+    ("C02", "Client Fit", False),
+    ("C03", "Market/Geography Intelligence", False),
+    ("C04", "Inventory/Operator Intelligence", True),
+    ("C05", "Avails/Availability", True),
+    ("C06", "Audience/Mobility Intelligence", False),
+    ("C07", "Pricing/Transaction Evidence", False),
+    ("C08", "Planning", False),
+    ("C09", "Proposal/Estimation", False),
+    ("C10", "Procurement Liaison", False),
+    ("C11", "Contract/Terms Control", False),
+    ("C12", "Purchase Authorization Control", False),
+    ("C13", "Creative Suitability/Specs", True),
+    ("C14", "Production/Trafficking", False),
+    ("C15", "Regulatory/Permit Intelligence", False),
+    ("C16", "Programmatic DOOH", False),
+    ("C17", "Proof-of-Posting/Delivery Verification", True),
+    ("C18", "Outage/Makegood Control", False),
+    ("C19", "Measurement/Attribution", False),
+    ("C20", "Billing/Reconciliation", True),
+    ("C21", "Vendor Relationship Intelligence", False),
+    ("C22", "Quality/Error/Agent Performance", False),
+    ("C23", "Knowledge/Documentation/Recovery", False),
 )
+CELL_NOTES = {"C20": "covers reconciliation and makegood control for the initial cell; C18 Outage/Makegood Control "
+                     "is noted as its dependency"}
 
 
 def roster() -> list[dict]:
     """The registry as data. No agent is built in OOH-0/1; none can commit anything, ever (Oct 16)."""
     return [{"capability_id": cid, "capability": name, "initial_cell": cell,
-             "status": ROSTER_ACTIVE_STATUS if cell else ROSTER_INACTIVE_STATUS, "built": False,
-             "authority": "PREPARE_ONLY", "can_commit": False, "provisional_name": True}
+             "status": ROSTER_CELL_STATUS if cell else ROSTER_INACTIVE_STATUS,
+             "build_state": "NOT_BUILT_YET", "built": False, "authority": "PREPARE_ONLY", "can_commit": False,
+             "note": CELL_NOTES.get(cid)}
             for cid, name, cell in CAPABILITIES]
 
 

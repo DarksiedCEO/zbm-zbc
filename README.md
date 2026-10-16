@@ -1016,7 +1016,7 @@ decisions (Oct 16), decisions, limitations and the open founder decisions: `docs
 constitution.md`. Routes and settings: `services/ooh-py/README.md`. Env prefix `OOH_`, default port 8510.
 
 - **Status:** built and tested (count: docs/test-counts.md). **Not in force.** No agent is built (the 23-capability
-  roster is data; names provisional pending the blueprint). Finance (31), vendor ordering, e-signature and inventory
+  roster is data, with the blueprint's section 40 names and the section 42 initial cell). Finance (31), vendor ordering, e-signature and inventory
   data are `NOT_CONNECTED`: Andre verifies client funds through his approval gate with the bank's reference, and
   places every order with the vendor himself; this service decides whether he may.
 - **Andre only:** Director / P&L, Buyer and signer — the commercial model, the sell price and buy limit, the client's

@@ -187,6 +187,11 @@ def _main(work: Path) -> int:
         check("the roster is 23 capabilities as data, none built, none able to commit",
               roster["total"] == 23 and roster["built"] == 0
               and all(x["can_commit"] is False for x in roster["capabilities"]))
+        check("the roster carries the blueprint's section 40 names and the section 42 cell, none built yet",
+              roster["capabilities"][4]["capability"] == "Avails/Availability"
+              and roster["capabilities"][19]["capability"] == "Billing/Reconciliation"
+              and roster["initial_cell"] == ["C04", "C05", "C13", "C17", "C20"]
+              and all(x["build_state"] == "NOT_BUILT_YET" for x in roster["capabilities"]))
 
         # --- tenants ------------------------------------------------------------------------------------------------
         agent_t = a.post("/tenants", {"request_id": rid(), "tenant_id": "acme-live"})
@@ -227,10 +232,13 @@ def _main(work: Path) -> int:
                                           **extra}, andre=andre)
 
         # --- the lifecycle -----------------------------------------------------------------------------------------
-        steps_ok = go("BRIEF_CONFIRMED").status_code == 200 and go("PLANNING").status_code == 200
+        steps_ok = go("BRIEF_VALIDATED").status_code == 200 and go("PLAN_DRAFTED").status_code == 200
         gated = go("PURCHASE_AUTHORIZED", andre=True)
         skipped = go("PROPOSAL_SENT", andre=True)
-        check("the lifecycle advances step by step; a gated state and a skipped step are refused even for Andre",
+        agent_plan = go("PLAN_APPROVED")
+        steps_ok = steps_ok and agent_plan.status_code == 403 and go("PLAN_APPROVED", andre=True).status_code == 200
+        check("the lifecycle advances step by step (only Andre approves the plan); a gated state and a skipped step "
+              "are refused even for Andre",
               steps_ok and gated.status_code == 409 and gated.json()["detail"] == "TRANSITION_GATED"
               and skipped.status_code == 409 and skipped.json()["detail"] == "TRANSITION_NOT_ALLOWED")
         uid = a.post(C + "/inventory", {"request_id": rid(), "vendor": "lamar", "kind": "static",
@@ -247,7 +255,7 @@ def _main(work: Path) -> int:
               early.status_code == 409 and moved and q.status_code == 201
               and q.json()["evidence_class"] == "VENDOR_ASSERTED" and held.status_code == 200
               and held.json()["evidence_class"] == "VENDOR_ASSERTED")
-        go("QUOTING")
+        go("AVAILS_REQUESTED")
         c = view()
         cm = a.post(C + "/commercial-model", {"request_id": rid(), "expected_version": c["version"],
                                               "principal_agent_state": "PRINCIPAL", "pricing_method": "DISCLOSED_MARKUP",
@@ -264,7 +272,7 @@ def _main(work: Path) -> int:
               and default_markup.status_code == 409 and default_markup.json()["detail"] == "MARKUP_MISMATCH"
               and sell.status_code == 201 and limit.status_code == 201)
         sell_id = sell.json()["price_id"]
-        go("PROPOSAL_READY")
+        go("QUOTES_VALIDATED")
         go("PROPOSAL_SENT", andre=True)
         c = view()
         ap_agent = a.post(C + "/client-approval", {"request_id": rid(), "expected_version": c["version"],
@@ -292,16 +300,19 @@ def _main(work: Path) -> int:
             return b
 
         f_agent = funds("6000.00", "boa-ach-live-0", andre=False)
+        zero = funds("0.00", "boa-ach-live-9")
         partial = funds("1000.00", "boa-ach-live-1")
         blocked = a.post(C + "/authorizations", auth_body(), andre=True)
-        check("partial funds keep the campaign approved-not-funded and the purchase is refused FUNDS_NOT_VERIFIED; "
+        check("a 0.00 record is refused; partial funds put the campaign in FUNDING_REQUIRED and the purchase is "
+              "refused FUNDS_NOT_VERIFIED; "
               "an agent cannot verify funds", f_agent.status_code == 403 and partial.status_code == 200
-              and partial.json()["state"] == "CLIENT_APPROVED" and blocked.status_code == 409
+              and zero.status_code == 422 and partial.json()["state"] == "FUNDING_REQUIRED"
+              and blocked.status_code == 409
               and blocked.json()["detail"] == "FUNDS_NOT_VERIFIED")
-        reused = funds("5000.00", "boa-ach-live-1")
+        reused = funds("5000.00", "ACH:BOA_ACH_LIVE.1")
         full = funds("5000.00", "boa-ach-live-2")
         fx = full.json().get("exposure", {})
-        check("one bank transfer funds one record; 100% prepaid moves it to FUNDS_VERIFIED, labelled OBSERVED",
+        check("one bank transfer funds one record, however its reference is spelt; 100% prepaid moves it to FUNDS_VERIFIED, labelled OBSERVED",
               reused.status_code == 409 and reused.json()["detail"] == "FUNDS_EVIDENCE_REUSED"
               and full.json()["state"] == "FUNDS_VERIFIED" and fx.get("funding_state") == "CLEARED_FULL"
               and {f["evidence_class"] for f in full.json()["funds"]} == {"OBSERVED"})

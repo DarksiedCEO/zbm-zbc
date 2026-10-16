@@ -27,7 +27,7 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `POST …/transitions` (Andre for the transitions ADR 0019 decision 4 names) | agent, dashboard |
 | `POST …/inventory`, `GET …/inventory/{uid}`, `POST …/inventory/{uid}/availability` | agent, dashboard |
 | `POST …/prices` (sell price and buy limit: Andre) | agent, dashboard |
-| `POST …/commercial-model`, `…/client-approval`, `…/funds-verifications`, `…/authorizations` | Andre |
+| `POST …/commercial-model`, `…/client-approval`, `…/funds-verifications`, `…/funds-reconfirmations`, `…/authorizations` | Andre |
 | `GET …/authorizations/{aid}`; `POST …/authorizations/{aid}/submit`, `…/outcome` | readers; Andre |
 | `POST /jobs/integrity/run` | scheduler |
 | `GET /audit/integrity`, `/audit/export`, `/audit/evidence` | dashboard, compliance |

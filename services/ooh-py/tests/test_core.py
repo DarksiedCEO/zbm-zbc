@@ -98,9 +98,9 @@ def test_tenants_are_andres_and_isolated(h):
                      {"request_id": rid(), "vendor": "lamar", "kind": "static", "market": "la",
                       "vendor_unit_ref": "x1"}), 404, "CAMPAIGN_NOT_FOUND")
     h.refused(h.post(f"/tenants/acme/campaigns/{globex}/transitions",
-                     {"request_id": rid(), "to": "BRIEF_CONFIRMED", "expected_state": "DRAFT", "expected_version": 1,
+                     {"request_id": rid(), "to": "BRIEF_VALIDATED", "expected_state": "INTAKE", "expected_version": 1,
                       "reason": "CROSS_TENANT"}), 404, "CAMPAIGN_NOT_FOUND")
-    assert h.view("globex", globex)["state"] == "DRAFT"
+    assert h.view("globex", globex)["state"] == "INTAKE"
     h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["la"]},
                      caller="hub", tenant="acme"), 403, "CALLER_NOT_ALLOWED")   # the hub only reads
 
@@ -220,11 +220,43 @@ def test_constitution_and_roster_are_data(h):
     assert r["total"] == 23 and r["built"] == 0 and len({x["capability_id"] for x in r["capabilities"]}) == 23
     cell = [x for x in r["capabilities"] if x["initial_cell"]]
     rest = [x for x in r["capabilities"] if not x["initial_cell"]]
-    assert cell and all(x["status"] == policy.ROSTER_ACTIVE_STATUS for x in cell)
+    assert cell and all(x["status"] == policy.ROSTER_CELL_STATUS for x in cell)
     assert all(x["status"] == "REGISTERED_INACTIVE_READY" for x in rest)
     assert all(x["can_commit"] is False and x["built"] is False and x["authority"] == "PREPARE_ONLY"
                for x in r["capabilities"])
     h.refused(h.get("/roster", caller="ooh_agent"), 403, "CALLER_NOT_ALLOWED")
+
+
+SECTION_40 = ["Department Coordination", "Client Fit", "Market/Geography Intelligence", "Inventory/Operator Intelligence",
+              "Avails/Availability", "Audience/Mobility Intelligence", "Pricing/Transaction Evidence", "Planning",
+              "Proposal/Estimation", "Procurement Liaison", "Contract/Terms Control", "Purchase Authorization Control",
+              "Creative Suitability/Specs", "Production/Trafficking", "Regulatory/Permit Intelligence",
+              "Programmatic DOOH", "Proof-of-Posting/Delivery Verification", "Outage/Makegood Control",
+              "Measurement/Attribution", "Billing/Reconciliation", "Vendor Relationship Intelligence",
+              "Quality/Error/Agent Performance", "Knowledge/Documentation/Recovery"]
+
+
+def test_roster_is_the_section_40_map_and_the_section_42_cell(h):
+    r = h.ok(h.get("/roster"))
+    assert [x["capability"] for x in r["capabilities"]] == SECTION_40
+    assert r["initial_cell"] == ["C04", "C05", "C13", "C17", "C20"]
+    cell = [x for x in r["capabilities"] if x["initial_cell"]]
+    assert [x["capability"] for x in cell] == ["Inventory/Operator Intelligence", "Avails/Availability",
+                                               "Creative Suitability/Specs", "Proof-of-Posting/Delivery Verification",
+                                               "Billing/Reconciliation"]
+    assert all(x["status"] == "INITIAL_CELL" and x["build_state"] == "NOT_BUILT_YET" for x in cell)
+    assert "C18" in next(x for x in cell if x["capability_id"] == "C20")["note"]
+    assert all("provisional" not in json.dumps(x) for x in r["capabilities"])
+
+
+def test_state_vocabulary_marks_what_is_beyond_section_4(h):
+    c = h.ok(h.get("/constitution"))
+    assert {"INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED",
+            "FUNDING_REQUIRED", "CLIENT_HOLD", "VENDOR_HOLD"} == set(c["section_4_states"])
+    assert set(c["beyond_section_4"]) == {"PROPOSAL_SENT", "ORDER_SUBMITTED", "CHANGE_REQUESTED"}
+    assert set(c["not_built"]) == {"IN_PRODUCTION", "LIVE", "COMPLETED", "RECONCILED", "CLOSED"}
+    assert set(c["section_4_states"]) | set(c["beyond_section_4"]) | set(c["names_unconfirmed"]) == \
+        set(c["campaign_states"]) | set(c["exception_states"])
 
 
 def test_ledger_down_means_nothing_takes_effect(h):
@@ -242,7 +274,7 @@ def _full_story(h) -> dict:
     h.ok(h.submit(ctx))
     h.ok(h.outcome(ctx))
     other = h.funded("globex")
-    h.ok(h.go("globex", other["cid"], "ON_HOLD"))
+    h.ok(h.go("globex", other["cid"], "CLIENT_HOLD"))
     h.ok(h.switch("capability:prices"))
     return ctx
 

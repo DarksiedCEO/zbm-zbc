@@ -404,7 +404,9 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                 "price_types": list(policy.PRICE_TYPES), "evidence_classes": list(policy.EVIDENCE_CLASSES),
                 "decisions": list(policy.DECISIONS), "decision_self_authorizes": False,
                 "campaign_states": list(policy.CAMPAIGN_STATES), "exception_states": list(policy.EXCEPTION_STATES),
-                "campaign_gated": list(policy.CAMPAIGN_GATED), "not_in_wave": list(policy.CAMPAIGN_NOT_IN_WAVE),
+                "campaign_gated": list(policy.CAMPAIGN_GATED), "not_built": list(policy.CAMPAIGN_NOT_BUILT),
+                "section_4_states": list(policy.SECTION_4), "beyond_section_4": dict(policy.BEYOND_SECTION_4),
+                "names_unconfirmed": list(policy.NAME_UNCONFIRMED),
                 "availability_states": list(policy.AVAILABILITY_STATES),
                 "submission_states": list(policy.SUBMISSION_STATES)}
 
