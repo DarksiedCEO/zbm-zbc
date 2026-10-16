@@ -73,9 +73,85 @@ def submit(ctx):
     return ctx.h.submit(ctx.c)
 
 
+def submitted(ctx):
+    authorized(ctx)
+    return submit(ctx)
+
+
+def funded_sibling(ctx):
+    """Campaign A funded by transfer "boa-ach-12345"; campaign B (the case's target) client-approved, unfunded."""
+    a = ctx.h.to_proposal_sent()
+    ctx.h.ok(ctx.h.approve(a))
+    ctx.h.ok(ctx.h.funds(a, a["sell"], ref="boa-ach-12345"))
+    return approved_unfunded(ctx)
+
+
+def fund(ctx, ref):
+    return ctx.h.funds(ctx.c, ctx.c["sell"], ref=ref)
+
+
+def fund_amount(ctx, amount):
+    return ctx.h.funds(ctx.c, amount)
+
+
+def two_quotes_one_unit(ctx):
+    """One held unit with two vendor quotes; returns the attempt to price both in one sell price. The campaign is then
+    taken, on the first quote only, to FUNDS_VERIFIED."""
+    h = ctx.h
+    cid = h.campaign()
+    h.plan("acme", cid)
+    uid, q1 = h.held_unit("acme", cid, amount="2500.00")
+    q2 = h.quote("acme", cid, [uid], "2500.00")
+    h.ok(h.go("acme", cid, "AVAILS_REQUESTED"))
+    h.ok(h.commercial("acme", cid, "20.00"))
+    both = h.price("acme", cid, "CLIENT_SELL_PRICE", "6000.00", andre=True, quote_refs=[q1, q2])
+    sp = h.ok(h.price("acme", cid, "CLIENT_SELL_PRICE", "3000.00", andre=True, quote_refs=[q1]), 201)
+    h.ok(h.price("acme", cid, "APPROVED_BUY_LIMIT", "5000.00", andre=True), 201)
+    h.ok(h.go("acme", cid, "QUOTES_VALIDATED"))
+    h.ok(h.go("acme", cid, "PROPOSAL_SENT", andre=True))
+    ctx.c = {"tid": "acme", "cid": cid, "uid": uid, "qid": q1, "q2": q2, "sell_id": sp["price_id"], "sell": "3000.00",
+             "amount": "2500.00"}
+    h.ok(h.approve(ctx.c))
+    h.ok(h.funds(ctx.c, "6000.00"))
+    v = h.view("acme", cid)
+    ctx.c.update(approval_id=v["client_approval"]["approval_id"], terms_id=v["commercial"]["terms_id"])
+    return both
+
+
+def authorize_both_quotes(ctx):
+    return ctx.h.authorize(ctx.c, exact_quote_refs=[ctx.c["qid"], ctx.c["q2"]], authorized_amount="5000.00")
+
+
+def face_registered(ctx):
+    """Face lamar/face-101 registered on campaign A; campaign B is the case's target."""
+    h = ctx.h
+    a = h.campaign()
+    r = h.post(f"/tenants/acme/campaigns/{a}/inventory",
+               {"request_id": H.rid(), "vendor": "lamar", "kind": "static", "market": "los-angeles",
+                "vendor_unit_ref": "face-101"})
+    ctx.c = {"tid": "acme", "cid": h.campaign()}
+    return r
+
+
+def add_face(ctx, ref):
+    return ctx.h.post(f"/tenants/acme/campaigns/{ctx.c['cid']}/inventory",
+                      {"request_id": H.rid(), "vendor": "lamar", "kind": "static", "market": "los-angeles",
+                       "vendor_unit_ref": ref})
+
+
+def dispute(ctx):
+    return ctx.h.go("acme", ctx.c["cid"], "DISPUTED")
+
+
+def outcome(ctx, outcome):
+    return ctx.h.outcome(ctx.c, outcome)
+
+
 ACTIONS = {"approved_unfunded": approved_unfunded, "funded": funded, "authorized": authorized,
            "vendor_text_quote": vendor_text_quote, "authorize": authorize, "authorize_as": authorize_as,
-           "submit": submit}
+           "submit": submit, "submitted": submitted, "funded_sibling": funded_sibling, "fund": fund, "fund_amount": fund_amount,
+           "two_quotes_one_unit": two_quotes_one_unit, "authorize_both_quotes": authorize_both_quotes,
+           "face_registered": face_registered, "add_face": add_face, "dispute": dispute, "outcome": outcome}
 
 
 def observe(ctx) -> dict:
@@ -84,8 +160,12 @@ def observe(ctx) -> dict:
         return {}
     c = h.view("acme", ctx.c["cid"])
     auths = [h.svc.authorizations[a] for a in c["authorization_ids"]]
-    return {"campaign_state": c["state"], "funding_state": c["exposure"]["funding_state"],
-            "vendor_commitment": c["exposure"]["vendor_commitment"], "markup_pct": c["commercial"]["markup_pct"],
+    return {"campaign_state": c["state"], "resume_to": c["resume_to"],
+            "funding_state": c["exposure"]["funding_state"], "funds_count": len(c["funds"]),
+            "vendor_commitment": c["exposure"]["vendor_commitment"],
+            "markup_pct": (c["commercial"] or {}).get("markup_pct"),
             "authorizations": len(auths), "live_authorizations": sum(1 for a in auths if a["status"] == "AUTHORIZED"),
             "orders": len(h.svc.orders),
+            "lamar_faces": sum(1 for u in h.svc.inventory.values() if u["vendor"] == "lamar"
+                               and u["state"] != "WITHDRAWN"),
             "funds_classes": sorted({f["evidence_class"] for f in c["funds"]})}

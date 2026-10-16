@@ -1,10 +1,10 @@
 {
  "library": "ooh-py",
- "version": 1,
+ "version": 2,
  "department": "Out-of-Home & DOOH (department 15)",
  "service": "ooh-py",
  "driver": "ooh_py.py",
- "basis": "ADR 0019 (founder decisions Oct 16 2026; blueprint sections 12, 50-52, 54): agents prepare and never commit; nothing is bought until cleared client funds cover the approved price in full; the purchase authorization must match the quotes exactly (amount, vendor) and is Andre's alone; a second submission of an open order is DUPLICATE_ORDER_BLOCKED; vendor text is untrusted data",
+ "basis": "ADR 0019 (founder decisions Oct 16 2026; blueprint sections 12, 50-52, 54): agents prepare and never commit; nothing is bought until cleared client funds cover the approved price in full; the purchase authorization must match the quotes exactly (amount, vendor) and is Andre's alone; a second submission of an open order is DUPLICATE_ORDER_BLOCKED; vendor text is untrusted data; AEGIS round 1 (Oct 16 2026): one bank transfer funds one campaign whatever its spelling (H1), a unit is never priced or bought twice in one order (H2), one face is one live unit record (M1), a vendor answer never promotes a disputed campaign (M2), a funds record must move money (M3)",
  "variants_per_seed": 3,
  "scenarios": [
   {
@@ -353,6 +353,311 @@
      "args": {
       "key": "vendor_commitment",
       "value": "5000.00"
+     }
+    }
+   ]
+  },
+  {
+   "id": "funds-reference-respelt",
+   "persona": "the same bank transfer presented again for another campaign under another spelling",
+   "basis": "tests/test_aegis_ooh_r1.py REF_VARIANTS (AEGIS H1; ADR 0019 decision 16 and the round 1 fixes)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_aegis_ooh_r1.py",
+      "module": "REF_VARIANTS"
+     }
+    }
+   ],
+   "input_field": "ref",
+   "steps": [
+    {
+     "action": "funded_sibling",
+     "as": "setup"
+    },
+    {
+     "action": "fund",
+     "as": "fund",
+     "args": {
+      "ref": "$ref"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "letter_punct",
+    "soft_hyphen",
+    "zero_width",
+    "fullwidth"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "fund",
+      "codes": [
+       409,
+       422
+      ]
+     }
+    },
+    {
+     "id": "no-funds-recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "funds_count",
+      "value": 0
+     }
+    },
+    {
+     "id": "not-funded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "campaign_state",
+      "value": "CLIENT_APPROVED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "one-unit-two-quotes",
+   "persona": "two vendor quotes for the same face, priced and ordered together",
+   "basis": "tests/test_aegis_ooh_r1.py test_h2_one_unit_in_two_quotes_is_never_priced_or_bought_twice (AEGIS H2)",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "two_quotes_one_unit",
+     "as": "sell_both"
+    },
+    {
+     "action": "authorize_both_quotes",
+     "as": "authorize"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "not-priced-twice",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "sell_both",
+      "field": "detail",
+      "value": "UNIT_IN_MULTIPLE_QUOTES"
+     }
+    },
+    {
+     "id": "not-bought-twice",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "authorize",
+      "field": "detail",
+      "value": "UNIT_IN_MULTIPLE_QUOTES"
+     }
+    },
+    {
+     "id": "no-authorization",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "authorizations",
+      "value": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "face-registered-twice",
+   "persona": "the same billboard face entered again under a respelt vendor reference",
+   "basis": "tests/test_aegis_ooh_r1.py UNIT_REF_VARIANTS (AEGIS M1)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_aegis_ooh_r1.py",
+      "module": "UNIT_REF_VARIANTS"
+     }
+    }
+   ],
+   "input_field": "ref",
+   "steps": [
+    {
+     "action": "face_registered",
+     "as": "setup"
+    },
+    {
+     "action": "add_face",
+     "as": "add",
+     "args": {
+      "ref": "$ref"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "letter_punct",
+    "soft_hyphen",
+    "zero_width",
+    "fullwidth"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "add",
+      "codes": [
+       409,
+       422
+      ]
+     }
+    },
+    {
+     "id": "one-record",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "lamar_faces",
+      "value": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "outcome-during-dispute",
+   "persona": "the agent runtime disputes an order in flight, then the vendor's answer arrives",
+   "basis": "tests/test_aegis_ooh_r1.py test_m2_an_outcome_never_promotes_a_disputed_campaign (AEGIS M2)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_aegis_ooh_r1.py",
+      "test": "test_m2_an_outcome_never_promotes_a_disputed_campaign",
+      "parametrize": true,
+      "field": 0
+     }
+    }
+   ],
+   "input_field": "outcome",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "submitted",
+     "as": "setup"
+    },
+    {
+     "action": "dispute",
+     "as": "dispute"
+    },
+    {
+     "action": "outcome",
+     "as": "outcome",
+     "args": {
+      "outcome": "$outcome"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "answer-recorded",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "outcome",
+      "codes": [
+       200
+      ]
+     }
+    },
+    {
+     "id": "still-disputed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "campaign_state",
+      "value": "DISPUTED"
+     }
+    },
+    {
+     "id": "resume-target-set",
+     "severity": "MUST",
+     "check": "state_in",
+     "args": {
+      "key": "resume_to",
+      "values": [
+       "BOOKED",
+       "FUNDS_VERIFIED"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "funds-of-nothing",
+   "persona": "a funds record that moves no money",
+   "basis": "tests/test_aegis_ooh_r1.py ZERO_AMOUNTS (AEGIS M3)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_aegis_ooh_r1.py",
+      "module": "ZERO_AMOUNTS"
+     }
+    }
+   ],
+   "input_field": "amount",
+   "steps": [
+    {
+     "action": "approved_unfunded",
+     "as": "setup"
+    },
+    {
+     "action": "fund_amount",
+     "as": "fund",
+     "args": {
+      "amount": "$amount"
+     }
+    }
+   ],
+   "transforms": [
+    "zero_width",
+    "fullwidth",
+    "letter_punct",
+    "soft_hyphen"
+   ],
+   "chain_max": 1,
+   "invariants": [
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "fund",
+      "codes": [
+       422
+      ]
+     }
+    },
+    {
+     "id": "no-funds-recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "funds_count",
+      "value": 0
+     }
+    },
+    {
+     "id": "not-promoted",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "campaign_state",
+      "value": "CLIENT_APPROVED"
      }
     }
    ]

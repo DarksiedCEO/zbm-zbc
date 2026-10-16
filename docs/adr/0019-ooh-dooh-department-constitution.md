@@ -241,9 +241,10 @@ refuses start).
 - **Re-funding after a change request.** A campaign sent back through `CHANGE_REQUESTED` and re-approved needs a new
   funds verification with a new evidence reference (a bank statement reference will do; the amount may be 0.00 when
   the money already received covers the new price).
-- **War room (ADR 0018):** `devtools/warroom/scenarios/ooh-py.json` with `drivers/ooh_py.py` covers five money and
-  authority scenarios (vendor-text injection, an amount off the quote, vendor substitution, someone other than Andre
-  authorizing, a duplicate submission), all MUST. It does not cover the availability machine, the commercial model
+- **War room (ADR 0018):** `devtools/warroom/scenarios/ooh-py.json` with `drivers/ooh_py.py` covers ten money and
+  authority scenarios, all MUST: vendor-text injection, an amount off the quote, vendor substitution, someone other
+  than Andre authorizing, a duplicate submission, and (AEGIS round 1) a respelt funds reference, one face in two
+  quotes, a respelt face reference, a vendor answer during a dispute, a funds record of 0.00. It does not cover the availability machine, the commercial model
   or the exception states; those are covered by the service's own tests only.
 
 ## Open founder decisions
