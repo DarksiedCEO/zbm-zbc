@@ -153,6 +153,13 @@ _CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|220[0-4]|222[1-9]|22[3-9][0-9]|2[3-6][0
 _CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
 
 
+def _aba_routing(digits: str) -> bool:
+    """A nine-digit ABA routing number: 3, 7, 1 weights over its digits sum to a multiple of ten."""
+    if len(digits) != 9:
+        return False
+    return sum(int(d) * w for d, w in zip(digits, (3, 7, 1) * 3)) % 10 == 0
+
+
 def _luhn_card(digits: str) -> bool:
     """A payment-card number, never stored (re-verification N2)."""
     if not 13 <= len(digits) <= 19 or not _CARD_PREFIX.match(digits) \
@@ -195,9 +202,9 @@ def names_a_card(value: str) -> bool:
             for j in range(i, len(groups)):
                 # card groupings (4-4-4-4, 4-6-5, 4-4-4-4-3) have no group shorter than three digits, so a date's
                 # "-10-17" is never joined into a card; a candidate stops growing past 19 digits
-                # and no group longer than six (an ABA routing number or an account number is never part of one:
-                # third delta review F2)
-                if j > i and not (3 <= len(groups[j]) <= 6 and 3 <= len(groups[i]) <= 6):
+                # and an ABA routing number (nine digits passing the routing checksum) is never joined to another
+                # group (third delta review F2; fourth G1: "4242-424242424242" is still a card)
+                if j > i and not all(len(g) >= 3 and not _aba_routing(g) for g in (groups[i], groups[j])):
                     break
                 joined += groups[j]
                 if len(joined) > 19:

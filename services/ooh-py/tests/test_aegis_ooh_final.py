@@ -454,3 +454,23 @@ def test_f2_amex_grouping_4_6_5_is_still_a_card():
 
 def test_f3_a_long_local_part_before_the_word_at_is_caught():
     assert pii.has_personal_data("a" * 65 + " at x1.org")
+
+
+@pytest.mark.parametrize("ref", ["42424242-42424242", "4242-424242424242", "424242424242-4242", "625094-1006528599016",
+                                 "3782-82246310005"])
+def test_g1_a_card_split_around_a_long_group_is_a_card(acme, ref):
+    assert sc.names_a_card(ref)
+    ctx = _approved(acme)
+    acme.refused(acme.funds(ctx, ctx["sell"], ref=ref), 422, "FUNDS_METHOD_CONFLICT")
+
+
+def test_g3_a_routing_number_is_never_joined_but_a_non_routing_nine_digit_group_is():
+    assert sc._aba_routing("256074974") and sc._aba_routing("021000021") and not sc._aba_routing("424242424")
+    assert not sc.names_a_card("ACH-256074974-4242")             # routing + short account: never joined
+    assert sc.names_a_card("424242424-2424242")                  # nine digits that are no routing number: joined
+    import random
+    rnd = random.Random(11)
+    for _ in range(3000):
+        acct = str(rnd.randint(10 ** 2, 10 ** 12))
+        for routing in ("256074974", "322271627", "314074269", "021000021", "121000358"):
+            assert not sc.names_a_card(f"ACH-{routing}-{acct}"), (routing, acct)
