@@ -188,9 +188,11 @@ class FundsReconfirm(Strict):
 
 
 class Authorize(Strict):
-    """Section 12 OOH_PURCHASE_AUTHORIZATION, as Andre signs it. ``funding_state`` is computed, never supplied."""
+    """Section 12 OOH_PURCHASE_AUTHORIZATION, as Andre signs it. ``funding_state`` is computed, never supplied.
+    ``contract_id``: the vendor contract whose terms Andre approved (OOH-4)."""
     request_id: RequestId
     expected_version: Version
+    contract_id: Id
     inventory_ids: Annotated[list[Id], Field(min_length=1, max_length=200)]
     vendor: Annotated[StrictStr, Field(pattern=VENDOR)]
     exact_quote_refs: Annotated[list[Id], Field(min_length=1, max_length=200)]
@@ -285,6 +287,26 @@ class MarkupEvidence(Strict):
     request_id: RequestId
     kind: Literal[policy.MARKUP_EVIDENCE_KINDS]                      # type: ignore[valid-type]
     doc_ref: Ref
+
+
+class ContractDraft(Strict):
+    """A vendor contract (insertion order) as the vendor's document states it, drafted by a preparer."""
+    request_id: RequestId
+    vendor: Annotated[StrictStr, Field(pattern=VENDOR)]
+    quote_refs: Annotated[list[Id], Field(min_length=1, max_length=200)]
+    total: Amount
+    currency: Annotated[StrictStr, Field(pattern=r"^[A-Z]{3}$")]
+    io_doc_ref: Ref                                                  # the vendor's insertion order / contract
+    cancellation_terms_ref: Ref
+    payment_terms_days: Annotated[StrictInt, Field(ge=0, le=policy.CONTRACT_PAYMENT_TERMS_MAX_DAYS)]
+    vendor_payment_method: Literal[policy.VENDOR_PAYMENT_METHODS]     # type: ignore[valid-type]
+    vendor_text: Optional[Annotated[StrictStr, Field(max_length=DOC_MAX)]] = None
+
+
+class ContractApproval(Strict):
+    """Andre approves the terms of one named contract draft."""
+    request_id: RequestId
+    expected_version: Version                                        # the campaign's
 
 
 class PortSync(Strict):

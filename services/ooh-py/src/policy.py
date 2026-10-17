@@ -136,6 +136,15 @@ COST_BASES = ("VENDOR_QUOTE", "VENDOR_COST_ESTIMATE", "UNKNOWN")
 BRIEF_STATES = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "CHANGE_REQUESTED")
 BRIEF_WINDOW_MAX_DAYS = 731     # a brief's flight window spans at most two years (each flight in it: FLIGHT_MAX_DAYS)
 
+# ---------------------------------------------------------------------------------------------- OOH-4: contracts
+# The vendor contract (insertion order) a purchase is made under. Agents draft it from the vendor's document; only
+# Andre approves its terms; the authorization names it and the order flow moves it.
+CONTRACT_STATES = ("DRAFT", "TERMS_APPROVED_BY_ANDRE", "SUBMITTED", "EXECUTED", "VOID")
+CONTRACT_OPEN = ("DRAFT", "TERMS_APPROVED_BY_ANDRE")
+CONTRACT_WRITABLE = ("QUOTES_VALIDATED", "PROPOSAL_SENT", "CLIENT_APPROVED", "FUNDING_REQUIRED", "FUNDS_VERIFIED",
+                     "PURCHASE_AUTHORIZED")
+CONTRACT_PAYMENT_TERMS_MAX_DAYS = 120
+
 # ---------------------------------------------------------------------------------------------- section 9
 # The longest flight a unit may carry (AEGIS R3: a flight of 0001-01-01..9999-12-31 must not hold a face forever).
 FLIGHT_MAX_DAYS = 366

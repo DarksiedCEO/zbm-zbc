@@ -376,6 +376,8 @@ def test_rejected_order_needs_a_new_authorization_and_the_same_quotes_cannot_dou
     h.refused(h.authorize(ctx), 409, "INVENTORY_NOT_HELD")   # AEGIS M4: hold again, confirmed again, first
     h.ok(h.move("acme", ctx["cid"], ctx["uid"], "HOLD_REQUESTED"))
     h.confirm_hold("acme", ctx["cid"], ctx["uid"], vendor_ref="lamar-hold-78")
+    h.refused(h.authorize(ctx), 409, "CONTRACT_NOT_APPROVED")     # OOH-4: the rejected order's contract is void
+    ctx["contract_id"] = h.contract(ctx)
     a2 = h.ok(h.authorize(ctx), 201)
     ctx2 = {**ctx, "aid": a2["authorization_id"]}
     h.ok(h.submit(ctx2))

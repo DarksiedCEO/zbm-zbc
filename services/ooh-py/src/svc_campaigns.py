@@ -223,7 +223,7 @@ class CampaignsMixin:
             "state": "INTAKE", "version": 1, "resume_to": None, "created_at": at,
             "history": [{"from": None, "to": "INTAKE", "reason": "CREATED", "actor": d["actor"], "at": at}],
             "commercial": None, "current_sell_price_id": None, "buy_limit_id": None, "client_approval": None,
-            "brief": None, "markup_evidence": [],
+            "brief": None, "markup_evidence": [], "contract_ids": [],
             "funds": [], "inventory_ids": [], "price_ids": [], "authorization_ids": []}
 
     def _move(self, c: dict, to: str, reason: str, actor: str, at: str) -> None:
@@ -242,6 +242,7 @@ class CampaignsMixin:
                     a["void_reason"] = f"CAMPAIGN_{to}"
         if to == "CHANGE_REQUESTED":
             c["client_approval"] = None              # the client approves the changed campaign again
+        self.contracts_on_campaign_move(c, to)       # OOH-4: a change or a cancellation voids open contracts
         c["state"] = to
         c["version"] += 1
         c["history"].append({"from": frm, "to": to, "reason": reason, "actor": actor, "at": at})
@@ -1011,6 +1012,9 @@ class CampaignsMixin:
         if a["commercial_terms_ref"] != cm["terms_id"] or ap["terms_id"] != cm["terms_id"] \
                 or a["cancellation_terms_ref"] != cm["cancellation_terms_ref"]:
             return "TERMS_CHANGED"
+        code = self.contract_gate_problem(c, a)      # OOH-4: an approved vendor contract matching exactly
+        if code:
+            return code
         x = self.exposure(c)
         if x["funding_state"] != "CLEARED_FULL":
             return "FUNDS_NOT_VERIFIED"
@@ -1044,7 +1048,7 @@ class CampaignsMixin:
             if prev:
                 return self.authorization_view(prev[1])
             self._expect(c, body)
-            a = {k: body[k] for k in ("inventory_ids", "vendor", "exact_quote_refs", "authorized_amount",
+            a = {k: body[k] for k in ("contract_id", "inventory_ids", "vendor", "exact_quote_refs", "authorized_amount",
                                       "authorized_currency", "client_approval_ref", "commercial_terms_ref",
                                       "cancellation_terms_ref", "signer", "authority_scope", "expires_at")}
             code = self._gate_problem(c, a, at_submit=False)
@@ -1132,6 +1136,7 @@ class CampaignsMixin:
         c = self.campaigns[d["campaign_id"]]
         a.update(submission_state="SUBMISSION_UNKNOWN", channel=d["channel"], submitted_at=at)
         self.orders[d["idempotency_key"]] = d["authorization_id"]
+        self.contracts_on_order_submitted(a)
         for uid in a["inventory_ids"]:
             u = self.inventory[uid]
             u["pre_booking_state"] = u["state"]
@@ -1175,6 +1180,7 @@ class CampaignsMixin:
                 self._clear_hold(u)
         if not accepted:
             a["status"], a["void_reason"] = "VOID", "VENDOR_REJECTED"
+        self.contracts_on_outcome(a, accepted)
         target = "BOOKED" if accepted else "FUNDS_VERIFIED"
         if c["state"] == "DISPUTED":
             # AEGIS M2: a dispute is Andre's to close. The answer is recorded; the campaign stays DISPUTED and will
@@ -1249,5 +1255,6 @@ class CampaignsMixin:
                                           "prices": self.prices, "authorizations": self.authorizations,
                                           "orders": self.orders, "funds_evidence": self.funds_evidence,
                                           "vendors": self.vendors, "pa_determination": self.pa_determination,
-                                          "markets": self.markets, "sources": self.sources, "faces": self.faces},
+                                          "markets": self.markets, "sources": self.sources, "faces": self.faces,
+                                          "contracts": self.contracts},
                                          sort_keys=True))

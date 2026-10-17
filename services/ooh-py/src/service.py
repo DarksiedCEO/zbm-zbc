@@ -39,6 +39,7 @@ from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_campaigns import CampaignsMixin
 from svc_inventory import InventoryMixin
+from svc_contracts import ContractsMixin
 from svc_planning import PlanningMixin
 from svc_tenants import TenantsMixin
 
@@ -67,7 +68,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin):
+class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin, ContractsMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, clock: Optional[Clock] = None,
                  lock_token: Optional[str] = None):
         self.settings = settings
@@ -89,6 +90,7 @@ class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin):
         # the CPA's / counsel's principal-or-agent confirmation, as Andre recorded it (None: UNDETERMINED, locked)
         self.pa_determination: Optional[dict] = None
         self._init_registry()                          # OOH-2: markets (all flags NOT_MET), sources, faces
+        self.contracts: dict[str, dict] = {}           # OOH-4: vendor contracts (insertion orders)
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}

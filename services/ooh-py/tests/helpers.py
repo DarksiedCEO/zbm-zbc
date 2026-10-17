@@ -173,6 +173,7 @@ class Harness:
         for vid, name in VENDORS.items():           # Andre's vendor registry (global): the vendors the suites use
             if vid not in self.svc.vendors:
                 self.vendor(vid, name)
+                self.vendor_methods(vid)            # OOH-4: each vendor's (test) payment terms, from its rate card
         return t
 
     def determine(self, determination: str, confirmed_by: str = "COUNSEL", ref: str = "counsel-memo-test-1"):
@@ -208,6 +209,27 @@ class Harness:
             found = self.ok(self.get("/faces", params={"vendor": vendor, "vendor_face_ref": ref}))
             return found[0]["face_id"]
         return self.ok(r, 201)["face_id"]
+
+    def vendor_methods(self, vid: str, methods: str = "ach,check"):
+        v = self.ok(self.get(f"/vendors/{vid}"))
+        return self.ok(self.post(f"/vendors/{vid}/attributes",
+                                 {"request_id": rid(), "expected_version": v["version"], "attribute": "payment_methods",
+                                  "value": methods, "source_id": self.source(vid)}))
+
+    def contract(self, ctx: dict, quotes: Optional[list] = None, total: Optional[str] = None, vendor: str = "lamar",
+                 method: str = "ach", approve: bool = True, **over) -> str:
+        """A vendor contract for the campaign's quotes, drafted by the agent and (by default) approved by Andre."""
+        base = f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/contracts"
+        body = {"request_id": rid(), "vendor": vendor, "quote_refs": quotes or [ctx["qid"]],
+                "total": total or ctx["amount"], "currency": "USD", "io_doc_ref": "lamar-io-draft-1",
+                "cancellation_terms_ref": "lamar-cxl-30d", "payment_terms_days": 30, "vendor_payment_method": method,
+                **over}
+        kid = self.ok(self.post(base, body), 201)["contract_id"]
+        if approve:
+            v = self.view(ctx["tid"], ctx["cid"])
+            self.ok(self.post(f"{base}/{kid}/approve", {"request_id": rid(), "expected_version": v["version"]},
+                              andre=True))
+        return kid
 
     def vendor(self, vid: str, name: str):
         return self.ok(self.post("/vendors", {"request_id": rid(), "vendor_id": vid, "legal_name": name}, andre=True),
@@ -364,11 +386,16 @@ class Harness:
         c = self.view(tid, ctx["cid"])
         assert c["state"] == "FUNDS_VERIFIED", c["state"]
         ctx.update(approval_id=c["client_approval"]["approval_id"], terms_id=c["commercial"]["terms_id"])
+        ctx["contract_id"] = self.contract(ctx)            # OOH-4: the vendor contract, terms approved by Andre
         return ctx
 
     def auth_body(self, ctx: dict, **over) -> dict:
         c = self.view(ctx["tid"], ctx["cid"])
-        body = {"request_id": rid(), "expected_version": c["version"], "inventory_ids": [ctx["uid"]],
+        if "contract_id" not in over and "contract_id" not in ctx:
+            ctx["contract_id"] = self.contract(ctx)
+            c = self.view(ctx["tid"], ctx["cid"])
+        body = {"request_id": rid(), "expected_version": c["version"],
+                "contract_id": over.pop("contract_id", None) or ctx["contract_id"], "inventory_ids": [ctx["uid"]],
                 "vendor": "lamar", "exact_quote_refs": [ctx["qid"]], "authorized_amount": ctx["amount"],
                 "authorized_currency": "USD", "client_approval_ref": ctx["approval_id"],
                 "commercial_terms_ref": ctx["terms_id"], "cancellation_terms_ref": "lamar-cxl-30d",

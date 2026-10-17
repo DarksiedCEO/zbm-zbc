@@ -313,7 +313,8 @@ def supplier_attr(h, vid, name, value, source=None):
 
 def test_the_supplier_profile_is_sourced_and_vendors_are_never_paid_by_card(acme):
     h = acme
-    v = h.ok(h.get("/vendors/lamar"))
+    h.vendor("bulletin-west", "Bulletin West Outdoor")              # nothing sourced about it yet
+    v = h.ok(h.get("/vendors/bulletin-west"))
     assert v["data_port"] == "NOT_CONNECTED"
     assert all(a == {"status": "UNKNOWN", "value": None} for a in v["attributes"].values())
     h.refused(supplier_attr(h, "lamar", "payment_methods", "ach,card"), 422, "VENDOR_PAYMENT_METHOD_REFUSED")

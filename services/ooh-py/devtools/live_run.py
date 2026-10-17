@@ -381,8 +381,11 @@ def _main(work: Path) -> int:
         approval_id = view()["client_approval"]["approval_id"]
         terms_id = view()["commercial"]["terms_id"]
 
+        contract = {"id": "ooh-ctr-" + "0" * 40}          # replaced by the real contract once it is approved
+
         def auth_body(**over):
-            b = {"request_id": rid(), "expected_version": view()["version"], "inventory_ids": [uid], "vendor": "lamar",
+            b = {"request_id": rid(), "expected_version": view()["version"], "contract_id": contract["id"],
+                 "inventory_ids": [uid], "vendor": "lamar",
                  "exact_quote_refs": [qid], "authorized_amount": "5000.00", "authorized_currency": "USD",
                  "client_approval_ref": approval_id, "commercial_terms_ref": terms_id,
                  "cancellation_terms_ref": "lamar-cxl-30d", "signer": "andre", "authority_scope": "OOH_PURCHASE",
@@ -413,6 +416,26 @@ def _main(work: Path) -> int:
         check("once the proposal went out the flight is locked: a 12-month flight under a 1-month quote is refused",
               relocked.status_code == 409 and relocked.json()["detail"] == "FLIGHT_LOCKED"
               and a.get(f"{C}/inventory/{uid}").json()["flight"] == list(FLIGHT))
+        lv = a.get("/vendors/lamar").json()
+        pm = a.post("/vendors/lamar/attributes", {"request_id": rid(), "expected_version": lv["version"],
+                                                  "attribute": "payment_methods", "value": "ach,check",
+                                                  "source_id": rc_src.json()["source_id"]})
+        k_body = {"request_id": rid(), "vendor": "lamar", "quote_refs": [qid], "total": "5000.00", "currency": "USD",
+                  "io_doc_ref": "lamar-io-live", "cancellation_terms_ref": "lamar-cxl-30d", "payment_terms_days": 30,
+                  "vendor_payment_method": "ach"}
+        k_card = a.post(C + "/contracts", {**k_body, "request_id": rid(), "vendor_payment_method": "card"})
+        k_draft = a.post(C + "/contracts", k_body)
+        kid = k_draft.json()["contract_id"]
+        no_contract = a.post(C + "/authorizations", auth_body(), andre=True)
+        k_agent = a.post(f"{C}/contracts/{kid}/approve", {"request_id": rid(), "expected_version": view()["version"]})
+        k_ok = a.post(f"{C}/contracts/{kid}/approve", {"request_id": rid(), "expected_version": view()["version"]},
+                      andre=True)
+        contract["id"] = kid
+        check("the agent drafts the vendor contract from the IO; card is refused; only Andre approves its terms; no "
+              "purchase without it", pm.status_code == 200 and k_card.status_code == 422
+              and k_draft.status_code == 201 and k_draft.json()["status"] == "DRAFT"
+              and no_contract.json().get("detail") == "CONTRACT_NOT_FOUND" and k_agent.status_code == 403
+              and k_ok.status_code == 200 and k_ok.json()["status"] == "TERMS_APPROVED_BY_ANDRE")
         wrong_amount = a.post(C + "/authorizations", auth_body(authorized_amount="5500.00"), andre=True)
         wrong_vendor = a.post(C + "/authorizations", auth_body(vendor="outfront"), andre=True)
         expired = a.post(C + "/authorizations", auth_body(expires_at=later(days=-1)), andre=True)

@@ -29,7 +29,7 @@ the check.
 | `python:influencer-py` | 441 | pytest collection | — |
 | `python:legal-py` | 319 | pytest collection | — |
 | `python:onboarding-py` | 849 | pytest collection | — |
-| `python:ooh-py` | 321 | pytest collection | — |
+| `python:ooh-py` | 343 | pytest collection | — |
 | `python:sales-py` | 874 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
 | `python:seo-py` | 497 | pytest collection | — |

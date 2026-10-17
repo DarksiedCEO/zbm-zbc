@@ -629,6 +629,20 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                         req: dict = Depends(body(m.FundsReconfirm))) -> dict:
         return svc.reconfirm_funds(scope[1], _id(cid), req)
 
+    @app.post(C + "/contracts", dependencies=auth, status_code=201)
+    def draft_contract(cid: str, req: dict = Depends(body(m.ContractDraft)), scope: tuple = Depends(scoped(*PREP))):
+        """A vendor contract drafted from the vendor's document (OOH-4); it commits nothing."""
+        return svc.draft_contract(scope[0], scope[1], _id(cid), req)
+
+    @app.get(C + "/contracts/{kid}", dependencies=auth)
+    def contract(cid: str, kid: str, scope: tuple = Depends(scoped(*READ))) -> dict:
+        return svc.contract_for(scope[1], _id(cid), _id(kid))
+
+    @app.post(C + "/contracts/{kid}/approve", dependencies=auth)
+    def approve_contract(cid: str, kid: str, scope: tuple = Depends(andre_scoped),
+                         req: dict = Depends(body(m.ContractApproval))) -> dict:
+        return svc.approve_contract(scope[1], _id(cid), _id(kid), req)
+
     @app.post(C + "/authorizations", dependencies=auth, status_code=201)
     def authorize(cid: str, scope: tuple = Depends(andre_scoped), req: dict = Depends(body(m.Authorize))) -> dict:
         return svc.authorize(scope[1], _id(cid), req)
