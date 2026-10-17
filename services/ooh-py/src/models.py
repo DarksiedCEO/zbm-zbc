@@ -263,6 +263,30 @@ class AttributeSet(Strict):
     source_id: Id
 
 
+class Brief(Strict):
+    """The client's brief for a campaign (OOH-3): what the plan must fit."""
+    request_id: RequestId
+    expected_version: Version
+    budget_cap: Amount                                               # the client's budget, all-in
+    currency: Annotated[StrictStr, Field(pattern=r"^[A-Z]{3}$")]
+    formats: Annotated[list[Literal[policy.FORMATS]], Field(min_length=1, max_length=4)]  # type: ignore[valid-type]
+    flight_window_start: Annotated[StrictStr, Field(pattern=DATE)]
+    flight_window_end: Annotated[StrictStr, Field(pattern=DATE)]
+    brief_doc_ref: Ref                                               # the client's brief document
+
+
+class Estimate(Strict):
+    request_id: RequestId
+    method: Literal[policy.ESTIMATE_METHODS]                         # type: ignore[valid-type]
+
+
+class MarkupEvidence(Strict):
+    """Evidence a deal's markup is set from; the commercial model's markup_basis_ref names one of these."""
+    request_id: RequestId
+    kind: Literal[policy.MARKUP_EVIDENCE_KINDS]                      # type: ignore[valid-type]
+    doc_ref: Ref
+
+
 class PortSync(Strict):
     request_id: RequestId
     vendor: Annotated[StrictStr, Field(pattern=VENDOR)]

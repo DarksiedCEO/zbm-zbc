@@ -223,6 +223,7 @@ class CampaignsMixin:
             "state": "INTAKE", "version": 1, "resume_to": None, "created_at": at,
             "history": [{"from": None, "to": "INTAKE", "reason": "CREATED", "actor": d["actor"], "at": at}],
             "commercial": None, "current_sell_price_id": None, "buy_limit_id": None, "client_approval": None,
+            "brief": None, "markup_evidence": [],
             "funds": [], "inventory_ids": [], "price_ids": [], "authorization_ids": []}
 
     def _move(self, c: dict, to: str, reason: str, actor: str, at: str) -> None:
@@ -287,6 +288,10 @@ class CampaignsMixin:
             return "NO_INVENTORY"
         if to == "PLAN_APPROVED" and not all(self.flag_met(mk, "PLANNING_COVERAGE") for mk in c["markets"]):
             return "MARKET_PLANNING_NOT_COVERED"                 # OOH-2: a plan only where ZBM has planning coverage
+        if to == "PLAN_APPROVED":
+            g = self.plan_guard(c)                               # OOH-3: a brief, every cost known, within budget
+            if g:
+                return g
         if to == "PROPOSAL_SENT" and c["current_sell_price_id"] is None:
             return "NO_CURRENT_SELL_PRICE"                   # AEGIS L5: a model reset after the price unseated it
         if to == "QUOTES_VALIDATED":
@@ -324,6 +329,7 @@ class CampaignsMixin:
             self.require_vendor(face["vendor"])
             key = face["unit_key"]
             flight = self._flight(body)
+            self.check_brief_fit(c, face["format"], flight)     # OOH-3: the unit fits the client's brief
             if self._registration_clash(tid, face["vendor"], key, flight, None):
                 raise Conflict(R("UNIT_ALREADY_REGISTERED"))
             uid = derived_id("inv", tid, rk)
@@ -406,6 +412,7 @@ class CampaignsMixin:
             flight = self._flight(body)
             if flight is None:
                 raise Invalid(R("FLIGHT_INVALID"))
+            self.check_brief_fit(c, u["format"], flight)
             if self._registration_clash(tid, u["vendor"], u["unit_key"], flight, uid):
                 raise Conflict(R("UNIT_ALREADY_REGISTERED"))
             # a unit priced or held for another flight goes back to VERIFIED; its quotes are retired
@@ -747,6 +754,8 @@ class CampaignsMixin:
             if c["state"] not in PLANNING_STATES:
                 raise Conflict(R("COMMERCIAL_MODEL_LOCKED"))
             self._expect(c, body)
+            if body["markup_basis_ref"] not in {e["evidence_id"] for e in c["markup_evidence"]}:
+                raise Conflict(R("MARKUP_BASIS_UNKNOWN"))           # OOH-3: the markup is set from recorded evidence
             pa = body["principal_agent_state"]
             if pa != "UNDETERMINED" and pa != self.principal_agent_state():
                 raise Conflict(R("PRINCIPAL_AGENT_NOT_CONFIRMED"))     # only what a CPA / counsel confirmed

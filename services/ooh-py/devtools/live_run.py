@@ -247,6 +247,12 @@ def _main(work: Path) -> int:
         gcid = a.post("/tenants/globex-live/campaigns", {"request_id": rid(), "name": "Other", "markets": ["san-diego"]}
                       ).json()["campaign_id"]
         C = f"{T}/campaigns/{cid}"
+        brief = a.post(C + "/brief", {"request_id": rid(), "expected_version": 1, "budget_cap": "8000.00",
+                                      "currency": "USD", "formats": ["STATIC_BILLBOARD"],
+                                      "flight_window_start": FLIGHT[0], "flight_window_end": FLIGHT[1],
+                                      "brief_doc_ref": "acme-live-brief"})
+        check("the agent records the client's brief (budget, formats, flight window)", brief.status_code == 200
+              and brief.json()["brief"]["budget_cap"] == "8000.00")
         mine = a.get(C, caller="hub", tenant="acme-live")
         other = a.get(f"/tenants/globex-live/campaigns/{gcid}", caller="hub", tenant="acme-live")
         missing = a.get("/tenants/nobody-live/campaigns/" + gcid, caller="hub", tenant="acme-live")
@@ -327,11 +333,25 @@ def _main(work: Path) -> int:
               and held.json()["state"] == "HOLD_CONFIRMED" and held.json()["hold_confirmed_by"] == "andre"
               and held.json()["evidence_class"] == "VENDOR_ASSERTED")
         go("AVAILS_REQUESTED")
+        plan_v = a.get(C + "/plan").json()
+        mkx = a.post(C + "/markup-evidence", {"request_id": rid(), "kind": "COMPARABLE_DEALS",
+                                              "doc_ref": "comparable-deals-live"})
+        mkx_id = mkx.json()["markup_evidence"][-1]["evidence_id"]
         c = view()
+        no_basis = a.post(C + "/commercial-model", {"request_id": rid(), "expected_version": c["version"],
+                                                    "principal_agent_state": "PRINCIPAL",
+                                                    "pricing_method": "DISCLOSED_MARKUP", "markup_pct": "20.00",
+                                                    "markup_disclosed": True, "markup_basis_ref": "rate-card-2026",
+                                                    "presentation": "COST_AND_FEE_BROKEN_OUT",
+                                                    "cancellation_terms_ref": "lamar-cxl-30d"}, andre=True)
+        check("the plan prices the quoted face at its quote and fits the brief; the markup needs recorded evidence",
+              plan_v["lines"][0]["cost"]["basis"] == "VENDOR_QUOTE" and plan_v["budget_fit"] == "WITHIN"
+              and mkx.status_code == 201 and no_basis.status_code == 409
+              and no_basis.json()["detail"] == "MARKUP_BASIS_UNKNOWN")
         cm = a.post(C + "/commercial-model", {"request_id": rid(), "expected_version": c["version"],
                                               "principal_agent_state": "PRINCIPAL", "pricing_method": "DISCLOSED_MARKUP",
                                               "markup_pct": "20.00", "markup_disclosed": True,
-                                              "markup_basis_ref": "rate-card-2026",
+                                              "markup_basis_ref": mkx_id,
                                               "presentation": "COST_AND_FEE_BROKEN_OUT",
                                               "cancellation_terms_ref": "lamar-cxl-30d"}, andre=True)
         agent_sell = price("CLIENT_SELL_PRICE", "6000.00", quote_refs=[qid])

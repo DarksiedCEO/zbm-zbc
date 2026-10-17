@@ -83,6 +83,7 @@ def test_a_plan_needs_planning_coverage_in_every_market_it_names(acme):
     c = h.ok(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "Two Markets",
                                                 "markets": ["los-angeles", "san-diego"]}), 201)
     cid = c["campaign_id"]
+    h.ok(h.brief("acme", cid))
     for to in ("BRIEF_VALIDATED", "PLAN_DRAFTED"):
         h.ok(h.go("acme", cid, to))
     r = h.refused(h.go("acme", cid, "PLAN_APPROVED", andre=True), 409, "TRANSITION_GUARD_FAILED")

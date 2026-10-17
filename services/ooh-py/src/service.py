@@ -39,6 +39,7 @@ from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_campaigns import CampaignsMixin
 from svc_inventory import InventoryMixin
+from svc_planning import PlanningMixin
 from svc_tenants import TenantsMixin
 
 INTERNAL = "ooh"
@@ -66,7 +67,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class OohService(TenantsMixin, CampaignsMixin, InventoryMixin):
+class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, clock: Optional[Clock] = None,
                  lock_token: Optional[str] = None):
         self.settings = settings

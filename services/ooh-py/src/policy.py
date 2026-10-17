@@ -125,6 +125,17 @@ SUPPLIER_ATTRIBUTES = {"operator_type": "operator_type", "formats_offered": "for
                        "cancellation_policy_ref": "ref", "contact_ref": "ref"}
 AVAILS_ANSWERS = ("AVAILABLE", "UNAVAILABLE")
 
+# ---------------------------------------------------------------------------------------------- OOH-3: planning
+# What a deal's markup may be set from (founder: "disclosed and set per deal from evidence"; 15% is a suggestion).
+MARKUP_EVIDENCE_KINDS = ("COMPARABLE_DEALS", "MARKET_RATE_SURVEY", "COST_TO_SERVE", "CLIENT_NEGOTIATION")
+# How a rate card becomes a cost estimate: the card's amount for its period, prorated by calendar day to the flight,
+# rounded half up to the cent. An estimate, never a quote (class ESTIMATED).
+ESTIMATE_METHODS = ("RATE_CARD_PRORATED_DAILY",)
+# Where a plan line's cost comes from, best first. UNKNOWN when nothing is sourced: never filled in.
+COST_BASES = ("VENDOR_QUOTE", "VENDOR_COST_ESTIMATE", "UNKNOWN")
+BRIEF_STATES = ("INTAKE", "BRIEF_VALIDATED", "PLAN_DRAFTED", "CHANGE_REQUESTED")
+BRIEF_WINDOW_MAX_DAYS = 731     # a brief's flight window spans at most two years (each flight in it: FLIGHT_MAX_DAYS)
+
 # ---------------------------------------------------------------------------------------------- section 9
 # The longest flight a unit may carry (AEGIS R3: a flight of 0001-01-01..9999-12-31 must not hold a face forever).
 FLIGHT_MAX_DAYS = 366

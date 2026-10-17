@@ -33,6 +33,7 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `POST …/inventory`, `GET …/inventory/{uid}`, `POST …/inventory/{uid}/availability`, `…/flight`, `…/hold-evidence` | agent, dashboard |
 | `POST …/inventory/{uid}/hold-decisions` (the only way to `HOLD_CONFIRMED`) | Andre |
 | `POST …/prices` (sell price and buy limit: Andre) | agent, dashboard |
+| `POST …/brief`, `…/markup-evidence`, `…/inventory/{uid}/rate-card-estimates`; `GET …/plan` (never the hub) | agent, dashboard (plan: + compliance) |
 | `POST …/commercial-model`, `…/client-approval`, `…/funds-verifications`, `…/funds-reconfirmations`, `…/authorizations` | Andre |
 | `GET …/authorizations/{aid}`; `POST …/authorizations/{aid}/submit`, `…/outcome` | readers; Andre |
 | `POST /jobs/integrity/run` | scheduler |
@@ -63,7 +64,8 @@ supply data).
 ## Layout
 
 `src/policy.py` the constitution as data · `src/svc_campaigns.py` the spine · `src/svc_inventory.py` the OOH-2
-registry (markets, sources, faces, suppliers, avails; [ADR 0020](../../docs/adr/0020-ooh-inventory-operator-registry.md)) · `src/svc_tenants.py` tenants and kill
+registry (markets, sources, faces, suppliers, avails; [ADR 0020](../../docs/adr/0020-ooh-inventory-operator-registry.md)) · `src/svc_planning.py` OOH-3
+planning and pricing (brief, rate-card estimates, plan, markup evidence; [ADR 0021](../../docs/adr/0021-ooh-planning-and-pricing.md)) · `src/svc_tenants.py` tenants and kill
 switches · `src/service.py` record-first plumbing (seo-py's) · `src/api.py` routes and limits · `src/store.py`,
 `src/ledger.py`, `src/founder.py`, `src/serve.py` (seo-py's) · `src/graceful_close.py`, `src/launch_guard.py`
 (shared, byte-identical) · `tests/` (hostile tests of every gate; clocks injected) · `devtools/live_run.py` (the real

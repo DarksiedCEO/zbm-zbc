@@ -22,12 +22,12 @@ def test_every_non_listed_transition_from_draft_is_refused(h):
     for to in policy.ALL_STATES:
         if to in policy.CAMPAIGN_ALLOWED["INTAKE"]:
             continue
-        r = _post_transition(h, "acme", cid, to, "INTAKE", 1, andre=True)
+        r = _post_transition(h, "acme", cid, to, "INTAKE", 2, andre=True)     # version 2: the brief is set
         expected = "STATE_NOT_BUILT" if to in policy.CAMPAIGN_NOT_BUILT else \
             "TRANSITION_GATED" if to in policy.CAMPAIGN_GATED else "TRANSITION_NOT_ALLOWED"
         h.refused(r, 409, expected)
     c = h.view("acme", cid)
-    assert c["state"] == "INTAKE" and c["version"] == 1 and len(c["history"]) == 1
+    assert c["state"] == "INTAKE" and c["version"] == 2 and len(c["history"]) == 1
 
 
 @pytest.mark.parametrize("frm,to", [("INTAKE", "AVAILS_REQUESTED"), ("BRIEF_VALIDATED", "PROPOSAL_SENT"),

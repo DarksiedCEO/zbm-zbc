@@ -590,6 +590,26 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                      scope: tuple = Depends(scoped(*PREP))) -> dict:
         return svc.record_price(scope[0], scope[1], _id(cid), req, andre=andre_if_presented(request))
 
+    @app.post(C + "/brief", dependencies=auth)
+    def brief(cid: str, req: dict = Depends(body(m.Brief)), scope: tuple = Depends(scoped(*PREP))) -> dict:
+        return svc.set_brief(scope[0], scope[1], _id(cid), req)
+
+    @app.post(C + "/inventory/{uid}/rate-card-estimates", dependencies=auth, status_code=201)
+    def rate_card_estimate(cid: str, uid: str, req: dict = Depends(body(m.Estimate)),
+                           scope: tuple = Depends(scoped(*PREP))) -> dict:
+        return svc.estimate_from_rate_card(scope[0], scope[1], _id(cid), _id(uid), req)
+
+    @app.get(C + "/plan", dependencies=auth)
+    def plan(cid: str, scope: tuple = Depends(scoped(*READ))) -> dict:
+        """The plan with vendor cost: preparers and Compliance only (never the hub)."""
+        with svc.lock:
+            return svc.plan(svc._campaign(scope[1], _id(cid)))
+
+    @app.post(C + "/markup-evidence", dependencies=auth, status_code=201)
+    def markup_evidence(cid: str, req: dict = Depends(body(m.MarkupEvidence)),
+                        scope: tuple = Depends(scoped(*PREP))) -> dict:
+        return svc.record_markup_evidence(scope[0], scope[1], _id(cid), req)
+
     # ------------------------------------------------------------------ Andre's gates
 
     @app.post(C + "/commercial-model", dependencies=auth)

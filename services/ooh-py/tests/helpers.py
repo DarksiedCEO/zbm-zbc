@@ -34,6 +34,11 @@ FLIGHT = ("2026-11-01", "2026-11-30")
 VENDORS = {"lamar": "Lamar Advertising Company", "outfront": "Outfront Media", "clear-channel": "Clear Channel Outdoor"}
 
 
+def policy_formats() -> tuple:
+    import policy
+    return policy.FORMATS
+
+
 def rid() -> str:
     return str(uuid.uuid4())
 
@@ -211,7 +216,20 @@ class Harness:
     def campaign(self, tid: str = "acme") -> str:
         c = self.ok(self.post(f"/tenants/{tid}/campaigns", {"request_id": rid(), "name": "Fall Billboards",
                                                             "markets": ["los-angeles"]}), 201)
+        self.ok(self.brief(tid, c["campaign_id"]))          # OOH-3: every suite plans against a client brief
         return c["campaign_id"]
+
+    def brief(self, tid: str, cid: str, **over):
+        c = self.view(tid, cid)
+        body = {"request_id": rid(), "expected_version": c["version"], "budget_cap": "50000.00", "currency": "USD",
+                "formats": list(policy_formats()), "flight_window_start": "2026-10-16",
+                "flight_window_end": "2027-12-31", "brief_doc_ref": "acme-brief-1", **over}
+        return self.post(f"/tenants/{tid}/campaigns/{cid}/brief", body)
+
+    def markup_evidence(self, tid: str, cid: str, kind: str = "COMPARABLE_DEALS") -> str:
+        c = self.ok(self.post(f"/tenants/{tid}/campaigns/{cid}/markup-evidence",
+                              {"request_id": rid(), "kind": kind, "doc_ref": "comparable-deals-2026"}), 201)
+        return c["markup_evidence"][-1]["evidence_id"]
 
     def view(self, tid: str, cid: str) -> dict:
         return self.ok(self.get(f"/tenants/{tid}/campaigns/{cid}"))
@@ -282,9 +300,13 @@ class Harness:
 
     def commercial(self, tid: str, cid: str, markup: str = "20.00", pa: str = "PRINCIPAL", **over):
         c = self.view(tid, cid)
+        prior = self.view(tid, cid)["markup_evidence"]
+        basis = over.pop("markup_basis_ref", None) or (prior[-1]["evidence_id"] if prior
+                                                       else self.markup_evidence(tid, cid))
+        c = self.view(tid, cid)
         body = {"request_id": rid(), "expected_version": c["version"], "principal_agent_state": pa,
                 "pricing_method": "DISCLOSED_MARKUP", "markup_pct": markup, "markup_disclosed": True,
-                "markup_basis_ref": "rate-card-2026", "presentation": "COST_AND_FEE_BROKEN_OUT",
+                "markup_basis_ref": basis, "presentation": "COST_AND_FEE_BROKEN_OUT",
                 "cancellation_terms_ref": "lamar-cxl-30d", **over}
         return self.post(f"/tenants/{tid}/campaigns/{cid}/commercial-model", body, andre=True)
 
