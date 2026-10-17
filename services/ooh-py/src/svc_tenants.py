@@ -10,7 +10,7 @@ Kill switches, each refusing with its own reason code:
   global                 every state change except the kill switches themselves (reads stay available)
   write                  the same, kept separate so Compliance (38) can freeze writes without "global"
   tenant:<id>            everything for that tenant
-  capability:<name>      campaigns, inventory, prices, funds, purchase (authorization), submission
+  capability:<name>      campaigns, inventory, prices, funds, purchase (authorization), submission, registry (OOH-2)
 Engaging is easy, releasing is not: the dashboard, the agent runtime or Compliance (38) may ENGAGE any switch; only
 Andre releases one. An engage the ledger cannot record still takes effect at once, in memory (``volatile``: fail
 closed), and is reported as unrecorded. Switches set by the environment (OOH_KILL_GLOBAL, OOH_KILLED_CAPABILITIES)

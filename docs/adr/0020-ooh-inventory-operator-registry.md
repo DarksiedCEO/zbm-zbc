@@ -20,14 +20,21 @@ fact tied to the source that states it.
 1. **One registry, global** (`src/svc_inventory.py`). Markets, sources and faces are ZBM's knowledge of the market,
    not a client's data, so they are not per tenant. The client hub never reads them (403): a face carries vendor
    cost (`rate_card_amount`), and the hub never shows vendor cost (locked).
-2. **Nothing is invented.** A market's four flags start `NOT_MET`; a face attribute or supplier attribute nobody has
+2. **What is sourced, exactly** (AEGIS wave 2, plan fidelity F-2/F-3). Sourced, with the source's id and date: a
+   face's identity, every face attribute, every avails answer, every supplier attribute. NOT sourced, and recorded as
+   who-said-what instead: a vendor's legal name (Andre's registration), the market names and county scope (policy
+   geography), a readiness flag's `evidence_ref` (a reference Andre or a preparer gives, not a source record), a
+   campaign unit's flight (the plan's, set by a preparer), and an avails answer's `valid_until`. The service checks
+   that a source is of the right vendor; it cannot check that the document really describes that face, format or
+   market — that is the preparer's job and Andre's review.
+3. **Nothing is invented.** A market's four flags start `NOT_MET`; a face attribute or supplier attribute nobody has
    sourced is `{"status": "UNKNOWN", "value": null}`; there are no defaults. Impressions, audience and measurement are
    not attributes: no measurement provider is chosen (a later port).
-3. **Geography** (`policy.MARKETS`): `los-angeles` (Los Angeles County), `orange-county`, `inland-empire` (Riverside
+4. **Geography** (`policy.MARKETS`): `los-angeles` (Los Angeles County), `orange-county`, `inland-empire` (Riverside
    and San Bernardino Counties), `san-diego`, `ventura`, `santa-barbara`, `imperial-az-border` (Imperial County, CA,
    and the Arizona border area, whose Arizona extent is recorded as UNKNOWN until researched). A campaign names only
    registry markets (`MARKET_UNKNOWN`), each once.
-4. **Four independent readiness flags per market** (`policy.READINESS_FLAGS`): `RESEARCH_COVERAGE`,
+5. **Four independent readiness flags per market** (`policy.READINESS_FLAGS`): `RESEARCH_COVERAGE`,
    `PLANNING_COVERAGE`, `EXECUTION_AUTHORIZED`, `OPERATING_MATURITY`, each `NOT_MET | MET` with its evidence
    reference, who set it, when, and its history. No single "active" flag exists and none is derived from another.
    - `POST /ooh/v1/markets/{mid}/readiness`: raising to `MET` is Andre's (`ANDRE_APPROVAL_REQUIRED` otherwise, and the
@@ -39,47 +46,47 @@ fact tied to the source that states it.
      `EXECUTION_AUTHORIZED` — the purchase gate refuses, at authorization and again at submission, any unit whose
      market is not `MET` (`MARKET_EXECUTION_NOT_AUTHORIZED`). `RESEARCH_COVERAGE` and `OPERATING_MATURITY` gate
      nothing yet; they are recorded for later waves.
-5. **Named sources** (`POST /ooh/v1/sources`, preparers): `VENDOR_QUOTE` or `RATE_CARD` (the founder's "vendor quotes
+6. **Named sources** (`POST /ooh/v1/sources`, preparers): `VENDOR_QUOTE` or `RATE_CARD` (the founder's "vendor quotes
    and rate cards now"), of a registered vendor, with the document reference and the date the source states
    (`dated`, never in the future: `SOURCE_DATED_IN_FUTURE`). Class `VENDOR_ASSERTED`. Optional vendor text is
    untrusted data (ADR 0019 decision 19; only its hash reaches the ledger). `VENDOR_API` and `PLATFORM_FEED` are
    named and refused `SOURCE_NOT_CONNECTED`.
-6. **The canonical face** (`POST /ooh/v1/faces`, preparers): one object for every format —
+7. **The canonical face** (`POST /ooh/v1/faces`, preparers): one object for every format —
    `STATIC_BILLBOARD`, `DIGITAL_BILLBOARD`, `TRANSIT_STREET_FURNITURE`, `MOBILE_BILLBOARD` — with its identity
    (vendor, the vendor's face reference, format, market) taken from a named source and stamped with that source's
    id and date. One physical face is one record: `(vendor, normalised reference)` is unique (`FACE_EXISTS`; the
    ADR 0019 M1 normalisation, so `WEST-101`, `west_101` and `w-e-s-t-1-0-1` are one face). `GET /ooh/v1/faces`
    filters by market, format, vendor and (respelt) reference.
-7. **Proof per format** (`policy.PROOF_REQUIREMENTS`, fixed by the format, never settable): static — `POSTING_PHOTO`;
+8. **Proof per format** (`policy.PROOF_REQUIREMENTS`, fixed by the format, never settable): static — `POSTING_PHOTO`;
    digital — `PLAY_LOGS`; transit / street furniture — `INSTALL_PROOF`; mobile — `ROUTE_GPS_PROOF`. Every face and
    every campaign unit carries it. Checking the proof itself is the proof-of-performance wave (C17).
-8. **Sourced attributes** (`POST /ooh/v1/faces/{fid}/attributes`, preparers; `policy.FACE_ATTRIBUTES`): each
+9. **Sourced attributes** (`POST /ooh/v1/faces/{fid}/attributes`, preparers; `policy.FACE_ATTRIBUTES`): each
    attribute has a type and the formats it applies to (`ATTRIBUTE_NOT_FOR_FORMAT`: a mobile billboard has no fixed
    latitude; `ATTRIBUTE_UNKNOWN`; `ATTRIBUTE_VALUE_INVALID`). Every value names a source of the face's own vendor
    (`SOURCE_VENDOR_MISMATCH`) and takes that source's date as its `as_of`. The current value is the one from the most
    recent source (a tie goes to the later record); an older source recorded later is kept in the history,
    `current: false`, and never displaces it. Text attributes are vendor data (untrusted, hash-only on the ledger).
-9. **Supplier schema** (`POST /ooh/v1/vendors/{vid}/attributes`, `GET /ooh/v1/vendors/{vid}`;
+10. **Supplier schema** (`POST /ooh/v1/vendors/{vid}/attributes`, `GET /ooh/v1/vendors/{vid}`;
    `policy.SUPPLIER_ATTRIBUTES`): operator type, formats offered, markets served, payment methods, payment terms,
    cancellation policy reference, contact reference — sourced exactly like face attributes. Vendors are paid by ACH
    or check only (locked): `card` is refused `VENDOR_PAYMENT_METHOD_REFUSED`. Contacts are kept by reference: no
    names, phones or other personal data (the repo is public; the personal-data key refusal still applies). Each
    supplier shows `data_port: NOT_CONNECTED`.
-10. **Campaign units are registry faces** (`POST …/inventory` now takes `face_id` and the flight): vendor, format,
+11. **Campaign units are registry faces** (`POST …/inventory` now takes `face_id` and the flight): vendor, format,
     market, the vendor's reference, the unit key and the proof requirement come from the face. A face outside the
     campaign's markets is `MARKET_NOT_IN_CAMPAIGN`; the free-text body is gone (422). The OOH-1 uniqueness, flight
     and cross-tenant face rules are unchanged.
-11. **Avails** (`POST /ooh/v1/faces/{fid}/avails`, preparers): the vendor's `AVAILABLE | UNAVAILABLE` answer for a
+12. **Avails** (`POST /ooh/v1/faces/{fid}/avails`, preparers): the vendor's `AVAILABLE | UNAVAILABLE` answer for a
     flight, from a named source of that vendor, optionally valid until a time. A unit's move to `HOLD_REQUESTED` is
     refused `AVAILS_UNAVAILABLE` when the vendor's latest unexpired answer for an overlapping flight is
     `UNAVAILABLE`. Holds themselves are ADR 0019's: only Andre confirms one.
-12. **The vendor-API / platform port** (`svc_inventory.NotConnectedInventoryPort`): an interface with no
+13. **The vendor-API / platform port** (`svc_inventory.NotConnectedInventoryPort`): an interface with no
     implementation. `GET /ooh/v1/inventory-port` reports `NOT_CONNECTED`; `POST /ooh/v1/inventory-port/sync` answers
     503 `INVENTORY_PORT_NOT_CONNECTED` and records nothing; `/status` lists `inventory_data`, `measurement` and
     `programmatic_dooh` as `NOT_CONNECTED`. `OOH_INVENTORY_PROVIDER` still refuses start.
-13. **Record-first, replayable.** Every registry change commits through `_commit` and is applied by its `_a_*`
+14. **Record-first, replayable.** Every registry change commits through `_commit` and is applied by its `_a_*`
     handler; the face-key index is rebuilt by replay. Tested: restart gives an identical snapshot.
-14. **Log format 3** (from the hold change, ADR 0019): the unit record shape changed again here; there is no
+15. **Log format 3** (from the hold change, ADR 0019): the unit record shape changed again here; there is no
     migration (the service is unreleased).
 
 ## What OOH-2 does NOT do
