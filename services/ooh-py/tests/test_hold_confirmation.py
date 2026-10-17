@@ -242,7 +242,7 @@ def test_a_version_bump_without_a_move_also_stales_the_evidence(acme):
                 {"request_id": rid(), "expected_version": u["version"], "flight_start": u["flight"][0],
                  "flight_end": u["flight"][1]}))
     u = h.unit_get("acme", cid, uid)
-    assert u["state"] == "HOLD_REQUESTED" and u["hold_evidence"][-1]["status"] == "PENDING_ANDRE"
+    assert u["state"] == "HOLD_REQUESTED" and u["hold_evidence"][-1]["status"] == "STALE"
     h.refused(h.hold_decide("acme", cid, uid, eid), 409, "HOLD_EVIDENCE_STALE")
 
 
@@ -370,3 +370,27 @@ def test_an_extension_request_ends_the_confirmed_hold_until_andre_confirms_again
     assert h.view("acme", cid)["hold_state"] == "HOLD_REQUESTED"
     h.confirm_hold("acme", cid, uid, vendor_ref="lamar-hold-ext")
     assert h.unit_get("acme", cid, uid)["vendor_ref"] == "lamar-hold-ext"
+
+
+def test_the_campaign_hold_state_counts_only_andres_confirmations(acme):
+    h = acme
+    cid, uid, _ = requested(h)
+    h.confirm_hold("acme", cid, uid)
+    assert h.view("acme", cid)["hold_state"] == "HOLD_CONFIRMED"
+    h.svc.inventory[uid]["hold_confirmed_by"] = None              # a confirmed state without Andre's decision
+    assert h.view("acme", cid)["hold_state"] == "HOLD_REQUESTED"
+
+
+def test_the_unit_view_is_a_copy(acme):
+    h = acme
+    cid, uid, _ = requested(h)
+    h.ok(h.hold_evidence("acme", cid, uid), 201)
+    v = h.svc.unit_view(uid)
+    v["hold_evidence"][-1]["status"] = "CONFIRMED_BY_ANDRE"
+    assert h.svc.inventory[uid]["hold_evidence"][-1]["status"] == "PENDING_ANDRE"
+
+
+def test_the_constitution_lists_the_hold_vocabulary(acme):
+    c = acme.ok(acme.get("/constitution"))
+    assert c["availability_andre_only"] == ["HOLD_CONFIRMED"]
+    assert c["hold_evidence_states"][0] == "PENDING_ANDRE" and "REFERENCE_NOT_VERIFIED" in c["hold_reject_reasons"]

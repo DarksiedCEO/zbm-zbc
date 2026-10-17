@@ -410,6 +410,9 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                 "section_4_derived": list(policy.DERIVED_STATES), "beyond_section_4": dict(policy.BEYOND_SECTION_4),
                 "exceptions_built": list(policy.EXCEPTIONS_BUILT),
                 "availability_states": list(policy.AVAILABILITY_STATES),
+                "availability_andre_only": list(policy.AVAILABILITY_ANDRE_ONLY),
+                "hold_evidence_states": list(policy.HOLD_EVIDENCE_STATES),
+                "hold_reject_reasons": list(policy.HOLD_REJECT_REASONS),
                 "submission_states": list(policy.SUBMISSION_STATES)}
 
     @app.get(P + "/roster", dependencies=auth)

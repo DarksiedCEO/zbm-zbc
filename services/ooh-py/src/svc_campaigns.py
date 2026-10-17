@@ -419,6 +419,9 @@ class CampaignsMixin:
             self._clear_hold(u)
         else:
             u["version"] += 1
+            for ev in u.get("hold_evidence", ()):         # evidence about the unit before this change (AEGIS S2-L3)
+                if ev["status"] == "PENDING_ANDRE":
+                    ev["status"] = "STALE"
         for pid in d.get("retired_quotes", []):
             self.prices[pid].update(retired=True, retired_reason="FLIGHT_CHANGED")
         sp = self.prices.get(c["current_sell_price_id"] or "")
@@ -580,7 +583,7 @@ class CampaignsMixin:
             self._unit_move(u, "HOLD_CONFIRMED", d["actor"], at)
             # the hold is for the flight the evidence was for, which is the unit's flight (AEGIS R3-H1)
             u.update(vendor_ref=ev["vendor_ref"], hold_expires_at=ev["hold_expires_at"], hold_flight=list(ev["flight"]),
-                     evidence_class=ev["evidence_class"], hold_confirmed_by=d["actor"],
+                     evidence_class=P.EVIDENCE_ALLOWED["hold_confirmation"][0], hold_confirmed_by=d["actor"],
                      hold_evidence_id=ev["evidence_id"])
             ev["status"] = "CONFIRMED_BY_ANDRE"
         else:
@@ -1132,7 +1135,8 @@ class CampaignsMixin:
         """The section 4 campaign-level HOLD_REQUESTED / HOLD_CONFIRMED, derived from the units (policy.DERIVED_STATES):
         never stored, never read by the purchase gate (which checks every unit itself)."""
         live = [self.inventory[u] for u in c["inventory_ids"] if self.inventory[u]["state"] != "WITHDRAWN"]
-        if live and all(u["state"] == "HOLD_CONFIRMED" and not self._expired(u["hold_expires_at"]) for u in live):
+        if live and all(u["state"] == "HOLD_CONFIRMED" and u.get("hold_confirmed_by") == P.SIGNER
+                        and not self._expired(u["hold_expires_at"]) for u in live):
             return "HOLD_CONFIRMED"
         if any(u["state"] in ("HOLD_REQUESTED", "HOLD_CONFIRMED") for u in live):
             return "HOLD_REQUESTED"
@@ -1153,8 +1157,7 @@ class CampaignsMixin:
 
     def unit_view(self, uid: str) -> dict:
         with self.lock:
-            u = self.inventory[uid]
-            return {**u, "history": [dict(h) for h in u["history"]]}
+            return json.loads(json.dumps(self.inventory[uid]))       # a deep copy (AEGIS S2-L6)
 
     def price_view(self, pid: str) -> dict:
         with self.lock:

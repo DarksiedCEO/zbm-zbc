@@ -80,6 +80,7 @@ AVAILABILITY_ALLOWED = {
     "VERIFIED": ("AVAILABILITY_REQUESTED", "WITHDRAWN", "UNAVAILABLE"),
     "AVAILABILITY_REQUESTED": ("QUOTED",) + _AV_EXIT,
     "QUOTED": ("HOLD_REQUESTED",) + _AV_EXIT,
+    # HOLD_CONFIRMED is a legal move but only through Andre's hold decision (AVAILABILITY_ANDRE_ONLY, below)
     "HOLD_REQUESTED": ("HOLD_CONFIRMED", "QUOTED") + _AV_EXIT,      # QUOTED: the vendor declined the hold
     "HOLD_CONFIRMED": ("HOLD_REQUESTED",) + _AV_EXIT,                # HOLD_REQUESTED: an extension asked for
     "BOOKING_PENDING": (),                                           # set and cleared by the order flow only
