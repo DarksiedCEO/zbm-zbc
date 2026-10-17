@@ -322,8 +322,9 @@ and an expiry that nothing checked (open decision 7). Now:
 The waves 0-1 build had three of the locked decisions as defaults or open questions; they are now enforced:
 
 - **Clients pay by ACH only.** `policy.FUNDS_METHODS = ("ach",)`: a check (or card, wire, cash) for client funds is
-  refused 422. Vendors are paid by ACH or check, never card (`policy.VENDOR_PAYMENT_METHODS`; today it bounds the supplier
-  profile's `payment_methods`, ADR 0020; no vendor-payment flow exists yet). The R3 rail warning (`SAME_REFERENCE_OTHER_RAIL`) is dormant while ACH is the only client rail.
+  refused 422. Vendors are paid by ACH or check, never card (`policy.VENDOR_PAYMENT_METHODS`; it bounds the supplier
+  profile's `payment_methods`, ADR 0020, and every vendor contract's payment method, ADR 0022; paying the vendor is
+  Finance's). The R3 rail warning (`SAME_REFERENCE_OTHER_RAIL`) is dormant while ACH is the only client rail.
   This settles open decision 5.
 - **$10,000 and 7 days are ceilings.** `policy.MAX_PURCHASE_CEILING = "10000.00"` and
   `policy.AUTHORITY_DAYS_CEILING = 7`: `OOH_MAX_PURCHASE_AMOUNT` and `OOH_AUTHORITY_MAX_DAYS` may only lower them

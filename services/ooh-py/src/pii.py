@@ -1,30 +1,50 @@
-"""Personal data in free text (AEGIS wave 2 F-2 and OOH-3/4 security F3). This department keeps no personal data:
-an e-mail address or a phone number in a free-text value is refused (attributes) or redacted (vendor text). The text
-is NFKC-normalised and case-folded first, so full-width or look-alike characters, "[at]" spellings and any
-separators between digits are caught. Names cannot be detected reliably; preparers must not type them."""
+"""Personal data in free text (AEGIS wave 2 F-2, OOH-3/4 security F3, re-verification N1/N3). This department keeps
+no personal data: an e-mail address or a phone number in a free-text value is refused (attributes, campaign names)
+or redacted (vendor text).
+
+Text is NFKC-normalised, zero-width characters and %40 are unfolded, then matched case-insensitively:
+* e-mail: ``@`` / ``[at]`` / ``(at)`` / ``{at}`` (spaces allowed around it and around the dots after it), or the
+  word `` at `` followed by a dotted (or `` dot ``-spelled) domain;
+* phone: a North American number shape (optional +1, 3-3-4 digits with optional separators or parentheses) or ten
+  or more digits in a row. Dates, hours, ZIP+4 and comma-grouped counts are not phone shapes, so OOH text that carries
+  them passes.
+Names, spelled-out digits and letters used as separators cannot be detected reliably: preparers must not type them."""
 
 from __future__ import annotations
 
 import re
 import unicodedata
 
-_EMAIL = re.compile(r"[^\s@]+\s*(?:@|\[at\]|\(at\)|\{at\}|\sat\s)\s*[a-z0-9-]+"
-                    r"(?:(?:\.|\s*\[dot\]\s*|\s*\(dot\)\s*)[a-z]{2,})+")   # a plain dot takes no spaces
-_PHONE = re.compile(r"(?:\d[^a-z\d]{0,3}){6,}\d")
+_ZW = re.compile("[​‌‍⁠﻿­]")
+_DOM = r"[\w-]+"
+_EMAIL_STRONG = re.compile(r"[^\s@]+\s*(?:@|\[at\]|\(at\)|\{at\})\s*" + _DOM +
+                           r"(?:\s*(?:\.|\[dot\]|\(dot\)|\bdot\b)\s*[a-z]{2,})+", re.I)
+_EMAIL_WORD = re.compile(r"\b[\w.+-]+\s+at\s+" + _DOM + r"(?:(?:\.|\s*\[dot\]\s*|\s*\(dot\)\s*|\s+dot\s+)[a-z]{2,})+",
+                         re.I)
+_SEP = "[\\s./_\u2010-\u2015-]*"
+_PHONE = re.compile(r"(?<!\d)(?:\+?1" + _SEP + r")?\(?\d{3}\)?" + _SEP + r"\d{3}" + _SEP + r"\d{4}(?!\d)|(?<!\d)\d{10,}(?!\d)")
 
 
 def _norm(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).casefold()
+    """NFKC; zero-width characters removed; every other control or format character read as a space (it is a space
+    once vendor text is stored, red team OOH-3/4 F4); %40 read as @."""
+    t = unicodedata.normalize("NFKC", text)
+    t = _ZW.sub("", t)
+    t = "".join(" " if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp") else ch for ch in t)
+    return t.replace("%40", "@")
+
+
+def _spans(t: str) -> list:
+    return [m.span() for rx in (_EMAIL_STRONG, _EMAIL_WORD, _PHONE) for m in rx.finditer(t)]
 
 
 def has_personal_data(text: str) -> bool:
-    t = _norm(text)
-    return bool(_EMAIL.search(t) or _PHONE.search(t))
+    return bool(_spans(_norm(text)))
 
 
 def redact(text: str) -> str:
-    """The text with every e-mail- or phone-like span replaced by "[redacted]" (spans found on the normalised text
-    are removed from it; the result is the normalised text)."""
+    """The normalised text with every e-mail- or phone-like span replaced by "[redacted]" (case is kept)."""
     t = _norm(text)
-    t = _EMAIL.sub("[redacted]", t)
-    return _PHONE.sub("[redacted]", t)
+    for rx in (_EMAIL_STRONG, _EMAIL_WORD, _PHONE):
+        t = rx.sub("[redacted]", t)
+    return t

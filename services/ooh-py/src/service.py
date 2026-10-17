@@ -91,6 +91,7 @@ class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin, Co
         self.pa_determination: Optional[dict] = None
         self._init_registry()                          # OOH-2: markets (all flags NOT_MET), sources, faces
         self.contracts: dict[str, dict] = {}           # OOH-4: vendor contracts (insertion orders)
+        self.finance_refs: dict[str, str] = {}         # Finance (31) verification reference -> campaign id
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}

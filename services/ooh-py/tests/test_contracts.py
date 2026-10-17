@@ -232,3 +232,13 @@ def test_a_contract_for_fewer_quotes_than_the_authorization_does_not_cover_it(ac
     h.refused(h.authorize(ctx, **body), 409, "CONTRACT_MISMATCH")
     both = h.contract(ctx, quotes=[q1, q2], total="5000.00")
     h.ok(h.authorize(ctx, **{**body, "contract_id": both}), 201)
+
+
+
+@pytest.mark.parametrize("caller", ["ooh_agent", "dashboard", "compliance_38"])
+def test_no_one_but_andre_approves_a_contract_as(acme, caller):
+    """The war room's seed for someone-else-approves-a-contract: the caller sends no Andre token."""
+    h = acme
+    ctx = to_funded_without_contract(h)
+    kid = h.ok(draft(h, ctx), 201)["contract_id"]
+    assert approve(h, ctx, kid, andre=False, caller=caller).status_code == 403

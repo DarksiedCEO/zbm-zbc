@@ -115,6 +115,8 @@ class PlanningMixin:
             amt, per = self._current_attr(face, "rate_card_amount"), self._current_attr(face, "rate_card_period_days")
             if amt is None or per is None:
                 raise Conflict(R("RATE_CARD_UNKNOWN"))               # no sourced rate card: no estimate
+            if amt["source_id"] != per["source_id"]:
+                raise Conflict(R("RATE_CARD_UNKNOWN"))   # red team F6: amount and period come from ONE rate card
             days = (date.fromisoformat(u["flight"][1]) - date.fromisoformat(u["flight"][0])).days + 1
             cost = (Decimal(amt["value"]) * Decimal(days) / Decimal(per["value"])).quantize(P.CENT,
                                                                                             rounding=ROUND_HALF_UP)
@@ -147,7 +149,8 @@ class PlanningMixin:
                     and p.get("flights", {}).get(u["unit_id"]) == u["flight"] and not self._expired(p["valid_until"]):
                 quotes.append(p)
             elif p["price_type"] == "VENDOR_COST_ESTIMATE" and p.get("method") in P.ESTIMATE_METHODS \
-                    and p.get("flight") == u["flight"] and len(p["inventory_ids"]) == 1:   # rate-card estimates only
+                    and p.get("flight") == u["flight"] and len(p["inventory_ids"]) == 1 \
+                    and p.get("rate_card_source_ids") == self._current_rate_card(u):   # current rate-card ones only
                 estimates.append(p)
         if quotes:
             q = quotes[-1]
@@ -161,6 +164,14 @@ class PlanningMixin:
                     "evidence_class": e["evidence_class"], "split_evenly_from_multi_unit_quote": False}
         return {"basis": "UNKNOWN", "price_id": None, "amount": None, "evidence_class": "UNKNOWN",
                 "split_evenly_from_multi_unit_quote": False}
+
+    def _current_rate_card(self, u: dict) -> Optional[list]:
+        """The source ids of the face's current rate card (red team F6: an estimate from a replaced card is stale)."""
+        face = self.faces.get(u.get("face_id") or "")
+        if face is None:
+            return None
+        amt, per = self._current_attr(face, "rate_card_amount"), self._current_attr(face, "rate_card_period_days")
+        return sorted({amt["source_id"], per["source_id"]}) if amt and per else None
 
     def plan(self, c: dict) -> dict:
         lines, by_vendor, counted = [], {}, set()

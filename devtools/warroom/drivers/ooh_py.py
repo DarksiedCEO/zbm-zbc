@@ -182,6 +182,25 @@ def register_vendor(ctx, vendor_id):
                       andre=True)
 
 
+def contract_drafted(ctx):
+    """A funded campaign (Finance verified) with a vendor contract drafted by the agent, not yet approved."""
+    h = ctx.h
+    ctx.c = h.to_proposal_sent()
+    h.ok(h.approve(ctx.c))
+    h.ok(h.funds(ctx.c, ctx.c["sell"]))
+    h.finance_verify(ctx.c)
+    ctx.c["contract_id"] = h.contract(ctx.c, approve=False)
+    return {"status": 201, "body": {"contract_id": ctx.c["contract_id"]}}
+
+
+def approve_contract_as(ctx, caller):
+    """Andre's contract approval sent by another caller, without an approval token."""
+    h, c = ctx.h, ctx.c
+    v = h.view("acme", c["cid"])
+    return h.client.post(f"/ooh/v1/tenants/acme/campaigns/{c['cid']}/contracts/{c['contract_id']}/approve",
+                         json={"request_id": H.rid(), "expected_version": v["version"]}, headers=h.headers(caller))
+
+
 def hold_evidence_pending(ctx):
     """A campaign with one unit at HOLD_REQUESTED and the vendor's evidence attached by the agent, awaiting Andre."""
     h = ctx.h
@@ -219,7 +238,8 @@ ACTIONS = {"approved_unfunded": approved_unfunded, "funded": funded, "authorized
            "funded_sibling_plain": funded_sibling_plain, "face_ordered_by_another_tenant": face_ordered_by_another_tenant,
            "funded_same_face": funded_same_face, "register_vendor": register_vendor,
            "hold_evidence_pending": hold_evidence_pending,
-           "confirm_hold_via_availability_as": confirm_hold_via_availability_as, "decide_hold_as": decide_hold_as}
+           "confirm_hold_via_availability_as": confirm_hold_via_availability_as, "decide_hold_as": decide_hold_as,
+           "contract_drafted": contract_drafted, "approve_contract_as": approve_contract_as}
 
 
 def observe(ctx) -> dict:
@@ -238,4 +258,5 @@ def observe(ctx) -> dict:
             "lamar_faces": sum(1 for u in h.svc.inventory.values() if u["vendor"] == "lamar"
                                and u["state"] != "WITHDRAWN"),
             "funds_classes": sorted({f["evidence_class"] for f in c["funds"]}),
-            "confirmed_holds": sum(1 for u in h.svc.inventory.values() if u["state"] == "HOLD_CONFIRMED")}
+            "confirmed_holds": sum(1 for u in h.svc.inventory.values() if u["state"] == "HOLD_CONFIRMED"),
+            "approved_contracts": sum(1 for k in h.svc.contracts.values() if k["status"] != "DRAFT")}

@@ -76,9 +76,19 @@ def observed(text: Optional[str]) -> Optional[dict]:
 RAILS = {"ach": "ach", "eft": "ach", "wire": "wire", "check": "check", "cheque": "check", "chk": "check",
          # AEGIS wave 2 red team F2: card, cash and payment-app references are not ACH money (refused as a conflict)
          "card": "card", "visa": "card", "mastercard": "card", "amex": "card", "debit": "card", "credit": "card",
-         "cash": "cash", "zelle": "app", "venmo": "app", "paypal": "app", "cashapp": "app"}
+         "cash": "cash", "zelle": "app", "venmo": "app", "paypal": "app", "cashapp": "app",
+         # re-verification N2: more card, money-order, crypto, wallet and gift-card words
+         "cc": "card", "mc": "card", "creditcard": "card", "debitcard": "card", "discover": "card",
+         "moneyorder": "money_order", "mo": "money_order", "crypto": "crypto", "btc": "crypto", "bitcoin": "crypto",
+         "eth": "crypto", "usdt": "crypto", "usdc": "crypto", "applepay": "app", "googlepay": "app", "gpay": "app",
+         "giftcard": "gift_card"}
 NOISE_WORDS = ("transfer", "xfer", "txn", "trace", "ref", "reference", "conf", "confirmation")
 METHOD_WORDS = tuple(RAILS) + NOISE_WORDS
+# A word may also be a token's PREFIX before a digit (ACH12345) only if it is one of the original rail and noise words
+# or at least four letters long: "cc", "mc", "mo", "btc", "eth" count only as whole tokens, so a bank reference such
+# as "CC4491" or a random "cc3f…" is not mistaken for a card (found as a flaky test, Oct 17).
+_ORIGINAL = ("ach", "eft", "wire", "check", "cheque", "chk") + NOISE_WORDS
+PREFIX_WORDS = tuple(w for w in METHOD_WORDS if w in _ORIGINAL or len(w) >= 4)
 
 
 def _alnum_tokens(value: str) -> list[str]:
@@ -89,7 +99,7 @@ def _split_method(token: str) -> tuple[Optional[str], str]:
     """(the method word the token is or starts with, the rest), or (None, token)."""
     if token in METHOD_WORDS:
         return token, ""
-    for w in sorted(METHOD_WORDS, key=len, reverse=True):
+    for w in sorted(PREFIX_WORDS, key=len, reverse=True):
         if token.startswith(w) and token[len(w):len(w) + 1].isdigit():
             return w, token[len(w):]
     return None, token
@@ -118,6 +128,26 @@ def _spelled_out(value: str) -> list[str]:
         out.append(tok)
         i = j
     return out
+
+
+def _luhn_card(digits: str) -> bool:
+    """A 13-19 digit run that passes the Luhn check: a payment-card number, never stored (re-verification N2)."""
+    if not 13 <= len(digits) <= 19:
+        return False
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2:
+            d = d * 2 - 9 if d > 4 else d * 2
+        total += d
+    return total % 10 == 0
+
+
+def names_a_card(value: str) -> bool:
+    joined = re.sub(r"[^0-9a-z]+", "", unicodedata.normalize("NFKC", value).casefold())
+    words = ("moneyorder", "creditcard", "debitcard", "giftcard", "applepay", "googlepay")
+    return any(w in joined for w in words) or any(_luhn_card(run) for run in re.findall(r"[0-9]{13,19}",
+                                                                                         re.sub(r"[\s-]", "", value)))
 
 
 def funds_ref_parts(value: str) -> tuple[set, str]:
@@ -219,6 +249,8 @@ class CampaignsMixin:
             self.check_kill(tenant=tid, capability="campaigns")
             if len(set(body["markets"])) != len(body["markets"]):
                 raise Invalid(R("INVALID"), field="markets")
+            if pii.has_personal_data(body["name"]):
+                raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"), field="name")   # re-verification N1 (hub reads it)
             for mk in body["markets"]:
                 self.require_market(mk)                          # OOH-2: a market of the registry, never free text
             cid = self._fresh(self.campaigns, derived_id("cmp", tid, actor, rk))   # the caller too (security F1)
@@ -604,6 +636,8 @@ class CampaignsMixin:
                 raise Invalid(R("INVALID"), field="reject_reason")    # a rejection names its reason; a confirm none
             if confirm and self._expired(ev["hold_expires_at"]):
                 raise Conflict(R("HOLD_EXPIRED"))
+            if confirm and self.avails_block(u["face_id"], u["flight"]) is not None:
+                raise Conflict(R("AVAILS_UNAVAILABLE"))       # red team F8: the vendor said no after the request
             data = {"unit_id": uid, "campaign_id": cid, "evidence_id": ev["evidence_id"], "decision": body["decision"],
                     "reject_reason": body.get("reject_reason")}
             self._commit("hold_decided", self._req(data, "andre", rk, body, uid), "andre",
@@ -864,6 +898,8 @@ class CampaignsMixin:
                 raise Invalid(R("INVALID"), field="amount")             # AEGIS M3: a funds record moves money
             if body["currency"] != c["client_approval"]["currency"]:
                 self._refuse("FUNDS_CURRENCY_MISMATCH", c, rk)
+            if names_a_card(body["evidence_ref"]):
+                raise Invalid(R("FUNDS_METHOD_CONFLICT"))           # a card number or a non-ACH instrument (N2)
             rails, ident = funds_ref_parts(body["evidence_ref"])
             if not ident:
                 raise Invalid(R("INVALID"), field="evidence_ref")
@@ -920,6 +956,9 @@ class CampaignsMixin:
                 self._refuse("FUNDS_CURRENCY_MISMATCH", c, rk)
             if Decimal(body["verified_amount"]) <= 0:
                 raise Invalid(R("INVALID"), field="verified_amount")
+            owner = self.finance_refs.get(body["finance_ref"])
+            if owner is not None and owner != cid:
+                self._refuse("FUNDS_EVIDENCE_REUSED", c, rk)          # one Finance reference, one campaign (N4)
             data = {"campaign_id": cid, "approval_id": ap["approval_id"], "verified_amount": body["verified_amount"],
                     "currency": body["currency"], "finance_ref": body["finance_ref"],
                     "evidence_class": "FINANCIALLY_VERIFIED", "source": "FINANCE_31"}
@@ -929,6 +968,7 @@ class CampaignsMixin:
 
     def _a_finance_verified(self, d, at):
         c = self.campaigns[d["campaign_id"]]
+        self.finance_refs[d["finance_ref"]] = d["campaign_id"]
         c["finance_verification"] = {k: d[k] for k in ("approval_id", "verified_amount", "currency", "finance_ref",
                                                        "evidence_class", "source")} | {"verified_at": at}
 
@@ -1312,5 +1352,5 @@ class CampaignsMixin:
                                           "orders": self.orders, "funds_evidence": self.funds_evidence,
                                           "vendors": self.vendors, "pa_determination": self.pa_determination,
                                           "markets": self.markets, "sources": self.sources, "faces": self.faces,
-                                          "contracts": self.contracts},
+                                          "contracts": self.contracts, "finance_refs": self.finance_refs},
                                          sort_keys=True))

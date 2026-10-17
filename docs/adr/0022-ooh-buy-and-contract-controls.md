@@ -78,6 +78,29 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   registry write, every principal/agent field required, caller checks on the registry routes, the face filters,
   registry retries).
 
+### Second round (re-verification at 70e6962 and the red team at 138dcc8)
+
+- **Personal data (N1, N3, F4, F10).** `src/pii.py` rewritten: control and format characters read as spaces (as
+  they are once stored), zero-width characters dropped, `%40` read as `@`; e-mail with `@` / `[at]` (spaces allowed
+  around it and its dots), or ` at ` with a tight or `dot`-spelled domain; phones by North American shape (optional
+  +1, 3-3-4 with any separators incl. dashes) or ten-plus digits. Dates, hours, ZIP+4 and grouped counts now pass.
+  Campaign names and reference attributes are screened too; vendor-text redaction keeps the original case.
+- **Instruments (N2).** More non-ACH words (money order, crypto, wallets, gift cards, `cc`, `mc`) and any 13-19-digit
+  run passing the Luhn check (a card number) refuse a client funds reference. Short words (`cc`, `mc`, `mo`, `btc`,
+  `eth`) count only as whole tokens, never as a prefix before a digit (that misread `CC4491`-style bank references and
+  made the suite flaky).
+- **Finance references (N4).** One Finance (31) reference verifies one campaign (`FUNDS_EVIDENCE_REUSED`).
+- **Rate cards (red team F6).** An estimate needs amount and period from ONE rate card source; an estimate from a
+  card since replaced no longer counts in the plan (re-estimate).
+- **Avails (red team F8).** Andre's hold confirmation is refused `AVAILS_UNAVAILABLE` when the vendor said no after
+  the request.
+- **Untested checks (red team F5a/F5b).** Tests for the gate's cancellation-terms comparison, contract reads through
+  another campaign or tenant, kill switches on every new write, cancellation voiding contracts, supersession scope,
+  quote eligibility in drafts and the plan, the snapshot holding contracts, and caller scopes on the new routes:
+  `tests/test_aegis_ooh_rt34.py`. War room scenario `someone-else-approves-a-contract` (all MUST).
+- Not changed: after a change request, Finance replaying its OLD request gets the idempotent answer (200, the campaign
+  view, which shows no verification) — the standard retry rule; the gate refuses (N5).
+
 ## What OOH-4 does NOT do
 
 - **No signing.** Andre still signs and sends the order outside the system (channel `MANUAL_BY_ANDRE`); there is no

@@ -200,7 +200,7 @@ def test_sec_f3_vendor_text_is_redacted(acme):
     uid = h.unit("acme", cid, ref="vt-1", text="Rep: jane@example.com, cell 213-555-0100. Lit until midnight.")
     vt = h.svc.inventory[uid]["vendor_text"]
     assert vt["personal_data_redacted"] is True
-    assert "jane" not in vt["text"] and "0100" not in vt["text"] and "lit until midnight" in vt["text"]
+    assert "jane" not in vt["text"].lower() and "0100" not in vt["text"] and "Lit until midnight" in vt["text"]
 
 
 # ---------------------------------------------------------------------------------------------- mutation gaps
@@ -302,3 +302,78 @@ def test_sec_f2_a_multi_unit_quote_counts_once_however_many_units_are_live(acme)
     p = h.ok(h.get(f"/tenants/acme/campaigns/{cid}/plan"))
     assert p["totals"]["quoted"] == "20000.00" and len(p["lines"]) == 2
     assert all(ln["cost"]["split_evenly_from_multi_unit_quote"] for ln in p["lines"])
+
+
+# ---------------------------------------------------------------------------------------------- re-verification (70e6962)
+
+@pytest.mark.parametrize("text", ["jane at example dot com", "jane @ example . com", "jane%40example.com",
+                                  "ja​ne@exam​ple.com", "jose@ejemplo-señal.mx", "1 213 555 0100"])
+def test_rv_n1_the_remaining_email_and_phone_spellings_are_caught(acme, text):
+    h = acme
+    fid = _face(h, f"rv-{abs(hash(text)) % 100000}")
+    f = h.ok(h.get(f"/faces/{fid}"))
+    r = h.post(f"/faces/{fid}/attributes", {"request_id": rid(), "expected_version": f["version"],
+                                            "attribute": "location_description", "value": text,
+                                            "source_id": h.source("lamar")})
+    h.refused(r, 422, "ATTRIBUTE_VALUE_PERSONAL_DATA")
+
+
+@pytest.mark.parametrize("text", ["Posting 2026-11-01 to 2026-11-30", "Lit 06:00-24:00 daily", "ZIP 90210-1234",
+                                  "1,250,000 weekly impressions (vendor-stated)", "I-405 N at Wilshire Blvd, exit 55",
+                                  "12345 Ventura Blvd, Studio City CA 91604"])
+def test_rv_n3_ordinary_ooh_text_passes_the_screen(acme, text):
+    h = acme
+    fid = _face(h, f"ok-{abs(hash(text)) % 100000}")
+    f = h.ok(h.get(f"/faces/{fid}"))
+    h.ok(h.post(f"/faces/{fid}/attributes", {"request_id": rid(), "expected_version": f["version"],
+                                             "attribute": "location_description", "value": text,
+                                             "source_id": h.source("lamar")}))
+
+
+def test_rv_n3_redaction_keeps_the_case_and_the_flight_dates(acme):
+    h = acme
+    cid = h.campaign()
+    uid = h.unit("acme", cid, ref="vt-2", text="Flight 2026-11-01..2026-11-30. Call Jane at 213-555-0100.")
+    t = h.svc.inventory[uid]["vendor_text"]["text"]
+    assert "2026-11-01" in t and "Flight" in t and "Jane" in t and "0100" not in t
+
+
+def test_rv_n1_a_campaign_name_with_personal_data_is_refused(acme):
+    r = acme.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "Jane Doe 555-123-4567",
+                                              "markets": ["los-angeles"]})
+    acme.refused(r, 422, "ATTRIBUTE_VALUE_PERSONAL_DATA")
+
+
+@pytest.mark.parametrize("ref", ["money-order-5", "MO-778", "crypto-1", "btc-9a", "usdt-12", "cc-4242", "mc-881",
+                                 "creditcard-1", "applepay-7", "giftcard-55", "4111-1111-1111-1111", "4111111111111111"])
+def test_rv_n2_more_non_ach_instruments_and_card_numbers_are_refused(acme, ref):
+    h = acme
+    ctx = h.to_proposal_sent()
+    h.ok(h.approve(ctx))
+    h.refused(h.funds(ctx, ctx["sell"], ref=ref), 422, "FUNDS_METHOD_CONFLICT")
+
+
+def test_rv_n4_one_finance_reference_verifies_one_campaign(acme):
+    h = acme
+    h.tenant("globex")
+    a = h.funded("acme")
+    b = h.to_proposal_sent("globex")
+    h.ok(h.approve(b))
+    h.ok(h.funds(b, b["sell"]))
+    ref = h.view("acme", a["cid"])["finance_verification"]["finance_ref"]
+    ap = h.view("globex", b["cid"])["client_approval"]
+    r = h.post(f"/tenants/globex/campaigns/{b['cid']}/finance-verifications",
+               {"request_id": rid(), "approval_id": ap["approval_id"], "verified_amount": ap["amount"],
+                "currency": "USD", "finance_ref": ref, "cleared": True}, caller="finance_31")
+    h.refused(r, 409, "FUNDS_EVIDENCE_REUSED")
+
+
+
+@pytest.mark.parametrize("ref", ["boa-ach-cc4491", "CC4491", "mc3f0a", "boa-mo123", "eth1", "btc22"])
+def test_rv_n2_short_instrument_words_count_only_as_whole_tokens(acme, ref):
+    """An ACH reference that merely starts with "cc", "mc", "mo", "eth" or "btc" before a digit is not a card,
+    a money order or crypto (a random funds reference made this test suite flaky before)."""
+    h = acme
+    ctx = h.to_proposal_sent()
+    h.ok(h.approve(ctx))
+    h.ok(h.funds(ctx, ctx["sell"], ref=ref))

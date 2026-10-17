@@ -20,14 +20,16 @@ def bare_campaign(h):
                 201)["campaign_id"]
 
 
-def rate_card(h, fid, amount="2800.00", period="28", dated=None):
+def rate_card(h, fid, amount="2800.00", period="28", dated=None, source=None):
+    """Both values from ONE rate card source (an estimate refuses a card mixed from two)."""
+    sid = source or h.source("lamar", dated=dated)
     for name, value in (("rate_card_amount", amount), ("rate_card_period_days", period)):
         if value is None:
             continue
         f = h.ok(h.get(f"/faces/{fid}"))
         h.ok(h.post(f"/faces/{fid}/attributes", {"request_id": rid(), "expected_version": f["version"],
-                                                 "attribute": name, "value": value,
-                                                 "source_id": h.source("lamar", dated=dated)}))
+                                                 "attribute": name, "value": value, "source_id": sid}))
+    return sid
 
 
 def estimate(h, cid, uid):
@@ -94,15 +96,15 @@ def test_an_estimate_comes_only_from_a_sourced_rate_card(acme):
     uid = h.unit("acme", cid, ref="e-1")
     fid = h.svc.inventory[uid]["face_id"]
     h.refused(estimate(h, cid, uid), 409, "RATE_CARD_UNKNOWN")                 # nothing sourced: no estimate
-    rate_card(h, fid, period=None)
+    sid = rate_card(h, fid, period=None)
     h.refused(estimate(h, cid, uid), 409, "RATE_CARD_UNKNOWN")                 # half a rate card is no rate card
-    rate_card(h, fid, amount=None)
+    rate_card(h, fid, amount=None, source=sid)
     p = h.ok(estimate(h, cid, uid), 201)
     # 2800.00 per 28 days, a 30-day flight (Nov 1-30): 3000.00
     assert (p["amount"], p["price_type"], p["evidence_class"], p["method"]) == \
         ("3000.00", "VENDOR_COST_ESTIMATE", "ESTIMATED", "RATE_CARD_PRORATED_DAILY")
     assert p["flight_days"] == 30 and p["rate_card_amount"] == "2800.00" and p["rate_card_period_days"] == 28
-    assert len(p["rate_card_source_ids"]) == 2
+    assert p["rate_card_source_ids"] == [sid]                                  # one rate card, named
     assert h.ledger.of_type("rate_card_estimate_recorded")
 
 

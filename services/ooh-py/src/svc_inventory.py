@@ -70,7 +70,7 @@ def parse_value(kind: str, value: str):
     """The typed value of an attribute (a string in the body), or raises Invalid. Text is vendor data: untrusted."""
     def bad():
         return Invalid(R("ATTRIBUTE_VALUE_INVALID"))
-    if kind == "text" and personal_data_in(value):      # references cannot hold "@"; dates in them are not phones
+    if kind in ("text", "ref") and personal_data_in(value):   # red team OOH-3/4 F10: refs too (dates are not phones)
         raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"))
     if kind in ("lat", "lon"):
         if not (_LAT if kind == "lat" else _LON).fullmatch(value):
