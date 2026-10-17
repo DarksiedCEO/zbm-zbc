@@ -17,8 +17,10 @@ def test_starts_verified_with_every_port_not_connected(h):
     st = h.ok(h.get("/status"))
     assert st["integrity"]["ok"] is True and st["status"] == "ok" and st["andre_approvals_configured"] is True
     assert set(st["ports"].values()) == {"NOT_CONNECTED"}
-    assert st["funds_verification"] == {"mode": "andre_gate", "sources_connected": ["ANDRE_GATE"],
-                                        "finance_31": "NOT_CONNECTED", "policy": "CLIENT_PREPAY_REQUIRED"}
+    assert st["funds_verification"] == {"mode": "andre_gate_observed_and_finance_31_verified",
+                                        "sources_connected": ["ANDRE_GATE"],
+                                        "finance_31": "INBOUND_ROUTE_caller_finance_31",
+                                        "finance_verification_required": True, "policy": "CLIENT_PREPAY_REQUIRED"}
     assert st["commercial"] == {"suggested_markup_pct": "15.00", "suggested_markup_applied": False}
     assert st["agents_built"] == 0
     assert h.client.get("/health").json() == {"status": "ok"}

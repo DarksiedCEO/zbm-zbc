@@ -223,7 +223,7 @@ class CampaignsMixin:
             "state": "INTAKE", "version": 1, "resume_to": None, "created_at": at,
             "history": [{"from": None, "to": "INTAKE", "reason": "CREATED", "actor": d["actor"], "at": at}],
             "commercial": None, "current_sell_price_id": None, "buy_limit_id": None, "client_approval": None,
-            "brief": None, "markup_evidence": [], "contract_ids": [],
+            "brief": None, "markup_evidence": [], "contract_ids": [], "finance_verification": None,
             "funds": [], "inventory_ids": [], "price_ids": [], "authorization_ids": []}
 
     def _move(self, c: dict, to: str, reason: str, actor: str, at: str) -> None:
@@ -242,6 +242,7 @@ class CampaignsMixin:
                     a["void_reason"] = f"CAMPAIGN_{to}"
         if to == "CHANGE_REQUESTED":
             c["client_approval"] = None              # the client approves the changed campaign again
+            c["finance_verification"] = None         # and Finance verifies the funds for that approval again
         self.contracts_on_campaign_move(c, to)       # OOH-4: a change or a cancellation voids open contracts
         c["state"] = to
         c["version"] += 1
@@ -884,6 +885,37 @@ class CampaignsMixin:
         else:
             c["version"] += 1
 
+    def finance_verify(self, tid: str, cid: str, body: dict) -> dict:
+        """Finance (31) verifies cleared client funds for the CURRENT client approval (locked, Oct 16 round 2). It
+        moves no campaign state: Andre's gate does that; this is the verification the purchase gate requires."""
+        with self.lock:
+            self._gate()
+            c = self._campaign(tid, cid)
+            rk = self.rk("finance_verification", cid, body)
+            if self._idem("finance_31", rk, body):
+                return self.campaign_view(tid, cid)
+            self.check_kill(tenant=tid, capability="funds")
+            if c["state"] not in FUNDABLE + ("FUNDS_VERIFIED", "PURCHASE_AUTHORIZED"):
+                self._refuse("STATE_NOT_ELIGIBLE", c, rk)
+            ap = c["client_approval"]
+            if ap is None or body["approval_id"] != ap["approval_id"]:
+                self._refuse("CLIENT_APPROVAL_MISMATCH", c, rk)
+            if body["currency"] != ap["currency"]:
+                self._refuse("FUNDS_CURRENCY_MISMATCH", c, rk)
+            if Decimal(body["verified_amount"]) <= 0:
+                raise Invalid(R("INVALID"), field="verified_amount")
+            data = {"campaign_id": cid, "approval_id": ap["approval_id"], "verified_amount": body["verified_amount"],
+                    "currency": body["currency"], "finance_ref": body["finance_ref"],
+                    "evidence_class": "FINANCIALLY_VERIFIED", "source": "FINANCE_31"}
+            self._commit("finance_verified", self._req(data, "finance_31", rk, body, cid), "finance_31",
+                         evidence=self._ev("client_funds_verified_by_finance_31", cid, data, "finance_31", rk))
+            return self.campaign_view(tid, cid)
+
+    def _a_finance_verified(self, d, at):
+        c = self.campaigns[d["campaign_id"]]
+        c["finance_verification"] = {k: d[k] for k in ("approval_id", "verified_amount", "currency", "finance_ref",
+                                                       "evidence_class", "source")} | {"verified_at": at}
+
     def reconfirm_funds(self, tid: str, cid: str, body: dict) -> dict:
         """AEGIS M3: after a change request and a new client approval, Andre re-confirms that the cleared funds
         already recorded on this campaign cover the newly approved amount. No new reference, no new money: the
@@ -1023,6 +1055,12 @@ class CampaignsMixin:
                           "authorization_id")), Decimal(0))
         if others + amount > Decimal(x["client_funds_received"]):
             return "FUNDS_INSUFFICIENT"
+        if P.FINANCE_VERIFICATION_REQUIRED:          # locked: Finance (31) verifies the funds cleared
+            fv = c.get("finance_verification")
+            if fv is None or fv["approval_id"] != ap["approval_id"] or fv["currency"] != a["authorized_currency"] \
+                    or Decimal(fv["verified_amount"]) < Decimal(ap["amount"]) \
+                    or Decimal(fv["verified_amount"]) < others + amount:
+                return "FUNDS_NOT_FINANCE_VERIFIED"
         return None
 
     def _face_on_open_order(self, unit: dict, own: Optional[str]) -> bool:

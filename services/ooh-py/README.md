@@ -36,6 +36,7 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `POST …/brief`, `…/markup-evidence`, `…/inventory/{uid}/rate-card-estimates`; `GET …/plan` (never the hub) | agent, dashboard (plan: + compliance) |
 | `POST …/contracts` (draft from the vendor's IO); `GET …/contracts/{kid}`; `POST …/contracts/{kid}/approve` | agent, dashboard; readers; Andre |
 | `POST …/commercial-model`, `…/client-approval`, `…/funds-verifications`, `…/funds-reconfirmations`, `…/authorizations` | Andre |
+| `POST …/finance-verifications` (Finance's verification of cleared funds; the purchase gate needs it) | finance_31 |
 | `GET …/authorizations/{aid}`; `POST …/authorizations/{aid}/submit`, `…/outcome` | readers; Andre |
 | `POST /jobs/integrity/run` | scheduler |
 | `GET /audit/integrity`, `/audit/export`, `/audit/evidence` | dashboard, compliance |
@@ -45,7 +46,7 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | Variable | Meaning |
 |---|---|
 | `OOH_SERVICE_TOKEN` | bearer token (32..512 printable ASCII); required |
-| `OOH_CALLER_TOKENS` | JSON `{caller: token}` for `dashboard`, `ooh_agent`, `scheduler`, `hub`, `compliance_38` |
+| `OOH_CALLER_TOKENS` | JSON `{caller: token}` for `dashboard`, `ooh_agent`, `scheduler`, `hub`, `compliance_38`, `finance_31` |
 | `OOH_TENANT_TOKENS` | JSON `{tenant_id: token}` for the hub's client views |
 | `OOH_ANDRE_APPROVAL_TOKEN` | Andre's approval token; unset or equal to any other token = every approval refused |
 | `OOH_DATA_DIR` | absolute, owned, mode 700 directory for the hash-chained log; required in production |

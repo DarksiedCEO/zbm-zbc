@@ -58,6 +58,13 @@ class PlanningMixin:
             if ws > we or (we - ws).days + 1 > P.BRIEF_WINDOW_MAX_DAYS:
                 raise Invalid(R("FLIGHT_INVALID"))
             window = [ws.isoformat(), we.isoformat()]
+            # AEGIS OOH-3/4 source F-1: a new brief must still hold every live unit (else the plan would hold units
+            # outside it); withdraw or move a unit first
+            probe = {"formats": sorted(body["formats"]), "flight_window": window}
+            for uid in c["inventory_ids"]:
+                u = self.inventory[uid]
+                if u["state"] not in ("WITHDRAWN", "UNAVAILABLE"):
+                    self._fits(probe, u["format"], u["flight"])
             data = {"campaign_id": cid, "brief": {"budget_cap": body["budget_cap"], "currency": body["currency"],
                                                   "formats": sorted(body["formats"]), "flight_window": window,
                                                   "brief_doc_ref": body["brief_doc_ref"]}}
@@ -75,6 +82,10 @@ class PlanningMixin:
         b = c.get("brief")
         if b is None:
             raise Conflict(R("BRIEF_REQUIRED"))
+        self._fits(b, fmt, flight)
+
+    @staticmethod
+    def _fits(b: dict, fmt: str, flight: Optional[list]) -> None:
         if fmt not in b["formats"]:
             raise Conflict(R("FORMAT_NOT_IN_BRIEF"))
         w = b["flight_window"]
@@ -135,8 +146,8 @@ class PlanningMixin:
             if p["price_type"] == "VENDOR_QUOTE" and not p.get("retired") \
                     and p.get("flights", {}).get(u["unit_id"]) == u["flight"] and not self._expired(p["valid_until"]):
                 quotes.append(p)
-            elif p["price_type"] == "VENDOR_COST_ESTIMATE" and p.get("flight") == u["flight"] \
-                    and len(p["inventory_ids"]) == 1:
+            elif p["price_type"] == "VENDOR_COST_ESTIMATE" and p.get("method") in P.ESTIMATE_METHODS \
+                    and p.get("flight") == u["flight"] and len(p["inventory_ids"]) == 1:   # rate-card estimates only
                 estimates.append(p)
         if quotes:
             q = quotes[-1]
@@ -193,6 +204,11 @@ class PlanningMixin:
         if c.get("brief") is None:
             return "NO_BRIEF"
         p = self.plan(c)
+        for ln in p["lines"]:                            # every line still inside the brief (defence in depth)
+            try:
+                self._fits(c["brief"], ln["format"], ln["flight"])
+            except Conflict:
+                return "PLAN_UNIT_OUTSIDE_BRIEF"
         if p["totals"]["unknown_lines"]:
             return "PLAN_COST_UNKNOWN"
         if p["budget_fit"] == "OVER":

@@ -41,21 +41,29 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
    (`MAX_PURCHASE_CEILING`, `AUTHORITY_DAYS_CEILING`); one open order per face per overlapping flight across all
    tenants; a confirmed hold (Andre's) for every unit; principal/agent confirmed by a CPA or counsel; 100% prepaid.
 8. The hub never reads a contract (it carries vendor cost). Everything replays identically.
+9. **Finance (31) must verify funds cleared** (locked; AEGIS OOH-3/4 plan fidelity PF-1). Built literally, fail
+   closed: a new caller `finance_31` posts `POST …/campaigns/{cid}/finance-verifications` — the current client
+   approval's id, the verified amount and currency, Finance's own reference, `cleared: true` — recorded
+   `FINANCIALLY_VERIFIED`, source `FINANCE_31` (ledger event `client_funds_verified_by_finance_31`). Not even Andre
+   can post it. The purchase gate, at authorization and at submission, after the funds checks, requires it for the
+   current approval, in the same currency, covering the approved price and every open commitment plus this order
+   (`FUNDS_NOT_FINANCE_VERIFIED`). A change request clears it. Andre's gate still records what he observed (and
+   moves the campaign to `FUNDS_VERIFIED`), but it is no longer enough to buy. Until Finance holds a `finance_31`
+   token and calls this route, no purchase can be authorized.
 
 ## What OOH-4 does NOT do
 
 - **No signing.** Andre still signs and sends the order outside the system (channel `MANUAL_BY_ANDRE`); there is no
   e-signature port (`OOH_ESIGN_URL` refuses start).
 - **No vendor payment.** Paying the vendor is Finance's (31); this records only the method the contract states.
-- **No Finance (31) verification of client funds.** Funds are still verified through Andre's gate, labelled
-  `OBSERVED` (ADR 0019); see open question 1.
+- **No Finance (31) client inside this service**: Finance calls in (decision 9); nothing here reaches a bank.
 - No makegoods, cancellations in flight, or credit terms.
 
 ## Open questions for the founder
 
-1. **Finance (31) must verify funds cleared** (locked). Built: Andre's gate verifies, labelled `OBSERVED`, because
-   no Finance client exists. Should every purchase stay blocked until a Finance (31) verification
-   (`FINANCIALLY_VERIFIED`) exists — which today means no purchase at all — or is Andre's gate the interim?
+1. **Finance (31) must verify funds cleared** (locked). Built literally (decision 9): purchases need Finance's own
+   verification, so none can happen until Finance (31) is wired to call the route. Confirm this reading, or rule
+   that Andre's gate is an interim (that would be one constant, `policy.FINANCE_VERIFICATION_REQUIRED`).
 2. Should approving a contract's terms be separate from authorizing the purchase (built: two steps, both Andre's), or
    one step?
 3. Payment terms bound (built: 0..120 days).

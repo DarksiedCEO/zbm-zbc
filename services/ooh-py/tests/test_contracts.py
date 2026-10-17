@@ -21,6 +21,7 @@ def to_funded_without_contract(h):
     h.ok(h.funds(ctx, ctx["sell"]))
     c = h.view("acme", ctx["cid"])
     ctx.update(approval_id=c["client_approval"]["approval_id"], terms_id=c["commercial"]["terms_id"])
+    h.finance_verify(ctx)
     return ctx
 
 
@@ -225,6 +226,7 @@ def test_a_contract_for_fewer_quotes_than_the_authorization_does_not_cover_it(ac
     h.ok(h.funds(ctx, "6000.00"))
     c = h.view("acme", cid)
     ctx.update(approval_id=c["client_approval"]["approval_id"], terms_id=c["commercial"]["terms_id"])
+    h.finance_verify(ctx)
     one = h.contract(ctx, quotes=[q1], total="2000.00")
     body = dict(contract_id=one, inventory_ids=[u1, u2], exact_quote_refs=[q1, q2], authorized_amount="5000.00")
     h.refused(h.authorize(ctx, **body), 409, "CONTRACT_MISMATCH")

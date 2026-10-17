@@ -133,6 +133,7 @@ def test_evidence_alone_never_passes_the_purchase_gate(acme):
     h.ok(h.funds(ctx, "6000.00"))
     c = h.view("acme", cid)
     ctx.update(approval_id=c["client_approval"]["approval_id"], terms_id=c["commercial"]["terms_id"])
+    h.finance_verify(ctx)
     h.refused(h.authorize(ctx), 409, "INVENTORY_NOT_HELD")
     h.ok(h.hold_decide("acme", cid, uid))                       # Andre confirms: now the gate passes
     h.ok(h.authorize(ctx), 201)

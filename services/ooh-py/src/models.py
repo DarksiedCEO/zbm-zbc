@@ -178,6 +178,16 @@ class FundsVerify(Strict):
     cleared: Literal[True]                                           # Andre attests the funds are CLEARED
 
 
+class FinanceVerification(Strict):
+    """Finance (31) verifies that cleared client funds cover the current client approval (locked, Oct 16 round 2)."""
+    request_id: RequestId
+    approval_id: Id                                                  # the client approval it verifies
+    verified_amount: Amount
+    currency: Annotated[StrictStr, Field(pattern=r"^[A-Z]{3}$")]
+    finance_ref: Ref                                                 # Finance's own verification reference
+    cleared: Literal[True]
+
+
 class FundsReconfirm(Strict):
     """Andre re-confirms that cleared funds already recorded cover the re-approved amount (no new money, no new
     reference: AEGIS M3)."""

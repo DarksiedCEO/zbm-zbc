@@ -419,6 +419,9 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                 "readiness_gates": dict(policy.READINESS_GATES), "formats": list(policy.FORMATS),
                 "proof_requirements": dict(policy.PROOF_REQUIREMENTS), "source_kinds": list(policy.SOURCE_KINDS),
                 "source_kinds_not_connected": list(policy.SOURCE_KINDS_NOT_CONNECTED),
+                "cost_bases": list(policy.COST_BASES), "contract_states": list(policy.CONTRACT_STATES),
+                "markup_evidence_kinds": list(policy.MARKUP_EVIDENCE_KINDS),
+                "finance_verification_required": policy.FINANCE_VERIFICATION_REQUIRED,
                 "submission_states": list(policy.SUBMISSION_STATES)}
 
     @app.get(P + "/roster", dependencies=auth)
@@ -623,6 +626,12 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
     @app.post(C + "/funds-verifications", dependencies=auth)
     def funds(cid: str, scope: tuple = Depends(andre_scoped), req: dict = Depends(body(m.FundsVerify))) -> dict:
         return svc.verify_funds(scope[1], _id(cid), req)
+
+    @app.post(C + "/finance-verifications", dependencies=auth)
+    def finance_verification(cid: str, req: dict = Depends(body(m.FinanceVerification)),
+                             scope: tuple = Depends(scoped("finance_31"))) -> dict:
+        """Finance (31) verifies the cleared client funds for the current approval (the purchase gate needs it)."""
+        return svc.finance_verify(scope[1], _id(cid), req)
 
     @app.post(C + "/funds-reconfirmations", dependencies=auth)
     def funds_reconfirm(cid: str, scope: tuple = Depends(andre_scoped),

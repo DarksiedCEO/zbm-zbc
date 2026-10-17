@@ -386,8 +386,16 @@ class Harness:
         c = self.view(tid, ctx["cid"])
         assert c["state"] == "FUNDS_VERIFIED", c["state"]
         ctx.update(approval_id=c["client_approval"]["approval_id"], terms_id=c["commercial"]["terms_id"])
+        self.finance_verify(ctx)                           # locked: Finance (31) verifies the funds cleared
         ctx["contract_id"] = self.contract(ctx)            # OOH-4: the vendor contract, terms approved by Andre
         return ctx
+
+    def finance_verify(self, ctx: dict, amount: Optional[str] = None, **over):
+        ap = self.view(ctx["tid"], ctx["cid"])["client_approval"]
+        body = {"request_id": rid(), "approval_id": ap["approval_id"], "verified_amount": amount or ap["amount"],
+                "currency": "USD", "finance_ref": f"fin31-{uuid.uuid4().hex[:8]}", "cleared": True, **over}
+        return self.ok(self.post(f"/tenants/{ctx['tid']}/campaigns/{ctx['cid']}/finance-verifications", body,
+                                 caller="finance_31"))
 
     def auth_body(self, ctx: dict, **over) -> dict:
         c = self.view(ctx["tid"], ctx["cid"])

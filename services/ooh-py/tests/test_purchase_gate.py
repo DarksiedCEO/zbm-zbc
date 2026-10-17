@@ -39,6 +39,7 @@ def test_no_one_but_andre_approves_verifies_funds_authorizes_or_submits(acme, ca
     h.ok(h.funds(ctx, ctx["sell"]))
     ctx.update(approval_id=h.view("acme", ctx["cid"])["client_approval"]["approval_id"],
                terms_id=h.view("acme", ctx["cid"])["commercial"]["terms_id"])
+    h.finance_verify(ctx)
     r = h.post(base + "/authorizations", h.auth_body(ctx), caller=caller)
     assert r.status_code == 403
     a = h.ok(h.authorize(ctx), 201)

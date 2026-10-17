@@ -25,7 +25,9 @@ from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 #   scheduler      the integrity job
 #   hub            the public site backend: a client's read-only view, always with a tenant token
 #   compliance_38  evidence, export, integrity reads; may engage a kill switch
-KNOWN_CALLERS = ("dashboard", "ooh_agent", "scheduler", "hub", "compliance_38")
+#   finance_31     Finance (31): verifies that a campaign's client funds cleared (locked decision, Oct 16 round 2);
+#                  without its token no purchase can be authorized
+KNOWN_CALLERS = ("dashboard", "ooh_agent", "scheduler", "hub", "compliance_38", "finance_31")
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 CAPABILITY_SWITCHES = ("campaigns", "inventory", "prices", "funds", "purchase", "submission", "registry")

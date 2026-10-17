@@ -232,3 +232,37 @@ def test_planning_replays_identically(hd):
     h2 = h.restart()
     assert h2.svc.snapshot() == before
     assert h2.ok(h2.get(f"/tenants/acme/campaigns/{cid}/plan")) == plan
+
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS OOH-3/4 source
+
+def test_s34_f1_a_new_brief_must_still_hold_every_live_unit(acme):
+    h = acme
+    cid = h.campaign()
+    uid = h.unit("acme", cid, ref="rb-1")                                # static, November 2026
+    h.refused(h.brief("acme", cid, formats=["DIGITAL_BILLBOARD"]), 409, "FORMAT_NOT_IN_BRIEF")
+    h.refused(h.brief("acme", cid, flight_window_start="2026-12-01", flight_window_end="2027-03-31"), 409,
+              "FLIGHT_OUTSIDE_BRIEF")
+    h.ok(h.move("acme", cid, uid, "WITHDRAWN"))
+    h.ok(h.brief("acme", cid, formats=["DIGITAL_BILLBOARD"]))           # nothing live left outside it
+
+
+def test_s34_f1_plan_approval_rechecks_every_line_against_the_brief(acme):
+    h = acme
+    cid = drafted(h)
+    uid = h.unit("acme", cid, ref="rb-2")
+    rate_card(h, h.svc.inventory[uid]["face_id"])
+    h.ok(estimate(h, cid, uid), 201)
+    h.svc.campaigns[cid]["brief"]["formats"] = ["DIGITAL_BILLBOARD"]     # tampered in memory (no route can)
+    r = h.refused(h.go("acme", cid, "PLAN_APPROVED", andre=True), 409, "TRANSITION_GUARD_FAILED")
+    assert r["guard"] == "PLAN_UNIT_OUTSIDE_BRIEF"
+
+
+def test_s34_f5_a_manual_estimate_never_counts_in_the_plan(acme):
+    h = acme
+    cid = h.campaign()
+    uid = h.unit("acme", cid, ref="me-1", flight=None)
+    h.ok(h.price("acme", cid, "VENDOR_COST_ESTIMATE", "10.00", vendor="lamar", inventory_ids=[uid]), 201)
+    line = h.ok(h.get(f"/tenants/acme/campaigns/{cid}/plan"))["lines"][0]
+    assert line["cost"]["basis"] == "UNKNOWN"

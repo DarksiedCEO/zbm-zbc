@@ -48,7 +48,8 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
 3. **Callers** (`config.KNOWN_CALLERS`): `dashboard` (Andre's console; never Andre by itself), `ooh_agent` (the agent
    runtime: prepares campaigns, inventory, estimates, quotes, hold requests), `scheduler` (the integrity job), `hub`
    (a client's read-only view of its own campaign, always with a tenant token; never vendor cost or terms),
-   `compliance_38` (evidence, export, integrity; may engage a kill switch).
+   `compliance_38` (evidence, export, integrity; may engage a kill switch), `finance_31` (Finance (31): posts its
+   verification that a campaign's client funds cleared; added Oct 16 round 2, ADR 0022).
 4. **Andre's gate** (`X-Andre-Approval-Token` through the dashboard, `hmac.compare_digest`; a token equal to any
    other token counts as not configured). Andre-only: creating a tenant; confirming a hold; the commercial model; the client sell price
    and the approved buy limit (P&L decisions); sending the proposal; recording the client's approval; verifying
@@ -147,7 +148,11 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
     of the quotes (`QUOTE_ORDER_MISMATCH`), above the approved buy limit (`AMOUNT_EXCEEDS_APPROVAL`) or above
     `OOH_MAX_PURCHASE_AMOUNT` (`SPEND_LIMIT_EXCEEDED`); a client approval that is not the current one or does not
     cover these quotes; changed material terms (`TERMS_CHANGED`); funds not cleared in full, or not covering every
-    open vendor commitment plus this one (`FUNDS_INSUFFICIENT`). The authorization binds tenant, campaign, units (with
+    open vendor commitment plus this one (`FUNDS_INSUFFICIENT`); and, added since (ADR 0022), before the funds checks
+    an approved vendor contract identical to the authorization (`contract_id` in the body; `CONTRACT_NOT_FOUND`,
+    `CONTRACT_NOT_APPROVED`, `CONTRACT_MISMATCH`, `VENDOR_PAYMENT_METHOD_*`), and after them Finance (31)'s
+    verification of the funds for the current approval (`FUNDS_NOT_FINANCE_VERIFIED`); ADR 0020 adds the market's
+    `EXECUTION_AUTHORIZED` (`MARKET_EXECUTION_NOT_AUTHORIZED`). The authorization binds tenant, campaign, units (with
     their versions), quotes, amount, authority, the campaign version and the expiry (section 50). A new authorization
     supersedes an unsubmitted one. A refusal changes nothing and is recorded on the ledger
     (`purchase_gate_refused`, best effort).
@@ -348,9 +353,9 @@ refuses start).
 ## What OOH-0 and OOH-1 do NOT do (honest)
 
 - **No agent.** The roster is data. Nothing proposes, researches, negotiates or submits on its own.
-- **No Finance (31) client.** Funds are Andre's attestation with a reference, labelled `OBSERVED`. Nothing checks a
-  bank. When Finance's client is built, it becomes the `FINANCE_31` source and the only one allowed to produce
-  `FINANCIALLY_VERIFIED`.
+- **No Finance (31) client inside this service.** Andre's funds record is his attestation with a reference, labelled
+  `OBSERVED`. Since Oct 16 round 2 a purchase also needs Finance (31)'s own verification, posted by the `finance_31`
+  caller (`FINANCIALLY_VERIFIED`; ADR 0022): until Finance is wired to call it, no purchase can be authorized.
 - **No vendor port, no e-signature.** Orders and signatures happen outside the system; the service records them and
   enforces the gate before Andre is told the order may go out. It cannot stop Andre from ordering by phone without
   it.

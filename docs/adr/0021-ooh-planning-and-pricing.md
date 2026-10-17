@@ -18,7 +18,9 @@ automatic); the hub never shows vendor cost; never invent rate or inventory data
    `campaign_brief_set`.
 2. **Units fit the brief.** No unit before a brief (`BRIEF_REQUIRED`); the unit's format must be in the brief
    (`FORMAT_NOT_IN_BRIEF`); its flight, at registration and on every flight change, must lie in the window
-   (`FLIGHT_OUTSIDE_BRIEF`).
+   (`FLIGHT_OUTSIDE_BRIEF`). A new brief is refused while any live unit would fall outside it (AEGIS OOH-3/4 source
+   F-1: withdraw or move the unit first), and the plan approval guard re-checks every line
+   (`PLAN_UNIT_OUTSIDE_BRIEF`).
 3. **Rate-card estimates** (`POST …/inventory/{uid}/rate-card-estimates`, preparers, method
    `RATE_CARD_PRORATED_DAILY`): a `VENDOR_COST_ESTIMATE` computed from the face's CURRENT sourced
    `rate_card_amount` and `rate_card_period_days` (ADR 0020), prorated by calendar day to the unit's flight,
