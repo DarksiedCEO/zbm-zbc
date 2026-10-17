@@ -56,6 +56,8 @@ automatic); the hub never shows vendor cost; never invent rate or inventory data
 - No optimisation or recommendation: the plan shows the faces preparers chose; it does not pick them.
 - No client-facing proposal document; the sell price and proposal remain ADR 0019's (Andre's).
 - No currency other than USD.
+- No taxes, permit fees or production and installation costs in the plan (PF-2): a line costs what the vendor's
+  quote or rate card says.
 
 ## Open questions for the founder
 

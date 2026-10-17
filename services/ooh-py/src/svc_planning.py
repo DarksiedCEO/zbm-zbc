@@ -150,7 +150,7 @@ class PlanningMixin:
                 quotes.append(p)
             elif p["price_type"] == "VENDOR_COST_ESTIMATE" and p.get("method") in P.ESTIMATE_METHODS \
                     and p.get("flight") == u["flight"] and len(p["inventory_ids"]) == 1 \
-                    and p.get("rate_card_source_ids") == self._current_rate_card(u):   # current rate-card ones only
+                    and self._rate_card_identity(p) == self._current_rate_card(u):   # current rate card only
                 estimates.append(p)
         if quotes:
             q = quotes[-1]
@@ -165,13 +165,22 @@ class PlanningMixin:
         return {"basis": "UNKNOWN", "price_id": None, "amount": None, "evidence_class": "UNKNOWN",
                 "split_evenly_from_multi_unit_quote": False}
 
-    def _current_rate_card(self, u: dict) -> Optional[list]:
-        """The source ids of the face's current rate card (red team F6: an estimate from a replaced card is stale)."""
+    @staticmethod
+    def _rate_card_identity(p: dict) -> tuple:
+        """The rate card an estimate was made from: its sources, amount, period and date."""
+        return (p.get("rate_card_source_ids"), p.get("rate_card_amount"), p.get("rate_card_period_days"),
+                p.get("rate_card_as_of"))
+
+    def _current_rate_card(self, u: dict) -> Optional[tuple]:
+        """The identity of the face's current rate card. An estimate from a replaced card is stale (red team F6), and
+        so is one whose card was re-recorded with another value under the same source (final red team NF-5)."""
         face = self.faces.get(u.get("face_id") or "")
         if face is None:
             return None
         amt, per = self._current_attr(face, "rate_card_amount"), self._current_attr(face, "rate_card_period_days")
-        return sorted({amt["source_id"], per["source_id"]}) if amt and per else None
+        if not (amt and per):
+            return None
+        return (sorted({amt["source_id"], per["source_id"]}), amt["value"], per["value"], max(amt["as_of"], per["as_of"]))
 
     def plan(self, c: dict) -> dict:
         lines, by_vendor, counted = [], {}, set()

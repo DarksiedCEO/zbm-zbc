@@ -74,19 +74,27 @@ def observed(text: Optional[str]) -> Optional[dict]:
 # different rails, never merged). NOISE words carry no identity. Either is removed only as a whole token, or as a
 # token's leading prefix directly followed by a digit (ACH12345): never from inside a word (REFUND77 is not UND77).
 RAILS = {"ach": "ach", "eft": "ach", "wire": "wire", "check": "check", "cheque": "check", "chk": "check",
-         # AEGIS wave 2 red team F2: card, cash and payment-app references are not ACH money (refused as a conflict)
-         "card": "card", "visa": "card", "mastercard": "card", "amex": "card", "debit": "card", "credit": "card",
+         # AEGIS wave 2 red team F2: card, cash and payment-app references are not ACH money (refused as a conflict).
+         # "credit" and "debit" alone are NOT rails: an ACH credit and an ACH debit are ACH (final red team NF-1);
+         # "credit card" / "debit card" are refused by names_a_card.
+         "card": "card", "visa": "card", "mastercard": "card", "amex": "card",
          "cash": "cash", "zelle": "app", "venmo": "app", "paypal": "app", "cashapp": "app",
          # re-verification N2: more card, money-order, crypto, wallet and gift-card words
          "cc": "card", "mc": "card", "creditcard": "card", "debitcard": "card", "discover": "card",
          "moneyorder": "money_order", "mo": "money_order", "crypto": "crypto", "btc": "crypto", "bitcoin": "crypto",
          "eth": "crypto", "usdt": "crypto", "usdc": "crypto", "applepay": "app", "googlepay": "app", "gpay": "app",
-         "giftcard": "gift_card"}
-NOISE_WORDS = ("transfer", "xfer", "txn", "trace", "ref", "reference", "conf", "confirmation")
+         "giftcard": "gift_card",
+         # final red team NF-2: money-transfer services, card processors, prepaid cards and more crypto
+         "westernunion": "money_transfer", "wu": "money_transfer", "moneygram": "money_transfer",
+         "stripe": "card", "square": "card", "prepaid": "card", "ltc": "crypto", "doge": "crypto",
+         "litecoin": "crypto", "dogecoin": "crypto"}
+NOISE_WORDS = ("transfer", "xfer", "txn", "trace", "ref", "reference", "conf", "confirmation", "credit", "debit")
 METHOD_WORDS = tuple(RAILS) + NOISE_WORDS
 # A word may also be a token's PREFIX before a digit (ACH12345) only if it is one of the original rail and noise words
-# or at least four letters long: "cc", "mc", "mo", "btc", "eth" count only as whole tokens, so a bank reference such
-# as "CC4491" or a random "cc3f…" is not mistaken for a card (found as a flaky test, Oct 17).
+# or at least four letters long: "cc", "mc", "mo", "btc", "eth", "wu", "ltc" count only as whole tokens, so a bank
+# reference such as "CC4491" or a random "cc3f…" is not mistaken for a card (found as a flaky test, Oct 17). Known
+# limit (final red team NF-2, accepted): "cc4242" or "mo5" is recorded under the ACH method. The method itself is
+# structurally ACH only, and a purchase also needs Finance (31)'s own verification.
 _ORIGINAL = ("ach", "eft", "wire", "check", "cheque", "chk") + NOISE_WORDS
 PREFIX_WORDS = tuple(w for w in METHOD_WORDS if w in _ORIGINAL or len(w) >= 4)
 
@@ -150,11 +158,26 @@ def _luhn_card(digits: str) -> bool:
     return total % 10 == 0
 
 
+# Instruments named in two or more words ("money order", "Western Union"): matched on one token or on adjacent tokens
+# joined, never inside a longer word ("APPLE-PAYMENT-0001" is not Apple Pay: final red team NF-1).
+_INSTRUMENT_WORDS = ("moneyorder", "creditcard", "debitcard", "giftcard", "applepay", "googlepay", "westernunion",
+                     "moneygram", "prepaidcard", "cashapp")
+
+
 def names_a_card(value: str) -> bool:
-    joined = re.sub(r"[^0-9a-z]+", "", unicodedata.normalize("NFKC", value).casefold())
-    words = ("moneyorder", "creditcard", "debitcard", "giftcard", "applepay", "googlepay")
-    return any(w in joined for w in words) or any(_luhn_card(run) for run in re.findall(r"[0-9]{13,19}",
-                                                                                         re.sub(r"[\s-]", "", value)))
+    """A reference that names a non-ACH instrument in words, or carries a payment-card number. A card number is read
+    across any separators between its digits ("4242.4242.4242.4242", "4242_4242…", "4242:4242…": final red team
+    NF-2)."""
+    toks = _alnum_tokens(value)
+    for i in range(len(toks)):
+        for j in range(i + 1, min(i + 4, len(toks)) + 1):
+            joined = "".join(toks[i:j])
+            for w in _INSTRUMENT_WORDS:
+                if joined == w or (joined.startswith(w) and joined[len(w):].isdigit()):
+                    return True
+    text = unicodedata.normalize("NFKC", value).casefold()
+    digits = re.sub(r"(?<=[0-9])[^0-9a-z]+(?=[0-9])", "", text)
+    return any(_luhn_card(run) for run in re.findall(r"(?<![0-9])[0-9]{13,19}(?![0-9])", digits))
 
 
 def funds_ref_parts(value: str) -> tuple[set, str]:
@@ -183,6 +206,12 @@ def unit_ref_key(value: str) -> str:
     every digit run without its leading zeros (AEGIS wave 2 red team F3: LA-123 and LA-0123 are one face; an all-zero
     run stays "0")."""
     return re.sub(r"(?<![0-9])0+(?=[0-9])", "", "".join(_alnum_tokens(value)))
+
+
+def finance_ref_key(value: str) -> str:
+    """The key one Finance (31) reference is known by: NFKC, case-folded, separators removed (final red team NF-6:
+    "FIN31-ABC" and "fin31abc" are one reference, verifying one campaign)."""
+    return "".join(_alnum_tokens(value))
 
 
 def order_key(tenant: str, campaign: str, vendor: str, quotes: list, amount: str, currency: str, version: int) -> str:
@@ -963,7 +992,7 @@ class CampaignsMixin:
                 self._refuse("FUNDS_CURRENCY_MISMATCH", c, rk)
             if Decimal(body["verified_amount"]) <= 0:
                 raise Invalid(R("INVALID"), field="verified_amount")
-            owner = self.finance_refs.get(body["finance_ref"])
+            owner = self.finance_refs.get(finance_ref_key(body["finance_ref"]))
             if owner is not None and owner != cid:
                 self._refuse("FUNDS_EVIDENCE_REUSED", c, rk)          # one Finance reference, one campaign (N4)
             data = {"campaign_id": cid, "approval_id": ap["approval_id"], "verified_amount": body["verified_amount"],
@@ -975,7 +1004,7 @@ class CampaignsMixin:
 
     def _a_finance_verified(self, d, at):
         c = self.campaigns[d["campaign_id"]]
-        self.finance_refs[d["finance_ref"]] = d["campaign_id"]
+        self.finance_refs[finance_ref_key(d["finance_ref"])] = d["campaign_id"]
         c["finance_verification"] = {k: d[k] for k in ("approval_id", "verified_amount", "currency", "finance_ref",
                                                        "evidence_class", "source")} | {"verified_at": at}
 

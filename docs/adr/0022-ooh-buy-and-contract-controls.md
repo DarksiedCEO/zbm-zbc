@@ -63,8 +63,8 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   (`PLAN_EMPTY`), so units added after an (empty) plan approval are checked; a quote naming several units counts once,
   in full, while any of them is live (withdrawing one no longer hides cost).
 - **Security F3 / wave 2 F-2, personal data.** `src/pii.py`: NFKC-normalised and case-folded text is checked for
-  e-mail addresses (also `[at]` / `(at)` / ` at ` spellings) and phone numbers (seven or more digits with any short
-  separators). Free-text attribute values carrying them are refused; vendor text is stored with them redacted
+  e-mail addresses (also `[at]` / `(at)` / ` at ` spellings) and phone numbers (as rewritten in the second and final
+  rounds below). Free-text attribute values carrying them are refused; vendor text is stored with them redacted
   (`personal_data_redacted`). References cannot hold `@`; a reference made of digits cannot be told from an id.
 - **Red team F2 (wave 2), card and cash.** A client funds reference naming a card, cash or a payment app (`card`,
   `visa`, `mastercard`, `amex`, `debit`, `credit`, `cash`, `zelle`, `venmo`, `paypal`, `cashapp`) is refused under
@@ -102,7 +102,38 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
 - Not changed: after a change request, Finance replaying its OLD request gets the idempotent answer (200, the campaign
   view, which shows no verification) — the standard retry rule; the gate refuses (N5).
 
+### Final round (red team at 0a1729e)
+
+- **ACH references (NF-1).** `credit` and `debit` alone are description words, not rails (an ACH credit or debit is
+  ACH); instruments named in words (`money order`, `Apple Pay`, `Western Union`, `credit card` …) match on adjacent
+  whole tokens, never inside a longer word (`APPLE-PAYMENT-0001` passes). The Luhn rule needs a card-network prefix,
+  so no ACH trace number is refused by chance.
+- **Non-ACH instruments (NF-2).** A card number is read across any separator (`4242.4242…`, `4242_4242…`,
+  `4242:4242…`). More words are refused: Western Union / `wu`, MoneyGram, Stripe, Square, prepaid, `ltc`, `doge`.
+  Accepted limit: the short words (`cc`, `mc`, `mo`, `btc`, `eth`, `wu`, `ltc`) count only as whole tokens, so
+  `cc4242` or `mo5` is recorded under ACH; refusing them would also refuse bank references such as `CC4491`. The
+  method itself is structurally ACH only, and a purchase also needs Finance (31)'s verification.
+- **Personal data (NF-3, NF-4).** `src/pii.py`: HTML entities and bracket spellings of `@` and `.` (`&#64;`, `<at>`,
+  `[.]`, `(.)`, ideographic dots) are read as the character; phone separators add the minus sign, commas, colons,
+  bars, middle dots, apostrophes and ampersands; seven-digit local numbers with a dash (`555-1234`) and international
+  numbers (`+`, country code, eight or more digits) are refused. A dot after `@` takes spaces on both sides or none, so
+  `Digital @ Sunset. Faces west` passes, and a number does not start after a digit and a decimal point, so GPS
+  coordinates pass. Known false positives (refused, never stored): ten-digit references, `<word> at <word>.<word>`,
+  `Route 101-2025`.
+- **Rate cards (NF-5).** An estimate counts only while the face's current rate card has the same sources, amount,
+  period and date it was made from: a card re-recorded with another value under the same source makes it stale.
+- **Finance references (NF-6).** One Finance (31) reference, in any case or separator spelling, verifies one campaign.
+- **Tests (NF-7).** `tests/test_aegis_ooh_final.py`: Luhn bounds and doubling, every refused instrument, the PII
+  inputs both ways, Finance retry, bearer and body checks, Andre's REJECT under UNAVAILABLE avails, both ends of the
+  AVAILABLE cover, the all-zero face ref, and supersession leaving another contract's authorization. 30 targeted
+  mutants (the red team's surviving ones among them, W34-172/173/375 included) are killed.
+
 ## What OOH-4 does NOT do
+
+- **No taxes, fees or permits** (final red team PF-2): no sales tax, production, installation, permit or municipal
+  fee is computed or checked; a vendor quote's total is taken as the vendor states it.
+- **No competitive separation**: nothing stops two competing advertisers on adjacent faces.
+- **No contract amendments**: a change is a new draft that supersedes the open one (Andre approves it again).
 
 - **No signing.** Andre still signs and sends the order outside the system (channel `MANUAL_BY_ANDRE`); there is no
   e-signature port (`OOH_ESIGN_URL` refuses start).
