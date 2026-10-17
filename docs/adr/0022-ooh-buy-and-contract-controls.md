@@ -110,23 +110,40 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   so no ACH trace number is refused by chance.
 - **Non-ACH instruments (NF-2).** A card number is read across any separator (`4242.4242…`, `4242_4242…`,
   `4242:4242…`). More words are refused: Western Union / `wu`, MoneyGram, Stripe, Square, prepaid, `ltc`, `doge`.
-  Accepted limit: the short words (`cc`, `mc`, `mo`, `btc`, `eth`, `wu`, `ltc`) count only as whole tokens, so
-  `cc4242` or `mo5` is recorded under ACH; refusing them would also refuse bank references such as `CC4491`. The
-  method itself is structurally ACH only, and a purchase also needs Finance (31)'s verification.
+  Accepted limit: `cc` and `mc` count only as whole tokens, so `cc4242` is recorded under ACH; refusing it would also
+  refuse bank references such as `CC4491` (and random hex). The method itself is structurally ACH only, and a purchase
+  also needs Finance (31)'s verification.
 - **Personal data (NF-3, NF-4).** `src/pii.py`: HTML entities and bracket spellings of `@` and `.` (`&#64;`, `<at>`,
-  `[.]`, `(.)`, ideographic dots) are read as the character; phone separators add the minus sign, commas, colons,
-  bars, middle dots, apostrophes and ampersands; seven-digit local numbers with a dash (`555-1234`) and international
-  numbers (`+`, country code, eight or more digits) are refused. A dot after `@` takes spaces on both sides or none, so
-  `Digital @ Sunset. Faces west` passes, and a number does not start after a digit and a decimal point, so GPS
-  coordinates pass. Known false positives (refused, never stored): ten-digit references, `<word> at <word>.<word>`,
-  `Route 101-2025`.
+  `[.]`, `(.)`, ideographic dots) are read as the character; phone separators add the minus sign, colons, bars,
+  middle dots, apostrophes and ampersands; seven-digit local numbers with a dash (`555-1234`) and international
+  numbers (`+`, country code, eight or more digits) are refused. After a spaced `@` a dot takes spaces on both sides
+  or none, so `Digital @ Sunset. Faces west` passes; GPS coordinates pass.
+- **Delta review of the above (988725f).**
+  - DF-1: every Luhn-valid 13-19-digit run is a card; only a 15-digit run (an ACH trace number's length) also needs
+    a card-network prefix no routing prefix starts with (4, 34-38, 50-58, 6011), so JCB, Diners, Maestro,
+    Mastercard 2-series and Discover 64/65 are refused and no trace number is. Digit groups of three or more are
+    joined in every contiguous part (a card followed by an expiry is seen; a date's `-10-17` is never joined).
+  - DF-2: a tight `@` (no space on either side) takes any domain and dots with spaces (`jane@163.com`,
+    `jane@example .com`); a comma before a number is no longer a reason to skip it (`48,310 555 1234`).
+  - DF-3: one comma is a phone separator, a comma and a space are not (`360, 720, 1440` passes); the two joints of a
+    3-3-4 number are both separated or both not (`34.0522342, -118.2436849` passes).
+  - DF-4: a Finance reference's separators are kept as boundaries (`F31-1-10` and `F31-11-0` are two); a reference
+    with no letter or digit is refused.
+  - DF-5: plurals (`money-orders`, `giftcards`, `credit-cards`) are refused; `mo`, `btc`, `eth`, `wu`, `ltc` count
+    before digits (`mo5`, `btc1`).
+  - DF-6: an address's local part is bounded (64), so a 4,000-character adversarial text screens in about 50 ms.
+  - DF-7: redaction repeats until nothing detectable is left.
+  - Known false positives (refused, never stored): ten-digit references, `<word> at <word>.<word>`, a three- and a
+    four-digit group joined by a dash (`LA-101-2025`), and 3-3-4 digit groups split by bars or colons
+    (`405 | 110 | 1200`).
 - **Rate cards (NF-5).** An estimate counts only while the face's current rate card has the same sources, amount,
   period and date it was made from: a card re-recorded with another value under the same source makes it stale.
 - **Finance references (NF-6).** One Finance (31) reference, in any case or separator spelling, verifies one campaign.
 - **Tests (NF-7).** `tests/test_aegis_ooh_final.py`: Luhn bounds and doubling, every refused instrument, the PII
   inputs both ways, Finance retry, bearer and body checks, Andre's REJECT under UNAVAILABLE avails, both ends of the
   AVAILABLE cover, the all-zero face ref, and supersession leaving another contract's authorization. 30 targeted
-  mutants (the red team's surviving ones among them, W34-172/173/375 included) are killed.
+  mutants (the red team's surviving ones among them, W34-172/173/375 included) are killed; the delta review's DF-8
+  gaps (entity spellings, the eight-digit bound, redaction, credit/debit, litecoin/dogecoin) by 42 more.
 
 ## What OOH-4 does NOT do
 

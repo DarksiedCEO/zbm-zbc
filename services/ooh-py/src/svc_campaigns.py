@@ -90,13 +90,14 @@ RAILS = {"ach": "ach", "eft": "ach", "wire": "wire", "check": "check", "cheque":
          "litecoin": "crypto", "dogecoin": "crypto"}
 NOISE_WORDS = ("transfer", "xfer", "txn", "trace", "ref", "reference", "conf", "confirmation", "credit", "debit")
 METHOD_WORDS = tuple(RAILS) + NOISE_WORDS
-# A word may also be a token's PREFIX before a digit (ACH12345) only if it is one of the original rail and noise words
-# or at least four letters long: "cc", "mc", "mo", "btc", "eth", "wu", "ltc" count only as whole tokens, so a bank
-# reference such as "CC4491" or a random "cc3f…" is not mistaken for a card (found as a flaky test, Oct 17). Known
-# limit (final red team NF-2, accepted): "cc4242" or "mo5" is recorded under the ACH method. The method itself is
-# structurally ACH only, and a purchase also needs Finance (31)'s own verification.
+# A word may also be a token's PREFIX before a digit (ACH12345) if it is one of the original rail and noise words or
+# at least four letters long. Of the shorter words, "mo", "btc", "eth", "wu" and "ltc" count before a rest of digits
+# alone ("mo5", "btc1": delta red team); "cc" and "mc" only as whole tokens, so a bank reference such as "CC4491" or a
+# random hex "cc3f…" is not mistaken for a card (found as a flaky test, Oct 17). Known limit (accepted): "cc4242" is
+# recorded under the ACH method, which is structurally ACH only; a purchase also needs Finance (31)'s verification.
 _ORIGINAL = ("ach", "eft", "wire", "check", "cheque", "chk") + NOISE_WORDS
 PREFIX_WORDS = tuple(w for w in METHOD_WORDS if w in _ORIGINAL or len(w) >= 4)
+DIGIT_PREFIX_WORDS = ("mo", "btc", "eth", "wu", "ltc")
 
 
 def _alnum_tokens(value: str) -> list[str]:
@@ -109,6 +110,9 @@ def _split_method(token: str) -> tuple[Optional[str], str]:
         return token, ""
     for w in sorted(PREFIX_WORDS, key=len, reverse=True):
         if token.startswith(w) and token[len(w):len(w) + 1].isdigit():
+            return w, token[len(w):]
+    for w in DIGIT_PREFIX_WORDS:
+        if token.startswith(w) and token[len(w):].isdigit():
             return w, token[len(w):]
     return None, token
 
@@ -138,16 +142,17 @@ def _spelled_out(value: str) -> list[str]:
     return out
 
 
-# Card-network prefixes that no ABA routing prefix (00-12, 21-32, 61-72, 80) can start an ACH trace number with:
-# Visa 4, Mastercard 51-55, Amex 34/37, Discover 6011. (Mastercard 2221-2720 overlaps routing prefixes 22-27 and is
-# left out rather than refuse a real trace number.)
-_CARD_PREFIX = re.compile(r"^(?:4|5[1-5]|3[47]|6011)")
+# A 15-digit run is the length of an ACH trace number, whose first digits are an ABA routing prefix (00-12, 21-32,
+# 61-72, 80): one in ten passes Luhn by chance. A 15-digit run counts as a card only with a card-network prefix no
+# routing prefix starts with: Visa 4, Amex 34/37, JCB 35, Diners 36/38, Maestro 50/56-58, Mastercard 51-55,
+# Discover 6011. Every other 13-19-digit run that passes Luhn is a card (delta red team DF-1: JCB, Diners, Maestro,
+# Mastercard 2-series and Discover 64/65 cards of 14, 16 or 19 digits).
+_CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
 
 
 def _luhn_card(digits: str) -> bool:
-    """A 13-19 digit run with a card-network prefix that passes the Luhn check: a payment-card number, never stored
-    (re-verification N2). A 15-digit ACH trace number is not refused by chance (one in ten passes Luhn)."""
-    if not 13 <= len(digits) <= 19 or not _CARD_PREFIX.match(digits):
+    """A payment-card number, never stored (re-verification N2)."""
+    if not 13 <= len(digits) <= 19 or (len(digits) == 15 and not _CARD_PREFIX_15.match(digits)):
         return False
     total = 0
     for i, ch in enumerate(reversed(digits)):
@@ -173,11 +178,27 @@ def names_a_card(value: str) -> bool:
         for j in range(i + 1, min(i + 4, len(toks)) + 1):
             joined = "".join(toks[i:j])
             for w in _INSTRUMENT_WORDS:
-                if joined == w or (joined.startswith(w) and joined[len(w):].isdigit()):
-                    return True
+                for form in (w, w + "s"):                      # plurals too (delta red team DF-5)
+                    if joined == form or (joined.startswith(form) and joined[len(form):].isdigit()):
+                        return True
+    # A run of digit groups split by separators: every contiguous part of it is a candidate, so a card followed by
+    # another group ("4242-4242-4242-4242-1228") is still seen (delta red team DF-1).
     text = unicodedata.normalize("NFKC", value).casefold()
-    digits = re.sub(r"(?<=[0-9])[^0-9a-z]+(?=[0-9])", "", text)
-    return any(_luhn_card(run) for run in re.findall(r"(?<![0-9])[0-9]{13,19}(?![0-9])", digits))
+    for run in re.finditer(r"[0-9]+(?:[^0-9a-z]+[0-9]+)*", text):
+        groups = re.findall(r"[0-9]+", run.group())
+        for i in range(len(groups)):
+            joined = ""
+            for j in range(i, len(groups)):
+                # card groupings (4-4-4-4, 4-6-5, 4-4-4-4-3) have no group shorter than three digits, so a date's
+                # "-10-17" is never joined into a card; a candidate stops growing past 19 digits
+                if j > i and (len(groups[j]) < 3 or len(groups[i]) < 3):
+                    break
+                joined += groups[j]
+                if len(joined) > 19:
+                    break
+                if _luhn_card(joined):
+                    return True
+    return False
 
 
 def funds_ref_parts(value: str) -> tuple[set, str]:
@@ -209,9 +230,10 @@ def unit_ref_key(value: str) -> str:
 
 
 def finance_ref_key(value: str) -> str:
-    """The key one Finance (31) reference is known by: NFKC, case-folded, separators removed (final red team NF-6:
-    "FIN31-ABC" and "fin31abc" are one reference, verifying one campaign)."""
-    return "".join(_alnum_tokens(value))
+    """The key one Finance (31) reference is known by: NFKC, case-folded, every run of separators read as one "-"
+    (final red team NF-6: "FIN31.ABC" and "fin31-abc" are one reference). Separators are kept as boundaries, so
+    "F31-1-10" and "F31-11-0" are two (delta red team DF-4); a reference with no letter or digit has no key."""
+    return "-".join(_alnum_tokens(value))
 
 
 def order_key(tenant: str, campaign: str, vendor: str, quotes: list, amount: str, currency: str, version: int) -> str:
@@ -992,6 +1014,8 @@ class CampaignsMixin:
                 self._refuse("FUNDS_CURRENCY_MISMATCH", c, rk)
             if Decimal(body["verified_amount"]) <= 0:
                 raise Invalid(R("INVALID"), field="verified_amount")
+            if not finance_ref_key(body["finance_ref"]):
+                raise Invalid(R("INVALID"), field="finance_ref")      # no letter or digit (delta red team DF-4)
             owner = self.finance_refs.get(finance_ref_key(body["finance_ref"]))
             if owner is not None and owner != cid:
                 self._refuse("FUNDS_EVIDENCE_REUSED", c, rk)          # one Finance reference, one campaign (N4)

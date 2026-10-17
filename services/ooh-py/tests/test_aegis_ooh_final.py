@@ -88,10 +88,14 @@ def test_nf7_other_digit_runs_are_not_cards(digits):
     assert not sc.names_a_card(digits)
 
 
-def test_nf7_short_method_words_count_only_as_whole_tokens():
+def test_nf7_short_method_words():
     assert sc.funds_ref_parts("cc-4242")[0] == {"card"}
     assert sc.funds_ref_parts("cc4242")[0] == set()           # accepted limit (NF-2): a bank prefix like CC4491
     assert sc.funds_ref_parts("visa4242")[0] == {"card"}
+    for ref, rail in (("mo5", "money_order"), ("btc1", "crypto"), ("eth1", "crypto"), ("wu77", "money_transfer"),
+                      ("ltc3", "crypto"), ("boa-mo123", "money_order")):
+        assert sc.funds_ref_parts(ref)[0] == {rail}, ref
+    assert sc.funds_ref_parts("mo5x")[0] == set() and sc.funds_ref_parts("moab1")[0] == set()
     assert sc.funds_ref_parts("eth")[0] == {"crypto"}
     assert sc.funds_ref_parts("ach-debit-1")[0] == {"ach"}
 
@@ -289,3 +293,65 @@ def test_nf7_superseding_one_contract_leaves_another_contracts_authorization(acm
     assert h.svc.contracts[k2]["status"] == "VOID" and h.svc.contracts[k3]["status"] == "DRAFT"
     assert h.svc.contracts[k1]["status"] == "TERMS_APPROVED_BY_ANDRE"
     assert h.svc.authorizations[a1]["status"] == "AUTHORIZED"
+
+
+# ---------------------------------------------------------------------------- delta red team (988725f): DF-1 .. DF-8
+
+@pytest.mark.parametrize("ref", ["3530111333300000", "36227206271667", "5018000000000009", "2223000048400011",
+                                 "6445644564456445", "4242-4242-4242-4242-1228", "4242.4242.4242.4242.0",
+                                 "x-12-4242-4242-4242-4242", "money-orders-1", "giftcards-1", "credit-cards-1",
+                                 "litecoin-1", "dogecoin-1", "mo5", "btc1"])
+def test_df1_df5_cards_of_every_network_and_plural_instruments_are_refused(acme, ref):
+    ctx = _approved(acme)
+    acme.refused(acme.funds(ctx, ctx["sell"], ref=ref), 422, "FUNDS_METHOD_CONFLICT")
+    assert not acme.ledger.of_type("client_funds_verified_by_andre")
+
+
+def test_df1_a_date_inside_a_reference_is_never_joined_into_a_card():
+    for y, m, d, n in ((2026, 10, 17, 12345678), (2025, 1, 2, 87654321), (2027, 12, 31, 40000000)):
+        for seq in range(200):
+            assert not sc.names_a_card(f"ach-{y}-{m:02d}-{d:02d}-{n + seq}")
+
+
+@pytest.mark.parametrize("text", ["jane@163.com", "jane@126.com", "contact jane@example .com",
+                                  "contact jane@example. com", "Rep 48,310 555 1234", "jane&#x40;example&#46;com",
+                                  "jane&commat;example&period;com", "JANE&COMMAT;EXAMPLE&PERIOD;COM",
+                                  "jane{at}example{dot}com", "jane@example{.}com", "(555) 123-4567",
+                                  "+1 (555) 123-4567", "5551234567"])
+def test_df2_df8_these_addresses_and_numbers_are_personal_data(acme, text):
+    assert pii.has_personal_data(text)
+    acme.refused(_text_attr(acme, f"df2-{abs(hash(text)) % 10 ** 6}", text), 422, "ATTRIBUTE_VALUE_PERSONAL_DATA")
+
+
+def test_df2_vendor_text_with_an_address_is_redacted(acme):
+    cid = acme.campaign()
+    uid = acme.unit("acme", cid, ref="df2b", text="Rep: jane@163.com, lit 06:00-24:00")
+    vt = acme.unit_get("acme", cid, uid)["vendor_text"]
+    assert vt["personal_data_redacted"] is True and "163" not in vt["text"] and "06:00-24:00" in vt["text"]
+
+
+@pytest.mark.parametrize("text", ["Daypart plays: 360, 720, 1440", "Panels 101, 205, 1450 on Sunset",
+                                  "GPS 34.0522342, -118.2436849", "$12,500.00 per 4 weeks", "+1 234 567"])
+def test_df3_df8_ordinary_text_is_accepted(acme, text):
+    assert not pii.has_personal_data(text)
+    acme.ok(_text_attr(acme, f"df3-{abs(hash(text)) % 10 ** 6}", text))
+
+
+def test_df8_an_international_number_needs_eight_digits():
+    assert pii.has_personal_data("+44 2079 46") and not pii.has_personal_data("+44 2079 4")   # 8 vs 7 digits
+
+
+def test_df7_redaction_leaves_no_detectable_number_behind():
+    for text in ("[redacted]+44.09587946 x", "call 555-123-4567 555-123-4567", "5551234567@example.com"):
+        out = pii.redact(text)
+        assert not pii.has_personal_data(out) and "[redacted]" in out, (text, out)
+
+
+def test_df4_a_finance_reference_keeps_its_separators_as_boundaries(acme):
+    h = acme
+    a, b = _funded_unverified(h), _funded_unverified(h)
+    h.ok(_fv(h, a, _finance_body(h, a, "F31-1-10")))
+    h.ok(_fv(h, b, _finance_body(h, b, "F31-11-0")))                 # another reference
+    c = _funded_unverified(h)
+    h.refused(_fv(h, c, _finance_body(h, c, "-")), 422, "INVALID")    # no letter or digit: no reference
+    assert sc.finance_ref_key("FIN31.Ab_c") == sc.finance_ref_key("fin31-ab-c") == "fin31-ab-c"

@@ -369,10 +369,10 @@ def test_rv_n4_one_finance_reference_verifies_one_campaign(acme):
 
 
 
-@pytest.mark.parametrize("ref", ["boa-ach-cc4491", "CC4491", "mc3f0a", "boa-mo123", "eth1", "btc22"])
+@pytest.mark.parametrize("ref", ["boa-ach-cc4491", "CC4491", "mc3f0a", "boa-ach-mc77"])
 def test_rv_n2_short_instrument_words_count_only_as_whole_tokens(acme, ref):
-    """An ACH reference that merely starts with "cc", "mc", "mo", "eth" or "btc" before a digit is not a card,
-    a money order or crypto (a random funds reference made this test suite flaky before)."""
+    """An ACH reference that merely starts with "cc" or "mc" before a digit is not a card (a random funds reference
+    made this test suite flaky before). "mo5", "btc1", "eth1" are refused (delta red team: test_aegis_ooh_final)."""
     h = acme
     ctx = h.to_proposal_sent()
     h.ok(h.approve(ctx))

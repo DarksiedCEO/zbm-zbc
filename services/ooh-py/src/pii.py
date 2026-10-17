@@ -27,22 +27,32 @@ _ZW = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u00ad]")
 _AT_SPELLINGS = re.compile(r"&#0*64;|&#x0*40;|&commat;|<at>|\[at\]|\(at\)|\{at\}", re.I)
 _DOT_SPELLINGS = re.compile(r"&#0*46;|&#x0*2e;|&period;|<dot>|\[dot\]|\(dot\)|\{dot\}|\[\.\]|\(\.\)|\{\.\}|[\u3002\uff0e\uff61]",
                             re.I)
-_DOM = r"[a-z][\w-]*"
-# e-mail: "@" with optional spaces around it, then a dotted domain; a dot takes spaces on both sides or none
-# ("Digital @ Sunset. Faces west" is not an address: final red team NF-4), a spelled-out " dot " takes spaces.
+_LOCAL = r"[^\s@]{1,64}"                 # an address's local part (bounded: delta red team DF-6, regex cost)
+_DOM = r"[\w-]+"
+_WORD_DOM = r"[a-z][\w-]*"
+# e-mail, three shapes:
+# * tight "@" (no space on either side): any domain, dots with or without spaces ("jane@163.com", "jane@example .com",
+#   delta red team DF-2);
+# * spaced "@": a dot takes spaces on both sides or none ("Digital @ Sunset. Faces west" is not an address: NF-4);
+# * the word " at ": a domain that starts with a letter ("Open at 6.pm" is not an address).
 _DOTSEP = r"(?:\.|\s+\.\s+|\s+dot\s+)"
-_EMAIL_STRONG = re.compile(r"[^\s@]+\s*@\s*" + _DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
-_EMAIL_WORD = re.compile(r"\b[\w.+-]+\s+at\s+" + _DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
-# Phone separators: spaces, dots, slashes, underscores, dashes (U+2010-2015, U+2212 minus), commas, colons, bars,
-# middle dots, apostrophes and ampersands (final red team NF-3).
-_SEPCH = "-\\s./_,:|\u00b7'&\u2010-\u2015\u2212"
-_SEP = "[" + _SEPCH + "]*"
-# A number does not start right after a digit, or after a digit and a decimal point or comma (GPS 34.101 -118.3265 is
-# a coordinate, not a phone: NF-4).
-_START = r"(?<!\d)(?<!\d[.,])"
+_EMAIL_TIGHT = re.compile(r"(?<![^\s])" + _LOCAL + r"@" + _DOM + r"(?:\s*\.\s*[a-z]{2,}|\s+dot\s+[a-z]{2,})+",
+                          re.I)
+_EMAIL_STRONG = re.compile(_LOCAL + r"(?:\s+@\s*|\s*@\s+)" + _DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
+_EMAIL_WORD = re.compile(r"\b[\w.+-]{1,64}\s+at\s+" + _WORD_DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
+# Phone separators: spaces, dots, slashes, underscores, dashes (U+2010-2015, U+2212 minus), colons, bars, middle dots,
+# apostrophes and ampersands (final red team NF-3), or one comma on its own ("555,123,4567"; "360, 720, 1440" is a
+# list of numbers: delta red team DF-3).
+_SEPCH = "-\\s./_,:|·'&‐-―−"
+_SEPCH_NC = "-\\s./_:|·'&‐-―−"
+_SEPP = "(?:,|[" + _SEPCH_NC + "]+)"
+# A number does not start right after a digit, or after a digit and a decimal point (GPS 34.101 -118.3265 is a
+# coordinate, not a phone: NF-4). Its two joints are both separated or both not ("118.2436849" is a coordinate).
+_START = r"(?<!\d)(?<!\d\.)"
 _PHONE = re.compile(
-    _START + r"(?:\+?1" + _SEP + r")?\(?\d{3}\)?" + _SEP + r"\d{3}" + _SEP + r"\d{4}(?!\d)"   # North American
-    + r"|" + _START + r"\d{3}[\u2010-\u2015\u2212-]\d{4}(?![\d.,]\d|\d)"                          # local 555-1234
+    _START + r"(?:\+?1" + _SEPP + r"?)?(?:\(\d{3}\)\s*\d{3}" + _SEPP + r"?|\d{3}" + _SEPP + r"\d{3}" + _SEPP
+    + r"|\d{6})\d{4}(?!\d)"                                                                         # North American
+    + r"|" + _START + r"\d{3}[‐-―−-]\d{4}(?![\d.,]\d|\d)"                          # local 555-1234
     + r"|(?<!\d)\d{10,}(?!\d)")                                                                   # ten digits or more
 # An international number: "+", a country code, and at least eight digits in all (+52 55 1234 5678, +44 20 7946 0958)
 _INTL = re.compile(r"(?<![\w+])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
@@ -62,7 +72,7 @@ def _norm(text: str) -> str:
 
 
 def _matches(t: str) -> list:
-    out = [m for rx in (_EMAIL_STRONG, _EMAIL_WORD, _PHONE) for m in rx.finditer(t)]
+    out = [m for rx in (_EMAIL_TIGHT, _EMAIL_STRONG, _EMAIL_WORD, _PHONE) for m in rx.finditer(t)]
     return out + [m for m in _INTL.finditer(t) if sum(ch.isdigit() for ch in m.group()) >= _INTL_MIN_DIGITS]
 
 
@@ -74,9 +84,7 @@ def has_personal_data(text: str) -> bool:
     return bool(_spans(_norm(text)))
 
 
-def redact(text: str) -> str:
-    """The normalised text with every e-mail- or phone-like span replaced by "[redacted]" (case is kept)."""
-    t = _norm(text)
+def _redact_once(t: str) -> str:
     spans = sorted(_spans(t))
     out, pos = [], 0
     for lo, hi in spans:
@@ -86,3 +94,14 @@ def redact(text: str) -> str:
         out.append("[redacted]")
         pos = hi
     return "".join(out) + t[pos:]
+
+
+def redact(text: str) -> str:
+    """The normalised text with every e-mail- or phone-like span replaced by "[redacted]" (case is kept), repeated
+    until none is left (a redaction can bring two parts of a number together: delta red team DF-7)."""
+    t = _norm(text)
+    for _ in range(4):
+        if not _spans(t):
+            return t
+        t = _redact_once(t)
+    return t if not _spans(t) else "[redacted]"
