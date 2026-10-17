@@ -21,6 +21,11 @@ AUTHORITY_SCOPES = ("OOH_PURCHASE",)
 # ---------------------------------------------------------------------------------------------- section 10
 PRINCIPAL_AGENT_STATES = ("PRINCIPAL", "AGENT", "UNDETERMINED")
 PRINCIPAL_AGENT_DEFAULT = "UNDETERMINED"
+# Locked (founder, Oct 16 round 2): principal vs agent stays UNDETERMINED, and purchases stay blocked, until a CPA or
+# counsel confirms. The confirmation is recorded by Andre as a department-wide determination naming who confirmed and
+# the reference of their written confirmation; a deal's commercial model may carry PRINCIPAL or AGENT only when it
+# equals the current determination.
+PRINCIPAL_AGENT_CONFIRMERS = ("CPA", "COUNSEL")
 
 # ---------------------------------------------------------------------------------------------- section 11
 FUNDING_POLICY = "CLIENT_PREPAY_REQUIRED"     # the default and, at launch, the only policy: 100% prepaid
@@ -30,8 +35,10 @@ FUNDING_STATES = ("NONE", "PARTIAL", "CLEARED_FULL")
 # no code path can produce it in OOH-1.
 FUNDS_SOURCES = ("ANDRE_GATE", "FINANCE_31")
 FUNDS_SOURCES_CONNECTED = ("ANDRE_GATE",)
-# Vendor-related client money is ACH only, never card (founder, Oct 5); checks are recorded by hand.
-FUNDS_METHODS = ("ach", "check")
+# Locked (founder, Oct 16 round 2): clients pay by ACH only. (Vendors are paid by ACH or check, never card: that is a
+# vendor-payment rule, VENDOR_PAYMENT_METHODS, not a client-funds one.)
+FUNDS_METHODS = ("ach",)
+VENDOR_PAYMENT_METHODS = ("ach", "check")
 
 # ---------------------------------------------------------------------------------------------- section 19
 PRICE_TYPES = ("VENDOR_COST_ESTIMATE", "VENDOR_QUOTE", "NEGOTIATION_TARGET", "APPROVED_BUY_LIMIT", "CLIENT_SELL_PRICE",
@@ -55,6 +62,12 @@ EVIDENCE_ALLOWED = {
     "funds_andre_gate": ("OBSERVED",),      # Andre saw cleared funds; never FINANCIALLY_VERIFIED (that is Finance's)
     "order_outcome": ("VENDOR_ASSERTED",),
 }
+
+# ---------------------------------------------------------------------------------------------- locked limits
+# Locked (founder, Oct 16 round 2): the largest single purchase and the longest an authorization lives. The
+# environment may LOWER them (OOH_MAX_PURCHASE_AMOUNT, OOH_AUTHORITY_MAX_DAYS), never raise them.
+MAX_PURCHASE_CEILING = "10000.00"
+AUTHORITY_DAYS_CEILING = 7
 
 # ---------------------------------------------------------------------------------------------- section 9
 # The longest flight a unit may carry (AEGIS R3: a flight of 0001-01-01..9999-12-31 must not hold a face forever).

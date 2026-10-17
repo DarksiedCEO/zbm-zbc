@@ -694,6 +694,35 @@ class CampaignsMixin:
 
     # ================================================================================================ commercial (s. 9-10)
 
+    def principal_agent_state(self) -> str:
+        d = self.pa_determination
+        return d["determination"] if d else P.PRINCIPAL_AGENT_DEFAULT
+
+    def determine_principal_agent(self, body: dict) -> dict:
+        """Andre records the CPA's or counsel's confirmation (locked decision, Oct 16 round 2). Department-wide."""
+        with self.lock:
+            self._gate()
+            rk = self.rk("pa_determination", "ooh", body)
+            if self._idem("andre", rk, body):
+                return self.pa_view()
+            self.check_kill(capability="purchase")
+            data = {k: body[k] for k in ("determination", "confirmed_by", "confirmation_ref")}
+            self._commit("pa_determined", self._req(data, "andre", rk, body, "ooh"), "andre",
+                         evidence=("principal_agent_determination_recorded_by_andre", "ooh:principal-agent", data,
+                                   ("andre", rk)))
+            return self.pa_view()
+
+    def _a_pa_determined(self, d, at):
+        self.pa_determination = None if d["determination"] == "UNDETERMINED" else {
+            k: d[k] for k in ("determination", "confirmed_by", "confirmation_ref")} | {"recorded_by": d["actor"],
+                                                                                         "recorded_at": at}
+
+    def pa_view(self) -> dict:
+        with self.lock:
+            return {"principal_agent_state": self.principal_agent_state(),
+                    "determination": dict(self.pa_determination) if self.pa_determination else None,
+                    "purchases_blocked": self.pa_determination is None}
+
     def set_commercial_model(self, tid: str, cid: str, body: dict) -> dict:
         with self.lock:
             self._gate()
@@ -705,6 +734,9 @@ class CampaignsMixin:
             if c["state"] not in PLANNING_STATES:
                 raise Conflict(R("COMMERCIAL_MODEL_LOCKED"))
             self._expect(c, body)
+            pa = body["principal_agent_state"]
+            if pa != "UNDETERMINED" and pa != self.principal_agent_state():
+                raise Conflict(R("PRINCIPAL_AGENT_NOT_CONFIRMED"))     # only what a CPA / counsel confirmed
             model = {k: body[k] for k in ("principal_agent_state", "pricing_method", "markup_pct", "markup_disclosed",
                                           "markup_basis_ref", "presentation", "cancellation_terms_ref")}
             terms_id = derived_id("ctm", cid, c["version"], model)
@@ -877,6 +909,8 @@ class CampaignsMixin:
         cm = c["commercial"]
         if cm is None or cm["principal_agent_state"] == "UNDETERMINED":
             return "PRINCIPAL_AGENT_UNDETERMINED"
+        if cm["principal_agent_state"] != self.principal_agent_state():
+            return "PRINCIPAL_AGENT_NOT_CONFIRMED"           # the confirmation was withdrawn or changed since
         if a["signer"] != P.SIGNER or a["authority_scope"] not in P.AUTHORITY_SCOPES:
             return "AUTHORITY_SCOPE_INVALID"
         try:
@@ -1190,5 +1224,5 @@ class CampaignsMixin:
                                           "campaigns": self.campaigns, "inventory": self.inventory,
                                           "prices": self.prices, "authorizations": self.authorizations,
                                           "orders": self.orders, "funds_evidence": self.funds_evidence,
-                                          "vendors": self.vendors},
+                                          "vendors": self.vendors, "pa_determination": self.pa_determination},
                                          sort_keys=True))

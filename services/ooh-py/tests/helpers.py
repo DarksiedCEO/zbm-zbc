@@ -161,10 +161,17 @@ class Harness:
 
     def tenant(self, tid: str = "acme") -> dict:
         t = self.ok(self.post("/tenants", {"request_id": rid(), "tenant_id": tid}, andre=True), 201)
+        if self.svc.pa_determination is None:      # the suites buy as PRINCIPAL: counsel's (test) confirmation first
+            self.determine("PRINCIPAL")
         for vid, name in VENDORS.items():           # Andre's vendor registry (global): the vendors the suites use
             if vid not in self.svc.vendors:
                 self.vendor(vid, name)
         return t
+
+    def determine(self, determination: str, confirmed_by: str = "COUNSEL", ref: str = "counsel-memo-test-1"):
+        return self.ok(self.post("/principal-agent-determinations",
+                                 {"request_id": rid(), "determination": determination, "confirmed_by": confirmed_by,
+                                  "confirmation_ref": ref}, andre=True))
 
     def vendor(self, vid: str, name: str):
         return self.ok(self.post("/vendors", {"request_id": rid(), "vendor_id": vid, "legal_name": name}, andre=True),

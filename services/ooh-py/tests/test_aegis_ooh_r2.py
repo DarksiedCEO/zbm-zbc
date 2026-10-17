@@ -64,8 +64,8 @@ def test_r2l1_different_rails_are_different_transfers(acme):
     # a reference naming the wire rail cannot be recorded as an ACH payment (nor the other way round)
     acme.refused(_second(acme, "BOA-WIRE-12345", first="BOA-ACH-12345"), 422, "FUNDS_METHOD_CONFLICT")
     acme.refused(_second(acme, "CHK-12345", first="BOA-ACH-9"), 422, "FUNDS_METHOD_CONFLICT")
-    # a check with the same digits as an ACH transfer is another payment
-    assert _second(acme, "check-12345", method="check").status_code == 200
+    # clients pay by ACH only (locked, Oct 16 round 2): a check is not client money here
+    assert _second(acme, "check-12345", method="check").status_code == 422
 
 
 # ---------------------------------------------------------------------------------------------- R2-M1 vendors

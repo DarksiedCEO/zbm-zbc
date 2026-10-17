@@ -153,6 +153,15 @@ class CommercialModelSet(Strict):
     cancellation_terms_ref: Ref
 
 
+class PrincipalAgentDetermination(Strict):
+    """Andre records the CPA's or counsel's written confirmation of whether ZBM buys media as principal or as agent
+    (department-wide). UNDETERMINED withdraws a determination."""
+    request_id: RequestId
+    determination: Literal[policy.PRINCIPAL_AGENT_STATES]           # type: ignore[valid-type]
+    confirmed_by: Literal[policy.PRINCIPAL_AGENT_CONFIRMERS]         # type: ignore[valid-type]
+    confirmation_ref: Ref                                            # the confirmation letter / memo reference
+
+
 class ClientApproval(Strict):
     request_id: RequestId
     expected_version: Version

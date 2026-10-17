@@ -192,7 +192,9 @@ def test_personal_data_keys_are_refused_and_not_echoed(h):
         r = h.funds(ctx, ctx["sell"], **{key: "021000021"})
         assert r.status_code == 422 and "021000021" not in r.text, key
     r = h.funds(ctx, ctx["sell"], method="card")
-    assert r.status_code == 422                                      # vendor money: ACH (or a check), never card
+    assert r.status_code == 422                                      # client money: ACH only, never card
+    r = h.funds(ctx, ctx["sell"], method="check")
+    assert r.status_code == 422                                      # nor a check (locked, Oct 16 round 2)
 
 
 def test_request_limits(h):

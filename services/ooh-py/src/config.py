@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
+import policy
 from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 # Who may hold a caller token (ADR 0019 decision 3).
@@ -175,8 +176,12 @@ def load(env: Optional[dict] = None) -> Settings:
     s.andre_token = andre
     s.kill_global = _flag(env, "OOH_KILL_GLOBAL")
     s.killed_capabilities = _list(env, "OOH_KILLED_CAPABILITIES", CAPABILITY_SWITCHES)
-    s.max_purchase_amount = _amount(env, "OOH_MAX_PURCHASE_AMOUNT", "10000.00")
-    s.authority_max_days = _int(env, "OOH_AUTHORITY_MAX_DAYS", 7, 1, 30)
+    s.max_purchase_amount = _amount(env, "OOH_MAX_PURCHASE_AMOUNT", policy.MAX_PURCHASE_CEILING)
+    if Decimal(s.max_purchase_amount) > Decimal(policy.MAX_PURCHASE_CEILING):
+        raise RuntimeError(f"OOH_MAX_PURCHASE_AMOUNT may only lower the locked ceiling of "
+                           f"{policy.MAX_PURCHASE_CEILING} (founder decision); it can never raise it")
+    s.authority_max_days = _int(env, "OOH_AUTHORITY_MAX_DAYS", policy.AUTHORITY_DAYS_CEILING, 1,
+                                policy.AUTHORITY_DAYS_CEILING)
     s.inventory_max = _int(env, "OOH_INVENTORY_MAX_PER_CAMPAIGN", 200, 1, 2000)
     s.bind_addr = (env.get("OOH_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "OOH_PORT", 8510, 1024, 65535)

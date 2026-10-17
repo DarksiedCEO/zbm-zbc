@@ -23,6 +23,7 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `GET /constitution`, `GET /roster` | dashboard, agent, compliance / dashboard, compliance |
 | `POST /tenants`, `GET /tenants/{tid}` | Andre / scoped (hub: its own tenant only) |
 | `POST /vendors`, `GET /vendors` | Andre / dashboard, agent, compliance |
+| `GET /principal-agent`, `POST /principal-agent-determinations` (a CPA's / counsel's confirmation) | readers / Andre |
 | `GET, POST /kill-switches` | dashboard, agent, compliance engage; Andre releases |
 | `POST /tenants/{tid}/campaigns`, `GET …/campaigns/{cid}` (hub: client view), `GET …/exposure` | agent, dashboard |
 | `POST …/transitions` (Andre for the transitions ADR 0019 decision 4 names) | agent, dashboard |
@@ -45,8 +46,8 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `OOH_DATA_DIR` | absolute, owned, mode 700 directory for the hash-chained log; required in production |
 | `OOH_NON_PRODUCTION` | `1` allows an in-memory run without a data directory (tests only) |
 | `OOH_KILL_GLOBAL`, `OOH_KILLED_CAPABILITIES` | kill switches set at start; cannot be released at runtime |
-| `OOH_MAX_PURCHASE_AMOUNT` | the per-authorization spend limit (default 10000.00) |
-| `OOH_AUTHORITY_MAX_DAYS` | the longest an authorization may live (default 7, at most 30) |
+| `OOH_MAX_PURCHASE_AMOUNT` | the per-authorization spend limit (default and locked ceiling 10000.00; may only be lowered) |
+| `OOH_AUTHORITY_MAX_DAYS` | the longest an authorization may live (default and locked ceiling 7; may only be lowered) |
 | `OOH_INVENTORY_MAX_PER_CAMPAIGN` | units per campaign (default 200) |
 | `OOH_BIND_ADDR`, `OOH_PORT` | default 127.0.0.1:8510 |
 | `OOH_REQUEST_HEAD_TIMEOUT_SECONDS`, `OOH_KEEP_ALIVE_TIMEOUT_SECONDS`, `OOH_LIMIT_CONCURRENCY`, `OOH_SWITCH_INTERVAL_SECONDS`, `OOH_DRAINS_MAX` | the hardened launcher (`src/serve.py`, seo-py's) |

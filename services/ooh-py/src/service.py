@@ -84,6 +84,8 @@ class OohService(TenantsMixin, CampaignsMixin):
         self.orders: dict[str, str] = {}               # idempotency key -> authorization id (duplicate-order block)
         self.funds_evidence: dict[str, str] = {}       # funds evidence ref -> campaign id (one transfer, one campaign)
         self.vendors: dict[str, dict] = {}             # the vendor registry (Andre's; global: ZBM is the one buyer)
+        # the CPA's / counsel's principal-or-agent confirmation, as Andre recorded it (None: UNDETERMINED, locked)
+        self.pa_determination: Optional[dict] = None
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
@@ -452,7 +454,10 @@ class OohService(TenantsMixin, CampaignsMixin):
                           "inventory_data": "NOT_CONNECTED"},
                 "funds_verification": {"mode": "andre_gate", "sources_connected": list(policy.FUNDS_SOURCES_CONNECTED),
                                        "finance_31": "NOT_CONNECTED", "policy": policy.FUNDING_POLICY},
+                "principal_agent": self.principal_agent_state(),
                 "limits": {"max_purchase_amount": s.max_purchase_amount, "authority_max_days": s.authority_max_days,
+                           "max_purchase_ceiling": policy.MAX_PURCHASE_CEILING,
+                           "authority_days_ceiling": policy.AUTHORITY_DAYS_CEILING,
                            "inventory_max_per_campaign": s.inventory_max},
                 "commercial": {"suggested_markup_pct": policy.SUGGESTED_MARKUP_PCT, "suggested_markup_applied": False},
                 "agents_built": 0,

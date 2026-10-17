@@ -443,6 +443,14 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
     def register_vendor(who: str = Depends(andre), req: dict = Depends(body(m.VendorCreate))) -> dict:
         return svc.register_vendor(req)
 
+    @app.get(P + "/principal-agent", dependencies=auth)
+    def principal_agent(who: str = Depends(caller("dashboard", "ooh_agent", "compliance_38"))) -> dict:
+        return svc.pa_view()
+
+    @app.post(P + "/principal-agent-determinations", dependencies=auth)
+    def determine_pa(who: str = Depends(andre), req: dict = Depends(body(m.PrincipalAgentDetermination))) -> dict:
+        return svc.determine_principal_agent(req)
+
     @app.get(P + "/kill-switches", dependencies=auth)
     def switches(who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
         with svc.lock:

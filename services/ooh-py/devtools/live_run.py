@@ -218,6 +218,17 @@ def _main(work: Path) -> int:
               v_agent.status_code == 403 and v1.status_code == 201 and v2.status_code == 201
               and spoof.status_code == 409 and spoof.json()["detail"] == "VENDOR_EXISTS"
               and [v["vendor_id"] for v in listed.json()] == ["lamar", "outfront"])
+        pa0 = a.get("/principal-agent").json()
+        pa_agent = a.post("/principal-agent-determinations", {"request_id": rid(), "determination": "PRINCIPAL",
+                                                             "confirmed_by": "COUNSEL",
+                                                             "confirmation_ref": "counsel-memo-live"})
+        pa = a.post("/principal-agent-determinations", {"request_id": rid(), "determination": "PRINCIPAL",
+                                                       "confirmed_by": "COUNSEL", "confirmation_ref": "counsel-memo-live"},
+                    andre=True)
+        check("principal vs agent starts UNDETERMINED (purchases blocked); only Andre records counsel's confirmation",
+              pa0["principal_agent_state"] == "UNDETERMINED" and pa0["purchases_blocked"] is True
+              and pa_agent.status_code == 403 and pa.status_code == 200
+              and pa.json()["principal_agent_state"] == "PRINCIPAL")
         T = "/tenants/acme-live"
         cid = a.post(T + "/campaigns", {"request_id": rid(), "name": "Live Billboards", "markets": ["los-angeles"]}
                      ).json()["campaign_id"]

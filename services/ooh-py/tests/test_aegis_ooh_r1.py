@@ -30,7 +30,7 @@ def acme(h):
 
 @pytest.mark.parametrize("first,second,method", [("BOA-ACH-12345", "boa-ach-12345", "ach"), ("12345", "ach:12345", "ach"),
                                                  ("ACH12345", "12345", "ach"), ("boa.ach.12345", "BOA_ACH_12345", "ach"),
-                                                 ("eft-778", "EFT778", "ach"), ("chk:9001", "check-9001", "check")])
+                                                 ("eft-778", "EFT778", "ach")])
 def test_h1_one_transfer_funds_one_campaign_whatever_its_spelling(acme, first, second, method):
     h = acme
     a = h.to_proposal_sent()

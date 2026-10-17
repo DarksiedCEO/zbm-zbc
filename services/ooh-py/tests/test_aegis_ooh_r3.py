@@ -158,8 +158,13 @@ def test_r3l_the_same_reference_on_another_rail_is_allowed_with_a_warning(acme):
     assert first["warnings"] == []
     b = h.to_proposal_sent()
     h.ok(h.approve(b))
-    r = h.ok(h.funds(b, b["sell"], ref="boa-12345", method="check"))
-    assert r["warnings"] == [{"code": "SAME_REFERENCE_OTHER_RAIL", "rails": ["ach"]}]
+    # clients pay by ACH only (locked, Oct 16 round 2): a client check is refused outright...
+    assert h.funds(b, b["sell"], ref="boa-12345", method="check").status_code == 422
+    # ...so the warning can only meet a reference already held on another rail (dormant while ACH is the only client
+    # rail; kept for when Finance (31) records other rails). Simulated: the same identity recorded as a check.
+    h.svc.funds_evidence["check:boa777"] = a["cid"]
+    r = h.ok(h.funds(b, b["sell"], ref="boa-777"))
+    assert r["warnings"] == [{"code": "SAME_REFERENCE_OTHER_RAIL", "rails": ["check"]}]
     assert r["funds"][0]["warnings"] == r["warnings"]
     ev = [e for e in h.ledger.of_type("client_funds_verified_by_andre") if e["_payload"].get("warnings")]
     assert len(ev) == 1 and ev[0]["_payload"]["warnings"][0]["code"] == "SAME_REFERENCE_OTHER_RAIL"

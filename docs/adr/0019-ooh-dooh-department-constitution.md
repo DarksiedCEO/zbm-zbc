@@ -56,8 +56,8 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
    campaign out of approval; leaving a dispute; releasing any kill switch. Moving his approvals to Cybersecurity (22)
    passkeys is on the unlock list.
 5. **Principal / agent state (section 10):** `PRINCIPAL | AGENT | UNDETERMINED`, default `UNDETERMINED`, set per deal
-   in the commercial model by Andre. A purchase is refused while it is `UNDETERMINED`
-   (`PRINCIPAL_AGENT_UNDETERMINED`): who owes the vendor must be settled before ZBM commits to one (open item 3).
+   in the commercial model by Andre, and only to what a CPA or counsel confirmed ("Locked decisions enforced"). A
+   purchase is refused while it is `UNDETERMINED` (`PRINCIPAL_AGENT_UNDETERMINED`).
 6. **Cash exposure (section 11).** Policy `CLIENT_PREPAY_REQUIRED`, the only one. `GET …/exposure` computes, from the
    records (never stored, so it cannot drift): `client_funds_received`, `client_funds_available`,
    `approved_client_commitment`, `vendor_commitment` (every order SUBMITTED-UNKNOWN or ACCEPTED: an order whose answer
@@ -131,8 +131,8 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
     once the proposal is out (`COMMERCIAL_MODEL_LOCKED`); a new model unseats a sell price made under the old one.
 15. **Client approval** (Andre, at `PROPOSAL_SENT`): binds the current sell price, its quotes, its terms and the
     client's document reference.
-16. **Funds** (Andre's gate, at `CLIENT_APPROVED`): amount, currency (must match), method (`ach` or `check`; card is
-    refused: vendor money is ACH, founder Oct 5), the bank's transfer reference (never an account number: those keys
+16. **Funds** (Andre's gate, at `CLIENT_APPROVED`): amount, currency (must match), method (`ach` only: locked Oct 16 round 2; card,
+    check and wire are refused), the bank's transfer reference (never an account number: those keys
     are refused anywhere in a body), and `cleared: true`. One evidence reference funds one campaign
     (`FUNDS_EVIDENCE_REUSED`, across tenants too). Recorded with source `ANDRE_GATE` and evidence class `OBSERVED` —
     never `FINANCIALLY_VERIFIED`, which is reserved for Finance (31). The campaign reaches `FUNDS_VERIFIED` only when
@@ -308,12 +308,33 @@ and an expiry that nothing checked (open decision 7). Now:
 - Leaving `HOLD_CONFIRMED` (an extension request) clears the hold; it is confirmed again only by Andre.
 - Tests: `tests/test_hold_confirmation.py`; war room scenario `someone-else-confirms-a-hold` (all MUST).
 
+## Locked decisions enforced (founder, Oct 16 2026 round 2)
+
+The waves 0-1 build had three of the locked decisions as defaults or open questions; they are now enforced:
+
+- **Clients pay by ACH only.** `policy.FUNDS_METHODS = ("ach",)`: a check (or card, wire, cash) for client funds is
+  refused 422. Vendors are paid by ACH or check, never card (`policy.VENDOR_PAYMENT_METHODS`, used by the vendor
+  payment controls). The R3 rail warning (`SAME_REFERENCE_OTHER_RAIL`) is dormant while ACH is the only client rail.
+  This settles open decision 5.
+- **$10,000 and 7 days are ceilings.** `policy.MAX_PURCHASE_CEILING = "10000.00"` and
+  `policy.AUTHORITY_DAYS_CEILING = 7`: `OOH_MAX_PURCHASE_AMOUNT` and `OOH_AUTHORITY_MAX_DAYS` may only lower them
+  (start is refused otherwise). This settles open decision 2. `/status` shows both ceilings.
+- **Principal vs agent stays UNDETERMINED until a CPA or counsel confirms.** A department-wide determination is
+  recorded by Andre (`POST /ooh/v1/principal-agent-determinations`: `determination`, `confirmed_by` = `CPA` or
+  `COUNSEL`, `confirmation_ref`; ledger event `principal_agent_determination_recorded_by_andre`; `UNDETERMINED`
+  withdraws it). `GET /ooh/v1/principal-agent` shows it and `purchases_blocked`. A deal's commercial model may carry
+  `PRINCIPAL` or `AGENT` only when it equals the current determination (`PRINCIPAL_AGENT_NOT_CONFIRMED`), and the
+  purchase gate re-checks this at authorization and at submission, so a withdrawn or changed confirmation blocks
+  every open purchase. A fresh service is `UNDETERMINED`: purchases are blocked. This settles open decision 3.
+  The record is Andre's attestation of the confirmation (the document stays outside the repo, by reference).
+- Tests: `tests/test_locked_decisions.py`.
+
 ## Configuration
 
 Read once at start (`src/config.py`; every variable is also listed in `services/ooh-py/README.md`):
 `OOH_SERVICE_TOKEN`, `OOH_CALLER_TOKENS`, `OOH_TENANT_TOKENS`, `OOH_ANDRE_APPROVAL_TOKEN`, `OOH_DATA_DIR`,
 `OOH_NON_PRODUCTION` (tests only: an in-memory run), `OOH_KILL_GLOBAL`, `OOH_KILLED_CAPABILITIES`,
-`OOH_MAX_PURCHASE_AMOUNT` (default 10000.00), `OOH_AUTHORITY_MAX_DAYS` (default 7), `OOH_INVENTORY_MAX_PER_CAMPAIGN`
+`OOH_MAX_PURCHASE_AMOUNT` (default and ceiling 10000.00), `OOH_AUTHORITY_MAX_DAYS` (default and ceiling 7), `OOH_INVENTORY_MAX_PER_CAMPAIGN`
 (default 200), `OOH_BIND_ADDR`, `OOH_PORT` (8510), the launcher's `OOH_REQUEST_HEAD_TIMEOUT_SECONDS`,
 `OOH_KEEP_ALIVE_TIMEOUT_SECONDS`, `OOH_LIMIT_CONCURRENCY`, `OOH_SWITCH_INTERVAL_SECONDS`, `OOH_DRAINS_MAX`, and the
 NOT_BUILT names `OOH_FINANCE_URL`, `OOH_VENDOR_PORT_URL`, `OOH_ESIGN_URL`, `OOH_INVENTORY_PROVIDER` (setting any
@@ -350,13 +371,12 @@ refuses start).
 
 1. (Resolved Oct 16: the complete section 4 list was supplied; decision 9 maps every name.) Whether
    `HOLD_REQUESTED` / `HOLD_CONFIRMED` should become stored campaign states (built: derived from the units).
-2. `OOH_MAX_PURCHASE_AMOUNT` default (10000.00) and `OOH_AUTHORITY_MAX_DAYS` (7) are build defaults, not his numbers.
-3. Whether a purchase may proceed while principal/agent is `UNDETERMINED` (built: no). His Oct 5 statement was
-   "ZBM is principal" for media; the blueprint's default is `UNDETERMINED` until counsel confirms.
-4. Whether `QUOTED` without a confirmed hold may ever be bought (built: no; every unit must be `HOLD_CONFIRMED`).
-5. Whether a check is acceptable client money for a vendor buy (built: `ach` or `check`; card refused).
-6. Whether the client's hub view should ever show cost and fee broken out (built: never cost; the presentation
-   choice is recorded for the proposal only).
+2. **Resolved Oct 16 2026 (round 2):** $10,000 and 7 days are the founder's locked ceilings ("Locked decisions enforced").
+3. **Resolved Oct 16 2026 (round 2):** UNDETERMINED until a CPA or counsel confirms; purchases blocked until then
+   ("Locked decisions enforced").
+4. **Resolved Oct 16 2026 (round 2, locked):** a confirmed hold is required before purchase.
+5. **Resolved Oct 16 2026 (round 2):** clients pay by ACH only; vendors are paid by ACH or check, never card.
+6. **Resolved Oct 16 2026 (round 2, locked):** the client hub never shows vendor cost.
 7. (AEGIS L4) **Resolved Oct 16 2026 (round 2): only Andre confirms a hold**; agents attach the vendor's evidence
    and submit it for his decision ("Hold confirmation is Andre's", above).
 8. (AEGIS M1, superseded by R2-M2) Registration is now unique per tenant per face per FLIGHT; a booked face is free
@@ -369,9 +389,8 @@ refuses start).
 10. (AEGIS R2, founder-confirm) A campaign whose client pays the approved price in ONE cleared payment goes
     CLIENT_APPROVED → FUNDS_VERIFIED directly, never visiting FUNDING_REQUIRED (which is entered only on a partial
     payment). Built that way; the alternative is to always pass through FUNDING_REQUIRED.
-11. (AEGIS R2-L1) Wire is not an accepted method for client money (`ach` or `check`, founder Oct 5: vendor money is
-    ACH). A wire reference is therefore refused, not recorded under ACH (`FUNDS_METHOD_CONFLICT`). Whether wires
-    should be accepted is his decision.
+11. (AEGIS R2-L1) **Resolved Oct 16 2026 (round 2, locked):** clients pay by ACH only, so a wire is not client money
+    here; a wire reference is refused, not recorded under ACH (`FUNDS_METHOD_CONFLICT`).
 
 ## Unlock list
 
