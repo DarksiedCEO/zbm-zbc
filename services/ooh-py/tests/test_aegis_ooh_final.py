@@ -378,9 +378,9 @@ def test_e2_a_digit_run_that_cannot_start_a_card_is_never_one():
     import random
     rnd = random.Random(7)
     for _ in range(3000):
-        for first in "01789":
-            assert not sc.names_a_card(first + "".join(rnd.choice("0123456789") for _ in range(15)))
-        assert not sc.names_a_card(f"2{rnd.randint(0, 220):03d}" + "".join(rnd.choice("0123456789") for _ in range(12)))
+        for first in ("0", "1", "7", "80", "83", "89", "90", "95"):
+            assert not sc.names_a_card(first + "".join(rnd.choice("0123456789") for _ in range(16 - len(first))))
+        assert not sc.names_a_card(f"2{rnd.randint(0, 199):03d}" + "".join(rnd.choice("0123456789") for _ in range(12)))
 
 
 def test_df8_an_international_number_needs_eight_digits():
@@ -416,3 +416,41 @@ def test_e8_a_card_in_three_digit_groups_or_behind_long_separators_is_a_card(ref
 
 def test_e8_a_short_leading_group_is_never_joined_into_a_card():
     assert _luhn("4201000000000009") and not sc.names_a_card("ACH-42-01000000000009")
+
+
+def _card_with_prefix(prefix: str, n: int = 16) -> str:
+    base = (prefix + "0" * n)[:n - 1]
+    return next(base + x for x in "0123456789" if _luhn(base + x))
+
+
+@pytest.mark.parametrize("prefix", ["2200", "2204", "2221", "2230", "2699", "2700", "2720", "8100", "8200", "8600",
+                                    "9792", "9860", "3000", "3900", "5000", "5800", "6200", "4000"])
+def test_f1_f4_every_card_network_prefix_is_a_card(prefix):
+    assert sc.names_a_card(_card_with_prefix(prefix))
+
+
+@pytest.mark.parametrize("prefix", ["2205", "2220", "2721", "2800", "8000", "8300", "8601", "9791", "9861", "7000",
+                                    "1000", "0210", "5900"])
+def test_f1_f4_a_run_outside_every_card_network_is_not_a_card(prefix):
+    assert not sc.names_a_card(_card_with_prefix(prefix))
+
+
+def test_f1_a_mir_card_is_refused_and_never_recorded(acme):
+    ctx = _approved(acme)
+    acme.refused(acme.funds(ctx, ctx["sell"], ref="2200-1022-4807-8782"), 422, "FUNDS_METHOD_CONFLICT")
+    assert not acme.ledger.of_type("client_funds_verified_by_andre")
+
+
+@pytest.mark.parametrize("ref", ["ACH-256074974-93982757", "ACH-322271627-72979298", "ACH-314074269-35735457"])
+def test_f2_a_routing_and_account_reference_is_not_a_card(acme, ref):
+    assert not sc.names_a_card(ref)
+    ctx = _approved(acme)
+    assert acme.ok(acme.funds(ctx, ctx["sell"], ref=ref))["state"] == "FUNDS_VERIFIED"
+
+
+def test_f2_amex_grouping_4_6_5_is_still_a_card():
+    assert sc.names_a_card("3782-822463-10005")
+
+
+def test_f3_a_long_local_part_before_the_word_at_is_caught():
+    assert pii.has_personal_data("a" * 65 + " at x1.org")

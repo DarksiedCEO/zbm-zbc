@@ -143,12 +143,13 @@ def _spelled_out(value: str) -> list[str]:
 
 
 # Card numbers start with a card-network prefix (IIN): Visa 4, Mastercard 51-55 and 2221-2720, Maestro 50/56-58,
-# Amex 34/37, JCB 35, Diners 30/36/38/39, Discover and UnionPay 6. A digit run that cannot start a card (0, 1, 7, 8,
-# 9, or 2 outside 2221-2720: dates such as 2026…, ABA routing numbers 0…/1…) is never read as one, so a bank
-# reference with a date or a routing number is not refused by chance (delta red team 2 E2). A 15-digit run is the
-# length of an ACH trace number, whose ABA routing prefix can be 21-32 or 61-72: it counts only with a prefix no
-# routing prefix starts with (4, 34-38, 50-58, 6011).
-_CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720|3[0-9]|6)")
+# Mir 2200-2204, Amex 34/37, JCB 35, Diners 30/36/38/39, Discover, UnionPay and RuPay 6, RuPay 81/82, Uzcard 8600,
+# Troy 9792, Humo 9860 (third delta review F1). A digit run that starts otherwise (0, 1, 7, most of 2, 8 and 9: dates
+# such as 2026…, ABA routing numbers) is never read as a card, so a bank reference with a date is not refused by
+# chance (second delta review E2). A 15-digit run is the length of an ACH trace number, whose ABA routing prefix can
+# be 21-32 or 61-72: it counts only with a prefix no routing prefix starts with (4, 34-38, 50-58, 6011).
+_CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|220[0-4]|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720|3[0-9]|6"
+                          r"|8[12]|8600|9792|9860)")
 _CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
 
 
@@ -194,7 +195,9 @@ def names_a_card(value: str) -> bool:
             for j in range(i, len(groups)):
                 # card groupings (4-4-4-4, 4-6-5, 4-4-4-4-3) have no group shorter than three digits, so a date's
                 # "-10-17" is never joined into a card; a candidate stops growing past 19 digits
-                if j > i and (len(groups[j]) < 3 or len(groups[i]) < 3):
+                # and no group longer than six (an ABA routing number or an account number is never part of one:
+                # third delta review F2)
+                if j > i and not (3 <= len(groups[j]) <= 6 and 3 <= len(groups[i]) <= 6):
                     break
                 joined += groups[j]
                 if len(joined) > 19:

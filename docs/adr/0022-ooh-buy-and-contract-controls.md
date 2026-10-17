@@ -137,13 +137,16 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
     before digits (`mo5`, `btc1`).
   - DF-6: an address's local part is bounded (64), so a 4,000-character adversarial text screens in about 50 ms.
   - DF-7: redaction repeats until nothing detectable is left.
-  - E2 (second delta review): a digit run that cannot start a card (0, 1, 7, 8, 9, or 2 outside Mastercard's
-    2221-2720) is never one, so a bank reference with a date or an ABA routing number is not refused by chance.
+  - E2 / F1 / F2 (second and third delta reviews): a digit run is read as a card only with a card-network prefix
+    (Visa, Mastercard 51-55 and 2221-2720, Maestro, Mir 2200-2204, Amex, JCB, Diners, Discover / UnionPay / RuPay 6,
+    RuPay 81/82, Uzcard 8600, Troy 9792, Humo 9860), and groups are joined only when each has three to six digits
+    (card groupings), never with a nine-digit routing number or an account number. So a bank reference with a date or
+    a routing number is not refused by chance, and every listed card network is.
   - Known false positives (refused, never stored): ten-digit references, `<word> at <word>.<word>`, a three- and a
     four-digit group joined by a dash (`LA-101-2025`), lists of 3-3-4 digit groups (`360, 720, 1440`,
     `405 | 110 | 1200`), coordinates with seven decimals, and `place@place. Word` (`Sunset@Vine. Faces east`).
-  - Known limits (accepted): a card number written in one- or two-digit groups (`42-42-42-…`) is not seen (only a
-    deliberate spelling does that); `cc4242` (see NF-2).
+  - Known limits (accepted): a card number written in one- or two-digit groups (`42-42-42-…`) or in groups longer
+    than six (`424242424-2424242`) is not seen (only a deliberate spelling does that); `cc4242` (see NF-2).
 - **Rate cards (NF-5).** An estimate counts only while the face's current rate card has the same sources, amount,
   period and date it was made from: a card re-recorded with another value under the same source makes it stale.
 - **Finance references (NF-6).** One Finance (31) reference, in any case or separator spelling, verifies one campaign.
