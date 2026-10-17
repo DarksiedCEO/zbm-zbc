@@ -130,9 +130,16 @@ def _spelled_out(value: str) -> list[str]:
     return out
 
 
+# Card-network prefixes that no ABA routing prefix (00-12, 21-32, 61-72, 80) can start an ACH trace number with:
+# Visa 4, Mastercard 51-55, Amex 34/37, Discover 6011. (Mastercard 2221-2720 overlaps routing prefixes 22-27 and is
+# left out rather than refuse a real trace number.)
+_CARD_PREFIX = re.compile(r"^(?:4|5[1-5]|3[47]|6011)")
+
+
 def _luhn_card(digits: str) -> bool:
-    """A 13-19 digit run that passes the Luhn check: a payment-card number, never stored (re-verification N2)."""
-    if not 13 <= len(digits) <= 19:
+    """A 13-19 digit run with a card-network prefix that passes the Luhn check: a payment-card number, never stored
+    (re-verification N2). A 15-digit ACH trace number is not refused by chance (one in ten passes Luhn)."""
+    if not 13 <= len(digits) <= 19 or not _CARD_PREFIX.match(digits):
         return False
     total = 0
     for i, ch in enumerate(reversed(digits)):

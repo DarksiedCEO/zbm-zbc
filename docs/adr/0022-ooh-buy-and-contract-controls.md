@@ -86,7 +86,8 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   +1, 3-3-4 with any separators incl. dashes) or ten-plus digits. Dates, hours, ZIP+4 and grouped counts now pass.
   Campaign names and reference attributes are screened too; vendor-text redaction keeps the original case.
 - **Instruments (N2).** More non-ACH words (money order, crypto, wallets, gift cards, `cc`, `mc`) and any 13-19-digit
-  run passing the Luhn check (a card number) refuse a client funds reference. Short words (`cc`, `mc`, `mo`, `btc`,
+  run with a card-network prefix (Visa 4, Mastercard 51-55, Amex 34/37, Discover 6011 — none of which an
+  ABA routing prefix can start an ACH trace number with) passing the Luhn check refuse a client funds reference. Short words (`cc`, `mc`, `mo`, `btc`,
   `eth`) count only as whole tokens, never as a prefix before a digit (that misread `CC4491`-style bank references and
   made the suite flaky).
 - **Finance references (N4).** One Finance (31) reference verifies one campaign (`FUNDS_EVIDENCE_REUSED`).

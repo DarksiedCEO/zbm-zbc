@@ -377,3 +377,27 @@ def test_rv_n2_short_instrument_words_count_only_as_whole_tokens(acme, ref):
     ctx = h.to_proposal_sent()
     h.ok(h.approve(ctx))
     h.ok(h.funds(ctx, ctx["sell"], ref=ref))
+
+
+
+def _with_luhn_digit(body: str) -> str:
+    for d in "0123456789":
+        n = body + d
+        total = sum((int(c) * 2 - 9 if int(c) > 4 else int(c) * 2) if i % 2 else int(c)
+                    for i, c in enumerate(reversed(n)))
+        if total % 10 == 0:
+            return n
+    raise AssertionError
+
+
+def test_rv_n2_ach_trace_numbers_that_pass_luhn_are_not_mistaken_for_cards(acme):
+    """15-digit ACH trace numbers (routing prefixes 02 and 12) that happen to pass the Luhn check are not cards;
+    a Visa-prefixed Luhn number still is."""
+    from svc_campaigns import _luhn_card
+    traces = [_with_luhn_digit("02100002100001"), _with_luhn_digit("12104288000000")]
+    assert all(not _luhn_card(t) for t in traces)
+    assert _luhn_card(_with_luhn_digit("411111111111111"))
+    h = acme
+    ctx = h.to_proposal_sent()
+    h.ok(h.approve(ctx))
+    h.ok(h.funds(ctx, ctx["sell"], ref=f"trace-{traces[0]}"))
