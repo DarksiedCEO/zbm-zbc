@@ -326,7 +326,8 @@ The waves 0-1 build had three of the locked decisions as defaults or open questi
 - **Principal vs agent stays UNDETERMINED until a CPA or counsel confirms.** A department-wide determination is
   recorded by Andre (`POST /ooh/v1/principal-agent-determinations`: `determination`, `confirmed_by` = `CPA` or
   `COUNSEL`, `confirmation_ref`; ledger event `principal_agent_determination_recorded_by_andre`; `UNDETERMINED`
-  withdraws it). `GET /ooh/v1/principal-agent` shows it and `purchases_blocked`. A deal's commercial model may carry
+  withdraws it, and withdrawing is never stopped by a kill switch — the safe direction, AEGIS wave 2 F-5).
+  `GET /ooh/v1/principal-agent` shows it and `purchases_blocked`. A deal's commercial model may carry
   `PRINCIPAL` or `AGENT` only when it equals the current determination (`PRINCIPAL_AGENT_NOT_CONFIRMED`), and the
   purchase gate re-checks this at authorization and at submission, so a withdrawn or changed confirmation blocks
   every open purchase. A fresh service is `UNDETERMINED`: purchases are blocked. This settles open decision 3.

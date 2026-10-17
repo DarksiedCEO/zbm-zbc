@@ -68,18 +68,21 @@ fact tied to the source that states it.
    `current: false`, and never displaces it. Text attributes are vendor data (untrusted, hash-only on the ledger).
 10. **Supplier schema** (`POST /ooh/v1/vendors/{vid}/attributes`, `GET /ooh/v1/vendors/{vid}`;
    `policy.SUPPLIER_ATTRIBUTES`): operator type, formats offered, markets served, payment methods, payment terms,
-   cancellation policy reference, contact reference — sourced exactly like face attributes. Vendors are paid by ACH
-   or check only (locked): `card` is refused `VENDOR_PAYMENT_METHOD_REFUSED`. Contacts are kept by reference: no
-   names, phones or other personal data (the repo is public; the personal-data key refusal still applies). Each
-   supplier shows `data_port: NOT_CONNECTED`.
+   cancellation policy reference — sourced exactly like face attributes. Vendors are paid by ACH or check only
+   (locked): `card` is refused `VENDOR_PAYMENT_METHOD_REFUSED`. There is no contact attribute (AEGIS wave 2 F-2:
+   contacts are personal data). Free-text values (face descriptions, routes) are refused when they carry an e-mail
+   address or a phone-number-like run of digits (`ATTRIBUTE_VALUE_PERSONAL_DATA`); names cannot be detected
+   reliably, so preparers must not type them. Each supplier shows `data_port: NOT_CONNECTED`.
 11. **Campaign units are registry faces** (`POST …/inventory` now takes `face_id` and the flight): vendor, format,
     market, the vendor's reference, the unit key and the proof requirement come from the face. A face outside the
     campaign's markets is `MARKET_NOT_IN_CAMPAIGN`; the free-text body is gone (422). The OOH-1 uniqueness, flight
     and cross-tenant face rules are unchanged.
 12. **Avails** (`POST /ooh/v1/faces/{fid}/avails`, preparers): the vendor's `AVAILABLE | UNAVAILABLE` answer for a
     flight, from a named source of that vendor, optionally valid until a time. A unit's move to `HOLD_REQUESTED` is
-    refused `AVAILS_UNAVAILABLE` when the vendor's latest unexpired answer for an overlapping flight is
-    `UNAVAILABLE`. Holds themselves are ADR 0019's: only Andre confirms one.
+    refused `AVAILS_UNAVAILABLE` while the vendor has an unexpired `UNAVAILABLE` answer for an overlapping flight
+    that no LATER (by the source's date) `AVAILABLE` answer covering the unit's whole flight has overtaken (AEGIS
+    wave 2 F-1: an `AVAILABLE` for a flight that only shares a day says nothing about the rest). Holds themselves
+    are ADR 0019's: only Andre confirms one.
 13. **The vendor-API / platform port** (`svc_inventory.NotConnectedInventoryPort`): an interface with no
     implementation. `GET /ooh/v1/inventory-port` reports `NOT_CONNECTED`; `POST /ooh/v1/inventory-port/sync` answers
     503 `INVENTORY_PORT_NOT_CONNECTED` and records nothing; `/status` lists `inventory_data`, `measurement` and
@@ -105,5 +108,11 @@ fact tied to the source that states it.
 2. Whether raising `RESEARCH_COVERAGE` / `PLANNING_COVERAGE` should stay Andre's alone (built) or be open to the
    agent runtime with evidence.
 3. The Arizona side of `imperial-az-border`: which Arizona counties or cities it covers.
-4. Whether a digital face may carry more than one open order for different loop slots (built: no — the locked rule
+4. (AEGIS wave 2 F-3) A face's market is what the preparer records; nothing checks it against the face's
+   coordinates (that would need county boundaries this build does not have). A face registered in the wrong market
+   would be bought under that market's `EXECUTION_AUTHORIZED`. Should registration require coordinates inside the
+   market, from a boundary source to be chosen?
+5. (AEGIS wave 2 F-4) The same board offered by its operator and by a rep firm is two faces (two vendors), so the
+   one-open-order rule cannot see the overlap. Should a face record the operator behind a rep firm's listing?
+6. Whether a digital face may carry more than one open order for different loop slots (built: no — the locked rule
    is one open order per face per overlapping flight).

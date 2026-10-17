@@ -330,7 +330,7 @@ def test_the_supplier_profile_is_sourced_and_vendors_are_never_paid_by_card(acme
     h.refused(supplier_attr(h, "lamar", "operator_type", "OPERATOR", source=h.source("outfront")), 409,
               "SOURCE_VENDOR_MISMATCH")
     v = h.ok(supplier_attr(h, "lamar", "operator_type", "OPERATOR"))
-    assert v["attributes"]["operator_type"]["source_id"] and v["attributes"]["contact_ref"]["status"] == "UNKNOWN"
+    assert v["attributes"]["operator_type"]["source_id"] and "contact_ref" not in v["attributes"]   # F-2: no contacts
     h.refused(h.get("/vendors/nobody"), 404, "VENDOR_UNKNOWN")
 
 
@@ -360,3 +360,52 @@ def test_the_registry_replays_identically(hd):
     assert h2.svc.snapshot() == before
     assert h2.ok(h2.get(f"/faces/{fid}"))["attributes"]["width_ft"]["value"] == "6"
     h2.refused(h2.post("/faces", face_body(h2, ref="RP_1")), 409, "FACE_EXISTS")     # the key index is rebuilt
+
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS wave 2 security
+
+def test_w2_f1_an_available_answer_for_another_flight_does_not_lift_an_unavailable_one(acme):
+    h = acme
+    cid, uid, fid = requested_unit(h, "f1-1")                          # the unit's flight: Nov 1-30
+    h.ok(avails(h, fid, "UNAVAILABLE", dated=at(days=-3)), 201)
+    h.ok(avails(h, fid, "AVAILABLE", start="2026-11-30", end="2026-12-30", dated=at(days=-1)), 201)
+    h.refused(h.move("acme", cid, uid, "HOLD_REQUESTED"), 409, "AVAILS_UNAVAILABLE")
+    h.ok(avails(h, fid, "AVAILABLE", start="2026-10-20", end="2026-12-31", dated=at(days=-1)), 201)   # covers it all
+    h.ok(h.move("acme", cid, uid, "HOLD_REQUESTED"))
+
+
+def test_w2_f1_an_older_available_never_lifts_a_newer_unavailable(acme):
+    h = acme
+    cid, uid, fid = requested_unit(h, "f1-2")
+    h.ok(avails(h, fid, "UNAVAILABLE", dated=at(days=-1)), 201)
+    h.ok(avails(h, fid, "AVAILABLE", dated=at(days=-5)), 201)          # recorded later, dated earlier
+    h.refused(h.move("acme", cid, uid, "HOLD_REQUESTED"), 409, "AVAILS_UNAVAILABLE")
+
+
+@pytest.mark.parametrize("text", ["call jane at 555-867-5309", "ask jane.doe@example.com", "+1 (213) 555 0100",
+                                  "contact 2135550100"])
+def test_w2_f2_free_text_with_personal_data_is_refused(acme, text):
+    h = acme
+    fid = h.ok(h.post("/faces", face_body(h, ref=f"pd-{abs(hash(text)) % 10000}")), 201)["face_id"]
+    h.refused(attr(h, fid, "location_description", text), 422, "ATTRIBUTE_VALUE_PERSONAL_DATA")
+    assert h.ok(h.get(f"/faces/{fid}"))["attributes"]["location_description"]["status"] == "UNKNOWN"
+
+
+def test_w2_f2_there_is_no_contact_attribute_and_references_with_dates_are_fine(acme):
+    h = acme
+    h.refused(supplier_attr(h, "lamar", "contact_ref", "jane.doe.555-867-5309"), 422, "ATTRIBUTE_UNKNOWN")
+    v = h.ok(supplier_attr(h, "lamar", "cancellation_policy_ref", "lamar-cxl-20261101"))
+    assert v["attributes"]["cancellation_policy_ref"]["value"] == "lamar-cxl-20261101"
+    fid = h.ok(h.post("/faces", face_body(h, ref="pd-ok")), 201)["face_id"]
+    h.ok(attr(h, fid, "location_description", "I-405 N at Wilshire Blvd, 1,200 ft east of exit 55"))
+
+
+def test_w2_f5_withdrawing_the_determination_is_never_kill_blocked(acme):
+    h = acme
+    h.ok(h.switch("capability:purchase"))
+    h.determine("UNDETERMINED", ref="counsel-withdrew-under-kill")
+    assert h.ok(h.get("/principal-agent"))["purchases_blocked"] is True
+    r = h.post("/principal-agent-determinations", {"request_id": rid(), "determination": "PRINCIPAL",
+                                                   "confirmed_by": "COUNSEL", "confirmation_ref": "c-2"}, andre=True)
+    h.refused(r, 403, "KILLED_CAPABILITY")                              # setting one still is

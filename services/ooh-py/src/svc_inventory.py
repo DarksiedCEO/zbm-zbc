@@ -41,6 +41,14 @@ _FEET = re.compile(r"[0-9]{1,4}(\.[0-9]{1,2})?")
 _INT = re.compile(r"[1-9][0-9]{0,6}")
 _MONEY = re.compile(r"(0|[1-9][0-9]{0,11})\.[0-9]{2}")
 _REF = re.compile(r"[A-Za-z0-9._:-]{1,100}")
+# AEGIS wave 2 F-2: an e-mail address or a phone-number-like run of digits in a free-text value is personal data,
+# refused. (Names cannot be detected reliably; text attributes are vendor descriptions of a face, and the ADR says so.)
+_EMAIL = re.compile(r"[^\s@]+@[^\s@]+")
+_PHONE = re.compile(r"(?:\d[\s().+-]*){7,}")
+
+
+def personal_data_in(value: str) -> bool:
+    return bool(_EMAIL.search(value) or _PHONE.search(value))
 
 
 class PortNotConnected(Exception):
@@ -69,6 +77,8 @@ def parse_value(kind: str, value: str):
     """The typed value of an attribute (a string in the body), or raises Invalid. Text is vendor data: untrusted."""
     def bad():
         return Invalid(R("ATTRIBUTE_VALUE_INVALID"))
+    if kind == "text" and personal_data_in(value):      # references cannot hold "@"; dates in them are not phones
+        raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"))
     if kind in ("lat", "lon"):
         if not (_LAT if kind == "lat" else _LON).fullmatch(value):
             raise bad()
@@ -352,19 +362,24 @@ class InventoryMixin:
                                                                           d["actor"], at)})
         f["version"] += 1
 
-    def avails_for(self, fid: str, flight: Optional[list]) -> Optional[dict]:
-        """The vendor's latest unexpired answer on this face for a flight overlapping ``flight`` (by the source's
-        date; a tie goes to the later record), or None."""
-        best = None
+    def avails_block(self, fid: str, flight: Optional[list]) -> Optional[dict]:
+        """The vendor's unexpired UNAVAILABLE answer on this face for a flight overlapping ``flight`` that no later
+        AVAILABLE answer covering the WHOLE of ``flight`` has overtaken (AEGIS wave 2 F-1: an AVAILABLE for a merely
+        overlapping flight says nothing about the other days), or None. Later = the source's date, then the record."""
+        live = []
         for i, a in enumerate(self.faces[fid]["avails"]):
-            if not self._overlap(a["flight"], flight):
-                continue
             if a["valid_until"] is not None and parse_iso(a["valid_until"]) <= self.now():
                 continue
-            k = (parse_iso(a["as_of"]), i)
-            if best is None or k >= best[0]:
-                best = (k, a)
-        return best[1] if best else None
+            live.append(((parse_iso(a["as_of"]), i), a))
+        for k, a in live:
+            if a["answer"] != "UNAVAILABLE" or not self._overlap(a["flight"], flight):
+                continue
+            overtaken = flight is not None and any(
+                k2 > k and b["answer"] == "AVAILABLE" and b["flight"][0] <= flight[0] and b["flight"][1] >= flight[1]
+                for k2, b in live)
+            if not overtaken:
+                return a
+        return None
 
     def face_view(self, fid: str) -> dict:
         with self.lock:

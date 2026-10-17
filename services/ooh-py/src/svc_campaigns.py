@@ -475,8 +475,7 @@ class CampaignsMixin:
                                           for p in c["price_ids"]):
                 raise Conflict(R("TRANSITION_GUARD_FAILED"), guard="NO_VENDOR_QUOTE_FOR_UNIT")
             if to == "HOLD_REQUESTED":
-                av = self.avails_for(u["face_id"], u["flight"])
-                if av is not None and av["answer"] == "UNAVAILABLE":
+                if self.avails_block(u["face_id"], u["flight"]) is not None:
                     raise Conflict(R("AVAILS_UNAVAILABLE"))         # the vendor's latest answer for this flight is no
             data = {"unit_id": uid, "campaign_id": cid, "from": u["state"], "to": to}
             self._commit("availability_moved", self._req(data, actor, rk, body, uid), actor,
@@ -726,7 +725,8 @@ class CampaignsMixin:
             rk = self.rk("pa_determination", "ooh", body)
             if self._idem("andre", rk, body):
                 return self.pa_view()
-            self.check_kill(capability="purchase")
+            if body["determination"] != "UNDETERMINED":
+                self.check_kill(capability="purchase")   # withdrawing is the safe direction: never blocked (F-5)
             data = {k: body[k] for k in ("determination", "confirmed_by", "confirmation_ref")}
             self._commit("pa_determined", self._req(data, "andre", rk, body, "ooh"), "andre",
                          evidence=("principal_agent_determination_recorded_by_andre", "ooh:principal-agent", data,

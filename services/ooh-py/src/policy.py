@@ -118,11 +118,13 @@ FACE_ATTRIBUTES = {
     "rate_card_amount": ("money", FORMATS), "rate_card_period_days": ("int", FORMATS),
 }
 FACINGS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
-# The supplier (operator) profile, sourced the same way. Contacts are kept by reference only (no personal data).
+# The supplier (operator) profile, sourced the same way. No contacts: no personal data.
 OPERATOR_TYPES = ("OPERATOR", "REP_FIRM", "NETWORK")
 SUPPLIER_ATTRIBUTES = {"operator_type": "operator_type", "formats_offered": "formats", "markets_served": "markets",
                        "payment_methods": "payment_methods", "payment_terms_days": "int",
-                       "cancellation_policy_ref": "ref", "contact_ref": "ref"}
+                       "cancellation_policy_ref": "ref"}
+# AEGIS wave 2 F-2: no contact attribute (contacts are personal data; this repo and its ledger evidence are not the
+# place for them). Free-text values are screened for e-mail addresses and phone numbers as well.
 AVAILS_ANSWERS = ("AVAILABLE", "UNAVAILABLE")
 
 # ---------------------------------------------------------------------------------------------- OOH-3: planning
