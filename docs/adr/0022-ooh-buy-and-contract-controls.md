@@ -150,7 +150,10 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
     shapes) is refused `FUNDS_METHOD_CONFLICT` (open question 4). A card split 10-6 and an account plus a sequence number
     cannot be told apart, and a card number must never be stored.
   - Known limits (accepted): a card number written in one- or two-digit groups (`42-42-42-…`), or split around a
-    nine-digit group that passes the routing checksum, is not seen (only a deliberate spelling does that); `cc4242` (see NF-2).
+    nine-digit group that passes the routing checksum, is not seen (only a deliberate spelling does that); `cc4242` (see NF-2); and
+    card networks outside the listed prefixes are not screened (for example BORICA 2205, GPN, and WEX / Voyager fleet
+    cards). These are acceptable only while the method stays structurally ACH, only Andre posts client funds, and a
+    purchase needs Finance (31)'s verification (AEGIS Ω ruling 1).
 - **Rate cards (NF-5).** An estimate counts only while the face's current rate card has the same sources, amount,
   period and date it was made from: a card re-recorded with another value under the same source makes it stale.
 - **Finance references (NF-6).** One Finance (31) reference, in any case or separator spelling, verifies one campaign.
