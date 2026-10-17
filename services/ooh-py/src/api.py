@@ -9,7 +9,8 @@ seo-py's (itself bizdev-py's / service-py's / security-py's / legal-py's), uncha
   not exist (no existence oracle);
 - Andre's actions arrive through the ``dashboard`` caller AND carry ``X-Andre-Approval-Token`` (FounderGate,
   ``hmac.compare_digest``): client approval, funds verification, purchase authorization, submission (signing) and its
-  outcome, the commercial model, the buy limit and the client sell price, tenants, releasing a kill switch;
+  outcome, the commercial model, the buy limit and the client sell price, confirming a hold, tenants, releasing a kill
+  switch;
 - personal-data keys anywhere in a body are refused 422 before it is parsed; every response is ``no-store``;
   /docs, /redoc, /openapi.json disabled; bind 127.0.0.1 unless OOH_BIND_ADDR says otherwise; port 8510;
 - request limits before any route: target 4 KiB (414), head 16 KiB (431), body 64 KiB (413), JSON only (415),
@@ -481,6 +482,18 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
     def availability(cid: str, uid: str, req: dict = Depends(body(m.AvailabilityMove)),
                      scope: tuple = Depends(scoped(*PREP))) -> dict:
         return svc.move_availability(scope[0], scope[1], _id(cid), _id(uid), req)
+
+    @app.post(C + "/inventory/{uid}/hold-evidence", dependencies=auth, status_code=201)
+    def hold_evidence(cid: str, uid: str, req: dict = Depends(body(m.HoldEvidence)),
+                      scope: tuple = Depends(scoped(*PREP))) -> dict:
+        """The vendor's hold evidence, attached for Andre's decision (it confirms nothing)."""
+        return svc.submit_hold_evidence(scope[0], scope[1], _id(cid), _id(uid), req)
+
+    @app.post(C + "/inventory/{uid}/hold-decisions", dependencies=auth)
+    def hold_decision(cid: str, uid: str, scope: tuple = Depends(andre_scoped),
+                      req: dict = Depends(body(m.HoldDecision))) -> dict:
+        """Andre's decision on one hold-evidence record: the only way a unit becomes HOLD_CONFIRMED."""
+        return svc.decide_hold(scope[1], _id(cid), _id(uid), req)
 
     @app.post(C + "/inventory/{uid}/flight", dependencies=auth)
     def flight(cid: str, uid: str, req: dict = Depends(body(m.FlightSet)), scope: tuple = Depends(scoped(*PREP))):

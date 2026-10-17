@@ -11,8 +11,10 @@ Rules enforced here, each with its own reason code (reasons.py) and its own test
   the generic route (``TRANSITION_GATED``); a stale caller is refused (``STATE_STALE`` / ``VERSION_STALE``).
 * Leaving CLIENT_HOLD, VENDOR_HOLD or DISPUTED goes back exactly to the state it was entered from, and never restores
   an authorization (entering a hold, DISPUTED, CHANGE_REQUESTED or CANCELLED voids every unsubmitted authorization).
-* A hold requested is not a hold confirmed: HOLD_CONFIRMED needs the vendor's reference and an expiry, and the gate
-  wants every unit HOLD_CONFIRMED and unexpired. Booking states are reached only through the order flow.
+* A hold requested is not a hold confirmed, and only Andre confirms one (founder, Oct 16 round 2; replaces AEGIS L4):
+  an agent attaches the vendor's evidence (reference, expiry, document) to a HOLD_REQUESTED unit and submits it;
+  Andre confirms or rejects that one named record. The availability route refuses HOLD_CONFIRMED for everyone. The
+  gate wants every unit HOLD_CONFIRMED by Andre and unexpired. Booking states are reached only through the order flow.
 * The six price objects never stand in for each other; an evidence class is fixed when a record is created and no
   route changes it. Andre's gate gives funds the class OBSERVED, never FINANCIALLY_VERIFIED (that is Finance's).
 * No markup is ever applied by default: a client sell price must equal the quotes it names marked up by the markup
@@ -331,6 +333,7 @@ class CampaignsMixin:
         u = {k: d[k] for k in ("unit_id", "campaign_id", "tenant_id", "vendor", "kind", "market", "vendor_unit_ref",
                                "unit_key", "flight", "vendor_text")}
         u.update(state="IDENTIFIED", version=1, vendor_ref=None, hold_expires_at=None, evidence_class=None,
+                 hold_flight=None, hold_confirmed_by=None, hold_evidence_id=None, hold_evidence=[],
                  pre_booking_state=None, history=[{"from": None, "to": "IDENTIFIED", "actor": d["actor"], "at": at}])
         self.inventory[d["unit_id"]] = u
         c = self.campaigns[d["campaign_id"]]
@@ -413,7 +416,7 @@ class CampaignsMixin:
         u["flight"] = list(d["flight"])
         if d.get("reset_to_verified"):
             self._unit_move(u, "VERIFIED", d["actor"], at)
-            u.update(vendor_ref=None, hold_expires_at=None, hold_flight=None, evidence_class=None)
+            self._clear_hold(u)
         else:
             u["version"] += 1
         for pid in d.get("retired_quotes", []):
@@ -442,21 +445,16 @@ class CampaignsMixin:
                 raise Conflict(R("VERSION_STALE"))
             if to in P.AVAILABILITY_GATED:
                 raise Conflict(R("AVAILABILITY_GATED"))
+            if to in P.AVAILABILITY_ANDRE_ONLY:
+                raise Conflict(R("HOLD_CONFIRMATION_ANDRE_ONLY"))       # evidence, then Andre's decision
             if to not in P.AVAILABILITY_ALLOWED[u["state"]]:
                 raise Conflict(R("AVAILABILITY_TRANSITION_NOT_ALLOWED"))
-            hold_expires_at = None
             if to == "QUOTED" and not any(self.prices[p]["price_type"] == "VENDOR_QUOTE" and uid in
                                           self.prices[p]["inventory_ids"] and not self.prices[p].get("retired")
                                           and self.prices[p]["flights"].get(uid) == u["flight"]
                                           for p in c["price_ids"]):
                 raise Conflict(R("TRANSITION_GUARD_FAILED"), guard="NO_VENDOR_QUOTE_FOR_UNIT")
-            if to == "HOLD_CONFIRMED":
-                if not body.get("vendor_ref"):
-                    raise Invalid(R("VENDOR_REF_REQUIRED"))
-                hold_expires_at = self._future(body.get("hold_expires_at"), "HOLD_EXPIRY_REQUIRED")
-            data = {"unit_id": uid, "campaign_id": cid, "from": u["state"], "to": to,
-                    "vendor_ref": body.get("vendor_ref") if to == "HOLD_CONFIRMED" else None,
-                    "hold_expires_at": hold_expires_at}
+            data = {"unit_id": uid, "campaign_id": cid, "from": u["state"], "to": to}
             self._commit("availability_moved", self._req(data, actor, rk, body, uid), actor,
                          evidence=self._ev("availability_moved", cid, data, actor, rk))
             return self.unit_view(uid)
@@ -464,18 +462,133 @@ class CampaignsMixin:
     def _a_availability_moved(self, d, at):
         u = self.inventory[d["unit_id"]]
         self._unit_move(u, d["to"], d["actor"], at)
-        u["vendor_ref"] = d["vendor_ref"]
-        u["hold_expires_at"] = d["hold_expires_at"]
-        u["evidence_class"] = "VENDOR_ASSERTED" if d["to"] == "HOLD_CONFIRMED" else None
-        # the hold is for the flight the unit had when the vendor confirmed it (AEGIS R3-H1)
-        u["hold_flight"] = list(u["flight"]) if d["to"] == "HOLD_CONFIRMED" and u["flight"] else None
+        self._clear_hold(u)              # no route here reaches HOLD_CONFIRMED; leaving it (an extension) ends the hold
         self.campaigns[d["campaign_id"]]["version"] += 1
 
     @staticmethod
+    def _clear_hold(u: dict) -> None:
+        u.update(vendor_ref=None, hold_expires_at=None, hold_flight=None, evidence_class=None, hold_confirmed_by=None,
+                 hold_evidence_id=None)
+
+    @staticmethod
     def _unit_move(u: dict, to: str, actor: str, at: str) -> None:
+        """Every availability change of a unit. Hold evidence still waiting for Andre goes STALE: it was about the
+        unit as it was."""
         u["history"].append({"from": u["state"], "to": to, "actor": actor, "at": at})
         u["state"] = to
         u["version"] += 1
+        for ev in u.get("hold_evidence", ()):
+            if ev["status"] == "PENDING_ANDRE":
+                ev["status"] = "STALE"
+
+    # ------------------------------------------------------------------ hold evidence and Andre's decision (Oct 16 r2)
+
+    def _unit(self, cid: str, uid: str) -> dict:
+        u = self.inventory.get(uid)
+        if u is None or u["campaign_id"] != cid:
+            raise NotFound(R("INVENTORY_NOT_FOUND"))
+        return u
+
+    def submit_hold_evidence(self, actor: str, tid: str, cid: str, uid: str, body: dict) -> dict:
+        """An agent (or the dashboard) attaches the vendor's hold evidence to a HOLD_REQUESTED unit for Andre's
+        decision. The unit stays HOLD_REQUESTED; nothing is confirmed. Newer evidence supersedes older pending
+        evidence."""
+        with self.lock:
+            self._gate()
+            c = self._campaign(tid, cid)
+            u = self._unit(cid, uid)
+            rk = self.rk("hold_evidence", uid, body)
+            if self._idem(actor, rk, body):
+                return self.unit_view(uid)
+            self.check_kill(tenant=tid, capability="inventory")
+            self._writable(c, PRE_ORDER_WRITABLE)
+            if u["state"] != "HOLD_REQUESTED":
+                raise Conflict(R("HOLD_NOT_REQUESTED"))
+            if u["version"] != body["expected_version"]:
+                raise Conflict(R("VERSION_STALE"))
+            if u["flight"] is None:
+                raise Conflict(R("FLIGHT_REQUIRED"))
+            expires = self._future(body["hold_expires_at"], "HOLD_EXPIRY_REQUIRED")
+            eid = derived_id("hev", uid, rk)
+            data = {"unit_id": uid, "campaign_id": cid, "evidence_id": eid, "vendor_ref": body["vendor_ref"],
+                    "hold_expires_at": expires, "evidence_doc_ref": body["evidence_doc_ref"],
+                    "flight": list(u["flight"]), "evidence_class": P.EVIDENCE_ALLOWED["hold_evidence"][0],
+                    "vendor_text": observed(body.get("vendor_text"))}
+            ev = {k: data[k] for k in ("unit_id", "evidence_id", "vendor_ref", "hold_expires_at", "evidence_doc_ref",
+                                       "flight", "evidence_class")}
+            ev["vendor_text_sha256"] = (data["vendor_text"] or {}).get("sha256")
+            self._commit("hold_evidence_submitted", self._req(data, actor, rk, body, uid), actor,
+                         evidence=self._ev("hold_evidence_submitted", cid, ev, actor, rk))
+            return self.unit_view(uid)
+
+    def _a_hold_evidence_submitted(self, d, at):
+        u = self.inventory[d["unit_id"]]
+        for old in u["hold_evidence"]:
+            if old["status"] == "PENDING_ANDRE":
+                old["status"] = "SUPERSEDED"
+        u["version"] += 1
+        u["hold_evidence"].append({
+            "evidence_id": d["evidence_id"], "status": "PENDING_ANDRE", "vendor_ref": d["vendor_ref"],
+            "hold_expires_at": d["hold_expires_at"], "evidence_doc_ref": d["evidence_doc_ref"],
+            "flight": list(d["flight"]), "evidence_class": d["evidence_class"], "vendor_text": d["vendor_text"],
+            "submitted_by": d["actor"], "submitted_at": at, "unit_version": u["version"],
+            "decided_by": None, "decided_at": None, "reject_reason": None})
+        self.campaigns[d["campaign_id"]]["version"] += 1
+
+    def decide_hold(self, tid: str, cid: str, uid: str, body: dict) -> dict:
+        """Andre's decision on one named hold-evidence record. CONFIRM is the ONLY way a unit becomes HOLD_CONFIRMED:
+        the evidence must still be the unit's pending record, nothing recorded on the unit since (its version), the
+        unit still HOLD_REQUESTED for the same flight, and the vendor's expiry still ahead."""
+        with self.lock:
+            self._gate()
+            c = self._campaign(tid, cid)
+            u = self._unit(cid, uid)
+            rk = self.rk("hold_decision", uid, body)
+            if self._idem("andre", rk, body):
+                return self.unit_view(uid)
+            self.check_kill(tenant=tid, capability="inventory")
+            self._writable(c, PRE_ORDER_WRITABLE)
+            if u["version"] != body["expected_version"]:
+                raise Conflict(R("VERSION_STALE"))
+            ev = next((e for e in u["hold_evidence"] if e["evidence_id"] == body["evidence_id"]), None)
+            if ev is None:
+                raise NotFound(R("HOLD_EVIDENCE_NOT_FOUND"))
+            if ev["status"] == "STALE":
+                raise Conflict(R("HOLD_EVIDENCE_STALE"))
+            if ev["status"] != "PENDING_ANDRE":
+                raise Conflict(R("HOLD_EVIDENCE_NOT_PENDING"))
+            if u["state"] != "HOLD_REQUESTED" or u["version"] != ev["unit_version"] or u["flight"] != ev["flight"]:
+                raise Conflict(R("HOLD_EVIDENCE_STALE"))
+            confirm = body["decision"] == "CONFIRM"
+            if confirm == (body.get("reject_reason") is not None):
+                raise Invalid(R("INVALID"), field="reject_reason")    # a rejection names its reason; a confirm none
+            if confirm and self._expired(ev["hold_expires_at"]):
+                raise Conflict(R("HOLD_EXPIRED"))
+            data = {"unit_id": uid, "campaign_id": cid, "evidence_id": ev["evidence_id"], "decision": body["decision"],
+                    "reject_reason": body.get("reject_reason")}
+            self._commit("hold_decided", self._req(data, "andre", rk, body, uid), "andre",
+                         evidence=self._ev("hold_confirmed_by_andre" if confirm else "hold_evidence_rejected_by_andre",
+                                           cid, {**data, "vendor_ref": ev["vendor_ref"],
+                                                 "hold_expires_at": ev["hold_expires_at"], "flight": ev["flight"]},
+                                           "andre", rk))
+            return self.unit_view(uid)
+
+    def _a_hold_decided(self, d, at):
+        u = self.inventory[d["unit_id"]]
+        ev = next(e for e in u["hold_evidence"] if e["evidence_id"] == d["evidence_id"])
+        if d["decision"] == "CONFIRM":
+            self._unit_move(u, "HOLD_CONFIRMED", d["actor"], at)
+            # the hold is for the flight the evidence was for, which is the unit's flight (AEGIS R3-H1)
+            u.update(vendor_ref=ev["vendor_ref"], hold_expires_at=ev["hold_expires_at"], hold_flight=list(ev["flight"]),
+                     evidence_class=ev["evidence_class"], hold_confirmed_by=d["actor"],
+                     hold_evidence_id=ev["evidence_id"])
+            ev["status"] = "CONFIRMED_BY_ANDRE"
+        else:
+            u["version"] += 1
+            ev["status"] = "REJECTED_BY_ANDRE"
+            ev["reject_reason"] = d["reject_reason"]
+        ev.update(decided_by=d["actor"], decided_at=at)
+        self.campaigns[d["campaign_id"]]["version"] += 1
 
     # ================================================================================================ prices (s. 19)
 
@@ -806,8 +919,8 @@ class CampaignsMixin:
                 return "INVENTORY_MISMATCH"
             if u["vendor"] != a["vendor"]:
                 return "VENDOR_MISMATCH"
-            if u["state"] != "HOLD_CONFIRMED":
-                return "INVENTORY_NOT_HELD"
+            if u["state"] != "HOLD_CONFIRMED" or u.get("hold_confirmed_by") != P.SIGNER:
+                return "INVENTORY_NOT_HELD"                          # only Andre's confirmation counts as a hold
             if self._expired(u["hold_expires_at"]):
                 return "HOLD_EXPIRED"
             if u["flight"] is None:
@@ -998,7 +1111,7 @@ class CampaignsMixin:
             self._unit_move(u, "BOOKING_CONFIRMED" if accepted else "QUOTED", d["actor"], at)
             u["pre_booking_state"] = None
             if not accepted:
-                u.update(vendor_ref=None, hold_expires_at=None, hold_flight=None, evidence_class=None)
+                self._clear_hold(u)
         if not accepted:
             a["status"], a["void_reason"] = "VOID", "VENDOR_REJECTED"
         target = "BOOKED" if accepted else "FUNDS_VERIFIED"

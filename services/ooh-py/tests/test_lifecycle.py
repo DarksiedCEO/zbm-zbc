@@ -147,7 +147,7 @@ def test_hold_requested_and_confirmed_are_derived_for_the_campaign(h):
     for to in ("QUOTED", "HOLD_REQUESTED"):
         h.ok(h.move("acme", cid, other, to))
     assert h.view("acme", cid)["hold_state"] == "HOLD_REQUESTED"    # one face requested, one confirmed
-    h.ok(h.move("acme", cid, other, "HOLD_CONFIRMED", vendor_ref="lamar-h2", hold_expires_at=at(days=3)))
+    h.confirm_hold("acme", cid, other, vendor_ref="lamar-h2", expires=at(days=3))
     c = h.view("acme", cid)
     assert c["hold_state"] == "HOLD_CONFIRMED" and c["state"] == "PLAN_APPROVED"    # derived, never stored
     h.clock.advance(days=3)
@@ -191,9 +191,9 @@ def test_availability_cannot_skip_and_booking_is_gated(h):
     h.tenant("acme")
     cid = h.campaign()
     uid = h.unit("acme", cid)
-    for to in ("HOLD_CONFIRMED", "QUOTED", "HOLD_REQUESTED", "AVAILABILITY_REQUESTED"):
-        h.refused(h.move("acme", cid, uid, to, vendor_ref="v", hold_expires_at=at(days=3)), 409,
-                  "AVAILABILITY_TRANSITION_NOT_ALLOWED")
+    h.refused(h.move("acme", cid, uid, "HOLD_CONFIRMED"), 409, "HOLD_CONFIRMATION_ANDRE_ONLY")
+    for to in ("QUOTED", "HOLD_REQUESTED", "AVAILABILITY_REQUESTED"):
+        h.refused(h.move("acme", cid, uid, to), 409, "AVAILABILITY_TRANSITION_NOT_ALLOWED")
     for to in policy.AVAILABILITY_GATED:
         h.refused(h.move("acme", cid, uid, to), 409, "AVAILABILITY_GATED")
     h.ok(h.move("acme", cid, uid, "VERIFIED"))
@@ -212,12 +212,14 @@ def test_hold_requested_is_not_hold_confirmed(h):
     h.ok(h.move("acme", cid, uid, "QUOTED"))
     u = h.ok(h.move("acme", cid, uid, "HOLD_REQUESTED"))      # a hold may be requested without any funds
     assert u["state"] == "HOLD_REQUESTED" and u["vendor_ref"] is None and u["evidence_class"] is None
-    h.refused(h.move("acme", cid, uid, "HOLD_CONFIRMED"), 422, "VENDOR_REF_REQUIRED")
-    h.refused(h.move("acme", cid, uid, "HOLD_CONFIRMED", vendor_ref="lamar-h1"), 422, "HOLD_EXPIRY_REQUIRED")
-    h.refused(h.move("acme", cid, uid, "HOLD_CONFIRMED", vendor_ref="lamar-h1", hold_expires_at=at(hours=-1)), 409,
+    h.refused(h.move("acme", cid, uid, "HOLD_CONFIRMED"), 409, "HOLD_CONFIRMATION_ANDRE_ONLY")
+    h.refused(h.hold_evidence("acme", cid, uid, vendor_ref="lamar-h1", expires=at(hours=-1)), 409,
               "HOLD_EXPIRY_REQUIRED")
-    u = h.ok(h.move("acme", cid, uid, "HOLD_CONFIRMED", vendor_ref="lamar-h1", hold_expires_at=at(days=5)))
+    u = h.ok(h.hold_evidence("acme", cid, uid, vendor_ref="lamar-h1", expires=at(days=5)), 201)
+    assert u["state"] == "HOLD_REQUESTED" and u["vendor_ref"] is None      # evidence confirms nothing
+    u = h.ok(h.hold_decide("acme", cid, uid))
     assert u["state"] == "HOLD_CONFIRMED" and u["evidence_class"] == "VENDOR_ASSERTED"
+    assert u["hold_confirmed_by"] == "andre" and u["vendor_ref"] == "lamar-h1"
 
 
 def test_availability_stale_caller_is_refused(h):

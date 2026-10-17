@@ -375,8 +375,7 @@ def test_rejected_order_needs_a_new_authorization_and_the_same_quotes_cannot_dou
     h.refused(h.submit(ctx), 409, "AUTHORIZATION_VOID")
     h.refused(h.authorize(ctx), 409, "INVENTORY_NOT_HELD")   # AEGIS M4: hold again, confirmed again, first
     h.ok(h.move("acme", ctx["cid"], ctx["uid"], "HOLD_REQUESTED"))
-    h.ok(h.move("acme", ctx["cid"], ctx["uid"], "HOLD_CONFIRMED", vendor_ref="lamar-hold-78",
-                hold_expires_at=at(days=7)))
+    h.confirm_hold("acme", ctx["cid"], ctx["uid"], vendor_ref="lamar-hold-78")
     a2 = h.ok(h.authorize(ctx), 201)
     ctx2 = {**ctx, "aid": a2["authorization_id"]}
     h.ok(h.submit(ctx2))

@@ -50,7 +50,7 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
    (a client's read-only view of its own campaign, always with a tenant token; never vendor cost or terms),
    `compliance_38` (evidence, export, integrity; may engage a kill switch).
 4. **Andre's gate** (`X-Andre-Approval-Token` through the dashboard, `hmac.compare_digest`; a token equal to any
-   other token counts as not configured). Andre-only: creating a tenant; the commercial model; the client sell price
+   other token counts as not configured). Andre-only: creating a tenant; confirming a hold; the commercial model; the client sell price
    and the approved buy limit (P&L decisions); sending the proposal; recording the client's approval; verifying
    client funds; authorizing a purchase; submitting (signing) the order and recording the vendor's answer; backing a
    campaign out of approval; leaving a dispute; releasing any kill switch. Moving his approvals to Cybersecurity (22)
@@ -116,9 +116,8 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
 12. **Availability (section 15).** `IDENTIFIED, VERIFIED, AVAILABILITY_REQUESTED, QUOTED, HOLD_REQUESTED,
     HOLD_CONFIRMED, BOOKING_PENDING, BOOKING_CONFIRMED, UNAVAILABLE, EXPIRED, WITHDRAWN, DISPUTED` with an explicit
     table. Known is not available (`QUOTED` needs a vendor quote naming the unit); a hold requested is not a hold
-    confirmed (`HOLD_CONFIRMED` needs the vendor's reference and an expiry in the future, and is recorded
-    `VENDOR_ASSERTED`); booking states are reached only through the order flow (`AVAILABILITY_GATED`). The full
-    inventory schema is OOH-2.
+    confirmed, and only Andre confirms one (see "Hold confirmation is Andre's", below); booking states are reached
+    only through the order flow (`AVAILABILITY_GATED`). The full inventory schema is OOH-2.
 13. **Price objects (section 19)** are separate records that never stand in for each other: `VENDOR_COST_ESTIMATE`,
     `VENDOR_QUOTE` (vendor, units, `valid_until` required), `NEGOTIATION_TARGET`, `APPROVED_BUY_LIMIT` (Andre),
     `CLIENT_SELL_PRICE` (Andre), `ACTUAL_RECONCILED_COST` (`PRICE_TYPE_NOT_IN_WAVE`). An estimate, a target or a sell
@@ -282,6 +281,33 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
   face's live record is refused (`UNIT_ALREADY_REGISTERED`). Both tests fail if their check is removed.
 - **Cosmetic** The old-log refusal message is whole ("log line N has no log format (written before format 2); …").
 
+## Hold confirmation is Andre's (founder decision, Oct 16 2026 round 2; replaces AEGIS L4)
+
+Before this change the agent runtime could move a unit to `HOLD_CONFIRMED` itself, from a free-text vendor reference
+and an expiry that nothing checked (open decision 7). Now:
+
+- The availability route refuses `HOLD_CONFIRMED` for every caller, Andre included (`HOLD_CONFIRMATION_ANDRE_ONLY`,
+  `policy.AVAILABILITY_ANDRE_ONLY`); its body no longer has `vendor_ref` or `hold_expires_at` (extra fields: 422).
+- An agent (or the dashboard) attaches the vendor's evidence to a `HOLD_REQUESTED` unit:
+  `POST …/inventory/{uid}/hold-evidence` with the unit's version, the vendor's hold reference, the expiry the vendor
+  states (in the future), the reference of the vendor's message or document, and optional vendor text (untrusted,
+  section 52). The record is `PENDING_ANDRE`, class `VENDOR_ASSERTED`, and binds the unit's flight and its version
+  after the attach. The unit stays `HOLD_REQUESTED`; nothing is confirmed. Newer evidence supersedes older pending
+  evidence (`SUPERSEDED`). Ledger event `hold_evidence_submitted` (only the vendor text's hash reaches it).
+- Andre decides one named record: `POST …/inventory/{uid}/hold-decisions` (dashboard + Andre's token) with the unit's
+  version, the `evidence_id` and `CONFIRM`, or `REJECT` with a reason from a closed set
+  (`policy.HOLD_REJECT_REASONS`). Refused: a record that is not the unit's (`HOLD_EVIDENCE_NOT_FOUND`), already
+  decided or superseded (`HOLD_EVIDENCE_NOT_PENDING`), or about an older unit — any move, a new flight or any other
+  version bump since the attach (`HOLD_EVIDENCE_STALE`); a confirmation whose expiry has passed (`HOLD_EXPIRED`).
+  `CONFIRM` is the only way a unit becomes `HOLD_CONFIRMED`: the unit takes the evidence's reference, expiry and
+  flight, `hold_confirmed_by: andre` and `hold_evidence_id`. Ledger events `hold_confirmed_by_andre` /
+  `hold_evidence_rejected_by_andre`. A rejection leaves the unit `HOLD_REQUESTED`.
+- The class stays `VENDOR_ASSERTED`: Andre confirms the vendor's assertion, he does not observe the hold. Nothing
+  checks the reference against the vendor (the vendor port is `NOT_CONNECTED`); Andre's decision is the control.
+- The purchase gate also requires `hold_confirmed_by == "andre"` on every unit (`INVENTORY_NOT_HELD` otherwise).
+- Leaving `HOLD_CONFIRMED` (an extension request) clears the hold; it is confirmed again only by Andre.
+- Tests: `tests/test_hold_confirmation.py`; war room scenario `someone-else-confirms-a-hold` (all MUST).
+
 ## Configuration
 
 Read once at start (`src/config.py`; every variable is also listed in `services/ooh-py/README.md`):
@@ -331,10 +357,8 @@ refuses start).
 5. Whether a check is acceptable client money for a vendor buy (built: `ach` or `check`; card refused).
 6. Whether the client's hub view should ever show cost and fee broken out (built: never cost; the presentation
    choice is recorded for the proposal only).
-7. (AEGIS L4) The agent runtime may record `HOLD_CONFIRMED` with a free-text vendor reference and an expiry; nothing
-   checks that reference against the vendor. Built as is: a confirmed hold is `VENDOR_ASSERTED`, the gate still needs
-   Andre's authorization, and the reference is on the record. Whether a hold confirmation should need Andre (or a
-   vendor port) is his decision.
+7. (AEGIS L4) **Resolved Oct 16 2026 (round 2): only Andre confirms a hold**; agents attach the vendor's evidence
+   and submit it for his decision ("Hold confirmation is Andre's", above).
 8. (AEGIS M1, superseded by R2-M2) Registration is now unique per tenant per face per FLIGHT; a booked face is free
    again for a flight that does not overlap.
 9. (AEGIS R2, founder-confirm) The section 42 cell mapping judgment calls: C04 Inventory/Operator Intelligence is in

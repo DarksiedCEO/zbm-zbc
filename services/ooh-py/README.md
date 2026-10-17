@@ -26,7 +26,8 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `GET, POST /kill-switches` | dashboard, agent, compliance engage; Andre releases |
 | `POST /tenants/{tid}/campaigns`, `GET …/campaigns/{cid}` (hub: client view), `GET …/exposure` | agent, dashboard |
 | `POST …/transitions` (Andre for the transitions ADR 0019 decision 4 names) | agent, dashboard |
-| `POST …/inventory`, `GET …/inventory/{uid}`, `POST …/inventory/{uid}/availability`, `…/flight` | agent, dashboard |
+| `POST …/inventory`, `GET …/inventory/{uid}`, `POST …/inventory/{uid}/availability`, `…/flight`, `…/hold-evidence` | agent, dashboard |
+| `POST …/inventory/{uid}/hold-decisions` (the only way to `HOLD_CONFIRMED`) | Andre |
 | `POST …/prices` (sell price and buy limit: Andre) | agent, dashboard |
 | `POST …/commercial-model`, `…/client-approval`, `…/funds-verifications`, `…/funds-reconfirmations`, `…/authorizations` | Andre |
 | `GET …/authorizations/{aid}`; `POST …/authorizations/{aid}/submit`, `…/outcome` | readers; Andre |

@@ -206,6 +206,33 @@ class Harness:
                          {"request_id": rid(), "to": to, "expected_state": u["state"],
                           "expected_version": u["version"], **extra})
 
+    def unit_get(self, tid: str, cid: str, uid: str) -> dict:
+        return self.ok(self.get(f"/tenants/{tid}/campaigns/{cid}/inventory/{uid}"))
+
+    def hold_evidence(self, tid: str, cid: str, uid: str, caller: str = "ooh_agent", vendor_ref: str = "lamar-hold-77",
+                      expires: Optional[str] = None, doc: str = "lamar-email-hold-77", **extra):
+        """An agent attaches the vendor's hold evidence for Andre's decision."""
+        u = self.unit_get(tid, cid, uid)
+        body = {"request_id": rid(), "expected_version": u["version"], "vendor_ref": vendor_ref,
+                "hold_expires_at": expires or at(days=7), "evidence_doc_ref": doc, **extra}
+        return self.post(f"/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence", body, caller=caller)
+
+    def hold_decide(self, tid: str, cid: str, uid: str, evidence_id: Optional[str] = None, decision: str = "CONFIRM",
+                    andre: bool = True, caller: str = "dashboard", **extra):
+        """Andre's decision on a hold-evidence record (the unit's latest one unless named)."""
+        u = self.unit_get(tid, cid, uid)
+        eid = evidence_id or u["hold_evidence"][-1]["evidence_id"]
+        body = {"request_id": rid(), "expected_version": u["version"], "evidence_id": eid, "decision": decision,
+                **extra}
+        return self.post(f"/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions", body, caller=caller,
+                         andre=andre)
+
+    def confirm_hold(self, tid: str, cid: str, uid: str, vendor_ref: str = "lamar-hold-77",
+                     expires: Optional[str] = None) -> dict:
+        """Evidence by the agent, then Andre's confirmation: the one way to HOLD_CONFIRMED."""
+        self.ok(self.hold_evidence(tid, cid, uid, vendor_ref=vendor_ref, expires=expires), 201)
+        return self.ok(self.hold_decide(tid, cid, uid))
+
     def price(self, tid: str, cid: str, price_type: str, amount: str, andre: bool = False, **extra):
         body = {"request_id": rid(), "price_type": price_type, "amount": amount, "currency": "USD", **extra}
         return self.post(f"/tenants/{tid}/campaigns/{cid}/prices", body, andre=andre)
@@ -234,7 +261,7 @@ class Harness:
         qid = self.quote(tid, cid, [uid], amount, vendor, valid_until)
         for to in ("QUOTED", "HOLD_REQUESTED"):
             self.ok(self.move(tid, cid, uid, to))
-        self.ok(self.move(tid, cid, uid, "HOLD_CONFIRMED", vendor_ref="lamar-hold-77", hold_expires_at=at(days=7)))
+        self.confirm_hold(tid, cid, uid)
         return uid, qid
 
     def to_proposal_sent(self, tid: str = "acme", amount: str = "5000.00", markup: str = "20.00",

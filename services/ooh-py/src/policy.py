@@ -50,7 +50,8 @@ EVIDENCE_ALLOWED = {
     "NEGOTIATION_TARGET": ("MODELED", "ESTIMATED"),
     "APPROVED_BUY_LIMIT": (None,),          # a decision, not a measurement
     "CLIENT_SELL_PRICE": (None,),           # a decision, not a measurement
-    "hold_confirmation": ("VENDOR_ASSERTED",),
+    "hold_confirmation": ("VENDOR_ASSERTED",),   # Andre confirms the vendor's assertion; he did not observe the hold
+    "hold_evidence": ("VENDOR_ASSERTED",),
     "funds_andre_gate": ("OBSERVED",),      # Andre saw cleared funds; never FINANCIALLY_VERIFIED (that is Finance's)
     "order_outcome": ("VENDOR_ASSERTED",),
 }
@@ -90,6 +91,16 @@ AVAILABILITY_ALLOWED = {
 }
 # Reached only through the order flow (never through the availability route): booking is a purchase consequence.
 AVAILABILITY_GATED = ("BOOKING_PENDING", "BOOKING_CONFIRMED")
+# Reached only through Andre's hold decision (founder decision, Oct 16 round 2; replaces AEGIS L4): an agent attaches
+# the vendor's evidence and submits it; only Andre sets HOLD_CONFIRMED, from one named evidence record. The generic
+# availability route refuses it for everyone, Andre included.
+AVAILABILITY_ANDRE_ONLY = ("HOLD_CONFIRMED",)
+# A hold-evidence record's life. PENDING_ANDRE is the only state Andre may decide; anything recorded on the unit after
+# the evidence (a move, a new flight, newer evidence) leaves it STALE or SUPERSEDED.
+HOLD_EVIDENCE_STATES = ("PENDING_ANDRE", "CONFIRMED_BY_ANDRE", "REJECTED_BY_ANDRE", "SUPERSEDED", "STALE")
+HOLD_DECISIONS = ("CONFIRM", "REJECT")
+HOLD_REJECT_REASONS = ("EVIDENCE_INSUFFICIENT", "REFERENCE_NOT_VERIFIED", "EXPIRY_WRONG", "WRONG_FACE_OR_FLIGHT",
+                       "VENDOR_WITHDREW")
 
 # ---------------------------------------------------------------------------------------------- sections 3 and 4
 # The blueprint's section 4 vocabulary, complete (main and exception states), and how this service stores it.

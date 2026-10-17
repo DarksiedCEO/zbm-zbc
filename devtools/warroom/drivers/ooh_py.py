@@ -176,13 +176,44 @@ def register_vendor(ctx, vendor_id):
                       andre=True)
 
 
+def hold_evidence_pending(ctx):
+    """A campaign with one unit at HOLD_REQUESTED and the vendor's evidence attached by the agent, awaiting Andre."""
+    h = ctx.h
+    cid = h.campaign("acme")
+    h.plan("acme", cid)
+    uid = h.unit("acme", cid)
+    for to in ("VERIFIED", "AVAILABILITY_REQUESTED"):
+        h.ok(h.move("acme", cid, uid, to))
+    h.quote("acme", cid, [uid])
+    for to in ("QUOTED", "HOLD_REQUESTED"):
+        h.ok(h.move("acme", cid, uid, to))
+    ctx.c = {"tid": "acme", "cid": cid, "uid": uid}
+    return h.hold_evidence("acme", cid, uid)
+
+
+def confirm_hold_via_availability_as(ctx, caller):
+    """The generic availability route asked for HOLD_CONFIRMED by another caller."""
+    h, c = ctx.h, ctx.c
+    u = h.unit_get("acme", c["cid"], c["uid"])
+    return h.post(f"/tenants/acme/campaigns/{c['cid']}/inventory/{c['uid']}/availability",
+                  {"request_id": H.rid(), "to": "HOLD_CONFIRMED", "expected_state": u["state"],
+                   "expected_version": u["version"]}, caller=caller)
+
+
+def decide_hold_as(ctx, caller):
+    """Andre's hold decision (CONFIRM the pending evidence) sent by another caller, without an approval token."""
+    return ctx.h.hold_decide("acme", ctx.c["cid"], ctx.c["uid"], caller=caller, andre=False)
+
+
 ACTIONS = {"approved_unfunded": approved_unfunded, "funded": funded, "authorized": authorized,
            "vendor_text_quote": vendor_text_quote, "authorize": authorize, "authorize_as": authorize_as,
            "submit": submit, "submitted": submitted, "funded_sibling": funded_sibling, "fund": fund, "fund_amount": fund_amount,
            "two_quotes_one_unit": two_quotes_one_unit, "authorize_both_quotes": authorize_both_quotes,
            "face_registered": face_registered, "add_face": add_face, "dispute": dispute, "outcome": outcome,
            "funded_sibling_plain": funded_sibling_plain, "face_ordered_by_another_tenant": face_ordered_by_another_tenant,
-           "funded_same_face": funded_same_face, "register_vendor": register_vendor}
+           "funded_same_face": funded_same_face, "register_vendor": register_vendor,
+           "hold_evidence_pending": hold_evidence_pending,
+           "confirm_hold_via_availability_as": confirm_hold_via_availability_as, "decide_hold_as": decide_hold_as}
 
 
 def observe(ctx) -> dict:
@@ -200,4 +231,5 @@ def observe(ctx) -> dict:
             "orders": len(h.svc.orders),
             "lamar_faces": sum(1 for u in h.svc.inventory.values() if u["vendor"] == "lamar"
                                and u["state"] != "WITHDRAWN"),
-            "funds_classes": sorted({f["evidence_class"] for f in c["funds"]})}
+            "funds_classes": sorted({f["evidence_class"] for f in c["funds"]}),
+            "confirmed_holds": sum(1 for u in h.svc.inventory.values() if u["state"] == "HOLD_CONFIRMED")}

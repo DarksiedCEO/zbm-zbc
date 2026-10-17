@@ -1,10 +1,10 @@
 {
  "library": "ooh-py",
- "version": 3,
+ "version": 4,
  "department": "Out-of-Home & DOOH (department 15)",
  "service": "ooh-py",
  "driver": "ooh_py.py",
- "basis": "ADR 0019 (founder decisions Oct 16 2026; blueprint sections 12, 50-52, 54): agents prepare and never commit; nothing is bought until cleared client funds cover the approved price in full; the purchase authorization must match the quotes exactly (amount, vendor) and is Andre's alone; a second submission of an open order is DUPLICATE_ORDER_BLOCKED; vendor text is untrusted data; AEGIS round 1 (Oct 16 2026): one bank transfer funds one campaign whatever its spelling (H1), a unit is never priced or bought twice in one order (H2), one face is one live unit record (M1), a vendor answer never promotes a disputed campaign (M2), a funds record must move money (M3); AEGIS round 2: zero padding never makes a second transfer (R2-H1); one face, one overlapping flight, one open order across all tenants, refused without naming the other tenant (R2-M3); free text never gives a registered vendor a second identity (R2-M1)",
+ "basis": "ADR 0019 (founder decisions Oct 16 2026; blueprint sections 12, 50-52, 54): agents prepare and never commit; nothing is bought until cleared client funds cover the approved price in full; the purchase authorization must match the quotes exactly (amount, vendor) and is Andre's alone; a second submission of an open order is DUPLICATE_ORDER_BLOCKED; vendor text is untrusted data; AEGIS round 1 (Oct 16 2026): one bank transfer funds one campaign whatever its spelling (H1), a unit is never priced or bought twice in one order (H2), one face is one live unit record (M1), a vendor answer never promotes a disputed campaign (M2), a funds record must move money (M3); AEGIS round 2: zero padding never makes a second transfer (R2-H1); one face, one overlapping flight, one open order across all tenants, refused without naming the other tenant (R2-M3); free text never gives a registered vendor a second identity (R2-M1); founder Oct 16 round 2: only Andre confirms a hold, an agent only attaches the vendor's evidence",
  "variants_per_seed": 3,
  "scenarios": [
   {
@@ -834,6 +834,76 @@
        "lamar",
        "outfront"
       ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "someone-else-confirms-a-hold",
+   "persona": "an agent, the console without Andre, or Compliance turning the vendor's hold evidence into a confirmed hold",
+   "basis": "tests/test_hold_confirmation.py test_the_availability_route_never_confirms_a_hold_for_anyone (founder Oct 16 round 2: only Andre sets HOLD_CONFIRMED; replaces AEGIS L4)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_hold_confirmation.py",
+      "test": "test_the_availability_route_never_confirms_a_hold_for_anyone",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "caller",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "hold_evidence_pending",
+     "as": "setup"
+    },
+    {
+     "action": "confirm_hold_via_availability_as",
+     "as": "availability",
+     "args": {
+      "caller": "$caller"
+     }
+    },
+    {
+     "action": "decide_hold_as",
+     "as": "decision",
+     "args": {
+      "caller": "$caller"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "availability-refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "availability",
+      "codes": [
+       403,
+       409
+      ]
+     }
+    },
+    {
+     "id": "decision-refused",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "decision",
+      "codes": [
+       403
+      ]
+     }
+    },
+    {
+     "id": "no-confirmed-hold",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "confirmed_holds",
+      "value": 0
      }
     }
    ]

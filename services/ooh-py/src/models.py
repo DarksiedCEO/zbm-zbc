@@ -100,12 +100,31 @@ class VendorCreate(Strict):
 
 
 class AvailabilityMove(Strict):
+    """A unit's availability move. HOLD_CONFIRMED is never reached here (policy.AVAILABILITY_ANDRE_ONLY), so the
+    vendor's hold reference and expiry are not fields of this body: they travel as hold evidence."""
     request_id: RequestId
     to: Literal[policy.AVAILABILITY_STATES]                          # type: ignore[valid-type]
     expected_state: Literal[policy.AVAILABILITY_STATES]              # type: ignore[valid-type]
     expected_version: Version
-    vendor_ref: Optional[Ref] = None
-    hold_expires_at: Optional[Time] = None
+
+
+class HoldEvidence(Strict):
+    """The vendor's hold evidence, attached by an agent (or the dashboard) for Andre's decision. It confirms nothing."""
+    request_id: RequestId
+    expected_version: Version                                        # the unit's version
+    vendor_ref: Ref                                                  # the vendor's hold reference
+    hold_expires_at: Time                                            # the expiry the vendor states
+    evidence_doc_ref: Ref                                            # where the vendor's message or document is kept
+    vendor_text: Optional[Annotated[StrictStr, Field(max_length=DOC_MAX)]] = None
+
+
+class HoldDecision(Strict):
+    """Andre's decision on ONE named hold-evidence record: CONFIRM sets HOLD_CONFIRMED; REJECT names a reason."""
+    request_id: RequestId
+    expected_version: Version                                        # the unit's version
+    evidence_id: Id
+    decision: Literal[policy.HOLD_DECISIONS]                         # type: ignore[valid-type]
+    reject_reason: Optional[Literal[policy.HOLD_REJECT_REASONS]] = None  # type: ignore[valid-type]
 
 
 class PriceRecord(Strict):

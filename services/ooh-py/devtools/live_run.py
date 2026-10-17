@@ -264,16 +264,32 @@ def _main(work: Path) -> int:
                                         "market": "los-angeles", "vendor_unit_ref": "face-101",
                                         "flight_start": FLIGHT[0], "flight_end": FLIGHT[1],
                                         "vendor_text": INJECTION}).json()["unit_id"]
-        early = move(uid, "HOLD_CONFIRMED", vendor_ref="h1", hold_expires_at=later(days=7))
+        early = move(uid, "HOLD_CONFIRMED")
         moved = all(move(uid, s).status_code == 200 for s in ("VERIFIED", "AVAILABILITY_REQUESTED"))
         q = price("VENDOR_QUOTE", "5000.00", vendor="lamar", inventory_ids=[uid], valid_until=later(days=10),
                   source_ref="lamar-q-live", vendor_text=INJECTION)
         qid = q.json()["price_id"]
         moved = moved and all(move(uid, s).status_code == 200 for s in ("QUOTED", "HOLD_REQUESTED"))
-        held = move(uid, "HOLD_CONFIRMED", vendor_ref="lamar-hold-live", hold_expires_at=later(days=7))
-        check("availability cannot skip to a confirmed hold; a confirmed hold carries the vendor's reference",
+        agent_held = move(uid, "HOLD_CONFIRMED")
+        u = a.get(f"{C}/inventory/{uid}").json()
+        ev = a.post(f"{C}/inventory/{uid}/hold-evidence", {"request_id": rid(), "expected_version": u["version"],
+                                                          "vendor_ref": "lamar-hold-live",
+                                                          "hold_expires_at": later(days=7),
+                                                          "evidence_doc_ref": "lamar-email-hold-live"})
+        u = a.get(f"{C}/inventory/{uid}").json()
+        decide = {"request_id": rid(), "expected_version": u["version"],
+                  "evidence_id": (u["hold_evidence"] or [{}])[-1].get("evidence_id", "ooh-hev-" + "0" * 40),
+                  "decision": "CONFIRM"}
+        agent_decides = a.post(f"{C}/inventory/{uid}/hold-decisions", decide)
+        held = a.post(f"{C}/inventory/{uid}/hold-decisions", decide, andre=True)
+        check("availability cannot skip to a confirmed hold; only Andre confirms one, from the vendor evidence an "
+              "agent attached",
               early.status_code == 409 and moved and q.status_code == 201
-              and q.json()["evidence_class"] == "VENDOR_ASSERTED" and held.status_code == 200
+              and q.json()["evidence_class"] == "VENDOR_ASSERTED"
+              and agent_held.status_code == 409 and agent_held.json()["detail"] == "HOLD_CONFIRMATION_ANDRE_ONLY"
+              and ev.status_code == 201 and ev.json()["state"] == "HOLD_REQUESTED"
+              and agent_decides.status_code == 403 and held.status_code == 200
+              and held.json()["state"] == "HOLD_CONFIRMED" and held.json()["hold_confirmed_by"] == "andre"
               and held.json()["evidence_class"] == "VENDOR_ASSERTED")
         go("AVAILS_REQUESTED")
         c = view()
