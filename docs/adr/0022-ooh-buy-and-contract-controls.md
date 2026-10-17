@@ -145,6 +145,10 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   - Known false positives (refused, never stored): ten-digit references, `<word> at <word>.<word>`, a three- and a
     four-digit group joined by a dash (`LA-101-2025`), lists of 3-3-4 digit groups (`360, 720, 1440`,
     `405 | 110 | 1200`), coordinates with seven decimals, and `place@place. Word` (`Sunset@Vine. Faces east`).
+  - Known false refusals (fail closed; fourth delta review H1): a reference made of an account number and a
+    sequence number that together look like a card (a valid network prefix and Luhn check, about 2-5% of such
+    shapes) is refused `FUNDS_METHOD_CONFLICT` (open question 4). A card split 10-6 and an account plus a sequence number
+    cannot be told apart, and a card number must never be stored.
   - Known limits (accepted): a card number written in one- or two-digit groups (`42-42-42-…`), or split around a
     nine-digit group that passes the routing checksum, is not seen (only a deliberate spelling does that); `cc4242` (see NF-2).
 - **Rate cards (NF-5).** An estimate counts only while the face's current rate card has the same sources, amount,
@@ -177,3 +181,6 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
 2. Should approving a contract's terms be separate from authorizing the purchase (built: two steps, both Andre's), or
    one step?
 3. Payment terms bound (built: 0..120 days).
+4. About 2-5% of bank references shaped as an account number plus a sequence number are refused as possible card
+   numbers (fail closed). How should Andre record such a reference: a separate structured field for the bank's
+   transfer id, or another rule?

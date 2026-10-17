@@ -474,3 +474,13 @@ def test_g3_a_routing_number_is_never_joined_but_a_non_routing_nine_digit_group_
         acct = str(rnd.randint(10 ** 2, 10 ** 12))
         for routing in ("256074974", "322271627", "314074269", "021000021", "121000358"):
             assert not sc.names_a_card(f"ACH-{routing}-{acct}"), (routing, acct)
+
+
+def test_h3_the_routing_checksum_is_modulo_ten():
+    assert not sc._aba_routing("100000002")                     # weighted sum ends in 5: not a routing number
+    assert sc.names_a_card("4000-100000002") == _luhn("4000100000002")
+
+
+def test_h3_a_routing_number_in_second_place_is_not_joined_either():
+    first = next(f"4{n:03d}" for n in range(1000) if _luhn(f"4{n:03d}256074974"))
+    assert _luhn(first + "256074974") and not sc.names_a_card(f"ACH-{first}-256074974")
