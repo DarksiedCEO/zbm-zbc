@@ -31,7 +31,9 @@ LOG_NAME = "ooh_log.jsonl"
 # an older log is discarded (start from an empty data directory), not converted (ADR 0019).
 # Format 3 (Oct 16 2026 round 2): a format-2 log can hold agent-made HOLD_CONFIRMED moves, which only Andre may now
 # make; replaying one would bring such a hold back (AEGIS step 2 L2), so format 2 refuses start like any other.
-FORMAT_VERSION = 3
+# Format 4 (OOH-2..4 review): face keys fold leading zeros and object ids include the caller; a format-3 log's ids and
+# keys would not match what this build derives, so it refuses start too.
+FORMAT_VERSION = 4
 
 
 class StoreCorrupt(RuntimeError):

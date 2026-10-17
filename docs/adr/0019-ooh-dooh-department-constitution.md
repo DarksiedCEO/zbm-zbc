@@ -253,7 +253,7 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
   ACCEPTED/BOOKED) of any tenant with an overlapping flight. The body is that code alone: no tenant, campaign,
   order or flight of the other buyer. Proven through the API (two tenants; overlapping refused, adjacent allowed,
   re-checked at submission, freed by a rejection).
-- **R2-L3** Every log line carries `fmt` (log format 2 then; 3 since the hold change). A log of another format refuses start with a reason
+- **R2-L3** Every log line carries `fmt` (log format 2 then; 3 since the hold change; 4 since the OOH-2..4 review, ADR 0022). A log of another format refuses start with a reason
   (`StoreCorrupt`: "log line N is log format …; this build reads format N only and has no migration"). There is no
   migration: the service is unreleased, so an older data directory is moved aside, not converted.
 - **R2-L4** An outcome recorded during a dispute adds a history entry (DISPUTED → DISPUTED with the answer as the

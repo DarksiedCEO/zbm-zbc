@@ -90,7 +90,7 @@ class ContractsMixin:
             code = self._contract_terms_problem(c, k)
             if code:
                 raise Conflict(R(code))
-            kid = derived_id("ctr", cid, actor, rk)
+            kid = self._fresh(self.contracts, derived_id("ctr", cid, actor, rk))
             superseded = sorted(o for o in c["contract_ids"] if self.contracts[o]["status"] in P.CONTRACT_OPEN
                                 and set(self.contracts[o]["quote_refs"]) & set(k["quote_refs"]))
             data = {"contract_id": kid, "campaign_id": cid, **k, "superseded": superseded,

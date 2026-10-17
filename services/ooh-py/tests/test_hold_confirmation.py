@@ -429,7 +429,7 @@ def test_a_format_2_log_refuses_start(tmp_path):
     fd = os.open(data / LOG_NAME, os.O_WRONLY | os.O_CREAT, 0o600)
     os.write(fd, encode(rec) + b"\n")
     os.close(fd)
-    with pytest.raises(StoreCorrupt, match="log format 2; this build reads log format 3"):
+    with pytest.raises(StoreCorrupt, match="log format 2; this build reads log format 4"):
         RecordLog(str(data))
 
 

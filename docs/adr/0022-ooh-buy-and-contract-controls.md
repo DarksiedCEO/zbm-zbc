@@ -51,6 +51,33 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
    moves the campaign to `FUNDS_VERIFIED`), but it is no longer enough to buy. Until Finance holds a `finance_31`
    token and calls this route, no purchase can be authorized.
 
+## AEGIS review of OOH-2..4 (Oct 16 2026): fixes
+
+- **Security F1 (HIGH), an id collision.** Object ids derived from a request key left out the caller, and
+  idempotency is per caller, so a preparer reusing Andre's request id got the same price id and overwrote his record
+  (a buy limit raised from 1000.00 to 9999.00; a quote under an approved contract rewritten). The pattern dated
+  from waves 0-1. Every created id now includes the caller (campaigns, units, prices, approvals, authorizations,
+  contracts, sources, avails, estimates, markup evidence, hold evidence), and every create refuses an id that already
+  exists (`REQUEST_ID_REUSED`), so no record is ever overwritten.
+- **Security F2, plan-guard ordering.** `QUOTES_VALIDATED` now re-runs the plan guards and needs at least one line
+  (`PLAN_EMPTY`), so units added after an (empty) plan approval are checked; a quote naming several units counts once,
+  in full, while any of them is live (withdrawing one no longer hides cost).
+- **Security F3 / wave 2 F-2, personal data.** `src/pii.py`: NFKC-normalised and case-folded text is checked for
+  e-mail addresses (also `[at]` / `(at)` / ` at ` spellings) and phone numbers (seven or more digits with any short
+  separators). Free-text attribute values carrying them are refused; vendor text is stored with them redacted
+  (`personal_data_redacted`). References cannot hold `@`; a reference made of digits cannot be told from an id.
+- **Red team F2 (wave 2), card and cash.** A client funds reference naming a card, cash or a payment app (`card`,
+  `visa`, `mastercard`, `amex`, `debit`, `credit`, `cash`, `zelle`, `venmo`, `paypal`, `cashapp`) is refused under
+  ACH (`FUNDS_METHOD_CONFLICT`).
+- **Red team F3 (wave 2), leading zeros.** A face reference's digit runs lose their leading zeros, so `LA-123` and
+  `LA-0123` are one face (and one open order across tenants).
+- **Red team F4 (wave 2), avails at the gate.** The purchase gate, at authorization and at submission, refuses a
+  unit the vendor's avails block (`AVAILS_UNAVAILABLE`).
+- **Log format 4**: face keys and object ids changed; a format-3 log refuses start (no migration: unreleased).
+- Tests: `tests/test_aegis_ooh_w234.py` (with the red team's main mutation gaps: the registry kill switch on every
+  registry write, every principal/agent field required, caller checks on the registry routes, the face filters,
+  registry retries).
+
 ## What OOH-4 does NOT do
 
 - **No signing.** Andre still signs and sends the order outside the system (channel `MANUAL_BY_ANDRE`); there is no

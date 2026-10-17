@@ -118,7 +118,7 @@ class PlanningMixin:
             days = (date.fromisoformat(u["flight"][1]) - date.fromisoformat(u["flight"][0])).days + 1
             cost = (Decimal(amt["value"]) * Decimal(days) / Decimal(per["value"])).quantize(P.CENT,
                                                                                             rounding=ROUND_HALF_UP)
-            pid = derived_id("prc", tid, actor, rk)
+            pid = self._fresh(self.prices, derived_id("prc", tid, actor, rk))
             data = {"price_id": pid, "campaign_id": cid, "tenant_id": tid, "price_type": "VENDOR_COST_ESTIMATE",
                     "amount": P.fmt(cost), "currency": "USD", "vendor": u["vendor"], "inventory_ids": [uid],
                     "quote_refs": [], "evidence_class": "ESTIMATED", "valid_until": None, "source_ref": None,
@@ -163,7 +163,7 @@ class PlanningMixin:
                 "split_evenly_from_multi_unit_quote": False}
 
     def plan(self, c: dict) -> dict:
-        lines, by_vendor = [], {}
+        lines, by_vendor, counted = [], {}, set()
         quoted = estimated = Decimal(0)
         unknown = 0
         for uid in c["inventory_ids"]:
@@ -177,10 +177,16 @@ class PlanningMixin:
             if cost["basis"] == "UNKNOWN":
                 unknown += 1
                 continue
-            amount = Decimal(cost["amount"])
             if cost["basis"] == "VENDOR_QUOTE":
+                # AEGIS OOH-3/4 security F2: a quote is owed in full while any of its units is live, so it counts
+                # once at its whole amount (never a share that a withdrawn sibling would make vanish)
+                if cost["price_id"] in counted:
+                    continue
+                counted.add(cost["price_id"])
+                amount = Decimal(self.prices[cost["price_id"]]["amount"])
                 quoted += amount
             else:
+                amount = Decimal(cost["amount"])
                 estimated += amount
             by_vendor[u["vendor"]] = by_vendor.get(u["vendor"], Decimal(0)) + amount
         b = c.get("brief")
@@ -226,7 +232,7 @@ class PlanningMixin:
                 return self.campaign_view(tid, cid)
             self.check_kill(tenant=tid, capability="prices")
             self._writable(c, P.BRIEF_STATES + ("PLAN_APPROVED", "AVAILS_REQUESTED", "QUOTES_VALIDATED"))
-            mid = derived_id("mkx", cid, actor, rk)
+            mid = self._fresh({e["evidence_id"] for e in c["markup_evidence"]}, derived_id("mkx", cid, actor, rk))
             data = {"campaign_id": cid, "evidence_id": mid, "kind": body["kind"], "doc_ref": body["doc_ref"]}
             self._commit("markup_evidence_recorded", self._req(data, actor, rk, body, cid), actor,
                          evidence=self._ev("markup_evidence_recorded", cid, data, actor, rk))

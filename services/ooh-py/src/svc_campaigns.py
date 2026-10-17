@@ -38,6 +38,7 @@ from decimal import Decimal
 from typing import Optional
 
 import policy as P
+import pii
 from clock import parse_iso
 from errors import Conflict, Forbidden, Invalid, NotFound
 from ledger import canonical, derived_id
@@ -56,11 +57,15 @@ FUNDABLE = ("CLIENT_APPROVED", "FUNDING_REQUIRED")
 
 
 def observed(text: Optional[str]) -> Optional[dict]:
-    """Vendor text as reportable data: control characters removed, bounded, marked untrusted (section 52)."""
+    """Vendor text as reportable data: control characters removed, personal data redacted (AEGIS OOH-3/4 F3),
+    bounded, marked untrusted (section 52)."""
     if text is None:
         return None
     s = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
-    return {"untrusted": True, "text": s[:OBSERVED_MAX], "truncated": len(s) > OBSERVED_MAX,
+    redacted = pii.has_personal_data(s)
+    if redacted:
+        s = " ".join(pii.redact(s).split())
+    return {"untrusted": True, "personal_data_redacted": redacted, "text": s[:OBSERVED_MAX], "truncated": len(s) > OBSERVED_MAX,
             "sha256": hashlib.sha256(s.encode("utf-8", "surrogatepass")).hexdigest()}
 
 
@@ -68,7 +73,10 @@ def observed(text: Optional[str]) -> Optional[dict]:
 # agree with the structured ``method`` (AEGIS R2-L1: BOA-ACH-12345 and BOA-WIRE-12345 are different transfers on
 # different rails, never merged). NOISE words carry no identity. Either is removed only as a whole token, or as a
 # token's leading prefix directly followed by a digit (ACH12345): never from inside a word (REFUND77 is not UND77).
-RAILS = {"ach": "ach", "eft": "ach", "wire": "wire", "check": "check", "cheque": "check", "chk": "check"}
+RAILS = {"ach": "ach", "eft": "ach", "wire": "wire", "check": "check", "cheque": "check", "chk": "check",
+         # AEGIS wave 2 red team F2: card, cash and payment-app references are not ACH money (refused as a conflict)
+         "card": "card", "visa": "card", "mastercard": "card", "amex": "card", "debit": "card", "credit": "card",
+         "cash": "cash", "zelle": "app", "venmo": "app", "paypal": "app", "cashapp": "app"}
 NOISE_WORDS = ("transfer", "xfer", "txn", "trace", "ref", "reference", "conf", "confirmation")
 METHOD_WORDS = tuple(RAILS) + NOISE_WORDS
 
@@ -134,8 +142,10 @@ def funds_ref_key(value: str, method: str) -> str:
 
 
 def unit_ref_key(value: str) -> str:
-    """The key one physical face is known by at its vendor (AEGIS M1): NFKC, case-folded, separators removed."""
-    return "".join(_alnum_tokens(value))
+    """The key one physical face is known by at its vendor (AEGIS M1): NFKC, case-folded, separators removed, and
+    every digit run without its leading zeros (AEGIS wave 2 red team F3: LA-123 and LA-0123 are one face; an all-zero
+    run stays "0")."""
+    return re.sub(r"(?<![0-9])0+(?=[0-9])", "", "".join(_alnum_tokens(value)))
 
 
 def order_key(tenant: str, campaign: str, vendor: str, quotes: list, amount: str, currency: str, version: int) -> str:
@@ -211,7 +221,7 @@ class CampaignsMixin:
                 raise Invalid(R("INVALID"), field="markets")
             for mk in body["markets"]:
                 self.require_market(mk)                          # OOH-2: a market of the registry, never free text
-            cid = derived_id("cmp", tid, rk)
+            cid = self._fresh(self.campaigns, derived_id("cmp", tid, actor, rk))   # the caller too (security F1)
             data = {"campaign_id": cid, "tenant_id": tid, "name": body["name"], "markets": list(body["markets"])}
             self._commit("campaign_created", self._req(data, actor, rk, body, cid), actor,
                          evidence=self._ev("campaign_created", cid, {"campaign_id": cid, "tenant_id": tid}, actor, rk))
@@ -306,6 +316,11 @@ class CampaignsMixin:
                 return "SELL_PRICE_QUOTE_RETIRED"
             if any(self._expired(self.prices[q]["valid_until"]) for q in sp["quote_refs"]):
                 return "SELL_PRICE_QUOTE_EXPIRED"
+            if not self.plan(c)["lines"]:
+                return "PLAN_EMPTY"                          # AEGIS OOH-3/4 security F2: nothing planned, nothing quoted
+            g = self.plan_guard(c)                           # the plan still holds once the units are in (F2)
+            if g:
+                return g
         return None
 
     def _a_campaign_transition(self, d, at):
@@ -334,7 +349,7 @@ class CampaignsMixin:
             self.check_brief_fit(c, face["format"], flight)     # OOH-3: the unit fits the client's brief
             if self._registration_clash(tid, face["vendor"], key, flight, None):
                 raise Conflict(R("UNIT_ALREADY_REGISTERED"))
-            uid = derived_id("inv", tid, rk)
+            uid = self._fresh(self.inventory, derived_id("inv", tid, actor, rk))
             data = {"unit_id": uid, "campaign_id": cid, "tenant_id": tid, "face_id": face["face_id"],
                     "vendor": face["vendor"], "format": face["format"], "market": face["market"],
                     "vendor_unit_ref": face["vendor_face_ref"], "unit_key": key,
@@ -533,7 +548,8 @@ class CampaignsMixin:
             if u["flight"] is None:
                 raise Conflict(R("FLIGHT_REQUIRED"))
             expires = self._future(body["hold_expires_at"], "HOLD_EXPIRY_REQUIRED")
-            eid = derived_id("hev", uid, actor, rk)       # the caller too: one id, one record (AEGIS step 2 L1)
+            eid = self._fresh({e["evidence_id"] for e in u["hold_evidence"]},
+                              derived_id("hev", uid, actor, rk))  # the caller too: one id, one record (step 2 L1)
             data = {"unit_id": uid, "campaign_id": cid, "evidence_id": eid, "vendor_ref": body["vendor_ref"],
                     "hold_expires_at": expires, "evidence_doc_ref": body["evidence_doc_ref"],
                     "flight": list(u["flight"]), "evidence_class": P.EVIDENCE_ALLOWED["hold_evidence"][0],
@@ -689,7 +705,7 @@ class CampaignsMixin:
                 if Decimal(body["amount"]) != expected:
                     raise Conflict(R("MARKUP_MISMATCH"))
                 extra = {"cost_basis": P.fmt(cost), "markup_pct": cm["markup_pct"], "terms_id": cm["terms_id"]}
-            pid = derived_id("prc", tid, rk)
+            pid = self._fresh(self.prices, derived_id("prc", tid, actor, rk))   # AEGIS OOH-3/4 security F1
             data = {"price_id": pid, "campaign_id": cid, "tenant_id": tid, "price_type": pt, "amount": body["amount"],
                     "currency": body["currency"], "vendor": body.get("vendor"), "inventory_ids": inv,
                     "quote_refs": quotes, "evidence_class": ec, "valid_until": valid_until,
@@ -793,7 +809,7 @@ class CampaignsMixin:
             if body["sell_price_id"] != c["current_sell_price_id"]:
                 self._refuse("SELL_PRICE_NOT_CURRENT", c, rk)
             sp = self.prices[body["sell_price_id"]]
-            approval_id = derived_id("cap", cid, rk)
+            approval_id = derived_id("cap", cid, "andre", rk)
             data = {"campaign_id": cid, "approval_id": approval_id, "sell_price_id": sp["price_id"],
                     "amount": sp["amount"], "currency": sp["currency"], "quote_refs": list(sp["quote_refs"]),
                     "doc_ref": body["client_approval_doc_ref"], "terms_id": sp["terms_id"]}
@@ -1028,6 +1044,8 @@ class CampaignsMixin:
                 return "FACE_ALREADY_ORDERED"
             if not self.flag_met(u["market"], "EXECUTION_AUTHORIZED"):
                 return "MARKET_EXECUTION_NOT_AUTHORIZED"         # OOH-2: buying only where Andre authorized execution
+            if self.avails_block(u["face_id"], u["flight"]) is not None:
+                return "AVAILS_UNAVAILABLE"                      # wave 2 red team F4: the vendor said no for it
         amount = Decimal(a["authorized_amount"])
         if amount != sum((Decimal(q["amount"]) for q in qs), Decimal(0)):
             return "QUOTE_ORDER_MISMATCH"
@@ -1092,7 +1110,7 @@ class CampaignsMixin:
             code = self._gate_problem(c, a, at_submit=False)
             if code:
                 self._refuse(code, c, rk, Forbidden if code.startswith("KILLED_") else Conflict)
-            aid = derived_id("aut", cid, rk)
+            aid = self._fresh(self.authorizations, derived_id("aut", cid, "andre", rk))
             data = {"authorization_id": aid, "campaign_id": cid, "tenant_id": tid, **a,
                     "exact_quote_refs": sorted(a["exact_quote_refs"]), "inventory_ids": sorted(a["inventory_ids"]),
                     "funding_state": "CLEARED_FULL", "authorized_at_version": c["version"]}

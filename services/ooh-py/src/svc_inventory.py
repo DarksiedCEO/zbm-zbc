@@ -41,14 +41,7 @@ _FEET = re.compile(r"[0-9]{1,4}(\.[0-9]{1,2})?")
 _INT = re.compile(r"[1-9][0-9]{0,6}")
 _MONEY = re.compile(r"(0|[1-9][0-9]{0,11})\.[0-9]{2}")
 _REF = re.compile(r"[A-Za-z0-9._:-]{1,100}")
-# AEGIS wave 2 F-2: an e-mail address or a phone-number-like run of digits in a free-text value is personal data,
-# refused. (Names cannot be detected reliably; text attributes are vendor descriptions of a face, and the ADR says so.)
-_EMAIL = re.compile(r"[^\s@]+@[^\s@]+")
-_PHONE = re.compile(r"(?:\d[\s().+-]*){7,}")
-
-
-def personal_data_in(value: str) -> bool:
-    return bool(_EMAIL.search(value) or _PHONE.search(value))
+from pii import has_personal_data as personal_data_in   # noqa: E402  (AEGIS wave 2 F-2, OOH-3/4 F3)
 
 
 class PortNotConnected(Exception):
@@ -216,7 +209,7 @@ class InventoryMixin:
                 raise Invalid(R("INVALID"), field="dated") from None
             if dated > self.now():
                 raise Invalid(R("SOURCE_DATED_IN_FUTURE"))
-            sid = derived_id("src", actor, rk)
+            sid = self._fresh(self.sources, derived_id("src", actor, rk))
             data = {"source_id": sid, "kind": body["kind"], "vendor": body["vendor"], "doc_ref": body["doc_ref"],
                     "dated": body["dated"], "evidence_class": "VENDOR_ASSERTED",
                     "vendor_text": observed(body.get("vendor_text"))}
@@ -269,7 +262,7 @@ class InventoryMixin:
                 raise Invalid(R("INVALID"), field="vendor_face_ref")
             if (src["vendor"], key) in self.face_keys:
                 raise Conflict(R("FACE_EXISTS"))                   # one physical face, one registry record
-            fid = derived_id("fce", src["vendor"], key)
+            fid = self._fresh(self.faces, derived_id("fce", src["vendor"], key))
             data = {"face_id": fid, "vendor": src["vendor"], "vendor_face_ref": body["vendor_face_ref"], "unit_key": key,
                     "format": body["format"], "market": body["market"], "source_id": src["source_id"]}
             self._commit("face_registered", self._req(data, actor, rk, body, fid), actor,
@@ -348,7 +341,7 @@ class InventoryMixin:
             src = self._source(body["source_id"], f["vendor"])
             if body.get("valid_until") is not None:
                 self._future(body["valid_until"], "AVAILS_VALIDITY_INVALID")
-            aid = derived_id("avl", fid, actor, rk)
+            aid = self._fresh({a["avails_id"] for a in f["avails"]}, derived_id("avl", fid, actor, rk))
             data = {"face_id": fid, "avails_id": aid, "source_id": src["source_id"], "flight": flight,
                     "answer": body["answer"], "valid_until": body.get("valid_until")}
             self._commit("avails_recorded", self._req(data, actor, rk, body, fid), actor,

@@ -258,6 +258,14 @@ class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin, Co
     def _req(data: dict, actor: str, rk: str, body: dict, obj) -> dict:
         return {**data, "actor": actor, "request_id": rk, "request_sha": request_sha(body), "_obj": obj}
 
+    @staticmethod
+    def _fresh(existing, oid: str) -> str:
+        """AEGIS OOH-3/4 security F1: a new object's id must be new. Ids include the caller, so this never fires for
+        a legitimate request; it is the last line against any id collision overwriting another's record."""
+        if oid in existing:
+            raise Conflict(R("REQUEST_ID_REUSED"))
+        return oid
+
     def _gate(self) -> None:
         if self._closed:
             raise Unavailable(R("SERVICE_CLOSED"))
