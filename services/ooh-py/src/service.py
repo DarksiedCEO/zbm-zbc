@@ -217,13 +217,22 @@ class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin, Co
             return rec
 
     def _record_twice(self, eid, event_type, actor, subject, payload, summary) -> None:
-        """One retry of the SAME event when the answer was lost (the ledger is idempotent on identical content)."""
+        """One retry of the SAME event when the answer was lost (the ledger is idempotent on identical content).
+        AEGIS Ω RED at d1b0de9 (RELIABILITY F1): once the first answer was lost, the ledger may hold the event, so a
+        retry that certainly recorded nothing (ledger unreachable) still leaves the outcome UNKNOWN. Reporting it as
+        "not recorded" let ``_commit`` drop an anchored line and reuse its seq, which stopped every write for good."""
         try:
             self.rec.record(eid, event_type, actor, subject, payload, summary)
         except LedgerRecordError as exc:
             if exc.took_effect is False or isinstance(exc, LedgerConflict):
                 raise
-            self.rec.record(eid, event_type, actor, subject, payload, summary)
+            try:
+                self.rec.record(eid, event_type, actor, subject, payload, summary)
+            except LedgerRecordError as again:
+                if again.took_effect is False:
+                    raise LedgerRecordError(f"ledger answer lost, then the retry failed ({again}): the ledger may "
+                                            "hold the first attempt") from again
+                raise
 
     def _anchor(self, eid: str, actor: str, epoch: str, payload: dict, kind: str, seq: int) -> None:
         self._record_twice(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")

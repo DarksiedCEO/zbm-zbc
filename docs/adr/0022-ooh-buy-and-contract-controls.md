@@ -163,6 +163,21 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   mutants (the red team's surviving ones among them, W34-172/173/375 included) are killed; the delta review's DF-8
   gaps (entity spellings, the eight-digit bound, redaction, credit/debit, litecoin/dogecoin) by 42 more.
 
+### AEGIS Ω RED at d1b0de9 (Oct 17 2026)
+- **Lost ledger answer, then an unreachable ledger (RELIABILITY F1, HIGH; inherited from the wave 0-1 base).** Once
+  the first answer for an event was lost, the ledger may hold it, so a retry that reaches nothing now leaves the
+  outcome unknown: the pending line is kept and the next integrity check rolls it forward. Before, the line was
+  dropped, its seq reused, and every later write was refused for good (also after a restart). The same function in
+  seo-py, sales-py, influencer-py, bizdev-py and service-py is not changed here.
+- **Untested locked-rule lines (TEST_TRUTH B1-B8).** `tests/test_aegis_omega_red.py` pins each at its boundary, with
+  a control on the accepted side: a wrong Andre token on the four routes that take one if presented; funds
+  reconfirmation and the order outcome without Andre; 10000.00 allowed and 10000.01 refused; the approved buy limit
+  plus one cent; seven days of authority allowed and one second more refused; a quote outside the client's approval;
+  a contract for one quote buying another.
+- **Still open, for a merge (not this push):** the slow-drip ledger answer that holds the lock (RELIABILITY F2), the
+  running service not re-reading its log file (DATA M-1), reads served from a consistently rewritten log (DATA M-2),
+  the service bearer pinned by tests on 4 of 57 routes, the funds kill switch, and the legacy mutation survivors.
+
 ## What OOH-4 does NOT do
 
 - **No taxes, fees or permits** (final red team PF-2): no sales tax, production, installation, permit or municipal
