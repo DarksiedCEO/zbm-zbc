@@ -29,7 +29,9 @@ LOG_NAME = "ooh_log.jsonl"
 # AEGIS R2-L3: every line carries the log format it was written in. A log of another format refuses start with a
 # reason (StoreCorrupt), never a KeyError from a replay handler. There is no migration: the service is unreleased, so
 # an older log is discarded (start from an empty data directory), not converted (ADR 0019).
-FORMAT_VERSION = 2
+# Format 3 (Oct 16 2026 round 2): a format-2 log can hold agent-made HOLD_CONFIRMED moves, which only Andre may now
+# make; replaying one would bring such a hold back (AEGIS step 2 L2), so format 2 refuses start like any other.
+FORMAT_VERSION = 3
 
 
 class StoreCorrupt(RuntimeError):

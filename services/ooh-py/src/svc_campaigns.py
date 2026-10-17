@@ -512,7 +512,7 @@ class CampaignsMixin:
             if u["flight"] is None:
                 raise Conflict(R("FLIGHT_REQUIRED"))
             expires = self._future(body["hold_expires_at"], "HOLD_EXPIRY_REQUIRED")
-            eid = derived_id("hev", uid, rk)
+            eid = derived_id("hev", uid, actor, rk)       # the caller too: one id, one record (AEGIS step 2 L1)
             data = {"unit_id": uid, "campaign_id": cid, "evidence_id": eid, "vendor_ref": body["vendor_ref"],
                     "hold_expires_at": expires, "evidence_doc_ref": body["evidence_doc_ref"],
                     "flight": list(u["flight"]), "evidence_class": P.EVIDENCE_ALLOWED["hold_evidence"][0],

@@ -248,8 +248,8 @@ full inventory schema, agents, proof of performance, reconciliation) will stand 
   ACCEPTED/BOOKED) of any tenant with an overlapping flight. The body is that code alone: no tenant, campaign,
   order or flight of the other buyer. Proven through the API (two tenants; overlapping refused, adjacent allowed,
   re-checked at submission, freed by a rejection).
-- **R2-L3** Every log line carries `fmt` (log format 2). A log of another format refuses start with a reason
-  (`StoreCorrupt`: "log line N is log format …; this build reads format 2 only and has no migration"). There is no
+- **R2-L3** Every log line carries `fmt` (log format 2 then; 3 since the hold change). A log of another format refuses start with a reason
+  (`StoreCorrupt`: "log line N is log format …; this build reads format N only and has no migration"). There is no
   migration: the service is unreleased, so an older data directory is moved aside, not converted.
 - **R2-L4** An outcome recorded during a dispute adds a history entry (DISPUTED → DISPUTED with the answer as the
   reason and the new `resume_to`).
@@ -306,6 +306,10 @@ and an expiry that nothing checked (open decision 7). Now:
   checks the reference against the vendor (the vendor port is `NOT_CONNECTED`); Andre's decision is the control.
 - The purchase gate also requires `hold_confirmed_by == "andre"` on every unit (`INVENTORY_NOT_HELD` otherwise).
 - Leaving `HOLD_CONFIRMED` (an extension request) clears the hold; it is confirmed again only by Andre.
+- The evidence id is derived from the unit, the caller and the request key, so two callers reusing one request id
+  get two distinct records (AEGIS step 2 L1).
+- The log format is now 3 (`store.FORMAT_VERSION`): a format-2 log could hold agent-made `HOLD_CONFIRMED` moves, so
+  it refuses start like any other old format (AEGIS step 2 L2; R2-L3 below describes the mechanism).
 - Tests: `tests/test_hold_confirmation.py`; war room scenario `someone-else-confirms-a-hold` (all MUST).
 
 ## Locked decisions enforced (founder, Oct 16 2026 round 2)

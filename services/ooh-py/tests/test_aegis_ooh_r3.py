@@ -201,6 +201,6 @@ def test_r3_the_old_log_message_is_whole(tmp_path):
     os.close(fd)
     with pytest.raises(StoreCorrupt) as e:
         RecordLog(str(data))
-    assert str(e.value) == ("log line 1 has no log format (written before format 2); this build reads log format 2 "
+    assert str(e.value) == ("log line 1 has no log format (written before format 2); this build reads log format 3 "
                             "only and has no migration (the service is unreleased): move the old data directory "
                             "aside and start from an empty one")

@@ -394,3 +394,37 @@ def test_the_constitution_lists_the_hold_vocabulary(acme):
     c = acme.ok(acme.get("/constitution"))
     assert c["availability_andre_only"] == ["HOLD_CONFIRMED"]
     assert c["hold_evidence_states"][0] == "PENDING_ANDRE" and "REFERENCE_NOT_VERIFIED" in c["hold_reject_reasons"]
+
+
+def test_two_callers_with_one_request_id_get_two_distinct_records(acme):
+    """AEGIS step 2 L1: the evidence id includes the caller, so Andre can always name the pending record."""
+    h = acme
+    cid, uid, _ = requested(h)
+    req = rid()
+    for caller in ("ooh_agent", "dashboard"):
+        u = h.unit_get("acme", cid, uid)
+        body = {"request_id": req, "expected_version": u["version"], "vendor_ref": f"v-{caller}",
+                "hold_expires_at": at(days=3), "evidence_doc_ref": "d-1"}
+        h.ok(h.post(f"/tenants/acme/campaigns/{cid}/inventory/{uid}/hold-evidence", body, caller=caller), 201)
+    evs = h.unit_get("acme", cid, uid)["hold_evidence"]
+    assert len({e["evidence_id"] for e in evs}) == 2
+    u = h.ok(h.hold_decide("acme", cid, uid, evs[-1]["evidence_id"]))
+    assert u["state"] == "HOLD_CONFIRMED" and u["vendor_ref"] == "v-dashboard"
+
+
+def test_a_format_2_log_refuses_start(tmp_path):
+    """AEGIS step 2 L2: a log written before Andre-only holds (format 2) could replay an agent-made confirmed hold."""
+    import hashlib
+    import os
+
+    from store import GENESIS, LOG_NAME, RecordLog, StoreCorrupt, encode
+    data = tmp_path / "data"
+    data.mkdir(mode=0o700)
+    rec = {"seq": 1, "kind": "tenant_created", "at": "2026-10-16T18:00:00Z",
+           "data": {"tenant_id": "acme", "actor": "andre"}, "prev_line_sha256": GENESIS, "fmt": 2}
+    rec["record_sha256"] = hashlib.sha256(encode(rec)).hexdigest()
+    fd = os.open(data / LOG_NAME, os.O_WRONLY | os.O_CREAT, 0o600)
+    os.write(fd, encode(rec) + b"\n")
+    os.close(fd)
+    with pytest.raises(StoreCorrupt, match="log format 2; this build reads log format 3"):
+        RecordLog(str(data))
