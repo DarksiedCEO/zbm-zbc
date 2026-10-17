@@ -36,22 +36,19 @@ _WORD_DOM = r"[a-z][\w-]*"
 # * spaced "@": a dot takes spaces on both sides or none ("Digital @ Sunset. Faces west" is not an address: NF-4);
 # * the word " at ": a domain that starts with a letter ("Open at 6.pm" is not an address).
 _DOTSEP = r"(?:\.|\s+\.\s+|\s+dot\s+)"
-_EMAIL_TIGHT = re.compile(r"(?<![^\s])" + _LOCAL + r"@" + _DOM + r"(?:\s*\.\s*[a-z]{2,}|\s+dot\s+[a-z]{2,})+",
+_EMAIL_TIGHT = re.compile(_LOCAL + r"@" + _DOM + r"(?:\s*\.\s*[a-z]{2,}|\s+dot\s+[a-z]{2,})+",
                           re.I)
 _EMAIL_STRONG = re.compile(_LOCAL + r"(?:\s+@\s*|\s*@\s+)" + _DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
 _EMAIL_WORD = re.compile(r"\b[\w.+-]{1,64}\s+at\s+" + _WORD_DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
-# Phone separators: spaces, dots, slashes, underscores, dashes (U+2010-2015, U+2212 minus), colons, bars, middle dots,
-# apostrophes and ampersands (final red team NF-3), or one comma on its own ("555,123,4567"; "360, 720, 1440" is a
-# list of numbers: delta red team DF-3).
+# Phone separators: spaces, dots, slashes, underscores, dashes (U+2010-2015, U+2212 minus), commas, colons, bars,
+# middle dots, apostrophes and ampersands, in any mix (final red team NF-3; delta red team 2 E3: "310-5551234",
+# "310, 555, 1234"). The screen errs toward refusing: a false positive is refused and never stored, a miss is kept.
 _SEPCH = "-\\s./_,:|·'&‐-―−"
-_SEPCH_NC = "-\\s./_:|·'&‐-―−"
-_SEPP = "(?:,|[" + _SEPCH_NC + "]+)"
-# A number does not start right after a digit, or after a digit and a decimal point (GPS 34.101 -118.3265 is a
-# coordinate, not a phone: NF-4). Its two joints are both separated or both not ("118.2436849" is a coordinate).
+_SEP = "[" + _SEPCH + "]*"
+# A number does not start right after a digit, or after a digit and a decimal point (GPS 34.101 -118.3265: NF-4).
 _START = r"(?<!\d)(?<!\d\.)"
 _PHONE = re.compile(
-    _START + r"(?:\+?1" + _SEPP + r"?)?(?:\(\d{3}\)\s*\d{3}" + _SEPP + r"?|\d{3}" + _SEPP + r"\d{3}" + _SEPP
-    + r"|\d{6})\d{4}(?!\d)"                                                                         # North American
+    _START + r"(?:\+?1" + _SEP + r")?\(?\d{3}\)?" + _SEP + r"\d{3}" + _SEP + r"\d{4}(?!\d)"   # North American
     + r"|" + _START + r"\d{3}[‐-―−-]\d{4}(?![\d.,]\d|\d)"                          # local 555-1234
     + r"|(?<!\d)\d{10,}(?!\d)")                                                                   # ten digits or more
 # An international number: "+", a country code, and at least eight digits in all (+52 55 1234 5678, +44 20 7946 0958)

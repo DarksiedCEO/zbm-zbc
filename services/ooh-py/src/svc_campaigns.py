@@ -142,17 +142,20 @@ def _spelled_out(value: str) -> list[str]:
     return out
 
 
-# A 15-digit run is the length of an ACH trace number, whose first digits are an ABA routing prefix (00-12, 21-32,
-# 61-72, 80): one in ten passes Luhn by chance. A 15-digit run counts as a card only with a card-network prefix no
-# routing prefix starts with: Visa 4, Amex 34/37, JCB 35, Diners 36/38, Maestro 50/56-58, Mastercard 51-55,
-# Discover 6011. Every other 13-19-digit run that passes Luhn is a card (delta red team DF-1: JCB, Diners, Maestro,
-# Mastercard 2-series and Discover 64/65 cards of 14, 16 or 19 digits).
+# Card numbers start with a card-network prefix (IIN): Visa 4, Mastercard 51-55 and 2221-2720, Maestro 50/56-58,
+# Amex 34/37, JCB 35, Diners 30/36/38/39, Discover and UnionPay 6. A digit run that cannot start a card (0, 1, 7, 8,
+# 9, or 2 outside 2221-2720: dates such as 2026…, ABA routing numbers 0…/1…) is never read as one, so a bank
+# reference with a date or a routing number is not refused by chance (delta red team 2 E2). A 15-digit run is the
+# length of an ACH trace number, whose ABA routing prefix can be 21-32 or 61-72: it counts only with a prefix no
+# routing prefix starts with (4, 34-38, 50-58, 6011).
+_CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720|3[0-9]|6)")
 _CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
 
 
 def _luhn_card(digits: str) -> bool:
     """A payment-card number, never stored (re-verification N2)."""
-    if not 13 <= len(digits) <= 19 or (len(digits) == 15 and not _CARD_PREFIX_15.match(digits)):
+    if not 13 <= len(digits) <= 19 or not _CARD_PREFIX.match(digits) \
+            or (len(digits) == 15 and not _CARD_PREFIX_15.match(digits)):
         return False
     total = 0
     for i, ch in enumerate(reversed(digits)):
@@ -230,10 +233,11 @@ def unit_ref_key(value: str) -> str:
 
 
 def finance_ref_key(value: str) -> str:
-    """The key one Finance (31) reference is known by: NFKC, case-folded, every run of separators read as one "-"
-    (final red team NF-6: "FIN31.ABC" and "fin31-abc" are one reference). Separators are kept as boundaries, so
-    "F31-1-10" and "F31-11-0" are two (delta red team DF-4); a reference with no letter or digit has no key."""
-    return "-".join(_alnum_tokens(value))
+    """The key one Finance (31) reference is known by: NFKC, case-folded, separators removed (final red team NF-6:
+    "FIN31-ABC", "fin31.abc" and "FIN31ABC" are one reference, verifying one campaign; delta red team 2 E4). Two
+    references that differ only in separators ("F31-1-10", "F31-11-0") are therefore one: that refuses (fails closed),
+    it never lets one reference verify two campaigns. A reference with no letter or digit has no key."""
+    return "".join(_alnum_tokens(value))
 
 
 def order_key(tenant: str, campaign: str, vendor: str, quotes: list, amount: str, currency: str, version: int) -> str:

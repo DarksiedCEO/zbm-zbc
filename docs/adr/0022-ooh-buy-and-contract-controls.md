@@ -124,18 +124,26 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
     Mastercard 2-series and Discover 64/65 are refused and no trace number is. Digit groups of three or more are
     joined in every contiguous part (a card followed by an expiry is seen; a date's `-10-17` is never joined).
   - DF-2: a tight `@` (no space on either side) takes any domain and dots with spaces (`jane@163.com`,
-    `jane@example .com`); a comma before a number is no longer a reason to skip it (`48,310 555 1234`).
-  - DF-3: one comma is a phone separator, a comma and a space are not (`360, 720, 1440` passes); the two joints of a
-    3-3-4 number are both separated or both not (`34.0522342, -118.2436849` passes).
-  - DF-4: a Finance reference's separators are kept as boundaries (`F31-1-10` and `F31-11-0` are two); a reference
-    with no letter or digit is refused.
+    `jane@example .com`), wherever it starts in a token (`IG @lamar/jane@example.com`, a long URL); a comma before
+    a number is no longer a reason to skip it (`48,310 555 1234`).
+  - DF-3 (revised by the second delta review, E3): **the personal-data screen errs toward refusing.** A false
+    positive is refused and never stored; a miss keeps personal data. A 3-3-4 number with any mix of separators,
+    `, ` included, is a phone (every US layout of 324 tried is caught), so `360, 720, 1440` and a coordinate with
+    seven decimals are refused, as documented false positives.
+  - DF-4 (revised, E4): a Finance reference's key drops separators (`FIN31-ABC` = `FIN31ABC`), so two references
+    that differ only in separators (`F31-1-10`, `F31-11-0`) are one: that refuses (fails closed) and never lets one
+    reference verify two campaigns. A reference with no letter or digit is refused.
   - DF-5: plurals (`money-orders`, `giftcards`, `credit-cards`) are refused; `mo`, `btc`, `eth`, `wu`, `ltc` count
     before digits (`mo5`, `btc1`).
   - DF-6: an address's local part is bounded (64), so a 4,000-character adversarial text screens in about 50 ms.
   - DF-7: redaction repeats until nothing detectable is left.
+  - E2 (second delta review): a digit run that cannot start a card (0, 1, 7, 8, 9, or 2 outside Mastercard's
+    2221-2720) is never one, so a bank reference with a date or an ABA routing number is not refused by chance.
   - Known false positives (refused, never stored): ten-digit references, `<word> at <word>.<word>`, a three- and a
-    four-digit group joined by a dash (`LA-101-2025`), and 3-3-4 digit groups split by bars or colons
-    (`405 | 110 | 1200`).
+    four-digit group joined by a dash (`LA-101-2025`), lists of 3-3-4 digit groups (`360, 720, 1440`,
+    `405 | 110 | 1200`), coordinates with seven decimals, and `place@place. Word` (`Sunset@Vine. Faces east`).
+  - Known limits (accepted): a card number written in one- or two-digit groups (`42-42-42-…`) is not seen (only a
+    deliberate spelling does that); `cc4242` (see NF-2).
 - **Rate cards (NF-5).** An estimate counts only while the face's current rate card has the same sources, amount,
   period and date it was made from: a card re-recorded with another value under the same source makes it stale.
 - **Finance references (NF-6).** One Finance (31) reference, in any case or separator spelling, verifies one campaign.
