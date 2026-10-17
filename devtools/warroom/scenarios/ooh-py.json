@@ -875,6 +875,17 @@
    ],
    "invariants": [
     {
+     "id": "setup-evidence-attached",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "setup",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
      "id": "availability-refused",
      "severity": "MUST",
      "check": "status_in",

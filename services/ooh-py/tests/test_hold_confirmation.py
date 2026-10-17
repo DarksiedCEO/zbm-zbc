@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+import policy
+
 from helpers import at, rid
 
 
@@ -428,3 +430,115 @@ def test_a_format_2_log_refuses_start(tmp_path):
     os.close(fd)
     with pytest.raises(StoreCorrupt, match="log format 2; this build reads log format 3"):
         RecordLog(str(data))
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS step 2 red team
+# F2: reachable checks no earlier test covered (the red team's gap tests, kept as written)
+
+def test_rt_g1_no_decision_on_a_cancelled_campaign(acme):
+    h = acme
+    cid, uid, _ = requested(h)
+    h.ok(h.hold_evidence("acme", cid, uid), 201)
+    r = h.go("acme", cid, "CANCELLED", andre=True)
+    h.ok(r)
+    r = h.hold_decide("acme", cid, uid)
+    assert r.status_code == 409 and r.json()["detail"] == "CAMPAIGN_CLOSED_FOR_WRITES"
+
+
+def test_rt_g1b_no_evidence_on_a_cancelled_campaign(acme):
+    h = acme
+    cid, uid, _ = requested(h)
+    h.ok(h.go("acme", cid, "CANCELLED", andre=True))
+    r = h.hold_evidence("acme", cid, uid)
+    assert r.status_code == 409 and r.json()["detail"] == "CAMPAIGN_CLOSED_FOR_WRITES"
+
+
+def test_rt_g2_unit_of_another_campaign_via_this_campaigns_path(acme):
+    h = acme
+    cid_a = h.campaign("acme")
+    h.plan("acme", cid_a)
+    cid_b, uid_b, _ = requested(h)
+    h.ok(h.hold_evidence("acme", cid_b, uid_b), 201)
+    u = h.unit_get("acme", cid_b, uid_b)
+    body = {"request_id": rid(), "expected_version": u["version"], "evidence_id": u["hold_evidence"][-1]["evidence_id"],
+            "decision": "CONFIRM"}
+    r = h.post(f"/tenants/acme/campaigns/{cid_a}/inventory/{uid_b}/hold-decisions", body, andre=True)
+    assert r.status_code == 404
+    eb = {"request_id": rid(), "expected_version": u["version"], "vendor_ref": "x", "hold_expires_at": at(days=2),
+          "evidence_doc_ref": "d"}
+    r = h.post(f"/tenants/acme/campaigns/{cid_a}/inventory/{uid_b}/hold-evidence", eb)
+    assert r.status_code == 404
+
+
+def test_rt_g3_compliance_cannot_attach_evidence(acme):
+    h = acme
+    cid, uid, _ = requested(h)
+    r = h.hold_evidence("acme", cid, uid, caller="compliance_38")
+    assert r.status_code == 403
+
+
+def test_rt_g4_no_service_bearer(acme):
+    h = acme
+    cid, uid, _ = requested(h)
+    h.ok(h.hold_evidence("acme", cid, uid), 201)
+    u = h.unit_get("acme", cid, uid)
+    body = {"request_id": rid(), "expected_version": u["version"], "evidence_id": u["hold_evidence"][-1]["evidence_id"],
+            "decision": "CONFIRM"}
+    hd = h.headers("dashboard", andre=True)
+    hd.pop("Authorization")
+    r = h.client.post(f"/ooh/v1/tenants/acme/campaigns/{cid}/inventory/{uid}/hold-decisions", json=body, headers=hd)
+    assert r.status_code == 401
+    hd = h.headers("ooh_agent")
+    hd.pop("Authorization")
+    eb = {"request_id": rid(), "expected_version": u["version"], "vendor_ref": "x", "hold_expires_at": at(days=2),
+          "evidence_doc_ref": "d"}
+    r = h.client.post(f"/ooh/v1/tenants/acme/campaigns/{cid}/inventory/{uid}/hold-evidence", json=eb, headers=hd)
+    assert r.status_code == 401
+
+
+def test_rt_g5_decision_vocabulary_is_exactly_two_and_reasons_exactly_five(acme):
+    assert policy.HOLD_DECISIONS == ("CONFIRM", "REJECT")
+    assert set(policy.HOLD_REJECT_REASONS) == {"EVIDENCE_INSUFFICIENT", "REFERENCE_NOT_VERIFIED", "EXPIRY_WRONG",
+                                                "WRONG_FACE_OR_FLIGHT", "VENDOR_WITHDREW"}
+
+
+# F4: the version bumps and the strict bodies
+
+def test_rt_f4_attach_reject_and_decide_bump_the_versions(acme):
+    h = acme
+    cid, uid, _ = requested(h)
+    u0, c0 = h.unit_get("acme", cid, uid)["version"], h.view("acme", cid)["version"]
+    h.ok(h.hold_evidence("acme", cid, uid), 201)
+    u1, c1 = h.unit_get("acme", cid, uid)["version"], h.view("acme", cid)["version"]
+    assert (u1, c1) == (u0 + 1, c0 + 1)
+    assert h.unit_get("acme", cid, uid)["hold_evidence"][-1]["unit_version"] == u1
+    h.ok(h.hold_decide("acme", cid, uid, decision="REJECT", reject_reason="EVIDENCE_INSUFFICIENT"))
+    u2, c2 = h.unit_get("acme", cid, uid)["version"], h.view("acme", cid)["version"]
+    assert (u2, c2) == (u1 + 1, c1 + 1)
+    h.ok(h.hold_evidence("acme", cid, uid), 201)
+    h.ok(h.hold_decide("acme", cid, uid))
+    assert h.view("acme", cid)["version"] == c2 + 2
+
+
+@pytest.mark.parametrize("route,extra", [("hold-evidence", {"hold_confirmed_by": "andre"}),
+                                         ("hold-evidence", {"expected_version": "3"}),
+                                         ("hold-evidence", {"vendor_ref": "has spaces"}),
+                                         ("hold-evidence", {"hold_expires_at": "next week"}),
+                                         ("hold-decisions", {"status": "CONFIRMED_BY_ANDRE"}),
+                                         ("hold-decisions", {"decision": "confirm"}),
+                                         ("hold-decisions", {"evidence_id": "hev-1"})])
+def test_rt_f4_the_new_bodies_are_strict(acme, route, extra):
+    h = acme
+    cid, uid, _ = requested(h)
+    h.ok(h.hold_evidence("acme", cid, uid), 201)
+    u = h.unit_get("acme", cid, uid)
+    if route == "hold-evidence":
+        body = {"request_id": rid(), "expected_version": u["version"], "vendor_ref": "v-1",
+                "hold_expires_at": at(days=3), "evidence_doc_ref": "d-1"}
+    else:
+        body = {"request_id": rid(), "expected_version": u["version"],
+                "evidence_id": u["hold_evidence"][-1]["evidence_id"], "decision": "CONFIRM"}
+    r = h.post(f"/tenants/acme/campaigns/{cid}/inventory/{uid}/{route}", {**body, **extra},
+               andre=route == "hold-decisions")
+    assert r.status_code == 422, r.text
+    assert h.unit_get("acme", cid, uid)["state"] == "HOLD_REQUESTED"
