@@ -38,6 +38,7 @@ from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordEr
 from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_campaigns import CampaignsMixin
+from svc_inventory import InventoryMixin
 from svc_tenants import TenantsMixin
 
 INTERNAL = "ooh"
@@ -65,7 +66,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class OohService(TenantsMixin, CampaignsMixin):
+class OohService(TenantsMixin, CampaignsMixin, InventoryMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, clock: Optional[Clock] = None,
                  lock_token: Optional[str] = None):
         self.settings = settings
@@ -86,6 +87,7 @@ class OohService(TenantsMixin, CampaignsMixin):
         self.vendors: dict[str, dict] = {}             # the vendor registry (Andre's; global: ZBM is the one buyer)
         # the CPA's / counsel's principal-or-agent confirmation, as Andre recorded it (None: UNDETERMINED, locked)
         self.pa_determination: Optional[dict] = None
+        self._init_registry()                          # OOH-2: markets (all flags NOT_MET), sources, faces
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
@@ -451,7 +453,8 @@ class OohService(TenantsMixin, CampaignsMixin):
                 "andre_approvals_configured": None,          # filled by the API (the gate lives there)
                 "kill_switches": self.switch_view(),
                 "ports": {"finance_31": "NOT_CONNECTED", "vendor_orders": "NOT_CONNECTED", "esign": "NOT_CONNECTED",
-                          "inventory_data": "NOT_CONNECTED"},
+                          "inventory_data": self.inventory_port.status, "measurement": "NOT_CONNECTED",
+                          "programmatic_dooh": "NOT_CONNECTED"},
                 "funds_verification": {"mode": "andre_gate", "sources_connected": list(policy.FUNDS_SOURCES_CONNECTED),
                                        "finance_31": "NOT_CONNECTED", "policy": policy.FUNDING_POLICY},
                 "principal_agent": self.principal_agent_state(),

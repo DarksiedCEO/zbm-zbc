@@ -126,17 +126,23 @@ def face_registered(ctx):
     """Face lamar/face-101 registered on campaign A; campaign B is the case's target."""
     h = ctx.h
     a = h.campaign()
-    r = h.post(f"/tenants/acme/campaigns/{a}/inventory",
-               {"request_id": H.rid(), "vendor": "lamar", "kind": "static", "market": "los-angeles",
-                "vendor_unit_ref": "face-101"})
+    r = h.post(f"/tenants/acme/campaigns/{a}/inventory", {"request_id": H.rid(), "face_id": h.face("lamar", "face-101")})
     ctx.c = {"tid": "acme", "cid": h.campaign()}
     return r
 
 
 def add_face(ctx, ref):
-    return ctx.h.post(f"/tenants/acme/campaigns/{ctx.c['cid']}/inventory",
-                      {"request_id": H.rid(), "vendor": "lamar", "kind": "static", "market": "los-angeles",
-                       "vendor_unit_ref": ref})
+    """A respelt reference of lamar/face-101: the registry finds the same face (OOH-2), so the unit is refused."""
+    h = ctx.h
+    r = h.post("/faces", {"request_id": H.rid(), "source_id": h.source("lamar"), "vendor_face_ref": ref,
+                          "format": "STATIC_BILLBOARD", "market": "los-angeles"})
+    if r.status_code == 409 and r.json().get("detail") == "FACE_EXISTS":
+        fid = h.ok(h.get("/faces", params={"vendor": "lamar", "vendor_face_ref": ref}))[0]["face_id"]
+    elif r.status_code == 201:
+        fid = r.json()["face_id"]
+    else:
+        return r                                      # a reference the registry refuses outright (422)
+    return h.post(f"/tenants/acme/campaigns/{ctx.c['cid']}/inventory", {"request_id": H.rid(), "face_id": fid})
 
 
 def dispute(ctx):

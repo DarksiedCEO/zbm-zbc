@@ -163,6 +163,8 @@ class Harness:
         t = self.ok(self.post("/tenants", {"request_id": rid(), "tenant_id": tid}, andre=True), 201)
         if self.svc.pa_determination is None:      # the suites buy as PRINCIPAL: counsel's (test) confirmation first
             self.determine("PRINCIPAL")
+        if not self.svc.flag_met("los-angeles", "EXECUTION_AUTHORIZED"):   # the suites plan and buy in Los Angeles
+            self.ready("los-angeles", "PLANNING_COVERAGE", "EXECUTION_AUTHORIZED")
         for vid, name in VENDORS.items():           # Andre's vendor registry (global): the vendors the suites use
             if vid not in self.svc.vendors:
                 self.vendor(vid, name)
@@ -172,6 +174,35 @@ class Harness:
         return self.ok(self.post("/principal-agent-determinations",
                                  {"request_id": rid(), "determination": determination, "confirmed_by": confirmed_by,
                                   "confirmation_ref": ref}, andre=True))
+
+    def ready(self, market: str, *flags: str, value: str = "MET", andre: bool = True, caller: str = "dashboard"):
+        out = None
+        for f in flags:
+            out = self.post(f"/markets/{market}/readiness", {"request_id": rid(), "flag": f, "value": value,
+                                                            "evidence_ref": f"readiness-{market}-{f.lower()}"},
+                            caller=caller, andre=andre)
+            if out.status_code != 200:
+                return out
+        return out
+
+    def source(self, vendor: str = "lamar", kind: str = "RATE_CARD", dated: Optional[str] = None,
+               caller: str = "ooh_agent", doc: Optional[str] = None) -> str:
+        r = self.post("/sources", {"request_id": rid(), "kind": kind, "vendor": vendor,
+                                   "doc_ref": doc or f"{vendor}-ratecard-2026", "dated": dated or at(days=-1)},
+                      caller=caller)
+        return self.ok(r, 201)["source_id"]
+
+    def face(self, vendor: str = "lamar", ref: Optional[str] = None, fmt: str = "STATIC_BILLBOARD",
+             market: str = "los-angeles") -> str:
+        """The registry face for (vendor, ref): registered from a rate card if new, else the existing one (a respelt
+        reference finds the same face)."""
+        ref = ref or f"face-{uuid.uuid4().hex[:8]}"
+        r = self.post("/faces", {"request_id": rid(), "source_id": self.source(vendor), "vendor_face_ref": ref,
+                                 "format": fmt, "market": market})
+        if r.status_code == 409 and r.json().get("detail") == "FACE_EXISTS":
+            found = self.ok(self.get("/faces", params={"vendor": vendor, "vendor_face_ref": ref}))
+            return found[0]["face_id"]
+        return self.ok(r, 201)["face_id"]
 
     def vendor(self, vid: str, name: str):
         return self.ok(self.post("/vendors", {"request_id": rid(), "vendor_id": vid, "legal_name": name}, andre=True),
@@ -199,8 +230,7 @@ class Harness:
 
     def unit(self, tid: str, cid: str, vendor: str = "lamar", text: Optional[str] = None,
              ref: Optional[str] = None, flight: Optional[tuple] = FLIGHT) -> str:
-        body = {"request_id": rid(), "vendor": vendor, "kind": "static", "market": "los-angeles",
-                "vendor_unit_ref": ref or f"face-{uuid.uuid4().hex[:8]}"}
+        body = {"request_id": rid(), "face_id": self.face(vendor, ref)}
         if flight is not None:
             body.update(flight_start=flight[0], flight_end=flight[1])
         if text is not None:

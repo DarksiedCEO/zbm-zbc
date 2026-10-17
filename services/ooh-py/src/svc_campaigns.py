@@ -207,6 +207,10 @@ class CampaignsMixin:
             if prev:
                 return self.campaign_view(tid, prev[1])
             self.check_kill(tenant=tid, capability="campaigns")
+            if len(set(body["markets"])) != len(body["markets"]):
+                raise Invalid(R("INVALID"), field="markets")
+            for mk in body["markets"]:
+                self.require_market(mk)                          # OOH-2: a market of the registry, never free text
             cid = derived_id("cmp", tid, rk)
             data = {"campaign_id": cid, "tenant_id": tid, "name": body["name"], "markets": list(body["markets"])}
             self._commit("campaign_created", self._req(data, actor, rk, body, cid), actor,
@@ -281,6 +285,8 @@ class CampaignsMixin:
         live = [u for u in (self.inventory[i] for i in c["inventory_ids"]) if u["state"] != "WITHDRAWN"]
         if to == "AVAILS_REQUESTED" and not live:
             return "NO_INVENTORY"
+        if to == "PLAN_APPROVED" and not all(self.flag_met(mk, "PLANNING_COVERAGE") for mk in c["markets"]):
+            return "MARKET_PLANNING_NOT_COVERED"                 # OOH-2: a plan only where ZBM has planning coverage
         if to == "PROPOSAL_SENT" and c["current_sell_price_id"] is None:
             return "NO_CURRENT_SELL_PRICE"                   # AEGIS L5: a model reset after the price unseated it
         if to == "QUOTES_VALIDATED":
@@ -312,26 +318,29 @@ class CampaignsMixin:
             self._writable(c, PRE_ORDER_WRITABLE)
             if len(c["inventory_ids"]) >= self.settings.inventory_max:
                 raise Conflict(R("INVENTORY_LIMIT"))
-            self.require_vendor(body["vendor"])
-            key = unit_ref_key(body["vendor_unit_ref"])
-            if not key:
-                raise Invalid(R("INVALID"), field="vendor_unit_ref")
+            face = self._face(body["face_id"])                  # OOH-2: a unit is a registry face for a flight
+            if face["market"] not in c["markets"]:
+                raise Conflict(R("MARKET_NOT_IN_CAMPAIGN"))
+            self.require_vendor(face["vendor"])
+            key = face["unit_key"]
             flight = self._flight(body)
-            if self._registration_clash(tid, body["vendor"], key, flight, None):
+            if self._registration_clash(tid, face["vendor"], key, flight, None):
                 raise Conflict(R("UNIT_ALREADY_REGISTERED"))
             uid = derived_id("inv", tid, rk)
-            data = {"unit_id": uid, "campaign_id": cid, "tenant_id": tid, "vendor": body["vendor"],
-                    "kind": body["kind"], "market": body["market"], "vendor_unit_ref": body["vendor_unit_ref"],
-                    "unit_key": key, "flight": flight, "vendor_text": observed(body.get("vendor_text"))}
-            ev = {"unit_id": uid, "campaign_id": cid, "vendor": body["vendor"],
+            data = {"unit_id": uid, "campaign_id": cid, "tenant_id": tid, "face_id": face["face_id"],
+                    "vendor": face["vendor"], "format": face["format"], "market": face["market"],
+                    "vendor_unit_ref": face["vendor_face_ref"], "unit_key": key,
+                    "proof_requirement": face["proof_requirement"], "flight": flight,
+                    "vendor_text": observed(body.get("vendor_text"))}
+            ev = {"unit_id": uid, "campaign_id": cid, "face_id": face["face_id"], "vendor": face["vendor"],
                   "vendor_text_sha256": (data["vendor_text"] or {}).get("sha256")}
             self._commit("inventory_added", self._req(data, actor, rk, body, uid), actor,
                          evidence=self._ev("inventory_added", cid, ev, actor, rk))
             return self.unit_view(uid)
 
     def _a_inventory_added(self, d, at):
-        u = {k: d[k] for k in ("unit_id", "campaign_id", "tenant_id", "vendor", "kind", "market", "vendor_unit_ref",
-                               "unit_key", "flight", "vendor_text")}
+        u = {k: d[k] for k in ("unit_id", "campaign_id", "tenant_id", "face_id", "vendor", "format", "market",
+                               "vendor_unit_ref", "unit_key", "proof_requirement", "flight", "vendor_text")}
         u.update(state="IDENTIFIED", version=1, vendor_ref=None, hold_expires_at=None, evidence_class=None,
                  hold_flight=None, hold_confirmed_by=None, hold_evidence_id=None, hold_evidence=[],
                  pre_booking_state=None, history=[{"from": None, "to": "IDENTIFIED", "actor": d["actor"], "at": at}])
@@ -457,6 +466,10 @@ class CampaignsMixin:
                                           and self.prices[p]["flights"].get(uid) == u["flight"]
                                           for p in c["price_ids"]):
                 raise Conflict(R("TRANSITION_GUARD_FAILED"), guard="NO_VENDOR_QUOTE_FOR_UNIT")
+            if to == "HOLD_REQUESTED":
+                av = self.avails_for(u["face_id"], u["flight"])
+                if av is not None and av["answer"] == "UNAVAILABLE":
+                    raise Conflict(R("AVAILS_UNAVAILABLE"))         # the vendor's latest answer for this flight is no
             data = {"unit_id": uid, "campaign_id": cid, "from": u["state"], "to": to}
             self._commit("availability_moved", self._req(data, actor, rk, body, uid), actor,
                          evidence=self._ev("availability_moved", cid, data, actor, rk))
@@ -971,6 +984,8 @@ class CampaignsMixin:
                 return "FLIGHT_IN_PAST"
             if self._face_on_open_order(u, a.get("authorization_id")):
                 return "FACE_ALREADY_ORDERED"
+            if not self.flag_met(u["market"], "EXECUTION_AUTHORIZED"):
+                return "MARKET_EXECUTION_NOT_AUTHORIZED"         # OOH-2: buying only where Andre authorized execution
         amount = Decimal(a["authorized_amount"])
         if amount != sum((Decimal(q["amount"]) for q in qs), Decimal(0)):
             return "QUOTE_ORDER_MISMATCH"
@@ -1224,5 +1239,6 @@ class CampaignsMixin:
                                           "campaigns": self.campaigns, "inventory": self.inventory,
                                           "prices": self.prices, "authorizations": self.authorizations,
                                           "orders": self.orders, "funds_evidence": self.funds_evidence,
-                                          "vendors": self.vendors, "pa_determination": self.pa_determination},
+                                          "vendors": self.vendors, "pa_determination": self.pa_determination,
+                                          "markets": self.markets, "sources": self.sources, "faces": self.faces},
                                          sort_keys=True))

@@ -229,10 +229,22 @@ def _main(work: Path) -> int:
               pa0["principal_agent_state"] == "UNDETERMINED" and pa0["purchases_blocked"] is True
               and pa_agent.status_code == 403 and pa.status_code == 200
               and pa.json()["principal_agent_state"] == "PRINCIPAL")
+        mk0 = a.get("/markets/los-angeles").json()
+        mk_agent = a.post("/markets/los-angeles/readiness", {"request_id": rid(), "flag": "EXECUTION_AUTHORIZED",
+                                                             "value": "MET", "evidence_ref": "live-exec"})
+        mk_plan = a.post("/markets/los-angeles/readiness", {"request_id": rid(), "flag": "PLANNING_COVERAGE",
+                                                            "value": "MET", "evidence_ref": "live-plan"}, andre=True)
+        mk_exec = a.post("/markets/los-angeles/readiness", {"request_id": rid(), "flag": "EXECUTION_AUTHORIZED",
+                                                            "value": "MET", "evidence_ref": "live-exec"}, andre=True)
+        check("a market starts with all four readiness flags NOT_MET; only Andre raises one",
+              all(f["value"] == "NOT_MET" for f in mk0["flags"].values()) and mk_agent.status_code == 403
+              and mk_plan.status_code == 200 and mk_exec.status_code == 200
+              and mk_exec.json()["flags"]["EXECUTION_AUTHORIZED"]["value"] == "MET"
+              and mk_exec.json()["flags"]["RESEARCH_COVERAGE"]["value"] == "NOT_MET")
         T = "/tenants/acme-live"
         cid = a.post(T + "/campaigns", {"request_id": rid(), "name": "Live Billboards", "markets": ["los-angeles"]}
                      ).json()["campaign_id"]
-        gcid = a.post("/tenants/globex-live/campaigns", {"request_id": rid(), "name": "Other", "markets": ["la"]}
+        gcid = a.post("/tenants/globex-live/campaigns", {"request_id": rid(), "name": "Other", "markets": ["san-diego"]}
                       ).json()["campaign_id"]
         C = f"{T}/campaigns/{cid}"
         mine = a.get(C, caller="hub", tenant="acme-live")
@@ -271,8 +283,20 @@ def _main(work: Path) -> int:
               "are refused even for Andre",
               steps_ok and gated.status_code == 409 and gated.json()["detail"] == "TRANSITION_GATED"
               and skipped.status_code == 409 and skipped.json()["detail"] == "TRANSITION_NOT_ALLOWED")
-        uid = a.post(C + "/inventory", {"request_id": rid(), "vendor": "lamar", "kind": "static",
-                                        "market": "los-angeles", "vendor_unit_ref": "face-101",
+        rc_src = a.post("/sources", {"request_id": rid(), "kind": "RATE_CARD", "vendor": "lamar",
+                                  "doc_ref": "lamar-ratecard-live", "dated": later(days=-1), "vendor_text": INJECTION})
+        api_src = a.post("/sources", {"request_id": rid(), "kind": "VENDOR_API", "vendor": "lamar",
+                                      "doc_ref": "lamar-api", "dated": later(days=-1)})
+        face = a.post("/faces", {"request_id": rid(), "source_id": rc_src.json()["source_id"],
+                                 "vendor_face_ref": "face-101", "format": "STATIC_BILLBOARD", "market": "los-angeles"})
+        fv = face.json()
+        check("a face enters the registry from a named rate card; a vendor-API source is NOT_CONNECTED; an unsourced "
+              "attribute is UNKNOWN",
+              rc_src.status_code == 201 and api_src.status_code == 409
+              and api_src.json()["detail"] == "SOURCE_NOT_CONNECTED" and face.status_code == 201
+              and fv["identity"]["source_id"] == rc_src.json()["source_id"] and fv["proof_requirement"] == "POSTING_PHOTO"
+              and fv["attributes"]["width_ft"]["status"] == "UNKNOWN")
+        uid = a.post(C + "/inventory", {"request_id": rid(), "face_id": fv["face_id"],
                                         "flight_start": FLIGHT[0], "flight_end": FLIGHT[1],
                                         "vendor_text": INJECTION}).json()["unit_id"]
         early = move(uid, "HOLD_CONFIRMED")

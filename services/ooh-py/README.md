@@ -23,6 +23,9 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `GET /constitution`, `GET /roster` | dashboard, agent, compliance / dashboard, compliance |
 | `POST /tenants`, `GET /tenants/{tid}` | Andre / scoped (hub: its own tenant only) |
 | `POST /vendors`, `GET /vendors` | Andre / dashboard, agent, compliance |
+| `GET /markets`, `GET /markets/{mid}`; `POST /markets/{mid}/readiness` (MET: Andre; NOT_MET: any preparer, compliance) | readers |
+| `POST /sources`, `POST /faces`, `POST /faces/{fid}/attributes`, `POST /faces/{fid}/avails`, `POST /vendors/{vid}/attributes` | agent, dashboard |
+| `GET /sources/{sid}`, `GET /faces`, `GET /faces/{fid}`, `GET /vendors/{vid}`, `GET /inventory-port` (NOT_CONNECTED; `POST …/sync` refuses 503) | dashboard, agent, compliance (never the hub) |
 | `GET /principal-agent`, `POST /principal-agent-determinations` (a CPA's / counsel's confirmation) | readers / Andre |
 | `GET, POST /kill-switches` | dashboard, agent, compliance engage; Andre releases |
 | `POST /tenants/{tid}/campaigns`, `GET …/campaigns/{cid}` (hub: client view), `GET …/exposure` | agent, dashboard |
@@ -45,7 +48,7 @@ LEDGER_BIN=../ledger-rust/target/release/server python3 devtools/live_run.py
 | `OOH_ANDRE_APPROVAL_TOKEN` | Andre's approval token; unset or equal to any other token = every approval refused |
 | `OOH_DATA_DIR` | absolute, owned, mode 700 directory for the hash-chained log; required in production |
 | `OOH_NON_PRODUCTION` | `1` allows an in-memory run without a data directory (tests only) |
-| `OOH_KILL_GLOBAL`, `OOH_KILLED_CAPABILITIES` | kill switches set at start; cannot be released at runtime |
+| `OOH_KILL_GLOBAL`, `OOH_KILLED_CAPABILITIES` | kill switches set at start (capabilities: campaigns, inventory, prices, funds, purchase, submission, registry); cannot be released at runtime |
 | `OOH_MAX_PURCHASE_AMOUNT` | the per-authorization spend limit (default and locked ceiling 10000.00; may only be lowered) |
 | `OOH_AUTHORITY_MAX_DAYS` | the longest an authorization may live (default and locked ceiling 7; may only be lowered) |
 | `OOH_INVENTORY_MAX_PER_CAMPAIGN` | units per campaign (default 200) |
@@ -59,7 +62,8 @@ supply data).
 
 ## Layout
 
-`src/policy.py` the constitution as data · `src/svc_campaigns.py` the spine · `src/svc_tenants.py` tenants and kill
+`src/policy.py` the constitution as data · `src/svc_campaigns.py` the spine · `src/svc_inventory.py` the OOH-2
+registry (markets, sources, faces, suppliers, avails; [ADR 0020](../../docs/adr/0020-ooh-inventory-operator-registry.md)) · `src/svc_tenants.py` tenants and kill
 switches · `src/service.py` record-first plumbing (seo-py's) · `src/api.py` routes and limits · `src/store.py`,
 `src/ledger.py`, `src/founder.py`, `src/serve.py` (seo-py's) · `src/graceful_close.py`, `src/launch_guard.py`
 (shared, byte-identical) · `tests/` (hostile tests of every gate; clocks injected) · `devtools/live_run.py` (the real

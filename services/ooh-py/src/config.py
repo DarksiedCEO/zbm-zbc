@@ -28,7 +28,7 @@ from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 KNOWN_CALLERS = ("dashboard", "ooh_agent", "scheduler", "hub", "compliance_38")
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
-CAPABILITY_SWITCHES = ("campaigns", "inventory", "prices", "funds", "purchase", "submission")
+CAPABILITY_SWITCHES = ("campaigns", "inventory", "prices", "funds", "purchase", "submission", "registry")
 _AMOUNT = re.compile(r"(0|[1-9][0-9]{0,11})\.[0-9]{2}")
 
 NOT_BUILT = {

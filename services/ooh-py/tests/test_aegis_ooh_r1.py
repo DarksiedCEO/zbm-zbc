@@ -107,15 +107,21 @@ def test_h2_one_unit_in_two_quotes_is_never_priced_or_bought_twice(acme):
 def test_m1_one_face_is_one_live_unit_record_across_campaigns(acme, variant):
     h = acme
     a, b = h.campaign(), h.campaign()
-    body = {"request_id": rid(), "vendor": "lamar", "kind": "static", "market": "los-angeles",
-            "vendor_unit_ref": "face-101"}
+    body = {"request_id": rid(), "face_id": h.face("lamar", "face-101")}
     h.ok(h.post(f"/tenants/acme/campaigns/{a}/inventory", body), 201)
+    # OOH-2: a respelt reference is refused at the registry (one face, one record) and finds the same face...
+    r = h.post("/faces", {"request_id": rid(), "source_id": h.source("lamar"), "vendor_face_ref": variant,
+                          "format": "STATIC_BILLBOARD", "market": "los-angeles"})
+    h.refused(r, 409, "FACE_EXISTS")
+    assert h.face("lamar", variant) == body["face_id"]
+    # ...and that face is one live unit record across campaigns
     for cid in (a, b):
         h.refused(h.post(f"/tenants/acme/campaigns/{cid}/inventory", {**body, "request_id": rid(),
-                                                                      "vendor_unit_ref": variant}),
+                                                                      "face_id": h.face("lamar", variant)}),
                   409, "UNIT_ALREADY_REGISTERED")
     # another vendor's face with the same reference is another face
-    h.ok(h.post(f"/tenants/acme/campaigns/{b}/inventory", {**body, "request_id": rid(), "vendor": "outfront"}), 201)
+    h.ok(h.post(f"/tenants/acme/campaigns/{b}/inventory", {**body, "request_id": rid(),
+                                                            "face_id": h.face("outfront", "face-101")}), 201)
     assert sum(1 for u in h.svc.inventory.values() if u["vendor"] == "lamar") == 1
     assert unit_ref_key(variant) == unit_ref_key("face-101") == "face101"
 
@@ -127,7 +133,7 @@ def test_m1_a_withdrawn_or_cancelled_record_frees_the_face_but_an_open_order_sti
     h.ok(h.move("acme", a, uid, "WITHDRAWN"))
     ref = h.svc.inventory[uid]["vendor_unit_ref"]
     b = h.campaign()
-    body = {"request_id": rid(), "vendor": "lamar", "kind": "static", "market": "los-angeles", "vendor_unit_ref": ref}
+    body = {"request_id": rid(), "face_id": h.face("lamar", ref)}
     h.ok(h.post(f"/tenants/acme/campaigns/{b}/inventory", body), 201)
     # a face on an open order in one campaign is refused by the gate in any other (defense in depth: the record
     # uniqueness above means a second record can only come from a cancelled campaign)
@@ -235,7 +241,7 @@ def test_l1_personal_data_is_refused_as_such_not_as_an_unknown_field(acme, key):
     ctx = h.to_proposal_sent()
     h.ok(h.approve(ctx))
     for r in (h.funds(ctx, ctx["sell"], **{key: "021000021"}),
-              h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["la"],
+              h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["los-angeles"],
                                                  "meta": {key: "021000021"}})):
         body = r.json()
         assert r.status_code == 422 and "021000021" not in r.text
@@ -251,7 +257,7 @@ def test_l2_a_503_says_whether_the_call_may_have_taken_effect(acme):
     assert r.status_code == 503 and r.json() == {"detail": "LEDGER_UNAVAILABLE", "maybe": True}
     h.ok(h.post("/jobs/integrity/run", {"request_id": rid()}, caller="scheduler"))
     h.ledger.fail = True
-    r = h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["la"]})
+    r = h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["los-angeles"]})
     assert r.status_code == 503 and r.json() == {"detail": "LEDGER_UNAVAILABLE", "maybe": False}
 
 

@@ -115,7 +115,7 @@ def test_r3l_a_flight_is_at_most_366_days(acme, start, end, ok):
     h = acme
     cid = h.campaign()
     r = h.post(f"/tenants/acme/campaigns/{cid}/inventory",
-               {"request_id": rid(), "vendor": "lamar", "kind": "static", "market": "la", "vendor_unit_ref": "f-1",
+               {"request_id": rid(), "face_id": h.face("lamar", "f-1"),
                 "flight_start": start, "flight_end": end})
     if ok:
         h.ok(r, 201)

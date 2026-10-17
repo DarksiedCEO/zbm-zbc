@@ -69,6 +69,62 @@ EVIDENCE_ALLOWED = {
 MAX_PURCHASE_CEILING = "10000.00"
 AUTHORITY_DAYS_CEILING = 7
 
+# ---------------------------------------------------------------------------------------------- OOH-2: geography
+# The Southern California footprint (founder, Oct 16 round 2). Ids, names and the county scope are geography, not
+# market data; everything ZBM knows ABOUT a market is a readiness flag set from evidence, and starts NOT_MET.
+MARKETS = (
+    ("los-angeles", "Los Angeles", "Los Angeles County, CA"),
+    ("orange-county", "Orange County", "Orange County, CA"),
+    ("inland-empire", "Inland Empire", "Riverside and San Bernardino Counties, CA"),
+    ("san-diego", "San Diego", "San Diego County, CA"),
+    ("ventura", "Ventura", "Ventura County, CA"),
+    ("santa-barbara", "Santa Barbara", "Santa Barbara County, CA"),
+    ("imperial-az-border", "Imperial / Arizona border",
+     "Imperial County, CA, and the Arizona border area (the Arizona extent is UNKNOWN until researched)"),
+)
+MARKET_IDS = tuple(m[0] for m in MARKETS)
+# Four independent flags per market; there is no single "active" flag and none is derived from the others.
+READINESS_FLAGS = ("RESEARCH_COVERAGE", "PLANNING_COVERAGE", "EXECUTION_AUTHORIZED", "OPERATING_MATURITY")
+READINESS_VALUES = ("NOT_MET", "MET")
+READINESS_DEFAULT = "NOT_MET"
+# What each flag gates (beyond the blueprint as restated; ADR 0020 open question 1). RESEARCH_COVERAGE and
+# OPERATING_MATURITY gate nothing yet: they are recorded so later waves can read them.
+READINESS_GATES = {"PLANNING_COVERAGE": "a campaign reaches PLAN_APPROVED only when every market it names is MET",
+                   "EXECUTION_AUTHORIZED": "a purchase is authorized and submitted only when every unit's market is MET",
+                   "RESEARCH_COVERAGE": None, "OPERATING_MATURITY": None}
+
+# ---------------------------------------------------------------------------------------------- OOH-2: inventory
+# The pilot formats (founder, Oct 16 round 2), each with its own proof of performance.
+FORMATS = ("STATIC_BILLBOARD", "DIGITAL_BILLBOARD", "TRANSIT_STREET_FURNITURE", "MOBILE_BILLBOARD")
+PROOF_REQUIREMENTS = {"STATIC_BILLBOARD": "POSTING_PHOTO", "DIGITAL_BILLBOARD": "PLAY_LOGS",
+                      "TRANSIT_STREET_FURNITURE": "INSTALL_PROOF", "MOBILE_BILLBOARD": "ROUTE_GPS_PROOF"}
+# Where inventory facts come from. Now: vendor quotes and rate cards, recorded by hand. A vendor API or a platform
+# feed is a port that is NOT_CONNECTED: a source of that kind is refused.
+SOURCE_KINDS = ("VENDOR_QUOTE", "RATE_CARD")
+SOURCE_KINDS_NOT_CONNECTED = ("VENDOR_API", "PLATFORM_FEED")
+_S, _D, _T, _M = FORMATS
+_FIXED = (_S, _D, _T)
+# The canonical face: one object for every format. Each attribute is (value type, the formats it applies to). An
+# attribute nobody has sourced is UNKNOWN; there are no defaults. Impressions and audience are NOT here: measurement
+# providers are not chosen (a later port).
+FACE_ATTRIBUTES = {
+    "latitude": ("lat", _FIXED), "longitude": ("lon", _FIXED),
+    "location_description": ("text", FORMATS), "facing": ("facing", _FIXED),
+    "width_ft": ("feet", FORMATS), "height_ft": ("feet", FORMATS),
+    "illuminated": ("bool", (_S, _T)),
+    "screen_width_px": ("int", (_D,)), "screen_height_px": ("int", (_D,)),
+    "slot_length_s": ("int", (_D,)), "loop_length_s": ("int", (_D,)),
+    "route_description": ("text", (_M,)),
+    "rate_card_amount": ("money", FORMATS), "rate_card_period_days": ("int", FORMATS),
+}
+FACINGS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+# The supplier (operator) profile, sourced the same way. Contacts are kept by reference only (no personal data).
+OPERATOR_TYPES = ("OPERATOR", "REP_FIRM", "NETWORK")
+SUPPLIER_ATTRIBUTES = {"operator_type": "operator_type", "formats_offered": "formats", "markets_served": "markets",
+                       "payment_methods": "payment_methods", "payment_terms_days": "int",
+                       "cancellation_policy_ref": "ref", "contact_ref": "ref"}
+AVAILS_ANSWERS = ("AVAILABLE", "UNAVAILABLE")
+
 # ---------------------------------------------------------------------------------------------- section 9
 # The longest flight a unit may carry (AEGIS R3: a flight of 0001-01-01..9999-12-31 must not hold a face forever).
 FLIGHT_MAX_DAYS = 366

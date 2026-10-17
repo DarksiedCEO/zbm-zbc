@@ -67,11 +67,10 @@ class Transition(Strict):
 
 
 class InventoryAdd(Strict):
+    """A campaign unit is one face of the registry (OOH-2) for one flight: vendor, format, market and the vendor's
+    face reference come from the face, never from this body."""
     request_id: RequestId
-    vendor: Annotated[StrictStr, Field(pattern=VENDOR)]
-    kind: Literal["static", "digital"]
-    market: Annotated[StrictStr, Field(pattern=r"^[a-z0-9-]{2,60}$")]
-    vendor_unit_ref: Ref
+    face_id: Id
     flight_start: Optional[Annotated[StrictStr, Field(pattern=DATE)]] = None   # with flight_end, or neither yet
     flight_end: Optional[Annotated[StrictStr, Field(pattern=DATE)]] = None
     # vendor-supplied description: untrusted data, kept bounded and marked, never read as an instruction (section 52)
@@ -220,3 +219,60 @@ class Outcome(Strict):
     request_id: RequestId
     outcome: Literal[policy.OUTCOMES]                                # type: ignore[valid-type]
     vendor_ref: Ref                                                  # the vendor's confirmation or rejection reference
+
+
+# ---------------------------------------------------------------------------------------------- OOH-2 registry
+
+MARKET = r"^[a-z0-9-]{2,60}$"
+
+
+class ReadinessSet(Strict):
+    """One of a market's four readiness flags. MET needs Andre; NOT_MET (the safe direction) any preparer."""
+    request_id: RequestId
+    flag: Literal[policy.READINESS_FLAGS]                            # type: ignore[valid-type]
+    value: Literal[policy.READINESS_VALUES]                          # type: ignore[valid-type]
+    evidence_ref: Ref
+
+
+class SourceRecord(Strict):
+    """A named source of inventory facts: a vendor quote or a rate card, as received."""
+    request_id: RequestId
+    kind: Literal[policy.SOURCE_KINDS + policy.SOURCE_KINDS_NOT_CONNECTED]   # type: ignore[valid-type]
+    vendor: Annotated[StrictStr, Field(pattern=VENDOR)]
+    doc_ref: Ref
+    dated: Time                                                      # the date the source states (not in the future)
+    vendor_text: Optional[Annotated[StrictStr, Field(max_length=DOC_MAX)]] = None
+
+
+class FaceCreate(Strict):
+    """A face enters the registry from a named source: its identity (vendor, the vendor's reference, format,
+    market) is that source's."""
+    request_id: RequestId
+    source_id: Id
+    vendor_face_ref: Ref
+    format: Literal[policy.FORMATS]                                  # type: ignore[valid-type]
+    market: Annotated[StrictStr, Field(pattern=MARKET)]
+
+
+class AttributeSet(Strict):
+    """One attribute value as a named source states it (its timestamp is the source's)."""
+    request_id: RequestId
+    expected_version: Version
+    attribute: Annotated[StrictStr, Field(pattern=r"^[a-z_]{2,40}$")]
+    value: Annotated[StrictStr, Field(min_length=1, max_length=300)]
+    source_id: Id
+
+
+class PortSync(Strict):
+    request_id: RequestId
+    vendor: Annotated[StrictStr, Field(pattern=VENDOR)]
+
+
+class AvailsRecord(Strict):
+    """The vendor's answer on a face for a flight, from a named source."""
+    request_id: RequestId
+    source_id: Id
+    flight_start: Annotated[StrictStr, Field(pattern=DATE)]
+    flight_end: Annotated[StrictStr, Field(pattern=DATE)]
+    answer: Literal[policy.AVAILS_ANSWERS]                           # type: ignore[valid-type]
+    valid_until: Optional[Time] = None

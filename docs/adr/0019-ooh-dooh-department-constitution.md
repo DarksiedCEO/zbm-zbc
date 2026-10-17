@@ -399,5 +399,5 @@ refuses start).
 ## Unlock list
 
 Finance (31) funds client; vendor ordering port; e-signature; Cybersecurity (22) passkeys for Andre's approvals;
-OOH-2 inventory schema and data source; the agents, starting with the initial cell; production and proof of
+OOH-2 inventory registry (built: ADR 0020) and a connected inventory data source; the agents, starting with the initial cell; production and proof of
 performance; reconciliation (`ACTUAL_RECONCILED_COST`).

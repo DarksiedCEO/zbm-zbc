@@ -99,9 +99,9 @@ def test_r2m1_the_registry_is_andres_agents_read_it(acme):
 def test_r2m1_unregistered_vendors_are_refused_everywhere(acme):
     h = acme
     cid = h.campaign()
-    r = h.post(f"/tenants/acme/campaigns/{cid}/inventory",
-               {"request_id": rid(), "vendor": "lamarr", "kind": "static", "market": "la", "vendor_unit_ref": "f1"})
-    h.refused(r, 409, "VENDOR_UNKNOWN")
+    r = h.post("/sources", {"request_id": rid(), "kind": "RATE_CARD", "vendor": "lamarr", "doc_ref": "rc-1",
+                            "dated": at(days=-1)})
+    h.refused(r, 409, "VENDOR_UNKNOWN")                         # OOH-2: no source, so no face, of an unknown vendor
     h.refused(h.price("acme", cid, "VENDOR_COST_ESTIMATE", "10.00", vendor="lamarr"), 409, "VENDOR_UNKNOWN")
     ctx = h.funded()
     h.refused(h.authorize(ctx, vendor="lamarr"), 409, "VENDOR_UNKNOWN")
@@ -123,7 +123,7 @@ def test_r2m2_a_flight_is_required_before_quote_and_authorization_and_is_bound(a
         h.refused(h.post(path, {"request_id": rid(), "expected_version": u["version"], "flight_start": start,
                                 "flight_end": end}), 422, "FLIGHT_INVALID")
     r = h.post(f"/tenants/acme/campaigns/{cid}/inventory",
-               {"request_id": rid(), "vendor": "lamar", "kind": "static", "market": "la", "vendor_unit_ref": "f9",
+               {"request_id": rid(), "face_id": h.face("lamar", "f9"),
                 "flight_start": "2026-12-01"})
     h.refused(r, 422, "FLIGHT_INVALID")                         # one end without the other
     u = h.ok(h.post(path, {"request_id": rid(), "expected_version": u["version"], "flight_start": "2026-12-01",
@@ -150,7 +150,7 @@ def test_r2m2_a_booked_face_is_free_again_for_another_flight_in_the_same_tenant(
     h.ok(h.submit(ctx))
     h.ok(h.outcome(ctx))
     b = h.campaign()
-    body = {"request_id": rid(), "vendor": "lamar", "kind": "static", "market": "la", "vendor_unit_ref": "FACE-888"}
+    body = {"request_id": rid(), "face_id": h.face("lamar", "FACE-888")}
     path = f"/tenants/acme/campaigns/{b}/inventory"
     h.refused(h.post(path, body), 409, "UNIT_ALREADY_REGISTERED")                 # no flight: may overlap
     h.refused(h.post(path, {**body, "request_id": rid(), "flight_start": "2026-11-30", "flight_end": "2026-12-30"}),

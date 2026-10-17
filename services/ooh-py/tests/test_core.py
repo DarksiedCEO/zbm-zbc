@@ -95,13 +95,12 @@ def test_tenants_are_andres_and_isolated(h):
     b = h.refused(h.get("/tenants/acme/campaigns/ooh-cmp-" + "0" * 40), 404, "CAMPAIGN_NOT_FOUND")
     assert a == b
     h.refused(h.post(f"/tenants/acme/campaigns/{globex}/inventory",
-                     {"request_id": rid(), "vendor": "lamar", "kind": "static", "market": "la",
-                      "vendor_unit_ref": "x1"}), 404, "CAMPAIGN_NOT_FOUND")
+                     {"request_id": rid(), "face_id": h.face("lamar", "x1")}), 404, "CAMPAIGN_NOT_FOUND")
     h.refused(h.post(f"/tenants/acme/campaigns/{globex}/transitions",
                      {"request_id": rid(), "to": "BRIEF_VALIDATED", "expected_state": "INTAKE", "expected_version": 1,
                       "reason": "CROSS_TENANT"}), 404, "CAMPAIGN_NOT_FOUND")
     assert h.view("globex", globex)["state"] == "INTAKE"
-    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["la"]},
+    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["los-angeles"]},
                      caller="hub", tenant="acme"), 403, "CALLER_NOT_ALLOWED")   # the hub only reads
 
 
@@ -135,7 +134,7 @@ def test_cross_tenant_references_inside_bodies_are_refused_like_nothing(h):
 def test_each_kill_switch_stops_writes_and_only_andre_releases(h, switch, code):
     h.tenant("acme")
     h.ok(h.switch(switch, caller="compliance_38"))
-    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["la"]}), 403, code)
+    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["los-angeles"]}), 403, code)
     h.refused(h.switch(switch, engaged=False), 403, "ANDRE_APPROVAL_REQUIRED")
     h.refused(h.switch(switch, engaged=False, caller="compliance_38"), 403, "ANDRE_APPROVAL_REQUIRED")
     h.ok(h.switch(switch, engaged=False, andre=True))
@@ -171,7 +170,7 @@ def test_an_engage_the_ledger_cannot_record_still_takes_effect(h):
     r = h.ok(h.switch("tenant:acme"))
     assert r["recorded"] is False and r["volatile_unrecorded"] == [{"kind": "tenant", "arg": "acme"}]
     h.ledger.fail = False
-    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["la"]}), 403,
+    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["los-angeles"]}), 403,
               "KILLED_TENANT")
 
 
@@ -280,7 +279,7 @@ def test_state_vocabulary_is_the_whole_of_section_4_plus_three_marked_additions(
 def test_ledger_down_means_nothing_takes_effect(h):
     h.tenant("acme")
     h.ledger.fail = True
-    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["la"]}), 503,
+    h.refused(h.post("/tenants/acme/campaigns", {"request_id": rid(), "name": "x y", "markets": ["los-angeles"]}), 503,
               "LEDGER_UNAVAILABLE")
     assert h.svc.campaigns == {}
 

@@ -19,6 +19,8 @@ cannot be released at runtime at all.
 
 from __future__ import annotations
 
+import json
+
 from typing import Optional
 
 from config import CAPABILITY_SWITCHES, TENANT_ID
@@ -172,7 +174,7 @@ class TenantsMixin:
 
     def vendors_view(self) -> list:
         with self.lock:
-            return [dict(self.vendors[v]) for v in sorted(self.vendors)]
+            return json.loads(json.dumps([self.vendors[v] for v in sorted(self.vendors)]))
 
     def require_vendor(self, vid: Optional[str]) -> None:
         if vid is not None and vid not in self.vendors:

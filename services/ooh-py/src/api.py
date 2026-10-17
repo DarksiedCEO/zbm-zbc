@@ -265,6 +265,8 @@ class NoStore:
 
 
 OOH_ID = re.compile(r"^ooh-[a-z]{3}-[0-9a-f]{40}$")
+MARKET_RX = re.compile(r"^[a-z0-9-]{2,60}$")
+VENDOR_RX = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
 TENANT_RX = re.compile(config_mod.TENANT_ID.pattern)
 
 
@@ -413,6 +415,10 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
                 "availability_andre_only": list(policy.AVAILABILITY_ANDRE_ONLY),
                 "hold_evidence_states": list(policy.HOLD_EVIDENCE_STATES),
                 "hold_reject_reasons": list(policy.HOLD_REJECT_REASONS),
+                "markets": [m[0] for m in policy.MARKETS], "readiness_flags": list(policy.READINESS_FLAGS),
+                "readiness_gates": dict(policy.READINESS_GATES), "formats": list(policy.FORMATS),
+                "proof_requirements": dict(policy.PROOF_REQUIREMENTS), "source_kinds": list(policy.SOURCE_KINDS),
+                "source_kinds_not_connected": list(policy.SOURCE_KINDS_NOT_CONNECTED),
                 "submission_states": list(policy.SUBMISSION_STATES)}
 
     @app.get(P + "/roster", dependencies=auth)
@@ -442,6 +448,75 @@ def create_app(service: OohService, settings: config_mod.Settings) -> FastAPI:
     @app.post(P + "/vendors", dependencies=auth, status_code=201)
     def register_vendor(who: str = Depends(andre), req: dict = Depends(body(m.VendorCreate))) -> dict:
         return svc.register_vendor(req)
+
+    # ------------------------------------------------------------------ OOH-2 registry (global; never the hub)
+
+    @app.get(P + "/markets", dependencies=auth)
+    def markets(who: str = Depends(caller(*READ))) -> list:
+        return svc.markets_view()
+
+    @app.get(P + "/markets/{mid}", dependencies=auth)
+    def market(mid: str, who: str = Depends(caller(*READ))) -> dict:
+        _id(mid, MARKET_RX)
+        if mid not in svc.markets:
+            raise NotFound(R("MARKET_UNKNOWN"))
+        return svc.market_view(mid)
+
+    @app.post(P + "/markets/{mid}/readiness", dependencies=auth)
+    def readiness(request: Request, mid: str, req: dict = Depends(body(m.ReadinessSet)),
+                  who: str = Depends(caller("dashboard", "ooh_agent", "compliance_38"))) -> dict:
+        """MET is Andre's; NOT_MET (the safe direction) any preparer or Compliance."""
+        return svc.set_readiness(who, _id(mid, MARKET_RX), req, andre=andre_if_presented(request))
+
+    @app.post(P + "/sources", dependencies=auth, status_code=201)
+    def record_source(req: dict = Depends(body(m.SourceRecord)), who: str = Depends(caller(*PREP))) -> dict:
+        return svc.record_source(who, req)
+
+    @app.get(P + "/sources/{sid}", dependencies=auth)
+    def source(sid: str, who: str = Depends(caller(*READ))) -> dict:
+        return svc.source_view(_id(sid))
+
+    @app.post(P + "/faces", dependencies=auth, status_code=201)
+    def register_face(req: dict = Depends(body(m.FaceCreate)), who: str = Depends(caller(*PREP))) -> dict:
+        return svc.register_face(who, req)
+
+    @app.get(P + "/faces", dependencies=auth)
+    def faces(market: Optional[str] = Query(default=None, pattern=MARKET_RX.pattern),
+              format: Optional[str] = Query(default=None, pattern=r"^[A-Z_]{3,40}$"),
+              vendor: Optional[str] = Query(default=None, pattern=VENDOR_RX.pattern),
+              vendor_face_ref: Optional[str] = Query(default=None, pattern=r"^[A-Za-z0-9._:-]{1,100}$"),
+              who: str = Depends(caller(*READ))) -> list:
+        return svc.faces_view(market, format, vendor, vendor_face_ref)
+
+    @app.get(P + "/faces/{fid}", dependencies=auth)
+    def face(fid: str, who: str = Depends(caller(*READ))) -> dict:
+        return svc.face_view(_id(fid))
+
+    @app.post(P + "/faces/{fid}/attributes", dependencies=auth)
+    def face_attribute(fid: str, req: dict = Depends(body(m.AttributeSet)), who: str = Depends(caller(*PREP))):
+        return svc.set_face_attribute(who, _id(fid), req)
+
+    @app.post(P + "/faces/{fid}/avails", dependencies=auth, status_code=201)
+    def face_avails(fid: str, req: dict = Depends(body(m.AvailsRecord)), who: str = Depends(caller(*PREP))):
+        return svc.record_avails(who, _id(fid), req)
+
+    @app.get(P + "/vendors/{vid}", dependencies=auth)
+    def supplier(vid: str, who: str = Depends(caller(*READ))) -> dict:
+        return svc.supplier_view(_id(vid, VENDOR_RX))
+
+    @app.post(P + "/vendors/{vid}/attributes", dependencies=auth)
+    def supplier_attribute(vid: str, req: dict = Depends(body(m.AttributeSet)), who: str = Depends(caller(*PREP))):
+        return svc.set_supplier_attribute(who, _id(vid, VENDOR_RX), req)
+
+    @app.get(P + "/inventory-port", dependencies=auth)
+    def inventory_port(who: str = Depends(caller(*READ))) -> dict:
+        return {"port": svc.inventory_port.name, "status": svc.inventory_port.status,
+                "sources_accepted": list(policy.SOURCE_KINDS),
+                "sources_not_connected": list(policy.SOURCE_KINDS_NOT_CONNECTED)}
+
+    @app.post(P + "/inventory-port/sync", dependencies=auth)
+    def inventory_port_sync(req: dict = Depends(body(m.PortSync)), who: str = Depends(caller(*PREP))) -> dict:
+        return svc.sync_from_port(req["vendor"])
 
     @app.get(P + "/principal-agent", dependencies=auth)
     def principal_agent(who: str = Depends(caller("dashboard", "ooh_agent", "compliance_38"))) -> dict:
