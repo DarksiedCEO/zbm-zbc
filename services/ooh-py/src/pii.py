@@ -4,7 +4,8 @@ number in a free-text value is refused (attributes, campaign names, the client a
 redacted (vendor text), before anything is written to the log or the ledger.
 
 Every screen reads ``screen_form`` (vendor text is stored in it too): NFKC; zero-width, format, private-use,
-unassigned and invisible filler characters removed, and a combining mark on a digit dropped; every script's decimal
+and invisible filler characters removed (unassigned characters kept as typed), and a combining mark on a digit
+dropped, to a fixed point; every script's decimal
 digits read as ASCII; any other non-printable character read as a space and runs of spaces collapsed. Then %40, HTML entities (&#64; &commat; &#46;) and bracket
 spellings ([at] (at) {at} <at>, [dot] (dot) <dot> [.] (.)) and full-width or ideographic dots are read as the
 character. Then, case-insensitively:
@@ -27,7 +28,10 @@ character. Then, case-insensitively:
   word; "123 - 45 - 6789" (a separator with spaces around it); digit groups split by letters, %20 or entities.
 In the three screened free-text fields of OOH2-PII-1 (unit vendor text, face text attributes, the client approval
 document reference) one more rule decides, before any of the shapes below matter: any cluster of nine or more digits
-joined by characters that are not letters is personal data (``screen_free_text``; founder design change, ADR 0022).
+joined by characters that are not ASCII letters is personal data, in the raw and in the HTML-decoded text
+(``screen_free_text``; founder design change and decisions, ADR 0022).
+Known limit (founder decision): URL escapes other than %40 and JS/CSS escapes are not decoded; their hex letters
+end a cluster ("4111%2D1111%2D1111%2D1111" is kept).
 Known false positives (refused, never stored): a ten-digit reference ("io-0000012345"), "<word> at <word>.<word>"
 ("14x48 at Wilshire.Blvd"), a three-and-four-digit pair with a dash ("Route 101-2025").
 Names, spelled-out digits and letters used as separators cannot be detected reliably: preparers must not type them."""
@@ -44,8 +48,13 @@ _AT_SPELLINGS = re.compile(r"&#0*64;|&#x0*40;|&commat;|<at>|\[at\]|\(at\)|\{at\}
 _DOT_SPELLINGS = re.compile(r"&#0*46;|&#x0*2e;|&period;|<dot>|\[dot\]|\(dot\)|\{dot\}|\[\.\]|\(\.\)|\{\.\}|[\u3002\uff0e\uff61]",
                             re.I)
 _LOCAL = r"[^\s@]{1,64}"                 # an address's local part (bounded: delta red team DF-6, regex cost)
-_DOM = r"[\w-]+"
-_WORD_DOM = r"[a-z][\w-]*"
+# A word character for the e-mail and phone shapes, the same on every Unicode version (AEGIS r12 reliability R12-2:
+# `\w` follows the Python build's Unicode database, so a CJK Extension I letter, unassigned in Python 3.12 and a
+# letter in 3.13, made "a@b<it>d.com" an address on one and not the other): ASCII letters, digits and "_", and every
+# non-ASCII character that is not a space (wider than `\w`: fails closed).
+_W = r"(?:[A-Za-z0-9_]|[^\x00-\x7f\s])"
+_DOM = rf"(?:{_W}|-)+"
+_WORD_DOM = rf"[a-z](?:{_W}|-)*"
 # e-mail, three shapes:
 # * tight "@" (no space on either side): any domain, dots with or without spaces ("jane@163.com", "jane@example .com",
 #   delta red team DF-2);
@@ -55,7 +64,7 @@ _DOTSEP = r"(?:\.|\s+\.\s+|\s+dot\s+)"
 _EMAIL_TIGHT = re.compile(_LOCAL + r"@" + _DOM + r"(?:\s*\.\s*[a-z]{2,}|\s+dot\s+[a-z]{2,})+",
                           re.I)
 _EMAIL_STRONG = re.compile(_LOCAL + r"(?:\s+@\s*|\s*@\s+)" + _DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
-_EMAIL_WORD = re.compile(r"[\w.+-]{1,64}\s+at\s+" + _WORD_DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
+_EMAIL_WORD = re.compile(rf"(?:{_W}|[.+-]){{1,64}}\s+at\s+" + _WORD_DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
 # Phone separators: spaces, dots, slashes, underscores, dashes (U+2010-2015, U+2212 minus), commas, colons, bars,
 # middle dots, apostrophes and ampersands, in any mix (final red team NF-3; delta red team 2 E3: "310-5551234",
 # "310, 555, 1234"). The screen errs toward refusing: a false positive is refused and never stored, a miss is kept.
@@ -68,7 +77,7 @@ _PHONE = re.compile(
     + r"|" + _START + r"\d{3}[‐-―−-]\d{4}(?![\d.,]\d|\d)"                          # local 555-1234
     + r"|(?<!\d)\d{10,}(?!\d)")                                                                   # ten digits or more
 # An international number: "+", a country code, and at least eight digits in all (+52 55 1234 5678, +44 20 7946 0958)
-_INTL = re.compile(r"(?<![\w+])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
+_INTL = re.compile(r"(?<![A-Za-z0-9_+])(?<![^\x00-\x7f\s])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
 _INTL_MIN_DIGITS = 8
 
 
@@ -87,7 +96,8 @@ _REMOVED = ("Cf", "Co")
 def strip_format(text: str, hidden: str = "") -> str:
     """NFKC; zero-width, format, private-use and the invisible characters above replaced by ``hidden``
     (removed by default), and a combining mark on a digit dropped (AEGIS r9 security F2, r10 source M-1); every decimal
-    digit of any script read as its ASCII digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Removing a hidden character
+    digit of any script and every other character with a digit value (circled, dingbat, Ethiopic) read as its ASCII
+    digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card; r12 security S12-1). Removing a hidden character
     rejoins a digit group it split (a card); reading it as a space keeps it as a separator (an SSN): the screen reads
     both forms."""
     t = _INVISIBLE.sub(hidden, _ZW.sub(hidden, unicodedata.normalize("NFKC", text)))
@@ -100,7 +110,8 @@ def strip_format(text: str, hidden: str = "") -> str:
             if hidden:
                 out.append(hidden)
             continue
-        out.append(str(unicodedata.decimal(ch)) if ch > "\x7f" and cat == "Nd" else ch)
+        d = unicodedata.digit(ch, None) if ch > "\x7f" else None      # every digit, not only decimal ones (AEGIS
+        out.append(str(d) if d is not None else ch)                    # r12 security S12-1: "❶", "⓵", Ethiopic "፩")
     return "".join(out)
 
 
@@ -109,8 +120,14 @@ def screen_form(text: str, hidden: str = "") -> str:
     text while storage read a cleaned copy, so "123  45  6789" was redacted in the line but hashed in clear):
     ``strip_format``, every other non-printable character (controls, line and paragraph separators, other spaces)
     read as a space, and runs of spaces collapsed to one."""
-    return " ".join("".join(ch if ch.isprintable() or unicodedata.category(ch) == "Cn" else " "
-                            for ch in strip_format(text, hidden)).split())
+    t = text
+    for _ in range(5):                    # to a fixed point (AEGIS r12 source S-2b: NFKC ran before a hidden character
+        once = " ".join("".join(ch if ch.isprintable() or unicodedata.category(ch) == "Cn" else " "   # was removed,
+                                for ch in strip_format(t, hidden)).split())                          # so one pass
+        if once == t:                                                                                # was not enough)
+            break
+        t = once
+    return t
 
 
 def _norm(text: str, hidden: str = "") -> str:
@@ -238,7 +255,7 @@ def _redact_once(t: str) -> str:
 
 # The three screened free-text fields of OOH2-PII-1 (unit vendor text, a face text attribute, the client approval
 # document reference): founder design change, Oct 18 2026, to end the spelling-by-spelling loop. After ``_norm``, any
-# cluster of CLUSTER_MIN_DIGITS or more digits joined by characters that are not letters — whatever those characters
+# cluster of CLUSTER_MIN_DIGITS or more digits joined by characters that are not ASCII letters — whatever those characters
 # are — is personal data. The card and SSN rules no longer decide; they only label what was redacted. Trade-off
 # (accepted): a date range, a price list or a reference with nine or more digits and no letter between them is
 # redacted or refused too ("2026-11-01 - 2026-11-30", "io-2026-1018-0001").
@@ -298,29 +315,68 @@ def _redact_all(t: str, find, kinds: set) -> str:
     return "[redacted]" if find(t) else t
 
 
+_MAX_DECODE = 16          # HTML-entity decoding passes; text still changing after that is redacted whole
+
+
+def _fully_decoded(t: str):
+    """``t`` with HTML entities decoded until nothing changes (entities that spell entities: "&amp;amp;nbsp;"), or None
+    when it still changes after _MAX_DECODE passes (AEGIS r12 source S-1: three passes let four levels through)."""
+    for _ in range(_MAX_DECODE):
+        once = html.unescape(t)
+        if once == t:
+            return t
+        t = once
+    return None
+
+
+def _screen_stages(t: str, kinds: set) -> str:
+    """The two stages every form of the text goes through (AEGIS r11 source S-1): the cluster rule on the text as it
+    would be kept, then every rule after the @ and . spellings are read."""
+    t = _redact_all(screen_form(t), number_cluster_spans, kinds)
+    return _redact_all(_norm(t), _free_text_spans, kinds)
+
+
+def _forms(t: str):
+    """Every form a reader could make of ``t``: as kept, ``screen_form``, ``_norm``, and the same three of the fully
+    HTML-decoded text; None when the decoding never settles."""
+    d = _fully_decoded(t)
+    if d is None:
+        return None
+    out = []
+    for f in (t, d):
+        out += [f, screen_form(f), _norm(f)]
+    return out
+
+
+def _still_holds_personal_data(t: str) -> bool:
+    forms = _forms(t)
+    return forms is None or any(number_cluster_spans(f) for f in forms) or any(_free_text_spans(_norm(f)) for f in forms)
+
+
 def screen_free_text(text: str) -> tuple:
-    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. The cluster
-    rule runs first on the text as it would be kept (``screen_form``), then once more with the e-mail, phone, card and
-    SSN rules after the @ and . spellings are read (``_norm``): a cluster either form shows is redacted (AEGIS r11
-    source S-1: "1234567%40" lost two digits to the "@" spelling and kept nine). With nothing found, the text as kept
-    is ``screen_form(text)``."""
+    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields.
+    - The raw text goes through both stages (``_screen_stages``). The raw text decoded to a fixed point (founder
+      decision after r11) goes through the same two stages (AEGIS r12 source S-2a: one stage, after the @ spellings
+      were read, let "1234567&nbsp;%40" through), and that result is kept when the decoded form held personal data.
+    - Backstop, on whatever is returned: if any form of it (``_forms``) still shows a cluster or another span, or the
+      decoding never settles (r12 source S-1: four levels of nesting), the whole value is "[redacted]" — an edge case
+      not yet found redacts rather than keeps.
+    With nothing found, the text as kept is ``screen_form(text)``."""
     kinds = set()
-    t = _redact_all(screen_form(text), number_cluster_spans, kinds)
-    t = _redact_all(_norm(t), _free_text_spans, kinds)
-    # HTML entities (founder decision, AEGIS r11 security S11-2: "4111&nbsp;1111&nbsp;…", "123&ndash;45&ndash;6789"):
-    # the decoded text is screened too, and kept decoded when it holds personal data; decoding is repeated for
-    # entities that spell entities ("&amp;nbsp;")
-    decoded = t
-    for _ in range(3):
-        once = html.unescape(decoded)
-        if once == decoded:
-            break
-        decoded = once
-    if decoded != t and _free_text_spans(_norm(decoded)):
-        t = _redact_all(_norm(decoded), _free_text_spans, kinds)
-    if not kinds:
-        return screen_form(text), []
-    return " ".join(t.split()), sorted(kinds)
+    t = _screen_stages(text, kinds)
+    d = _fully_decoded(text)
+    if d is None:
+        return "[redacted]", sorted(kinds | {"number"})
+    if d != text:
+        found = set()
+        t2 = _screen_stages(d, found)
+        if found:
+            kinds |= found
+            t = t2
+    kept = " ".join(t.split()) if kinds else screen_form(text)
+    if _still_holds_personal_data(kept):
+        return "[redacted]", sorted(kinds | {"number"})
+    return kept, sorted(kinds)
 
 
 def free_text_has_personal_data(text: str) -> bool:

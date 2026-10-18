@@ -152,8 +152,11 @@ def test_decisions_screen_finds_it(text):
 
 def _unescape(t):
     import html
-    for _ in range(3):
-        t = html.unescape(t)
+    for _ in range(64):                  # to a fixed point (AEGIS r12 source S-4: three passes hid deeper nesting)
+        once = html.unescape(t)
+        if once == t:
+            return t
+        t = once
     return t
 
 
@@ -190,3 +193,74 @@ def test_decisions_unassigned_characters_are_kept_so_the_hash_is_stable(cp):
     import service as SV
     from ledger import payload_sha256 as p
     assert SV.request_sha({"request_id": "r", "vendor_text": text}) == p({"request_id": "r", "vendor_text": text})
+
+
+# ---------------------------------------------------------------- AEGIS r12 (1a90498) source S-1, S-2, S-4
+
+def _nested(entity, depth):
+    return "&" + "amp;" * depth + entity
+
+
+NESTED = ["123456" + _nested("nbsp;", d) + "789" for d in (1, 3, 4, 8, 15)] + \
+         ["123" + _nested("ndash;", 4) + "45" + _nested("ndash;", 4) + "6789"]
+DECODED_TWICE = ["1234567&nbsp;%40", "1234567&amp;%40", "1234567&#x25;40", "12345a&zwj;&#769;6789",
+                 "12345a&#8205;&#x301;6789", "12345a&shy;&#769;6789", "12345a&#x200b;&#769;6789"]
+
+
+@pytest.mark.parametrize("text", NESTED + DECODED_TWICE)
+def test_r12_nested_entities_and_decoded_forms_are_redacted(text):
+    kept, kinds = pii.screen_free_text(f"note {text} end")
+    assert kinds and not pii._still_holds_personal_data(kept), (text, kept)
+
+
+def test_r12_decoding_that_never_settles_redacts_the_whole_value():
+    text = "123" + _nested("nbsp;", pii._MAX_DECODE + 2) + " ok"
+    assert pii.screen_free_text(text) == ("[redacted]", ["number"])
+
+
+def test_r12_screen_form_is_idempotent_with_hidden_characters_and_marks():
+    for t in ["12345a\u200d\u03016789", "a\u00ad\u0301b", "4\u0303 1", "x\u200b\u0301\u200by"]:
+        once = pii.screen_form(t)
+        assert pii.screen_form(once) == once, (t, once)
+
+
+@pytest.mark.parametrize("text", NESTED[:3] + DECODED_TWICE[:4])
+def test_r12_the_fields_redact_or_refuse(h, text):
+    test_cluster_vendor_text_is_redacted_and_hashed_redacted(h, text)
+    test_cluster_face_text_attribute_is_refused(h, text)
+
+
+def test_r12_backstop_property_on_every_form():
+    import random
+    rnd = random.Random(1904)
+    alphabet = list("0123456789 -._:/,|+%@#&;xa") + ["%40", "&#64;", "&nbsp;", "&ndash;", "&amp;", "&#52;", "&#x34;",
+                                                       "&zwj;", "&#769;", "&#x301;", "&shy;", "&#x200b;", "\u200b",
+                                                       "\u0301", "\u3164", "\ue000", "\u0664", "\u30fc", "\u02bc",
+                                                       "\u2ffc", "\u0378", "&amp;amp;"]
+    for _ in range(20000):
+        t = "".join(rnd.choice(alphabet) for _ in range(rnd.randint(1, 30)))
+        kept, _kinds = pii.screen_free_text(t)
+        assert not pii._still_holds_personal_data(kept), (t, kept)
+        decoded = _unescape(kept)
+        for form in (kept, pii.screen_form(kept), pii._norm(kept), decoded, pii.screen_form(decoded), pii._norm(decoded)):
+            assert not pii.number_cluster_spans(form), (t, kept, form)
+
+
+# ---------------------------------------------------------------- AEGIS r12 security S12-1, reliability R12-2
+
+def test_r12_s12_1_every_digit_valued_character_counts():
+    # dingbat and circled digits, Ethiopic: not decimal (Nd) but digits all the same; 1a90498 kept 69 such kinds
+    import unicodedata
+    kept = [cp for cp in range(0x80, 0x110000) if chr(cp).isdigit()
+            and not pii.screen_free_text("note " + chr(cp) * 9 + " end")[1]]
+    assert kept == [], [hex(c) for c in kept[:20]]
+    assert pii.screen_free_text("❹❶❶❶ ❶❶❶❶ ❶❶❶❶ ❶❶❶❶")[1]
+    assert unicodedata.digit("❶") == 1
+
+
+@pytest.mark.parametrize("cp", [0x2FFC, 0x2FFF, 0x31EF, 0x2EBF0, 0x2EE5D])
+def test_r12_r12_2_shapes_do_not_depend_on_the_unicode_version(cp):
+    # unassigned in Unicode 15.0 (Python 3.12), assigned in 15.1 (3.13): a domain with it is an address on both
+    c = chr(cp)
+    assert pii.has_personal_data("a@b" + c + "d.com") and pii.free_text_has_personal_data("a@b" + c + "d.com")
+    assert pii.screen_free_text("faces west " + c + " lit") == ("faces west " + c + " lit", [])

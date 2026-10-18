@@ -341,7 +341,7 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   attribute that storage would have redacted was accepted. Now every screen and the stored vendor text use
   `pii.screen_form`, and `observed()` screens the raw text exactly as the attribute and the hash do: storage redacts
   exactly when the screen finds personal data.
-- **Hidden characters (source M-1, data D10-M1).** `screen_form` also removes private-use, unassigned and invisible
+- **Hidden characters (source M-1, data D10-M1).** `screen_form` also removes private-use and invisible
   filler characters and drops a combining mark on a digit; it reads every other non-printable character as a space
   and collapses runs of spaces. For campaign names and `ref` attributes (`has_personal_data`) a hidden character is read both ways: removed
   (it rejoins a card's digit group) and as a space (it keeps an SSN's groups apart). The three screened free-text fields
@@ -359,9 +359,11 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   doubled or spaced separators, hidden characters, other scripts). The founder ended the spelling-by-spelling loop.
 - **The rule.** In the three screened free-text fields — unit vendor text, a face text attribute
   (`location_description` and every other `text` attribute) and the client approval document reference — the text
-  is normalised (`pii.screen_form`: invisible, format, private-use and unassigned characters removed, a combining mark
+  is normalised (`pii.screen_form`, to a fixed point: invisible, format and private-use characters removed (unassigned ones
+  kept as typed since the decisions below), a combining mark
   on a digit dropped, every script's digits read as ASCII, other non-printables read as a space, spaces collapsed).
-  Then any cluster of nine or more digits joined by characters that are not letters, whatever those characters are,
+  Then any cluster of nine or more digits joined by characters that are not letters (ASCII letters only, since the
+  decisions below), whatever those characters are,
   is personal data (`pii.screen_free_text`, `CLUSTER_MIN_DIGITS = 9`). The e-mail and phone rules still apply. The
   card and SSN rules no longer decide; they label what was redacted (`personal_data_kinds` on the stored vendor text:
   `card`, `ssn`, `phone`, `email`, `number`).
@@ -385,10 +387,22 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
     when that form holds personal data ("4111&nbsp;1111&nbsp;…", "123&ndash;45&ndash;6789": security S11-2, data
     D11-L2). Tags such as `<br>` are letters and still end a cluster.
   - *Spellings of @ and .:* the cluster rule runs on the text as kept and again after "%40", "&#64;" and the like are
-    read, so such a spelling cannot hide digits (source S-1).
+    read (source S-1); the HTML-decoded text goes through the same two stages (r12 source S-2a).
   - *Unassigned characters* are kept as typed, neither removed nor read as a space, so the kept text and the request
     hash do not depend on the Python build's Unicode version (reliability N1; 627 code points differ between Unicode
     15.0 in Python 3.12 and 15.1 in 3.13). The cluster rule joins across them.
+  - *AEGIS r12 (1a90498, source S-1, S-2):* entities are decoded to a fixed point (at most 16 passes; text that
+    still changes is redacted whole), the decoded text goes through both stages, and `screen_form` runs to a fixed
+    point (NFKC ran before a hidden character was removed, so "a", ZWJ, a combining accent became "á"). A final
+    check runs on whatever is kept: if any form of it (as kept, `screen_form`, `_norm`, and those of its fully decoded
+    text) still shows a cluster or another span, the whole value is "[redacted]" (fail closed).
+  - *AEGIS r12 (1a90498), more:* every character with a Unicode digit value (circled, dingbat, Ethiopic: not only
+    decimal digits) is read as its ASCII digit (security S12-1, data D12-H1: a regression of the ASCII-only count);
+    the e-mail and phone shapes use a word class that is the same on every Unicode version instead of `\w`
+    (reliability R12-2).
+  - *Known limit (founder decision after r12, security S12-2):* URL escapes (`%2D`, `%2F`, `%C2%A0`) and JS/CSS escapes
+    (`\x2d`, `\u002d`, `\2d`) are not decoded (only `%40` is read, as "@"); their hex letters A-F are ASCII letters and
+    end a cluster, so "4111%2D1111%2D1111%2D1111" is kept. Tracked in docs/findings/OPEN.md (OOH2-R12-SEC-S2).
   - *False positives* are accepted for now (OOH2-PII-1-FP); next wave: structured vendor fields for location, ZIP and
     dates (OOH2-PII-1-STRUCT).
 - **Not changed.** Campaign names, `ref` attributes and the client funds reference keep their earlier rules
