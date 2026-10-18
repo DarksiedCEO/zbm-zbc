@@ -1,0 +1,52 @@
+== commits in 84a5377..99569bd whose tree contains <USER>
+99569bd ooh-py: AEGIS Ω RED at 4a0a4b4 — H-1, compare the whole log fi files=       0
+8b613e3 docs(ooh wave 2): <HOME> for the home path, card/SSN purge ste files=       0
+eae7a86 docs(ooh wave 2): handoff for the AEGIS round on 4a0a4b4 (Ω RE files=     332
+da7b960 docs(ooh wave 2): AEGIS evidence for 4a0a4b4, ce665c5, 75b0662 files=     330
+75b0662 ooh-py: AEGIS mutation BLOCK at ce665c5 — pin the store's writ files=       7
+ce665c5 ooh-py: AEGIS mutation BLOCK at 4a0a4b4 — pin six commit/integ files=       7
+4a0a4b4 ooh-py: AEGIS mutation BLOCK at 5116917 — pin the integrity-ch files=       7
+5116917 ooh-py: AEGIS mutation BLOCK at e680f98 — pin the _commit ledg files=       7
+e680f98 ooh-py: AEGIS Ω RED at d1b0de9 — F1 lost-answer retry stays un files=       7
+d1b0de9 docs: ADR 0022 names the card networks the funds screen does n files=       7
+8495cda ooh-py: AEGIS fifth delta red team (8a2b3a3) — H1 disclosed, H files=       7
+8a2b3a3 ooh-py: AEGIS fourth delta red team (2bab0f6) — G1, G3 files=       7
+2bab0f6 ooh-py: AEGIS third delta red team (004873f) — F1..F4 files=       7
+004873f ooh-py: AEGIS second delta red team (acfaaad) — E2..E8; the PI files=       7
+acfaaad ooh-py: AEGIS delta red team (988725f) — DF-1..DF-8 files=       7
+988725f ooh-py: AEGIS final red team (0a1729e) — NF-1..NF-7 files=       7
+e0b0540 ooh-py: the card-number check never refuses an ACH trace numbe files=       7
+0a1729e ooh-py: AEGIS second round (re-verification at 70e6962, red te files=       7
+70e6962 ooh-py: AEGIS OOH-2..4 review fixes (security HIGH id collisio files=       7
+7016a4b ooh-py: Finance (31) must verify funds cleared; AEGIS OOH-3/4  files=       7
+138dcc8 ooh-py: AEGIS wave 2 security F-1, F-2, F-5 (avails, personal  files=       7
+e848d73 ooh-py: OOH-4 — buy and contract controls (ADR 0022) files=       7
+e8cb45e ooh-py: OOH-3 — planning and pricing (ADR 0021) files=       7
+261c1ff ooh-py: AEGIS wave 2 doc lows (registry kill switch, vendor-pa files=       7
+d08ea52 ooh-py: OOH-2 — the inventory and operator registry (ADR 0020) files=       7
+bf1ec98 ooh-py: AEGIS step 2 red team F2/F4/F5 — the untested checks,  files=       7
+2e4fa1d ooh-py: AEGIS step 2 security lows (L1 evidence id per caller, files=       7
+653aa54 ooh-py: enforce three locked decisions the waves 0-1 build lef files=       7
+3fa4103 ooh-py: AEGIS step 2 source review lows (S2-L1..L3, L5, L6) files=       7
+58eb7de ooh-py: only Andre confirms a hold; agents attach vendor evide files=       7
+== 84a5377 itself
+       7
+== remote branches containing 8b613e3^
+  origin/integration-2026-09-24
+  origin/ooh-dept-15-wave0
+== commit author/committer emails in range
+  30 Andre <<OWNER-EMAIL>> | Andre <<OWNER-EMAIL>>
+remote branches containing eae7a86:
+remote branches containing da7b960:
+remote branches containing 75b0662:
+remote branches containing 84a5377:
+  origin/integration-2026-09-24
+  origin/ooh-dept-15-wave0
+84a5377 files with <USER>:
+84a5377:docs/aegis/round-26b/VERDICT.md
+84a5377:docs/aegis/round-26b/data.md
+84a5377:docs/aegis/round-26b/mutation-fuzz.md
+84a5377:docs/aegis/round-26b/provenance.md
+84a5377:docs/aegis/round-26b/redteam.md
+84a5377:docs/aegis/round-26b/security.md
+84a5377:docs/aegis/round-26b/test-truth.md

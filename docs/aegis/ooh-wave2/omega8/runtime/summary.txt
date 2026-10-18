@@ -1,0 +1,534 @@
+== c75_e1_W_3.12 3.12.14
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c75_e1_W_3.13 3.13.9
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c75_e2_I_3.12 3.12.14
+   W3                           201 unch=False anc 2->3
+   A_no_write                   ok=True ()
+   A_no_write_again             ok=True ()
+   job_no_write                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e2_I_3.13 3.13.9
+   W3                           201 unch=False anc 2->3
+   A_no_write                   ok=True ()
+   A_no_write_again             ok=True ()
+   job_no_write                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e2_W_3.12 3.12.14
+   W3                           201 unch=False anc 2->3
+   A_after_W3                   ok=True ()
+   job_after_W3                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e2_W_3.13 3.13.9
+   W3                           201 unch=False anc 2->3
+   A_after_W3                   ok=True ()
+   job_after_W3                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e3_I_3.12 3.12.14
+   W3                           201 unch=False anc 2->3
+   A_no_write                   ok=True ()
+   A_no_write_again             ok=True ()
+   job_no_write                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e3_I_3.13 3.13.9
+   W3                           201 unch=False anc 2->3
+   A_no_write                   ok=True ()
+   A_no_write_again             ok=True ()
+   job_no_write                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e3_W_3.12 3.12.14
+   W3                           201 unch=False anc 2->3
+   A_after_W3                   ok=True ()
+   job_after_W3                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e3_W_3.13 3.13.9
+   W3                           201 unch=False anc 2->3
+   A_after_W3                   ok=True ()
+   job_after_W3                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_e4_X_3.12 3.12.14
+   A_no_write                   ok=True ()
+   job_no_write                 ok=True ()
+   A_putback                    ok=True ()
+   restart_tampered             started integrity=None
+   file_after_restart_unchanged True
+   A_restart                    ok=False (local log line 2 has no matching anchor on the ledger)
+   W_restart                    503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   restart_putback              started integrity=None
+   W_putback                    201 unch=False anc 2->3
+   FINAL lines=3 anchors=3 verify=True tenants=['t-before', 't-mid', 't-after']
+== c75_e4_X_3.13 3.13.9
+   A_no_write                   ok=True ()
+   job_no_write                 ok=True ()
+   A_putback                    ok=True ()
+   restart_tampered             started integrity=None
+   file_after_restart_unchanged True
+   A_restart                    ok=False (local log line 2 has no matching anchor on the ledger)
+   W_restart                    503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   restart_putback              started integrity=None
+   W_putback                    201 unch=False anc 2->3
+   FINAL lines=3 anchors=3 verify=True tenants=['t-before', 't-mid', 't-after']
+== c75_m2_W_3.12 3.12.14
+   W3                           201 unch=False anc 2->3
+   A_after_W3                   ok=True ()
+   job_after_W3                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c75_m2_W_3.13 3.13.9
+   W3                           201 unch=False anc 2->3
+   A_after_W3                   ok=True ()
+   job_after_W3                 ok=True ()
+   W4                           201 unch=False anc 3->4
+   file_eq_fault_before_putback False
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 4->4
+   W5                           201 unch=False anc 4->5
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 5->6
+   FINAL lines=6 anchors=6 verify=True tenants=['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+== c99_e1_W_3.12 3.12.14
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e1_W_3.13 3.13.9
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e2_I_3.12 3.12.14
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e2_I_3.13 3.13.9
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e2_W_3.12 3.12.14
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e2_W_3.13 3.13.9
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e2_W_rename_3.12 3.12.14
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e2_W_rename_3.13 3.13.9
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e3_I_3.12 3.12.14
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e3_I_3.13 3.13.9
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e3_W_3.12 3.12.14
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e3_W_3.13 3.13.9
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_e4_X_3.12 3.12.14
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   A_putback                    ok=True ()
+   restart_tampered             started integrity=None
+   file_after_restart_unchanged True
+   A_restart                    ok=False (local log line 2 has no matching anchor on the ledger)
+   W_restart                    503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   restart_putback              started integrity=None
+   W_putback                    201 unch=False anc 2->3
+   FINAL lines=3 anchors=3 verify=True tenants=['t-before', 't-mid', 't-after']
+== c99_e4_X_3.13 3.13.9
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   A_putback                    ok=True ()
+   restart_tampered             started integrity=None
+   file_after_restart_unchanged True
+   A_restart                    ok=False (local log line 2 has no matching anchor on the ledger)
+   W_restart                    503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   restart_putback              started integrity=None
+   W_putback                    201 unch=False anc 2->3
+   FINAL lines=3 anchors=3 verify=True tenants=['t-before', 't-mid', 't-after']
+== c99_e4y_X_3.12 3.12.14
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   A_putback                    ok=True ()
+   restart_tampered             EXIT rc=1 store.StoreCorrupt: log line 2 is not JSON
+   file_after_restart_unchanged True
+   restart_putback              started integrity=None
+   W_putback                    201 unch=False anc 2->3
+   FINAL lines=3 anchors=3 verify=True tenants=['t-before', 't-mid', 't-after']
+== c99_e4y_X_3.13 3.13.9
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   A_putback                    ok=True ()
+   restart_tampered             EXIT rc=1 store.StoreCorrupt: log line 2 is not JSON
+   file_after_restart_unchanged True
+   restart_putback              started integrity=None
+   W_putback                    201 unch=False anc 2->3
+   FINAL lines=3 anchors=3 verify=True tenants=['t-before', 't-mid', 't-after']
+== c99_m2_I_3.12 3.12.14
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_m2_I_3.13 3.13.9
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_m2_W_3.12 3.12.14
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_m2_W_3.13 3.13.9
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_m3_I_3.12 3.12.14
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_m3_I_3.13 3.13.9
+   W3                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   A_no_write                   ok=False (the local log file differs from the lines this service holds: an opera)
+   A_no_write_again             ok=False (the local log file differs from the lines this service holds: an opera)
+   job_no_write                 ok=False (the local log file differs from the lines this service holds: an opera)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 2->2
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=False anc 2->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_m3_W_3.12 3.12.14
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_m3_W_3.13 3.13.9
+   W3                           503/STORE_UNAVAILABLE/m=True unch=True anc 2->3
+   A_after_W3                   ok=False (the pending line is anchored on the ledger but cannot be written here)
+   job_after_W3                 ok=False (the pending line is anchored on the ledger but cannot be written here)
+   W4                           503/INTEGRITY_UNVERIFIED/m=False unch=True anc 3->3
+   file_eq_fault_before_putback True
+   job_putback                  ok=True ()
+   A_putback                    ok=True ()
+   W3_retry                     201 unch=True anc 3->3
+   W5                           201 unch=False anc 3->4
+   restart                      started integrity=None
+   A_restart                    ok=True ()
+   W_restart                    201 unch=False anc 4->5
+   FINAL lines=5 anchors=5 verify=True tenants=['t-before', 't-mid', 't-x', 't-z', 't-after']
+== c99_thr_X_3.12 3.12.14
+   A_throttled                  ok=True ()
+   A_after_window               ok=False (the local log file differs from the lines this service holds: an opera)
+   job                          ok=False (the local log file differs from the lines this service holds: an opera)
+   A_pre                        ok=True ()
+   FINAL lines=2 anchors=2 verify=True tenants=['t-before']
+== c99_thr_X_3.13 3.13.9
+   A_throttled                  ok=True ()
+   A_after_window               ok=False (the local log file differs from the lines this service holds: an opera)
+   job                          ok=False (the local log file differs from the lines this service holds: an opera)
+   A_pre                        ok=True ()
+   FINAL lines=2 anchors=2 verify=True tenants=['t-before']

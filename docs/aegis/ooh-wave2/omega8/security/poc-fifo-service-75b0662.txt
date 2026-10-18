@@ -1,0 +1,10 @@
+after 4 s: job alive False | write alive False | audit alive False {'job': 200, 'audit': 200, 'write': 503}
+no reader on the FIFO: [Errno 6] Device not configured: '/private/var/folders/2_/q80gd3fn3f50pcmk1qlw7gnh0000gn/T/pytest-of-<USER>/pytest-13049/test_fifo_log_hangs_service_vi0/data/ooh_log.jsonl'
+after release: {'job': 200, 'audit': 200, 'write': 503}
+        print("\nafter 4 s: job alive", tj.is_alive(), "| write alive", tw.is_alive(), "| audit alive", tr.is_alive(), out)
+            fd = os.open(p, os.O_WRONLY | os.O_NONBLOCK); os.close(fd)   # release: the reader sees EOF
+            print("no reader on the FIFO:", e)
+        print("after release:", out)
+>       assert hung == (True, True, True)
+E       assert (False, False, False) == (True, True, True)
+1 failed in 1.28s

@@ -1,0 +1,3 @@
+lines=1000 file=1.2 MiB append=0.31 ms file_problem~0.22 ms
+lines=5000 file=5.9 MiB append=2.11 ms file_problem~1.61 ms
+lines=20000 file=23.6 MiB append=8.50 ms file_problem~7.80 ms

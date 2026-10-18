@@ -1,0 +1,14 @@
+== 8b613e3: added lines 829
+-- email
+-- phone
+-- ssn
+1:10:+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log files carry the local 
+2:23:+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log files carry the local 
+824:6087:+| OOH2-PII-1 | High (founder ruling 2026-10-18; AEGIS security graded it Medium as M-1) | next OOH wave; blocks production, not the push of ooh-dept-15-wave2 (founder ruling 2026-10-18) | 2026-10-18 | ooh-py: c
+-- card (13-19 digits, optional sep)
+== 99569bd: added lines 220
+-- email
+   1 +@pytest.mark.parametrize
+-- phone
+-- ssn
+-- card (13-19 digits, optional sep)

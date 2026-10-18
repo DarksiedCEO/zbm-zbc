@@ -1,0 +1,279 @@
+{
+ "scen": "e3",
+ "mode": "W",
+ "repl": "inplace",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega8/runtime/src75/services/ooh-py",
+ "python": "3.13.9",
+ "start": {
+  "status": "ok"
+ },
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:44Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "file_sha_after": "c0b4a6bb208bfd08dbe6a232f8b8eeab12c4ee98c9cf717fd0dfcc9bdcdcce1c",
+  "file_unchanged": false,
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:44Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "c0b4a6bb208bfd08dbe6a232f8b8eeab12c4ee98c9cf717fd0dfcc9bdcdcce1c",
+  "file_sha_after": "b1a82ced79ff2b69bbf1456d52ca506451e42aadc983786b8a08cb48a29a6485",
+  "file_unchanged": false,
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false
+ },
+ "pre": {
+  "disk": {
+   "sha256": "b1a82ced79ff2b69bbf1456d52ca506451e42aadc983786b8a08cb48a29a6485",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T13:27:44Z",
+   "problem": null
+  }
+ },
+ "fault": {
+  "orig_sha": "b1a82ced79ff2b69bbf1456d52ca506451e42aadc983786b8a08cb48a29a6485",
+  "fault_sha": "139e0c8868674a18cb95dc793130a725703677e674fbe47e10d7752f1a9cc329",
+  "same_size": true,
+  "disk": {
+   "sha256": "139e0c8868674a18cb95dc793130a725703677e674fbe47e10d7752f1a9cc329",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  }
+ },
+ "W3": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:55Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "139e0c8868674a18cb95dc793130a725703677e674fbe47e10d7752f1a9cc329",
+  "file_sha_after": "558ac6d33a09dae80957c1d7f6d759e0f82ee91bc5e1cd02f721eb6ca1630672",
+  "file_unchanged": false,
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": false
+ },
+ "after_W3": {
+  "disk": {
+   "sha256": "558ac6d33a09dae80957c1d7f6d759e0f82ee91bc5e1cd02f721eb6ca1630672",
+   "size": 2037,
+   "lines": 3,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T13:27:44Z",
+   "problem": null
+  },
+  "file_eq_fault": false
+ },
+ "A_after_W3": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:27:55Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 3
+  },
+  "file_sha": "558ac6d33a09dae80957c1d7f6d759e0f82ee91bc5e1cd02f721eb6ca1630672"
+ },
+ "job_after_W3": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:27:55Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "558ac6d33a09dae80957c1d7f6d759e0f82ee91bc5e1cd02f721eb6ca1630672"
+ },
+ "W4": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-y",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:55Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "558ac6d33a09dae80957c1d7f6d759e0f82ee91bc5e1cd02f721eb6ca1630672",
+  "file_sha_after": "3512c8299241fa6285c190f741ed4367715f7f63307c1a35142f72d84ca3d3d5",
+  "file_unchanged": false,
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false
+ },
+ "file_eq_fault_before_putback": false,
+ "putback_prefix_is_fault": true,
+ "putback_sha": "4aad1fa06cd40fde97588de6f37a46e813d0b8442013c745c2c81c10d6c80366",
+ "job_putback": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:28:06Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "4aad1fa06cd40fde97588de6f37a46e813d0b8442013c745c2c81c10d6c80366"
+ },
+ "A_putback": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:28:06Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "file_sha": "4aad1fa06cd40fde97588de6f37a46e813d0b8442013c745c2c81c10d6c80366"
+ },
+ "after_putback": {
+  "disk": {
+   "sha256": "4aad1fa06cd40fde97588de6f37a46e813d0b8442013c745c2c81c10d6c80366",
+   "size": 2702,
+   "lines": 4,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 8,
+   "ooh_anchors": 4
+  }
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:55Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "4aad1fa06cd40fde97588de6f37a46e813d0b8442013c745c2c81c10d6c80366",
+  "file_sha_after": "4aad1fa06cd40fde97588de6f37a46e813d0b8442013c745c2c81c10d6c80366",
+  "file_unchanged": true,
+  "anchors_before": 4,
+  "anchors_after": 4,
+  "pending_present": false
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T13:28:06Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "4aad1fa06cd40fde97588de6f37a46e813d0b8442013c745c2c81c10d6c80366",
+  "file_sha_after": "c00c24a5325e342fe61b68ac3da08e878a46979377690e7bee1eda06e49df277",
+  "file_unchanged": false,
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:28:07Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 5
+  },
+  "file_sha": "c00c24a5325e342fe61b68ac3da08e878a46979377690e7bee1eda06e49df277"
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T13:28:07Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "c00c24a5325e342fe61b68ac3da08e878a46979377690e7bee1eda06e49df277",
+  "file_sha_after": "3b44786e65f64782fa7563026be60356c9dbca50b21101043b61bced85ae5dd4",
+  "file_unchanged": false,
+  "anchors_before": 5,
+  "anchors_after": 6,
+  "pending_present": false
+ },
+ "final": {
+  "disk": {
+   "sha256": "3b44786e65f64782fa7563026be60356c9dbca50b21101043b61bced85ae5dd4",
+   "size": 4056,
+   "lines": 6,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 12,
+   "ooh_anchors": 6
+  },
+  "ledger_verify": {
+   "entries": 12,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-y",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

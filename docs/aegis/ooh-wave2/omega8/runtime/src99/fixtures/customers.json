@@ -1,0 +1,11 @@
+[
+  {"customer_id": "cust_1", "email": "amara.legit@example.com", "created_at": "2025-11-02T14:00:00Z", "lifetime_order_count": 4},
+  {"customer_id": "cust_2", "email": "d.fraudclick@example.com", "created_at": "2026-01-15T09:30:00Z", "lifetime_order_count": 1},
+  {"customer_id": "cust_3", "email": "priya.stacker@example.com", "created_at": "2025-08-20T11:00:00Z", "lifetime_order_count": 7},
+  {"customer_id": "cust_4", "email": "j.normal@example.com", "created_at": "2026-02-01T16:45:00Z", "lifetime_order_count": 2},
+  {"customer_id": "cust_5", "email": "wanda.abandons@example.com", "created_at": "2026-03-10T08:15:00Z", "lifetime_order_count": 3},
+  {"customer_id": "cust_6", "email": "carlos.recovered@example.com", "created_at": "2026-01-22T13:00:00Z", "lifetime_order_count": 5},
+  {"customer_id": "cust_7", "email": "nina.subscriber@example.com", "created_at": "2025-05-04T10:00:00Z", "lifetime_order_count": 12},
+  {"customer_id": "cust_8", "email": "leo.cancelled@example.com", "created_at": "2025-09-18T12:30:00Z", "lifetime_order_count": 3},
+  {"customer_id": "cust_9", "email": "sofia.pastdue@example.com", "created_at": "2025-12-01T09:00:00Z", "lifetime_order_count": 6}
+]

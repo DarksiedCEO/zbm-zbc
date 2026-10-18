@@ -1,0 +1,9 @@
+== git grep -i <USER> at 99569bd in docs/ claude/
+exit=1
+== whole tree
+exit=1
+== /Users/ paths in docs claude
+99569bd:docs/ci.md:277:(`/home/runner/work/_temp` on Linux, `/Users/runner/work/_temp` on macOS): outside the checkout (no R1/R2 change),
+== <HOME> count
+     332
+claude

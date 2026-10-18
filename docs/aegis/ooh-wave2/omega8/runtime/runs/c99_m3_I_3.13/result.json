@@ -1,0 +1,292 @@
+{
+ "scen": "m3",
+ "mode": "I",
+ "repl": "inplace",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega8/runtime/src99/services/ooh-py",
+ "python": "3.13.9",
+ "start": {
+  "status": "ok"
+ },
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T13:25:53Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "file_sha_after": "bcd68aad062ec39d9b68b8c8c2cf9996c5563fb7e8b4ba73f5af1321fca98082",
+  "file_unchanged": false,
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T13:25:53Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "bcd68aad062ec39d9b68b8c8c2cf9996c5563fb7e8b4ba73f5af1321fca98082",
+  "file_sha_after": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3",
+  "file_unchanged": false,
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false
+ },
+ "pre": {
+  "disk": {
+   "sha256": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T13:25:53Z",
+   "problem": null
+  }
+ },
+ "fault": {
+  "orig_sha": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3",
+  "fault_sha": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316",
+  "same_size": true,
+  "disk": {
+   "sha256": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  }
+ },
+ "A_no_write": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:26:04Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316"
+ },
+ "A_no_write_again": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:26:04Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316"
+ },
+ "job_no_write": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:26:04Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316"
+ },
+ "status_after_check": {
+  "ok": false,
+  "checked_at": "2026-10-18T13:26:04Z",
+  "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+ },
+ "W3": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "file_sha_before": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316",
+  "file_sha_after": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316",
+  "file_unchanged": true,
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false
+ },
+ "after_W3": {
+  "disk": {
+   "sha256": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "status_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-18T13:26:04Z",
+   "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+  },
+  "file_eq_fault": true
+ },
+ "W4": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "file_sha_before": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316",
+  "file_sha_after": "2eccefa977aee902ab9a5db3bd4262aa79cfeeaa7f09b5ac08a9b96548a87316",
+  "file_unchanged": true,
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false
+ },
+ "file_eq_fault_before_putback": true,
+ "putback_prefix_is_fault": true,
+ "putback_sha": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3",
+ "job_putback": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:26:15Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3"
+ },
+ "A_putback": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:26:15Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3"
+ },
+ "after_putback": {
+  "disk": {
+   "sha256": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2
+  }
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:16Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "e6445b2bd80c967ae016a6d448e0652dc8d96e61afe7ba32b77396f1dc846bc3",
+  "file_sha_after": "06c8c1f8a3685013c058414f3bfa2f7277d95bb9b0a41575bbd0bb2633c2118b",
+  "file_unchanged": false,
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": false
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:16Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "06c8c1f8a3685013c058414f3bfa2f7277d95bb9b0a41575bbd0bb2633c2118b",
+  "file_sha_after": "149786356b971dff0b4a64f5a7ca9665d5668e5f853debe78a0f8b79b678eea7",
+  "file_unchanged": false,
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:26:16Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "file_sha": "149786356b971dff0b4a64f5a7ca9665d5668e5f853debe78a0f8b79b678eea7"
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:16Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "149786356b971dff0b4a64f5a7ca9665d5668e5f853debe78a0f8b79b678eea7",
+  "file_sha_after": "77ec15603ff936352a9449fddb256aae2ac87f8b328fe8e31788517c40a59c0c",
+  "file_unchanged": false,
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false
+ },
+ "final": {
+  "disk": {
+   "sha256": "77ec15603ff936352a9449fddb256aae2ac87f8b328fe8e31788517c40a59c0c",
+   "size": 3391,
+   "lines": 5,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 10,
+   "ooh_anchors": 5
+  },
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

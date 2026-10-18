@@ -1,0 +1,220 @@
+10:+  - T148, T149, T151, T153, T154, T157, T159: before a write the file must be exactly memory (until the H-1 fix
+11:+    below, only its size and the slot of the next line were compared). Any other tail is
+20:+### AEGIS Ω RED at 4a0a4b4 and the H-1 fix (Oct 18 2026)
+21:+- **H-1 (High).** `RecordLog.append_prepared` compared only the log file's size with memory, and the running service
+22:+  never re-read the file (the integrity check compares the ledger with the in-memory line hashes). A same-size
+23:+  in-place edit of an existing line was written over: writes answered 201 and integrity said ok; only a restart
+24:+  refused. Fixed in ooh-py only (founder ruling Oct 18 2026):
+25:+  - before every write the whole file is read and compared with the in-memory lines, byte for byte; any difference
+26:+    refuses the write (`the log file and memory disagree`) and leaves the file untouched. The anchor was recorded
+27:+    first, so the write answers 503 with `maybe: true` and integrity stops writes; once the file is put back, the
+28:+    next integrity check rolls the line forward as for any anchored-but-unwritten line;
+29:+  - adoption (a line that reached the disk before an fsync error) needs the whole file to be the in-memory lines
+30:+    followed by exactly this line;
+31:+  - every integrity check also compares the file with memory (`RecordLog.file_problem()`): a changed, deleted or
+32:+    unreadable file reports "the local log file differs from the lines this service holds: an operator must inspect
+33:+    it" (or "cannot be read") and writes stop before any write is attempted. A data directory with no line yet has no
+34:+    file, which is not a difference;
+35:+  - reads use `pread` until the requested bytes or the end of the file (a short read is completed, not taken as a
+36:+    difference);
+37:+  - the cost: the whole log is read before every write and at every integrity check, so it grows with the log.
+38:+  - `RecordLog.verify()`, which nothing called, is replaced by `file_problem()`.
+39:+  - Tests: `tests/test_aegis_h1_file_content.py` (same-size edits of the first, a middle and the last line through
+40:+    the service; the integrity check before any write; recovery after the file is put back; adoption with a changed
+41:+    earlier line or another same-size line; a deleted, an unreadable and a not-yet-created file; short reads).
+42:+- **Not fixed here:** the same size-only check is in the store.py of seo-py, sales-py, bizdev-py, service-py and
+43:+  influencer-py; each is an open High in docs/findings/OPEN.md (`OOH2-RT-H1-<SERVICE>`).
+44:+- The other blockers of that verdict (card/SSN `OOH2-PII-1`, T222, the Medium/Low rows, the missing
+45:+  test-verification report) are tracked in docs/findings/OPEN.md and docs/aegis/ooh-wave2/.
+59:+| OOH2-MUT-DEAD | Low | next OOH wave | 2026-10-18 | ooh-py store.py `RecordLog.verify()` has no caller (mutants T180-T206 survive as dead code); delete it or call it (related: runtime H-1, the file content is never re-read while running). Fix wave 2 status: `verify()` is replaced by `RecordLog.file_problem()`, which the integrity check calls (H-1 fix); the line stays open until AEGIS confirms | AEGIS omega5 mutation.md §7 |
+62:+| OOH2-RT-H1 | High (AEGIS runtime omega7 H-1; Ω RED at 4a0a4b4 kept it High; DATA graded the same behaviour M-1 Medium) | next OOH wave; blocks merge and production | 2026-10-18 | ooh-py store.py:180-184 `append_prepared` compares only the log file's size with memory before a write, and the running service never re-reads the file (`RecordLog.verify()` has no caller; `verify_integrity` checks the ledger against the in-memory line hashes). A same-size in-place edit of an existing log line while the service runs is written over: writes answer 201 and integrity reports ok; only a restart refuses (StoreCorrupt or "no matching anchor"), and acknowledged lines can end up behind a broken chain. Contradicts store.py:159-160 ("the file must be exactly the in-memory lines before the write"), ADR 0022 (wave-2 section, "before a write the file must be exactly memory") and the docstring of tests/test_aegis_store_write_path.py (DATA INFO-7). The same size-only check is in the store.py copied into seo, sales, bizdev, service and influencer (rows OOH2-RT-H1-<SERVICE>). Fix wave 2 status (Oct 18 2026): ooh-py fixed in the commit that adds this text (byte compare of the whole file before every write and at every integrity check, `RecordLog.file_problem()`; tests/test_aegis_h1_file_content.py; ADR 0022 "AEGIS Ω RED at 4a0a4b4 and the H-1 fix"); the line stays open until AEGIS confirms the fix at an exact SHA | AEGIS omega7 runtime.md H-1 (fals/content_check.diff); omega5 data.md M-1 (poc/runtime_tamper.py); omega7 data.md INFO-7; omega5 omega.md ruling a |
+75:+| `python:ooh-py` | 805 | pytest collection | — |
+87:+            if problem is None:
+88:+                problem = self.log.file_problem()     # AEGIS H-1: the file, not only memory, against the ledger
+101:+caught at start (start-up refuses). While the service runs, the file must stay exactly the lines it holds: every
+102:+write compares the whole file with them first, and every integrity check does too (AEGIS H-1). A whole-file rewrite, a truncated tail or a deleted log is caught against
+110:+def _pread_exact(fd: int, n: int, offset: int) -> bytes:
+111:+    """Up to ``n`` bytes at ``offset``; fewer only at the end of the file (``pread`` may return a short read)."""
+112:+    chunks = []
+113:+    while n > 0:
+114:+        b = os.pread(fd, n, offset)
+115:+        if not b:
+116:+            break
+117:+        chunks.append(b)
+118:+        n -= len(b)
+119:+        offset += len(b)
+120:+    return b"".join(chunks)
+130:+    def _memory_bytes(self) -> bytes:
+131:+        return b"".join(ln + b"\n" for ln in self._lines)
+138:+        """Append one line. The file must be exactly the in-memory lines before the write, byte for byte (else
+139:+        refused, the file untouched: AEGIS H-1, a same-size edit of an existing line is refused too); a failed write
+140:+        is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file already holds exactly
+141:+        the in-memory lines followed by this line (a write that reached the disk before an fsync error), it is
+142:+        adopted instead of written twice. The whole file is read before every write: the cost grows with the log."""
+151:+                mem = self._memory_bytes()
+152:+                expected = len(mem)
+162:+                    adopt = size == expected + len(line) + 1
+163:+                    if not (adopt or size == expected) or _pread_exact(fd, expected, 0) != mem or \
+164:+                            (adopt and _pread_exact(fd, len(line) + 1, expected) != line + b"\n"):
+166:+                    if adopt:
+167:+                        os.fsync(fd)                  # already on disk: adopt it
+177:+    def file_problem(self) -> Optional[str]:
+178:+        """None when the log file holds exactly the in-memory lines, else why not (AEGIS H-1: the integrity check
+179:+        reads this, so a file changed under a running service is reported, not only refused at the next write)."""
+181:+            if not self.path:
+182:+                return None
+198:+                with open(self.path, "rb") as fh:
+199:+                    raw = fh.read()
+200:+            except FileNotFoundError:
+201:+                raw = b""                    # no line written yet: no file (a deleted file with lines in memory differs)
+202:+            except OSError as exc:
+203:+                return f"the local log file cannot be read ({type(exc).__name__})"
+204:+            if raw != self._memory_bytes():
+205:+                return "the local log file differs from the lines this service holds: an operator must inspect it"
+206:+            return None
+216:+"""AEGIS H-1 (runtime omega7; Ω RED at 4a0a4b4): the write path compared only the log file's SIZE with memory, so a
+217:+same-size in-place edit of an existing line while the service ran was written over, writes answered 201 and the
+218:+integrity check said ok. Now:
+219:+- every write compares the whole file with the in-memory lines, byte for byte, and refuses (503, file untouched);
+220:+- every integrity check does the same (``RecordLog.file_problem``), so a changed file stops writes even before one;
+221:+- a refused write was anchored first, so once the file is put back the next check rolls it forward."""
+222:+from __future__ import annotations
+224:+import os
+226:+import pytest
+228:+from store import RecordLog, StoreWriteError
+229:+from test_aegis_integrity_path import _anchors, _check, _new_tenant, env  # noqa: F401  (env is a fixture)
+230:+from test_aegis_store_write_path import _fake_os
+232:+DIFFERS = "the local log file differs from the lines this service holds: an operator must inspect it"
+235:+def _disk(h):
+236:+    with open(h.svc.log.path, "rb") as fh:
+237:+        return fh.read()
+240:+def _same_size_edit(h, index):
+241:+    """Change one hex digit of line ``index``'s record hash in place: same size, other bytes."""
+242:+    raw = _disk(h)
+243:+    lines = raw.split(b"\n")[:-1]
+244:+    target = lines[index]
+245:+    at = target.index(b'"record_sha256":"') + len(b'"record_sha256":"')
+246:+    flipped = b"0" if target[at:at + 1] != b"0" else b"1"
+247:+    offset = sum(len(ln) + 1 for ln in lines[:index]) + at
+248:+    with open(h.svc.log.path, "r+b") as fh:
+249:+        fh.seek(offset)
+250:+        fh.write(flipped)
+251:+    edited = _disk(h)
+252:+    assert len(edited) == len(raw) and edited != raw
+253:+    return raw, edited
+256:+def _three_lines(h):
+257:+    h.ok(_new_tenant(h, "t-2"), 201)
+258:+    h.ok(_new_tenant(h, "t-3"), 201)
+259:+    assert len(h.svc.log) >= 3
+262:+@pytest.mark.parametrize("which", ["first", "middle", "last"])
+263:+def test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write(env, which):
+264:+    led, h = env
+265:+    _three_lines(h)
+266:+    n = len(h.svc.log)
+267:+    index = {"first": 0, "middle": n // 2, "last": n - 1}[which]
+268:+    _, edited = _same_size_edit(h, index)
+269:+    r = _new_tenant(h, "after-edit")
+270:+    assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": True}, r.text
+271:+    assert _disk(h) == edited                                     # the file is left exactly as found
+272:+    assert len(h.svc.log) == n and "after-edit" not in h.svc.tenants
+273:+    assert h.svc.integrity["ok"] is False
+274:+    assert _check(h)["ok"] is False                               # still refused at the next check
+275:+    assert _disk(h) == edited
+276:+    assert _new_tenant(h, "after-check").json()["detail"] == "INTEGRITY_UNVERIFIED"
+279:+def test_h1_integrity_check_reports_a_changed_file_before_any_write(env):
+280:+    led, h = env
+281:+    _three_lines(h)
+282:+    _, edited = _same_size_edit(h, 1)
+283:+    i = _check(h)
+284:+    assert i["ok"] is False and i["problem"] == DIFFERS, i
+285:+    r = _new_tenant(h, "blocked")
+286:+    assert r.status_code == 503 and r.json()["detail"] == "INTEGRITY_UNVERIFIED", r.text
+287:+    assert _disk(h) == edited
+290:+def test_h1_integrity_check_is_ok_on_an_unchanged_file(env):
+291:+    led, h = env
+292:+    _three_lines(h)
+293:+    assert h.svc.log.file_problem() is None
+294:+    assert _check(h)["ok"] is True
+297:+def test_h1_putting_the_file_back_rolls_the_refused_write_forward(env):
+298:+    led, h = env
+299:+    _three_lines(h)
+300:+    n = len(h.svc.log)
+301:+    original, _ = _same_size_edit(h, n - 1)
+302:+    r = _new_tenant(h, "late-1")
+303:+    assert r.status_code == 503 and r.json()["maybe"] is True, r.text
+304:+    with open(h.svc.log.path, "wb") as fh:                        # the operator restores the file
+305:+        fh.write(original)
+306:+    for _ in range(2):
+307:+        _check(h)
+308:+    assert h.svc.integrity["ok"] is True, h.svc.integrity
+309:+    assert len(h.svc.log) == n + 1 and "late-1" in h.svc.tenants  # anchored before the refusal: rolled forward
+310:+    assert len(_anchors(led)) == len(h.svc.log)
+311:+    assert _disk(h) == original + h.svc.log.raw_lines(n)[0] + b"\n"
+314:+def test_h1_adoption_needs_the_whole_file_to_match(env):
+315:+    led, h = env
+316:+    _three_lines(h)
+317:+    log = h.svc.log
+318:+    rec, line = log.prepare("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": "ad-1", "actor": "andre"})
+319:+    with open(log.path, "ab") as fh:                              # this line already on disk (an fsync error)...
+320:+        fh.write(line + b"\n")
+321:+    _, edited = _same_size_edit(h, 0)                             # ...but an earlier line was changed
+322:+    n = len(log)
+323:+    with pytest.raises(StoreWriteError, match="the log file and memory disagree"):
+324:+        log.append_prepared(rec, line)
+325:+    assert _disk(h) == edited and len(log) == n
+328:+def test_h1_adoption_still_works_when_the_file_matches(env):
+329:+    led, h = env
+330:+    log = h.svc.log
+331:+    rec, line = log.prepare("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": "ad-2", "actor": "andre"})
+332:+    with open(log.path, "ab") as fh:
+333:+        fh.write(line + b"\n")
+334:+    want = _disk(h)
+335:+    log.append_prepared(rec, line)
+336:+    assert _disk(h) == want and log.raw_lines(len(log) - 1) == [line]
+339:+def test_h1_adoption_refuses_another_line_of_the_same_size(env):
+340:+    led, h = env
+341:+    log = h.svc.log
+342:+    rec, line = log.prepare("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": "ad-3", "actor": "andre"})
+343:+    other = line[:-2] + (b"0" if line[-2:-1] != b"0" else b"1") + line[-1:]
+344:+    with open(log.path, "ab") as fh:
+345:+        fh.write(other + b"\n")
+346:+    want = _disk(h)
+347:+    n = len(log)
+348:+    with pytest.raises(StoreWriteError, match="the log file and memory disagree"):
+349:+        log.append_prepared(rec, line)
+350:+    assert _disk(h) == want and len(log) == n
+353:+def test_h1_deleted_log_file_is_reported_and_refused(env):
+354:+    led, h = env
+355:+    _three_lines(h)
+356:+    n = len(h.svc.log)
+357:+    os.unlink(h.svc.log.path)
+358:+    i = _check(h)
+359:+    assert i["ok"] is False and i["problem"] == DIFFERS, i
+360:+    rec, line = h.svc.log.prepare("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": "del-1", "actor": "andre"})
+361:+    with pytest.raises(StoreWriteError, match="the log file and memory disagree"):
+362:+        h.svc.log.append_prepared(rec, line)
+363:+    assert _disk(h) == b"" and len(h.svc.log) == n                # nothing written into the re-created file
+366:+def test_h1_unreadable_log_file_is_reported(env):
+367:+    led, h = env
+368:+    path = h.svc.log.path
+369:+    os.chmod(path, 0)
+370:+    try:
+371:+        if os.access(path, os.R_OK):
+372:+            pytest.skip("running as a user that reads mode-0 files (root)")
+373:+        i = _check(h)
+374:+        assert i["ok"] is False and i["problem"] == "the local log file cannot be read (PermissionError)", i
+375:+    finally:
+376:+        os.chmod(path, 0o600)
+379:+def test_h1_no_file_yet_and_an_in_memory_log_have_no_file_problem(tmp_path):
+380:+    assert RecordLog(str(tmp_path / "fresh")).file_problem() is None      # no line written: no file is right
+381:+    assert RecordLog(None).file_problem() is None
+384:+def test_h1_short_reads_are_completed(env, monkeypatch):
+385:+    led, h = env
+386:+    _three_lines(h)
+387:+    real_pread = os.pread
+389:+    def one_byte(fd, n, offset):
+390:+        return real_pread(fd, min(n, 1), offset)
+392:+    _fake_os(monkeypatch, pread=one_byte)
+393:+    h.ok(_new_tenant(h, "slow-read"), 201)
+394:+    monkeypatch.undo()
+395:+    assert "slow-read" in h.svc.tenants and h.svc.log.file_problem() is None

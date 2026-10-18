@@ -1,0 +1,3 @@
+write committed seq 4 | file == memory: False
+file_problem after the race: the local log file differs from the lines this service holds: an operator must inspect it
+next write REFUSED: the log file and memory disagree; refusing to write

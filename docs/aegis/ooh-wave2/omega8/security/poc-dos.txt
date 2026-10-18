@@ -1,0 +1,7 @@
+file_problem still blocked after 3 s: True
+append blocked behind the store lock after 3 s: True {}
+exit=0
+sparse 1073741824 B: file_problem='the local log file differs from the lines this service holds: an operator must inspect it' in 0.12s, maxrss 20 -> 1044 MiB (macOS ru_maxrss in bytes)
+append refused in 0.0001s: the log file and memory disagree; refusing to write
+file_problem reading /dev/zero still running after 4 s: True maxrss MiB 16465.25
+exit=0

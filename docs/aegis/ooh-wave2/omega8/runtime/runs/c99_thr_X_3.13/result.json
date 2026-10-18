@@ -1,0 +1,148 @@
+{
+ "scen": "thr",
+ "mode": "X",
+ "repl": "inplace",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega8/runtime/src99/services/ooh-py",
+ "python": "3.13.9",
+ "start": {
+  "status": "ok"
+ },
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:43Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "file_sha_after": "4cffd75100986a550256c59e7568ac0f4b0c75c1e24056777eba681c462cd20b",
+  "file_unchanged": false,
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:43Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "4cffd75100986a550256c59e7568ac0f4b0c75c1e24056777eba681c462cd20b",
+  "file_sha_after": "d981f6f6f60feaa7f2b1a5c46f1b972553ee3b8bec4cd4cb244945ec2326f55d",
+  "file_unchanged": false,
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false
+ },
+ "A_pre": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:26:43Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "d981f6f6f60feaa7f2b1a5c46f1b972553ee3b8bec4cd4cb244945ec2326f55d"
+ },
+ "pre": {
+  "disk": {
+   "sha256": "d981f6f6f60feaa7f2b1a5c46f1b972553ee3b8bec4cd4cb244945ec2326f55d",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T13:26:43Z",
+   "problem": null
+  }
+ },
+ "fault": {
+  "orig_sha": "d981f6f6f60feaa7f2b1a5c46f1b972553ee3b8bec4cd4cb244945ec2326f55d",
+  "fault_sha": "846394b2f6ae7853bc152106aac9e206aa2badf062264bb82d22c7d6b1acf638",
+  "same_size": true,
+  "disk": {
+   "sha256": "846394b2f6ae7853bc152106aac9e206aa2badf062264bb82d22c7d6b1acf638",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  }
+ },
+ "A_throttled": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:26:43Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "846394b2f6ae7853bc152106aac9e206aa2badf062264bb82d22c7d6b1acf638"
+ },
+ "A_after_window": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:26:54Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "846394b2f6ae7853bc152106aac9e206aa2badf062264bb82d22c7d6b1acf638"
+ },
+ "job": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:26:54Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "846394b2f6ae7853bc152106aac9e206aa2badf062264bb82d22c7d6b1acf638"
+ },
+ "final": {
+  "disk": {
+   "sha256": "846394b2f6ae7853bc152106aac9e206aa2badf062264bb82d22c7d6b1acf638",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2
+  },
+  "ledger_verify": {
+   "entries": 4,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before"
+  ]
+ }
+}

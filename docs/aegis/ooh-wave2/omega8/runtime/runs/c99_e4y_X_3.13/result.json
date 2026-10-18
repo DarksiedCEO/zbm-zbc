@@ -1,0 +1,163 @@
+{
+ "scen": "e4y",
+ "mode": "X",
+ "repl": "inplace",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega8/runtime/src99/services/ooh-py",
+ "python": "3.13.9",
+ "start": {
+  "status": "ok"
+ },
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:31Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "file_sha_after": "6c25f12836712b3a29c78019fc8a14b45769c15f6ddaa13d3bdde8b521bb5820",
+  "file_unchanged": false,
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:31Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "6c25f12836712b3a29c78019fc8a14b45769c15f6ddaa13d3bdde8b521bb5820",
+  "file_sha_after": "01c81b8fd0bdfd271dd458b965572c456bedb1c3e0e7d5645d6acc89e6711c7f",
+  "file_unchanged": false,
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false
+ },
+ "pre": {
+  "disk": {
+   "sha256": "01c81b8fd0bdfd271dd458b965572c456bedb1c3e0e7d5645d6acc89e6711c7f",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T13:26:30Z",
+   "problem": null
+  }
+ },
+ "fault": {
+  "orig_sha": "01c81b8fd0bdfd271dd458b965572c456bedb1c3e0e7d5645d6acc89e6711c7f",
+  "fault_sha": "5686bcbc877ae64a1491b387e9c1084ad6245fb3d41a887514d0a071690e8e51",
+  "same_size": true,
+  "disk": {
+   "sha256": "5686bcbc877ae64a1491b387e9c1084ad6245fb3d41a887514d0a071690e8e51",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  }
+ },
+ "A_no_write": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:26:42Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "5686bcbc877ae64a1491b387e9c1084ad6245fb3d41a887514d0a071690e8e51"
+ },
+ "job_no_write": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:26:42Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "5686bcbc877ae64a1491b387e9c1084ad6245fb3d41a887514d0a071690e8e51"
+ },
+ "restart_tampered": {
+  "exited": 1,
+  "tail": [
+   "    raise StoreCorrupt(f\"log line {i + 1} is not JSON\") from exc",
+   "store.StoreCorrupt: log line 2 is not JSON"
+  ]
+ },
+ "file_after_restart_unchanged": true,
+ "restart_putback": {
+  "status": "ok"
+ },
+ "A_putback": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:26:42Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "01c81b8fd0bdfd271dd458b965572c456bedb1c3e0e7d5645d6acc89e6711c7f"
+ },
+ "W_putback": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:43Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "01c81b8fd0bdfd271dd458b965572c456bedb1c3e0e7d5645d6acc89e6711c7f",
+  "file_sha_after": "4281375554c8a42d9c9c7c12f0d00c429d831ed945ec429c10211002987aa99a",
+  "file_unchanged": false,
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": false
+ },
+ "final": {
+  "disk": {
+   "sha256": "4281375554c8a42d9c9c7c12f0d00c429d831ed945ec429c10211002987aa99a",
+   "size": 2061,
+   "lines": 3,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 6,
+   "ooh_anchors": 3
+  },
+  "ledger_verify": {
+   "entries": 6,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-after"
+  ]
+ }
+}

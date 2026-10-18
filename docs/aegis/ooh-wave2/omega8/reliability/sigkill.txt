@@ -1,0 +1,4 @@
+half rc -9 restart StoreCorrupt log ends with a torn line; refusing to start (inspect the file)
+full rc -9 restart lines 4 file_problem None
+half rc -9 restart StoreCorrupt log ends with a torn line; refusing to start (inspect the file)
+full rc -9 restart lines 4 file_problem None

@@ -1,0 +1,10 @@
+== rel-old
+n=100 bytes=71482 write_med_ms=0.10 write_max_ms=0.15 check_med_ms=1.19 (verify)
+n=1000 bytes=716783 write_med_ms=0.11 write_max_ms=0.28 check_med_ms=10.12 (verify)
+n=10000 bytes=7187784 write_med_ms=0.51 write_max_ms=0.70 check_med_ms=107.15 (verify)
+n=50000 bytes=36027784 write_med_ms=2.57 write_max_ms=3.48 check_med_ms=535.31 (verify)
+== rel-copy
+n=100 bytes=71482 write_med_ms=0.10 write_max_ms=0.16 check_med_ms=0.03 (file_problem)
+n=1000 bytes=716783 write_med_ms=0.20 write_max_ms=0.35 check_med_ms=0.15 (file_problem)
+n=10000 bytes=7187784 write_med_ms=1.85 write_max_ms=2.48 check_med_ms=1.65 (file_problem)
+n=50000 bytes=36027784 write_med_ms=10.21 write_max_ms=16.73 check_med_ms=9.94 (file_problem)

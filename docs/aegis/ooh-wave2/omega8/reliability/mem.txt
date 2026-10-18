@@ -1,0 +1,4 @@
+rel-old
+peak extra MB during one write at 50000 lines: 0.450459
+rel-copy
+peak extra MB during one write at 50000 lines: 76.850193

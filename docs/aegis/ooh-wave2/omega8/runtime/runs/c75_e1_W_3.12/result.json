@@ -1,0 +1,275 @@
+{
+ "scen": "e1",
+ "mode": "W",
+ "repl": "inplace",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega8/runtime/src75/services/ooh-py",
+ "python": "3.12.14",
+ "start": {
+  "status": "ok"
+ },
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:53Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "file_sha_after": "c51f421c5f9608685a50b7cb4389bf7cb3790f4342c40f04fc3ac8310fcfd41a",
+  "file_unchanged": false,
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T13:26:53Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "c51f421c5f9608685a50b7cb4389bf7cb3790f4342c40f04fc3ac8310fcfd41a",
+  "file_sha_after": "87d16140a60d1dce737501106b701d46a21bc906164448a53fac007fa16fef4a",
+  "file_unchanged": false,
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false
+ },
+ "pre": {
+  "disk": {
+   "sha256": "87d16140a60d1dce737501106b701d46a21bc906164448a53fac007fa16fef4a",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T13:26:53Z",
+   "problem": null
+  }
+ },
+ "fault": {
+  "orig_sha": "87d16140a60d1dce737501106b701d46a21bc906164448a53fac007fa16fef4a",
+  "fault_sha": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3",
+  "same_size": false,
+  "disk": {
+   "sha256": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3",
+   "size": 1380,
+   "lines": 3,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  }
+ },
+ "W3": {
+  "status": 503,
+  "body": {
+   "detail": "STORE_UNAVAILABLE",
+   "maybe": true
+  },
+  "file_sha_before": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3",
+  "file_sha_after": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3",
+  "file_unchanged": true,
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": true
+ },
+ "after_W3": {
+  "disk": {
+   "sha256": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3",
+   "size": 1380,
+   "lines": 3,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.line"
+   ]
+  },
+  "status_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-18T13:27:04Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "file_eq_fault": true
+ },
+ "A_after_W3": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:27:04Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "file_sha": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3"
+ },
+ "job_after_W3": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T13:27:04Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3"
+ },
+ "W4": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "file_sha_before": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3",
+  "file_sha_after": "549830b9e6096af7da4a15b1c18b64a0ece150e254a8bb4a240a1340e18d7ad3",
+  "file_unchanged": true,
+  "anchors_before": 3,
+  "anchors_after": 3,
+  "pending_present": true
+ },
+ "file_eq_fault_before_putback": true,
+ "putback_prefix_is_fault": true,
+ "putback_sha": "87d16140a60d1dce737501106b701d46a21bc906164448a53fac007fa16fef4a",
+ "job_putback": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:27:16Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "file_sha": "b2b12dc2958ab5a62b3aa82f6e04152ba2c8d63417a185b6cc94fdccf37d714d"
+ },
+ "A_putback": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:27:16Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 3
+  },
+  "file_sha": "b2b12dc2958ab5a62b3aa82f6e04152ba2c8d63417a185b6cc94fdccf37d714d"
+ },
+ "after_putback": {
+  "disk": {
+   "sha256": "b2b12dc2958ab5a62b3aa82f6e04152ba2c8d63417a185b6cc94fdccf37d714d",
+   "size": 2037,
+   "lines": 3,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 6,
+   "ooh_anchors": 3
+  }
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:04Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "b2b12dc2958ab5a62b3aa82f6e04152ba2c8d63417a185b6cc94fdccf37d714d",
+  "file_sha_after": "b2b12dc2958ab5a62b3aa82f6e04152ba2c8d63417a185b6cc94fdccf37d714d",
+  "file_unchanged": true,
+  "anchors_before": 3,
+  "anchors_after": 3,
+  "pending_present": false
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:16Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "b2b12dc2958ab5a62b3aa82f6e04152ba2c8d63417a185b6cc94fdccf37d714d",
+  "file_sha_after": "bdf9bb2b58c4e5cdb42d64882840d79b19691f07b42a1306cc0f75e9c09abcca",
+  "file_unchanged": false,
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T13:27:16Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "file_sha": "bdf9bb2b58c4e5cdb42d64882840d79b19691f07b42a1306cc0f75e9c09abcca"
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T13:27:16Z",
+   "campaigns": 0
+  },
+  "file_sha_before": "bdf9bb2b58c4e5cdb42d64882840d79b19691f07b42a1306cc0f75e9c09abcca",
+  "file_sha_after": "44f06e26cc90755533a528757dd5909410135ee5763fe7a83e03a5d8c159afb6",
+  "file_unchanged": false,
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false
+ },
+ "final": {
+  "disk": {
+   "sha256": "44f06e26cc90755533a528757dd5909410135ee5763fe7a83e03a5d8c159afb6",
+   "size": 3391,
+   "lines": 5,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "ledger": {
+   "entries": 10,
+   "ooh_anchors": 5
+  },
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

@@ -1,0 +1,204 @@
+FFFFFFF..FFFF                                                            [100%]
+=================================== FAILURES ===================================
+___ test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write[first] ___
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x107ac0500>, <helpers.Harness object at 0x107ac2e10>)
+which = 'first'
+
+    @pytest.mark.parametrize("which", ["first", "middle", "last"])
+    def test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write(env, which):
+        led, h = env
+        _three_lines(h)
+        n = len(h.svc.log)
+        index = {"first": 0, "middle": n // 2, "last": n - 1}[which]
+        _, edited = _same_size_edit(h, index)
+        r = _new_tenant(h, "after-edit")
+>       assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": True}, r.text
+E       AssertionError: {"tenant_id":"after-edit","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+E       assert (201 == 503)
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests/test_aegis_h1_file_content.py:55: AssertionError
+__ test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write[middle] ___
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x107c87f50>, <helpers.Harness object at 0x107c87f20>)
+which = 'middle'
+
+    @pytest.mark.parametrize("which", ["first", "middle", "last"])
+    def test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write(env, which):
+        led, h = env
+        _three_lines(h)
+        n = len(h.svc.log)
+        index = {"first": 0, "middle": n // 2, "last": n - 1}[which]
+        _, edited = _same_size_edit(h, index)
+        r = _new_tenant(h, "after-edit")
+>       assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": True}, r.text
+E       AssertionError: {"tenant_id":"after-edit","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+E       assert (201 == 503)
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests/test_aegis_h1_file_content.py:55: AssertionError
+___ test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write[last] ____
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x1080576b0>, <helpers.Harness object at 0x1080566f0>)
+which = 'last'
+
+    @pytest.mark.parametrize("which", ["first", "middle", "last"])
+    def test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write(env, which):
+        led, h = env
+        _three_lines(h)
+        n = len(h.svc.log)
+        index = {"first": 0, "middle": n // 2, "last": n - 1}[which]
+        _, edited = _same_size_edit(h, index)
+        r = _new_tenant(h, "after-edit")
+>       assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": True}, r.text
+E       AssertionError: {"tenant_id":"after-edit","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+E       assert (201 == 503)
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests/test_aegis_h1_file_content.py:55: AssertionError
+_______ test_h1_integrity_check_reports_a_changed_file_before_any_write ________
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x107f17a40>, <helpers.Harness object at 0x107f17e30>)
+
+    def test_h1_integrity_check_reports_a_changed_file_before_any_write(env):
+        led, h = env
+        _three_lines(h)
+        _, edited = _same_size_edit(h, 1)
+        i = _check(h)
+>       assert i["ok"] is False and i["problem"] == DIFFERS, i
+E       AssertionError: {'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None}
+E       assert (True is False)
+
+tests/test_aegis_h1_file_content.py:69: AssertionError
+______________ test_h1_integrity_check_is_ok_on_an_unchanged_file ______________
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x107dd7b90>, <helpers.Harness object at 0x107dd60c0>)
+
+    def test_h1_integrity_check_is_ok_on_an_unchanged_file(env):
+        led, h = env
+        _three_lines(h)
+>       assert h.svc.log.file_problem() is None
+               ^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'RecordLog' object has no attribute 'file_problem'
+
+tests/test_aegis_h1_file_content.py:78: AttributeError
+________ test_h1_putting_the_file_back_rolls_the_refused_write_forward _________
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x10837ade0>, <helpers.Harness object at 0x10837ab40>)
+
+    def test_h1_putting_the_file_back_rolls_the_refused_write_forward(env):
+        led, h = env
+        _three_lines(h)
+        n = len(h.svc.log)
+        original, _ = _same_size_edit(h, n - 1)
+        r = _new_tenant(h, "late-1")
+>       assert r.status_code == 503 and r.json()["maybe"] is True, r.text
+E       AssertionError: {"tenant_id":"late-1","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+E       assert (201 == 503)
+E        +  where 201 = <Response [201 Created]>.status_code
+
+tests/test_aegis_h1_file_content.py:88: AssertionError
+________________ test_h1_adoption_needs_the_whole_file_to_match ________________
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x1084bea50>, <helpers.Harness object at 0x1084bfbf0>)
+
+    def test_h1_adoption_needs_the_whole_file_to_match(env):
+        led, h = env
+        _three_lines(h)
+        log = h.svc.log
+        rec, line = log.prepare("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": "ad-1", "actor": "andre"})
+        with open(log.path, "ab") as fh:                              # this line already on disk (an fsync error)...
+            fh.write(line + b"\n")
+        _, edited = _same_size_edit(h, 0)                             # ...but an earlier line was changed
+        n = len(log)
+>       with pytest.raises(StoreWriteError, match="the log file and memory disagree"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE StoreWriteError
+
+tests/test_aegis_h1_file_content.py:108: Failed
+_______________ test_h1_deleted_log_file_is_reported_and_refused _______________
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x10850d2b0>, <helpers.Harness object at 0x1084f4650>)
+
+    def test_h1_deleted_log_file_is_reported_and_refused(env):
+        led, h = env
+        _three_lines(h)
+        n = len(h.svc.log)
+        os.unlink(h.svc.log.path)
+        i = _check(h)
+>       assert i["ok"] is False and i["problem"] == DIFFERS, i
+E       AssertionError: {'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None}
+E       assert (True is False)
+
+tests/test_aegis_h1_file_content.py:144: AssertionError
+___________________ test_h1_unreadable_log_file_is_reported ____________________
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x107e17350>, <helpers.Harness object at 0x107e15790>)
+
+    def test_h1_unreadable_log_file_is_reported(env):
+        led, h = env
+        path = h.svc.log.path
+        os.chmod(path, 0)
+        try:
+            if os.access(path, os.R_OK):
+                pytest.skip("running as a user that reads mode-0 files (root)")
+            i = _check(h)
+>           assert i["ok"] is False and i["problem"] == "the local log file cannot be read (PermissionError)", i
+E           AssertionError: {'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None}
+E           assert (True is False)
+
+tests/test_aegis_h1_file_content.py:159: AssertionError
+________ test_h1_no_file_yet_and_an_in_memory_log_have_no_file_problem _________
+
+tmp_path = PosixPath('/private/var/folders/2_/q80gd3fn3f50pcmk1qlw7gnh0000gn/T/pytest-of-<USER>/pytest-13065/test_h1_no_file_yet_and_an_in_0')
+
+    def test_h1_no_file_yet_and_an_in_memory_log_have_no_file_problem(tmp_path):
+>       assert RecordLog(str(tmp_path / "fresh")).file_problem() is None      # no line written: no file is right
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'RecordLog' object has no attribute 'file_problem'
+
+tests/test_aegis_h1_file_content.py:165: AttributeError
+______________________ test_h1_short_reads_are_completed _______________________
+
+env = (<test_aegis_integrity_path._CountingLedger object at 0x107f24dd0>, <helpers.Harness object at 0x107f25520>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107f27d10>
+
+    def test_h1_short_reads_are_completed(env, monkeypatch):
+        led, h = env
+        _three_lines(h)
+        real_pread = os.pread
+    
+        def one_byte(fd, n, offset):
+            return real_pread(fd, min(n, 1), offset)
+    
+        _fake_os(monkeypatch, pread=one_byte)
+        h.ok(_new_tenant(h, "slow-read"), 201)
+        monkeypatch.undo()
+>       assert "slow-read" in h.svc.tenants and h.svc.log.file_problem() is None
+                                                ^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'RecordLog' object has no attribute 'file_problem'
+
+tests/test_aegis_h1_file_content.py:180: AttributeError
+=============================== warnings summary ===============================
+../../../../../venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/test_aegis_h1_file_content.py::test_h1_adoption_still_works_when_the_file_matches
+PASSED tests/test_aegis_h1_file_content.py::test_h1_adoption_refuses_another_line_of_the_same_size
+FAILED tests/test_aegis_h1_file_content.py::test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write[first]
+FAILED tests/test_aegis_h1_file_content.py::test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write[middle]
+FAILED tests/test_aegis_h1_file_content.py::test_h1_same_size_edit_of_an_existing_line_refuses_the_next_write[last]
+FAILED tests/test_aegis_h1_file_content.py::test_h1_integrity_check_reports_a_changed_file_before_any_write
+FAILED tests/test_aegis_h1_file_content.py::test_h1_integrity_check_is_ok_on_an_unchanged_file
+FAILED tests/test_aegis_h1_file_content.py::test_h1_putting_the_file_back_rolls_the_refused_write_forward
+FAILED tests/test_aegis_h1_file_content.py::test_h1_adoption_needs_the_whole_file_to_match
+FAILED tests/test_aegis_h1_file_content.py::test_h1_deleted_log_file_is_reported_and_refused
+FAILED tests/test_aegis_h1_file_content.py::test_h1_unreadable_log_file_is_reported
+FAILED tests/test_aegis_h1_file_content.py::test_h1_no_file_yet_and_an_in_memory_log_have_no_file_problem
+FAILED tests/test_aegis_h1_file_content.py::test_h1_short_reads_are_completed
+11 failed, 2 passed, 1 warning in 1.21s

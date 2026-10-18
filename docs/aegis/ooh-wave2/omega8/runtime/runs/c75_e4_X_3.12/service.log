@@ -1,0 +1,39 @@
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [77374]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:54650 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54656 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54658 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54663 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54717 - "GET /ooh/v1/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54718 - "GET /ooh/v1/audit/integrity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54721 - "POST /ooh/v1/jobs/integrity/run HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77374]
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [77424]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:54650 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54728 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54729 - "GET /ooh/v1/audit/integrity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54732 - "POST /ooh/v1/tenants HTTP/1.1" 503 Service Unavailable
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77424]
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [77425]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:54650 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54738 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54739 - "GET /ooh/v1/audit/integrity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54742 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77425]
