@@ -4,12 +4,12 @@
 
 ## Binding
 
-- Repo: `/Users/andrelove/PycharmProjects/zbm-zbc`
+- Repo: `<HOME>/PycharmProjects/zbm-zbc`
 - candidateSha: `d80adc5528ddad4f27427098efe2beee32ee5d6a`
 - treeOid: `5c059f868fe4426859c737170ae75ea9a94f351e`
 - Base: `a6aee4e9fe78bb58a94243acce406d2e7b702387` (confirmed as the merge-base)
 - Scope: `git diff a6aee4e d80adc5 -- services devtools .gitignore` (125 files). Nothing outside this diff is certified.
-- Worktree: `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5`. HEAD matched the candidate before and after; `git status --short` was empty before and after.
+- Worktree: `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5`. HEAD matched the candidate before and after; `git status --short` was empty before and after.
 - Isolation mode: exclusivity only. Everything ran in-process against fakes (`FakeLedgerClient`, `FakeDockerCli`) with file-backed logs in per-run temp dirs, or against Rust test scratch under a private `TMPDIR` with `CARGO_TARGET_DIR` in my scratchpad. No real, shared or production ledger, service or database was contacted. This does not prove behaviour against the real ledger-rust server over HTTP, real Docker, or Linux.
 
 ## What persisted state the wave touches
@@ -205,11 +205,11 @@ Any content change to the candidate voids this result.
 
 ## Files
 
-Probe scripts are kept for reproduction in `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/aegis-data-probe/`:
+Probe scripts are kept for reproduction in `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/aegis-data-probe/`:
 - `conftest.py`
 - `test_probe_data.py`
 - `fifo_probe.py`
 
-Run the delivery probe with `/Users/andrelove/PycharmProjects/zbm-zbc/services/delivery-py/.venv/bin/python -m pytest -p no:cacheprovider -c /dev/null --rootdir <probe dir> -s -q test_probe_data.py` and `PYTHONDONTWRITEBYTECODE=1`. Run `fifo_probe.py` with the fulfillment-py venv's Python.
+Run the delivery probe with `<HOME>/PycharmProjects/zbm-zbc/services/delivery-py/.venv/bin/python -m pytest -p no:cacheprovider -c /dev/null --rootdir <probe dir> -s -q test_probe_data.py` and `PYTHONDONTWRITEBYTECODE=1`. Run `fifo_probe.py` with the fulfillment-py venv's Python.
 
 The disposable cargo target and temp dirs were removed. Nothing was edited, committed or pushed.

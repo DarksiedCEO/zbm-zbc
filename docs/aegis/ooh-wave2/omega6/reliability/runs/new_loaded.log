@@ -1,4 +1,4 @@
-SHA ce665c5 tree 5530ba0 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 under 28 CPU burners (python busy loops), 4 seq runs + 2 shuffled of 60 tests
+SHA ce665c5 tree 5530ba0 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 under 28 CPU burners (python busy loops), 4 seq runs + 2 shuffled of 60 tests
 60 passed, 1 warning in 13.88s
 60 passed, 1 warning in 16.86s
 60 passed, 1 warning in 14.86s

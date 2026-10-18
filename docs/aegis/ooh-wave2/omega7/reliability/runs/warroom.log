@@ -1,4 +1,4 @@
-warroom SHA 75b0662 tree 67c1518 /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14
+warroom SHA 75b0662 tree 67c1518 /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14
 seed 1 exit 0
 Gate: **PASS**. LLM personas: NOT_CONNECTED (deterministic personas only).
 | Department | Gate | Cases | PASS | FAIL | ERROR | MUST pass rate (excl. known) | SHOULD score | Known failures |

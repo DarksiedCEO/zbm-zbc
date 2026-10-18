@@ -4,7 +4,7 @@
    "ooh",
    "log_anchor"
   ],
-  "ledger_after_edit": "refused (ledger head checkpoint check failed: the log /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/data/live/integ-3.12/a-last-l); accepted once with LEDGER_ALLOW_RESET=30:f922e6ddb7392ba4/29:14275a147d045815; normal restart ok",
+  "ledger_after_edit": "refused (ledger head checkpoint check failed: the log /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/data/live/integ-3.12/a-last-l); accepted once with LEDGER_ALLOW_RESET=30:f922e6ddb7392ba4/29:14275a147d045815; normal restart ok",
   "check": {
    "ok": false,
    "checked_at": "2026-10-16T18:00:00Z",

@@ -1,8 +1,8 @@
-SHA 75b0662823b867df3325d676b1dcf69abe37a425 tree 67c15180382fab1a391b78756467c1a79a934973 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python Python 3.13.9 full suite
+SHA 75b0662823b867df3325d676b1dcf69abe37a425 tree 67c15180382fab1a391b78756467c1a79a934973 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python Python 3.13.9 full suite
 ........................................................................ [100%]
 =============================== warnings summary ===============================
 ../../../../../../venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1
-  /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

@@ -1,5 +1,5 @@
-[197248.71] started ledger pid 75988 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/target/release/server extra_env {}
-[197248.77] started service pid 75989 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api extra_env {}
+[197248.71] started ledger pid 75988 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/target/release/server extra_env {}
+[197248.77] started service pid 75989 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api extra_env {}
 [197249.22] service health {'status': 'ok'}
 [197249.23] status.integrity {'ok': True, 'checked_at': '2026-10-18T04:02:35Z', 'problem': None} ports {'finance_31': 'NOT_CONNECTED', 'vendor_orders': 'NOT_CONNECTED', 'esign': 'NOT_CONNECTED', 'inventory_data': 'NOT_CONNECTED', 'measurement': 'NOT_CONNECTED', 'programmatic_dooh': 'NOT_CONNECTED'}
 [197249.34] W1 (201, {'tenant_id': 't-before', 'killed': False, 'created_at': '2026-10-18T04:02:36Z', 'campaigns': 0})
@@ -7,15 +7,15 @@
 [197249.47] audit before rollback {'integrity': {'ok': True, 'checked_at': '2026-10-18T04:02:35Z', 'problem': None}, 'ledger_valid': True, 'log_length': 2}
 [197249.47] SIGKILL ledger pid 75988 returncode -9
 [197249.48] ROLLBACK: removed last ledger line {"seq": 3, "department": "ooh", "event_type": "log_anchor", "payload": null, "summary": "tenant_created #2", "sha256": "968948df9ab64bc02fadb285cd30a138e9a0cb16b4d235bb70f04f56496ac9ff"} ledger lines 4 -> 3
-[197249.48] started ledger pid 75992 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/target/release/server extra_env {}
-[197249.49] ledger start WITHOUT reset rc 1 refusal: ledger-rust: REFUSING TO START — ledger log at /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_c_3.13/ledger/ledger.jsonl failed to load: ledger head checkpoint check failed: the log /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_c_3.13/ledger/ledger.jsonl holds 3 entries but the head checkpoint records 4 (head hash 2c7d3eafc99083c3ab1821a5f03e0c6b1ba1e7f5d6a6424d470af6f804a1a812): acknowledged entries were removed (t
+[197249.48] started ledger pid 75992 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/target/release/server extra_env {}
+[197249.49] ledger start WITHOUT reset rc 1 refusal: ledger-rust: REFUSING TO START — ledger log at /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_c_3.13/ledger/ledger.jsonl failed to load: ledger head checkpoint check failed: the log /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_c_3.13/ledger/ledger.jsonl holds 3 entries but the head checkpoint records 4 (head hash 2c7d3eafc99083c3ab1821a5f03e0c6b1ba1e7f5d6a6424d470af6f804a1a812): acknowledged entries were removed (t
 [197260.51] audit while the ledger refuses to start {'integrity': {'ok': False, 'checked_at': '2026-10-18T04:02:47Z', 'problem': 'the ledger cannot be read'}, 'ledger_valid': False, 'log_length': 2}
 [197260.52] W3 while ledger refuses (503, {'detail': 'INTEGRITY_UNVERIFIED', 'maybe': False})
-[197260.53] started ledger pid 76027 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/target/release/server extra_env {'LEDGER_ALLOW_RESET': '4:2c7d3eafc99083c3/3:a5a9e52ad5af2aae'}
+[197260.53] started ledger pid 76027 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/target/release/server extra_env {'LEDGER_ALLOW_RESET': '4:2c7d3eafc99083c3/3:a5a9e52ad5af2aae'}
 Traceback (most recent call last):
-  File "/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/scripts/integrity_witness.py", line 216, in <module>
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/scripts/integrity_witness.py", line 216, in <module>
     start("ledger", {"LEDGER_ALLOW_RESET": binding}); log("ledger health (operator reset, rolled-back log)", wait(L+"/health", proc="ledger"))
                                                                                                              ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/scripts/integrity_witness.py", line 51, in wait
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/scripts/integrity_witness.py", line 51, in wait
     raise RuntimeError(f"{proc} exited rc={procs[proc].returncode}")
 RuntimeError: ledger exited rc=0

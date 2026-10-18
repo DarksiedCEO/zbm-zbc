@@ -1,4 +1,4 @@
-SHA 75b0662 tree 67c1518 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 seed 8 cycles 20 ledger-kill real ledger sha256 e65be4cc
+SHA 75b0662 tree 67c1518 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 seed 8 cycles 20 ledger-kill real ledger sha256 e65be4cc
 workdir /var/folders/2_/q80gd3fn3f50pcmk1qlw7gnh0000gn/T/tmptfvswns2
 writers joined; status now: {'ok': True, 'checked_at': '2026-10-18T10:38:19Z', 'problem': None}
 status integrity: {'ok': True, 'checked_at': '2026-10-18T10:38:19Z', 'problem': None}

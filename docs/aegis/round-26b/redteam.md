@@ -6,7 +6,7 @@
 
 - **Subject:** zbm-zbc, candidate `d80adc5528ddad4f27427098efe2beee32ee5d6a` (= `origin/fix26b`), tree `5c059f868fe4426859c737170ae75ea9a94f351e`.
 - **Scope:** the five claims in the brief; code diff `4c3a21a..d80adc5 -- .github services` (4 files).
-- **Sandbox:** `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/redteam-d80adc5` (detached at d80adc5).
+- **Sandbox:** `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/redteam-d80adc5` (detached at d80adc5).
 - **Mutants:** every mutant was planted there by script and restored in a `finally`. At the end `git status --short` in the sandbox is empty and HEAD is d80adc5. The main repo is untouched (only the pre-existing `.git.backup-preimport/` and `.idea/` are untracked).
 - **Platform:** macOS arm64, no Docker. Detection venv is Python 3.14.4 (CI uses 3.12/3.13), delivery venv 3.13.9, Go 1.25.5. The repo's own venvs were used as interpreters only, with `PYTHONDONTWRITEBYTECODE=1 -p no:cacheprovider`.
 - **Scripts and logs:** `<scratchpad>/rt/` holds `mut.py`, `mut2.py`, `probe.py`, `gomut.py`, `dmut.py` and `logs/` (all 53 job logs of run 37135247923, plus the macOS delivery logs of CI #4 and #5).

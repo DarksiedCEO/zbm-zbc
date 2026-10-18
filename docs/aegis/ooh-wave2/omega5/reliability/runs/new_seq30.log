@@ -1,4 +1,4 @@
-SHA 4a0a4b4 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 30x sequential test_aegis_integrity_path.py
+SHA 4a0a4b4 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 30x sequential test_aegis_integrity_path.py
 seq 1 50 passed, 1 warning in 18.50s
 seq 2 50 passed, 1 warning in 13.61s
 seq 3 50 passed, 1 warning in 15.35s

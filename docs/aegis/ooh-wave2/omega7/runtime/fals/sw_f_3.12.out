@@ -1,5 +1,5 @@
-[220173.86] started ledger pid 60730 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
-[220173.89] started service pid 60731 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
+[220173.86] started ledger pid 60730 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
+[220173.89] started service pid 60731 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
 [220174.21] service health {'status': 'ok', 'integrity': None, 'log_length': None}
 [220174.26] W1 (201, {'tenant_id': 't-before', 'killed': False, 'created_at': '2026-10-18T10:24:41Z', 'campaigns': 0})
 [220174.27] PRE {"disk": {"sha256": "361fd25088dc2d96ad0d4619d46e29b5b7e5eb7494e4a9bcb44bef48524c8638", "size": 695, "lines": 1, "line_shas": ["c27a50f21ebfaa4ba90a17be28445bfadd984b32dd131659aa555494c3ba0c33"], "dir": ["ooh.lock", "ooh_log.jsonl"], "mode": "0o700"}, "ledger": {"entries": 2, "ooh_anchors": 1, "ooh_other": ["tenant_created"], "anchor_line_shas": [null]}, "status_integrity": {"ok": true, "checked_at": "2026-10-18T10:24:41Z", "problem": null}}
@@ -14,7 +14,7 @@
 [220174.40] W5 after restore (201, {'tenant_id': 't-z', 'killed': False, 'created_at': '2026-10-18T10:24:41Z', 'campaigns': 0})
 [220174.44] W3 retry same request_id (201, {'tenant_id': 't-x', 'killed': False, 'created_at': '2026-10-18T10:24:41Z', 'campaigns': 0})
 [220174.61] service SIGTERM exit 143
-[220174.61] started service pid 60734 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
+[220174.61] started service pid 60734 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
 [220174.94] service health {'status': 'ok', 'integrity': None, 'log_length': None}
 [220174.95] audit after restart1 {'integrity': {'ok': True, 'checked_at': '2026-10-18T10:24:41Z', 'problem': None}, 'ledger_valid': True, 'log_length': 3}
 [220175.00] write after restart1 (201, {'tenant_id': 't-after', 'killed': False, 'created_at': '2026-10-18T10:24:42Z', 'campaigns': 0})

@@ -14,7 +14,7 @@
 | previous AEGIS candidate | `4c3a21abdb1e777cc6ed1f0ca8a822c4b26d2196` |
 | runtimePin | not supplied in the inputs; not checked |
 
-Mode was read-only. All commands ran from `/Users/andrelove/PycharmProjects/zbm-zbc` unless stated. I made no edits, commits, pushes, resets or checkouts.
+Mode was read-only. All commands ran from `<HOME>/PycharmProjects/zbm-zbc` unless stated. I made no edits, commits, pushes, resets or checkouts.
 
 ---
 
@@ -225,7 +225,7 @@ That latent permissiveness was not exercised here. The `required` job's log for 
 
 ## 4. Worktree at d80adc5 — VERIFIED, with one caveat
 
-In `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5`:
+In `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5`:
 ```
 git rev-parse HEAD 'HEAD^{tree}'   -> d80adc5528ddad4f27427098efe2beee32ee5d6a
                                       5c059f868fe4426859c737170ae75ea9a94f351e
@@ -277,4 +277,4 @@ Reason: SHA, tree and parent are equal across the local object store, `ls-remote
 
 This covers provenance only. It says nothing about whether the tests prove the properties claimed, and it does not extend to 08a8b8d or any later SHA. No overall verdict is rendered.
 
-Housekeeping: I left two scratch files, `prov-tree-oids.txt` and `prov-disk-oids.txt`, in `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/` (outside the repo and the worktree). They are the two OID lists from the rehash comparison.
+Housekeeping: I left two scratch files, `prov-tree-oids.txt` and `prov-disk-oids.txt`, in `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/` (outside the repo and the worktree). They are the two OID lists from the rehash comparison.

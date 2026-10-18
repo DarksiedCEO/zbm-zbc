@@ -1,4 +1,4 @@
-CONTROL SHA d1b0de9 (F1 unfixed) interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14
+CONTROL SHA d1b0de9 (F1 unfixed) interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14
     def test_seq(tmp_path, opname, tgt, a, b, outage):
         setup, op = OPS[opname]
         led = SL(); h = Harness(tmp_path, data_dir=str(tmp_path/"data"), ledger=led)
@@ -25,7 +25,7 @@ E       assert False
 poc/faults2.py:65: AssertionError
 =============================== warnings summary ===============================
 ../../../venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1
-  /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

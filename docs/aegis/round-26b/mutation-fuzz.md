@@ -1,6 +1,6 @@
 # AEGIS 26b mutation-fuzz gate, candidate d80adc5528ddad4f27427098efe2beee32ee5d6a
 
-Sandbox: the detached worktree `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/mutation-d80adc5`. Each mutant was planted one at a time with `scratchpad/mut.sh` and reverted with `git checkout -- <file>`.
+Sandbox: the detached worktree `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/mutation-d80adc5`. Each mutant was planted one at a time with `scratchpad/mut.sh` and reverted with `git checkout -- <file>`.
 
 At the end:
 - `git status` printed "Not currently on any branch. nothing to commit, working tree clean". `git status --short` printed nothing.
@@ -299,8 +299,8 @@ NON_BLOCKING_FINDING. There are two Medium and nine Low findings and no Critical
 Nothing was committed or pushed.
 
 Key paths:
-- Sandbox worktree: `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/mutation-d80adc5`
-- Scripts and raw outputs, in `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/`:
+- Sandbox worktree: `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/mutation-d80adc5`
+- Scripts and raw outputs, in `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/`:
   - `mut.sh`, `dmut.sh`, `gomut.sh`, `dlvmut.sh`, `hmut.sh`, `hmut2.sh`, `hmut3.sh`, `fmut.sh`, `fmut2.sh`, `fuzz.py`
   - `go-mut.out`, `dlv-mut.out`, `h-mut.out`, `h-mut2.out`, `f-mut.out`
 - Code under mutation:

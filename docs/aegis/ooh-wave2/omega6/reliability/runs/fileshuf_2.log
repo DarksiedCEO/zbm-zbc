@@ -1,3 +1,3 @@
-SHA ce665c5 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python file-shuffle seed 2 (omega5_mutation at pos 21)
+SHA ce665c5 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python file-shuffle seed 2 (omega5_mutation at pos 21)
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 777 passed, 1 warning in 107.24s (0:01:47)

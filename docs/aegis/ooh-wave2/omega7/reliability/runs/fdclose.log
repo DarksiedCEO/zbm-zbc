@@ -1,4 +1,4 @@
-SHA 75b0662 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 fd growth per file (pytest session start vs end)
+SHA 75b0662 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 fd growth per file (pytest session start vs end)
 -- tests/test_aegis_integrity_path.py
 FDCOUNT start=6 end=7 growth=1 ooh.lock_open=1
 50 passed, 1 warning in 5.30s

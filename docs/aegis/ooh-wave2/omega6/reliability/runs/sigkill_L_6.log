@@ -1,4 +1,4 @@
-SHA ce665c5 tree 5530ba0 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 seed 6 cycles 16 ledger-kill real ledger sha256 f3da9d7b
+SHA ce665c5 tree 5530ba0 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 seed 6 cycles 16 ledger-kill real ledger sha256 f3da9d7b
 workdir /var/folders/2_/q80gd3fn3f50pcmk1qlw7gnh0000gn/T/tmp34kns7l_
 writers joined; status now: {'ok': False, 'checked_at': '2026-10-18T07:53:51Z', 'problem': 'a ledger answer was lost; the pending line is rolled forward at the next integrity check'}
 status integrity: {'ok': False, 'checked_at': '2026-10-18T07:53:51Z', 'problem': 'a ledger answer was lost; the pending line is rolled forward at the next integrity check'}

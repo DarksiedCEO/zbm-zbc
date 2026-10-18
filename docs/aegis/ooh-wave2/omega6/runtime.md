@@ -14,29 +14,29 @@ Binding:
 Author: AG-AEGIS-RUNTIME (aegis-runtime gate agent, omega6 run). Written in fresh context. I reused omega5's drivers; omega5's verdicts were not relied on.
 
 ## 0. Binding and delta
-- `git -C /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/review-ce665c5 rev-parse HEAD HEAD^{tree}` -> ce665c5b…, 5530ba08…. `git status --porcelain` -> 0 lines, before and after the runs.
+- `git -C /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/review-ce665c5 rev-parse HEAD HEAD^{tree}` -> ce665c5b…, 5530ba08…. `git status --porcelain` -> 0 lines, before and after the runs.
 - `git diff --stat 4a0a4b4 ce665c5`: docs/adr/0022 (+21/-4), docs/test-counts.md (1/1), tests/test_aegis_integrity_path.py (+3/-1, fixture yield+close), tests/test_aegis_omega5_mutation.py (+152, new).
 - `git diff --stat 4a0a4b4 ce665c5 -- services/ooh-py/src services/ledger-rust` -> **empty**.
 - Tree OIDs are equal at both SHAs.
-- I extracted the candidate with `git archive ce665c5 | tar -x` into /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src. After all runs, a second archive in /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/verify_extract was compared with `diff -r` (excluding __pycache__ and target): IDENTICAL.
+- I extracted the candidate with `git archive ce665c5 | tar -x` into /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src. After all runs, a second archive in /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/verify_extract was compared with `diff -r` (excluding __pycache__ and target): IDENTICAL.
 - Main repo working tree: only the pre-existing ?? .git.backup-preimport/ and ?? .idea/.
 
 ## Execution conditions
 - Host: Darwin 25.6.0 arm64, Andres-MacBook-Pro.local, 2026-10-18 ~07:45–08:00 UTC.
-- Python: /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python (3.12.14) and /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python (3.13.9).
+- Python: /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python (3.12.14) and /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python (3.13.9).
 - Rust: cargo and rustc 1.90.0 (Homebrew).
 - Every process ran on 127.0.0.1 with bind(0) ports: a real ledger-rust and a real `python -m api`.
 - Runs were sequential and single-client. A peer gate's processes (omega6/data/poc/*) were running on the same host at the same time.
 - The war room is the exception: it runs in-process with fake ledgers (§3).
 
 ## 1. Ledger build (by this gate)
-`cd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src/services/ledger-rust && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk cargo build --release --offline --locked --target-dir /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target`
-- rc=0: "Compiling ledger-rust v0.1.0 (…omega6/runtime/src/services/ledger-rust) … Finished release in 7.62s" (/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/cargo_build.log).
-- `shasum -a 256 /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server` -> **e778f2bc7108f672198f15aabb9ffaacf9074923287ce5a679d1a532728bdde9**. Mach-O 64-bit arm64, 2161008 bytes (same size as omega5's; the source path is embedded, so the hash differs).
+`cd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src/services/ledger-rust && SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk cargo build --release --offline --locked --target-dir /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target`
+- rc=0: "Compiling ledger-rust v0.1.0 (…omega6/runtime/src/services/ledger-rust) … Finished release in 7.62s" (/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/cargo_build.log).
+- `shasum -a 256 /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server` -> **e778f2bc7108f672198f15aabb9ffaacf9074923287ce5a679d1a532728bdde9**. Mach-O 64-bit arm64, 2161008 bytes (same size as omega5's; the source path is embedded, so the hash differs).
 - Every real-ledger run below used this binary. No prebuilt binary was used.
 
 ## 2. live_run.py (real entrypoint + real ledger)
-From /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src/services/ooh-py: `LEDGER_BIN=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server LIVE_WORK_DIR=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/live<v> /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python devtools/live_run.py`. live_run.py:156 reads LEDGER_BIN, and :181/503/524 start `[sys.executable, "-m", "api"]`.
+From /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src/services/ooh-py: `LEDGER_BIN=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server LIVE_WORK_DIR=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/live<v> /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python devtools/live_run.py`. live_run.py:156 reads LEDGER_BIN, and :181/503/524 start `[sys.executable, "-m", "api"]`.
 
 | | py3.12 | py3.13 |
 |---|---|---|
@@ -47,7 +47,7 @@ From /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c
 | ooh_log.jsonl (42 lines) | 1a146323b4fa… | 8a220d06703b… |
 
 ## 3. War room (in-process harness, fake ledgers, NOT real-ledger evidence)
-From /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src: `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python devtools/warroom/run.py --department ooh-py --seed N --python /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python --out /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/wr_<v>_<N>`
+From /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src: `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python devtools/warroom/run.py --department ooh-py --seed N --python /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python --out /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/wr_<v>_<N>`
 
 | run | rc | gate | cases (PASS/FAIL/ERROR) | known | MUST | stdout sha256 |
 |---|---|---|---|---|---|---|
@@ -61,8 +61,8 @@ From /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c
 "LLM personas: NOT_CONNECTED". This is chaos coverage on fake ledgers, not real-protocol evidence.
 
 ## 4. F1 / R19 / C07, with a ledger SIGKILL and restart (real ledger)
-- Driver: /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/commit_witness.py (sha256 7a0f7ebc376751…). It is omega5's driver with only the label changed, omega5 -> omega6 (2 lines).
-- Command: `SCEN=<f1|r19|c07> LEDGER_BIN=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server TREE=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src WORK=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/cw_<s>_<v> /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python -I /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/commit_witness.py`
+- Driver: /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/commit_witness.py (sha256 7a0f7ebc376751…). It is omega5's driver with only the label changed, omega5 -> omega6 (2 lines).
+- Command: `SCEN=<f1|r19|c07> LEDGER_BIN=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server TREE=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src WORK=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/cw_<s>_<v> /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python -I /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/commit_witness.py`
 - All 6 runs gave **RESULT PASS**. Values below are from py3.12; py3.13 had the same outcome.
 - **F1** (out 8fce6ab2…; py3.13 effe82ff…):
   - The anchor was forwarded and the real ledger answered "HTTP/1.1 201 Created". The ledger was then SIGKILLed (returncode -9).
@@ -80,8 +80,8 @@ From /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c
   - After the restart, t-x rolled forward. FINAL: log 3 = anchors 3.
 
 ## 5. Integrity-path scenarios (real processes)
-- Driver: /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/integrity_witness.py (sha256 9943ae843d35…). It is omega5's v4 with only the label changed (2 lines).
-- Command: `SCEN=<a|b|b2|c|clat> … /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python -I /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/integrity_witness.py`
+- Driver: /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/integrity_witness.py (sha256 9943ae843d35…). It is omega5's v4 with only the label changed (2 lines).
+- Command: `SCEN=<a|b|b2|c|clat> … /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python -I /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/integrity_witness.py`
 - All 10 runs gave **RESULT PASS** (py3.12 values; py3.13 had the same outcome).
 - **(a)** (fffbe04f…; 17f73b25…):
   - The anchor got 201 from the real ledger, then the service was SIGKILLed before the answer was passed back.
@@ -101,7 +101,7 @@ From /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c
   - The ledger did not change from the reset to the end.
 
 ## 6. NEW: T222 on real processes (pending.line unremovable + certain ledger refusal)
-Driver: /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/pending_witness.py (sha256 9bba3ce87c9a…), written by this gate. The relay forwards the service's request bytes **unmodified** and passes the real ledger's answer back **verbatim**.
+Driver: /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/pending_witness.py (sha256 9bba3ce87c9a…), written by this gate. The relay forwards the service's request bytes **unmodified** and passes the real ledger's answer back **verbatim**.
 
 Construction: when the W2 log_anchor request reaches the relay, pending.line is already on disk. The relay then:
 1. chmods the data dir 0500, so pending.line cannot be unlinked;
@@ -112,7 +112,7 @@ Two recovery orders were run:
 - **d**: restore the dir, run the job, restore the token, run the job.
 - **d2**: restore the token, run the job, restore the dir, run the job.
 
-Each ran on both Pythons. The command was `SCEN=<d|d2> LEDGER_BIN=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server TREE=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src WORK=/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/pw_<s>_<v> /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python -I /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/pending_witness.py`.
+Each ran on both Pythons. The command was `SCEN=<d|d2> LEDGER_BIN=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server TREE=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src WORK=/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/pw_<s>_<v> /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv<v>/bin/python -I /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/pending_witness.py`.
 
 Observed (py3.12 d, out 8332aa7f…; d2 8fa6af05…; py3.13 d c9dfc233…, d2 3f18152a…; all four agree):
 - On arrival: dir [ooh.lock, ooh_log.jsonl, pending.line], pending sha256 90671ed4…. After the chmod: mode 0o500, dir_writable False. Ledger: "HTTP/1.1 401 Unauthorized", body "missing, malformed, or invalid Authorization header".
@@ -134,9 +134,9 @@ Observed (py3.12 d, out 8332aa7f…; d2 8fa6af05…; py3.13 d c9dfc233…, d2 3f
 - **Disclosure: the driver's own RESULT line printed FAIL on all 4 runs.**
   - The cause is a single predicate: I expected the problem text "the pending line could not be removed".
   - At service.py:201-207, `_drop_pending` sets that text (:248) and then returns False. The else branch then overwrites it with "a ledger answer was lost…" (:205).
-  - Every other predicate held. Per-predicate evaluation: /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/pw_eval.py over pw_*/result.json -> /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/pw_eval.out ("FAILING: ['problem_is_could_not_be_removed']" for all 4).
+  - Every other predicate held. Per-predicate evaluation: /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/scripts/pw_eval.py over pw_*/result.json -> /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/pw_eval.out ("FAILING: ['problem_is_could_not_be_removed']" for all 4).
   - I did not edit the driver after the fact. The raw FAIL lines stand as recorded.
-- **Falsifier T222**: a scratch copy where store.py clear_pending swallows OSError (diff in /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/fals/t222.diff), run with scenario d on py3.12. Output: /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/fals/pw_d_t222_3.12.out (c6d79b82…).
+- **Falsifier T222**: a scratch copy where store.py clear_pending swallows OSError (diff in /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/fals/t222.diff), run with scenario d on py3.12. Output: /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/fals/pw_d_t222_3.12.out (c6d79b82…).
   - W2 -> **503 {LEDGER_UNAVAILABLE, maybe: False}** while pending.line was still on disk, and integrity stayed ok **True**.
   - W3 was then refused only because the ledger was still rejecting the token, not by the integrity gate.
   - RESULT FAIL. The scenario discriminates.
@@ -151,7 +151,7 @@ Observed (py3.12 d, out 8332aa7f…; d2 8fa6af05…; py3.13 d c9dfc233…, d2 3f
 - /ooh/v1/status reported every port NOT_CONNECTED: finance_31, vendor_orders, esign, inventory_data, measurement, programmatic_dooh.
 - Every URL was 127.0.0.1. No live or production endpoint was read or written, and nothing was pushed.
 - `ps -axo pid,ppid,command | grep -E "omega6/runtime|python -m api|_witness.py|target/release/server"` -> no process of this gate.
-- Peer-gate processes were seen and left alone: pids 33067, 33069, 34137, 34138 and 34175, all under /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/data/ (poc/weaken*.py, rl_*_path.py, data/ledger-target server).
+- Peer-gate processes were seen and left alone: pids 33067, 33069, 34137, 34138 and 34175, all under /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/data/ (poc/weaken*.py, rl_*_path.py, data/ledger-target server).
 - The finally-block restored the data-dir mode to 0700 in every run.
 
 ## Findings

@@ -61,7 +61,7 @@ OOH2-REL-F2: a slow-drip ledger holds the service lock for about 88 s (write 503
   - omega6/data/out/weaken-3.12.json sha256 8089d9a9fe0f1eb3f75260bdafa50231350d4443a2adcf85a2af93fc4902be54
   - omega7/data/out/weaken-3.12.json sha256 697242bbd8a2b9771eeb353768a8f8cc2fdca4b069026af6ce43e429a5071ca1
   - omega7/data/out/weaken-omega7-3.12.json sha256 947f4d696ff0f0e1663312f693108661d4a6d8f5f17f81d20f2d4f026beef3e9
-- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log files carry the local home path `/Users/andrelove` (the repo already has it in docs/aegis/round-26b).
+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log files carry the local home path `<HOME>` (the repo already has it in docs/aegis/round-26b).
 
 ## Process notes
 - R-GATE (founder, applied to this round 2026-10-18): Critical/High block; Medium/Low go to OPEN.md. Future waves run mutation testing once per wave on changed files only.

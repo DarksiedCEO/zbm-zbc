@@ -1,4 +1,4 @@
-SHA 75b0662 tree 67c1518 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python 30x shuffled node-id order, ids 75
+SHA 75b0662 tree 67c1518 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python 30x shuffled node-id order, ids 75
 shuf 1 ['75 passed, 1 warning in 5.60s']
 shuf 2 ['75 passed, 1 warning in 5.67s']
 shuf 3 ['75 passed, 1 warning in 6.68s']

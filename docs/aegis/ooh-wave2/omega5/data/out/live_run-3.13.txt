@@ -46,4 +46,4 @@
 [ 197625.52]   CHECK PASS: no vendor text, amount, bank reference or vendor reference in the clear in ooh's ledger events
 [ 197625.53]   CHECK PASS: ledger verifies valid
 [ 197625.53] 37/37 checks passed
-work dir /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/data/liverun-3.13/ooh-live-y1rxcrw5 removed (set LIVE_WORK_DIR=<dir> to keep the run's logs)
+work dir /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/data/liverun-3.13/ooh-live-y1rxcrw5 removed (set LIVE_WORK_DIR=<dir> to keep the run's logs)

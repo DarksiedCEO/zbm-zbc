@@ -1,5 +1,5 @@
-[211263.42] started ledger pid 31686 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server
-[211263.46] started service pid 31687 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
+[211263.42] started ledger pid 31686 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server
+[211263.46] started service pid 31687 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
 [211263.90] service health {'status': 'ok'}
 [211263.91] status.integrity {'ok': True, 'checked_at': '2026-10-18T07:56:10Z', 'problem': None} ports {'finance_31': 'NOT_CONNECTED', 'vendor_orders': 'NOT_CONNECTED', 'esign': 'NOT_CONNECTED', 'inventory_data': 'NOT_CONNECTED', 'measurement': 'NOT_CONNECTED', 'programmatic_dooh': 'NOT_CONNECTED'}
 [211264.00] W1 before (201, {'tenant_id': 't-before', 'killed': False, 'created_at': '2026-10-18T07:56:10Z', 'campaigns': 0})
@@ -8,7 +8,7 @@
 [211264.05] ooh dir ['ooh.lock', 'ooh_log.jsonl']
 [211264.06] status.integrity after fault {'ok': True, 'checked_at': '2026-10-18T07:56:10Z', 'problem': None}
 [211264.07] W3 while ledger down (503, {'detail': 'LEDGER_UNAVAILABLE', 'maybe': False})
-[211264.07] started ledger pid 31689 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server
+[211264.07] started ledger pid 31689 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server
 [211264.11] relay listener closed (connects to the ledger URL now refused)
 [211264.19] ledger health after restart {'service': 'ledger-rust', 'status': 'ok'}
 [211264.70] log tenants after ledger restart (before integrity) (['t-before'], 1)
@@ -18,7 +18,7 @@
 [211280.72] log tenants after recovery (['t-before'], 1)
 [211280.80] W4 new write (201, {'tenant_id': 't-after', 'killed': False, 'created_at': '2026-10-18T07:56:27Z', 'campaigns': 0})
 [211280.98] service SIGTERM exit 143
-[211280.98] started service pid 31885 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
+[211280.98] started service pid 31885 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
 [211281.32] service health after restart {'status': 'ok'}
 [211281.36] FINAL {"log_tenants": ["t-before", "t-after"], "log_length": 2, "ledger_anchors": 2, "ledger_tenant_created_evidence": ["tenant:t-before", "tenant:t-x", "tenant:t-after"], "integrity": {"integrity": {"ok": true, "checked_at": "2026-10-18T07:56:28Z", "problem": null}, "ledger_valid": true, "log_length": 2}, "ledger_verify": {"entries": 5, "valid": true}}
 [211281.36] EVIDENCE VIEW {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle", "total": 3, "committed": 2, "attempted": 1, "limit": 200, "offset": 0, "evidence": [{"event_id": "ooh-evd-b747d73533aaf9f416e051cc5e1b80387327c5b6", "event_type": "tenant_created", "subject_id": "tenant:t-before", "ledger_seq": 0, "payload_sha256": "2ca8bbc65fecff3292155f6f74ac6478cb87de4d26212143632f182808e30c1d", "status": "committed", "seq": 1, "rk": "tenant|t-before|346cd98c-79fe-4596-a716-ee346081e436", "log_kind": "tenant_created"}, {"event_id": "ooh-evd-cb0f97e65d0cf6360f7ab57a50c6d8a1e8991198", "event_type": "tenant_created", "subject_id": "tenant:t-x", "ledger_seq": 2, "payload_sha256": "06cf2871cd22dd45d16f1f14f3a191798840a29cc6db1301a5f877c6488f5535", "status": "attempted", "seq": null, "rk": null, "log_kind": null}, {"event_id": "ooh-evd-31dc39bb9a730bd830539054ccd3995123b1b97f", "event_type": "tenant_created", "subject_id": "tenant:t-after", "ledger_seq": 3, "payload_sha256": "3663fa7eb62084336d25af9c30847126a5ac3cd8f0f7f02516417281958161c7", "status": "committed", "seq": 2, "rk": "tenant|t-after|a3735f20-fb80-41ff-a977-6ffefb61e7b2", "log_kind": "tenant_created"}], "log_length": 2}

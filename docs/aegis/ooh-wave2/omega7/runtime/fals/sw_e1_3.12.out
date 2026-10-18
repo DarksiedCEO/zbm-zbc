@@ -1,5 +1,5 @@
-[220171.99] started ledger pid 60711 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
-[220172.02] started service pid 60712 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
+[220171.99] started ledger pid 60711 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
+[220172.02] started service pid 60712 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
 [220172.36] service health {'status': 'ok', 'integrity': None, 'log_length': None}
 [220172.42] W1 (201, {'tenant_id': 't-before', 'killed': False, 'created_at': '2026-10-18T10:24:39Z', 'campaigns': 0})
 [220172.48] W2 (201, {'tenant_id': 't-mid', 'killed': False, 'created_at': '2026-10-18T10:24:39Z', 'campaigns': 0})
@@ -12,10 +12,10 @@
 [220172.60] W4 (503, {'detail': 'INTEGRITY_UNVERIFIED', 'maybe': False})
 [220172.60] AFTER W4 {"disk": {"sha256": "65fee7e2b0fae8d5bae7d364c42ef5dc7697a1c6a0d957d39986658b633baf03", "size": 1380, "lines": 3, "line_shas": ["3aa0527fcd6ebe474db08e66886ca344c94243fc08cddcc65d2186267b2af5b7", "823bf305615422879bc7404567c76a841ad3bd15626ebefc58138d59f7e16831", "372eb3774802a8d97badd0f3afdabbf7a17ef8a1f900b394db99a460b893406c"], "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"], "mode": "0o700"}, "ledger": {"entries": 6, "ooh_anchors": 3, "ooh_other": ["tenant_created", "tenant_created", "tenant_created"], "anchor_line_shas": [null, null, null]}}
 [220172.84] service SIGTERM exit 143
-[220172.84] started service pid 60718 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
-[220173.16] service EXITED at start rc 1 tail: ['  File "/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/fals/tree/services/ooh-py/src/store.py", line 67, in verify_lines', '    raise StoreCorrupt(f"log line {i + 1} is not JSON") from exc', 'store.StoreCorrupt: log line 3 is not JSON']
+[220172.84] started service pid 60718 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
+[220173.16] service EXITED at start rc 1 tail: ['  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/fals/tree/services/ooh-py/src/store.py", line 67, in verify_lines', '    raise StoreCorrupt(f"log line {i + 1} is not JSON") from exc', 'store.StoreCorrupt: log line 3 is not JSON']
 [220173.16] operator: planted tail removed
-[220173.16] started service pid 60720 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
+[220173.16] started service pid 60720 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api
 [220173.50] service health {'status': 'ok', 'integrity': None, 'log_length': None}
 [220173.51] audit after restart2 {'integrity': {'ok': True, 'checked_at': '2026-10-18T10:24:40Z', 'problem': None}, 'ledger_valid': True, 'log_length': 3}
 [220173.55] write after restart2 (201, {'tenant_id': 't-after', 'killed': False, 'created_at': '2026-10-18T10:24:40Z', 'campaigns': 0})

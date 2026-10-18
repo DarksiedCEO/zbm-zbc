@@ -36,7 +36,7 @@
    "sha256": "592e668634c9e4b5827909d9f01d18eec1a96e2fcd15b6e7553ad563545bde67"
   },
   "ledger_plain_start_rc": 1,
-  "refusal_excerpt": "ledger-rust: REFUSING TO START \u2014 ledger log at /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_clat_3.13/ledger/ledger.jsonl failed to load: ledger head checkpoint check failed: the log /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_clat_3.13/ledger/ledger.jsonl holds 3 entries but the head checkpoint records 4 (head hash 94123544e246aa629cfead9cb29fd160288e22ff45ecc4464e90daafac214554): acknowledged entries were remo",
+  "refusal_excerpt": "ledger-rust: REFUSING TO START \u2014 ledger log at /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_clat_3.13/ledger/ledger.jsonl failed to load: ledger head checkpoint check failed: the log /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/iw_clat_3.13/ledger/ledger.jsonl holds 3 entries but the head checkpoint records 4 (head hash 94123544e246aa629cfead9cb29fd160288e22ff45ecc4464e90daafac214554): acknowledged entries were remo",
   "binding": "4:94123544e246aa62/3:9e666d14e0276660",
   "reset_run_rc": 0,
   "ledger_after_reset": {

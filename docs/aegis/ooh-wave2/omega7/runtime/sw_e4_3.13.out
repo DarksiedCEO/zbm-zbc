@@ -1,12 +1,12 @@
-[220154.16] started ledger pid 60162 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
-[220154.19] started service pid 60164 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
+[220154.16] started ledger pid 60162 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
+[220154.19] started service pid 60164 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
 [220154.51] service health {'status': 'ok', 'integrity': None, 'log_length': None}
 [220154.56] W1 (201, {'tenant_id': 't-before', 'killed': False, 'created_at': '2026-10-18T10:24:21Z', 'campaigns': 0})
 [220154.60] W2 (201, {'tenant_id': 't-mid', 'killed': False, 'created_at': '2026-10-18T10:24:21Z', 'campaigns': 0})
 [220154.61] PRE {"disk": {"sha256": "ccd4ee0ce422b54f741c82f1b48fda17ca3a5210aa67c0aee747b123529867be", "size": 1372, "lines": 2, "line_shas": ["e64d299375bfc7fcbb7b641f75c1a4daa96a58cb4fa94942806d3548b900a5c2", "a018dfcec5f43cefcd1c429a5a7b934278cd204a0992fbb275aa6a12bc3e7ae7"], "dir": ["ooh.lock", "ooh_log.jsonl"], "mode": "0o700"}, "ledger": {"entries": 4, "ooh_anchors": 2, "ooh_other": ["tenant_created", "tenant_created"], "anchor_line_shas": [null, null]}, "status_integrity": {"ok": true, "checked_at": "2026-10-18T10:24:21Z", "problem": null}}
 [220154.61] AFTER FAULT {"disk": {"sha256": "01b7bbb9f6dc673a90efe74427cd53a740612bf00f5842277114634b5e71165a", "size": 1372, "lines": 2, "line_shas": ["e64d299375bfc7fcbb7b641f75c1a4daa96a58cb4fa94942806d3548b900a5c2", "cb8fc08ce9ea34bc02222d4a273837fa169ceaf156dac81eb3b15108478c2557"], "dir": ["ooh.lock", "ooh_log.jsonl"], "mode": "0o700"}, "status_integrity": {"ok": true, "checked_at": "2026-10-18T10:24:21Z", "problem": null}}
 [220154.84] service SIGTERM exit 143
-[220154.84] started service pid 60205 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
+[220154.84] started service pid 60205 cmd /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
 [220155.16] service health {'status': 'degraded', 'integrity': None, 'log_length': None}
 [220155.17] audit after restart1 {'integrity': {'ok': False, 'checked_at': '2026-10-18T10:24:22Z', 'problem': 'local log line 2 has no matching anchor on the ledger'}, 'ledger_valid': True, 'log_length': 2}
 [220155.18] write after restart1 (503, {'detail': 'INTEGRITY_UNVERIFIED', 'maybe': False})

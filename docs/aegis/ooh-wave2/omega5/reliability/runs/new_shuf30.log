@@ -1,4 +1,4 @@
-SHA 4a0a4b4 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python 30x shuffled node-id order; node ids: 50
+SHA 4a0a4b4 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python 30x shuffled node-id order; node ids: 50
 shuf 1 ['50 passed, 1 warning in 5.07s']
 shuf 2 ['50 passed, 1 warning in 5.07s']
 shuf 3 ['50 passed, 1 warning in 4.75s']

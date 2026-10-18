@@ -46,5 +46,5 @@
 [ 220516.05]   CHECK PASS: no vendor text, amount, bank reference or vendor reference in the clear in ooh's ledger events
 [ 220516.06]   CHECK PASS: ledger verifies valid
 [ 220516.06] 37/37 checks passed
-work dir kept (LIVE_WORK_DIR): /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/live3.13/ooh-live-t5etozpg
+work dir kept (LIVE_WORK_DIR): /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/live3.13/ooh-live-t5etozpg
 rc=0

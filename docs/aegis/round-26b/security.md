@@ -3,9 +3,9 @@
 **Gate verdict: SECURITY_GREEN for the scoped delta.** No Critical or High security finding. One Medium and three Low findings, all in test or evidence quality; none is a defect in the server. `blocking: false`. Overall verdict not rendered.
 
 - Repo: `DarksiedCEO/zbm-zbc`, candidate `d80adc5528ddad4f27427098efe2beee32ee5d6a`, tree `5c059f868fe4426859c737170ae75ea9a94f351e`.
-- Worktree: `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5` — HEAD confirmed, `git status --short` empty before and after my probes.
+- Worktree: `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5` — HEAD confirmed, `git status --short` empty before and after my probes.
 - Scope: the diff from 4c3a21a, detection-py's request-head cap, and the four scanner jobs of run 37135247923. The prior report's other boundaries were not re-tested.
-- Mode: read-only. Scratch files (venv, probe scripts, logs) are in `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/sec-d80/`.
+- Mode: read-only. Scratch files (venv, probe scripts, logs) are in `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/sec-d80/`.
 
 ## 1. Diff 4c3a21a..d80adc5
 

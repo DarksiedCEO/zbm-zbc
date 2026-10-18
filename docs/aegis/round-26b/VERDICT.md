@@ -179,9 +179,9 @@ What a re-adjudication needs to return CERTIFIED:
 - Whether any reviewer's work was affected by peers sharing the machine.
 
 Files:
-- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/aegis26b-r2/ (seven reports, run JSON, 9 job logs)
-- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/rt/logs/ (red team's 53 job logs)
-- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5/docs/findings/OPEN.md
-- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5/services/detection-py/tests/test_request_limits_live.py
-- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5/FIX_WAVE_26B_REPORT.md
-- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/c680f8a3-4c00-4324-89bb-e2650aad9434/scratchpad/aegis26b/VERDICT.md
+- /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/aegis26b-r2/ (seven reports, run JSON, 9 job logs)
+- /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/rt/logs/ (red team's 53 job logs)
+- /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5/docs/findings/OPEN.md
+- /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5/services/detection-py/tests/test_request_limits_live.py
+- /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5/FIX_WAVE_26B_REPORT.md
+- /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/c680f8a3-4c00-4324-89bb-e2650aad9434/scratchpad/aegis26b/VERDICT.md

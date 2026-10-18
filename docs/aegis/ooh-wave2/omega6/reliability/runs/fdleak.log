@@ -1,4 +1,4 @@
-SHA ce665c5 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 fd leak: per-file, 2 runs in one process
+SHA ce665c5 interp /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 fd leak: per-file, 2 runs in one process
 FDS tests/test_aegis_integrity_path.py per-run growth 50 tests 50
 Counter({'REG': 103, 'PIPE': 4, 'TYPE': 1, 'DIR': 1, 'CHR': 1})
 FDS tests/test_aegis_omega5_mutation.py per-run growth 10 tests 50

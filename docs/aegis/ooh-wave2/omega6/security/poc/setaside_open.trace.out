@@ -1,4 +1,4 @@
-  File "/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/security/poc/setaside_open.py", line 22, in <module>
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/security/poc/setaside_open.py", line 22, in <module>
 tests/helpers.py", line 115, in __init__
 src/service.py", line 116, in __init__
 src/service.py", line 139, in _start

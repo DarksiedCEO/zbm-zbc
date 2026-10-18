@@ -41,5 +41,5 @@
    Compiling chrono v0.4.45
    Compiling hyper v1.11.1
    Compiling hyper-util v0.1.21
-   Compiling ledger-rust v0.1.0 (/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/src/services/ledger-rust)
+   Compiling ledger-rust v0.1.0 (/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/src/services/ledger-rust)
     Finished `release` profile [optimized] target(s) in 5.41s

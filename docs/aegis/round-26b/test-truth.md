@@ -1,6 +1,6 @@
 # AEGIS 26b re-adjudication: test-truth gate (4a), candidate d80adc5528ddad4f27427098efe2beee32ee5d6a
 
-Worktree: /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5. HEAD was verified as d80adc5.
+Worktree: /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/review-d80adc5. HEAD was verified as d80adc5.
 
 Read-only on the repo. `git status --short` in the worktree was empty after every run. The probes and mutants ran in scratchpad copies (`probe_ci42.py`, `mut/`). Runs used the detection-py and delivery-py `.venv` from the main checkout, which the worktree lacks.
 
@@ -141,7 +141,7 @@ Assertions that would restore the lost strength (recommendation only; I edited n
 
 ## Task C: CI run 37135247923 accounting
 
-Run metadata: `/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/aegis26b-r2/ci6-run-37135247923.json`. Command: `gh api repos/DarksiedCEO/zbm-zbc/actions/jobs/<id>/logs`. Logs are saved as `job-<id>.log` in the same directory.
+Run metadata: `/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/d498d3cf-afb3-4870-8755-d7d820d377d5/scratchpad/aegis26b-r2/ci6-run-37135247923.json`. Command: `gh api repos/DarksiedCEO/zbm-zbc/actions/jobs/<id>/logs`. Logs are saved as `job-<id>.log` in the same directory.
 
 Raw: `headSha d80adc5528ddad4f27427098efe2beee32ee5d6a`, `conclusion success`, `event workflow_dispatch`, `headBranch fix26b`, and the aggregate `required` job `success`.
 

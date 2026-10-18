@@ -180,7 +180,7 @@
  "restart1": {
   "exited": 1,
   "tail": [
-   "  File \"/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/fals/tree/services/ooh-py/src/store.py\", line 67, in verify_lines",
+   "  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/fals/tree/services/ooh-py/src/store.py\", line 67, in verify_lines",
    "    raise StoreCorrupt(f\"log line {i + 1} is not JSON\") from exc",
    "store.StoreCorrupt: log line 2 is not JSON"
   ]
