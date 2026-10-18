@@ -9,7 +9,8 @@ and a mutex). This department stores no document bodies outside the log (vendor 
 ``OOH_DATA_DIR/ooh_log.jsonl``: one JSON object per line, ``{"seq", "kind", "at", "data",
 "prev_line_sha256", "record_sha256"}``; ``prev_line_sha256`` is the SHA-256 of the previous line's exact bytes
 (64 zeros first) and ``record_sha256`` the line's own hash, so an edit, deletion, reordering or torn write is
-caught at start (start-up refuses). A whole-file rewrite, a truncated tail or a deleted log is caught against
+caught at start (start-up refuses). While the service runs, the file must stay exactly the lines it holds: every
+write compares the whole file with them first, and every integrity check does too (AEGIS H-1). A whole-file rewrite, a truncated tail or a deleted log is caught against
 the ledger instead: every line is anchored on the ledger BEFORE it is written (service._commit).
 
 The pending line closes the crash window between "anchored on the ledger" and "appended here": the exact line
@@ -50,6 +51,19 @@ class _ShortWrite(OSError):
 
 def _line_sha(line: bytes) -> str:
     return hashlib.sha256(line).hexdigest()
+
+
+def _pread_exact(fd: int, n: int, offset: int) -> bytes:
+    """Up to ``n`` bytes at ``offset``; fewer only at the end of the file (``pread`` may return a short read)."""
+    chunks = []
+    while n > 0:
+        b = os.pread(fd, n, offset)
+        if not b:
+            break
+        chunks.append(b)
+        n -= len(b)
+        offset += len(b)
+    return b"".join(chunks)
 
 
 def encode(record: dict) -> bytes:
@@ -156,11 +170,15 @@ class RecordLog:
         if self.closed:
             raise StoreWriteError("this service instance is closed; its log refuses writes")
 
+    def _memory_bytes(self) -> bytes:
+        return b"".join(ln + b"\n" for ln in self._lines)
+
     def append_prepared(self, rec: dict, line: bytes) -> dict:
-        """Append one line. The file must be exactly the in-memory lines before the write (else refused); a
-        failed write is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file
-        already ends with exactly this line (a write that reached the disk before an fsync error), it is adopted
-        instead of written twice."""
+        """Append one line. The file must be exactly the in-memory lines before the write, byte for byte (else
+        refused, the file untouched: AEGIS H-1, a same-size edit of an existing line is refused too); a failed write
+        is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file already holds exactly
+        the in-memory lines followed by this line (a write that reached the disk before an fsync error), it is
+        adopted instead of written twice. The whole file is read before every write: the cost grows with the log."""
         with self.lock:
             self._refuse_if_closed()        # inside the lock: close() takes it too (round 5c item 2)
             if self.fail_next_append:
@@ -171,17 +189,20 @@ class RecordLog:
             if self.fault:
                 raise StoreWriteError(f"LOCAL_LOG_WRITE_FAULT: {self.fault}")
             if self.path:
-                expected = sum(len(ln) + 1 for ln in self._lines)
+                mem = self._memory_bytes()
+                expected = len(mem)
                 try:
                     fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
                 except OSError as exc:
                     raise StoreWriteError(f"local log open failed: {type(exc).__name__}") from exc
                 try:
                     size = os.fstat(fd).st_size
-                    if size == expected + len(line) + 1 and os.pread(fd, len(line) + 1, expected) == line + b"\n":
-                        os.fsync(fd)                  # already on disk: adopt it
-                    elif size != expected:
+                    adopt = size == expected + len(line) + 1
+                    if not (adopt or size == expected) or _pread_exact(fd, expected, 0) != mem or \
+                            (adopt and _pread_exact(fd, len(line) + 1, expected) != line + b"\n"):
                         raise StoreWriteError("the log file and memory disagree; refusing to write")
+                    if adopt:
+                        os.fsync(fd)                  # already on disk: adopt it
                     else:
                         payload = line + b"\n"
                         try:
@@ -210,24 +231,22 @@ class RecordLog:
             self._lines.append(line)
             return rec
 
-    def verify(self) -> bool:
-        """Re-verify the chain as stored (the file, when there is one)."""
+    def file_problem(self) -> Optional[str]:
+        """None when the log file holds exactly the in-memory lines, else why not (AEGIS H-1: the integrity check
+        reads this, so a file changed under a running service is reported, not only refused at the next write)."""
         with self.lock:
+            if not self.path:
+                return None
             try:
-                if self.path:
-                    with open(self.path, "rb") as fh:
-                        raw = fh.read()
-                    if raw and not raw.endswith(b"\n"):
-                        return False
-                    lines = raw.split(b"\n")[:-1] if raw else []
-                    if len(lines) != len(self._lines) or any(not ln for ln in lines):   # R4-2: no empty line
-                        return False
-                else:
-                    lines = self._lines
-                verify_lines(lines)
-                return True
-            except (OSError, StoreCorrupt):
-                return False
+                with open(self.path, "rb") as fh:
+                    raw = fh.read()
+            except FileNotFoundError:
+                raw = b""                    # no line written yet: no file (a deleted file with lines in memory differs)
+            except OSError as exc:
+                return f"the local log file cannot be read ({type(exc).__name__})"
+            if raw != self._memory_bytes():
+                return "the local log file differs from the lines this service holds: an operator must inspect it"
+            return None
 
 
     # ------------------------------------------------------------------ pending line (ADR 0012 decision 7)

@@ -222,7 +222,8 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   `tests/test_aegis_store_write_path.py`. Each test replaces one `os` function as store.py alone sees it:
   - T144, T172: an open or fstat failure on the log answers 503; memory is never ahead of the file (T172 would
     otherwise acknowledge a write that is not on disk).
-  - T148, T149, T151, T153, T154, T157, T159: before a write the file must be exactly memory. Any other tail is
+  - T148, T149, T151, T153, T154, T157, T159: before a write the file must be exactly memory (until the H-1 fix
+    below, only its size and the slot of the next line were compared). Any other tail is
     refused and left untouched; only a file that already ends with exactly this line is adopted.
   - T163, T165, T167, T169, T170, T171: a short or failed log write is cut back and refused; if the cut-back
     fails, the fault latch refuses every later write.
@@ -231,6 +232,34 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   - T276, T278, T286: a short or failed pending write stops the commit before its ledger anchor.
 - The `env` fixture in `test_aegis_integrity_path.py` now also releases the data-directory lock. The ce665c5
   change only closed the service, which gives up the claim but not the lock's file descriptor.
+
+
+### AEGIS Ω RED at 4a0a4b4 and the H-1 fix (Oct 18 2026)
+- **H-1 (High).** `RecordLog.append_prepared` compared only the log file's size with memory, and the running service
+  never re-read the file (the integrity check compares the ledger with the in-memory line hashes). A same-size
+  in-place edit of an existing line was written over: writes answered 201 and integrity said ok; only a restart
+  refused. Fixed in ooh-py only (founder ruling Oct 18 2026):
+  - before every write the whole file is read and compared with the in-memory lines, byte for byte; any difference
+    refuses the write (`the log file and memory disagree`) and leaves the file untouched. The anchor was recorded
+    first, so the write answers 503 with `maybe: true` and integrity stops writes; once the file is put back, the
+    next integrity check rolls the line forward as for any anchored-but-unwritten line;
+  - adoption (a line that reached the disk before an fsync error) needs the whole file to be the in-memory lines
+    followed by exactly this line;
+  - every integrity check also compares the file with memory (`RecordLog.file_problem()`): a changed, deleted or
+    unreadable file reports "the local log file differs from the lines this service holds: an operator must inspect
+    it" (or "cannot be read") and writes stop before any write is attempted. A data directory with no line yet has no
+    file, which is not a difference;
+  - reads use `pread` until the requested bytes or the end of the file (a short read is completed, not taken as a
+    difference);
+  - the cost: the whole log is read before every write and at every integrity check, so it grows with the log.
+  - `RecordLog.verify()`, which nothing called, is replaced by `file_problem()`.
+  - Tests: `tests/test_aegis_h1_file_content.py` (same-size edits of the first, a middle and the last line through
+    the service; the integrity check before any write; recovery after the file is put back; adoption with a changed
+    earlier line or another same-size line; a deleted, an unreadable and a not-yet-created file; short reads).
+- **Not fixed here:** the same size-only check is in the store.py of seo-py, sales-py, bizdev-py, service-py and
+  influencer-py; each is an open High in docs/findings/OPEN.md (`OOH2-RT-H1-<SERVICE>`).
+- The other blockers of that verdict (card/SSN `OOH2-PII-1`, T222, the Medium/Low rows, the missing
+  test-verification report) are tracked in docs/findings/OPEN.md and docs/aegis/ooh-wave2/.
 
 ## What OOH-4 does NOT do
 
