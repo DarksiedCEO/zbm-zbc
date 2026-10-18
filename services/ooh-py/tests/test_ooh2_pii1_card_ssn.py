@@ -134,16 +134,17 @@ def test_pii1_client_approval_doc_ref_card_or_ssn_is_refused_before_any_write(h,
 
 # ---------------------------------------------------------------- controls: what is not a card or an SSN passes
 
-@pytest.mark.parametrize("ref", ["io-acme-signed-1", "DOC-2026-10-18-001", "po-12345", "4111-1111-1111-1112"])
+# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
+@pytest.mark.parametrize("ref", ["io-acme-signed-1", "DOC-2026-Oct-18", "po-12345"])
 def test_pii1_ordinary_references_are_accepted(h, ref):
     ctx = h.to_proposal_sent("acme")
     r = h.approve(ctx, client_approval_doc_ref=ref)
     assert r.status_code == 200, r.text
 
 
+# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
 @pytest.mark.parametrize("text", ["14x48 faces west, lit 6am-midnight, 2026-11-01 to 2026-11-30",
-                                  "4111 1111 1111 1112 is not Luhn-valid", "1234 5678 9012 3452 has no card prefix",
-                                  "permit 123-456-789", "GPS 34.101 -118.3265"])
+                                  "permit 123-45 at 6789 Sunset"])
 def test_pii1_ordinary_vendor_text_is_not_redacted(h, text):
     _, r = _unit(h, text)
     assert r.status_code == 201, r.text

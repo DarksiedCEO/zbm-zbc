@@ -54,9 +54,10 @@ def test_r9_f1_request_hash_is_over_the_redacted_body(h):
     kept = line["data"]["request_sha"]
     assert kept != payload_sha256(body)                                     # never the raw body's hash
     assert kept == payload_sha256({**body, "vendor_text": pii.redact(body["vendor_text"])})
+    n = len(h.svc.log)
     again = h.post(f"/tenants/acme/campaigns/{cid}/inventory", body)        # the same request is still a replay
     assert again.status_code in (200, 201) and again.json()["unit_id"] == r.json()["unit_id"], again.text
-    assert len(h.svc.log) == len(h.svc.log)
+    assert len(h.svc.log) == n                                              # and appends nothing
     _absent(h, secret)
 
 
@@ -113,8 +114,9 @@ def test_r9_client_approval_doc_ref_ssn_forms_are_refused(h, secret):
     _absent(h, secret)
 
 
-@pytest.mark.parametrize("text", ["v1.2.3 build 2026.10.18", "14x48, 2026-11-01 to 2026-11-30", "Austin 123456789",
-                                  "routing 021000021", "unit 12 45 678"])
+# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
+@pytest.mark.parametrize("text", ["v1.2.3 build 2026.10.18", "14x48 faces west, 2026-11-01 to 2026-11-30",
+                                  "unit 12 45 678"])
 def test_r9_ordinary_text_still_passes(h, text):
     cid, body = _unit_body(h, text)
     r = h.post(f"/tenants/acme/campaigns/{cid}/inventory", body)
@@ -159,6 +161,7 @@ def test_r9_rt1_start_refuses_a_fifo_without_blocking(tmp_path):
     alive, out = _started_or_refused(d)
     if alive:                                                       # unblock the thread so the run can end
         os.close(os.open(os.path.join(d, ST.LOG_NAME), os.O_WRONLY | os.O_NONBLOCK))
+    os.unlink(os.path.join(d, ST.LOG_NAME))                         # r10 REL F5: leave no FIFO behind
     assert not alive, "start-up blocked on a FIFO"
     assert "not a regular file" in out.get("err", ""), out
 
@@ -171,6 +174,7 @@ def test_r9_rt1_start_refuses_a_symlinked_log(tmp_path):
     real.write_bytes(open(log.path, "rb").read())
     d = _data_dir_with(tmp_path, lambda p, t: os.symlink(str(real), p))
     alive, out = _started_or_refused(d)
+    os.unlink(os.path.join(d, ST.LOG_NAME))
     assert not alive and "it must be a regular file, not a link" in out.get("err", ""), out
 
 
@@ -179,6 +183,7 @@ def test_r9_rt1_start_refuses_a_link_to_a_device_without_reading_it(tmp_path):
         pytest.skip("no /dev/zero")
     d = _data_dir_with(tmp_path, lambda p, t: os.symlink("/dev/zero", p))
     alive, out = _started_or_refused(d)
+    os.unlink(os.path.join(d, ST.LOG_NAME))
     assert not alive and "err" in out, out
 
 

@@ -41,7 +41,7 @@ _FEET = re.compile(r"[0-9]{1,4}(\.[0-9]{1,2})?")
 _INT = re.compile(r"[1-9][0-9]{0,6}")
 _MONEY = re.compile(r"(0|[1-9][0-9]{0,11})\.[0-9]{2}")
 _REF = re.compile(r"[A-Za-z0-9._:-]{1,100}")
-from pii import has_personal_data as personal_data_in   # noqa: E402  (AEGIS wave 2 F-2, OOH-3/4 F3)
+from pii import free_text_has_personal_data, has_personal_data as personal_data_in   # noqa: E402  (AEGIS wave 2 F-2)
 
 
 class PortNotConnected(Exception):
@@ -70,7 +70,9 @@ def parse_value(kind: str, value: str):
     """The typed value of an attribute (a string in the body), or raises Invalid. Text is vendor data: untrusted."""
     def bad():
         return Invalid(R("ATTRIBUTE_VALUE_INVALID"))
-    if kind in ("text", "ref") and personal_data_in(value):   # red team OOH-3/4 F10: refs too (dates are not phones)
+    if kind == "text" and free_text_has_personal_data(value):   # OOH2-PII-1: the digit-cluster screen (ADR 0022)
+        raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"))
+    if kind == "ref" and personal_data_in(value):   # red team OOH-3/4 F10: refs too (dates are not phones)
         raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"))
     if kind in ("lat", "lon"):
         if not (_LAT if kind == "lat" else _LON).fullmatch(value):

@@ -23,6 +23,7 @@ is fsynced to ``pending.line`` before the anchor, and removed after the append.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -142,8 +143,8 @@ class RecordLog:
         except FileNotFoundError:
             return None
         except OSError as exc:
-            raise StoreCorrupt(f"the log cannot be opened ({type(exc).__name__}); refusing to start: it must be a "
-                               "regular file, not a link") from exc
+            why = "it must be a regular file, not a link" if exc.errno == errno.ELOOP else "inspect the data directory"
+            raise StoreCorrupt(f"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}") from exc
         try:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode):
@@ -262,7 +263,7 @@ class RecordLog:
                 except OSError as exc:
                     raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
                 finally:
-                    os.close(fd)
+                    _close_quietly(fd)    # r10 REL F1: the line is fsynced; a failed close must not lose it
             self._lines.append(line)
             return rec
 

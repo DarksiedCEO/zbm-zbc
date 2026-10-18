@@ -318,7 +318,8 @@ def test_rv_n1_the_remaining_email_and_phone_spellings_are_caught(acme, text):
     h.refused(r, 422, "ATTRIBUTE_VALUE_PERSONAL_DATA")
 
 
-@pytest.mark.parametrize("text", ["Posting 2026-11-01 to 2026-11-30", "Lit 06:00-24:00 daily", "ZIP 90210-1234",
+# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
+@pytest.mark.parametrize("text", ["Posting 2026-11-01 to 2026-11-30", "Lit 06:00-24:00 daily",
                                   "1,250,000 weekly impressions (vendor-stated)", "I-405 N at Wilshire Blvd, exit 55",
                                   "12345 Ventura Blvd, Studio City CA 91604"])
 def test_rv_n3_ordinary_ooh_text_passes_the_screen(acme, text):
@@ -333,7 +334,7 @@ def test_rv_n3_ordinary_ooh_text_passes_the_screen(acme, text):
 def test_rv_n3_redaction_keeps_the_case_and_the_flight_dates(acme):
     h = acme
     cid = h.campaign()
-    uid = h.unit("acme", cid, ref="vt-2", text="Flight 2026-11-01..2026-11-30. Call Jane at 213-555-0100.")
+    uid = h.unit("acme", cid, ref="vt-2", text="Flight 2026-11-01 to 2026-11-30. Call Jane at 213-555-0100.")   # "..": one digit cluster now
     t = h.svc.inventory[uid]["vendor_text"]["text"]
     assert "2026-11-01" in t and "Flight" in t and "Jane" in t and "0100" not in t
 

@@ -27,6 +27,7 @@ import json
 import re
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
 
@@ -35,7 +36,8 @@ import policy
 from clock import Clock, SystemClock, iso
 from config import Settings
 from errors import Conflict, NotFound, Unavailable
-from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
+from ledger import (DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id,
+                    payload_sha256)
 from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_campaigns import CampaignsMixin
@@ -66,22 +68,40 @@ def sha256_hex(data: bytes) -> str:
 
 
 def _screened(v):
-    """A request body as it may be kept (AEGIS r9 security F1: a plain hash of a body with a card number or an SSN in
-    its vendor text, next to the rest of the body, gave the number back by search). Vendor text is the only free text
-    that is stored after redaction (every other screened field is refused), so it is the only value replaced; ids and
-    references are hashed as sent, so two different requests never hash alike."""
+    """A request body as it may be kept (AEGIS r9/r10 security F1: a hash of a body with a card number or an SSN in its
+    vendor text, next to the rest of the body, gave the number back by search). Vendor text is the only free text that
+    is stored after redaction (the other screened fields are refused), so it is replaced by the text as kept,
+    always (founder design change, Oct 18 2026: the hash uses the redacted text only); ids and references are hashed
+    as sent."""
     if isinstance(v, dict):
-        return {k: (pii.redact(x) if k == "vendor_text" and isinstance(x, str) and pii.has_personal_data(x)
-                    else _screened(x)) for k, x in v.items()}
+        return {k: (pii.screen_free_text(x)[0] if k == "vendor_text" and isinstance(x, str) else _screened(x))
+                for k, x in v.items()}
     if isinstance(v, list):
         return [_screened(x) for x in v]
     return v
 
 
+_SHA_LOCK = threading.Lock()
+_SHA_CACHE: "OrderedDict[str, str]" = OrderedDict()      # raw-body digest -> request hash; memory only, 64 entries
+
+
 def request_sha(body: dict) -> str:
     """The idempotency hash of a request. Personal data is redacted first, so the hash kept in the log never stands for
-    a card number or an SSN; a body without personal data hashes as before (logs written earlier still replay)."""
-    return payload_sha256(_screened(body))
+    a card number or an SSN; a body without personal data hashes as before (logs written earlier still replay). The
+    screen runs once per body (AEGIS r10 reliability F2: it ran twice per request, under the service lock); the cache
+    is keyed by a digest of the body, never by the body, and is never written anywhere."""
+    key = hashlib.sha256(canonical(body).encode("utf-8")).hexdigest()
+    with _SHA_LOCK:
+        hit = _SHA_CACHE.get(key)
+        if hit is not None:
+            _SHA_CACHE.move_to_end(key)
+            return hit
+    value = payload_sha256(_screened(body))
+    with _SHA_LOCK:
+        _SHA_CACHE[key] = value
+        while len(_SHA_CACHE) > 64:
+            _SHA_CACHE.popitem(last=False)
+    return value
 
 
 class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin, ContractsMixin):

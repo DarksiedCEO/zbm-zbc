@@ -310,8 +310,10 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   next to the rest of that body: with a card number or an SSN redacted in the line, the hash still gave the number
   back by search (about 10^9 SSNs). `request_sha` is now taken over the body with its vendor text (the only free text
   that is stored after redaction; every other screened field is refused) in its redacted form. Ids and references
-  are hashed as sent, so two different requests never hash alike; a body without personal data hashes exactly as
-  before, so logs written earlier replay and retries still match.
+  are hashed as sent; two requests that differ only in the redacted card or SSN of their vendor text hash alike, so
+  a retry of that kind is answered as a replay (what is stored is identical), every other difference is a 409
+  REQUEST_ID_REUSED (r10 source M-2: the earlier "never hash alike" was wrong). A body without personal data hashes
+  exactly as before, so logs written earlier replay and retries still match.
 - **Hidden and other-script digits (F2, F5, source S-1).** `pii.strip_format` removes zero-width and every other
   format character instead of reading it as a space (a space split a digit group and hid the card), and reads every
   decimal digit of any script as its ASCII digit. Vendor text is stored in that form.
@@ -332,6 +334,52 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
 - **Not fixed this round (founder scope: the three fields of the finding):** 13 other reference fields (source
   doc_ref, vendor_face_ref, brief_doc_ref, prices source_ref, hold-evidence vendor_ref, contract io_doc_ref, the funds
   evidence_ref for SSNs, and the rest listed in docs/findings/OPEN.md OOH2-R9-SEC-F4) are not screened.
+
+### AEGIS round 10 at 0f5fbe3: one screen form, general SSN separators (Oct 18 2026)
+- **The request hash, again (security F1 residual, High; data D10-M1).** The screen read the raw text while storage
+  read a cleaned copy, so "123  45  6789" (two spaces) was redacted in the line but hashed in clear, and a face text
+  attribute that storage would have redacted was accepted. Now every screen and the stored vendor text use
+  `pii.screen_form`, and `observed()` screens the raw text exactly as the attribute and the hash do: storage redacts
+  exactly when the screen finds personal data.
+- **Hidden characters (source M-1, data D10-M1).** `screen_form` also removes private-use, unassigned and invisible
+  filler characters and drops a combining mark on a digit; it reads every other non-printable character as a space
+  and collapses runs of spaces. A hidden character is read both ways: removed (it rejoins a card's digit group) and as
+  a space (it keeps an SSN's groups apart); personal data in either form counts.
+- **SSN separators (data D10-H1, High):** superseded by the design change below.
+- **Reliability:** a failed close after a written and fsynced log line no longer loses it (F1); the request hash is
+  computed once per body, cached by a digest of the body in memory only (F2); the FIFO and symlink tests clean up.
+- **Docs (source M-2, L-1, L-2):** two requests that differ only in the redacted card or SSN of their vendor text hash
+  alike, so such a retry is a replay; the pii.py docstring lists the shapes and the limits; a test that compared a
+  value with itself now checks that a replay appends nothing.
+- Tests: `tests/test_aegis_r10_screen_form.py`.
+
+### OOH2-PII-1 design change: digit clusters (founder ruling, Oct 18 2026)
+- **Why.** Rounds 8, 9 and 10 each found card or SSN spellings that a separator or shape list missed (dots, slashes,
+  doubled or spaced separators, hidden characters, other scripts). The founder ended the spelling-by-spelling loop.
+- **The rule.** In the three screened free-text fields — unit vendor text, a face text attribute
+  (`location_description` and every other `text` attribute) and the client approval document reference — the text
+  is normalised (`pii.screen_form`: invisible, format, private-use and unassigned characters removed, a combining mark
+  on a digit dropped, every script's digits read as ASCII, other non-printables read as a space, spaces collapsed).
+  Then any cluster of nine or more digits joined by characters that are not letters, whatever those characters are,
+  is personal data (`pii.screen_free_text`, `CLUSTER_MIN_DIGITS = 9`). The e-mail and phone rules still apply. The
+  card and SSN rules no longer decide; they label what was redacted (`personal_data_kinds` on the stored vendor text:
+  `card`, `ssn`, `phone`, `email`, `number`).
+- **Effect.** Vendor text is stored with every such cluster replaced by "[redacted]"; a face text attribute or a client
+  approval document reference holding one is refused 422 `ATTRIBUTE_VALUE_PERSONAL_DATA` before anything is written.
+- **The request hash** uses the vendor text as kept (redacted, in screen form), always; ids and references are hashed as
+  sent. A retry whose vendor text differs only inside a redacted cluster is a replay. A retry, after this change, of a
+  request accepted before it may answer 409 when its vendor text changes under `screen_form` (unreleased service).
+- **False-positive trade-off (accepted by the founder).** Ordinary text with nine or more digits and no letter between
+  them is redacted (vendor text) or refused (attribute, approval reference): GPS coordinates ("34.101 -118.3265"),
+  ZIP+4 ("90028-1234"), date ranges joined by punctuation ("2026-11-01..2026-11-30"), routing and long reference
+  numbers ("021000021", "DOC-2026-10-18-001"). This reverses earlier red-team rulings that such text must pass
+  (OOH-3/4 NF-4 and the re-verification N3 controls); those cases are now pinned as refused in
+  `tests/test_ooh2_pii1_cluster_rule.py`. Workarounds for preparers: put a word between the numbers ("2026-11-01 to
+  2026-11-30"), use the typed `latitude`/`longitude` attributes (not screened), keep long references out of free
+  text.
+- **Not changed.** Campaign names, `ref` attributes and the client funds reference keep their earlier rules
+  (e-mail, phone, card and SSN shapes; `names_a_card` for the funds reference). The 13 other reference fields stay
+  unscreened (OOH2-R9-SEC-F4).
 
 ## What OOH-4 does NOT do
 

@@ -61,11 +61,10 @@ def observed(text: Optional[str]) -> Optional[dict]:
     bounded, marked untrusted (section 52)."""
     if text is None:
         return None
-    s = " ".join("".join(ch if ch.isprintable() else " " for ch in pii.strip_format(text)).split())   # r9 F2
-    redacted = pii.has_personal_data(s)
-    if redacted:
-        s = " ".join(pii.redact(s).split())
-    return {"untrusted": True, "personal_data_redacted": redacted, "text": s[:OBSERVED_MAX], "truncated": len(s) > OBSERVED_MAX,
+    s, kinds = pii.screen_free_text(text)    # OOH2-PII-1 design change: digit clusters, labelled (ADR 0022)
+    redacted = bool(kinds)
+    return {"untrusted": True, "personal_data_redacted": redacted, "personal_data_kinds": kinds, "text": s[:OBSERVED_MAX],
+            "truncated": len(s) > OBSERVED_MAX,
             "sha256": hashlib.sha256(s.encode("utf-8", "surrogatepass")).hexdigest()}
 
 
@@ -861,7 +860,7 @@ class CampaignsMixin:
         with self.lock:
             self._gate()
             c = self._campaign(tid, cid)
-            if pii.has_personal_data(body["client_approval_doc_ref"]):     # OOH2-PII-1: refused before any write
+            if pii.free_text_has_personal_data(body["client_approval_doc_ref"]):   # OOH2-PII-1: before any write
                 raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"), field="client_approval_doc_ref")
             rk = self.rk("client_approval", cid, body)
             if self._idem("andre", rk, body):

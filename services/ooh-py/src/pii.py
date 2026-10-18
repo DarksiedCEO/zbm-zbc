@@ -3,7 +3,9 @@ department keeps no personal data: an e-mail address, a phone number, a payment-
 number in a free-text value is refused (attributes, campaign names, the client approval document reference) or
 redacted (vendor text), before anything is written to the log or the ledger.
 
-Text is NFKC-normalised; zero-width characters are removed; %40, HTML entities (&#64; &commat; &#46;) and bracket
+Every screen reads ``screen_form`` (vendor text is stored in it too): NFKC; zero-width, format, private-use,
+unassigned and invisible filler characters removed, and a combining mark on a digit dropped; every script's decimal
+digits read as ASCII; any other non-printable character read as a space and runs of spaces collapsed. Then %40, HTML entities (&#64; &commat; &#46;) and bracket
 spellings ([at] (at) {at} <at>, [dot] (dot) <dot> [.] (.)) and full-width or ideographic dots are read as the
 character. Then, case-insensitively:
 * e-mail: ``@`` (spaces allowed around it) followed by a domain that starts with a letter and has a dotted TLD, or
@@ -18,9 +20,14 @@ character. Then, case-insensitively:
   start with a card-network prefix and pass the Luhn check (the rule the client funds reference already used:
   ``card_spans``, which ``svc_campaigns.names_a_card`` calls); an unbroken run of ten or more digits is refused as
   a phone number anyway;
-* social security number (onboarding-py redaction.py's shapes): ``ddd-dd-dddd`` with a hyphen or another dash, not
-  glued to a word or a dash, and nine digits within 20 characters after "SSN", "social security (number)", "ITIN"
-  or "tax id". A nine-digit run with spaces and no such word is not seen.
+* social security number (onboarding-py redaction.py's shapes, widened in AEGIS r9): 3-2-4 digits split by any
+  dash, a dot, an underscore, a colon, a slash or one space (runs of spaces are one space by then), not inside a
+  longer digit run (letters may touch it), and nine digits within 20 characters after "SSN", "social security
+  (number)", "ITIN", "TIN" or "tax id", which may touch them. Not seen: nine digits with no separator and no such
+  word; "123 - 45 - 6789" (a separator with spaces around it); digit groups split by letters, %20 or entities.
+In the three screened free-text fields of OOH2-PII-1 (unit vendor text, face text attributes, the client approval
+document reference) one more rule decides, before any of the shapes below matter: any cluster of nine or more digits
+joined by characters that are not letters is personal data (``screen_free_text``; founder design change, ADR 0022).
 Known false positives (refused, never stored): a ten-digit reference ("io-0000012345"), "<word> at <word>.<word>"
 ("14x48 at Wilshire.Blvd"), a three-and-four-digit pair with a dash ("Route 101-2025").
 Names, spelled-out digits and letters used as separators cannot be detected reliably: preparers must not type them."""
@@ -64,23 +71,45 @@ _INTL = re.compile(r"(?<![\w+])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
 _INTL_MIN_DIGITS = 8
 
 
-def strip_format(text: str) -> str:
-    """NFKC; zero-width and every other format character removed (they hide nothing once gone: AEGIS r9 security F2,
-    a zero-width character inside a card's digit group split it); every decimal digit of any script read as its ASCII
-    digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Vendor text is stored in this form too."""
-    t = unicodedata.normalize("NFKC", text)
-    t = _ZW.sub("", t)
-    t = "".join("" if unicodedata.category(ch) == "Cf" else
-                str(unicodedata.decimal(ch)) if ch > "\x7f" and unicodedata.category(ch) == "Nd" else ch for ch in t)
-    return t
+# Characters that show nothing but are not format characters (AEGIS r10 source M-1): the combining grapheme joiner,
+# Hangul and Mongolian fillers, Khmer inherent vowels, Mongolian variation selectors, the blank braille pattern and
+# the variation selectors.
+_INVISIBLE = re.compile("[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\ufe00-\ufe0f\uffa0"
+                        "\U000e0100-\U000e01ef]")
+_REMOVED = ("Cf", "Co", "Cn")        # format, private-use and unassigned characters: removed, not read as a space
 
 
-def _norm(text: str) -> str:
-    """``strip_format``; every control character and line or paragraph separator read as a space (it is a space once
-    vendor text is stored, red team OOH-3/4 F4); %40, HTML entities and bracket spellings of @ and . read as the
-    character."""
-    t = strip_format(text)
-    t = "".join(" " if unicodedata.category(ch) in ("Cc", "Zl", "Zp") else ch for ch in t)
+def strip_format(text: str, hidden: str = "") -> str:
+    """NFKC; zero-width, format, private-use, unassigned and the invisible characters above replaced by ``hidden``
+    (removed by default), and a combining mark on a digit dropped (AEGIS r9 security F2, r10 source M-1); every decimal
+    digit of any script read as its ASCII digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Removing a hidden character
+    rejoins a digit group it split (a card); reading it as a space keeps it as a separator (an SSN): the screen reads
+    both forms."""
+    t = _INVISIBLE.sub(hidden, _ZW.sub(hidden, unicodedata.normalize("NFKC", text)))
+    out = []
+    for ch in t:
+        cat = unicodedata.category(ch)
+        if cat in ("Mn", "Mc", "Me") and out and out[-1].isdigit():
+            continue
+        if cat in _REMOVED:
+            if hidden:
+                out.append(hidden)
+            continue
+        out.append(str(unicodedata.decimal(ch)) if ch > "\x7f" and cat == "Nd" else ch)
+    return "".join(out)
+
+
+def screen_form(text: str, hidden: str = "") -> str:
+    """The one form every screen reads and vendor text is stored in (AEGIS r10 security F1: the screen read the raw
+    text while storage read a cleaned copy, so "123  45  6789" was redacted in the line but hashed in clear):
+    ``strip_format``, every other non-printable character (controls, line and paragraph separators, other spaces)
+    read as a space, and runs of spaces collapsed to one."""
+    return " ".join("".join(ch if ch.isprintable() else " " for ch in strip_format(text, hidden)).split())
+
+
+def _norm(text: str, hidden: str = "") -> str:
+    """``screen_form``; %40, HTML entities and bracket spellings of @ and . read as the character."""
+    t = screen_form(text, hidden)
     t = t.replace("%40", "@")
     t = _AT_SPELLINGS.sub("@", t)
     return _DOT_SPELLINGS.sub(".", t)
@@ -154,27 +183,39 @@ def _card_from(groups: list, i: int) -> bool:
     return False
 
 
-# US social security numbers (onboarding-py redaction.py's two shapes, widened by AEGIS r9 security F3): 3-2-4 digits
-# split by any dash, a dot, an underscore, a colon, a slash or a space, not inside a longer digit run (letters may touch
-# it: "x123-45-6789", "io-123-45-6789"); and nine digits within 20 characters after an SSN word, which may touch them
-# ("SSN123456789", "TIN 123456789").
-_SSEP = "[-‐-―−._:/ ]"
+# US social security numbers (onboarding-py redaction.py's two shapes, made general in AEGIS r10 after separator
+# lists kept missing spellings: r9 F3, r10 data D10-H1): 3, 2 and 4 digits split by one to three characters that are
+# neither letters nor digits ("123-45-6789", "123 - 45 - 6789", "123--45--6789", "123..45..6789", "123,45,6789",
+# "123|45|6789"), not inside a longer digit run (letters may touch it); and nine digits, one to three such characters
+# allowed between any two, within 20 characters after an SSN word, which may touch them ("SSN123456789", "TIN 123 45
+# 6789").
+_SSEP = r"[^0-9A-Za-z\n]{1,3}"
 _SSN = re.compile(r"(?<!\d)\d{3}" + _SSEP + r"\d{2}" + _SSEP + r"\d{4}(?!\d)")
 _SSN_WORDS = r"ssn|social\s*security(?:\s*(?:number|no|nr|#))?|itin|tin|tax\s*id"
-_SSN_VALUE = re.compile(rf"(?<![a-z])(?:{_SSN_WORDS})(?![a-z])[^\d\n]{{0,20}}(\d[\d\s‐-―−._:/-]{{7,12}}\d)(?!\d)", re.I)
+_SSN_VALUE = re.compile(rf"(?<![a-z])(?:{_SSN_WORDS})(?![a-z])[^\d\n]{{0,20}}(\d(?:[^0-9A-Za-z\n]{{0,3}}\d){{8}})(?!\d)",
+                        re.I)
 
 
 def _ssn_spans(t: str) -> list:
     out = [m.span() for m in _SSN.finditer(t)]
-    return out + [m.span(1) for m in _SSN_VALUE.finditer(t) if sum(ch.isdigit() for ch in m.group(1)) == 9]
+    return out + [m.span(1) for m in _SSN_VALUE.finditer(t)]
 
 
 def _spans(t: str) -> list:
     return [m.span() for m in _matches(t)] + card_spans(t) + _ssn_spans(t)
 
 
+def _screened_form(text: str) -> str:
+    """The form the screen found personal data in: hidden characters removed, else read as spaces."""
+    t = _norm(text)
+    if _spans(t):
+        return t
+    alt = _norm(text, " ")
+    return alt if _spans(alt) else t
+
+
 def has_personal_data(text: str) -> bool:
-    return bool(_spans(_norm(text)))
+    return bool(_spans(_screened_form(text)))
 
 
 def _redact_once(t: str) -> str:
@@ -189,10 +230,80 @@ def _redact_once(t: str) -> str:
     return "".join(out) + t[pos:]
 
 
+# The three screened free-text fields of OOH2-PII-1 (unit vendor text, a face text attribute, the client approval
+# document reference): founder design change, Oct 18 2026, to end the spelling-by-spelling loop. After ``_norm``, any
+# cluster of CLUSTER_MIN_DIGITS or more digits joined by characters that are not letters — whatever those characters
+# are — is personal data. The card and SSN rules no longer decide; they only label what was redacted. Trade-off
+# (accepted): a date range, a price list or a reference with nine or more digits and no letter between them is
+# redacted or refused too ("2026-11-01 - 2026-11-30", "io-2026-1018-0001").
+CLUSTER_MIN_DIGITS = 9
+
+
+def number_cluster_spans(t: str) -> list:
+    """The spans, first digit to last, of every run of text without a letter that holds CLUSTER_MIN_DIGITS digits."""
+    out, first, last, count = [], None, None, 0
+    for i, ch in enumerate(t + "a"):
+        if ch.isalpha():
+            if count >= CLUSTER_MIN_DIGITS:
+                out.append((first, last + 1))
+            first, last, count = None, None, 0
+        elif ch.isdigit():
+            first = i if first is None else first
+            last, count = i, count + 1
+    return out
+
+
+def _label(seg: str) -> str:
+    if "@" in seg or _EMAIL_WORD.search(seg):
+        return "email"
+    if card_spans(seg):
+        return "card"
+    if _ssn_spans(seg):
+        return "ssn"
+    if _PHONE.search(seg) or _INTL.search(seg):
+        return "phone"
+    return "number"
+
+
+def _free_text_spans(t: str) -> list:
+    return sorted(_spans(t) + number_cluster_spans(t))
+
+
+def screen_free_text(text: str) -> tuple:
+    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. With nothing
+    found, the text as kept is ``screen_form(text)``; else every e-mail, phone, card, SSN and digit cluster is
+    "[redacted]" in the normalised text, repeated until none is left."""
+    t = _norm(text)
+    kinds = set()
+    for _ in range(4):
+        spans = _free_text_spans(t)
+        if not spans:
+            break
+        out, pos = [], 0
+        for lo, hi in spans:
+            if hi <= pos:
+                continue
+            kinds.add(_label(t[lo:hi]))
+            out.append(t[pos:max(lo, pos)])
+            out.append("[redacted]")
+            pos = hi
+        t = "".join(out) + t[pos:]
+    else:
+        if _free_text_spans(t):
+            t = "[redacted]"
+    if not kinds:
+        return screen_form(text), []
+    return " ".join(t.split()), sorted(kinds)
+
+
+def free_text_has_personal_data(text: str) -> bool:
+    return bool(screen_free_text(text)[1])
+
+
 def redact(text: str) -> str:
     """The normalised text with every e-mail-, phone-, card- or SSN-like span replaced by "[redacted]" (case is kept),
     repeated until none is left (a redaction can bring two parts of a number together: delta red team DF-7)."""
-    t = _norm(text)
+    t = _screened_form(text)
     for _ in range(4):
         if not _spans(t):
             return t

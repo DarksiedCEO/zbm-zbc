@@ -114,9 +114,10 @@ PERSONAL = ["call 555−123−4567", "call 555-1234", "+52 55 1234 5678", "+44 2
             "jane@example[.]com", "jane@example(.)com", "jane<at>example<dot>com", "555,123,4567", "555 | 123 | 4567",
             "555·123·4567", "jane@example。com", "tel:555:123:4567", "JANE@EXAMPLE.COM", "Jane.Doe@Example.Com",
             "555‎123‎4567", "ref 123456789012"]
-ORDINARY = ["Digital @ Sunset. Faces west", "Install crew @ Lamar. No access Sundays", "GPS 34.101 -118.3265",
-            "34.0522, 118.2437", "Open at 6.pm daily", "lit 06:00-24:00", "Flight 2026-11-01 to 2026-11-28",
-            "ZIP 90028-1234", "1,250,000 weekly impressions", "+15% markup suggested", "14x48 bulletin"]
+# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
+ORDINARY = ["Digital @ Sunset. Faces west", "Install crew @ Lamar. No access Sundays",
+            "Open at 6.pm daily", "lit 06:00-24:00", "Flight 2026-11-01 to 2026-11-28",
+            "1,250,000 weekly impressions", "+15% markup suggested", "14x48 bulletin"]
 
 
 @pytest.mark.parametrize("text", PERSONAL)
@@ -330,7 +331,8 @@ def test_df2_vendor_text_with_an_address_is_redacted(acme):
     assert vt["personal_data_redacted"] is True and "163" not in vt["text"] and "06:00-24:00" in vt["text"]
 
 
-@pytest.mark.parametrize("text", ["$12,500.00 per 4 weeks", "+1 234 567", "GPS 34.0522, -118.2437"])
+# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
+@pytest.mark.parametrize("text", ["$12,500.00 per 4 weeks", "+1 234 567"])
 def test_df3_df8_ordinary_text_is_accepted(acme, text):
     assert not pii.has_personal_data(text)
     acme.ok(_text_attr(acme, f"df3-{abs(hash(text)) % 10 ** 6}", text))
