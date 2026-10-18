@@ -46,7 +46,9 @@ def env(tmp_path):
     h = Harness(tmp_path, data_dir=str(tmp_path / "data"), ledger=led)
     h.tenant("acme")
     assert h.svc.integrity["ok"] is True
-    return led, h
+    yield led, h
+    if not h.svc.closed:
+        h.svc.close()          # give the data-directory lock back (one fd per test otherwise)
 
 
 def _check(h):

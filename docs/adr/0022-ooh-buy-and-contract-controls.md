@@ -194,10 +194,27 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   holds its exact ooh anchor, else set aside and revived when the anchor appears; a line with a bad actor, an unknown
   kind or a broken chain is never appended; an own pending line is kept while the ledger is down; store failures, an
   unreadable ledger, a closed instance, the retry timers, the audit route and `_commit`'s own guards.
-- **Left as equivalent (21):** H085, H192, H198, H229, H252-H255, H311, H322, H344, H357, H371, H384, H399, H416,
-  H432, H441, H448, H453, H469. Each only adds a ledger read, changes a value no caller reads, rewrites a value to
-  itself, or sits behind an earlier check that refuses first (the epoch check before the per-line subject check;
-  `INTEGRITY_RETRY_S` > `FORCED_MIN_S`; `_after_integrity` does nothing).
+- **Left as equivalent (17):** H085, H192, H252-H255, H311, H322, H344, H357, H371, H384, H416, H432, H441, H453,
+  H469. Each only adds a ledger read, changes a value no caller reads, rewrites a value to itself, or sits behind an
+  earlier check that refuses first (the epoch check before the per-line subject check; `INTEGRITY_RETRY_S` >
+  `FORCED_MIN_S`; `_after_integrity` does nothing). The gate at 4a0a4b4 showed four more that this section first
+  listed here (H198, H229, H399, H448) are not equivalent; see below.
+
+### AEGIS mutation gate BLOCK at 4a0a4b4 (Oct 17 2026)
+- **Thirteen behaviours no test pinned**, closed by `tests/test_aegis_omega5_mutation.py`, one named test per mutant:
+  - V001: the anchor payload's key names (`epoch`, `seq`, `line_sha256`) are a wire format. Renaming one would orphan
+    every anchor already on the ledger, so the test spells the keys out instead of calling `_anchor_ids`.
+  - T222: `RecordLog.clear_pending` must raise when the pending file can't be removed. If it swallowed the error, a
+    certain ledger refusal would answer maybe=false while the line stayed on disk and could later take effect.
+  - H198: the first forced integrity check reads the ledger even when the host clock started under `FORCED_MIN_S` ago.
+  - H229: a settling failure is the problem reported, not a later ledger read.
+  - H399: a stale pending line is set aside before it is removed, and writes stop if that fails.
+  - H448: a set-aside line appended late also clears `pending.discarded`.
+  - V045-V047, V082-V085: the integrity record a failed commit leaves has exactly `ok`, `checked_at` and `problem`,
+    with the exact problem text.
+- **Open, not changed in this commit:** a set-aside line that the ledger vouches for but that can't be applied is
+  appended while integrity stays ok (the own-pending and file-pending paths answer "an operator must inspect the
+  log"). It needs a ledger-valid anchor for a malformed line, which this service never writes. Next wave.
 
 ## What OOH-4 does NOT do
 
