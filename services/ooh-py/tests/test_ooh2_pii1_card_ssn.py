@@ -186,6 +186,6 @@ def test_pii1_a_routing_number_is_not_joined_into_a_card():
     assert not pii.has_personal_data("trace 021000021 0000001")
 
 
-def test_pii1_ssn_glued_to_a_word_or_with_other_digit_counts_is_not_an_ssn():
-    for t in ("A123-45-6789", "123-45-67890", "1234-56-7890", "SSN 12345678"):
+def test_pii1_ssn_with_other_digit_counts_is_not_an_ssn():
+    for t in ("123-45-67890", "1234-56-7890", "SSN 12345678", "routing 123456789", "Austin 123456789"):
         assert pii._ssn_spans(pii._norm(t)) == [], t

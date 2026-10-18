@@ -64,13 +64,23 @@ _INTL = re.compile(r"(?<![\w+])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
 _INTL_MIN_DIGITS = 8
 
 
-def _norm(text: str) -> str:
-    """NFKC; zero-width characters removed; every other control or format character read as a space (it is a space
-    once vendor text is stored, red team OOH-3/4 F4); %40, HTML entities and bracket spellings of @ and . read as the
-    character."""
+def strip_format(text: str) -> str:
+    """NFKC; zero-width and every other format character removed (they hide nothing once gone: AEGIS r9 security F2,
+    a zero-width character inside a card's digit group split it); every decimal digit of any script read as its ASCII
+    digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Vendor text is stored in this form too."""
     t = unicodedata.normalize("NFKC", text)
     t = _ZW.sub("", t)
-    t = "".join(" " if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp") else ch for ch in t)
+    t = "".join("" if unicodedata.category(ch) == "Cf" else
+                str(unicodedata.decimal(ch)) if ch > "\x7f" and unicodedata.category(ch) == "Nd" else ch for ch in t)
+    return t
+
+
+def _norm(text: str) -> str:
+    """``strip_format``; every control character and line or paragraph separator read as a space (it is a space once
+    vendor text is stored, red team OOH-3/4 F4); %40, HTML entities and bracket spellings of @ and . read as the
+    character."""
+    t = strip_format(text)
+    t = "".join(" " if unicodedata.category(ch) in ("Cc", "Zl", "Zp") else ch for ch in t)
     t = t.replace("%40", "@")
     t = _AT_SPELLINGS.sub("@", t)
     return _DOT_SPELLINGS.sub(".", t)
@@ -90,7 +100,7 @@ def _matches(t: str) -> list:
 _CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|220[0-4]|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720|3[0-9]|6"
                           r"|8[12]|8600|9792|9860)")
 _CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
-_DIGIT_RUN = re.compile(r"[0-9]+(?:[^0-9a-z]+[0-9]+)*", re.I)
+_DIGIT_RUN = re.compile(r"[0-9]+(?:[^0-9a-zA-Z]+[0-9]+)*")      # no re.I: it folded dotless ı into "i" (r9 F6)
 _GROUP = re.compile(r"[0-9]+")
 
 
@@ -144,11 +154,14 @@ def _card_from(groups: list, i: int) -> bool:
     return False
 
 
-# US social security numbers (onboarding-py redaction.py's ``_SSN`` and ``_SSN_VALUE``; every dash, not only "-")
-_DASH = "[-‐-―−]"
-_SSN = re.compile(r"(?<![\w‐-―−-])\d{3}" + _DASH + r"\d{2}" + _DASH + r"\d{4}(?![\w‐-―−-])")
-_SSN_WORDS = r"ssn|social\s+security(?:\s+(?:number|no|nr|#))?|itin|tax\s+id"
-_SSN_VALUE = re.compile(rf"(?<![^\W_])(?:{_SSN_WORDS})(?![^\W_])[^\d\n]{{0,20}}(\d[\d\s‐-―−-]{{7,12}}\d)(?!\d)", re.I)
+# US social security numbers (onboarding-py redaction.py's two shapes, widened by AEGIS r9 security F3): 3-2-4 digits
+# split by any dash, a dot, an underscore, a colon, a slash or a space, not inside a longer digit run (letters may touch
+# it: "x123-45-6789", "io-123-45-6789"); and nine digits within 20 characters after an SSN word, which may touch them
+# ("SSN123456789", "TIN 123456789").
+_SSEP = "[-‐-―−._:/ ]"
+_SSN = re.compile(r"(?<!\d)\d{3}" + _SSEP + r"\d{2}" + _SSEP + r"\d{4}(?!\d)")
+_SSN_WORDS = r"ssn|social\s*security(?:\s*(?:number|no|nr|#))?|itin|tin|tax\s*id"
+_SSN_VALUE = re.compile(rf"(?<![a-z])(?:{_SSN_WORDS})(?![a-z])[^\d\n]{{0,20}}(\d[\d\s‐-―−._:/-]{{7,12}}\d)(?!\d)", re.I)
 
 
 def _ssn_spans(t: str) -> list:

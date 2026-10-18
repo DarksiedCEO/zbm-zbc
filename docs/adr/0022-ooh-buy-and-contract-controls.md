@@ -305,6 +305,34 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   local log is test data and stays; a documented and tested purge/re-key step must exist before production (see
   docs/findings/OPEN.md OOH2-PII-1).
 
+### AEGIS round 9 at 91ea9a1: what still got through (Oct 18 2026)
+- **The request hash (security F1, High).** Every line kept `request_sha`, a plain SHA-256 of the raw request body,
+  next to the rest of that body: with a card number or an SSN redacted in the line, the hash still gave the number
+  back by search (about 10^9 SSNs). `request_sha` is now taken over the body with its vendor text (the only free text
+  that is stored after redaction; every other screened field is refused) in its redacted form. Ids and references
+  are hashed as sent, so two different requests never hash alike; a body without personal data hashes exactly as
+  before, so logs written earlier replay and retries still match.
+- **Hidden and other-script digits (F2, F5, source S-1).** `pii.strip_format` removes zero-width and every other
+  format character instead of reading it as a space (a space split a digit group and hid the card), and reads every
+  decimal digit of any script as its ASCII digit. Vendor text is stored in that form.
+- **SSN shapes (F3).** 3-2-4 digits split by any dash, a dot, an underscore, a colon, a slash or a space, touching
+  letters ("x123-45-6789", "io-…"), and nine digits after "SSN", "social security", "ITIN", "TIN" or "tax id", which
+  may touch the digits ("SSN123456789").
+- **The funds screen (F6).** The digit-run pattern no longer uses `re.I` (it folded the dotless ı into "i"); upper
+  case letters still break a run, so `names_a_card` is again the 99569bd function.
+- **Start-up (runtime RT9-1).** The start-up read now opens the log like the write path and the integrity check: no
+  symlink, no FIFO, no device or directory (`StoreCorrupt` with the reason). A symlinked log now refuses start
+  (it used to start degraded).
+- Reliability F1/F2: a failed close of a read-only descriptor is ignored; the write path opens the log with
+  O_NONBLOCK too.
+- Tests: `tests/test_aegis_r9_pii_hardening.py`.
+- **Known limits (accepted):** digit groups shorter than three digits are never joined into a card ("4 2 4 2 …",
+  source S-2, inherited from the funds screen); a card or SSN with letters or `%20` between its digits; an SSN with
+  no separator and no SSN word.
+- **Not fixed this round (founder scope: the three fields of the finding):** 13 other reference fields (source
+  doc_ref, vendor_face_ref, brief_doc_ref, prices source_ref, hold-evidence vendor_ref, contract io_doc_ref, the funds
+  evidence_ref for SSNs, and the rest listed in docs/findings/OPEN.md OOH2-R9-SEC-F4) are not screened.
+
 ## What OOH-4 does NOT do
 
 - **No taxes, fees or permits** (final red team PF-2): no sales tax, production, installation, permit or municipal

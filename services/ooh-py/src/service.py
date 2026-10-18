@@ -30,6 +30,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
+import pii
 import policy
 from clock import Clock, SystemClock, iso
 from config import Settings
@@ -64,8 +65,23 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _screened(v):
+    """A request body as it may be kept (AEGIS r9 security F1: a plain hash of a body with a card number or an SSN in
+    its vendor text, next to the rest of the body, gave the number back by search). Vendor text is the only free text
+    that is stored after redaction (every other screened field is refused), so it is the only value replaced; ids and
+    references are hashed as sent, so two different requests never hash alike."""
+    if isinstance(v, dict):
+        return {k: (pii.redact(x) if k == "vendor_text" and isinstance(x, str) and pii.has_personal_data(x)
+                    else _screened(x)) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_screened(x) for x in v]
+    return v
+
+
 def request_sha(body: dict) -> str:
-    return payload_sha256(body)
+    """The idempotency hash of a request. Personal data is redacted first, so the hash kept in the log never stands for
+    a card number or an SSN; a body without personal data hashes as before (logs written earlier still replay)."""
+    return payload_sha256(_screened(body))
 
 
 class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin, ContractsMixin):

@@ -61,7 +61,7 @@ def observed(text: Optional[str]) -> Optional[dict]:
     bounded, marked untrusted (section 52)."""
     if text is None:
         return None
-    s = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
+    s = " ".join("".join(ch if ch.isprintable() else " " for ch in pii.strip_format(text)).split())   # r9 F2
     redacted = pii.has_personal_data(s)
     if redacted:
         s = " ".join(pii.redact(s).split())

@@ -58,6 +58,13 @@ def _line_sha(line: bytes) -> str:
     return hashlib.sha256(line).hexdigest()
 
 
+def _close_quietly(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
 def _pread_exact(fd: int, n: int, offset: int) -> bytes:
     """Up to ``n`` bytes at ``offset``; fewer only at the end of the file (``pread`` may return a short read)."""
     chunks = []
@@ -116,9 +123,8 @@ class RecordLog:
         if data_dir:
             os.makedirs(data_dir, mode=0o700, exist_ok=True)
             self.path = os.path.join(data_dir, LOG_NAME)
-            if os.path.exists(self.path):
-                with open(self.path, "rb") as fh:
-                    raw = fh.read()
+            raw = self._read_at_start()
+            if raw is not None:
                 if raw and not raw.endswith(b"\n"):
                     raise StoreCorrupt("log ends with a torn line; refusing to start (inspect the file)")
                 parts = raw.split(b"\n")[:-1] if raw else []
@@ -127,6 +133,26 @@ class RecordLog:
                                        "remove it (the service never writes one)")
                 self._lines = parts
                 verify_lines(self._lines)
+
+    def _read_at_start(self) -> Optional[bytes]:
+        """The log's bytes, or None when there is none yet. Like the write path and the integrity check (AEGIS r9
+        runtime RT9-1): never through a symlink, never blocking on a FIFO, never a device."""
+        try:
+            fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise StoreCorrupt(f"the log cannot be opened ({type(exc).__name__}); refusing to start: it must be a "
+                               "regular file, not a link") from exc
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                raise StoreCorrupt("the log is not a regular file; refusing to start (inspect the data directory)")
+            return _pread_exact(fd, st.st_size, 0)
+        except OSError as exc:
+            raise StoreCorrupt(f"the log cannot be read ({type(exc).__name__}); refusing to start") from exc
+        finally:
+            _close_quietly(fd)
 
     @property
     def records(self) -> list[dict]:
@@ -198,7 +224,7 @@ class RecordLog:
                 mem = self._memory_bytes()
                 expected = len(mem)
                 try:
-                    fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                    fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)   # r9 REL F2
                 except OSError as exc:
                     raise StoreWriteError(f"local log open failed: {type(exc).__name__}") from exc
                 try:
@@ -264,7 +290,7 @@ class RecordLog:
             except OSError as exc:
                 return f"the local log file cannot be read ({type(exc).__name__})"
             finally:
-                os.close(fd)
+                _close_quietly(fd)                # r9 REL F1: a failed close of a read-only fd changes nothing
 
 
     # ------------------------------------------------------------------ pending line (ADR 0012 decision 7)
