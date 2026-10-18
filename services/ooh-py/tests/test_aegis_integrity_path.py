@@ -48,7 +48,9 @@ def env(tmp_path):
     assert h.svc.integrity["ok"] is True
     yield led, h
     if not h.svc.closed:
-        h.svc.close()          # give the data-directory lock back (one fd per test otherwise)
+        h.svc.close()
+    if h.settings.data_dir_lock is not None:
+        h.settings.data_dir_lock.release()      # close() only gives up the claim; this closes the lock's fd
 
 
 def _check(h):

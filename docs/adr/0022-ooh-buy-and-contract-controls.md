@@ -214,7 +214,23 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
     with the exact problem text.
 - **Open, not changed in this commit:** a set-aside line that the ledger vouches for but that can't be applied is
   appended while integrity stays ok (the own-pending and file-pending paths answer "an operator must inspect the
-  log"). It needs a ledger-valid anchor for a malformed line, which this service never writes. Next wave.
+  log"), and the next restart then fails to start (`KeyError 'tenant_id'`). It needs write access to the data
+  directory and a ledger-valid anchor for a malformed line, which this service never writes. Next wave.
+
+### AEGIS mutation gate BLOCK at ce665c5 (Oct 18 2026)
+- **The store's write path had 21 lines no test pinned** (`RecordLog.append_prepared` and `_write_file`), closed by
+  `tests/test_aegis_store_write_path.py`. Each test replaces one `os` function as store.py alone sees it:
+  - T144, T172: an open or fstat failure on the log answers 503; memory is never ahead of the file (T172 would
+    otherwise acknowledge a write that is not on disk).
+  - T148, T149, T151, T153, T154, T157, T159: before a write the file must be exactly memory. Any other tail is
+    refused and left untouched; only a file that already ends with exactly this line is adopted.
+  - T163, T165, T167, T169, T170, T171: a short or failed log write is cut back and refused; if the cut-back
+    fails, the fault latch refuses every later write.
+  - T166, T279, T283: every commit fsyncs the pending file before its rename, the directory after it, and the log
+    line before the 201.
+  - T276, T278, T286: a short or failed pending write stops the commit before its ledger anchor.
+- The `env` fixture in `test_aegis_integrity_path.py` now also releases the data-directory lock. The ce665c5
+  change only closed the service, which gives up the claim but not the lock's file descriptor.
 
 ## What OOH-4 does NOT do
 
