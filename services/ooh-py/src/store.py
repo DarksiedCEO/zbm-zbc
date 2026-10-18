@@ -1,16 +1,20 @@
 """
 Local append-only record log and the data-directory lock (ADR 0019; seo-py's, ADR 0017, itself bizdev-py's, ADR
-0016). Stdlib only. Copied from services/seo-py/src/store.py, unchanged in behaviour (originally services/service-py/src/store.py (itself security-py's as fixed in AEGIS rounds 1-5, ADR 0012 amendments, and
+0016). Stdlib only. Copied from services/seo-py/src/store.py (originally services/service-py/src/store.py (itself security-py's as fixed in AEGIS rounds 1-5, ADR 0012 amendments, and
 service-py's rounds 1-5e): own pending line kept in memory, a pending line found on disk appended only when the
 ledger already holds its anchor (else set aside to ``pending.discarded``), an empty line refuses start, exact-size
 append with adopt / truncate, a closed instance refuses every write, and the flock with a single-use adopt token
-and a mutex). This department stores no document bodies outside the log (vendor text is kept bounded, in the line).
+and a mutex); since the AEGIS H-1 fix (Oct 18 2026) it differs from seo-py's: the whole file is compared with memory
+before every write and at every integrity check, and ``verify()`` is replaced by ``file_problem()``. This department
+stores no document bodies outside the log (vendor text is kept bounded, in the line).
 
 ``OOH_DATA_DIR/ooh_log.jsonl``: one JSON object per line, ``{"seq", "kind", "at", "data",
 "prev_line_sha256", "record_sha256"}``; ``prev_line_sha256`` is the SHA-256 of the previous line's exact bytes
 (64 zeros first) and ``record_sha256`` the line's own hash, so an edit, deletion, reordering or torn write is
 caught at start (start-up refuses). While the service runs, the file must stay exactly the lines it holds: every
-write compares the whole file with them first, and every integrity check does too (AEGIS H-1). A whole-file rewrite, a truncated tail or a deleted log is caught against
+write compares the whole file with them first, and so does every integrity check that runs (AEGIS H-1; an unforced
+check returns the last result while it is ok, and a forced one runs at most every 10 s, so between checks it is the
+next write that refuses). A whole-file rewrite, a truncated tail or a deleted log is caught against
 the ledger instead: every line is anchored on the ledger BEFORE it is written (service._commit).
 
 The pending line closes the crash window between "anchored on the ledger" and "appended here": the exact line
@@ -22,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import threading
 from typing import Iterator, Optional
 
@@ -175,7 +180,8 @@ class RecordLog:
 
     def append_prepared(self, rec: dict, line: bytes) -> dict:
         """Append one line. The file must be exactly the in-memory lines before the write, byte for byte (else
-        refused, the file untouched: AEGIS H-1, a same-size edit of an existing line is refused too); a failed write
+        refused and nothing written: AEGIS H-1, a same-size edit of an existing line is refused too; a deleted file is
+        re-created empty by the open, nothing more); the file must be a regular file (AEGIS r8 M-1); a failed write
         is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file already holds exactly
         the in-memory lines followed by this line (a write that reached the disk before an fsync error), it is
         adopted instead of written twice. The whole file is read before every write: the cost grows with the log."""
@@ -196,7 +202,10 @@ class RecordLog:
                 except OSError as exc:
                     raise StoreWriteError(f"local log open failed: {type(exc).__name__}") from exc
                 try:
-                    size = os.fstat(fd).st_size
+                    st = os.fstat(fd)
+                    if not stat.S_ISREG(st.st_mode):        # AEGIS r8 security M-1: never a FIFO or a device
+                        raise StoreWriteError("the log file and memory disagree; refusing to write")
+                    size = st.st_size
                     adopt = size == expected + len(line) + 1
                     if not (adopt or size == expected) or _pread_exact(fd, expected, 0) != mem or \
                             (adopt and _pread_exact(fd, len(line) + 1, expected) != line + b"\n"):
@@ -237,16 +246,25 @@ class RecordLog:
         with self.lock:
             if not self.path:
                 return None
+            mem = self._memory_bytes()
+            differs = "the local log file differs from the lines this service holds: an operator must inspect it"
+            # AEGIS r8 security M-1: like the write path, never follow a symlink, never block on a FIFO, never read a
+            # device or a file of another size (the read happens under the service lock)
             try:
-                with open(self.path, "rb") as fh:
-                    raw = fh.read()
+                fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             except FileNotFoundError:
-                raw = b""                    # no line written yet: no file (a deleted file with lines in memory differs)
+                return differs if mem else None   # no line written yet: no file (a deleted file with lines differs)
             except OSError as exc:
                 return f"the local log file cannot be read ({type(exc).__name__})"
-            if raw != self._memory_bytes():
-                return "the local log file differs from the lines this service holds: an operator must inspect it"
-            return None
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_size != len(mem) or _pread_exact(fd, len(mem), 0) != mem:
+                    return differs
+                return None
+            except OSError as exc:
+                return f"the local log file cannot be read ({type(exc).__name__})"
+            finally:
+                os.close(fd)
 
 
     # ------------------------------------------------------------------ pending line (ADR 0012 decision 7)

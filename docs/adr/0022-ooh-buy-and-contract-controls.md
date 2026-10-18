@@ -262,6 +262,23 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   test-verification report) are tracked in docs/findings/OPEN.md and docs/aegis/ooh-wave2/.
 
 
+### AEGIS Ω RED at 99569bd: the H-1 fix's own findings (Oct 18 2026)
+- Ω ruled H-1 (ooh-py) and T222 closed at 99569bd and RED for other reasons (docs/aegis/ooh-wave2/omega8/omega.md).
+- **Security M-1 (Medium, a regression of the H-1 fix).** `file_problem` read the log with a plain `open().read()` under
+  the service lock: a FIFO in its place hung every route, a symlink to /dev/zero was read without end. It now opens
+  with O_RDONLY, O_NOFOLLOW and O_NONBLOCK, refuses anything but a regular file, and compares the size before reading
+  anything; the write path refuses a non-regular file too. A symlinked log is reported as not readable (L-2: it used
+  to read ok while every write was refused).
+- **Mutation survivors at 99569bd** (the shipped code was right; the tests did not pin it): a same-size edit of the
+  file's first or last byte (X016, X017), an adopt tail without its newline (X011), junk in the file of an empty log
+  (X024), the adopt fsync (M092/M093), the end-of-file guard of `_pread_exact` (M011/M013/X008), short reads of the
+  adopt tail (M080), no second write on adoption (M091), the 0600 create mode (M044):
+  `tests/test_aegis_h1_edges.py`, with the FIFO, symlink, device and size-before-read cases for M-1.
+- Docstrings: store.py no longer claims to be unchanged from seo-py's (source F1); a refused write writes nothing,
+  and a deleted log is re-created empty by the open (F2); between integrity checks it is the next write that refuses
+  (an unforced check returns the last result while ok, a forced one runs at most every 10 s: F3, runtime O8-1).
+- Every other omega8 Medium/Low is in docs/findings/OPEN.md (`OOH2-R8-*`).
+
 ### OOH2-PII-1: card numbers and SSNs in free text (Oct 18 2026)
 - **The finding (High, founder ruling; AEGIS security M-1).** `pii.py` refused or redacted only e-mail addresses and
   phone numbers, so a card number or an SSN typed into unit vendor text, a face text attribute or the client approval
