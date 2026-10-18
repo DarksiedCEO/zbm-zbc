@@ -178,6 +178,14 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   running service not re-reading its log file (DATA M-1), reads served from a consistently rewritten log (DATA M-2),
   the service bearer pinned by tests on 4 of 57 routes, the funds kill switch, and the legacy mutation survivors.
 
+### AEGIS mutation gate BLOCK at e680f98 (Oct 17 2026)
+- **Untested ledger-commit lines in `_commit` (R19, C06; C02, C03, C04, C07, C08 also closed).** The code was right;
+  no test pinned it. `tests/test_aegis_commit_path.py` pins each branch: a certain "nothing recorded" anchor refusal
+  never takes effect later; a typed-evidence record failure refuses the request; a line with another seq is never
+  anchored; the line this process wrote is the one rolled forward; a pending-line write failure whose clean-up also
+  fails answers maybe=true; an anchored but unwritten line stops writes until it is rolled forward; a committed write
+  leaves no pending file.
+
 ## What OOH-4 does NOT do
 
 - **No taxes, fees or permits** (final red team PF-2): no sales tax, production, installation, permit or municipal
