@@ -1,0 +1,8 @@
+3.12   80 HELD   L1s.hash-id-fields-are-pure-hex-ids 
+3.12   80 HELD   L1s.no-full-pii-strings-anywhere 
+3.12   80 HELD   L1s.no-pii-needles-in-text-fields 
+3.12   80 SUMMARY 15 held, 2 broken
+3.13   80 HELD   L1s.hash-id-fields-are-pure-hex-ids 
+3.13   80 HELD   L1s.no-full-pii-strings-anywhere 
+3.13   80 HELD   L1s.no-pii-needles-in-text-fields 
+3.13   80 SUMMARY 15 held, 2 broken

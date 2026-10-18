@@ -1,0 +1,134 @@
+{
+ "shorten_then_restore": {
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_vs_lines_at_stop": [
+   14,
+   13
+  ],
+  "files_at_stop": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "restart1": "the ledger holds anchors beyond the local log: the log was truncated or rolled back",
+  "files_after_restart1": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "tenants_restart1": false,
+  "restart2": "the ledger holds anchors beyond the local log: the log was truncated or rolled back",
+  "files_after_restart2": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "inflight_applied": false,
+  "write_after": 503,
+  "anchors_vs_lines_end": [
+   14,
+   13
+  ]
+ },
+ "control_no_shorten": {
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_vs_lines_at_stop": [
+   14,
+   13
+  ],
+  "files_at_stop": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "restart1": null,
+  "files_after_restart1": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "tenants_restart1": true,
+  "restart2": "the ledger holds anchors beyond the local log: the log was truncated or rolled back",
+  "files_after_restart2": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "inflight_applied": false,
+  "write_after": 503,
+  "anchors_vs_lines_end": [
+   14,
+   13
+  ]
+ },
+ "control_no_pending": {
+  "anchors_vs_lines_at_stop": [
+   13,
+   13
+  ],
+  "files_at_stop": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "restart1": "the ledger holds anchors beyond the local log: the log was truncated or rolled back",
+  "files_after_restart1": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "tenants_restart1": false,
+  "restart2": null,
+  "files_after_restart2": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "inflight_applied": false,
+  "write_after": 201,
+  "anchors_vs_lines_end": [
+   14,
+   14
+  ]
+ },
+ "keep_copy": {
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_vs_lines_at_stop": [
+   14,
+   13
+  ],
+  "files_at_stop": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "restart1": "the ledger holds anchors beyond the local log: the log was truncated or rolled back",
+  "files_after_restart1": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "tenants_restart1": false,
+  "restart2": null,
+  "files_after_restart2": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "inflight_applied": true,
+  "write_after": 201,
+  "anchors_vs_lines_end": [
+   15,
+   15
+  ]
+ }
+}

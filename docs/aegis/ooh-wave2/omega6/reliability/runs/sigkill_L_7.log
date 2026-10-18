@@ -1,0 +1,6 @@
+SHA ce665c5 tree 5530ba0 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 seed 7 cycles 16 ledger-kill real ledger sha256 f3da9d7b
+workdir /var/folders/2_/q80gd3fn3f50pcmk1qlw7gnh0000gn/T/tmp4t78id_e
+writers joined; status now: {'ok': True, 'checked_at': '2026-10-18T07:55:51Z', 'problem': None}
+status integrity: {'ok': True, 'checked_at': '2026-10-18T07:55:51Z', 'problem': None}
+{"seed": 7, "cycles": 16, "kill_ledger": true, "acked": 1073, "unacked_first": 239, "refused_first": 733, "log_tenants": 1073, "dups": [], "acked_missing": [], "unrecoverable": [], "integrity": {"integrity": {"ok": true, "checked_at": "2026-10-18T07:56:55Z", "problem": null}, "ledger_valid": true, "log_length": 1073}, "ledger_valid": {"entries": 2153, "valid": true}, "log_len": 1073, "anchors": 1073, "pending_files": []}
+RESULT PASS

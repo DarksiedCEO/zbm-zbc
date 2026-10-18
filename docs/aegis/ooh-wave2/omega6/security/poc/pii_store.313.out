@@ -1,0 +1,13 @@
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+STORED  unit.vendor_text (ooh_agent) PAN spaced: HTTP 201 
+STORED  unit.vendor_text (ooh_agent) SSN: HTTP 201 
+refused price.vendor_text (ooh_agent) PAN: HTTP 201 
+refused hold_evidence.vendor_text (ooh_agent) PAN: HTTP 201 
+refused face attribute text (ooh_agent) PAN: HTTP 422 {"detail":"ATTRIBUTE_VALUE_PERSONAL_DATA"}
+STORED  face attribute text (ooh_agent) SSN: HTTP 200 
+STORED  client_approval_doc_ref (andre) PAN dashed: HTTP 200 
+refused funds evidence_ref (andre) PAN [control: rule says never stored]: HTTP 422 {"detail":"FUNDS_METHOD_CONFLICT"}
+audit/export as compliance_38 contains PAN: True SSN: True
+unit view as ooh_agent contains PAN: True SSN: True
+hub campaign view contains PAN/SSN: False

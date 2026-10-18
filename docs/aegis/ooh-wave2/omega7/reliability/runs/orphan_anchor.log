@@ -1,0 +1,11 @@
+SHA 75b0662823b867df3325d676b1dcf69abe37a425 tree 67c15180382fab1a391b78756467c1a79a934973 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+write during the fault: 503 {"detail":"LEDGER_UNAVAILABLE","maybe":true}
+integrity check 0 {'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None}
+integrity check 1 {'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None}
+integrity check 2 {'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None}
+next write: 201 {"tenant_id":"orphan-2","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+after RESTART integrity: {'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None}
+write after restart: 201 {"tenant_id":"orphan-3","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+log lines 16 ledger anchors 16

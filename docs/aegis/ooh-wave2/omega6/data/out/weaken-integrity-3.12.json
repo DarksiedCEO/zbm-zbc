@@ -1,0 +1,1371 @@
+{
+ "I1_any_department_vouches": {
+  "pytest_tail": "2 failed, 48 passed, 1 warning in 6.73s",
+  "failed_tests": [
+   "test_ip_other_department_and_other_event_types_are_ignored",
+   "test_ip_disk_pending_vouched_only_by_another_department_is_not_appended"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [
+     "line 14: 0 matching anchors",
+     "anchors 15 != lines 16"
+    ],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:dd3a00b79e472780"
+    ],
+    "expected_subject": "log:dd3a00b79e472780",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I2_any_event_type_vouches": {
+  "pytest_tail": "22 failed, 28 passed, 1 warning in 6.33s",
+  "failed_tests": [
+   "test_ip_last_anchor_lost_on_the_ledger_is_caught",
+   "test_ip_middle_anchor_lost_on_the_ledger_is_caught",
+   "test_ip_unanchored_line_appended_to_the_local_log_is_caught",
+   "test_ip_anchor_with_another_payload_is_caught",
+   "test_ip_anchor_beyond_the_local_log_is_caught",
+   "test_ip_other_department_and_other_event_types_are_ignored",
+   "test_ip_disk_pending_with_its_anchor_is_appended_and_applied",
+   "test_ip_disk_pending_rolls_forward_across_a_restart",
+   "test_ip_disk_pending_without_anchor_is_set_aside_not_applied",
+   "test_ip_set_aside_line_is_appended_when_its_anchor_appears",
+   "test_ip_set_aside_line_that_went_stale_is_cleared",
+   "test_ip_set_aside_line_without_anchor_stays_set_aside",
+   "test_ip_disk_pending_vouched_only_by_another_department_is_not_appended",
+   "test_ip_disk_pending_append_failure_blocks_and_recovers",
+   "test_ip_own_pending_kept_while_the_ledger_is_down",
+   "test_ip_own_pending_that_went_stale_falls_through_to_the_file_path",
+   "test_ip_unreadable_ledger_blocks_until_it_reads_again",
+   "test_ip_unforced_check_is_skipped_when_ok_and_retried_after_the_interval",
+   "test_ip_ooh_event_of_another_type_does_not_vouch_for_a_disk_pending_line",
+   "test_ip_stale_own_pending_still_settles_the_line_on_disk",
+   "test_ip_appended_disk_pending_is_never_set_aside",
+   "test_ip_first_line_of_an_empty_log_rolls_forward_under_its_own_epoch"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": true,
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "readback_problems": [
+     "line 14: 0 matching anchors",
+     "anchors 13 != lines 14"
+    ],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "anchor_subjects": [
+     "log:905af5e49904512f"
+    ],
+    "expected_subject": "log:905af5e49904512f",
+    "restart_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I3_disk_vouch_ignores_payload_subject": {
+  "pytest_tail": "2 failed, 48 passed, 1 warning in 5.59s",
+  "failed_tests": [
+   "test_ip_disk_pending_with_a_wrong_anchor_payload_is_not_appended",
+   "test_ip_disk_pending_with_a_wrong_anchor_subject_is_not_appended"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:b49411a4d266c5a8"
+    ],
+    "expected_subject": "log:b49411a4d266c5a8",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I4_disk_pending_appended_without_anchor": {
+  "pytest_tail": "9 failed, 41 passed, 1 warning in 5.39s",
+  "failed_tests": [
+   "test_ip_disk_pending_without_anchor_is_set_aside_not_applied",
+   "test_ip_set_aside_line_is_appended_when_its_anchor_appears",
+   "test_ip_set_aside_line_that_went_stale_is_cleared",
+   "test_ip_set_aside_line_without_anchor_stays_set_aside",
+   "test_ip_disk_pending_with_a_wrong_anchor_payload_is_not_appended",
+   "test_ip_disk_pending_with_a_wrong_anchor_subject_is_not_appended",
+   "test_ip_disk_pending_vouched_only_by_another_department_is_not_appended",
+   "test_ip_set_aside_failure_blocks",
+   "test_ip_ooh_event_of_another_type_does_not_vouch_for_a_disk_pending_line"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": true,
+    "applied2": true,
+    "set_aside": false,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": true,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": true,
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 14: 0 matching anchors",
+     "anchors 13 != lines 14"
+    ],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": true,
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 14: 0 matching anchors",
+     "anchors 13 != lines 14"
+    ],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:2d6ebe4766f0144b"
+    ],
+    "expected_subject": "log:2d6ebe4766f0144b",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I5_no_beyond_log_check": {
+  "pytest_tail": "1 failed, 49 passed, 1 warning in 4.23s",
+  "failed_tests": [
+   "test_ip_anchor_beyond_the_local_log_is_caught"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:240d88b0e434133f"
+    ],
+    "expected_subject": "log:240d88b0e434133f",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I6_no_per_line_check": {
+  "pytest_tail": "4 failed, 46 passed, 1 warning in 4.12s",
+  "failed_tests": [
+   "test_ip_last_anchor_lost_on_the_ledger_is_caught",
+   "test_ip_middle_anchor_lost_on_the_ledger_is_caught",
+   "test_ip_unanchored_line_appended_to_the_local_log_is_caught",
+   "test_ip_anchor_with_another_payload_is_caught"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 17 != lines 18"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "write": 201,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "write": null,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "write": 201,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:a096ea8f53738f0d"
+    ],
+    "expected_subject": "log:a096ea8f53738f0d",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I7_no_other_log_check": {
+  "pytest_tail": "1 failed, 49 passed, 1 warning in 3.63s",
+  "failed_tests": [
+   "test_ip_anchor_of_another_log_is_caught"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:155dfbbebba419a0"
+    ],
+    "expected_subject": "log:155dfbbebba419a0",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I8_set_aside_never_revived": {
+  "pytest_tail": "6 failed, 44 passed, 1 warning in 4.05s",
+  "failed_tests": [
+   "test_ip_set_aside_line_is_appended_when_its_anchor_appears",
+   "test_ip_set_aside_line_that_went_stale_is_cleared",
+   "test_ip_anchored_disk_pending_with_an_invalid_actor_is_not_appended[Bad",
+   "test_ip_anchored_disk_pending_with_an_invalid_actor_is_not_appended[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]",
+   "test_ip_anchored_disk_pending_with_an_invalid_actor_is_not_appended[]",
+   "test_ip_anchored_disk_pending_of_an_unknown_kind_is_not_appended"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": false,
+    "set_aside": true,
+    "readback_problems": [
+     "anchors 14 != lines 13"
+    ],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": false,
+    "readback_problems": [
+     "anchors 14 != lines 13"
+    ],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:bcfa014d37cdeb59"
+    ],
+    "expected_subject": "log:bcfa014d37cdeb59",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I9_empty_log_epoch_wrong": {
+  "pytest_tail": "1 failed, 49 passed, 1 warning in 3.75s",
+  "failed_tests": [
+   "test_ip_first_line_of_an_empty_log_rolls_forward_under_its_own_epoch"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "anchor_subjects": [
+     "log:0000000000000000"
+    ],
+    "expected_subject": "log:1d3827ba892cf16a",
+    "restart_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "readback_problems": [
+     "line 1: 0 matching anchors"
+    ],
+    "money_evidence_problems": []
+   }
+  }
+ },
+ "I10_roll_forward_no_chain_check": {
+  "pytest_tail": "3 failed, 47 passed, 1 warning in 3.81s",
+  "failed_tests": [
+   "test_ip_set_aside_line_that_went_stale_is_cleared",
+   "test_ip_disk_pending_that_does_not_chain_is_not_appended_even_if_anchored",
+   "test_ip_own_pending_that_went_stale_falls_through_to_the_file_path"
+  ],
+  "real_ledger": {
+   "A_last_anchor_lost": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 15 has no matching anchor on the ledger"
+    },
+    "readback_problems": [
+     "line 15: 0 matching anchors",
+     "anchors 14 != lines 15"
+    ],
+    "money_evidence_problems": []
+   },
+   "A_wrong_ledger_fresh": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 1 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "A_ledger_of_other_ooh_log": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_in_process": {
+    "check": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": "INTEGRITY_UNVERIFIED",
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "B_unanchored_on_disk": {
+    "start_integrity": {
+     "ok": false,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": "local log line 14 has no matching anchor on the ledger"
+    },
+    "write": 503,
+    "readback_problems": null,
+    "money_evidence_problems": null
+   },
+   "C_disk_pending_anchored": {
+    "applied": true,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "C_crash_after_anchor": {
+    "applied": true,
+    "start_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_disk_pending_unanchored_revived": {
+    "applied1": false,
+    "applied2": true,
+    "set_aside": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "D_crash_before_anchor_revived": {
+    "applied_at_start": false,
+    "applied": true,
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_seo_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "E_ooh_note_same_id": {
+    "applied": false,
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   },
+   "F_first_line_empty_log": {
+    "check": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "anchor_subjects": [
+     "log:103e7ddc521d9f80"
+    ],
+    "expected_subject": "log:103e7ddc521d9f80",
+    "restart_integrity": {
+     "ok": true,
+     "checked_at": "2026-10-16T18:00:00Z",
+     "problem": null
+    },
+    "readback_problems": [],
+    "money_evidence_problems": []
+   }
+  }
+ }
+}

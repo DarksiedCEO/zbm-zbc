@@ -1,0 +1,58 @@
+# War room report (seed 13)
+
+Gate: **PASS**. LLM personas: NOT_CONNECTED (deterministic personas only).
+
+| Department | Gate | Cases | PASS | FAIL | ERROR | MUST pass rate (excl. known) | SHOULD score | Known failures |
+|---|---|---|---|---|---|---|---|---|
+| ooh-py | PASS | 170 | 170 | 0 | 0 | 100.0% | n/a | 0 |
+
+## ooh-py
+
+| Transform | Cases | MUST failures | SHOULD misses |
+|---|---|---|---|
+| (base) | 66 | 0 | 0 |
+| case_flip | 28 | 0 | 0 |
+| fullwidth | 37 | 0 | 0 |
+| homoglyph | 17 | 0 | 0 |
+| homoglyph_wide | 5 | 0 | 0 |
+| html_wrap | 3 | 0 | 0 |
+| injection | 2 | 0 | 0 |
+| leetspeak | 9 | 0 | 0 |
+| letter_punct | 10 | 0 | 0 |
+| long_body | 1 | 0 | 0 |
+| signature | 1 | 0 | 0 |
+| soft_hyphen | 20 | 0 | 0 |
+| zero_width | 25 | 0 | 0 |
+
+| Scenario | Cases | PASS | FAIL | ERROR | known failure |
+|---|---|---|---|---|---|
+| amount-off-the-quote | 11 | 11 | 0 | 0 | 0 |
+| duplicate-submission | 1 | 1 | 0 | 0 | 0 |
+| face-clash-across-tenants | 5 | 5 | 0 | 0 | 0 |
+| face-registered-twice | 21 | 21 | 0 | 0 | 0 |
+| funds-of-nothing | 3 | 3 | 0 | 0 | 0 |
+| funds-reference-respelt | 27 | 27 | 0 | 0 | 0 |
+| funds-zero-padded | 17 | 17 | 0 | 0 | 0 |
+| one-unit-two-quotes | 1 | 1 | 0 | 0 | 0 |
+| outcome-during-dispute | 2 | 2 | 0 | 0 | 0 |
+| someone-else-approves-a-contract | 3 | 3 | 0 | 0 | 0 |
+| someone-else-authorizes | 4 | 4 | 0 | 0 | 0 |
+| someone-else-confirms-a-hold | 3 | 3 | 0 | 0 | 0 |
+| vendor-spoofing | 36 | 36 | 0 | 0 | 0 |
+| vendor-substitution | 20 | 20 | 0 | 0 | 0 |
+| vendor-text-injection | 16 | 16 | 0 | 0 | 0 |
+
+## Slowest cases (measured, not asserted)
+
+- `ooh-py/face-clash-across-tenants#003.0@13` 241.6 ms
+- `ooh-py/funds-zero-padded#005.0@13` 217.4 ms
+- `ooh-py/funds-reference-respelt#000.2@13` 213.4 ms
+- `ooh-py/funds-zero-padded#001.2@13` 210.8 ms
+- `ooh-py/funds-reference-respelt#004.3@13` 210.3 ms
+- `ooh-py/funds-reference-respelt#002.2@13` 208.8 ms
+- `ooh-py/funds-reference-respelt#007.1@13` 202.8 ms
+- `ooh-py/face-clash-across-tenants#000.0@13` 199.5 ms
+- `ooh-py/face-clash-across-tenants#002.0@13` 199.0 ms
+- `ooh-py/face-clash-across-tenants#001.0@13` 198.4 ms
+
+rc=0

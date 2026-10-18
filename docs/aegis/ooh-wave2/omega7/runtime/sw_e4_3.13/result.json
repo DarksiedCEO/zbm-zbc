@@ -1,0 +1,129 @@
+{
+ "start": {
+  "status": "ok"
+ },
+ "W1": [
+  201,
+  {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:21Z",
+   "campaigns": 0
+  }
+ ],
+ "W2": [
+  201,
+  {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:21Z",
+   "campaigns": 0
+  }
+ ],
+ "pre": {
+  "disk": {
+   "sha256": "ccd4ee0ce422b54f741c82f1b48fda17ca3a5210aa67c0aee747b123529867be",
+   "size": 1372,
+   "lines": 2,
+   "line_shas": [
+    "e64d299375bfc7fcbb7b641f75c1a4daa96a58cb4fa94942806d3548b900a5c2",
+    "a018dfcec5f43cefcd1c429a5a7b934278cd204a0992fbb275aa6a12bc3e7ae7"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null,
+    null
+   ]
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:21Z",
+   "problem": null
+  }
+ },
+ "forged_line": "{\"at\":\"2026-10-18T10:24:21Z\",\"data\":{\"_obj\":\"t-mid\",\"actor\":\"andre\",\"evidence\":[{\"event_id\":\"ooh-evd-143407f404b7a6eae4807d6877099e92f6db6d7b\",\"event_type\":\"tenant_created\",\"payload\":{\"rk\":\"tenant|t-mid|9dd2d1f0-b3f0-4942-ba73-6316921c0c35\",\"seq\":2,\"tenant_id\":\"t-mid\"},\"subject_id\":\"tenant:t-mid\"}],\"request_id\":\"tenant|t-mid|9dd2d1f0-b3f0-4942-ba73-6316921c0c35\",\"request_sha\":\"00ee54ed7b993b726a2f1acf28077f663d0fe549379961293d32e4eae23fd69f\",\"tenant_id\":\"t-mie\"},\"fmt\":4,\"kind\":\"tenant_created\",\"prev_line_sha256\":\"e64d299375bfc7fcbb7b641f75c1a4daa96a58cb4fa94942806d3548b900a5c2\",\"record_sha256\":\"f28be5cbbe885fecaeba44919bb0d98c3ef18c5a1f5e8fd7cb5325fd4e29e8c2\",\"seq\":2}",
+ "after_fault": {
+  "disk": {
+   "sha256": "01b7bbb9f6dc673a90efe74427cd53a740612bf00f5842277114634b5e71165a",
+   "size": 1372,
+   "lines": 2,
+   "line_shas": [
+    "e64d299375bfc7fcbb7b641f75c1a4daa96a58cb4fa94942806d3548b900a5c2",
+    "cb8fc08ce9ea34bc02222d4a273837fa169ceaf156dac81eb3b15108478c2557"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:21Z",
+   "problem": null
+  }
+ },
+ "restart1": {
+  "status": "degraded"
+ },
+ "restart1_audit": {
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-18T10:24:22Z",
+   "problem": "local log line 2 has no matching anchor on the ledger"
+  },
+  "ledger_valid": true,
+  "log_length": 2
+ },
+ "restart1_W": [
+  503,
+  {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  }
+ ],
+ "final": {
+  "disk": {
+   "sha256": "01b7bbb9f6dc673a90efe74427cd53a740612bf00f5842277114634b5e71165a",
+   "size": 1372,
+   "lines": 2,
+   "line_shas": [
+    "e64d299375bfc7fcbb7b641f75c1a4daa96a58cb4fa94942806d3548b900a5c2",
+    "cb8fc08ce9ea34bc02222d4a273837fa169ceaf156dac81eb3b15108478c2557"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null,
+    null
+   ]
+  },
+  "ledger_verify": {
+   "entries": 4,
+   "valid": true
+  }
+ }
+}

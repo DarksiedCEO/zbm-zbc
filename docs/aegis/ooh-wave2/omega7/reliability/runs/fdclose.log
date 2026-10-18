@@ -1,0 +1,19 @@
+SHA 75b0662 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 fd growth per file (pytest session start vs end)
+-- tests/test_aegis_integrity_path.py
+FDCOUNT start=6 end=7 growth=1 ooh.lock_open=1
+50 passed, 1 warning in 5.30s
+-- tests/test_aegis_omega5_mutation.py
+FDCOUNT start=6 end=6 growth=0 ooh.lock_open=0
+10 passed, 1 warning in 1.19s
+-- tests/test_aegis_store_write_path.py
+FDCOUNT start=6 end=6 growth=0 ooh.lock_open=0
+15 passed, 1 warning in 1.81s
+-- tests/test_aegis_store_write_path.py tests/test_aegis_omega5_mutation.py tests/test_aegis_integrity_path.py
+FDCOUNT start=6 end=7 growth=1 ooh.lock_open=1
+75 passed, 1 warning in 8.14s
+-- fdclose.py
+after 5x svc.close():  fd growth 5
+after lock.release():  fd growth 0
+-- full suite
+FDCOUNT start=6 end=27 growth=21 ooh.lock_open=21
+792 passed, 1 warning in 136.10s (0:02:16)

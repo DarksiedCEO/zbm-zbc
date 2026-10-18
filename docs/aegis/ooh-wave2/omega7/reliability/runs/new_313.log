@@ -1,0 +1,21 @@
+SHA 75b0662 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python Python 3.13.9 10x sequential + 10x shuffled (75 tests)
+75 passed, 1 warning in 8.21s
+75 passed, 1 warning in 8.67s
+75 passed, 1 warning in 8.88s
+75 passed, 1 warning in 8.94s
+75 passed, 1 warning in 8.73s
+75 passed, 1 warning in 8.60s
+75 passed, 1 warning in 8.53s
+75 passed, 1 warning in 8.42s
+75 passed, 1 warning in 8.11s
+75 passed, 1 warning in 8.50s
+shuf 1 ['75 passed, 1 warning in 7.85s']
+shuf 2 ['75 passed, 1 warning in 8.97s']
+shuf 3 ['75 passed, 1 warning in 8.91s']
+shuf 4 ['75 passed, 1 warning in 8.24s']
+shuf 5 ['75 passed, 1 warning in 8.84s']
+shuf 6 ['75 passed, 1 warning in 8.17s']
+shuf 7 ['75 passed, 1 warning in 8.57s']
+shuf 8 ['75 passed, 1 warning in 8.87s']
+shuf 9 ['75 passed, 1 warning in 9.25s']
+shuf 10 ['75 passed, 1 warning in 9.72s']

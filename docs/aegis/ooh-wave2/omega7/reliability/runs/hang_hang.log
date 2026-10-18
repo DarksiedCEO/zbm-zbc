@@ -1,0 +1,6 @@
+SHA 75b0662 tree 67c1518 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 mode hang
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+baseline create tenant 201 0.02s {"tenant_id":"acme","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+hang write -> 503 10.0s | concurrent GET /health: [(200, '9.5s'), (200, '0.0s'), (200, '0.0s')] | integrity ok after: True log len 1 tenants 1
+  after recovery write 201 0.0s integrity True log 2

@@ -1,0 +1,3906 @@
+[
+ {
+  "case": "c01-funds-anchor-held-live",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c02-funds-anchor-held-live-iw",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c03-funds-anchor-held-rs",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c04-funds-anchor-held-rs-iw",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c05-funds-anchor-not_held-live",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c06-funds-anchor-not_held-live-iw",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c07-funds-anchor-not_held-rs",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c08-funds-anchor-not_held-rs-iw",
+  "op": "funds",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 2,
+  "typed_committed": 1,
+  "typed_attempted_only": 1,
+  "audit_evidence_view": {
+   "total": 2,
+   "committed": 1,
+   "attempted": 1
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c09-funds-evidence-held-live",
+  "op": "funds",
+  "fault_on": "client_funds_verified_by_andre",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_andre",
+    "record_then_lose"
+   ],
+   [
+    "client_funds_verified_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c10-funds-evidence-held-rs",
+  "op": "funds",
+  "fault_on": "client_funds_verified_by_andre",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_andre",
+    "record_then_lose"
+   ],
+   [
+    "client_funds_verified_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c11-funds-evidence-not_held-live",
+  "op": "funds",
+  "fault_on": "client_funds_verified_by_andre",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_andre",
+    "lose_unrecorded"
+   ],
+   [
+    "client_funds_verified_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c12-funds-evidence-not_held-rs",
+  "op": "funds",
+  "fault_on": "client_funds_verified_by_andre",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_andre",
+    "lose_unrecorded"
+   ],
+   [
+    "client_funds_verified_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": null,
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   38,
+   38
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 39,
+   "anchors": 39,
+   "evidence_named": 39,
+   "problems": []
+  }
+ },
+ {
+  "case": "c13-finance-anchor-held-live",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c14-finance-anchor-held-live-iw",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   40,
+   40
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 41,
+   "anchors": 41,
+   "evidence_named": 41,
+   "problems": []
+  }
+ },
+ {
+  "case": "c15-finance-anchor-held-rs",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c16-finance-anchor-held-rs-iw",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   40,
+   40
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 41,
+   "anchors": 41,
+   "evidence_named": 41,
+   "problems": []
+  }
+ },
+ {
+  "case": "c17-finance-anchor-not_held-live",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c18-finance-anchor-not_held-live-iw",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   40,
+   40
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 41,
+   "anchors": 41,
+   "evidence_named": 41,
+   "problems": []
+  }
+ },
+ {
+  "case": "c19-finance-anchor-not_held-rs",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c20-finance-anchor-not_held-rs-iw",
+  "op": "finance",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 2,
+  "typed_committed": 1,
+  "typed_attempted_only": 1,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   40,
+   40
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 41,
+   "anchors": 41,
+   "evidence_named": 41,
+   "problems": []
+  }
+ },
+ {
+  "case": "c21-finance-evidence-held-live",
+  "op": "finance",
+  "fault_on": "client_funds_verified_by_finance_31",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_finance_31",
+    "record_then_lose"
+   ],
+   [
+    "client_funds_verified_by_finance_31",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c22-finance-evidence-held-rs",
+  "op": "finance",
+  "fault_on": "client_funds_verified_by_finance_31",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_finance_31",
+    "record_then_lose"
+   ],
+   [
+    "client_funds_verified_by_finance_31",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c23-finance-evidence-not_held-live",
+  "op": "finance",
+  "fault_on": "client_funds_verified_by_finance_31",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_finance_31",
+    "lose_unrecorded"
+   ],
+   [
+    "client_funds_verified_by_finance_31",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c24-finance-evidence-not_held-rs",
+  "op": "finance",
+  "fault_on": "client_funds_verified_by_finance_31",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "client_funds_verified_by_finance_31",
+    "lose_unrecorded"
+   ],
+   [
+    "client_funds_verified_by_finance_31",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "FUNDS_VERIFIED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": null,
+   "committed": null,
+   "attempted": null
+  },
+  "anchors_vs_lines": [
+   39,
+   39
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 40,
+   "anchors": 40,
+   "evidence_named": 40,
+   "problems": []
+  }
+ },
+ {
+  "case": "c25-authorize-anchor-held-live",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c26-authorize-anchor-held-live-iw",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c27-authorize-anchor-held-rs",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c28-authorize-anchor-held-rs-iw",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c29-authorize-anchor-not_held-live",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c30-authorize-anchor-not_held-live-iw",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c31-authorize-anchor-not_held-rs",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c32-authorize-anchor-not_held-rs-iw",
+  "op": "authorize",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "intervening_status": 201,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 2,
+  "typed_committed": 1,
+  "typed_attempted_only": 1,
+  "audit_evidence_view": {
+   "total": 2,
+   "committed": 1,
+   "attempted": 1
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c33-authorize-evidence-held-live",
+  "op": "authorize",
+  "fault_on": "purchase_authorized_by_andre",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_authorized_by_andre",
+    "record_then_lose"
+   ],
+   [
+    "purchase_authorized_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c34-authorize-evidence-held-rs",
+  "op": "authorize",
+  "fault_on": "purchase_authorized_by_andre",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_authorized_by_andre",
+    "record_then_lose"
+   ],
+   [
+    "purchase_authorized_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c35-authorize-evidence-not_held-live",
+  "op": "authorize",
+  "fault_on": "purchase_authorized_by_andre",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_authorized_by_andre",
+    "lose_unrecorded"
+   ],
+   [
+    "purchase_authorized_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c36-authorize-evidence-not_held-rs",
+  "op": "authorize",
+  "fault_on": "purchase_authorized_by_andre",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_authorized_by_andre",
+    "lose_unrecorded"
+   ],
+   [
+    "purchase_authorized_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   201,
+   201,
+   201,
+   201
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "PURCHASE_AUTHORIZED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "0.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 0
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   42,
+   42
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 43,
+   "anchors": 43,
+   "evidence_named": 43,
+   "problems": []
+  }
+ },
+ {
+  "case": "c37-submit-anchor-held-live",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c38-submit-anchor-held-live-iw",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   44,
+   44
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 45,
+   "anchors": 45,
+   "evidence_named": 45,
+   "problems": []
+  }
+ },
+ {
+  "case": "c39-submit-anchor-held-rs",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c40-submit-anchor-held-rs-iw",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   44,
+   44
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 45,
+   "anchors": 45,
+   "evidence_named": 45,
+   "problems": []
+  }
+ },
+ {
+  "case": "c41-submit-anchor-not_held-live",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c42-submit-anchor-not_held-live-iw",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 1,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   44,
+   44
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 45,
+   "anchors": 45,
+   "evidence_named": 45,
+   "problems": []
+  }
+ },
+ {
+  "case": "c43-submit-anchor-not_held-rs",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c44-submit-anchor-not_held-rs-iw",
+  "op": "submit",
+  "fault_on": "log_anchor",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": true,
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_in_memory": true,
+  "pending_on_disk": true,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "intervening_status": 201,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 2,
+  "typed_committed": 1,
+  "typed_attempted_only": 1,
+  "audit_evidence_view": {
+   "total": 2,
+   "committed": 1,
+   "attempted": 1
+  },
+  "anchors_vs_lines": [
+   44,
+   44
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 45,
+   "anchors": 45,
+   "evidence_named": 45,
+   "problems": []
+  }
+ },
+ {
+  "case": "c45-submit-evidence-held-live",
+  "op": "submit",
+  "fault_on": "purchase_order_submitted_by_andre",
+  "branch": "held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_order_submitted_by_andre",
+    "record_then_lose"
+   ],
+   [
+    "purchase_order_submitted_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c46-submit-evidence-held-rs",
+  "op": "submit",
+  "fault_on": "purchase_order_submitted_by_andre",
+  "branch": "held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_order_submitted_by_andre",
+    "record_then_lose"
+   ],
+   [
+    "purchase_order_submitted_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c47-submit-evidence-not_held-live",
+  "op": "submit",
+  "fault_on": "purchase_order_submitted_by_andre",
+  "branch": "not_held",
+  "restart_before_recovery": false,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_order_submitted_by_andre",
+    "lose_unrecorded"
+   ],
+   [
+    "purchase_order_submitted_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ },
+ {
+  "case": "c48-submit-evidence-not_held-rs",
+  "op": "submit",
+  "fault_on": "purchase_order_submitted_by_andre",
+  "branch": "not_held",
+  "restart_before_recovery": true,
+  "intervening_write": false,
+  "faults_played": [
+   [
+    "purchase_order_submitted_by_andre",
+    "lose_unrecorded"
+   ],
+   [
+    "purchase_order_submitted_by_andre",
+    "ledger_down"
+   ]
+  ],
+  "first_status": 503,
+  "first_detail": "LEDGER_UNAVAILABLE",
+  "integrity_after_fault": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_in_memory": false,
+  "pending_on_disk": false,
+  "ledger_alive_after_fault": false,
+  "write_while_ledger_down": 503,
+  "integrity_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines_added_by_recovery": 0,
+  "same_request_retries": [
+   200,
+   200,
+   200,
+   200
+  ],
+  "after_write": 201,
+  "money": {
+   "state": "ORDER_SUBMITTED",
+   "funds_entries": 1,
+   "client_funds_received": "6000.00",
+   "vendor_commitment": "5000.00",
+   "finance_verified": "6000.00",
+   "authorizations": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ],
+   "orders_total": 1
+  },
+  "op_lines_in_log": 1,
+  "typed_events_on_ledger": 1,
+  "typed_committed": 1,
+  "typed_attempted_only": 0,
+  "audit_evidence_view": {
+   "total": 1,
+   "committed": 1,
+   "attempted": 0
+  },
+  "anchors_vs_lines": [
+   43,
+   43
+  ],
+  "duplicate_event_ids_on_ledger": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback": {
+   "log_lines": 44,
+   "anchors": 44,
+   "evidence_named": 44,
+   "problems": []
+  }
+ }
+]

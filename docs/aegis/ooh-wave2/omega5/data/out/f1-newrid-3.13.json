@@ -1,0 +1,164 @@
+{
+ "funds/record_then_lose": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   409,
+   "STATE_NOT_ELIGIBLE"
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": null,
+  "auths": [],
+  "open_authorized_total": "0",
+  "orders": 0,
+  "vendor_commitment": "0.00",
+  "anchors_eq_lines": true
+ },
+ "funds/lose_unrecorded": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   409,
+   "STATE_NOT_ELIGIBLE"
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": null,
+  "auths": [],
+  "open_authorized_total": "0",
+  "orders": 0,
+  "vendor_commitment": "0.00",
+  "anchors_eq_lines": true
+ },
+ "finance/record_then_lose": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   200,
+   null
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": "6000.00",
+  "auths": [],
+  "open_authorized_total": "0",
+  "orders": 0,
+  "vendor_commitment": "0.00",
+  "anchors_eq_lines": true
+ },
+ "finance/lose_unrecorded": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   200,
+   null
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": "6000.00",
+  "auths": [],
+  "open_authorized_total": "0",
+  "orders": 0,
+  "vendor_commitment": "0.00",
+  "anchors_eq_lines": true
+ },
+ "authorize/record_then_lose": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   201,
+   null
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": "6000.00",
+  "auths": [
+   [
+    "VOID",
+    "NOT_SUBMITTED",
+    "5000.00"
+   ],
+   [
+    "AUTHORIZED",
+    "NOT_SUBMITTED",
+    "5000.00"
+   ]
+  ],
+  "open_authorized_total": "5000.0",
+  "orders": 0,
+  "vendor_commitment": "0.00",
+  "anchors_eq_lines": true
+ },
+ "authorize/lose_unrecorded": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   201,
+   null
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": "6000.00",
+  "auths": [
+   [
+    "VOID",
+    "NOT_SUBMITTED",
+    "5000.00"
+   ],
+   [
+    "AUTHORIZED",
+    "NOT_SUBMITTED",
+    "5000.00"
+   ]
+  ],
+  "open_authorized_total": "5000.0",
+  "orders": 0,
+  "vendor_commitment": "0.00",
+  "anchors_eq_lines": true
+ },
+ "submit/record_then_lose": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   409,
+   "DUPLICATE_ORDER_BLOCKED"
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": "6000.00",
+  "auths": [
+   [
+    "AUTHORIZED",
+    "SUBMISSION_UNKNOWN",
+    "5000.00"
+   ]
+  ],
+  "open_authorized_total": "5000.0",
+  "orders": 1,
+  "vendor_commitment": "5000.00",
+  "anchors_eq_lines": true
+ },
+ "submit/lose_unrecorded": {
+  "first": 503,
+  "integrity": true,
+  "resend_new_rid": [
+   409,
+   "DUPLICATE_ORDER_BLOCKED"
+  ],
+  "funds_entries": 1,
+  "client_funds_received": "6000.00",
+  "finance_verified": "6000.00",
+  "auths": [
+   [
+    "AUTHORIZED",
+    "SUBMISSION_UNKNOWN",
+    "5000.00"
+   ]
+  ],
+  "open_authorized_total": "5000.0",
+  "orders": 1,
+  "vendor_commitment": "5000.00",
+  "anchors_eq_lines": true
+ }
+}

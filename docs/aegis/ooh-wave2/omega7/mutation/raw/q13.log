@@ -1,0 +1,6 @@
+done
+done
+done
+done
+done
+q13.sh: line 9: 82135 Terminated: 15          python3 run7.py 3.13 8 ext_surv_ids.txt raw/ext197_313.jsonl f

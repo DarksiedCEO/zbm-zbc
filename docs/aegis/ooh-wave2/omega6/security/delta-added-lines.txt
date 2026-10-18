@@ -1,0 +1,177 @@
++- **Left as equivalent (17):** H085, H192, H252-H255, H311, H322, H344, H357, H371, H384, H416, H432, H441, H453,
++  H469. Each only adds a ledger read, changes a value no caller reads, rewrites a value to itself, or sits behind an
++  earlier check that refuses first (the epoch check before the per-line subject check; `INTEGRITY_RETRY_S` >
++  `FORCED_MIN_S`; `_after_integrity` does nothing). The gate at 4a0a4b4 showed four more that this section first
++  listed here (H198, H229, H399, H448) are not equivalent; see below.
++
++### AEGIS mutation gate BLOCK at 4a0a4b4 (Oct 17 2026)
++- **Thirteen behaviours no test pinned**, closed by `tests/test_aegis_omega5_mutation.py`, one named test per mutant:
++  - V001: the anchor payload's key names (`epoch`, `seq`, `line_sha256`) are a wire format. Renaming one would orphan
++    every anchor already on the ledger, so the test spells the keys out instead of calling `_anchor_ids`.
++  - T222: `RecordLog.clear_pending` must raise when the pending file can't be removed. If it swallowed the error, a
++    certain ledger refusal would answer maybe=false while the line stayed on disk and could later take effect.
++  - H198: the first forced integrity check reads the ledger even when the host clock started under `FORCED_MIN_S` ago.
++  - H229: a settling failure is the problem reported, not a later ledger read.
++  - H399: a stale pending line is set aside before it is removed, and writes stop if that fails.
++  - H448: a set-aside line appended late also clears `pending.discarded`.
++  - V045-V047, V082-V085: the integrity record a failed commit leaves has exactly `ok`, `checked_at` and `problem`,
++    with the exact problem text.
++- **Open, not changed in this commit:** a set-aside line that the ledger vouches for but that can't be applied is
++  appended while integrity stays ok (the own-pending and file-pending paths answer "an operator must inspect the
++  log"). It needs a ledger-valid anchor for a malformed line, which this service never writes. Next wave.
++| `python:ooh-py` | 777 | pytest collection | — |
++    yield led, h
++    if not h.svc.closed:
++        h.svc.close()          # give the data-directory lock back (one fd per test otherwise)
++"""AEGIS mutation gate BLOCK at 4a0a4b4: six commit/integrity-path behaviours no test pinned.
++
++- V001: the anchor payload's wire format (key names) is fixed; a rename would orphan every anchor already recorded.
++- T222: a pending line that cannot be removed after a certain ledger refusal answers maybe=true, never maybe=false.
++- H198: the first forced integrity check reads the ledger even when the host clock started under FORCED_MIN_S ago.
++- H229: when settling fails, the reported problem is the settling failure, not a later ledger read.
++- H399: a stale pending line is written to pending.discarded before it is removed; if that write fails, writes stop.
++- H448: a set-aside line whose anchor appears is appended and pending.discarded is cleared in the same check.
++- V045-V047, V082-V085: the integrity record a failed commit leaves has the keys ok, checked_at and problem, and
++  the exact problem text the operator reads."""
++from __future__ import annotations
++
++import os
++import types
++
++import service as SV
++import store as ST
++from ledger import payload_sha256
++from service import DEPARTMENT, sha256_hex
++from store import PENDING_NAME, StoreWriteError
++from test_aegis_integrity_path import (_anchor_for, _check, _discarded, _line, _new_tenant, _pending_on_disk,
++                                       env)  # noqa: F401  (env is a fixture)
++
++
++def test_v001_anchor_payload_wire_format_is_fixed(env):
++    led, h = env
++    h.ok(_new_tenant(h, "wire-1"), 201)
++    line = h.svc.log._lines[-1]
++    epoch = h.svc.log.epoch
++    seq = len(h.svc.log)
++    a = [e for e in led.events if e["event_type"] == "log_anchor" and e["department"] == DEPARTMENT][-1]
++    expected = {"epoch": epoch, "seq": seq, "line_sha256": sha256_hex(line)}      # literal keys: the wire format
++    assert a["_payload"] == expected
++    assert a["payload_sha256"] == payload_sha256(expected)
++    assert a["subject_id"] == f"log:{epoch}"
++
++
++def test_t222_unremovable_pending_after_certain_refusal_answers_maybe(env, monkeypatch):
++    led, h = env
++    real_unlink = ST.os.unlink
++
++    def unlink(path, *a, **k):
++        if str(path).endswith(PENDING_NAME):
++            raise PermissionError(13, "denied")
++        return real_unlink(path, *a, **k)
++
++    monkeypatch.setattr(ST.os, "unlink", unlink)
++    led.script = ["unreachable"]
++    r = _new_tenant(h, "stuck-1")
++    assert r.status_code == 503 and r.json() == {"detail": "LEDGER_UNAVAILABLE", "maybe": True}, r.text
++    assert os.path.exists(h.svc.log.pending_path)
++    assert h.svc.integrity["ok"] is False                     # kept: rolled forward or set aside at the next check
++    assert _new_tenant(h, "stuck-2").json()["detail"] == "INTEGRITY_UNVERIFIED"
++
++
++def test_t222_store_clear_pending_raises_when_the_file_cannot_be_removed(env, monkeypatch):
++    led, h = env
++    _pending_on_disk(h, b"x")
++    monkeypatch.setattr(ST.os, "unlink", lambda *a, **k: (_ for _ in ()).throw(PermissionError(13, "denied")))
++    try:
++        h.svc.log.clear_pending()
++    except StoreWriteError:
++        pass
++    else:
++        raise AssertionError("clear_pending swallowed an unlink failure")
++
++
++def test_h198_first_forced_check_reads_the_ledger_soon_after_host_boot(env, monkeypatch):
++    led, h = env
++    h.svc._last_integrity_try = 0
++    h.svc.integrity = {"ok": False, "checked_at": None, "problem": "not yet checked"}
++    monkeypatch.setattr(SV, "time", types.SimpleNamespace(monotonic=lambda: 5.0))     # host up for 5 s
++    before = led.reads
++    i = h.svc.verify_integrity(force=True)
++    assert led.reads == before + 1
++    assert i["ok"] is True, i
++
++
++def test_h229_settling_failure_is_the_problem_reported(env, monkeypatch):
++    led, h = env
++    rec, line = _line(h, "s-1")
++    _anchor_for(h, rec, line)
++    _pending_on_disk(h, line)
++
++    def fail(*a, **k):
++        raise StoreWriteError("unlink failed")
++
++    monkeypatch.setattr(h.svc.log, "clear_pending", fail)
++    led.fail_reads_after = 1                    # the first read works, any re-read fails
++    i = _check(h)
++    assert i["ok"] is False and i["problem"] == "the pending line could not be set aside", i
++
++
++def test_h399_stale_pending_is_set_aside_before_removal(env, monkeypatch):
++    led, h = env
++    rec, line = _line(h, "bad-1", actor="Bad Actor")
++    _anchor_for(h, rec, line)
++    _pending_on_disk(h, line)
++
++    def fail(*a, **k):
++        raise StoreWriteError("disk full")
++
++    monkeypatch.setattr(h.svc.log, "write_discarded", fail)
++    i = _check(h)
++    assert i["ok"] is False and i["problem"] == "the pending line could not be set aside", i
++    assert open(h.svc.log.pending_path, "rb").read() == line        # not removed before it was kept
++    assert _new_tenant(h, "after-1").json()["detail"] == "INTEGRITY_UNVERIFIED"
++
++
++def test_h448_set_aside_line_appended_late_clears_the_set_aside_copy(env):
++    led, h = env
++    rec, line = _line(h, "x", data={"actor": "andre"})      # tenant_created without tenant_id: cannot be applied
++    _pending_on_disk(h, line)
++    _check(h)
++    assert _discarded(h) == line                              # no anchor yet: set aside
++    _anchor_for(h, rec, line)                                 # the anchor appears late
++    n = len(h.svc.log)
++    _check(h)
++    assert len(h.svc.log) == n + 1
++    assert _discarded(h) is None
++
++
++def _shape(i, problem):
++    assert set(i) == {"ok", "checked_at", "problem"}, i
++    assert i["ok"] is False and isinstance(i["checked_at"], str) and i["checked_at"], i
++    assert i["problem"] == problem, i
++
++
++def _fail(*a, **k):
++    raise StoreWriteError("disk full")
++
++
++def test_v045_v047_unremovable_pending_integrity_record(env, monkeypatch):
++    led, h = env
++    monkeypatch.setattr(h.svc.log, "write_pending", _fail)
++    monkeypatch.setattr(h.svc.log, "clear_pending", _fail)
++    assert _new_tenant(h, "shape-1").status_code == 503
++    _shape(h.svc.integrity, "the pending line could not be removed")
++
++
++def test_v082_v083_lost_answer_integrity_record(env):
++    led, h = env
++    led.script = ["lose_unrecorded", "unreachable"]
++    assert _new_tenant(h, "shape-2").status_code == 503
++    _shape(h.svc.integrity, "a ledger answer was lost; the pending line is rolled forward at the next integrity check")
++
++
++def test_v084_v085_anchored_not_written_integrity_record(env, monkeypatch):
++    led, h = env
++    monkeypatch.setattr(h.svc.log, "append_prepared", _fail)
++    assert _new_tenant(h, "shape-3").status_code == 503
++    _shape(h.svc.integrity, "a log line was anchored but not written; it is rolled forward at the next integrity check")

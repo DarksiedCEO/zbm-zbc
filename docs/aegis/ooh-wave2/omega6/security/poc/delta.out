@@ -1,0 +1,50 @@
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+HELD   D1[record_then_lose].submit-answers-503-maybe-true {"detail":"LEDGER_UNAVAILABLE","maybe":true}
+HELD   D1[record_then_lose].no-internal-text-in-response 
+HELD   D1[record_then_lose].nothing-applied-yet 
+HELD   D1[record_then_lose].writes-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[record_then_lose].andre-money-action-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[record_then_lose].finance-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[record_then_lose].kill-engage-still-effective(volatile) lities_by_env":[],"tenants_killed":[],"volatile_unrecorded":[{"kind":"capability","arg":"submission"}],"recorded":false}
+HELD   D1[record_then_lose].kill-release-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[record_then_lose].hub-read-still-scoped 
+HELD   D1[record_then_lose].health-degraded-only {"status":"degraded"}
+HELD   D1[record_then_lose].job-run-as-ooh_agent-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[record_then_lose].job-run-as-hub-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[record_then_lose].job-run-as-compliance_38-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[record_then_lose].job-run-as-dashboard-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[record_then_lose].self-heals-on-integrity-job job=200 integrity={'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None} state=SUBMISSION_UNKNOWN log 41->42
+HELD   D1[record_then_lose].no-seq-reuse 
+HELD   D1[record_then_lose].ledger-anchors==log-lines 42 vs 42
+HELD   D1[record_then_lose].writes-resume {"campaign_id":"ooh-cmp-c3db9193e69367c5906b2bc30d872f126ea37db1","tenant_id":"a
+OBS   D1[record_then_lose].rolled-forward-despite-kill-engaged-after-503: submission_state=SUBMISSION_UNKNOWN; kill engaged at False
+HELD   D1[record_then_lose].no-second-order-after-roll-forward {"detail":"DUPLICATE_ORDER_BLOCKED","submission_state":"DUPLICATE_BLOCKED"}
+HELD   D1[lose_unrecorded].submit-answers-503-maybe-true {"detail":"LEDGER_UNAVAILABLE","maybe":true}
+HELD   D1[lose_unrecorded].no-internal-text-in-response 
+HELD   D1[lose_unrecorded].nothing-applied-yet 
+HELD   D1[lose_unrecorded].writes-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[lose_unrecorded].andre-money-action-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[lose_unrecorded].finance-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[lose_unrecorded].kill-engage-still-effective(volatile) lities_by_env":[],"tenants_killed":[],"volatile_unrecorded":[{"kind":"capability","arg":"submission"}],"recorded":false}
+HELD   D1[lose_unrecorded].kill-release-refused-during-wedge {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+HELD   D1[lose_unrecorded].hub-read-still-scoped 
+HELD   D1[lose_unrecorded].health-degraded-only {"status":"degraded"}
+HELD   D1[lose_unrecorded].job-run-as-ooh_agent-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[lose_unrecorded].job-run-as-hub-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[lose_unrecorded].job-run-as-compliance_38-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[lose_unrecorded].job-run-as-dashboard-refused {"detail":"CALLER_NOT_ALLOWED"}
+HELD   D1[lose_unrecorded].self-heals-on-integrity-job job=200 integrity={'ok': True, 'checked_at': '2026-10-16T18:00:00Z', 'problem': None} state=SUBMISSION_UNKNOWN log 41->42
+HELD   D1[lose_unrecorded].no-seq-reuse 
+HELD   D1[lose_unrecorded].ledger-anchors==log-lines 42 vs 42
+HELD   D1[lose_unrecorded].writes-resume {"campaign_id":"ooh-cmp-7792888ae3c00617257b87c55a8d536072430604","tenant_id":"a
+OBS   D1[lose_unrecorded].rolled-forward-despite-kill-engaged-after-503: submission_state=SUBMISSION_UNKNOWN; kill engaged at False
+HELD   D1[lose_unrecorded].no-second-order-after-roll-forward {"detail":"DUPLICATE_ORDER_BLOCKED","submission_state":"DUPLICATE_BLOCKED"}
+HELD   D2.evidence-lost-then-down: 503, nothing applied, writes not wedged {"detail":"LEDGER_UNAVAILABLE","maybe":false}
+HELD   D2.retry-same-rid-records-once 200 n=1
+HELD   D2.new-rid-after-success-blocked {"detail":"DUPLICATE_ORDER_BLOCKED","submission_state":"DUPLICATE_BLOCKED"}
+HELD   D3[record_then_lose].restart-applies-only-if-ledger-holds-anchor state=SUBMISSION_UNKNOWN integrity=True
+HELD   D3[lose_unrecorded].restart-applies-only-if-ledger-holds-anchor state=NOT_SUBMITTED integrity=True
+HELD   D4.no-ledger-exception-text-in-logs 'Using selector: KqueueSelector\nHTTP Request: POST http://testserver/ooh/v1/tenants "HTTP/1.1 201 Created"\nUsing selector: KqueueSelector\nHTTP Request: POST http://testserver/ooh/v1/principal-agent-det'
+
+SUMMARY 44 held, 0 broken

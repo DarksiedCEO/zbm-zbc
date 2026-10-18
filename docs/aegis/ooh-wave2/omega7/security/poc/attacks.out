@@ -1,0 +1,102 @@
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+HELD   A1.readiness-MET-agent: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.readiness-MET-compliance: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.readiness-MET-dashboard-no-token: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.switch-engage-agent(control): HTTP 200 None 
+HELD   A1.switch-release-ooh_agent: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.switch-release-compliance_38: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.switch-release-dashboard: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.switch-release-agent-with-REAL-andre-token: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A1.switch-release-andre(control): HTTP 200 None 
+HELD   A1.price-APPROVED_BUY_LIMIT-agent: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.price-CLIENT_SELL_PRICE-agent: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.transition-PLAN_APPROVED-agent: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.transition-to-CLIENT_APPROVED-agent: HTTP 409 TRANSITION_GATED 
+HELD   A1.agent-moves-unit-HOLD_CONFIRMED: HTTP 409 HOLD_CONFIRMATION_ANDRE_ONLY 
+HELD   A1.andre-direct-move-HOLD_CONFIRMED(no evidence): HTTP 409 HOLD_CONFIRMATION_ANDRE_ONLY 
+HELD   A1.agent-hold-decision: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A1.dashboard-no-token-hold-decision: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A1.unit-still-HOLD_REQUESTED: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A2.replay-andre-release-rid-as-ooh_agent: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A2.replay-andre-release-rid-as-compliance_38: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A2.replay-andre-release-rid-as-dashboard: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A2.replay-andre-buy-limit-rid-as-ooh_agent: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A2.replay-andre-buy-limit-rid-as-dashboard: HTTP 403 ANDRE_APPROVAL_REQUIRED 
+HELD   A2.replay-andre-transition-rid-as-agent: HTTP 409 STATE_STALE 
+HELD   A2.agent-rid-replayed-on-other-tenant: HTTP 201 None 
+HELD   A2.agent-rid-replayed-by-dashboard: HTTP 201 None 
+HELD   A2.andre-cannot-act-as-finance: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A2.authorize-same-rid-same-body: HTTP 201 None 
+HELD   A2.authorize-same-rid-other-body: HTTP 409 REQUEST_ID_REUSED 
+HELD   A3.dashboard-globex-cid-under-acme: HTTP 404 CAMPAIGN_NOT_FOUND 
+HELD   A3.ooh_agent-globex-cid-under-acme: HTTP 404 CAMPAIGN_NOT_FOUND 
+HELD   A3.hub-acme-globex-cid-under-acme: HTTP 404 CAMPAIGN_NOT_FOUND 
+HELD   A3.hub-acme-on-globex-path: HTTP 404 TENANT_NOT_FOUND 
+HELD   A3.hub-no-existence-oracle(other vs missing tenant): HTTP 404 TENANT_NOT_FOUND 
+HELD   A3.hub-no-existence-oracle(other vs missing campaign): HTTP 404 CAMPAIGN_NOT_FOUND 
+HELD   A3.globex-unit-under-acme-campaign: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A3.acme-unit-under-other-acme-campaign: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A3.globex-contract-under-acme-campaign: HTTP 404 CONTRACT_NOT_FOUND 
+HELD   A3.acme-contract-under-other-acme-campaign: HTTP 404 CONTRACT_NOT_FOUND 
+HELD   A3.globex-authorization-under-acme-campaign: HTTP 404 AUTHORIZATION_NOT_FOUND 
+HELD   A3.acme-authorization-under-other-acme-campaign: HTTP 404 AUTHORIZATION_NOT_FOUND 
+HELD   A3.write-availability-globex-object-via-acme-campaign: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A3.write-hold-evidence-globex-object-via-acme-campaign: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A3.write-hold-decisions-globex-object-via-acme-campaign: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A3.write-flight-globex-object-via-acme-campaign: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A3.write-rate-card-globex-object-via-acme-campaign: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A3.write-contract-approve-globex-object-via-acme-campaign: HTTP 404 CONTRACT_NOT_FOUND 
+HELD   A3.write-submit-globex-object-via-acme-campaign: HTTP 404 AUTHORIZATION_NOT_FOUND 
+HELD   A3.write-outcome-globex-object-via-acme-campaign: HTTP 404 AUTHORIZATION_NOT_FOUND 
+HELD   A3.globex-authorization-untouched: HTTP 404 AUTHORIZATION_NOT_FOUND 
+HELD   A4.sell-price-with-globex-quote: HTTP 409 SELL_PRICE_QUOTES_INVALID 
+HELD   A4.sell-price-own-quote(control): HTTP 201 None 
+HELD   A4.quote-on-globex-unit: HTTP 404 INVENTORY_NOT_FOUND 
+HELD   A4.contract-with-globex-quote: HTTP 409 QUOTE_NOT_FOUND 
+HELD   A4.authorize-with-globex-contract_id: HTTP 409 CONTRACT_NOT_FOUND 
+HELD   A4.authorize-with-globex-client_approval_ref: HTTP 409 CLIENT_APPROVAL_MISMATCH 
+HELD   A4.authorize-with-globex-commercial_terms_ref: HTTP 409 TERMS_CHANGED 
+HELD   A4.authorize-with-globex-exact_quote_refs: HTTP 409 QUOTE_NOT_FOUND 
+HELD   A4.authorize-with-globex-inventory_ids: HTTP 409 INVENTORY_MISMATCH 
+HELD   A4.finance-verify-with-globex-approval: HTTP 409 CLIENT_APPROVAL_MISMATCH 
+HELD   A4.client-approval-with-globex-sell-price: HTTP 409 SELL_PRICE_NOT_CURRENT 
+HELD   A4.funds-evidence-ref-of-globex-reused: HTTP 409 FUNDS_EVIDENCE_REUSED 
+HELD   A4.finance-ref-of-globex-reused: HTTP 409 FUNDS_EVIDENCE_REUSED 
+HELD   A4.hold-confirm-with-another-units-evidence: HTTP 404 HOLD_EVIDENCE_NOT_FOUND 
+HELD   A5.hub-campaign-view-keys: HTTP 200 validation keys=['approved_price', 'campaign_id', 'client_funds_received', 'currency', 'funding_state', 'name', 'state', 'tenant_id'] approved_price=6000.00 vendor_cost=5000.00
+HELD   A5.hub-tenant-view: HTTP 200 validation {"tenant_id": "acme", "killed": false, "created_at": "2026-10-16T18:00:00Z", "campaigns": 9}
+HELD   A5.hub-exposure: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-plan: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-inventory: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-contracts: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-authorizations: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-global-faces: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-global-vendors: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-global-vendors: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-global-audit: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-global-audit: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-global-markets: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-global-sources: HTTP 403 CALLER_NOT_ALLOWED 
+HELD   A5.hub-write-refused: HTTP 422 validation 
+HELD   A6.second-tenant-submit-same-face-overlap: HTTP 409 FACE_ALREADY_ORDERED 
+HELD   A6.authorize-same-face-while-open-order: HTTP 409 FACE_ALREADY_ORDERED 
+HELD   A6.authorize-after-PA-set-UNDETERMINED: HTTP 409 PRINCIPAL_AGENT_NOT_CONFIRMED 
+HELD   A6.submit-after-PA-UNDETERMINED: HTTP 409 PRINCIPAL_AGENT_NOT_CONFIRMED 
+HELD   A6.client-funds-method-wire: HTTP 422 validation 
+HELD   A6.client-funds-method-check: HTTP 422 validation 
+HELD   A6.client-funds-method-card: HTTP 422 validation 
+HELD   A6.client-funds-not-cleared: HTTP 422 validation 
+HELD   A6.client-funds-wire-ref-under-ach: HTTP 422 FUNDS_METHOD_CONFLICT 
+HELD   A6.authorize-without-finance-31: HTTP 409 FUNDS_NOT_FINANCE_VERIFIED 
+HELD   A6.authorize-finance-verified-short: HTTP 409 FUNDS_NOT_FINANCE_VERIFIED 
+HELD   A6.finance-cleared-false: HTTP 422 validation 
+HELD   A6.authority-7d+1s: HTTP 409 AUTHORITY_TOO_LONG 
+HELD   A6.signer-not-andre: HTTP 422 validation 
+HELD   A6.config-OOH_MAX_PURCHASE_AMOUNT=10000.01: RuntimeError: OOH_MAX_PURCHASE_AMOUNT may only lower the locked ceiling of 10000.00 (founder decision); 
+HELD   A6.config-OOH_AUTHORITY_MAX_DAYS=8: RuntimeError: OOH_AUTHORITY_MAX_DAYS must be a whole number from 1 to 7
+HELD   A6.andre-token-equal-to-other-token: HTTP 403 ANDRE_NOT_CONFIGURED 
+HELD   A6.andre-token-equal-to-other-token: HTTP 403 ANDRE_NOT_CONFIGURED 
+HELD   A6.andre-token-equal-to-other-token: HTTP 403 ANDRE_NOT_CONFIGURED 
+
+SUMMARY 98 held, 0 broken

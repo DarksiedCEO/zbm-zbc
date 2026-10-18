@@ -1,0 +1,100 @@
+{
+ "respelt_face_same_id": true,
+ "estimate_amount": "2800.00",
+ "after_reject_state": "FUNDS_VERIFIED",
+ "acme_final_state": "BOOKED",
+ "cross_tenant_same_face_authorize": [
+  409,
+  "FACE_ALREADY_ORDERED"
+ ],
+ "g2_before_cr": "FUNDS_VERIFIED",
+ "g2_after_cr": {
+  "state": "CHANGE_REQUESTED",
+  "finance_verification": null,
+  "contract": "VOID"
+ },
+ "funds_ref_reuse_other_campaign": [
+  409,
+  "STATE_NOT_ELIGIBLE"
+ ],
+ "idempotency": {
+  "distinct_requests": 126,
+  "replays": 378,
+  "new_log_lines": 0,
+  "new_ledger_events": 0,
+  "non_2xx_replays": 0,
+  "non_2xx_examples": [],
+  "state_changed_by_replays": []
+ },
+ "restart": {
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "state_diff": [],
+  "views_diff": [],
+  "n_views": 40,
+  "evidence_counts": {
+   "total": 128,
+   "committed": 126,
+   "attempted": 2,
+   "log_length": 126
+  },
+  "live_state_sha256": "11d4a08487763afd124b73e045b0829c71e687c7195a5b5baa9405159426b05f",
+  "replayed_state_sha256": "11d4a08487763afd124b73e045b0829c71e687c7195a5b5baa9405159426b05f",
+  "live_views_sha256": "0debfc592500a105584be432e45eb1ba4f1f49d49c36332d04eff44197a92aa7",
+  "replayed_views_sha256": "0debfc592500a105584be432e45eb1ba4f1f49d49c36332d04eff44197a92aa7"
+ },
+ "hub_keys": [
+  "approved_price",
+  "campaign_id",
+  "client_funds_received",
+  "currency",
+  "funding_state",
+  "name",
+  "state",
+  "tenant_id"
+ ],
+ "hub_contains_vendor_amounts": [],
+ "hub_routes_other": {
+  "/tenants/acme/campaigns/ooh-cmp-e8db631141b834b73bda02cf5d52fbdf18d41d82/plan": 403,
+  "/tenants/acme/campaigns/ooh-cmp-e8db631141b834b73bda02cf5d52fbdf18d41d82/exposure": 403,
+  "/tenants/acme/campaigns/ooh-cmp-e8db631141b834b73bda02cf5d52fbdf18d41d82/inventory/ooh-inv-3fd9ecdcc3b781b03c1a6a7e8934043473c44794": 403,
+  "/tenants/acme/campaigns/ooh-cmp-e8db631141b834b73bda02cf5d52fbdf18d41d82/contracts/ooh-ctr-657484c9f0f2e686ae0d717c1d1ec16208d46f73": 403,
+  "/tenants/acme/campaigns/ooh-cmp-e8db631141b834b73bda02cf5d52fbdf18d41d82/authorizations/ooh-aut-3b81f80927942b4e441d706f5e8f3f7c7cf46ac8": 403,
+  "/faces/ooh-fce-95651114456ed2bcac48b5974d9fbe43f04e5f5f": 403,
+  "/vendors/lamar": 403,
+  "/sources/ooh-src-d97571ec2c42def94693653df6df1b38b419bb40": 403
+ },
+ "hub_cross_tenant": 404,
+ "kinds_in_log": [
+  "availability_moved",
+  "avails_recorded",
+  "brief_set",
+  "campaign_created",
+  "campaign_transition",
+  "client_approved",
+  "commercial_model_set",
+  "contract_approved",
+  "contract_drafted",
+  "face_attribute_set",
+  "face_registered",
+  "finance_verified",
+  "funds_verified",
+  "hold_decided",
+  "hold_evidence_submitted",
+  "inventory_added",
+  "markup_evidence_recorded",
+  "order_outcome",
+  "order_submitted",
+  "pa_determined",
+  "price_recorded",
+  "purchase_authorized",
+  "readiness_set",
+  "source_recorded",
+  "supplier_attribute_set",
+  "tenant_created",
+  "vendor_registered"
+ ]
+}

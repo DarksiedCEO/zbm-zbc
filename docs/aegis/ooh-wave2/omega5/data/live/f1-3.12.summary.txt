@@ -1,0 +1,144 @@
+c01-funds-anchor-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c02-funds-anchor-held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c03-funds-anchor-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c04-funds-anchor-held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c05-funds-anchor-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c06-funds-anchor-not_held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c07-funds-anchor-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c08-funds-anchor-not_held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=2,1,1 audit={'total': 2, 'committed': 1, 'attempted': 1} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c09-funds-evidence-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c10-funds-evidence-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c11-funds-evidence-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c12-funds-evidence-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[38, 38] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=39/39
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': None, 'authorizations': [], 'orders_total': 0}
+c13-finance-anchor-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c14-finance-anchor-held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[40, 40] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=41/41
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c15-finance-anchor-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c16-finance-anchor-held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[40, 40] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=41/41
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c17-finance-anchor-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c18-finance-anchor-not_held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[40, 40] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=41/41
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c19-finance-anchor-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c20-finance-anchor-not_held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=2,1,1 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[40, 40] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=41/41
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c21-finance-evidence-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c22-finance-evidence-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c23-finance-evidence-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c24-finance-evidence-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': None, 'committed': None, 'attempted': None} anchors/lines=[39, 39] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=40/40
+   money={'state': 'FUNDS_VERIFIED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [], 'orders_total': 0}
+c25-authorize-anchor-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c26-authorize-anchor-held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c27-authorize-anchor-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c28-authorize-anchor-held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c29-authorize-anchor-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c30-authorize-anchor-not_held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c31-authorize-anchor-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c32-authorize-anchor-not_held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=201 retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=2,1,1 audit={'total': 2, 'committed': 1, 'attempted': 1} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c33-authorize-evidence-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c34-authorize-evidence-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c35-authorize-evidence-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c36-authorize-evidence-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[201, 201, 201, 201] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[42, 42] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=43/43
+   money={'state': 'PURCHASE_AUTHORIZED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '0.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'NOT_SUBMITTED', '5000.00']], 'orders_total': 0}
+c37-submit-anchor-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c38-submit-anchor-held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[44, 44] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=45/45
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c39-submit-anchor-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c40-submit-anchor-held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[44, 44] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=45/45
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c41-submit-anchor-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c42-submit-anchor-not_held-live-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=1 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[44, 44] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=45/45
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c43-submit-anchor-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c44-submit-anchor-not_held-rs-iw: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=True,True down_write=503 recovered=True +lines=0 iw=201 retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=2,1,1 audit={'total': 2, 'committed': 1, 'attempted': 1} anchors/lines=[44, 44] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=45/45
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c45-submit-evidence-held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c46-submit-evidence-held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c47-submit-evidence-not_held-live: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}
+c48-submit-evidence-not_held-rs: first=503/LEDGER_UNAVAILABLE pend(mem,disk)=False,False down_write=503 recovered=True +lines=0 iw=None retries=[200, 200, 200, 200] after=201
+   oplines=1 typed(ledger,committed,attempted)=1,1,0 audit={'total': 1, 'committed': 1, 'attempted': 0} anchors/lines=[43, 43] dup_ids=0 restart_ok=True diff=[] rwrite=201 readback_problems=[] rb=44/44
+   money={'state': 'ORDER_SUBMITTED', 'funds_entries': 1, 'client_funds_received': '6000.00', 'vendor_commitment': '5000.00', 'finance_verified': '6000.00', 'authorizations': [['AUTHORIZED', 'SUBMISSION_UNKNOWN', '5000.00']], 'orders_total': 1}

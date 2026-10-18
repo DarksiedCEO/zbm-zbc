@@ -1,0 +1,272 @@
+{"id": "W2-338", "desc": "str", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 4.37s", "fails": ["tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 5}
+{"id": "W2-295", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 193 passed, 1 warning in 23.60s", "fails": ["tests/test_aegis_ooh_final.py::test_nf3_personal_data_is_refused_in_free_text[call 555\\u2212123\\u22124567]"], "secs": 24}
+{"id": "N-D04", "desc": "D04 finance_ref any string", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 237 passed, 1 warning in 28.60s", "fails": ["tests/test_aegis_ooh_final.py::test_nf7_a_malformed_finance_body_is_refused[finance_ref-fin 31 ref]"], "secs": 29}
+{"id": "W34-96", "desc": "'is None'->'is not None'@26", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 4.65s", "fails": ["tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 5}
+{"id": "X-H05", "desc": "hold: reject_reason pairing", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 623 passed, 1 warning in 81.50s (0:01:21)", "fails": ["tests/test_hold_confirmation.py::test_andre_rejects_with_a_reason_and_the_hold_stays_requested"], "secs": 82}
+{"id": "N-C62", "desc": "C62 snapshot without finance_refs", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 471 passed, 1 warning in 60.20s (0:01:00)", "fails": ["tests/test_aegis_ooh_rt34.py::test_f5b_the_snapshot_holds_contracts_and_finance_records"], "secs": 61}
+{"id": "S2-D05", "desc": "D05 models: vendor_ref free StrictStr", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 650 passed, 1 warning in 85.36s (0:01:25)", "fails": ["tests/test_hold_confirmation.py::test_rt_f4_the_new_bodies_are_strict[hold-evidence-extra2]"], "secs": 86}
+{"id": "W2-65", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 765 passed, 1 warning in 101.46s (0:01:41)", "fails": ["tests/test_registry.py::test_w2_f2_there_is_no_contact_attribute_and_references_with_dates_are_fine"], "secs": 102}
+{"id": "W34-152", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 565 passed, 1 warning in 71.44s (0:01:11)", "fails": ["tests/test_contracts.py::test_an_agent_drafts_a_contract_that_matches_the_quotes_exactly"], "secs": 72}
+{"id": "W2-294", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 193 passed, 1 warning in 24.22s", "fails": ["  ooh.api:api.py:379 unexpected ResponseValidationError", "tests/test_aegis_ooh_final.py::test_nf3_personal_data_is_refused_in_free_text[call 555\\u2212123\\u22124567]"], "secs": 25}
+{"id": "W34-17", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 685 passed, 1 warning in 91.58s (0:01:31)", "fails": ["tests/test_planning.py::test_the_brief_is_validated_and_locked_once_the_plan_is_approved"], "secs": 92}
+{"id": "X-API038", "desc": "route L581: service bearer removed", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 645 passed, 1 warning in 86.47s (0:01:26)", "fails": ["tests/test_hold_confirmation.py::test_rt_g4_no_service_bearer"], "secs": 87}
+{"id": "W2-69", "desc": "==->!=", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 warning, 1 error in 0.52s", "fails": ["ests/test_aegis_integrity_path.py::test_ip_last_anchor_lost_on_the_ledger_is_caught"], "secs": 1}
+{"id": "W34-284", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 584 passed, 1 warning in 76.43s (0:01:16)", "fails": ["tests/test_contracts.py::test_the_hub_never_reads_a_contract"], "secs": 77}
+{"id": "X-G33", "desc": "gate: Finance verification disabled", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 592 passed, 1 warning in 77.62s (0:01:17)", "fails": ["tests/test_finance_verification.py::test_andres_gate_alone_never_authorizes_a_purchase"], "secs": 78}
+{"id": "X-D06", "desc": "pii: intl min digits low", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 219 passed, 1 warning in 27.02s", "fails": ["tests/test_aegis_ooh_final.py::test_nf4_ordinary_ooh_text_is_accepted[+15% markup suggested]"], "secs": 28}
+{"id": "X-G07", "desc": "authority scope not checked", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 715 passed, 1 warning in 96.64s (0:01:36)", "fails": ["tests/test_purchase_gate.py::test_stale_or_overlong_authority"], "secs": 97}
+{"id": "N-C08", "desc": "C08 RAILS: cc dropped", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 192 passed, 1 warning in 24.79s", "fails": ["tests/test_aegis_ooh_final.py::test_nf7_short_method_words"], "secs": 25}
+{"id": "S2-P05", "desc": "P05 policy: extra reject reason OTHER", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 646 passed, 1 warning in 91.40s (0:01:31)", "fails": ["tests/test_hold_confirmation.py::test_rt_g5_decision_vocabulary_is_exactly_two_and_reasons_exactly_five"], "secs": 92}
+{"id": "X-G08", "desc": "expiry boundary <", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 708 passed, 1 warning in 101.63s (0:01:41)", "fails": ["tests/test_purchase_gate.py::test_authority_lapsing_after_authorization_refuses_submission"], "secs": 102}
+{"id": "W2-434", "desc": "READ+hub", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 517 passed, 1 warning in 74.11s (0:01:14)", "fails": ["tests/test_aegis_ooh_w234.py::test_mut_registry_reads_refuse_other_callers[hub-/vendors/lamar]"], "secs": 75}
+{"id": "W34-162", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 76 passed, 1 warning in 10.27s", "fails": ["tests/test_aegis_omega_red.py::test_b8_a_contract_for_another_total_is_refused_at_the_draft"], "secs": 11}
+{"id": "X-H04", "desc": "hold: expired confirm accepted", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 627 passed, 1 warning in 97.20s (0:01:37)", "fails": ["tests/test_hold_confirmation.py::test_an_expiry_that_passed_before_andre_decides_is_refused"], "secs": 98}
+{"id": "W2-149", "desc": "negate-if", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 5.64s", "fails": ["tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 6}
+{"id": "W34-257", "desc": "' and '->' or '@53", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 241 passed, 1 warning in 38.55s", "fails": ["tests/test_aegis_ooh_final.py::test_nf7_andre_can_reject_a_hold_while_the_vendor_says_unavailable"], "secs": 39}
+{"id": "X-T10", "desc": "andre_if_presented: verify", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 64 passed, 1 warning in 7.27s", "fails": ["tests/test_aegis_omega_red.py::test_b1_wrong_andre_token_on_buy_limit_price"], "secs": 8}
+{"id": "W34-233", "desc": "' != '->' == '@36", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 766 passed, 1 warning in 121.16s (0:02:01)", "fails": ["tests/test_registry.py::test_w2_f5_withdrawing_the_determination_is_never_kill_blocked"], "secs": 122}
+{"id": "S2-M33", "desc": "M33 apply decided: REJECT bumps no version", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 647 passed, 1 warning in 111.26s (0:01:51)", "fails": ["tests/test_hold_confirmation.py::test_rt_f4_attach_reject_and_decide_bump_the_versions"], "secs": 112}
+{"id": "W34-31", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 685 passed, 1 warning in 117.13s (0:01:57)", "fails": ["tests/test_planning.py::test_the_brief_is_validated_and_locked_once_the_plan_is_approved"], "secs": 118}
+{"id": "W34-347", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 465 passed, 1 warning in 76.57s (0:01:16)", "fails": ["tests/test_aegis_ooh_rt34.py::test_f5b_kill_switches_stop_every_new_write[approve]"], "secs": 77}
+{"id": "W2-421", "desc": "READ+hub", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 515 passed, 1 warning in 84.99s (0:01:24)", "fails": ["tests/test_aegis_ooh_w234.py::test_mut_registry_reads_refuse_other_callers[hub-/markets]"], "secs": 86}
+{"id": "MF-luhn-double", "desc": "luhn-double", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 182 passed, 1 warning in 31.43s", "fails": ["tests/test_aegis_ooh_final.py::test_nf7_luhn_valid_card_numbers_of_13_to_19_digits_are_cards[5555555555554444]"], "secs": 32}
+{"id": "W2-350", "desc": "str", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 241 passed, 1 warning in 38.78s", "fails": ["tests/test_aegis_ooh_final.py::test_nf7_andre_can_reject_a_hold_while_the_vendor_says_unavailable"], "secs": 40}
+{"id": "W34-56", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 686 passed, 1 warning in 117.22s (0:01:57)", "fails": ["  ooh.api:api.py:379 unexpected TypeError", "tests/test_planning.py::test_an_estimate_comes_only_from_a_sourced_rate_card"], "secs": 118}
+{"id": "W2-272", "desc": "!=->==", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 5.85s", "fails": ["tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 7}
+{"id": "W34-329", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 581 passed, 1 warning in 96.79s (0:01:36)", "fails": ["tests/test_contracts.py::test_the_order_flow_moves_the_contract"], "secs": 98}
+{"id": "X-T03", "desc": "hub scoping skipped", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 89 passed, 1 warning in 10.70s", "fails": ["tests/test_core.py::test_tenants_are_andres_and_isolated"], "secs": 11}
+{"id": "X-API047", "desc": "route L619: andre_scoped->scoped(dashboard)", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 700 passed, 1 warning in 119.33s (0:01:59)", "fails": ["tests/test_purchase_gate.py::test_no_one_but_andre_approves_verifies_funds_authorizes_or_submits[dashboard]"], "secs": 120}
+{"id": "W2-175", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 506 passed, 1 warning in 83.67s (0:01:23)", "fails": ["tests/test_aegis_ooh_w234.py::test_mut_the_registry_kill_stops_every_registry_write[avails]"], "secs": 84}
+{"id": "N-A03", "desc": "A03 finance route open to compliance", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 596 passed, 1 warning in 99.53s (0:01:39)", "fails": ["tests/test_finance_verification.py::test_only_finance_verifies[compliance_38-False]"], "secs": 100}
+{"id": "W34-262", "desc": "'ge=0'->'ge=1'@51", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 572 passed, 1 warning in 93.43s (0:01:33)", "fails": ["tests/test_contracts.py::test_contracts_are_drafted_only_from_quotes_validated_to_purchase_authorized"], "secs": 94}
+{"id": "X-D22", "desc": "rails: stripe/square/prepaid", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 172 passed, 1 warning in 29.45s", "fails": ["tests/test_aegis_ooh_final.py::test_nf2_non_ach_instruments_are_refused[stripe-ch-1]"], "secs": 30}
+{"id": "W2-151", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 5.69s", "fails": ["  ooh.api:api.py:379 unexpected TypeError", "tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 6}
+{"id": "W2-104", "desc": "negate-if", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 5.46s", "fails": ["tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 6}
+{"id": "N-C31", "desc": "C31 cmp id without actor", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 478 passed, 1 warning in 78.37s (0:01:18)", "fails": ["tests/test_aegis_ooh_w234.py::test_sec_f1_every_created_id_includes_the_caller"], "secs": 79}
+{"id": "W2-98", "desc": "negate-if", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 5.49s", "fails": ["tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 6}
+{"id": "N-C05", "desc": "C05 RAILS: cash dropped", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 482 passed, 1 warning in 79.51s (0:01:19)", "fails": ["tests/test_aegis_ooh_w234.py::test_rt_f2_card_cash_and_app_references_are_not_ach_money[cash-100]"], "secs": 80}
+{"id": "W2-393", "desc": "str", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 755 passed, 1 warning in 129.58s (0:02:09)", "fails": ["tests/test_registry.py::test_the_supplier_profile_is_sourced_and_vendors_are_never_paid_by_card"], "secs": 130}
+{"id": "W2-142", "desc": "negate-if", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 51 passed, 1 warning in 5.63s", "fails": ["tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization"], "secs": 6}
+{"id": "W2-435", "desc": "PREP+scheduler", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 512 passed, 1 warning in 83.25s (0:01:23)", "fails": ["tests/test_aegis_ooh_w234.py::test_mut_registry_writes_refuse_other_callers[scheduler]"], "secs": 84}
+{"id": "W34-307", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 689 passed, 1 warning in 116.34s (0:01:56)", "fails": ["tests/test_planning.py::test_each_line_is_quote_else_estimate_else_unknown"], "secs": 117}
+{"id": "MF-W34-375", "desc": "W34-375", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 242 passed, 1 warning in 38.27s", "fails": ["tests/test_aegis_ooh_final.py::test_nf7_an_available_answer_must_cover_both_ends_of_the_flight[2026-11-01-2026-11-15]"], "secs": 39}
+{"id": "W34-201", "desc": "' or '->' and '@37", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 75 passed, 1 warning in 9.80s", "fails": ["tests/test_aegis_omega_red.py::test_b8_a_contract_for_one_quote_cannot_buy_another"], "secs": 11}
+{"id": "X-D16", "desc": "digit-prefix words", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 192 passed, 1 warning in 30.97s", "fails": ["tests/test_aegis_ooh_final.py::test_nf7_short_method_words"], "secs": 32}
+{"id": "W2-444", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 508 passed, 1 warning in 82.64s (0:01:22)", "fails": ["tests/test_aegis_ooh_w234.py::test_mut_a_determination_needs_every_field[confirmed_by]"], "secs": 83}
+{"id": "W2-409", "desc": "str", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 94 passed, 1 warning in 11.64s", "fails": ["tests/test_core.py::test_each_kill_switch_stops_writes_and_only_andre_releases[capability:campaigns-KILLED_CAPABILITY]"], "secs": 12}
+{"id": "W34-161", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 76 passed, 1 warning in 10.15s", "fails": ["tests/test_aegis_omega_red.py::test_b8_a_contract_for_another_total_is_refused_at_the_draft"], "secs": 11}
+{"id": "W2-197", "desc": "==->!=", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 530 passed, 1 warning in 84.69s (0:01:24)", "fails": ["tests/test_aegis_ooh_w234.py::test_mut_face_filters"], "secs": 85}
+{"id": "W34-372", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 760 passed, 1 warning in 123.59s (0:02:03)", "fails": ["tests/test_registry.py::test_w2_f1_an_older_available_never_lifts_a_newer_unavailable"], "secs": 124}
+{"id": "W2-12", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "1 failed, 747 passed, 1 warning in 113.01s (0:01:53)", "fails": ["  ooh.api:api.py:379 unexpected TypeError", "tests/test_registry.py::test_attributes_are_typed_per_format_and_tied_to_a_source_of_that_vendor"], "secs": 114}
+{"id": "CTRL", "desc": "noop", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 113.21s (0:01:53)", "fails": [], "secs": 114}
+{"id": "MF-C30-allzero", "desc": "C30-allzero", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.61s (0:01:52)", "fails": [], "secs": 113}
+{"id": "MF-pii-case", "desc": "pii-case", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 102.91s (0:01:42)", "fails": [], "secs": 104}
+{"id": "N-C12", "desc": "C12 RAILS: applepay dropped", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 103.63s (0:01:43)", "fails": [], "secs": 104}
+{"id": "N-C17", "desc": "C17 PREFIX_WORDS len>=3", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 103.27s (0:01:43)", "fails": [], "secs": 104}
+{"id": "N-C30", "desc": "C30 unit_ref_key: all-zero run dropped", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 102.82s (0:01:42)", "fails": [], "secs": 104}
+{"id": "N-C32", "desc": "C32 cmp _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 102.75s (0:01:42)", "fails": [], "secs": 103}
+{"id": "N-C33", "desc": "C33 inv id without actor", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 103.93s (0:01:43)", "fails": [], "secs": 105}
+{"id": "N-C34", "desc": "C34 inv _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 105.45s (0:01:45)", "fails": [], "secs": 106}
+{"id": "N-C36", "desc": "C36 hev _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.50s (0:01:51)", "fails": [], "secs": 112}
+{"id": "N-C38", "desc": "C38 prc _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 114.38s (0:01:54)", "fails": [], "secs": 115}
+{"id": "N-C40", "desc": "C40 aut _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 113.82s (0:01:53)", "fails": [], "secs": 115}
+{"id": "N-C58", "desc": "C58 gate: approval_id clause removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.83s (0:01:52)", "fails": [], "secs": 114}
+{"id": "N-C59", "desc": "C59 gate: currency clause removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.39s (0:01:50)", "fails": [], "secs": 111}
+{"id": "N-C61", "desc": "C61 gate: commitments clause removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 104.40s (0:01:44)", "fails": [], "secs": 105}
+{"id": "N-C63", "desc": "C63 cap id without andre (equiv?)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 102.80s (0:01:42)", "fails": [], "secs": 104}
+{"id": "N-I02", "desc": "I02 src _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 103.18s (0:01:43)", "fails": [], "secs": 104}
+{"id": "N-I03", "desc": "I03 fce _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 103.61s (0:01:43)", "fails": [], "secs": 104}
+{"id": "N-I04", "desc": "I04 avl _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 103.88s (0:01:43)", "fails": [], "secs": 105}
+{"id": "N-K01", "desc": "K01 ctr _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 102.19s (0:01:42)", "fails": [], "secs": 103}
+{"id": "N-L04", "desc": "L04 plan: estimate method check removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 101.46s (0:01:41)", "fails": [], "secs": 102}
+{"id": "N-L09", "desc": "L09 est prc _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 101.55s (0:01:41)", "fails": [], "secs": 102}
+{"id": "N-L10", "desc": "L10 mkx _fresh removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 96.92s (0:01:36)", "fails": [], "secs": 98}
+{"id": "N-P10", "desc": "P10 10+ -> 11+", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 95.31s (0:01:35)", "fails": [], "secs": 96}
+{"id": "N-S02", "desc": "S02 status finance flag", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 93.19s (0:01:33)", "fails": [], "secs": 94}
+{"id": "RA-P16", "desc": "P16 re-anchored: phone look-ahead removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 93.15s (0:01:33)", "fails": [], "secs": 94}
+{"id": "RA-P19b", "desc": "P19 re-anchored: EMAIL_STRONG case-sensitive", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 93.02s (0:01:33)", "fails": [], "secs": 94}
+{"id": "RA-P21", "desc": "P21 re-anchored: EMAIL_WORD case-sensitive", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 91.63s (0:01:31)", "fails": [], "secs": 92}
+{"id": "S2-D02", "desc": "D02 models: hold_expires_at optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 91.24s (0:01:31)", "fails": [], "secs": 92}
+{"id": "S2-D06", "desc": "D06 models: vendor_text unbounded", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 93.98s (0:01:33)", "fails": [], "secs": 95}
+{"id": "S2-M04", "desc": "M04 submit: flight None check removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 95.28s (0:01:35)", "fails": [], "secs": 96}
+{"id": "S2-M14", "desc": "M14 decide: unit state HOLD_REQUESTED clause removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 94.93s (0:01:34)", "fails": [], "secs": 96}
+{"id": "S2-M16", "desc": "M16 decide: flight clause removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 98.36s (0:01:38)", "fails": [], "secs": 99}
+{"id": "S2-M49", "desc": "M49 submit: flight copied by reference", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 98.57s (0:01:38)", "fails": [], "secs": 99}
+{"id": "S2-P06", "desc": "P06 policy: HOLD_REQUESTED->HOLD_CONFIRMED removed from ALLOWED", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 97.77s (0:01:37)", "fails": [], "secs": 99}
+{"id": "W2-1", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 98.32s (0:01:38)", "fails": [], "secs": 99}
+{"id": "W2-101", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 98.75s (0:01:38)", "fails": [], "secs": 100}
+{"id": "W2-109", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 98.97s (0:01:38)", "fails": [], "secs": 100}
+{"id": "W2-117", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 97.62s (0:01:37)", "fails": [], "secs": 98}
+{"id": "W2-118", "desc": ">->>=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 94.23s (0:01:34)", "fails": [], "secs": 95}
+{"id": "W2-125", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 92.62s (0:01:32)", "fails": [], "secs": 93}
+{"id": "W2-132", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 92.84s (0:01:32)", "fails": [], "secs": 94}
+{"id": "W2-134", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.21s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-136", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 89.28s (0:01:29)", "fails": [], "secs": 90}
+{"id": "W2-143", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 89.50s (0:01:29)", "fails": [], "secs": 90}
+{"id": "W2-15", "desc": "==->!=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.15s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-152", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.19s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-154", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 89.95s (0:01:29)", "fails": [], "secs": 91}
+{"id": "W2-16", "desc": "negate-if", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.34s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-166", "desc": ">=->>", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.82s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-17", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.42s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-171", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.10s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-172", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 89.73s (0:01:29)", "fails": [], "secs": 90}
+{"id": "W2-174", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 89.79s (0:01:29)", "fails": [], "secs": 90}
+{"id": "W2-178", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 90.24s (0:01:30)", "fails": [], "secs": 91}
+{"id": "W2-182", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 89.43s (0:01:29)", "fails": [], "secs": 90}
+{"id": "W2-183", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 89.24s (0:01:29)", "fails": [], "secs": 90}
+{"id": "W2-185", "desc": "<=-><", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 94.36s (0:01:34)", "fails": [], "secs": 95}
+{"id": "W2-189", "desc": ">=->>", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 98.39s (0:01:38)", "fails": [], "secs": 99}
+{"id": "W2-19", "desc": ">->>=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 105.60s (0:01:45)", "fails": [], "secs": 106}
+{"id": "W2-212", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 107.42s (0:01:47)", "fails": [], "secs": 108}
+{"id": "W2-214", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 108.22s (0:01:48)", "fails": [], "secs": 109}
+{"id": "W2-217", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 109.87s (0:01:49)", "fails": [], "secs": 111}
+{"id": "W2-219", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.94s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-224", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.11s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-229", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.89s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-230", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 109.91s (0:01:49)", "fails": [], "secs": 111}
+{"id": "W2-24", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.04s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-248", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.42s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-260", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.28s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-262", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.50s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-30", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.62s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-303", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.17s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-312", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.32s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-314", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.20s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-315", "desc": "and->or", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.29s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-317", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.97s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-319", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.65s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-321", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.98s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-323", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.88s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-325", "desc": "and->or", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.39s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-333", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.62s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-334", "desc": "and->or", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.87s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-335", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.80s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-336", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.20s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-337", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.68s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-343", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.00s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-347", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.19s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-349", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.62s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-352", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.54s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-353", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.75s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-355", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.25s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-357", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.91s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-361", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.74s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-365", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.43s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-368", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.56s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-369", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.75s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-370", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.66s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-371", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.39s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-372", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.65s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-373", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.05s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-374", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.04s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-375", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.29s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-376", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.98s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-377", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.96s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-382", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.08s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-383", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.91s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-384", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.06s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-385", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.02s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-386", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.77s (0:01:52)", "fails": [], "secs": 114}
+{"id": "W2-387", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.39s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-388", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.11s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-389", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.88s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-391", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.33s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-392", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.57s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-396", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.42s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-4", "desc": "or->and", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.02s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-412", "desc": "str", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.30s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-419", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.73s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-422", "desc": "READ+hub", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.60s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-423", "desc": "drop _id", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.23s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-426", "desc": "drop _id", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.10s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-432", "desc": "PREP+scheduler", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.27s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-433", "desc": "PREP+scheduler", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.41s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-438", "desc": "callers+hub", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.09s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-440", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.75s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-441", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.36s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-447", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.08s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-448", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.02s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-449", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.99s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-450", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.03s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-451", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.64s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-452", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.62s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-453", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.76s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-454", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.17s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-455", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.49s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-456", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.13s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-457", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.81s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-458", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.18s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-459", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.18s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-460", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.73s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-461", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.99s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-462", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.13s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-463", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.09s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-464", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.20s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-465", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.38s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-466", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.11s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-467", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.85s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-468", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.50s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-469", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.34s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-470", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.91s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-471", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.01s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-472", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.14s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-473", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.64s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-475", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.71s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-476", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.53s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-477", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.18s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-478", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.75s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-479", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.61s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-480", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.83s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-481", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.26s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-482", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.03s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-483", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.67s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-484", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.84s (0:01:52)", "fails": [], "secs": 114}
+{"id": "W2-485", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 113.43s (0:01:53)", "fails": [], "secs": 114}
+{"id": "W2-486", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 113.25s (0:01:53)", "fails": [], "secs": 114}
+{"id": "W2-487", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 113.38s (0:01:53)", "fails": [], "secs": 114}
+{"id": "W2-488", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.29s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W2-489", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.11s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-490", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.71s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-491", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.27s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-492", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.76s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-493", "desc": "field->optional", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.99s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-494", "desc": "type->StrictStr", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.22s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-5", "desc": "or->and", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.20s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-50", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.04s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-55", "desc": "<=-><", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.96s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-57", "desc": "int+1", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.87s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W2-58", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.12s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-59", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.49s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-64", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.60s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W2-7", "desc": "any(->all(", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.10s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-73", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.39s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-84", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.84s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W2-96", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.25s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W2-99", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.08s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-0", "desc": "' and '->' or '@26", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.92s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-1", "desc": "' and '->' or '@16", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.92s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-10", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.15s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-104", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.17s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-105", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.16s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-107", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.37s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-108", "desc": "' and '->' or '@21", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.51s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-109", "desc": "' and '->' or '@50", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.68s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-110", "desc": "' and '->' or '@39", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.69s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-111", "desc": "' and '->' or '@96", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.82s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-112", "desc": "' or '->' and '@25", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.05s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-113", "desc": "' and '->' or '@60", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.62s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-114", "desc": "' and '->' or '@25", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.21s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-115", "desc": "' or '->' and '@16", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.49s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-124", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.65s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-125", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.23s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-138", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.03s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-139", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.63s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-140", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.84s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-141", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.71s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-142", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.46s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-143", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.64s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-145", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.36s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-146", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.38s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-15", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.63s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-153", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.99s (0:01:51)", "fails": [], "secs": 113}

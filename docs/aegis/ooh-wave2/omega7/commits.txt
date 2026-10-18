@@ -1,0 +1,26 @@
+75b0662823b867df3325d676b1dcf69abe37a425 67c15180382fab1a391b78756467c1a79a934973 ce665c5b3aef1bcd56aacee9523559150dd8cb7b Andre ooh-py: AEGIS mutation BLOCK at ce665c5 — pin the store's write path
+ce665c5b3aef1bcd56aacee9523559150dd8cb7b 5530ba08de8a78fad4c004db4fedeb8c40b45a4a 4a0a4b478a88fbaaeb864a7535779e586b39f64a Andre ooh-py: AEGIS mutation BLOCK at 4a0a4b4 — pin six commit/integrity behaviours
+4a0a4b478a88fbaaeb864a7535779e586b39f64a e0640db37e4a40f58e0a291fd21d90a56f45d1ec 5116917b852f6b6df60424ceef33b9df925f03ae Andre ooh-py: AEGIS mutation BLOCK at 5116917 — pin the integrity-check paths
+5116917b852f6b6df60424ceef33b9df925f03ae 5b591f0e81d07a02180b275abb8d1c00595d66df e680f982e1d1197071e679416c9df563ccd8f65a Andre ooh-py: AEGIS mutation BLOCK at e680f98 — pin the _commit ledger path (R19, C06, C02-C04, C07, C08)
+e680f982e1d1197071e679416c9df563ccd8f65a 5a311cda8cde24908cecbc0d2aa4911b3e23a670 d1b0de95382b925d13c9e36780d8179231625955 Andre ooh-py: AEGIS Ω RED at d1b0de9 — F1 lost-answer retry stays unknown; B1-B8 tests
+d1b0de95382b925d13c9e36780d8179231625955 27507a146b9d0f248f13c5b05203deb737974dd6 8495cdadd4a026b16e28d41ed90fa784d4ad0bd8 Andre docs: ADR 0022 names the card networks the funds screen does not cover (AEGIS Ω ruling 1)
+8495cdadd4a026b16e28d41ed90fa784d4ad0bd8 82975a625e7ba34ca5e51ed79926225ec64b5ce9 8a2b3a388531521f1930ad2d5296306d9d3a819d Andre ooh-py: AEGIS fifth delta red team (8a2b3a3) — H1 disclosed, H3 tested (no code change)
+8a2b3a388531521f1930ad2d5296306d9d3a819d 093f8c9d9f8dd63569445778544dc2db231bdf4d 2bab0f6642061fab3b342a4790ab4fe0d538f955 Andre ooh-py: AEGIS fourth delta red team (2bab0f6) — G1, G3
+2bab0f6642061fab3b342a4790ab4fe0d538f955 01a7611cb2e51e6fad58b93cb1ddb6514c566d7c 004873f15605507186b5ecb9b98ff4141f92cc54 Andre ooh-py: AEGIS third delta red team (004873f) — F1..F4
+004873f15605507186b5ecb9b98ff4141f92cc54 7afcc01a88938b5a759abffa765fee06eb268f99 acfaaadfb16aacd9674ffb693b41fe0690b03bed Andre ooh-py: AEGIS second delta red team (acfaaad) — E2..E8; the PII screen errs toward refusing
+acfaaadfb16aacd9674ffb693b41fe0690b03bed 2a9e23f24153e0c5032925656f11a0ad2468ea8f 988725f38ba08a3daa5dc8e117924c15a0a7f176 Andre ooh-py: AEGIS delta red team (988725f) — DF-1..DF-8
+988725f38ba08a3daa5dc8e117924c15a0a7f176 e9b52c84799cf4e8985492b72dcb8dd892b39860 e0b054063255140d3783149d69098ca980ed451a Andre ooh-py: AEGIS final red team (0a1729e) — NF-1..NF-7
+e0b054063255140d3783149d69098ca980ed451a 53a5bcb1d42d7837296f14c8bdd84c8b6f11305b 0a1729ec6b7b80d9c381716c0581fee32eed1ab6 Andre ooh-py: the card-number check never refuses an ACH trace number
+0a1729ec6b7b80d9c381716c0581fee32eed1ab6 b926d45d9bab5d6d4d411c2684d4e4017a4be28b 70e69627e3f3b02b4dc1dcb060c5a8e8c1dd78ce Andre ooh-py: AEGIS second round (re-verification at 70e6962, red team at 138dcc8)
+70e69627e3f3b02b4dc1dcb060c5a8e8c1dd78ce 19b4ccc45b504c1f7ba20b47dd3e931a2d392c3d 7016a4b3b7f3ef0f0942e04a91c95c67da5464dc Andre ooh-py: AEGIS OOH-2..4 review fixes (security HIGH id collision; red team; plan; PII)
+7016a4b3b7f3ef0f0942e04a91c95c67da5464dc 85ba2a24b2be2fe7c80366196e7ab5e166ae5de7 138dcc8b1fad3f4b1c1ea48b6de6203820211413 Andre ooh-py: Finance (31) must verify funds cleared; AEGIS OOH-3/4 source fixes
+138dcc8b1fad3f4b1c1ea48b6de6203820211413 64cc70f57cb7d2bbe3641934df505a53728390d9 e848d739571307ff00e9fadbbc006b2749a4f78d Andre ooh-py: AEGIS wave 2 security F-1, F-2, F-5 (avails, personal data, safe-direction withdraw)
+e848d739571307ff00e9fadbbc006b2749a4f78d 7bfdd77f36a81694df78da1c7ff7a823d6de566e e8cb45eb447b70b4ca13a22184d047bc76b8cfd1 Andre ooh-py: OOH-4 — buy and contract controls (ADR 0022)
+e8cb45eb447b70b4ca13a22184d047bc76b8cfd1 bd4e57651fbd827718ce5321827d93de61327359 261c1fff3977e08328ec9ea1017bc9bdcf618724 Andre ooh-py: OOH-3 — planning and pricing (ADR 0021)
+261c1fff3977e08328ec9ea1017bc9bdcf618724 5a424b2342a6578bb544b5f73aba194009bc711f d08ea52a1b1b10d7f6c65e6d365f2484d2296423 Andre ooh-py: AEGIS wave 2 doc lows (registry kill switch, vendor-payment wording, what is sourced)
+d08ea52a1b1b10d7f6c65e6d365f2484d2296423 54310fbb48e834158e47d97dc411e1a9d8071435 bf1ec986e069d2d1366887ae82abd4d91f6d8404 Andre ooh-py: OOH-2 — the inventory and operator registry (ADR 0020)
+bf1ec986e069d2d1366887ae82abd4d91f6d8404 b97ab180592795fab4f9d7665595df9ca381b544 2e4fa1dbd4befdfd1ff76b829104e1f60b407fb7 Andre ooh-py: AEGIS step 2 red team F2/F4/F5 — the untested checks, now tested
+2e4fa1dbd4befdfd1ff76b829104e1f60b407fb7 fcf7031bc53296b114468049717471e764d7beb1 653aa5475170facd64cbf26a530e8b090d717295 Andre ooh-py: AEGIS step 2 security lows (L1 evidence id per caller, L2 log format 3)
+653aa5475170facd64cbf26a530e8b090d717295 d29cb71ef41490152383bee559e6e7edfaf511b3 3fa4103e3ba8c0b7c8d27f08905cebfc6604fa2b Andre ooh-py: enforce three locked decisions the waves 0-1 build left as defaults
+3fa4103e3ba8c0b7c8d27f08905cebfc6604fa2b be7c4b067c4cb7c2a7c257d4ca835e4cf3e6da8a 58eb7de51618642bad237caf7fe5c338b997378a Andre ooh-py: AEGIS step 2 source review lows (S2-L1..L3, L5, L6)
+58eb7de51618642bad237caf7fe5c338b997378a 2780fc853b98187ad777a453a867a9518e1831a7 84a5377df4892efcb4cb1c221a6862075fe0e018 Andre ooh-py: only Andre confirms a hold; agents attach vendor evidence for his decision

@@ -1,0 +1,166 @@
+{
+ "res": {
+  "W1": [
+   201,
+   {
+    "tenant_id": "t-before",
+    "killed": false,
+    "created_at": "2026-10-18T04:06:10Z",
+    "campaigns": 0
+   }
+  ],
+  "W2": [
+   "transport",
+   "RemoteProtocolError: Server disconnected without sending a response."
+  ],
+  "service_rc": -9,
+  "anchors_while_down": 2,
+  "pending_line": {
+   "at": "2026-10-18T04:06:10Z",
+   "data": {
+    "_obj": "t-x",
+    "actor": "andre",
+    "evidence": [
+     {
+      "event_id": "ooh-evd-1d90b06cde4341a2249af29d011e8534fadd0a1c",
+      "event_type": "tenant_created",
+      "payload": {
+       "rk": "tenant|t-x|c2e39bce-af56-4144-a624-4866ea98c8d6",
+       "seq": 2,
+       "tenant_id": "t-x"
+      },
+      "subject_id": "tenant:t-x"
+     }
+    ],
+    "request_id": "tenant|t-x|c2e39bce-af56-4144-a624-4866ea98c8d6",
+    "request_sha": "585afae97263110e83b21421e4c2f6d2badf1f1fe3d54bf1199c177414537226",
+    "tenant_id": "t-x"
+   },
+   "fmt": 4,
+   "kind": "tenant_created",
+   "prev_line_sha256": "b8eb1bc7bef353b52df75c35b2e75700e05756ca8a70b33b4c01edba458acc38",
+   "record_sha256": "20079c89687f7f3e81d029173c3815bc60eeed34e688613bb06a3dbb9757814a",
+   "seq": 2
+  },
+  "after_restart": {
+   "status_integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T04:06:10Z",
+    "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+   },
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.discarded"
+   ],
+   "log_lines": 1,
+   "pending_sha256": null,
+   "local_tenants": [
+    "t-before"
+   ],
+   "export": [
+    [
+     "t-before"
+    ],
+    1
+   ]
+  },
+  "line2_sha_eq_pending": false,
+  "W2_retry": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "W4": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "final": {
+   "log_tenants": [
+    "t-before"
+   ],
+   "log_length": 1,
+   "ledger_anchors": 2,
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.discarded"
+   ],
+   "integrity": {
+    "integrity": {
+     "ok": false,
+     "checked_at": "2026-10-18T04:06:11Z",
+     "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+    },
+    "ledger_valid": true,
+    "log_length": 1
+   },
+   "ledger_verify": {
+    "entries": 4,
+    "valid": true
+   }
+  },
+  "evidence_final": {
+   "counts": {
+    "rule": "unanchored evidence = attempted, not done",
+    "consistency": "eventual; re-read to settle",
+    "total": 2,
+    "committed": 1,
+    "attempted": 1,
+    "limit": 200,
+    "offset": 0,
+    "evidence": [
+     {
+      "event_id": "ooh-evd-453648ec05f41b4bfe3db5de3cd351d4a2f6a27d",
+      "event_type": "tenant_created",
+      "subject_id": "tenant:t-before",
+      "ledger_seq": 0,
+      "payload_sha256": "a4c0dc1603e95dd4d6cd718c5637ba1efba02aa35ee902d6f4bc9755033f9314",
+      "status": "committed",
+      "seq": 1,
+      "rk": "tenant|t-before|d3a95174-93bf-4760-b2a5-995893eccfff",
+      "log_kind": "tenant_created"
+     },
+     {
+      "event_id": "ooh-evd-1d90b06cde4341a2249af29d011e8534fadd0a1c",
+      "event_type": "tenant_created",
+      "subject_id": "tenant:t-x",
+      "ledger_seq": 2,
+      "payload_sha256": "ee2b0eb1fac569ad24a15d41e301f918d05a7bac76d6bb9c87db2fe77a4109cb",
+      "status": "attempted",
+      "seq": null,
+      "rk": null,
+      "log_kind": null
+     }
+    ],
+    "log_length": 1
+   },
+   "per": []
+  }
+ },
+ "relay": [
+  {
+   "scen": "a",
+   "event_id": "ooh-anc-b8050f17e0c0807a5707a94560e53925921da762",
+   "summary": "tenant_created #2",
+   "payload": null,
+   "ledger_status_line": "HTTP/1.1 201 Created",
+   "state_at_kill": {
+    "ooh_dir": [
+     "ooh.lock",
+     "ooh_log.jsonl",
+     "pending.line"
+    ],
+    "log_lines": 1,
+    "pending_sha256": "52594fea0e73437e11243ca460303b3456caf7bf35a8dfedb7365b5e3dec394a"
+   },
+   "service_killed": "SIGKILL service pid 78196 returncode -9",
+   "service_answer": "never passed back (service dead)"
+  }
+ ]
+}

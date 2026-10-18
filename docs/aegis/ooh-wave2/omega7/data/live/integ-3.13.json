@@ -1,0 +1,443 @@
+{
+ "A_last_anchor_lost": {
+  "dropped": [
+   "ooh",
+   "log_anchor"
+  ],
+  "ledger_after_edit": "refused (ledger head checkpoint check failed: the log /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/data/live/integ-3.13/a-last-l); accepted once with LEDGER_ALLOW_RESET=30:892c1d9c754b513b/29:7c96f100faf9c45c; normal restart ok",
+  "check": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "local log line 15 has no matching anchor on the ledger"
+  },
+  "write": [
+   503,
+   "INTEGRITY_UNVERIFIED"
+  ],
+  "ledger_verify": true,
+  "final_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "local log line 15 has no matching anchor on the ledger"
+  },
+  "final_anchors_vs_lines": [
+   14,
+   15
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "local log line 15 has no matching anchor on the ledger"
+  },
+  "restart_state_diff": [],
+  "restart_write": 503,
+  "readback_problems": [
+   "line 15: 0 matching anchors",
+   "anchors 14 != lines 15"
+  ],
+  "money_evidence_problems": []
+ },
+ "A_middle_anchor_lost": {
+  "dropped_index": 3,
+  "ledger_after_edit": "refused to start: ledger did not start | ledger chain integrity failure: ChainBroken { at_seq: 4, reason: \"seq 4 found at position 3\" }\nledger-rust: this is a fail-closed integrity check, not a crash \u2014 the log file is either corrupted or has",
+  "check_ledger_down": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger cannot be read"
+  },
+  "write": 503
+ },
+ "A_wrong_ledger_fresh": {
+  "start_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "local log line 1 has no matching anchor on the ledger"
+  },
+  "write": 503,
+  "fresh_ledger_events_after": 0
+ },
+ "A_ledger_of_other_ooh_log": {
+  "start_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+  },
+  "write": 503
+ },
+ "B_unanchored_in_process": {
+  "check": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "local log line 14 has no matching anchor on the ledger"
+  },
+  "write": "INTEGRITY_UNVERIFIED",
+  "anchors_added": 0,
+  "restart_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "local log line 14 has no matching anchor on the ledger"
+  },
+  "restart_write": 503,
+  "forged_applied_after_restart": true
+ },
+ "B_unanchored_on_disk": {
+  "start_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "local log line 14 has no matching anchor on the ledger"
+  },
+  "write": 503,
+  "health_status": "degraded"
+ },
+ "C_disk_pending_anchored": {
+  "anchor": "recorded",
+  "check": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "appended": 1,
+  "applied": true,
+  "pending_file": false,
+  "discarded": false,
+  "after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback_problems": [],
+  "money_evidence_problems": []
+ },
+ "C_crash_after_anchor": {
+  "crash": "no exception; answer 500 ",
+  "anchor_on_ledger": 1,
+  "pending_file": true,
+  "start_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "appended": 1,
+  "applied": true,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback_problems": [],
+  "money_evidence_problems": []
+ },
+ "D_disk_pending_unanchored_revived": {
+  "check1": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "set_aside": true,
+  "applied1": false,
+  "appended1": 0,
+  "pending_file1": false,
+  "late_anchor": "recorded",
+  "check2": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied2": true,
+  "discarded2": false,
+  "anchors_eq_lines": true,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback_problems": [],
+  "money_evidence_problems": []
+ },
+ "D_crash_before_anchor_revived": {
+  "crash": "no exception; answer 500 ",
+  "pending_file": true,
+  "anchors_added_at_crash": 0,
+  "start_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "set_aside": true,
+  "applied_at_start": false,
+  "write_while_set_aside": null,
+  "check_after_late_anchor": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied": true,
+  "appended": 1,
+  "discarded_after": false,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback_problems": [],
+  "money_evidence_problems": []
+ },
+ "D_set_aside_log_moves_late_anchor": {
+  "check1": true,
+  "write": 201,
+  "check2": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "discarded_after_move": false,
+  "late_anchor": "recorded",
+  "check3": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "write_after_late": 503,
+  "late_3_applied": false,
+  "restart_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "restart_write": 503
+ },
+ "E_seo_same_id": {
+  "foreign_record": "recorded",
+  "foreign_on_ledger": [
+   [
+    "seo",
+    "log_anchor"
+   ]
+  ],
+  "check": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "appended": 0,
+  "applied": false,
+  "set_aside": true,
+  "write_after": 201,
+  "real_ooh_anchor_now": "LedgerConflict: ledger already holds a DIFFERENT record under this event id (409)",
+  "check_after": true,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback_problems": [],
+  "money_evidence_problems": []
+ },
+ "E_ooh_note_same_id": {
+  "foreign_record": "recorded",
+  "foreign_on_ledger": [
+   [
+    "ooh",
+    "note"
+   ]
+  ],
+  "check": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "appended": 0,
+  "applied": false,
+  "set_aside": true,
+  "write_after": 201,
+  "real_ooh_anchor_now": "LedgerConflict: ledger already holds a DIFFERENT record under this event id (409)",
+  "check_after": true,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback_problems": [],
+  "money_evidence_problems": []
+ },
+ "E_squat_own_commit": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "faults": [
+   [
+    "log_anchor",
+    "squat_seo"
+   ],
+   [
+    "squat_status",
+    201
+   ]
+  ],
+  "integrity_after": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "check": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line could not be anchored yet (ledger unavailable); kept for the next check"
+  },
+  "write": 503,
+  "applied": false,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_write": 201
+ },
+ "F_first_line_empty_log": {
+  "log_len0": 0,
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "faults": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "down"
+   ]
+  ],
+  "anchors_before_recovery": 0,
+  "check": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied": true,
+  "log_len": 1,
+  "epoch_is_line1_sha16": true,
+  "anchor_subjects": [
+   "log:db19c0c620089d2a"
+  ],
+  "expected_subject": "log:db19c0c620089d2a",
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   1,
+   1
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "readback_problems": [],
+  "money_evidence_problems": []
+ }
+}

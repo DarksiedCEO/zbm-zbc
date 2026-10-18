@@ -1,0 +1,169 @@
+{
+ "V001_rename_payload_key": {
+  "pytest_tail": "1 failed, 9 passed, 1 warning in 3.06s",
+  "failed_tests": [
+   "test_v001_anchor_payload_wire_format_is_fixed"
+  ],
+  "real_ledger": {
+   "A_wire_format": [
+    1,
+    2,
+    3
+   ],
+   "B_t222_real401_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "B_t222_ledger_down_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "C_h448_appliable_set_aside_late": {
+    "discarded_after": true,
+    "restart": "ok"
+   }
+  }
+ },
+ "T222_clear_pending_swallows": {
+  "pytest_tail": "2 failed, 8 passed, 1 warning in 1.58s",
+  "failed_tests": [
+   "test_t222_unremovable_pending_after_certain_refusal_answers_maybe",
+   "test_t222_store_clear_pending_raises_when_the_file_cannot_be_removed"
+  ],
+  "real_ledger": {
+   "A_wire_format": [],
+   "B_t222_real401_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": false
+    }
+   ],
+   "B_t222_ledger_down_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": false
+    }
+   ],
+   "C_h448_appliable_set_aside_late": {
+    "discarded_after": false,
+    "restart": "ok"
+   }
+  }
+ },
+ "H198_forced_check_skipped_at_boot": {
+  "pytest_tail": "1 failed, 9 passed, 1 warning in 1.66s",
+  "failed_tests": [
+   "test_h198_first_forced_check_reads_the_ledger_soon_after_host_boot"
+  ],
+  "real_ledger": {
+   "A_wire_format": [],
+   "B_t222_real401_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "B_t222_ledger_down_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "C_h448_appliable_set_aside_late": {
+    "discarded_after": false,
+    "restart": "ok"
+   }
+  }
+ },
+ "H229_reread_overwrites_problem": {
+  "pytest_tail": "1 failed, 9 passed, 1 warning in 3.52s",
+  "failed_tests": [
+   "test_h229_settling_failure_is_the_problem_reported"
+  ],
+  "real_ledger": {
+   "A_wire_format": [],
+   "B_t222_real401_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "B_t222_ledger_down_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "C_h448_appliable_set_aside_late": {
+    "discarded_after": false,
+    "restart": "ok"
+   }
+  }
+ },
+ "H399_remove_before_set_aside": {
+  "pytest_tail": "1 failed, 9 passed, 1 warning in 1.95s",
+  "failed_tests": [
+   "test_h399_stale_pending_is_set_aside_before_removal"
+  ],
+  "real_ledger": {
+   "A_wire_format": [],
+   "B_t222_real401_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "B_t222_ledger_down_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "C_h448_appliable_set_aside_late": {
+    "discarded_after": false,
+    "restart": "ok"
+   }
+  }
+ },
+ "H448_revived_keeps_set_aside_copy": {
+  "pytest_tail": "1 failed, 9 passed, 1 warning in 1.32s",
+  "failed_tests": [
+   "test_h448_set_aside_line_appended_late_clears_the_set_aside_copy"
+  ],
+  "real_ledger": {
+   "A_wire_format": [],
+   "B_t222_real401_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "B_t222_ledger_down_unlink_eacces": [
+    503,
+    {
+     "detail": "LEDGER_UNAVAILABLE",
+     "maybe": true
+    }
+   ],
+   "C_h448_appliable_set_aside_late": {
+    "discarded_after": true,
+    "restart": "ok"
+   }
+  }
+ }
+}

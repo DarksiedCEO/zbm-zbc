@@ -1,0 +1,5 @@
+SHA 75b0662 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python 28 busy-loop burners, shuffled node ids 75
+loadshuf 1 ['75 passed, 1 warning in 24.24s'] 25.5 s
+loadshuf 2 ['75 passed, 1 warning in 24.64s'] 26.3 s
+loadshuf 3 ['75 passed, 1 warning in 23.15s'] 25.2 s
+loadshuf 4 ['75 passed, 1 warning in 23.78s'] 26.7 s

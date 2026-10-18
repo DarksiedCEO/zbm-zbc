@@ -1,0 +1,6 @@
+check1 ok: True | None | discarded set: True
+check2 ok: True | None | log grew: 1 | discarded cleared: True
+malformed line in log: True
+next write: 201 {"tenant_id":"after-1","killed":false,"created_at":"2026-10-16T18:00:00Z","campaigns":0}
+reads still served: 405
+restart raised: KeyError 'tenant_id'

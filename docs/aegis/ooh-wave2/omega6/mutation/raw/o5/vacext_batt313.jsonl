@@ -1,0 +1,26 @@
+{"id": "V017", "file": "service.py", "line": 281, "desc": "L281 R(SERVICE_CLOSED)->R(INTEGRITY_UNVERIFIED)", "rc": 0, "tail": "100 passed, 1 warning in 8.32s", "fails": []}
+{"id": "V005", "file": "service.py", "line": 343, "desc": "L343 str 'checked_at'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.31s", "fails": []}
+{"id": "V001", "file": "service.py", "line": 151, "desc": "L151 str 'line_sha256'->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.33s", "fails": ["test_X_anchor_wire_format"]}
+{"id": "V019", "file": "service.py", "line": 281, "desc": "L281 R(SERVICE_CLOSED)->R(STORE_UNAVAILABLE)", "rc": 0, "tail": "100 passed, 1 warning in 8.43s", "fails": []}
+{"id": "V024", "file": "service.py", "line": 337, "desc": "L337 str 'checked_at'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.42s", "fails": []}
+{"id": "V018", "file": "service.py", "line": 281, "desc": "L281 R(SERVICE_CLOSED)->R(LEDGER_UNAVAILABLE)", "rc": 0, "tail": "100 passed, 1 warning in 8.42s", "fails": []}
+{"id": "V046", "file": "service.py", "line": 248, "desc": "L248 str 'problem'->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.60s", "fails": ["test_X_drop_failure_state_shape"]}
+{"id": "V026", "file": "service.py", "line": 343, "desc": "L343 str 'checked_at'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.61s", "fails": []}
+{"id": "V045", "file": "service.py", "line": 247, "desc": "L247 str 'checked_at'->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.62s", "fails": ["test_X_drop_failure_state_shape"]}
+{"id": "V063", "file": "service.py", "line": 413, "desc": "L413 str 'no ledger-valid actor'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.29s", "fails": []}
+{"id": "V047", "file": "service.py", "line": 248, "desc": "L248 str 'the pending line could not be '->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.30s", "fails": ["test_X_drop_failure_state_shape"]}
+{"id": "V051", "file": "service.py", "line": 281, "desc": "L281 str 'SERVICE_CLOSED'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.31s", "fails": []}
+{"id": "V064", "file": "service.py", "line": 415, "desc": "L415 str 'unknown kind'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.52s", "fails": []}
+{"id": "V074", "file": "service.py", "line": 182, "desc": "L182 str 'event_type'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.51s", "fails": []}
+{"id": "V075", "file": "service.py", "line": 182, "desc": "L182 str 'subject_id'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.51s", "fails": []}
+{"id": "V082", "file": "service.py", "line": 205, "desc": "L205 str 'checked_at'->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.39s", "fails": ["test_X_lost_answer_state_shape"]}
+{"id": "V083", "file": "service.py", "line": 205, "desc": "L205 str 'problem'->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.48s", "fails": ["test_X_lost_answer_state_shape"]}
+{"id": "V084", "file": "service.py", "line": 211, "desc": "L211 str 'checked_at'->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.47s", "fails": ["test_X_anchored_not_written_state_shape"]}
+{"id": "VB1", "file": "service.py", "line": 316, "desc": "< FORCED_MIN_S-><= FORCED_MIN_S", "rc": 0, "tail": "100 passed, 1 warning in 8.54s", "fails": []}
+{"id": "V085", "file": "service.py", "line": 211, "desc": "L211 str 'problem'->XX", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.63s", "fails": ["test_X_anchored_not_written_state_shape"]}
+{"id": "V087", "file": "service.py", "line": 323, "desc": "L323 str 'checked_at'->XX", "rc": 0, "tail": "100 passed, 1 warning in 8.54s", "fails": []}
+{"id": "VB0", "file": "service.py", "line": 314, "desc": "< INTEGRITY_RETRY_S-><= INTEGRITY_RETRY_S", "rc": 0, "tail": "100 passed, 1 warning in 8.51s", "fails": []}
+{"id": "VB2", "file": "service.py", "line": 314, "desc": "< INTEGRITY_RETRY_S->< INTEGRITY_RETRY_S + 1", "rc": 0, "tail": "100 passed, 1 warning in 8.51s", "fails": []}
+{"id": "VB3", "file": "service.py", "line": 316, "desc": "< FORCED_MIN_S->< FORCED_MIN_S + 1", "rc": 0, "tail": "100 passed, 1 warning in 8.51s", "fails": []}
+{"id": "T251", "file": "store.py", "line": 296, "desc": "L296 raise->pass", "rc": 1, "tail": "1 failed, 99 passed, 1 warning in 8.23s", "fails": ["test_X_clear_failures_raise"]}
+{"id": "T222", "file": "store.py", "line": 262, "desc": "L262 raise->pass", "rc": 1, "tail": "3 failed, 97 passed, 1 warning in 8.22s", "fails": ["test_X_clear_failures_raise", "test_X_drop_failure_state_shape", "test_X_drop_failure_after_certain_refusal_is_not_certain"]}

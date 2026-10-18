@@ -1,0 +1,489 @@
+{
+ "A_wire_format": {
+  "anchor_post_body_keys": [
+   "actor",
+   "department",
+   "event_id",
+   "event_type",
+   "payload_sha256",
+   "subject_id",
+   "summary"
+  ],
+  "anchor_posts": 16,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "anchors_vs_lines": [
+   16,
+   16
+  ],
+  "pending_file": false,
+  "discarded": false,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire": {
+   "lines": 17,
+   "anchors_ooh": 17,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_t222_real401_unlink_eacces": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "faults": [
+   [
+    "log_anchor",
+    "ro_badtoken"
+   ],
+   [
+    "ledger_status",
+    401
+   ]
+  ],
+  "pending_file_kept": true,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "next_write_while_ro": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "anchors_added": 0,
+  "log_added": 0,
+  "applied_before_recovery": false,
+  "check_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_recovery": true,
+  "write_after_recovery": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "anchors_vs_lines": [
+   15,
+   15
+  ],
+  "pending_file": false,
+  "discarded": false,
+  "restart": "REFUSED: RuntimeError: OOH_DATA_DIR is open to group or others; chmod 700 it",
+  "wire": {
+   "lines": 15,
+   "anchors_ooh": 15,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_t222_ledger_down_unlink_eacces": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "faults": [
+   [
+    "log_anchor",
+    "ro_down"
+   ]
+  ],
+  "pending_file_kept": true,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "next_write_while_ro": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "anchors_added": 0,
+  "log_added": 0,
+  "applied_before_recovery": false,
+  "check_after_recovery": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_recovery": true,
+  "write_after_recovery": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "anchors_vs_lines": [
+   15,
+   15
+  ],
+  "pending_file": false,
+  "discarded": false,
+  "restart": "REFUSED: RuntimeError: OOH_DATA_DIR is open to group or others; chmod 700 it",
+  "wire": {
+   "lines": 15,
+   "anchors_ooh": 15,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_control_real401_unlink_ok": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "faults": [
+   [
+    "log_anchor",
+    "badtoken"
+   ],
+   [
+    "ledger_status",
+    401
+   ]
+  ],
+  "pending_file_kept": false,
+  "integrity_ok": true,
+  "check": true,
+  "applied": false,
+  "anchors_added": 0,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "anchors_vs_lines": [
+   14,
+   14
+  ],
+  "pending_file": false,
+  "discarded": false,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire": {
+   "lines": 15,
+   "anchors_ooh": 15,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_control_ledger_down_unlink_ok": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "faults": [
+   [
+    "log_anchor",
+    "down"
+   ]
+  ],
+  "pending_file_kept": false,
+  "integrity_ok": true,
+  "check": true,
+  "applied": false,
+  "anchors_added": 0,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "anchors_vs_lines": [
+   14,
+   14
+  ],
+  "pending_file": false,
+  "discarded": false,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire": {
+   "lines": 15,
+   "anchors_ooh": 15,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_h448_appliable_set_aside_late": {
+  "check1": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "set_aside": true,
+  "pending_file1": false,
+  "check2": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "appended": 1,
+  "discarded_after": false,
+  "tenants": [
+   "acme",
+   "late-ok"
+  ],
+  "write_after": [
+   201
+  ],
+  "log_len": 15,
+  "audit_integrity": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-16T18:00:00Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 15
+  },
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "anchors_vs_lines": [
+   15,
+   15
+  ],
+  "pending_file": false,
+  "discarded": false,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire": {
+   "lines": 16,
+   "anchors_ooh": 16,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_adr_unappliable_set_aside_late": {
+  "check1": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "set_aside": true,
+  "pending_file1": false,
+  "check2": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "appended": 1,
+  "discarded_after": false,
+  "tenants": [
+   "acme"
+  ],
+  "write_after": [
+   201
+  ],
+  "log_len": 15,
+  "audit_integrity": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-16T18:00:00Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 15
+  },
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "anchors_vs_lines": [
+   15,
+   15
+  ],
+  "pending_file": false,
+  "discarded": false,
+  "restart": "REFUSED: KeyError: 'tenant_id'",
+  "wire": {
+   "lines": 15,
+   "anchors_ooh": 15,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_adr_unappliable_file_pending": {
+  "check2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "an anchored pending line could not be applied; an operator must inspect the log"
+  },
+  "appended": 1,
+  "discarded_after": false,
+  "tenants": [
+   "acme"
+  ],
+  "write_after": [
+   503
+  ],
+  "log_len": 14,
+  "audit_integrity": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-16T18:00:00Z",
+    "problem": "an anchored pending line could not be applied; an operator must inspect the log"
+   },
+   "ledger_valid": true,
+   "log_length": 14
+  },
+  "final_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "an anchored pending line could not be applied; an operator must inspect the log"
+  },
+  "anchors_vs_lines": [
+   14,
+   14
+  ],
+  "pending_file": true,
+  "discarded": false,
+  "restart": "REFUSED: KeyError: 'tenant_id'",
+  "wire": {
+   "lines": 14,
+   "anchors_ooh": 14,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_adr_unappliable_own_pending": {
+  "check2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "an anchored pending line could not be applied; an operator must inspect the log"
+  },
+  "appended": 1,
+  "discarded_after": false,
+  "tenants": [
+   "acme"
+  ],
+  "write_after": [
+   503
+  ],
+  "log_len": 14,
+  "audit_integrity": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-16T18:00:00Z",
+    "problem": "an anchored pending line could not be applied; an operator must inspect the log"
+   },
+   "ledger_valid": true,
+   "log_length": 14
+  },
+  "final_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "an anchored pending line could not be applied; an operator must inspect the log"
+  },
+  "anchors_vs_lines": [
+   14,
+   14
+  ],
+  "pending_file": true,
+  "discarded": false,
+  "restart": "REFUSED: KeyError: 'tenant_id'",
+  "wire": {
+   "lines": 14,
+   "anchors_ooh": 14,
+   "mismatched_lines": [],
+   "alt_key_sets_match_line1": {
+    "renamed_key": false,
+    "extra_key": false,
+    "seq_as_str": false
+   }
+  },
+  "ledger_readback": [],
+  "money_evidence": []
+ }
+}

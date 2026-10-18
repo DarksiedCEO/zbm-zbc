@@ -1,0 +1,22 @@
+FDGROW 1 tests/test_aegis_commit_path.py::test_r19_certain_anchor_refusal_never_takes_effect_later
+FDGROW 1 tests/test_aegis_commit_path.py::test_c06_typed_evidence_failure_refuses_the_authorization
+FDGROW 1 tests/test_aegis_commit_path.py::test_c02_a_line_with_another_seq_is_never_anchored
+FDGROW 1 tests/test_aegis_commit_path.py::test_c03_own_pending_line_is_rolled_forward_after_a_lost_answer
+FDGROW 1 tests/test_aegis_commit_path.py::test_c04_pending_write_failure_with_failed_cleanup_answers_maybe
+FDGROW 1 tests/test_aegis_commit_path.py::test_c04_control_pending_write_failure_with_clean_cleanup_answers_not_maybe
+FDGROW 1 tests/test_aegis_commit_path.py::test_c07_anchored_but_unwritten_line_stops_writes_until_rolled_forward
+FDGROW 1 tests/test_aegis_commit_path.py::test_c08_committed_write_leaves_no_pending_file
+FDGROW 1 tests/test_aegis_integrity_path.py::test_ip_first_line_of_an_empty_log_rolls_forward_under_its_own_epoch
+FDGROW 1 tests/test_aegis_omega_red.py::test_f1_lost_answer_then_unreachable_ledger_rolls_forward_and_writes_resume
+FDGROW 1 tests/test_aegis_omega_red.py::test_f1_lost_answer_then_unreachable_ledger_nothing_recorded_also_recovers
+FDGROW 1 tests/test_aegis_ooh_r1.py::test_h1_the_key_survives_restart
+FDGROW 1 tests/test_aegis_ooh_r2.py::test_r2l3_a_log_of_another_format_refuses_with_a_reason
+FDGROW 1 tests/test_contracts.py::test_contracts_replay_identically
+FDGROW 1 tests/test_core.py::test_restart_and_replay_rebuild_identical_state
+FDGROW 1 tests/test_core.py::test_a_tampered_or_truncated_log_refuses_to_take_writes
+FDGROW 1 tests/test_finance_verification.py::test_finance_verification_replays_identically
+FDGROW 1 tests/test_hold_confirmation.py::test_evidence_and_decisions_replay_identically
+FDGROW 1 tests/test_locked_decisions.py::test_the_determination_replays_identically
+FDGROW 1 tests/test_planning.py::test_planning_replays_identically
+FDGROW 1 tests/test_registry.py::test_the_registry_replays_identically
+FDGROW_BY_FILE {'tests/test_aegis_commit_path.py': 8, 'tests/test_aegis_integrity_path.py': 1, 'tests/test_aegis_omega_red.py': 2, 'tests/test_aegis_ooh_r1.py': 1, 'tests/test_aegis_ooh_r2.py': 1, 'tests/test_contracts.py': 1, 'tests/test_core.py': 2, 'tests/test_finance_verification.py': 1, 'tests/test_hold_confirmation.py': 1, 'tests/test_locked_decisions.py': 1, 'tests/test_planning.py': 1, 'tests/test_registry.py': 1}

@@ -1,0 +1,167 @@
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [66801]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:64801 (Press CTRL+C to quit)
+INFO:     127.0.0.1:64806 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64807 - "GET /ooh/v1/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64809 - "GET /ooh/v1/roster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64810 - "POST /ooh/v1/tenants HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64811 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64814 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64817 - "POST /ooh/v1/vendors HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64818 - "POST /ooh/v1/vendors HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64821 - "POST /ooh/v1/vendors HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64824 - "POST /ooh/v1/vendors HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64825 - "GET /ooh/v1/vendors HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64826 - "GET /ooh/v1/principal-agent HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64827 - "POST /ooh/v1/principal-agent-determinations HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64828 - "POST /ooh/v1/principal-agent-determinations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64831 - "GET /ooh/v1/markets/los-angeles HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64832 - "POST /ooh/v1/markets/los-angeles/readiness HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64833 - "POST /ooh/v1/markets/los-angeles/readiness HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64836 - "POST /ooh/v1/markets/los-angeles/readiness HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64839 - "POST /ooh/v1/tenants/acme-live/campaigns HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64842 - "POST /ooh/v1/tenants/globex-live/campaigns HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64845 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/brief HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64848 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64849 - "GET /ooh/v1/tenants/globex-live/campaigns/ooh-cmp-d235ccc53d2f9e0ac9d4b88c23e0a631ae20ea89 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64850 - "GET /ooh/v1/tenants/nobody-live/campaigns/ooh-cmp-d235ccc53d2f9e0ac9d4b88c23e0a631ae20ea89 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64851 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-d235ccc53d2f9e0ac9d4b88c23e0a631ae20ea89 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64852 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64853 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64856 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64857 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64860 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64861 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64862 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64863 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64864 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64865 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64866 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64867 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64870 - "POST /ooh/v1/sources HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64873 - "POST /ooh/v1/sources HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64874 - "POST /ooh/v1/faces HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64877 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64880 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64881 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/availability HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64882 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64883 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/availability HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64886 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64887 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/availability HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64890 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/prices HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64893 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64894 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/availability HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64897 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64898 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/availability HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64901 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64902 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/availability HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64903 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64904 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/hold-evidence HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64907 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64908 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/hold-decisions HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64909 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/hold-decisions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64912 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64913 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64916 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/plan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64917 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/markup-evidence HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64920 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64921 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/commercial-model HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64922 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/commercial-model HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64925 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/prices HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64926 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/prices HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64927 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/prices HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64930 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/prices HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64933 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64934 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64937 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64938 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/transitions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64941 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64942 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/client-approval HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64943 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/client-approval HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64946 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64947 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64948 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64949 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/funds-verifications HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64950 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64951 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/funds-verifications HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:64952 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64953 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/funds-verifications HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64956 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64957 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64959 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64960 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/funds-verifications HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64962 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64963 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/funds-verifications HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64966 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64967 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec/flight HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64968 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64969 - "GET /ooh/v1/vendors/lamar HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64970 - "POST /ooh/v1/vendors/lamar/attributes HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64973 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/contracts HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:64974 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/contracts HTTP/1.1" 201 Created
+INFO:     127.0.0.1:64977 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64978 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64980 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64981 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/contracts/ooh-ctr-b09747e6bb7be923910a085989c13ba8e8bb156f/approve HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64982 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64983 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/contracts/ooh-ctr-b09747e6bb7be923910a085989c13ba8e8bb156f/approve HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64986 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64987 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64989 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/finance-verifications HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:64990 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/finance-verifications HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64993 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64994 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64996 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64997 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:64999 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65000 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:65002 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65003 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:65004 - "POST /ooh/v1/kill-switches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65007 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65008 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:65010 - "POST /ooh/v1/kill-switches HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:65011 - "POST /ooh/v1/kill-switches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65014 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65015 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations HTTP/1.1" 201 Created
+INFO:     127.0.0.1:65018 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations/ooh-aut-ea6f96ee99573dc98dd0dac382782c2c5d9797a7/submit HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65021 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations/ooh-aut-ea6f96ee99573dc98dd0dac382782c2c5d9797a7/submit HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65022 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations/ooh-aut-ea6f96ee99573dc98dd0dac382782c2c5d9797a7/submit HTTP/1.1" 409 Conflict
+INFO:     127.0.0.1:65024 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/exposure HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65025 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations/ooh-aut-ea6f96ee99573dc98dd0dac382782c2c5d9797a7/outcome HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:65026 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/authorizations/ooh-aut-ea6f96ee99573dc98dd0dac382782c2c5d9797a7/outcome HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65029 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65030 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/inventory/ooh-inv-ee844f694cc63423bf05fd7f3dd8357ca894cdec HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65031 - "POST /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857/funds-verifications HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:65032 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [66801]
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [67680]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:64801 (Press CTRL+C to quit)
+INFO:     127.0.0.1:65036 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65037 - "GET /ooh/v1/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65038 - "GET /ooh/v1/tenants/acme-live/campaigns/ooh-cmp-c25195394cfa00c61a8bda94335af8bebd665857 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65039 - "GET /ooh/v1/audit/integrity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65041 - "GET /ooh/v1/audit/evidence?limit=1000 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [67680]
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [67826]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:64801 (Press CTRL+C to quit)
+INFO:     127.0.0.1:65046 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65047 - "POST /ooh/v1/kill-switches HTTP/1.1" 503 Service Unavailable
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [67826]

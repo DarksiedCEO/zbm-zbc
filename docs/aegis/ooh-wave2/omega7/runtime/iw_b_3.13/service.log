@@ -1,0 +1,37 @@
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [63527]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:61689 (Press CTRL+C to quit)
+INFO:     127.0.0.1:61728 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61730 - "GET /ooh/v1/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61733 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [63532]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:61689 (Press CTRL+C to quit)
+INFO:     127.0.0.1:61796 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61798 - "GET /ooh/v1/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61800 - "GET /ooh/v1/audit/export?since=1&limit=1000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61803 - "GET /ooh/v1/audit/evidence?limit=200&offset=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61809 - "POST /ooh/v1/jobs/integrity/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61818 - "GET /ooh/v1/audit/export?since=1&limit=1000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61819 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [63532]
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [63538]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:61689 (Press CTRL+C to quit)
+INFO:     127.0.0.1:61880 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61882 - "GET /ooh/v1/audit/export?since=1&limit=1000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61886 - "GET /ooh/v1/audit/integrity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61891 - "GET /ooh/v1/audit/evidence?limit=200&offset=0 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [63538]

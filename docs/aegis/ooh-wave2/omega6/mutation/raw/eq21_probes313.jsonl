@@ -1,0 +1,21 @@
+{"id": "H254", "file": "service.py", "line": 338, "desc": "L338 cmp->is not", "rc": 0, "tail": "55 passed, 1 warning in 3.77s", "fails": []}
+{"id": "H192", "file": "service.py", "line": 316, "desc": "L316 operand->True", "rc": 0, "tail": "55 passed, 1 warning in 3.80s", "fails": []}
+{"id": "H085", "file": "service.py", "line": 232, "desc": "L232 cond->True", "rc": 0, "tail": "55 passed, 1 warning in 3.80s", "fails": []}
+{"id": "H255", "file": "service.py", "line": 339, "desc": "L339 stmt->pass", "rc": 0, "tail": "55 passed, 1 warning in 3.80s", "fails": []}
+{"id": "H253", "file": "service.py", "line": 338, "desc": "L338 cond->False", "rc": 0, "tail": "55 passed, 1 warning in 3.84s", "fails": []}
+{"id": "H252", "file": "service.py", "line": 338, "desc": "L338 cond->True", "rc": 0, "tail": "55 passed, 1 warning in 3.83s", "fails": []}
+{"id": "H311", "file": "service.py", "line": 376, "desc": "L376 bool flip", "rc": 0, "tail": "55 passed, 1 warning in 3.77s", "fails": []}
+{"id": "H322", "file": "service.py", "line": 382, "desc": "L382 return->(None, True)", "rc": 0, "tail": "55 passed, 1 warning in 3.73s", "fails": []}
+{"id": "H344", "file": "service.py", "line": 388, "desc": "L388 bool flip", "rc": 0, "tail": "55 passed, 1 warning in 3.78s", "fails": []}
+{"id": "H357", "file": "service.py", "line": 397, "desc": "L397 cond->True", "rc": 0, "tail": "55 passed, 1 warning in 3.76s", "fails": []}
+{"id": "H384", "file": "service.py", "line": 412, "desc": "L412 operand->False", "rc": 0, "tail": "55 passed, 1 warning in 3.77s", "fails": []}
+{"id": "H371", "file": "service.py", "line": 404, "desc": "L404 stmt->pass", "rc": 0, "tail": "55 passed, 1 warning in 3.82s", "fails": []}
+{"id": "H416", "file": "service.py", "line": 426, "desc": "L426 bool flip", "rc": 0, "tail": "55 passed, 1 warning in 3.85s", "fails": []}
+{"id": "H432", "file": "service.py", "line": 431, "desc": "L431 return->(None, False)", "rc": 0, "tail": "55 passed, 1 warning in 3.83s", "fails": []}
+{"id": "H441", "file": "service.py", "line": 435, "desc": "L435 bool flip", "rc": 0, "tail": "55 passed, 1 warning in 3.83s", "fails": []}
+{"id": "H453", "file": "service.py", "line": 440, "desc": "L440 return->(None, True)", "rc": 0, "tail": "55 passed, 1 warning in 3.80s", "fails": []}
+{"id": "H469", "file": "service.py", "line": 451, "desc": "L451 operand->False", "rc": 0, "tail": "55 passed, 1 warning in 3.85s", "fails": []}
+{"id": "H198", "file": "service.py", "line": 316, "desc": "L316 operand->True", "rc": 1, "tail": "1 failed, 54 passed, 1 warning in 3.85s", "fails": ["test_P_H198_first_forced_check_within_boot_window"]}
+{"id": "H229", "file": "service.py", "line": 327, "desc": "L327 operand->True", "rc": 1, "tail": "1 failed, 54 passed, 1 warning in 3.39s", "fails": ["test_P_H229_message_when_clear_fails_and_reread_fails"]}
+{"id": "H448", "file": "service.py", "line": 439, "desc": "L439 bool flip", "rc": 1, "tail": "1 failed, 54 passed, 1 warning in 3.37s", "fails": ["test_P_H448_aside_line_anchored_but_unapplicable"]}
+{"id": "H399", "file": "service.py", "line": 417, "desc": "L417 bool flip", "rc": 1, "tail": "1 failed, 54 passed, 1 warning in 3.39s", "fails": ["test_P_H399_stale_pending_set_aside_write_fails"]}

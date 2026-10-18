@@ -1,0 +1,234 @@
+{
+ "start": {
+  "status": "ok"
+ },
+ "W1": [
+  201,
+  {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:20Z",
+   "campaigns": 0
+  }
+ ],
+ "W2": [
+  201,
+  {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:20Z",
+   "campaigns": 0
+  }
+ ],
+ "pre": {
+  "disk": {
+   "sha256": "64c973db8fa4197795f9e1e8da1fc2b6406d5ed8d2e07a6fc8d838b1dd2ddf2e",
+   "size": 1372,
+   "lines": 2,
+   "line_shas": [
+    "18b28ec7e4762473b5c0718ae7d168a850a60da1a69625690be80610d175f45a",
+    "70501bbfd4d93a3a5f76b15d1530a7a5aafe258a004dc05f8f7ac108c46231f1"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 2,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null,
+    null
+   ]
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:20Z",
+   "problem": null
+  }
+ },
+ "forged_line": "{\"at\":\"2026-10-18T10:24:20Z\",\"data\":{\"_obj\":\"t-mid\",\"actor\":\"andre\",\"evidence\":[{\"event_id\":\"ooh-evd-bfda85340c78ed285f2bbf7de0501909f6b57f7c\",\"event_type\":\"tenant_created\",\"payload\":{\"rk\":\"tenant|t-mid|5d34c412-cc62-453e-bb5d-65c817325ef9\",\"seq\":2,\"tenant_id\":\"t-mid\"},\"subject_id\":\"tenant:t-mid\"}],\"request_id\":\"tenant|t-mid|5d34c412-cc62-453e-bb5d-65c817325ef9\",\"request_sha\":\"a16890d4900f9416a378810024a318519b3a4ac7585a2acaa9575bfcd34be5e2\",\"tenant_id\":\"t-mie\"},\"fmt\":4,\"kind\":\"tenant_created\",\"prev_line_sha256\":\"18b28ec7e4762473b5c0718ae7d168a850a60da1a69625690be80610d175f45a\",\"record_sha256\":\"276f02f4a800d94e31a414e737037300cbeb2e076891d5894950d7af9af18eb5\",\"seq\":2}",
+ "after_fault": {
+  "disk": {
+   "sha256": "eeee773edde23f1bace24d932d5ea4ee2d708d821169499af4668f8207482237",
+   "size": 1372,
+   "lines": 2,
+   "line_shas": [
+    "18b28ec7e4762473b5c0718ae7d168a850a60da1a69625690be80610d175f45a",
+    "b82a90f9cbb605cc8fe17952d7117554b443918765795559d76850718a67aba8"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:20Z",
+   "problem": null
+  }
+ },
+ "W3": [
+  201,
+  {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:20Z",
+   "campaigns": 0
+  }
+ ],
+ "after_W3": {
+  "disk": {
+   "sha256": "85c54a59f60d92da509052e5cf4b675e94af29ff7a5e7f6814cdf15b9b1f1604",
+   "size": 2037,
+   "lines": 3,
+   "line_shas": [
+    "18b28ec7e4762473b5c0718ae7d168a850a60da1a69625690be80610d175f45a",
+    "b82a90f9cbb605cc8fe17952d7117554b443918765795559d76850718a67aba8",
+    "bf2beac9de30e204ef3b4b79dab5e28bf73cb3801b2f338067fc685a8bad71b9"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 6,
+   "ooh_anchors": 3,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null,
+    null,
+    null
+   ]
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:20Z",
+   "problem": null
+  },
+  "file_unchanged": false
+ },
+ "audit": {
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:20Z",
+   "problem": null
+  },
+  "ledger_valid": true,
+  "log_length": 3
+ },
+ "job": [
+  200,
+  {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T10:24:20Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  }
+ ],
+ "W4": [
+  201,
+  {
+   "tenant_id": "t-y",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:20Z",
+   "campaigns": 0
+  }
+ ],
+ "after_W4": {
+  "disk": {
+   "sha256": "88ca03423468e7e7c7adb6f4656494a56adcf75b3d922735b8bb6f5f60ff80dd",
+   "size": 2702,
+   "lines": 4,
+   "line_shas": [
+    "18b28ec7e4762473b5c0718ae7d168a850a60da1a69625690be80610d175f45a",
+    "b82a90f9cbb605cc8fe17952d7117554b443918765795559d76850718a67aba8",
+    "bf2beac9de30e204ef3b4b79dab5e28bf73cb3801b2f338067fc685a8bad71b9",
+    "c48503fb10011b3bd4665b4c0196a48f771167af5b6db2d473afe8acfd410930"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 8,
+   "ooh_anchors": 4,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created",
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null,
+    null,
+    null,
+    null
+   ]
+  }
+ },
+ "restart1": {
+  "exited": 1,
+  "tail": [
+   "  File \"/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/src/services/ooh-py/src/store.py\", line 69, in verify_lines",
+   "    raise StoreCorrupt(f\"log chain broken at line {i + 1}\")",
+   "store.StoreCorrupt: log chain broken at line 3"
+  ]
+ },
+ "final": {
+  "disk": {
+   "sha256": "88ca03423468e7e7c7adb6f4656494a56adcf75b3d922735b8bb6f5f60ff80dd",
+   "size": 2702,
+   "lines": 4,
+   "line_shas": [
+    "18b28ec7e4762473b5c0718ae7d168a850a60da1a69625690be80610d175f45a",
+    "b82a90f9cbb605cc8fe17952d7117554b443918765795559d76850718a67aba8",
+    "bf2beac9de30e204ef3b4b79dab5e28bf73cb3801b2f338067fc685a8bad71b9",
+    "c48503fb10011b3bd4665b4c0196a48f771167af5b6db2d473afe8acfd410930"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 8,
+   "ooh_anchors": 4,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created",
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "ledger_verify": {
+   "entries": 8,
+   "valid": true
+  }
+ }
+}

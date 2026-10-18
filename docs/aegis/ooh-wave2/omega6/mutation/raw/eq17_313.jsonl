@@ -1,0 +1,18 @@
+{"id": "H085", "desc": "L232 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.20s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H252", "desc": "L338 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.35s (0:01:35)", "fails": [], "secs": 96}
+{"id": "NOOP", "desc": "noop", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.35s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H255", "desc": "L339 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.74s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H254", "desc": "L338 cmp->is not", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.06s (0:01:36)", "fails": [], "secs": 97}
+{"id": "H253", "desc": "L338 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.06s (0:01:36)", "fails": [], "secs": 97}
+{"id": "H192", "desc": "L316 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.07s (0:01:36)", "fails": [], "secs": 97}
+{"id": "H311", "desc": "L376 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.28s (0:01:36)", "fails": [], "secs": 97}
+{"id": "H322", "desc": "L382 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.43s (0:01:34)", "fails": [], "secs": 95}
+{"id": "H357", "desc": "L397 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.40s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H344", "desc": "L388 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.41s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H371", "desc": "L404 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.27s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H432", "desc": "L431 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.03s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H384", "desc": "L412 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.09s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H441", "desc": "L435 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.15s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H416", "desc": "L426 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.33s (0:01:35)", "fails": [], "secs": 96}
+{"id": "H453", "desc": "L440 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 66.95s (0:01:06)", "fails": [], "secs": 68}
+{"id": "H469", "desc": "L451 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 66.63s (0:01:06)", "fails": [], "secs": 67}

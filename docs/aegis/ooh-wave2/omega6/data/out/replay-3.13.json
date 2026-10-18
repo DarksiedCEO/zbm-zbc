@@ -1,0 +1,79 @@
+{
+ "tests": 777,
+ "instances": 694,
+ "compared": 692,
+ "mismatch": [
+  [
+   "tests/test_aegis_integrity_path.py::test_ip_unanchored_line_appended_to_the_local_log_is_caught",
+   [
+    "/tenants/forged-1: only in replay"
+   ]
+  ],
+  [
+   "tests/test_aegis_integrity_path.py::test_ip_disk_pending_that_does_not_chain_is_not_appended_even_if_anchored",
+   [
+    "/tenants/other-1: only in replay"
+   ]
+  ],
+  [
+   "tests/test_aegis_ooh_r3.py::test_r3h1_the_gate_compares_quoted_and_held_flights_with_the_current_one",
+   [
+    "/prices/ooh-prc-11f4bc96ba3c5c21ae43bce2faaeac6aab78df5a/flights/ooh-inv-56813ff2231b0adc5d2ce7330c6ae64634dc4542[1]: '2027-10-31' != '2026-11-30'"
+   ]
+  ],
+  [
+   "tests/test_aegis_ooh_r3.py::test_r3l_the_same_reference_on_another_rail_is_allowed_with_a_warning",
+   [
+    "/funds_evidence/check:boa777: only in live"
+   ]
+  ],
+  [
+   "tests/test_aegis_ooh_w234.py::test_sec_f2_the_empty_plan_guard_names_itself",
+   [
+    "/campaigns/ooh-cmp-98b174c4b07ec1525424538c3572466d83b0b50a/current_sell_price_id: type str != NoneType",
+    "/prices/x: only in live"
+   ]
+  ],
+  [
+   "tests/test_contracts.py::test_an_unknown_payment_method_is_refused",
+   [
+    "/vendors/lamar/profile/payment_methods: only in replay"
+   ]
+  ],
+  [
+   "tests/test_finance_verification.py::test_the_gate_rechecks_finance_at_submission",
+   [
+    "/campaigns/ooh-cmp-136a27f83dc098a516f06716c3ed298706d7fc6e/finance_verification: type NoneType != dict"
+   ]
+  ],
+  [
+   "tests/test_hold_confirmation.py::test_the_gate_also_refuses_a_confirmed_state_not_set_by_andre",
+   [
+    "/inventory/ooh-inv-c16d90a81e0e981b860ab36ff10baf7bedeb88e4/hold_confirmed_by: 'ooh_agent' != 'andre'"
+   ]
+  ],
+  [
+   "tests/test_hold_confirmation.py::test_the_campaign_hold_state_counts_only_andres_confirmations",
+   [
+    "/inventory/ooh-inv-50a8c7bc22f68233bb69297ede5e6df85a76022a/hold_confirmed_by: type NoneType != str"
+   ]
+  ],
+  [
+   "tests/test_planning.py::test_s34_f1_plan_approval_rechecks_every_line_against_the_brief",
+   [
+    "/campaigns/ooh-cmp-2e6288438479c265fdffc8273b9cd55e47c7dcd7/brief/formats: len 1 != 4"
+   ]
+  ]
+ ],
+ "replay_error": [
+  [
+   "tests/test_aegis_integrity_path.py::test_ip_anchored_line_that_cannot_be_applied_asks_for_an_operator",
+   "KeyError: 'tenant_id'"
+  ],
+  [
+   "tests/test_aegis_omega5_mutation.py::test_h448_set_aside_line_appended_late_clears_the_set_aside_copy",
+   "KeyError: 'tenant_id'"
+  ]
+ ],
+ "skipped": []
+}

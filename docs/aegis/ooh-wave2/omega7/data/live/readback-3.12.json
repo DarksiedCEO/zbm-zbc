@@ -1,0 +1,16 @@
+{
+ "log_lines": 126,
+ "ooh_ledger_events": 254,
+ "anchors": 126,
+ "evidence_named": 126,
+ "problems": [],
+ "clear_strings_found_in_ledger": [
+  "clear-channel",
+  "finance_31",
+  "globex",
+  "los-angeles",
+  "ooh_agent",
+  "outfront",
+  "san-diego"
+ ]
+}

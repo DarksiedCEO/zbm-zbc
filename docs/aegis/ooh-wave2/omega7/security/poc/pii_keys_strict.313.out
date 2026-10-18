@@ -1,0 +1,29 @@
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+REFUSED top.phone: HTTP 422 {"detail":[{"loc":["body","phone"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or phone)","
+REFUSED nested.phone: HTTP 422 {"detail":[{"loc":["body","nested.phone"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or ph
+REFUSED top.Phone-Number: HTTP 422 {"detail":[{"loc":["body","Phone-Number"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or ph
+REFUSED nested.Phone-Number: HTTP 422 {"detail":[{"loc":["body","nested.Phone-Number"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank accoun
+REFUSED top.ssn: HTTP 422 {"detail":[{"loc":["body","ssn"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or phone)","ty
+REFUSED nested.ssn: HTTP 422 {"detail":[{"loc":["body","nested.ssn"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or phon
+REFUSED top.card_number: HTTP 422 {"detail":[{"loc":["body","card_number"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or pho
+REFUSED nested.card_number: HTTP 422 {"detail":[{"loc":["body","nested.card_number"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account
+REFUSED top.routing_number: HTTP 422 {"detail":[{"loc":["body","routing_number"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or 
+REFUSED nested.routing_number: HTTP 422 {"detail":[{"loc":["body","nested.routing_number"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank acco
+REFUSED top.ip_address: HTTP 422 {"detail":[{"loc":["body","ip_address"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or phon
+REFUSED nested.ip_address: HTTP 422 {"detail":[{"loc":["body","nested.ip_address"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account 
+REFUSED top.date_of_birth: HTTP 422 {"detail":[{"loc":["body","date_of_birth"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or p
+REFUSED nested.date_of_birth: HTTP 422 {"detail":[{"loc":["body","nested.date_of_birth"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank accou
+REFUSED top.phoneNumber: HTTP 422 {"detail":[{"loc":["body","phoneNumber"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED nested.phoneNumber: HTTP 422 {"detail":[{"loc":["body","nested"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED top.emailAddress: HTTP 422 {"detail":[{"loc":["body","emailAddress"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED nested.emailAddress: HTTP 422 {"detail":[{"loc":["body","nested"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED top.email: HTTP 422 {"detail":[{"loc":["body","email"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED nested.email: HTTP 422 {"detail":[{"loc":["body","nested"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED top.e_mail: HTTP 422 {"detail":[{"loc":["body","e_mail"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED nested.e_mail: HTTP 422 {"detail":[{"loc":["body","nested"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED top.SSN: HTTP 422 {"detail":[{"loc":["body","SSN"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or phone)","ty
+REFUSED nested.SSN: HTTP 422 {"detail":[{"loc":["body","nested.SSN"],"msg":"personal or account data is never taken here (no IP, device, birth date, id, card, bank account or phon
+REFUSED top.creditCard: HTTP 422 {"detail":[{"loc":["body","creditCard"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+REFUSED nested.creditCard: HTTP 422 {"detail":[{"loc":["body","nested"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":1}
+CONTROL valid brief: 409

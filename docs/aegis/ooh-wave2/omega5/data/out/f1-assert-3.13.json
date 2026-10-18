@@ -1,0 +1,74 @@
+{
+ "counts": {
+  "cases": 48,
+  "first503_ok": 48,
+  "down503_ok": 48,
+  "recovered_ok": 48,
+  "oplines1_ok": 48,
+  "committed1_ok": 48,
+  "anchors_eq_lines_ok": 48,
+  "dup0_ok": 48,
+  "retries_2xx_ok": 48,
+  "restart_ok_ok": 48,
+  "diff_empty_ok": 48,
+  "readback_ok_ok": 48,
+  "audit_committed1_ok": 36,
+  "pending_mem_disk_ok": 32,
+  "retries": 192,
+  "attempted_only>0": 4,
+  "money:[1, \"6000.00\", [], 0]": 24,
+  "audit_committed1_FAIL": 12,
+  "money:[1, \"6000.00\", [[\"AUTHORIZED\", \"NOT_SUBMITTED\", \"5000.00\"]], 0]": 12,
+  "money:[1, \"6000.00\", [[\"AUTHORIZED\", \"SUBMISSION_UNKNOWN\", \"5000.00\"]], 1]": 12
+ },
+ "bad": [
+  [
+   "c13-finance-anchor-held-live",
+   "audit_committed1"
+  ],
+  [
+   "c14-finance-anchor-held-live-iw",
+   "audit_committed1"
+  ],
+  [
+   "c15-finance-anchor-held-rs",
+   "audit_committed1"
+  ],
+  [
+   "c16-finance-anchor-held-rs-iw",
+   "audit_committed1"
+  ],
+  [
+   "c17-finance-anchor-not_held-live",
+   "audit_committed1"
+  ],
+  [
+   "c18-finance-anchor-not_held-live-iw",
+   "audit_committed1"
+  ],
+  [
+   "c19-finance-anchor-not_held-rs",
+   "audit_committed1"
+  ],
+  [
+   "c20-finance-anchor-not_held-rs-iw",
+   "audit_committed1"
+  ],
+  [
+   "c21-finance-evidence-held-live",
+   "audit_committed1"
+  ],
+  [
+   "c22-finance-evidence-held-rs",
+   "audit_committed1"
+  ],
+  [
+   "c23-finance-evidence-not_held-live",
+   "audit_committed1"
+  ],
+  [
+   "c24-finance-evidence-not_held-rs",
+   "audit_committed1"
+  ]
+ ]
+}

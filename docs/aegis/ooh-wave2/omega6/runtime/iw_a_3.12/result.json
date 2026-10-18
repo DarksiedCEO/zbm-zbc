@@ -1,0 +1,183 @@
+{
+ "res": {
+  "W1": [
+   201,
+   {
+    "tenant_id": "t-before",
+    "killed": false,
+    "created_at": "2026-10-18T07:53:59Z",
+    "campaigns": 0
+   }
+  ],
+  "W2": [
+   "transport",
+   "RemoteProtocolError: Server disconnected without sending a response."
+  ],
+  "service_rc": -9,
+  "anchors_while_down": 2,
+  "pending_line": {
+   "at": "2026-10-18T07:53:59Z",
+   "data": {
+    "_obj": "t-x",
+    "actor": "andre",
+    "evidence": [
+     {
+      "event_id": "ooh-evd-ccf56310c0b3aaa5f76040308f6cd3706fd7a52e",
+      "event_type": "tenant_created",
+      "payload": {
+       "rk": "tenant|t-x|42c9c440-9766-4c57-86c4-6baee5baae35",
+       "seq": 2,
+       "tenant_id": "t-x"
+      },
+      "subject_id": "tenant:t-x"
+     }
+    ],
+    "request_id": "tenant|t-x|42c9c440-9766-4c57-86c4-6baee5baae35",
+    "request_sha": "f00bd688dd6a00f66b50119a78a2d6dfdaa95e8ea1beafeb4ff3bb7cde540121",
+    "tenant_id": "t-x"
+   },
+   "fmt": 4,
+   "kind": "tenant_created",
+   "prev_line_sha256": "cb9775dfac354964ff6b3c5682aa79ef079dc0a41f403b58e949e2746c773db2",
+   "record_sha256": "d3817bcd70b22d476057dfb477ca9456d6a1d16ab07c842603d9dd74420f2aca",
+   "seq": 2
+  },
+  "after_restart": {
+   "status_integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T07:54:00Z",
+    "problem": null
+   },
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "log_lines": 2,
+   "pending_sha256": null,
+   "local_tenants": [
+    "t-before",
+    "t-x"
+   ],
+   "export": [
+    [
+     "t-before",
+     "t-x"
+    ],
+    2
+   ]
+  },
+  "line2_sha_eq_pending": true,
+  "W2_retry": [
+   201,
+   {
+    "tenant_id": "t-x",
+    "killed": false,
+    "created_at": "2026-10-18T07:53:59Z",
+    "campaigns": 0
+   }
+  ],
+  "W4": [
+   201,
+   {
+    "tenant_id": "t-after",
+    "killed": false,
+    "created_at": "2026-10-18T07:54:00Z",
+    "campaigns": 0
+   }
+  ],
+  "final": {
+   "log_tenants": [
+    "t-before",
+    "t-x",
+    "t-after"
+   ],
+   "log_length": 3,
+   "ledger_anchors": 3,
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "integrity": {
+    "integrity": {
+     "ok": true,
+     "checked_at": "2026-10-18T07:54:00Z",
+     "problem": null
+    },
+    "ledger_valid": true,
+    "log_length": 3
+   },
+   "ledger_verify": {
+    "entries": 6,
+    "valid": true
+   }
+  },
+  "evidence_final": {
+   "counts": {
+    "rule": "unanchored evidence = attempted, not done",
+    "consistency": "eventual; re-read to settle",
+    "total": 3,
+    "committed": 3,
+    "attempted": 0,
+    "limit": 200,
+    "offset": 0,
+    "evidence": [
+     {
+      "event_id": "ooh-evd-060d3f377879bbefd936a40b90db34cafc55f541",
+      "event_type": "tenant_created",
+      "subject_id": "tenant:t-before",
+      "ledger_seq": 0,
+      "payload_sha256": "ccc5ea9b5d99fd9735c08bef00d9cb68f69136def0c6e5477f31ee905322375d",
+      "status": "committed",
+      "seq": 1,
+      "rk": "tenant|t-before|ca3e9925-66e8-4da1-a075-1052f2abc4a7",
+      "log_kind": "tenant_created"
+     },
+     {
+      "event_id": "ooh-evd-ccf56310c0b3aaa5f76040308f6cd3706fd7a52e",
+      "event_type": "tenant_created",
+      "subject_id": "tenant:t-x",
+      "ledger_seq": 2,
+      "payload_sha256": "eba0ddaa99b18fbb3fbadf935ad4bfe94b924559e8dda2b71d786b5a08b0f428",
+      "status": "committed",
+      "seq": 2,
+      "rk": "tenant|t-x|42c9c440-9766-4c57-86c4-6baee5baae35",
+      "log_kind": "tenant_created"
+     },
+     {
+      "event_id": "ooh-evd-a45bb01810c5f39c2cc9ad35be2ebc2e92f79d86",
+      "event_type": "tenant_created",
+      "subject_id": "tenant:t-after",
+      "ledger_seq": 4,
+      "payload_sha256": "a9322945dcb99268c11315eb6612618abc10e006099dac6b005ca4a9edfe7788",
+      "status": "committed",
+      "seq": 3,
+      "rk": "tenant|t-after|f8f99cd9-ca9b-4cf5-ab7c-cb9f9a965558",
+      "log_kind": "tenant_created"
+     }
+    ],
+    "log_length": 3
+   },
+   "per": []
+  }
+ },
+ "relay": [
+  {
+   "scen": "a",
+   "event_id": "ooh-anc-0f917f7d849175fe31c6d274243949556f33aa63",
+   "summary": "tenant_created #2",
+   "payload": null,
+   "ledger_status_line": "HTTP/1.1 201 Created",
+   "state_at_kill": {
+    "ooh_dir": [
+     "ooh.lock",
+     "ooh_log.jsonl",
+     "pending.line"
+    ],
+    "log_lines": 1,
+    "pending_sha256": "c9e53b71f1a6d59a58d88b81ad51bd9dd708b4ac535243e9bb1f2f81f4a949b3"
+   },
+   "service_killed": "SIGKILL service pid 30124 returncode -9",
+   "service_answer": "never passed back (service dead)"
+  }
+ ]
+}

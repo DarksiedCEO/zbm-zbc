@@ -1,0 +1,49 @@
+{"py": "3.13", "id": "A031", "file": "service.py", "line": 77, "desc": "L77 operand->False", "rc": 0, "tail": "13 passed, 1 warning in 1.43s", "fails": []}
+{"py": "3.13", "id": "A047", "file": "service.py", "line": 107, "desc": "L107 stmt->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.40s", "fails": []}
+{"py": "3.13", "id": "A056", "file": "service.py", "line": 119, "desc": "L119 raise->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.32s", "fails": []}
+{"py": "3.13", "id": "A064", "file": "service.py", "line": 135, "desc": "L135 return->True", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "A070", "file": "service.py", "line": 140, "desc": "L140 bool flip", "rc": 0, "tail": "13 passed, 1 warning in 1.51s", "fails": []}
+{"py": "3.13", "id": "B019", "file": "service.py", "line": 499, "desc": "L499 cond->False", "rc": 0, "tail": "13 passed, 1 warning in 1.52s", "fails": []}
+{"py": "3.13", "id": "B034", "file": "service.py", "line": 526, "desc": "L526 cond->True", "rc": 0, "tail": "13 passed, 1 warning in 1.43s", "fails": []}
+{"py": "3.13", "id": "B046", "file": "service.py", "line": 535, "desc": "L535 cond->True", "rc": 0, "tail": "13 passed, 1 warning in 1.34s", "fails": []}
+{"py": "3.13", "id": "B065", "file": "service.py", "line": 550, "desc": "L550 cond->False", "rc": 0, "tail": "13 passed, 1 warning in 1.35s", "fails": []}
+{"py": "3.13", "id": "B079", "file": "service.py", "line": 553, "desc": "L553 operand->True", "rc": 0, "tail": "13 passed, 1 warning in 1.35s", "fails": []}
+{"py": "3.13", "id": "B085", "file": "service.py", "line": 556, "desc": "L556 or->and", "rc": 0, "tail": "13 passed, 1 warning in 1.35s", "fails": []}
+{"py": "3.13", "id": "B094", "file": "service.py", "line": 556, "desc": "L556 operand->True", "rc": 0, "tail": "13 passed, 1 warning in 1.34s", "fails": []}
+{"py": "3.13", "id": "B104", "file": "service.py", "line": 564, "desc": "L564 cond->True", "rc": 0, "tail": "13 passed, 1 warning in 1.37s", "fails": []}
+{"py": "3.13", "id": "B122", "file": "service.py", "line": 576, "desc": "L576 cond->True", "rc": 0, "tail": "13 passed, 1 warning in 1.38s", "fails": []}
+{"py": "3.13", "id": "B126", "file": "service.py", "line": 580, "desc": "L580 stmt->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.34s", "fails": []}
+{"py": "3.13", "id": "B130", "file": "service.py", "line": 582, "desc": "L582 cond->False", "rc": 0, "tail": "13 passed, 1 warning in 1.36s", "fails": []}
+{"py": "3.13", "id": "B134", "file": "service.py", "line": 584, "desc": "L584 return->False", "rc": 0, "tail": "13 passed, 1 warning in 1.39s", "fails": []}
+{"py": "3.13", "id": "T012", "file": "store.py", "line": 56, "desc": "L56 bool flip", "rc": 0, "tail": "13 passed, 1 warning in 1.34s", "fails": []}
+{"py": "3.13", "id": "T024", "file": "store.py", "line": 68, "desc": "L68 operand->False", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T038", "file": "store.py", "line": 74, "desc": "L74 raise->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.32s", "fails": []}
+{"py": "3.13", "id": "T051", "file": "store.py", "line": 84, "desc": "L84 return->False", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T062", "file": "store.py", "line": 98, "desc": "L98 stmt->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.34s", "fails": []}
+{"py": "3.13", "id": "T074", "file": "store.py", "line": 103, "desc": "L103 operand->False", "rc": 0, "tail": "13 passed, 1 warning in 1.34s", "fails": []}
+{"py": "3.13", "id": "T084", "file": "store.py", "line": 115, "desc": "L115 return->None", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T088", "file": "store.py", "line": 115, "desc": "L115 return->(None, True)", "rc": 0, "tail": "13 passed, 1 warning in 1.36s", "fails": []}
+{"py": "3.13", "id": "T122", "file": "store.py", "line": 153, "desc": "L153 return->False", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T127", "file": "store.py", "line": 157, "desc": "L157 raise->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.43s", "fails": []}
+{"py": "3.13", "id": "T132", "file": "store.py", "line": 168, "desc": "L168 raise->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.36s", "fails": []}
+{"py": "3.13", "id": "T139", "file": "store.py", "line": 172, "desc": "L172 raise->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.32s", "fails": []}
+{"py": "3.13", "id": "T149", "file": "store.py", "line": 181, "desc": "L181 operand->True", "rc": 1, "tail": "1 failed, 12 passed, 1 warning in 1.35s", "fails": ["test_P_T149_file_longer_than_line_plus_extra_tail_is_refused"]}
+{"py": "3.13", "id": "T153", "file": "store.py", "line": 181, "desc": "L181 cmp->!=", "rc": 1, "tail": "3 failed, 10 passed, 1 warning in 1.41s", "fails": ["test_P_T148_to_T154_adoption_exact_line_adopted_once", "test_P_T149_file_longer_than_line_plus_extra_tail_is_refused", "test_P_T155_adopted_line_is_fsynced"]}
+{"py": "3.13", "id": "T159", "file": "store.py", "line": 184, "desc": "L184 raise->pass", "rc": 1, "tail": "2 failed, 11 passed, 1 warning in 1.40s", "fails": ["test_P_T149_file_longer_than_line_plus_extra_tail_is_refused", "test_P_T151_same_size_different_bytes_is_refused_not_adopted"]}
+{"py": "3.13", "id": "T167", "file": "store.py", "line": 196, "desc": "L196 stmt->pass", "rc": 1, "tail": "1 failed, 12 passed, 1 warning in 1.35s", "fails": ["test_P_T168_cut_back_is_fsynced"]}
+{"py": "3.13", "id": "T171", "file": "store.py", "line": 205, "desc": "L205 raise->pass", "rc": 1, "tail": "1 failed, 12 passed, 1 warning in 1.36s", "fails": ["test_P_T168_cut_back_is_fsynced"]}
+{"py": "3.13", "id": "T177", "file": "store.py", "line": 211, "desc": "L211 return->False", "rc": 0, "tail": "13 passed, 1 warning in 1.31s", "fails": []}
+{"py": "3.13", "id": "T181", "file": "store.py", "line": 217, "desc": "L217 cond->False", "rc": 0, "tail": "13 passed, 1 warning in 1.31s", "fails": []}
+{"py": "3.13", "id": "T185", "file": "store.py", "line": 220, "desc": "L220 and->or", "rc": 0, "tail": "13 passed, 1 warning in 1.35s", "fails": []}
+{"py": "3.13", "id": "T189", "file": "store.py", "line": 220, "desc": "L220 operand->False", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T193", "file": "store.py", "line": 223, "desc": "L223 cond->True", "rc": 0, "tail": "13 passed, 1 warning in 1.34s", "fails": []}
+{"py": "3.13", "id": "T197", "file": "store.py", "line": 223, "desc": "L223 operand->False", "rc": 0, "tail": "13 passed, 1 warning in 1.37s", "fails": []}
+{"py": "3.13", "id": "T201", "file": "store.py", "line": 223, "desc": "L223 drop not", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T205", "file": "store.py", "line": 228, "desc": "L228 bool flip", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T218", "file": "store.py", "line": 254, "desc": "L254 stmt->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T227", "file": "store.py", "line": 273, "desc": "L273 stmt->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.32s", "fails": []}
+{"py": "3.13", "id": "T235", "file": "store.py", "line": 279, "desc": "L279 return->(None, False)", "rc": 0, "tail": "13 passed, 1 warning in 1.35s", "fails": []}
+{"py": "3.13", "id": "T247", "file": "store.py", "line": 288, "desc": "L288 stmt->pass", "rc": 0, "tail": "13 passed, 1 warning in 1.32s", "fails": []}
+{"py": "3.13", "id": "T256", "file": "store.py", "line": 300, "desc": "L300 return->True", "rc": 0, "tail": "13 passed, 1 warning in 1.33s", "fails": []}
+{"py": "3.13", "id": "T269", "file": "store.py", "line": 306, "desc": "L306 operand->True", "rc": 0, "tail": "13 passed, 1 warning in 1.36s", "fails": []}
+{"py": "3.13", "id": "T279", "file": "store.py", "line": 322, "desc": "L322 stmt->pass", "rc": 1, "tail": "1 failed, 12 passed, 1 warning in 1.34s", "fails": ["test_P_T279_pending_file_is_fsynced_before_the_rename"]}

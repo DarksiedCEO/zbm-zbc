@@ -1,0 +1,6 @@
+diff -r /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/src/services/ooh-py/src/service.py /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/fals/mb/services/ooh-py/src/service.py
+429,430c429
+<             if e is None or e.get("payload_sha256") != payload_sha256(payload) \
+<                     or e.get("subject_id") != f"log:{epoch}":
+---
+>             if False:  # MUTANT: no anchor check

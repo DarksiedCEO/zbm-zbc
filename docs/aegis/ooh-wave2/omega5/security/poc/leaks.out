@@ -1,0 +1,21 @@
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+HELD   L1.ledger-body-keys-only-ids-hash-summary ['actor', 'department', 'event_id', 'event_type', 'payload_sha256', 'subject_id', 'summary']
+HELD   L1.no-vendor-text-or-pii-to-ledger 
+   summaries: ['availability_moved #22', 'availability_moved #23', 'availability_moved campaign:ooh-cmp-<id>', 'brief_set #15', 'campaign_brief_set campaign:ooh-cmp-<id>', 'campaign_created #14', 'campaign_created campaign:ooh-cmp-<id>', 'campaign_transition #16', 'campaign_transition #17', 'campaign_transition #18', 'campaign_transition campaign:ooh-cmp-<id>', 'face_registered #20', 'inventory_added #21', 'inventory_added campaign:ooh-cmp-<id>', 'inventory_face_registered face:ooh-fce-<id>', 'inventory_source_recorded source:ooh-src-<id>', 'market_readiness_raised_by_andre market:los-angeles', 'pa_determined #2', 'price_recorded #24', 'price_recorded campaign:ooh-cmp-<id>', 'principal_agent_determination_recorded_by_andre ooh:principal-agent', 'readiness_set #3', 'readiness_set #4', 'source_recorded #12', 'source_recorded #19', 'source_recorded #6', 'source_recorded #9', 'supplier_attribute_set #10', 'supplier_attribute_set #13', 'supplier_attribute_set #7', 'supplier_attribute_sourced vendor:clear-channel', 'supplier_attribute_sourced vendor:lamar', 'supplier_attribute_sourced vendor:outfront', 'tenant_created #1', 'tenant_created tenant:acme', 'vendor_registered #11', 'vendor_registered #5', 'vendor_registered #8', 'vendor_registered vendor:clear-channel', 'vendor_registered vendor:lamar']
+BROKEN L2.vendor-text-pii-redacted-in-views {"untrusted": true, "personal_data_redacted": true, "text": "call Jane at [redacted] or [redacted], SSN 123-45-6789, card 4111 1111 1111 1111", "truncated": false, "sha256": "7a17a96c4b149f50eabb655e1
+BROKEN L2.vendor-text-pii-redacted-in-local-log 
+HELD   L3.pii-key-phone-refused {"detail": [{"loc": ["body", "nested.phone"], "msg": "personal or account data is never taken here (no IP, dev
+HELD   L3.pii-key-Phone-Number-refused {"detail": [{"loc": ["body", "nested.Phone-Number"], "msg": "personal or account data is never taken here (no 
+HELD   L3.pii-key-ssn-refused {"detail": [{"loc": ["body", "nested.ssn"], "msg": "personal or account data is never taken here (no IP, devic
+HELD   L3.pii-key-card_number-refused {"detail": [{"loc": ["body", "nested.card_number"], "msg": "personal or account data is never taken here (no I
+HELD   L3.pii-key-routing_number-refused {"detail": [{"loc": ["body", "nested.routing_number"], "msg": "personal or account data is never taken here (n
+HELD   L3.pii-key-ip_address-refused {"detail": [{"loc": ["body", "nested.ip_address"], "msg": "personal or account data is never taken here (no IP
+HELD   L3.pii-key-date_of_birth-refused {"detail": [{"loc": ["body", "nested.date_of_birth"], "msg": "personal or account data is never taken here (no
+HELD   L3.pii-key-phoneNumber-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+HELD   L3.pii-key-emailAddress-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+HELD   L3.pii-key-email-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+HELD   L4.phone-in-campaign-name-refused {"detail":"ATTRIBUTE_VALUE_PERSONAL_DATA","field":"name"}
+OBS   L5.phone-shaped-client_approval_doc_ref: HTTP 200 {"campaign_id":"ooh-cmp-62e90925dc542592b2df9cd67845e3cf4cd76e99","tenant_id":"acme","name
+
+SUMMARY 13 held, 2 broken

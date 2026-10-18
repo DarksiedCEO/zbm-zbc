@@ -1,0 +1,10 @@
+{"id": "T016", "file": "store.py", "line": 67, "desc": "L67 raise->pass", "rc": 0, "tail": "94 passed, 1 warning in 9.10s", "fails": []}
+{"id": "T024", "file": "store.py", "line": 68, "desc": "L68 operand->False", "rc": 1, "tail": "1 failed, 93 passed, 1 warning in 9.19s", "fails": ["test_X_tamper_last_line_exact[seq]"]}
+{"id": "T032", "file": "store.py", "line": 71, "desc": "L71 cond->False", "rc": 1, "tail": "1 failed, 93 passed, 1 warning in 9.04s", "fails": ["test_X_tamper_last_line_exact[hash]"]}
+{"id": "T034", "file": "store.py", "line": 72, "desc": "L72 raise->pass", "rc": 1, "tail": "1 failed, 93 passed, 1 warning in 9.04s", "fails": ["test_X_tamper_last_line_exact[hash]"]}
+{"id": "T036", "file": "store.py", "line": 73, "desc": "L73 cond->False", "rc": 1, "tail": "1 failed, 93 passed, 1 warning in 9.00s", "fails": ["test_X_tamper_last_line_exact[canon]"]}
+{"id": "T038", "file": "store.py", "line": 74, "desc": "L74 raise->pass", "rc": 1, "tail": "1 failed, 93 passed, 1 warning in 8.98s", "fails": ["test_X_tamper_last_line_exact[canon]"]}
+{"id": "T071", "file": "store.py", "line": 103, "desc": "L103 operand->True", "rc": 0, "tail": "94 passed, 1 warning in 8.95s", "fails": []}
+{"id": "T062", "file": "store.py", "line": 98, "desc": "L98 stmt->pass", "rc": 0, "tail": "94 passed, 1 warning in 9.03s", "fails": []}
+{"id": "T081", "file": "store.py", "line": 107, "desc": "L107 raise->pass", "rc": 0, "tail": "94 passed, 1 warning in 9.03s", "fails": []}
+{"id": "T079", "file": "store.py", "line": 106, "desc": "L106 cond->False", "rc": 0, "tail": "94 passed, 1 warning in 9.10s", "fails": []}

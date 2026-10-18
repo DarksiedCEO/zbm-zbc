@@ -1,0 +1,17 @@
+{"id": "H254", "file": "service.py", "line": 338, "desc": "L338 cmp->is not", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.95s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H255", "file": "service.py", "line": 339, "desc": "L339 stmt->pass", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.99s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H192", "file": "service.py", "line": 316, "desc": "L316 operand->True", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.95s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H085", "file": "service.py", "line": 232, "desc": "L232 cond->True", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.95s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H253", "file": "service.py", "line": 338, "desc": "L338 cond->False", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.95s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H252", "file": "service.py", "line": 338, "desc": "L338 cond->True", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.98s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H311", "file": "service.py", "line": 376, "desc": "L376 bool flip", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.87s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H344", "file": "service.py", "line": 388, "desc": "L388 bool flip", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.86s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H322", "file": "service.py", "line": 382, "desc": "L382 return->(None, True)", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.93s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H384", "file": "service.py", "line": 412, "desc": "L412 operand->False", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.89s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H371", "file": "service.py", "line": 404, "desc": "L404 stmt->pass", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.96s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H357", "file": "service.py", "line": 397, "desc": "L397 cond->True", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.96s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H432", "file": "service.py", "line": 431, "desc": "L431 return->(None, False)", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.69s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H416", "file": "service.py", "line": 426, "desc": "L426 bool flip", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.70s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H441", "file": "service.py", "line": 435, "desc": "L435 bool flip", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.68s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H453", "file": "service.py", "line": 440, "desc": "L440 return->(None, True)", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.66s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}
+{"id": "H469", "file": "service.py", "line": 451, "desc": "L451 operand->False", "rc": 1, "tail": "1 failed, 55 passed, 1 warning in 3.70s", "fails": ["test_P_aside_unapplicable_integrity_verdict"]}

@@ -1,0 +1,2158 @@
+{
+ "A_extra_tail_before_tenant_restore": {
+  "kind": "extra_tail",
+  "when": "before",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_extra_tail_at_append_tenant_restore": {
+  "kind": "extra_tail",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_same_size_tail_before_tenant_restore": {
+  "error": "Traceback (most recent call last):\n  File \"/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/data/poc/rl_omega7.py\", line 241, in <module>\n    try: res[name] = fn()\n                     ^^^^\n  File \"/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/data/poc/rl_omega7.py\", line 229, in <lambda>\n    cases.append((f\"A_{kind}_{when}_tenant_restore\", lambda k=kind, w=when: a_case(k, w, \"tenant\", \"restore\")))\n                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/data/poc/rl_omega7.py\", line 103, in a_case\n    mutated = mutate(kind, mem0); open(h.svc.log.path, \"wb\").write(mutated)\n              ^^^^^^^^^^^^^^^^^^\n  File \"/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/data/poc/rl_omega7.py\", line 87, in mutate\n    if kind == \"same_size_tail\": return b + b\"y\" * len(line) + b\"\\n\"\n                                                   ^^^^^^^^^\nTypeError: object of type 'NoneType' has no len()\n"
+ },
+ "A_same_size_tail_at_append_tenant_restore": {
+  "kind": "same_size_tail",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_shorter_bytes_before_tenant_restore": {
+  "kind": "shorter_bytes",
+  "when": "before",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_shorter_bytes_at_append_tenant_restore": {
+  "kind": "shorter_bytes",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_shorter_line_before_tenant_restore": {
+  "kind": "shorter_line",
+  "when": "before",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_shorter_line_at_append_tenant_restore": {
+  "kind": "shorter_line",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_inplace_same_size_before_tenant_restore": {
+  "kind": "inplace_same_size",
+  "when": "before",
+  "op": "tenant",
+  "answer": [
+   201,
+   {
+    "tenant_id": "target-1",
+    "killed": false,
+    "created_at": "2026-10-16T18:00:00Z",
+    "campaigns": 0
+   }
+  ],
+  "disk_untouched_by_service": false,
+  "disk_grew_by": 697,
+  "memory_lines_added": 1,
+  "applied": true,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_file": false,
+  "own_pending": false,
+  "note": "write ACCEPTED over the changed file",
+  "integrity_check_after_accept": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_disk_lines": 14,
+  "final_disk_eq_memory": false,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart": "REFUSED: StoreCorrupt: log line 1 does not match its own hash",
+  "wire_unanchored_lines": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14
+  ],
+  "ledger_readback": [
+   "line 1: 0 matching anchors",
+   "line 2: 0 matching anchors",
+   "line 3: 0 matching anchors",
+   "line 4: 0 matching anchors",
+   "line 5: 0 matching anchors",
+   "line 6: 0 matching anchors",
+   "line 7: 0 matching anchors",
+   "line 8: 0 matching anchors",
+   "line 9: 0 matching anchors",
+   "line 10: 0 matching anchors",
+   "line 11: 0 matching anchors",
+   "line 12: 0 matching anchors",
+   "line 13: 0 matching anchors",
+   "line 14: 0 matching anchors"
+  ],
+  "money_evidence": []
+ },
+ "A_inplace_same_size_at_append_tenant_restore": {
+  "kind": "inplace_same_size",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   201,
+   {
+    "tenant_id": "target-1",
+    "killed": false,
+    "created_at": "2026-10-16T18:00:00Z",
+    "campaigns": 0
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": false,
+  "disk_grew_by": 697,
+  "memory_lines_added": 1,
+  "applied": true,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_file": false,
+  "own_pending": false,
+  "note": "write ACCEPTED over the changed file",
+  "integrity_check_after_accept": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_disk_lines": 14,
+  "final_disk_eq_memory": false,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart": "REFUSED: StoreCorrupt: log line 1 does not match its own hash",
+  "wire_unanchored_lines": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14
+  ],
+  "ledger_readback": [
+   "line 1: 0 matching anchors",
+   "line 2: 0 matching anchors",
+   "line 3: 0 matching anchors",
+   "line 4: 0 matching anchors",
+   "line 5: 0 matching anchors",
+   "line 6: 0 matching anchors",
+   "line 7: 0 matching anchors",
+   "line 8: 0 matching anchors",
+   "line 9: 0 matching anchors",
+   "line 10: 0 matching anchors",
+   "line 11: 0 matching anchors",
+   "line 12: 0 matching anchors",
+   "line 13: 0 matching anchors",
+   "line 14: 0 matching anchors"
+  ],
+  "money_evidence": []
+ },
+ "A_exact_copy_tail_at_append_tenant_restore": {
+  "kind": "exact_copy_tail",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   201,
+   {
+    "tenant_id": "target-1",
+    "killed": false,
+    "created_at": "2026-10-16T18:00:00Z",
+    "campaigns": 0
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 1,
+  "applied": true,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "pending_file": false,
+  "own_pending": false,
+  "note": "write ACCEPTED over the changed file",
+  "integrity_check_after_accept": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_disk_lines": 14,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_extra_tail_at_append_submit_restore": {
+  "kind": "extra_tail",
+  "when": "at_append",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_extra_tail_at_append_tenant_restart": {
+  "kind": "extra_tail",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "restart_on_changed": "REFUSED: StoreCorrupt: log line 14 is not JSON",
+  "restart_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_shorter_line_at_append_submit_restore": {
+  "kind": "shorter_line",
+  "when": "at_append",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_shorter_line_at_append_tenant_restart": {
+  "kind": "shorter_line",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "restart_on_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "restart_on_changed_write": 503,
+  "restart_on_changed_files": {
+   "pending": false,
+   "discarded": false
+  },
+  "restart_after_restore": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "applied_after_restore": false,
+  "lines_after_restore": 0,
+  "write_after_restore": 503,
+  "final_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "final_anchors_vs_lines": [
+   14,
+   13
+  ],
+  "final_disk_lines": 13,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "restart_state_diff": [],
+  "restart_write": 503,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [
+   "anchors 14 != lines 13"
+  ],
+  "money_evidence": []
+ },
+ "A_same_size_tail_at_append_submit_restore": {
+  "kind": "same_size_tail",
+  "when": "at_append",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "check_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_added_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "A_same_size_tail_at_append_tenant_restart": {
+  "kind": "same_size_tail",
+  "when": "at_append",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "disk_untouched_by_service": true,
+  "disk_grew_by": 0,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "own_pending": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check_while_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "disk_still_untouched": true,
+  "restart_on_changed": "REFUSED: StoreCorrupt: log line 14 is not JSON",
+  "restart_after_restore": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_restore": true,
+  "lines_after_restore": 1,
+  "write_after_restore": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_dir_0500_tenant": {
+  "how": "dir_0500",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "own_pending": false,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": false,
+  "anchors_added_after_undo": 0,
+  "same_action_again": [
+   201,
+   null
+  ],
+  "applied_count_end": true,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_dir_0500_submit": {
+  "how": "dir_0500",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "own_pending": false,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": false,
+  "anchors_added_after_undo": 0,
+  "same_action_again": [
+   200,
+   null
+  ],
+  "applied_count_end": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_rlimit_short_tenant": {
+  "how": "rlimit_short",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "own_pending": false,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": false,
+  "anchors_added_after_undo": 0,
+  "same_action_again": [
+   201,
+   null
+  ],
+  "applied_count_end": true,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_rlimit_short_submit": {
+  "how": "rlimit_short",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "own_pending": false,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": false,
+  "anchors_added_after_undo": 0,
+  "same_action_again": [
+   200,
+   null
+  ],
+  "applied_count_end": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_rename_onto_dir_tenant": {
+  "how": "rename_onto_dir",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line could not be removed"
+  },
+  "own_pending": true,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": true,
+  "anchors_added_after_undo": 1,
+  "same_action_again": [
+   409,
+   {
+    "detail": "TENANT_EXISTS"
+   }
+  ],
+  "applied_count_end": true,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_rename_onto_dir_submit": {
+  "how": "rename_onto_dir",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line could not be removed"
+  },
+  "own_pending": true,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": true,
+  "anchors_added_after_undo": 1,
+  "same_action_again": [
+   409,
+   {
+    "detail": "DUPLICATE_ORDER_BLOCKED",
+    "submission_state": "DUPLICATE_BLOCKED"
+   }
+  ],
+  "applied_count_end": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_replace_monkeypatched_tenant": {
+  "how": "replace_monkeypatched",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "own_pending": false,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": false,
+  "anchors_added_after_undo": 0,
+  "same_action_again": [
+   201,
+   null
+  ],
+  "applied_count_end": true,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "B_replace_monkeypatched_submit": {
+  "how": "replace_monkeypatched",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added_at_answer": 0,
+  "non_anchor_events_added": 1,
+  "log_unchanged": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "tmp_left": false,
+  "pending_file": false,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "own_pending": false,
+  "check_after_undo": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_undo": false,
+  "anchors_added_after_undo": 0,
+  "same_action_again": [
+   200,
+   null
+  ],
+  "applied_count_end": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_rlimit_short_tenant": {
+  "how": "rlimit_short",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_eq_before": true,
+  "disk_tail_bytes": 0,
+  "disk_ends_with_newline": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "fault": null,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check1": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_check": true,
+  "lines_added_after_check": 1,
+  "anchors_added_after_check": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_rlimit_short_submit": {
+  "how": "rlimit_short",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_eq_before": true,
+  "disk_tail_bytes": 0,
+  "disk_ends_with_newline": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "fault": null,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check1": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_check": true,
+  "lines_added_after_check": 1,
+  "anchors_added_after_check": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_rlimit_efbig_tenant": {
+  "how": "rlimit_efbig",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_eq_before": true,
+  "disk_tail_bytes": 0,
+  "disk_ends_with_newline": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "fault": null,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check1": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_check": true,
+  "lines_added_after_check": 1,
+  "anchors_added_after_check": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_rlimit_efbig_submit": {
+  "how": "rlimit_efbig",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_eq_before": true,
+  "disk_tail_bytes": 0,
+  "disk_ends_with_newline": true,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "fault": null,
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check1": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_check": true,
+  "lines_added_after_check": 1,
+  "anchors_added_after_check": 1,
+  "write_after": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_short_and_cutback_fails_tenant": {
+  "how": "short_and_cutback_fails",
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_eq_before": false,
+  "disk_tail_bytes": 10,
+  "disk_ends_with_newline": false,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "fault": "a failed log write could not be cut back (_ShortWrite, then OSError on truncate): the log refuses writes until the file is inspected and its torn tail removed (line 14)",
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check1": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "LOCAL_LOG_WRITE_FAULT: a failed log write could not be cut back (_ShortWrite, then OSError on truncate): the log refuses writes until the file is inspected and its torn tail removed (line 14)"
+  },
+  "applied_after_check": false,
+  "lines_added_after_check": 0,
+  "anchors_added_after_check": 1,
+  "restart_on_torn": "REFUSED: StoreCorrupt: log ends with a torn line; refusing to start (inspect the file)",
+  "restart_after_cut": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_cut": true,
+  "lines_after_cut": 1,
+  "write_after_cut": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_disk_lines": 15,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ },
+ "C_short_and_cutback_fails_submit": {
+  "how": "short_and_cutback_fails",
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "disk_eq_before": false,
+  "disk_tail_bytes": 10,
+  "disk_ends_with_newline": false,
+  "memory_lines_added": 0,
+  "applied": false,
+  "anchors_added": 1,
+  "fault": "a failed log write could not be cut back (_ShortWrite, then OSError on truncate): the log refuses writes until the file is inspected and its torn tail removed (line 42)",
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "pending_file": true,
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "check1": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "LOCAL_LOG_WRITE_FAULT: a failed log write could not be cut back (_ShortWrite, then OSError on truncate): the log refuses writes until the file is inspected and its torn tail removed (line 42)"
+  },
+  "applied_after_check": false,
+  "lines_added_after_check": 0,
+  "anchors_added_after_check": 1,
+  "restart_on_torn": "REFUSED: StoreCorrupt: log ends with a torn line; refusing to start (inspect the file)",
+  "restart_after_cut": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "applied_after_cut": 1,
+  "lines_after_cut": 1,
+  "write_after_cut": 201,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_disk_lines": 43,
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "restart_state_diff": [],
+  "restart_write": 201,
+  "wire_unanchored_lines": [],
+  "ledger_readback": [],
+  "money_evidence": []
+ }
+}

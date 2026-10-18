@@ -1,0 +1,56 @@
+# War room report (seed 7)
+
+Gate: **PASS**. LLM personas: NOT_CONNECTED (deterministic personas only).
+
+| Department | Gate | Cases | PASS | FAIL | ERROR | MUST pass rate (excl. known) | SHOULD score | Known failures |
+|---|---|---|---|---|---|---|---|---|
+| ooh-py | PASS | 156 | 156 | 0 | 0 | 100.0% | n/a | 0 |
+
+## ooh-py
+
+| Transform | Cases | MUST failures | SHOULD misses |
+|---|---|---|---|
+| (base) | 66 | 0 | 0 |
+| case_flip | 25 | 0 | 0 |
+| fullwidth | 27 | 0 | 0 |
+| homoglyph | 12 | 0 | 0 |
+| homoglyph_wide | 1 | 0 | 0 |
+| html_wrap | 3 | 0 | 0 |
+| leetspeak | 12 | 0 | 0 |
+| letter_punct | 16 | 0 | 0 |
+| long_body | 2 | 0 | 0 |
+| quoted_reply | 1 | 0 | 0 |
+| signature | 3 | 0 | 0 |
+| soft_hyphen | 13 | 0 | 0 |
+| zero_width | 21 | 0 | 0 |
+
+| Scenario | Cases | PASS | FAIL | ERROR | known failure |
+|---|---|---|---|---|---|
+| amount-off-the-quote | 8 | 8 | 0 | 0 | 0 |
+| duplicate-submission | 1 | 1 | 0 | 0 | 0 |
+| face-clash-across-tenants | 5 | 5 | 0 | 0 | 0 |
+| face-registered-twice | 18 | 18 | 0 | 0 | 0 |
+| funds-of-nothing | 1 | 1 | 0 | 0 | 0 |
+| funds-reference-respelt | 27 | 27 | 0 | 0 | 0 |
+| funds-zero-padded | 15 | 15 | 0 | 0 | 0 |
+| one-unit-two-quotes | 1 | 1 | 0 | 0 | 0 |
+| outcome-during-dispute | 2 | 2 | 0 | 0 | 0 |
+| someone-else-approves-a-contract | 3 | 3 | 0 | 0 | 0 |
+| someone-else-authorizes | 4 | 4 | 0 | 0 | 0 |
+| someone-else-confirms-a-hold | 3 | 3 | 0 | 0 | 0 |
+| vendor-spoofing | 35 | 35 | 0 | 0 | 0 |
+| vendor-substitution | 17 | 17 | 0 | 0 | 0 |
+| vendor-text-injection | 16 | 16 | 0 | 0 | 0 |
+
+## Slowest cases (measured, not asserted)
+
+- `ooh-py/funds-reference-respelt#004.3@7` 247.7 ms
+- `ooh-py/funds-reference-respelt#000.0@7` 227.4 ms
+- `ooh-py/funds-zero-padded#001.0@7` 213.5 ms
+- `ooh-py/face-clash-across-tenants#000.0@7` 212.3 ms
+- `ooh-py/funds-reference-respelt#005.1@7` 211.2 ms
+- `ooh-py/funds-zero-padded#001.1@7` 209.5 ms
+- `ooh-py/vendor-substitution#003.2@7` 208.4 ms
+- `ooh-py/funds-reference-respelt#005.0@7` 208.1 ms
+- `ooh-py/face-clash-across-tenants#004.0@7` 207.4 ms
+- `ooh-py/funds-reference-respelt#003.2@7` 205.4 ms

@@ -1,0 +1,105 @@
+{
+ "res": {
+  "W2": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "dir_after": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "status_after": {
+   "ok": false,
+   "checked_at": "2026-10-18T03:59:05Z",
+   "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+  },
+  "W3": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "audit": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T03:59:22Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "dir_after_recover": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "tenants_after_recover": [
+   [
+    "t-before",
+    "t-x"
+   ],
+   2
+  ],
+  "W2_retry": [
+   201,
+   {
+    "tenant_id": "t-x",
+    "killed": false,
+    "created_at": "2026-10-18T03:59:05Z",
+    "campaigns": 0
+   }
+  ],
+  "W4": [
+   201,
+   {
+    "tenant_id": "t-after",
+    "killed": false,
+    "created_at": "2026-10-18T03:59:22Z",
+    "campaigns": 0
+   }
+  ],
+  "final": {
+   "log_tenants": [
+    "t-before",
+    "t-x",
+    "t-after"
+   ],
+   "log_length": 3,
+   "ledger_anchors": 3,
+   "ledger_tenant_created_evidence": [
+    "tenant:t-before",
+    "tenant:t-x",
+    "tenant:t-after"
+   ],
+   "integrity": {
+    "integrity": {
+     "ok": true,
+     "checked_at": "2026-10-18T03:59:22Z",
+     "problem": null
+    },
+    "ledger_valid": true,
+    "log_length": 3
+   },
+   "ledger_verify": {
+    "entries": 6,
+    "valid": true
+   }
+  }
+ },
+ "relay": [
+  {
+   "scen": "f1",
+   "forwarded": "log_anchor",
+   "ledger_status_line": "HTTP/1.1 201 Created",
+   "event_id": "ooh-anc-fb7e52c482164834068ef8499ae99ca659002ff9",
+   "summary": "tenant_created #2",
+   "ledger_killed": "SIGKILL pid 73605 returncode -9",
+   "listener_closed_before_drop": true,
+   "service_answer": "dropped"
+  }
+ ]
+}

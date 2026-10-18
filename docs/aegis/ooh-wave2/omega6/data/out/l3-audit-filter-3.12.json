@@ -1,0 +1,25 @@
+{
+ "client_funds_verified_by_finance_31": [
+  422,
+  "{\"detail\":[{\"loc\":[\"query\",\"event_type\"],\"msg\":\"String should match pattern '^[a-z_]{1,64}$'\",\"type\":\"string_pattern_mismatch\"}],\"errors_total\":1}"
+ ],
+ "client_funds_verified_by_andre": [
+  200,
+  {
+   "total": 1,
+   "committed": 1
+  }
+ ],
+ "unfiltered_has_finance_31_events": 1,
+ "unfiltered_keys": [
+  "attempted",
+  "committed",
+  "consistency",
+  "evidence",
+  "limit",
+  "log_length",
+  "offset",
+  "rule",
+  "total"
+ ]
+}

@@ -1,0 +1,54 @@
+{"id": "H007", "desc": "L162 raise->pass", "fails": ["test_ip_commit_refuses_while_integrity_is_not_ok"], "tail": "1 failed, 57 passed, 1 warning in 4.56s"}
+{"id": "H017", "desc": "L170 operand->False", "fails": ["test_ip_commit_without_evidence_names_none_and_internal_key_is_scoped"], "tail": "1 failed, 57 passed, 1 warning in 4.65s"}
+{"id": "H009", "desc": "L164 stmt->pass", "fails": ["test_ip_commit_takes_the_actor_from_the_data_else_the_caller"], "tail": "1 failed, 57 passed, 1 warning in 4.65s"}
+{"id": "H002", "desc": "L159 cond->False", "fails": ["test_ip_commit_refuses_on_a_closed_instance"], "tail": "1 failed, 57 passed, 1 warning in 4.65s"}
+{"id": "H005", "desc": "L161 cond->False", "fails": ["test_ip_commit_refuses_while_integrity_is_not_ok"], "tail": "1 failed, 57 passed, 1 warning in 4.65s"}
+{"id": "H010", "desc": "L165 stmt->pass", "fails": ["test_ip_commit_takes_the_actor_from_the_data_else_the_caller"], "tail": "1 failed, 57 passed, 1 warning in 4.70s"}
+{"id": "H016", "desc": "L170 operand->True", "fails": ["test_ip_commit_without_evidence_names_none_and_internal_key_is_scoped"], "tail": "1 failed, 57 passed, 1 warning in 4.70s"}
+{"id": "H003", "desc": "L160 raise->pass", "fails": ["test_ip_commit_refuses_on_a_closed_instance"], "tail": "1 failed, 57 passed, 1 warning in 4.70s"}
+{"id": "H070", "desc": "L217 return->False", "fails": ["test_ip_commit_returns_the_record_it_appended"], "tail": "1 failed, 57 passed, 1 warning in 4.55s"}
+{"id": "H072", "desc": "L217 return->(None, True)", "fails": ["test_ip_commit_returns_the_record_it_appended"], "tail": "1 failed, 57 passed, 1 warning in 4.55s"}
+{"id": "H025", "desc": "L183 cond->True", "fails": ["test_ip_commit_without_evidence_names_none_and_internal_key_is_scoped"], "tail": "1 failed, 57 passed, 1 warning in 4.55s"}
+{"id": "H068", "desc": "L217 return->None", "fails": ["test_ip_commit_returns_the_record_it_appended"], "tail": "1 failed, 57 passed, 1 warning in 4.55s"}
+{"id": "H071", "desc": "L217 return->(None, False)", "fails": ["test_ip_commit_returns_the_record_it_appended"], "tail": "1 failed, 57 passed, 1 warning in 4.54s"}
+{"id": "H160", "desc": "L307 bool flip", "fails": ["test_ip_unforced_check_never_reads_while_ok_however_long_ago"], "tail": "1 failed, 57 passed, 1 warning in 4.54s"}
+{"id": "H069", "desc": "L217 return->True", "fails": ["test_ip_commit_returns_the_record_it_appended"], "tail": "1 failed, 57 passed, 1 warning in 4.55s"}
+{"id": "H085", "desc": "L232 cond->True", "fails": [], "tail": "58 passed, 1 warning in 4.55s"}
+{"id": "H198", "desc": "L316 operand->True", "fails": [], "tail": "58 passed, 1 warning in 4.60s"}
+{"id": "H192", "desc": "L316 operand->True", "fails": [], "tail": "58 passed, 1 warning in 4.55s"}
+{"id": "H202", "desc": "L317 return->None", "fails": ["test_ip_forced_check_is_rate_limited_unless_always"], "tail": "1 failed, 57 passed, 1 warning in 4.63s"}
+{"id": "H181", "desc": "L314 operand->False", "fails": ["test_ip_unforced_check_never_reads_while_ok_however_long_ago"], "tail": "1 failed, 57 passed, 1 warning in 4.65s"}
+{"id": "H203", "desc": "L317 return->True", "fails": ["test_ip_forced_check_is_rate_limited_unless_always"], "tail": "1 failed, 57 passed, 1 warning in 4.68s"}
+{"id": "H206", "desc": "L317 return->(None, True)", "fails": ["test_ip_forced_check_is_rate_limited_unless_always"], "tail": "1 failed, 57 passed, 1 warning in 4.66s"}
+{"id": "H204", "desc": "L317 return->False", "fails": ["test_ip_forced_check_is_rate_limited_unless_always"], "tail": "1 failed, 57 passed, 1 warning in 4.67s"}
+{"id": "H229", "desc": "L327 operand->True", "fails": [], "tail": "58 passed, 1 warning in 4.68s"}
+{"id": "H205", "desc": "L317 return->(None, False)", "fails": ["test_ip_forced_check_is_rate_limited_unless_always"], "tail": "1 failed, 57 passed, 1 warning in 4.54s"}
+{"id": "H221", "desc": "L325 operand->True", "fails": ["test_ip_ooh_event_of_another_type_does_not_vouch_for_a_disk_pending_line"], "tail": "1 failed, 57 passed, 1 warning in 4.58s"}
+{"id": "H252", "desc": "L338 cond->True", "fails": [], "tail": "58 passed, 1 warning in 4.56s"}
+{"id": "H253", "desc": "L338 cond->False", "fails": [], "tail": "58 passed, 1 warning in 4.58s"}
+{"id": "H255", "desc": "L339 stmt->pass", "fails": [], "tail": "58 passed, 1 warning in 4.55s"}
+{"id": "H254", "desc": "L338 cmp->is not", "fails": [], "tail": "58 passed, 1 warning in 4.59s"}
+{"id": "H274", "desc": "L356 cond->False", "fails": ["test_ip_audit_on_a_closed_instance_refuses_without_asking_the_ledger"], "tail": "1 failed, 57 passed, 1 warning in 4.60s"}
+{"id": "H272", "desc": "L347 bool flip", "fails": ["test_ip_audit_is_rate_limited"], "tail": "1 failed, 57 passed, 1 warning in 4.64s"}
+{"id": "H280", "desc": "L361 cond->False", "fails": ["test_ip_audit_closed_during_the_ledger_verify_refuses"], "tail": "1 failed, 57 passed, 1 warning in 4.57s"}
+{"id": "H301", "desc": "L374 return->(None, False)", "fails": ["test_ip_stale_own_pending_still_settles_the_line_on_disk"], "tail": "1 failed, 57 passed, 1 warning in 4.57s"}
+{"id": "H302", "desc": "L374 return->(None, True)", "fails": ["test_ip_stale_own_pending_still_settles_the_line_on_disk"], "tail": "1 failed, 57 passed, 1 warning in 4.55s"}
+{"id": "H281", "desc": "L362 raise->pass", "fails": ["test_ip_audit_closed_during_the_ledger_verify_refuses"], "tail": "1 failed, 57 passed, 1 warning in 4.51s"}
+{"id": "H275", "desc": "L357 raise->pass", "fails": ["test_ip_audit_on_a_closed_instance_refuses_without_asking_the_ledger"], "tail": "1 failed, 57 passed, 1 warning in 4.51s"}
+{"id": "H344", "desc": "L388 bool flip", "fails": [], "tail": "58 passed, 1 warning in 4.51s"}
+{"id": "H322", "desc": "L382 return->(None, True)", "fails": [], "tail": "58 passed, 1 warning in 4.56s"}
+{"id": "H311", "desc": "L376 bool flip", "fails": [], "tail": "58 passed, 1 warning in 4.56s"}
+{"id": "H357", "desc": "L397 cond->True", "fails": [], "tail": "58 passed, 1 warning in 4.63s"}
+{"id": "H345", "desc": "L390 cond->True", "fails": ["test_ip_appended_disk_pending_is_never_set_aside"], "tail": "1 failed, 57 passed, 1 warning in 4.62s"}
+{"id": "H398", "desc": "L417 return->(None, True)", "fails": ["test_ip_stale_own_pending_still_settles_the_line_on_disk"], "tail": "1 failed, 57 passed, 1 warning in 4.57s"}
+{"id": "H371", "desc": "L404 stmt->pass", "fails": [], "tail": "58 passed, 1 warning in 4.65s"}
+{"id": "H384", "desc": "L412 operand->False", "fails": [], "tail": "58 passed, 1 warning in 4.66s"}
+{"id": "H432", "desc": "L431 return->(None, False)", "fails": [], "tail": "58 passed, 1 warning in 4.59s"}
+{"id": "H399", "desc": "L417 bool flip", "fails": [], "tail": "58 passed, 1 warning in 4.61s"}
+{"id": "H416", "desc": "L426 bool flip", "fails": [], "tail": "58 passed, 1 warning in 4.61s"}
+{"id": "H405", "desc": "L419 operand->True", "fails": ["test_ip_first_line_of_an_empty_log_rolls_forward_under_its_own_epoch"], "tail": "1 failed, 57 passed, 1 warning in 4.16s"}
+{"id": "H406", "desc": "L419 operand->False", "fails": ["test_ip_first_line_of_an_empty_log_rolls_forward_under_its_own_epoch"], "tail": "1 failed, 57 passed, 1 warning in 4.16s"}
+{"id": "H441", "desc": "L435 bool flip", "fails": [], "tail": "58 passed, 1 warning in 4.32s"}
+{"id": "H469", "desc": "L451 operand->False", "fails": [], "tail": "58 passed, 1 warning in 4.24s"}
+{"id": "H448", "desc": "L439 bool flip", "fails": [], "tail": "58 passed, 1 warning in 4.26s"}
+{"id": "H453", "desc": "L440 return->(None, True)", "fails": [], "tail": "58 passed, 1 warning in 4.30s"}

@@ -1,0 +1,41 @@
+CONTROL SHA d1b0de9 (F1 unfixed) interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14
+    def test_seq(tmp_path, opname, tgt, a, b, outage):
+        setup, op = OPS[opname]
+        led = SL(); h = Harness(tmp_path, data_dir=str(tmp_path/"data"), ledger=led)
+        h.tenant("acme"); h.tenant("globex"); ctx = setup(h)
+        body, call = op(h, ctx); pre = state(h.svc)
+        led.scripts[tgt] = [a, b]
+        r = call(h)
+        st = r.status_code
+        if st not in (200, 201) and h.svc.integrity["ok"]:
+            assert state(h.svc) == pre, "memory changed on refused write with integrity ok"
+        if outage:
+            led.down = True
+            for _ in range(2):          # integrity checks during the outage must not corrupt/wedge/raise
+                h.svc._last_integrity_try = 0; h.svc.verify_integrity(force=True, always=True)
+            led.down = False
+        ok = False
+        for _ in range(3):
+            h.svc._last_integrity_try = 0
+            if h.svc.verify_integrity(force=True, always=True)["ok"]: ok = True; break
+>       assert ok, ("not recovered", h.svc.integrity, st)
+E       AssertionError: ('not recovered', {'ok': False, 'checked_at': '2026-10-16T18:00:00Z', 'problem': 'the ledger holds anchors beyond the local log: the log was truncated or rolled back'}, 503)
+E       assert False
+
+poc/faults2.py:65: AssertionError
+=============================== warnings summary ===============================
+../../../venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED poc/faults2.py::test_seq[campaign-anc-rl-un-False] - AssertionError: (...
+FAILED poc/faults2.py::test_seq[campaign-anc-rl-un-True] - AssertionError: ('...
+FAILED poc/faults2.py::test_seq[funds-anc-rl-un-False] - AssertionError: ('no...
+FAILED poc/faults2.py::test_seq[funds-anc-rl-un-True] - AssertionError: ('not...
+FAILED poc/faults2.py::test_seq[authorize-anc-rl-un-False] - AssertionError: ...
+FAILED poc/faults2.py::test_seq[authorize-anc-rl-un-True] - AssertionError: (...
+FAILED poc/faults2.py::test_seq[submit-anc-rl-un-False] - AssertionError: ('n...
+FAILED poc/faults2.py::test_seq[submit-anc-rl-un-True] - AssertionError: ('no...
+8 failed, 152 passed, 1 warning in 50.41s

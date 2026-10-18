@@ -1,0 +1,3 @@
+SHA 75b0662 tree 67c1518 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 whole-file shuffle seed 1
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+792 passed, 1 warning in 83.92s (0:01:23)

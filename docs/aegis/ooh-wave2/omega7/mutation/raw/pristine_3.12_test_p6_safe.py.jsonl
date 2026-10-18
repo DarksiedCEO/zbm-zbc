@@ -1,0 +1,1 @@
+{"py": "3.12", "id": "NOOP", "tail": "1 warning, 1 error in 0.06s", "fails": ["ERROR tests/test_p6_safe.py"]}

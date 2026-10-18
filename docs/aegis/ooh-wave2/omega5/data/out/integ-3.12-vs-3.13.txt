@@ -1,0 +1,15 @@
+A_last_anchor_lost IDENTICAL
+A_middle_anchor_lost IDENTICAL
+A_wrong_ledger_fresh IDENTICAL
+A_ledger_of_other_ooh_log IDENTICAL
+B_unanchored_in_process IDENTICAL
+B_unanchored_on_disk IDENTICAL
+C_disk_pending_anchored IDENTICAL
+C_crash_after_anchor IDENTICAL
+D_disk_pending_unanchored_revived IDENTICAL
+D_crash_before_anchor_revived IDENTICAL
+D_set_aside_log_moves_late_anchor IDENTICAL
+E_seo_same_id IDENTICAL
+E_ooh_note_same_id IDENTICAL
+E_squat_own_commit IDENTICAL
+F_first_line_empty_log IDENTICAL

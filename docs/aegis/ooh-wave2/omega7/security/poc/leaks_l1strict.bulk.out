@@ -1,0 +1,8 @@
+  40 3.12 SUMMARY 15 held, 2 broken
+   1 3.13 SUMMARY 14 held, 3 broken
+  39 3.13 SUMMARY 15 held, 2 broken
+  40 3.12 BROKEN L2.vendor-text-pii-redacted-in-local-log 
+  40 3.12 BROKEN L2.vendor-text-pii-redacted-in-views {"untrusted": true, "personal_data_redacted": true, "text": "call Jane 
+   1 3.13 BROKEN L1s.no-pii-needles-in-text-fields 
+  40 3.13 BROKEN L2.vendor-text-pii-redacted-in-local-log 
+  40 3.13 BROKEN L2.vendor-text-pii-redacted-in-views {"untrusted": true, "personal_data_redacted": true, "text": "call Jane 

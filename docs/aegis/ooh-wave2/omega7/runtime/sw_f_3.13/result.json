@@ -1,0 +1,237 @@
+{
+ "start": {
+  "status": "ok"
+ },
+ "W1": [
+  201,
+  {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:22Z",
+   "campaigns": 0
+  }
+ ],
+ "pre": {
+  "disk": {
+   "sha256": "522cf3274be481b8ba5ca0dad065392ad18216a08907a8a2a07471fe6bb8e4cf",
+   "size": 695,
+   "lines": 1,
+   "line_shas": [
+    "f2efd415128310aa7c9d23cd013f6afa2d7f06385146b0d29170bb24966e160e"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 2,
+   "ooh_anchors": 1,
+   "ooh_other": [
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null
+   ]
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:22Z",
+   "problem": null
+  }
+ },
+ "after_fault": {
+  "disk": {
+   "sha256": "522cf3274be481b8ba5ca0dad065392ad18216a08907a8a2a07471fe6bb8e4cf",
+   "size": 695,
+   "lines": 1,
+   "line_shas": [
+    "f2efd415128310aa7c9d23cd013f6afa2d7f06385146b0d29170bb24966e160e"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o500"
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:22Z",
+   "problem": null
+  }
+ },
+ "W3": [
+  503,
+  {
+   "detail": "STORE_UNAVAILABLE",
+   "maybe": false
+  }
+ ],
+ "after_W3": {
+  "disk": {
+   "sha256": "522cf3274be481b8ba5ca0dad065392ad18216a08907a8a2a07471fe6bb8e4cf",
+   "size": 695,
+   "lines": 1,
+   "line_shas": [
+    "f2efd415128310aa7c9d23cd013f6afa2d7f06385146b0d29170bb24966e160e"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o500"
+  },
+  "ledger": {
+   "entries": 3,
+   "ooh_anchors": 1,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null
+   ]
+  },
+  "status_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:22Z",
+   "problem": null
+  },
+  "file_unchanged": true
+ },
+ "audit": {
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:22Z",
+   "problem": null
+  },
+  "ledger_valid": true,
+  "log_length": 1
+ },
+ "job": [
+  200,
+  {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T10:24:23Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  }
+ ],
+ "W4": [
+  503,
+  {
+   "detail": "STORE_UNAVAILABLE",
+   "maybe": false
+  }
+ ],
+ "after_W4": {
+  "disk": {
+   "sha256": "522cf3274be481b8ba5ca0dad065392ad18216a08907a8a2a07471fe6bb8e4cf",
+   "size": 695,
+   "lines": 1,
+   "line_shas": [
+    "f2efd415128310aa7c9d23cd013f6afa2d7f06385146b0d29170bb24966e160e"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o500"
+  },
+  "ledger": {
+   "entries": 4,
+   "ooh_anchors": 1,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null
+   ]
+  }
+ },
+ "W5": [
+  201,
+  {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:23Z",
+   "campaigns": 0
+  }
+ ],
+ "W3_retry": [
+  201,
+  {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:23Z",
+   "campaigns": 0
+  }
+ ],
+ "restart1": {
+  "status": "ok"
+ },
+ "restart1_audit": {
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:24:23Z",
+   "problem": null
+  },
+  "ledger_valid": true,
+  "log_length": 3
+ },
+ "restart1_W": [
+  201,
+  {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T10:24:23Z",
+   "campaigns": 0
+  }
+ ],
+ "final": {
+  "disk": {
+   "sha256": "72b2b3ca5f89c5c96666985971306370454eebfb57bc69fcff56b447821b651d",
+   "size": 2714,
+   "lines": 4,
+   "line_shas": [
+    "f2efd415128310aa7c9d23cd013f6afa2d7f06385146b0d29170bb24966e160e",
+    "5a33e2452a77f6e7c4f79bb8a1d5b4da26cb3c66c6856c1ba8bec531867a39c8",
+    "e752af8a9522e757394617070c341e5a39e900367b64e7e28736caaaffd7ec52",
+    "9eb977cf8c377549af1da6f0ea4946aa3ac3ddaba1f949142ac19f4d049d7c47"
+   ],
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "mode": "0o700"
+  },
+  "ledger": {
+   "entries": 10,
+   "ooh_anchors": 4,
+   "ooh_other": [
+    "tenant_created",
+    "tenant_created",
+    "tenant_created",
+    "tenant_created",
+    "tenant_created",
+    "tenant_created"
+   ],
+   "anchor_line_shas": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  }
+ }
+}

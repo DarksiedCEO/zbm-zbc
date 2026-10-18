@@ -1,0 +1,343 @@
+diff --git a/docs/adr/0022-ooh-buy-and-contract-controls.md b/docs/adr/0022-ooh-buy-and-contract-controls.md
+index 6ff366b..6311819 100644
+--- a/docs/adr/0022-ooh-buy-and-contract-controls.md
++++ b/docs/adr/0022-ooh-buy-and-contract-controls.md
+@@ -214,7 +214,23 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000;
+     with the exact problem text.
+ - **Open, not changed in this commit:** a set-aside line that the ledger vouches for but that can't be applied is
+   appended while integrity stays ok (the own-pending and file-pending paths answer "an operator must inspect the
+-  log"). It needs a ledger-valid anchor for a malformed line, which this service never writes. Next wave.
++  log"), and the next restart then fails to start (`KeyError 'tenant_id'`). It needs write access to the data
++  directory and a ledger-valid anchor for a malformed line, which this service never writes. Next wave.
++
++### AEGIS mutation gate BLOCK at ce665c5 (Oct 18 2026)
++- **The store's write path had 21 lines no test pinned** (`RecordLog.append_prepared` and `_write_file`), closed by
++  `tests/test_aegis_store_write_path.py`. Each test replaces one `os` function as store.py alone sees it:
++  - T144, T172: an open or fstat failure on the log answers 503; memory is never ahead of the file (T172 would
++    otherwise acknowledge a write that is not on disk).
++  - T148, T149, T151, T153, T154, T157, T159: before a write the file must be exactly memory. Any other tail is
++    refused and left untouched; only a file that already ends with exactly this line is adopted.
++  - T163, T165, T167, T169, T170, T171: a short or failed log write is cut back and refused; if the cut-back
++    fails, the fault latch refuses every later write.
++  - T166, T279, T283: every commit fsyncs the pending file before its rename, the directory after it, and the log
++    line before the 201.
++  - T276, T278, T286: a short or failed pending write stops the commit before its ledger anchor.
++- The `env` fixture in `test_aegis_integrity_path.py` now also releases the data-directory lock. The ce665c5
++  change only closed the service, which gives up the claim but not the lock's file descriptor.
+ 
+ ## What OOH-4 does NOT do
+ 
+diff --git a/docs/test-counts.md b/docs/test-counts.md
+index c4957c5..0a1899c 100644
+--- a/docs/test-counts.md
++++ b/docs/test-counts.md
+@@ -29,7 +29,7 @@ the check.
+ | `python:influencer-py` | 441 | pytest collection | — |
+ | `python:legal-py` | 319 | pytest collection | — |
+ | `python:onboarding-py` | 849 | pytest collection | — |
+-| `python:ooh-py` | 777 | pytest collection | — |
++| `python:ooh-py` | 792 | pytest collection | — |
+ | `python:sales-py` | 874 | pytest collection | — |
+ | `python:security-py` | 192 | pytest collection | — |
+ | `python:seo-py` | 497 | pytest collection | — |
+diff --git a/services/ooh-py/tests/test_aegis_integrity_path.py b/services/ooh-py/tests/test_aegis_integrity_path.py
+index b9c2939..1376319 100644
+--- a/services/ooh-py/tests/test_aegis_integrity_path.py
++++ b/services/ooh-py/tests/test_aegis_integrity_path.py
+@@ -48,7 +48,9 @@ def env(tmp_path):
+     assert h.svc.integrity["ok"] is True
+     yield led, h
+     if not h.svc.closed:
+-        h.svc.close()          # give the data-directory lock back (one fd per test otherwise)
++        h.svc.close()
++    if h.settings.data_dir_lock is not None:
++        h.settings.data_dir_lock.release()      # close() only gives up the claim; this closes the lock's fd
+ 
+ 
+ def _check(h):
+diff --git a/services/ooh-py/tests/test_aegis_store_write_path.py b/services/ooh-py/tests/test_aegis_store_write_path.py
+new file mode 100644
+index 0000000..a85f5ba
+--- /dev/null
++++ b/services/ooh-py/tests/test_aegis_store_write_path.py
+@@ -0,0 +1,280 @@
++"""AEGIS mutation gate BLOCK at ce665c5: the store's write path (RecordLog.append_prepared and _write_file) had
++lines no test pinned. Each test injects one OS-level fault into store.py only (a proxy for its ``os`` module) and
++checks what the caller, the file and memory see:
++- T144, T172: an open or fstat failure on the log is a failed commit (503), never an acknowledged one;
++- T148-T154, T157, T159: the file must be exactly memory before a write; a file with any other tail is refused and
++  left untouched, and only a file that already ends with exactly this line is adopted;
++- T163-T171: a short or failed log write is cut back and refused; if the cut-back fails, every later write refuses;
++- T166, T279, T283: the log line, the pending file and its directory are fsynced before the write is acknowledged;
++- T276, T278, T286: a short or failed pending write stops the commit before its ledger anchor."""
++from __future__ import annotations
++
++import os
++
++import pytest
++
++import store as ST
++from store import StoreWriteError
++from test_aegis_integrity_path import _anchors, _new_tenant, env  # noqa: F401  (env is a fixture)
++
++
++class _OS:
++    """store.py's view of ``os``: the real module, with some functions replaced. Nothing outside store.py sees it."""
++
++    def __init__(self, **over):
++        self.__dict__.update(over)
++
++    def __getattr__(self, name):
++        return getattr(os, name)
++
++
++def _fake_os(monkeypatch, **over):
++    monkeypatch.setattr(ST, "os", _OS(**over))
++
++
++def _disk(h):
++    with open(h.svc.log.path, "rb") as fh:
++        return fh.read()
++
++
++def _state(h):
++    return _disk(h), len(h.svc.log), len(_anchors(h.ledger))
++
++
++def _on_log_fd(h, monkeypatch, **fns):
++    """Give store.py functions that apply ``fns[name]`` only to calls on the log file's descriptor."""
++    fds = set()
++    real_open = os.open
++
++    def opener(path, *a, **k):
++        fd = real_open(path, *a, **k)
++        if os.fspath(path) == h.svc.log.path:
++            fds.add(fd)
++        return fd
++
++    def wrap(name, fn):
++        real = getattr(os, name)
++        return lambda fd, *a, **k: fn(fd, *a, **k) if fd in fds else real(fd, *a, **k)
++
++    _fake_os(monkeypatch, open=opener, **{n: wrap(n, f) for n, f in fns.items()})
++
++
++# ---------------------------------------------------------------- open and fstat failures (T144, T172)
++
++def test_t144_log_open_failure_is_a_clean_refusal(env, monkeypatch):
++    led, h = env
++    disk, n, _ = _state(h)
++    real_open = os.open
++
++    def opener(path, *a, **k):
++        if os.fspath(path) == h.svc.log.path:
++            raise PermissionError(13, "denied")
++        return real_open(path, *a, **k)
++
++    _fake_os(monkeypatch, open=opener)
++    r = _new_tenant(h, "open-1")
++    assert r.status_code == 503 and r.json()["detail"] == "STORE_UNAVAILABLE", r.text
++    assert _disk(h) == disk and len(h.svc.log) == n
++
++
++def test_t172_fstat_failure_is_a_failed_commit_not_an_acknowledged_one(env, monkeypatch):
++    led, h = env
++    disk, n, _ = _state(h)
++
++    def boom(fd):
++        raise OSError(5, "EIO")
++
++    _on_log_fd(h, monkeypatch, fstat=boom)
++    r = _new_tenant(h, "fs-1")
++    assert r.status_code == 503 and r.json()["detail"] == "STORE_UNAVAILABLE", r.text
++    assert _disk(h) == disk and len(h.svc.log) == n          # memory never ahead of the disk
++    assert "fs-1" not in h.svc.tenants
++
++
++# ---------------------------------------------------------------- the file must be exactly memory (T148-T159)
++
++def _refused_untouched(h, tail):
++    log = h.svc.log
++    rec, line = log.prepare("tenant_created", "2026-10-16T18:00:00Z", {"tenant_id": "g-1", "actor": "andre"})
++    before = _disk(h) + tail(line)
++    with open(log.path, "wb") as fh:
++        fh.write(before)
++    n = len(log)
++    with pytest.raises(StoreWriteError, match="the log file and memory disagree"):
++        log.append_prepared(rec, line)
++    assert _disk(h) == before and len(log) == n
++
++
++def test_t149_t153_file_with_this_line_plus_an_extra_tail_is_refused(env):
++    led, h = env
++    _refused_untouched(h, lambda line: line + b"\n" + b"x\n")
++
++
++def test_t151_t154_same_size_other_bytes_is_refused_not_adopted(env):
++    led, h = env
++    _refused_untouched(h, lambda line: b"y" * len(line) + b"\n")
++
++
++def test_t148_same_size_partial_match_is_refused(env):
++    led, h = env
++    _refused_untouched(h, lambda line: line[:-1] + b"z" + b"\n")
++
++
++def test_t157_t159_file_longer_than_memory_is_refused(env):
++    led, h = env
++    _refused_untouched(h, lambda line: b"extra\n")
++
++
++def test_t157_t159_file_shorter_than_memory_is_refused(env):
++    led, h = env
++    log = h.svc.log
++    rec, line = log.prepare("tenant_created", "2026-10-16T18:00:00Z", {"tenant_id": "g-2", "actor": "andre"})
++    short = _disk(h)[:-5]
++    with open(log.path, "wb") as fh:
++        fh.write(short)
++    with pytest.raises(StoreWriteError, match="the log file and memory disagree"):
++        log.append_prepared(rec, line)
++    assert _disk(h) == short
++
++
++def test_t157_t159_service_refuses_a_write_over_a_changed_file(env):
++    led, h = env
++    with open(h.svc.log.path, "ab") as fh:
++        fh.write(b"planted\n")
++    disk = _disk(h)
++    r = _new_tenant(h, "over-1")
++    assert r.status_code == 503 and r.json()["detail"] == "STORE_UNAVAILABLE", r.text
++    assert _disk(h) == disk and "over-1" not in h.svc.tenants
++
++
++def test_adoption_a_line_already_on_disk_is_not_written_twice(env):
++    led, h = env
++    log = h.svc.log
++    rec, line = log.prepare("tenant_created", "2026-10-16T18:00:00Z", {"tenant_id": "g-3", "actor": "andre"})
++    with open(log.path, "ab") as fh:
++        fh.write(line + b"\n")
++    want = _disk(h)
++    log.append_prepared(rec, line)
++    assert _disk(h) == want and log._lines[-1] == line
++
++
++# ---------------------------------------------------------------- short and failed log writes (T163-T171)
++
++def test_t163_t165_t167_short_log_write_is_cut_back_and_refused(env, monkeypatch):
++    led, h = env
++    disk, n, _ = _state(h)
++
++    def short(fd, data, offset):
++        return os.pwrite(fd, data[: len(data) // 2], offset)
++
++    _on_log_fd(h, monkeypatch, pwrite=short)
++    with pytest.raises(StoreWriteError, match="short write"):
++        h.svc.log.append("tenant_created", "2026-10-16T18:00:00Z", {"tenant_id": "sw-1", "actor": "andre"})
++    assert _disk(h) == disk and len(h.svc.log) == n            # the partial bytes were cut back
++    assert not h.svc.log.fault
++
++
++def test_t171_failed_log_write_is_refused_through_the_service(env, monkeypatch):
++    led, h = env
++    disk, n, _ = _state(h)
++
++    def fail(fd, data, offset):
++        raise OSError(28, "ENOSPC")
++
++    _on_log_fd(h, monkeypatch, pwrite=fail)
++    r = _new_tenant(h, "w-1")
++    assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": True}, r.text
++    assert _disk(h) == disk and len(h.svc.log) == n and "w-1" not in h.svc.tenants
++
++
++def test_t169_failed_cut_back_latches_the_fault_and_every_later_write_refuses(env, monkeypatch):
++    led, h = env
++
++    def short(fd, data, offset):
++        return os.pwrite(fd, data[:3], offset)
++
++    def no_truncate(fd, length):
++        raise OSError(5, "EIO")
++
++    _on_log_fd(h, monkeypatch, pwrite=short, ftruncate=no_truncate)
++    with pytest.raises(StoreWriteError, match="short write"):
++        h.svc.log.append("tenant_created", "2026-10-16T18:00:00Z", {"tenant_id": "ft-1", "actor": "andre"})
++    assert h.svc.log.fault and "could not be cut back" in h.svc.log.fault
++    monkeypatch.setattr(ST, "os", os)
++    with pytest.raises(StoreWriteError, match="LOCAL_LOG_WRITE_FAULT"):
++        h.svc.log.append("tenant_created", "2026-10-16T18:00:00Z", {"tenant_id": "ft-2", "actor": "andre"})
++
++
++# ---------------------------------------------------------------- durability barriers (T166, T279, T283)
++
++def test_t166_t279_t283_every_commit_fsyncs_the_pending_file_its_directory_and_the_log_line(env, monkeypatch):
++    led, h = env
++    events = []
++    names = {}
++    real = {n: getattr(os, n) for n in ("open", "fsync", "replace", "pwrite", "write")}
++
++    def opener(path, *a, **k):
++        fd = real["open"](path, *a, **k)
++        names[fd] = os.fspath(path)
++        return fd
++
++    def fsync(fd):
++        events.append(("fsync", names.get(fd)))
++        return real["fsync"](fd)
++
++    def replace(src, dst):
++        events.append(("replace", os.fspath(dst)))
++        return real["replace"](src, dst)
++
++    def pwrite(fd, data, offset):
++        events.append(("pwrite", names.get(fd)))
++        return real["pwrite"](fd, data, offset)
++
++    _fake_os(monkeypatch, open=opener, fsync=fsync, replace=replace, pwrite=pwrite)
++    h.ok(_new_tenant(h, "dur-1"), 201)
++    pend, data_dir, logp = h.svc.log.pending_path, os.path.dirname(h.svc.log.pending_path), h.svc.log.path
++    i_tmp = events.index(("fsync", pend + ".tmp"))
++    i_rep = events.index(("replace", pend))
++    assert i_tmp < i_rep                                           # T279: the pending bytes are durable first
++    assert ("fsync", data_dir) in events[i_rep:]                   # T283: then the rename itself
++    i_pw = events.index(("pwrite", logp))
++    assert ("fsync", logp) in events[i_pw:]                        # T166: the log line before the 201
++
++
++# ---------------------------------------------------------------- the pending write stops the commit (T276-T286)
++
++def test_t276_t278_short_pending_write_stops_before_the_anchor(env, monkeypatch):
++    led, h = env
++    disk, n, anchors = _state(h)
++    real_open, real_write = os.open, os.write
++    fds = set()
++
++    def opener(path, *a, **k):
++        fd = real_open(path, *a, **k)
++        if os.fspath(path) == h.svc.log.pending_path + ".tmp":
++            fds.add(fd)
++        return fd
++
++    def write(fd, data):
++        return real_write(fd, data[: len(data) // 2]) if fd in fds else real_write(fd, data)
++
++    _fake_os(monkeypatch, open=opener, write=write)
++    r = _new_tenant(h, "pw-1")
++    assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": False}, r.text
++    assert _state(h) == (disk, n, anchors)
++    assert not os.path.exists(h.svc.log.pending_path)
++    assert not os.path.exists(h.svc.log.pending_path + ".tmp")
++
++
++def test_t286_pending_rename_failure_stops_before_the_anchor(env, monkeypatch):
++    led, h = env
++    disk, n, anchors = _state(h)
++
++    def replace(src, dst):
++        raise OSError(5, "EIO")
++
++    _fake_os(monkeypatch, replace=replace)
++    r = _new_tenant(h, "pr-1")
++    assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": False}, r.text
++    assert _state(h) == (disk, n, anchors)
++    assert "pr-1" not in h.svc.tenants

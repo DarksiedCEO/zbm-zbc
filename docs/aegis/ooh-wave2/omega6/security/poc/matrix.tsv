@@ -1,0 +1,1799 @@
+method	route	identity	status	expected	result
+GET	/health	no_bearer	200	OPEN	ok
+GET	/health	wrong_bearer	200	OPEN	ok
+GET	/health	andre_as_bearer	200	OPEN	ok
+GET	/health	caller_as_bearer	200	OPEN	ok
+GET	/health	bearer_no_caller	200	OPEN	ok
+GET	/health	bearer_wrong_caller	200	OPEN	ok
+GET	/health	andre_as_caller	200	OPEN	ok
+GET	/health	service_as_caller	200	OPEN	ok
+GET	/health	tenant_as_caller	200	OPEN	ok
+GET	/health	dashboard	200	OPEN	ok
+GET	/health	dashboard+andre	200	OPEN	ok
+GET	/health	dashboard+wrong_andre	200	OPEN	ok
+GET	/health	dashboard+empty_andre	200	OPEN	ok
+GET	/health	dashboard+svc_as_andre	200	OPEN	ok
+GET	/health	dashboard+agenttok_as_andre	200	OPEN	ok
+GET	/health	ooh_agent	200	OPEN	ok
+GET	/health	ooh_agent+andre	200	OPEN	ok
+GET	/health	scheduler	200	OPEN	ok
+GET	/health	scheduler+andre	200	OPEN	ok
+GET	/health	compliance_38	200	OPEN	ok
+GET	/health	compliance_38+andre	200	OPEN	ok
+GET	/health	finance_31	200	OPEN	ok
+GET	/health	finance_31+andre	200	OPEN	ok
+GET	/health	hub+own_tenant	200	OPEN	ok
+GET	/health	hub+other_tenant	200	OPEN	ok
+GET	/health	hub+no_tenant	200	OPEN	ok
+GET	/health	hub+wrong_tenant	200	OPEN	ok
+GET	/health	hub+andre_own_tenant	200	OPEN	ok
+GET	/health	ooh_agent+tenant_tok	200	OPEN	ok
+GET	/health	dashboard+andre+tenant_tok	200	OPEN	ok
+GET	/health	finance_31+tenant_tok	200	OPEN	ok
+GET	/ooh/v1/status	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/status	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/status	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/status	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/status	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/status	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/status	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/status	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/status	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/status	dashboard	200	PASSED	ok None
+GET	/ooh/v1/status	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/status	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/status	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/status	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/status	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/status	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/status	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/constitution	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/constitution	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/constitution	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/constitution	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/constitution	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/constitution	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/constitution	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/constitution	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/constitution	dashboard	200	PASSED	ok None
+GET	/ooh/v1/constitution	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/constitution	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/constitution	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/constitution	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/constitution	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/constitution	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/constitution	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/constitution	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/constitution	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/constitution	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/constitution	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/roster	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/roster	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/roster	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/roster	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/roster	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/roster	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/roster	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/roster	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/roster	dashboard	200	PASSED	ok None
+GET	/ooh/v1/roster	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/roster	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/roster	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/roster	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/roster	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/roster	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/roster	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/roster	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/roster	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants	dashboard	200	PASSED	ok list
+GET	/ooh/v1/tenants	dashboard+andre	200	PASSED	ok list
+GET	/ooh/v1/tenants	dashboard+wrong_andre	200	PASSED	ok list
+GET	/ooh/v1/tenants	dashboard+empty_andre	200	PASSED	ok list
+GET	/ooh/v1/tenants	dashboard+svc_as_andre	200	PASSED	ok list
+GET	/ooh/v1/tenants	dashboard+agenttok_as_andre	200	PASSED	ok list
+GET	/ooh/v1/tenants	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants	dashboard+andre	409	PASSED	ok TENANT_EXISTS
+POST	/ooh/v1/tenants	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants/{tid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}	hub+own_tenant	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	hub+other_tenant	404	REFUSED	ok TENANT_NOT_FOUND
+GET	/ooh/v1/tenants/{tid}	hub+no_tenant	403	REFUSED	ok TENANT_TOKEN_UNKNOWN
+GET	/ooh/v1/tenants/{tid}	hub+wrong_tenant	403	REFUSED	ok TENANT_TOKEN_UNKNOWN
+GET	/ooh/v1/tenants/{tid}	hub+andre_own_tenant	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/vendors	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/vendors	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/vendors	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/vendors	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors	dashboard	200	PASSED	ok list
+GET	/ooh/v1/vendors	dashboard+andre	200	PASSED	ok list
+GET	/ooh/v1/vendors	dashboard+wrong_andre	200	PASSED	ok list
+GET	/ooh/v1/vendors	dashboard+empty_andre	200	PASSED	ok list
+GET	/ooh/v1/vendors	dashboard+svc_as_andre	200	PASSED	ok list
+GET	/ooh/v1/vendors	dashboard+agenttok_as_andre	200	PASSED	ok list
+GET	/ooh/v1/vendors	ooh_agent	200	PASSED	ok list
+GET	/ooh/v1/vendors	ooh_agent+andre	200	PASSED	ok list
+GET	/ooh/v1/vendors	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	compliance_38	200	PASSED	ok list
+GET	/ooh/v1/vendors	compliance_38+andre	200	PASSED	ok list
+GET	/ooh/v1/vendors	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/vendors	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/vendors	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/vendors	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/vendors	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/vendors	dashboard+andre	409	PASSED	ok VENDOR_EXISTS
+POST	/ooh/v1/vendors	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/vendors	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/vendors	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/vendors	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/vendors	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/markets	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/markets	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/markets	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/markets	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets	dashboard	200	PASSED	ok list
+GET	/ooh/v1/markets	dashboard+andre	200	PASSED	ok list
+GET	/ooh/v1/markets	dashboard+wrong_andre	200	PASSED	ok list
+GET	/ooh/v1/markets	dashboard+empty_andre	200	PASSED	ok list
+GET	/ooh/v1/markets	dashboard+svc_as_andre	200	PASSED	ok list
+GET	/ooh/v1/markets	dashboard+agenttok_as_andre	200	PASSED	ok list
+GET	/ooh/v1/markets	ooh_agent	200	PASSED	ok list
+GET	/ooh/v1/markets	ooh_agent+andre	200	PASSED	ok list
+GET	/ooh/v1/markets	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	compliance_38	200	PASSED	ok list
+GET	/ooh/v1/markets	compliance_38+andre	200	PASSED	ok list
+GET	/ooh/v1/markets	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/markets/{mid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/markets/{mid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/markets/{mid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/markets/{mid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets/{mid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets/{mid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets/{mid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets/{mid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/markets/{mid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/markets/{mid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/markets/{mid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/markets/{mid}/readiness	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/markets/{mid}/readiness	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/markets/{mid}/readiness	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/markets/{mid}/readiness	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/markets/{mid}/readiness	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/markets/{mid}/readiness	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/markets/{mid}/readiness	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/markets/{mid}/readiness	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/markets/{mid}/readiness	dashboard	200	PASSED	ok None
+POST	/ooh/v1/markets/{mid}/readiness	dashboard+andre	200	PASSED	ok None
+POST	/ooh/v1/markets/{mid}/readiness	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/markets/{mid}/readiness	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/markets/{mid}/readiness	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/markets/{mid}/readiness	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/markets/{mid}/readiness	ooh_agent	200	PASSED	ok None
+POST	/ooh/v1/markets/{mid}/readiness	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	compliance_38	200	PASSED	ok None
+POST	/ooh/v1/markets/{mid}/readiness	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/markets/{mid}/readiness	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/sources	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/sources	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/sources	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/sources	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/sources	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/sources	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/sources	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/sources	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/sources	dashboard	201	PASSED	ok None
+POST	/ooh/v1/sources	dashboard+andre	201	PASSED	ok None
+POST	/ooh/v1/sources	dashboard+wrong_andre	201	PASSED	ok None
+POST	/ooh/v1/sources	dashboard+empty_andre	201	PASSED	ok None
+POST	/ooh/v1/sources	dashboard+svc_as_andre	201	PASSED	ok None
+POST	/ooh/v1/sources	dashboard+agenttok_as_andre	201	PASSED	ok None
+POST	/ooh/v1/sources	ooh_agent	201	PASSED	ok None
+POST	/ooh/v1/sources	ooh_agent+andre	201	PASSED	ok None
+POST	/ooh/v1/sources	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/sources	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/sources/{sid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/sources/{sid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/sources/{sid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/sources/{sid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/sources/{sid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/sources/{sid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/sources/{sid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/sources/{sid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/sources/{sid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/sources/{sid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/sources/{sid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/faces	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces	dashboard	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	dashboard+andre	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	dashboard+wrong_andre	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	dashboard+empty_andre	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	dashboard+svc_as_andre	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	dashboard+agenttok_as_andre	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	ooh_agent	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	ooh_agent+andre	409	PASSED	ok FACE_EXISTS
+POST	/ooh/v1/faces	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/faces	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/faces	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/faces	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/faces	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces	dashboard	200	PASSED	ok list
+GET	/ooh/v1/faces	dashboard+andre	200	PASSED	ok list
+GET	/ooh/v1/faces	dashboard+wrong_andre	200	PASSED	ok list
+GET	/ooh/v1/faces	dashboard+empty_andre	200	PASSED	ok list
+GET	/ooh/v1/faces	dashboard+svc_as_andre	200	PASSED	ok list
+GET	/ooh/v1/faces	dashboard+agenttok_as_andre	200	PASSED	ok list
+GET	/ooh/v1/faces	ooh_agent	200	PASSED	ok list
+GET	/ooh/v1/faces	ooh_agent+andre	200	PASSED	ok list
+GET	/ooh/v1/faces	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	compliance_38	200	PASSED	ok list
+GET	/ooh/v1/faces	compliance_38+andre	200	PASSED	ok list
+GET	/ooh/v1/faces	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/faces/{fid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/faces/{fid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/faces/{fid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/faces/{fid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces/{fid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces/{fid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces/{fid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces/{fid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/faces/{fid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/faces/{fid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/faces/{fid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/faces/{fid}/attributes	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces/{fid}/attributes	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces/{fid}/attributes	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces/{fid}/attributes	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/attributes	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/attributes	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/attributes	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/attributes	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/attributes	dashboard	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	dashboard+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	dashboard+wrong_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	dashboard+empty_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	dashboard+svc_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	dashboard+agenttok_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	ooh_agent	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	ooh_agent+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/faces/{fid}/attributes	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/attributes	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/faces/{fid}/avails	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces/{fid}/avails	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces/{fid}/avails	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/faces/{fid}/avails	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/avails	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/avails	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/avails	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/avails	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/faces/{fid}/avails	dashboard	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	dashboard+andre	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	dashboard+wrong_andre	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	dashboard+empty_andre	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	dashboard+svc_as_andre	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	dashboard+agenttok_as_andre	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	ooh_agent	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	ooh_agent+andre	201	PASSED	ok None
+POST	/ooh/v1/faces/{fid}/avails	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/faces/{fid}/avails	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/vendors/{vid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/vendors/{vid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/vendors/{vid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/vendors/{vid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors/{vid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors/{vid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors/{vid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors/{vid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/vendors/{vid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/vendors/{vid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/vendors/{vid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/vendors/{vid}/attributes	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/vendors/{vid}/attributes	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/vendors/{vid}/attributes	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/vendors/{vid}/attributes	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors/{vid}/attributes	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors/{vid}/attributes	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors/{vid}/attributes	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors/{vid}/attributes	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/vendors/{vid}/attributes	dashboard	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	dashboard+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	dashboard+wrong_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	dashboard+empty_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	dashboard+svc_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	dashboard+agenttok_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	ooh_agent	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	ooh_agent+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/vendors/{vid}/attributes	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/vendors/{vid}/attributes	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/inventory-port	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/inventory-port	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/inventory-port	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/inventory-port	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/inventory-port	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/inventory-port	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/inventory-port	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/inventory-port	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/inventory-port	dashboard	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/inventory-port	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/inventory-port	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/inventory-port/sync	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/inventory-port/sync	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/inventory-port/sync	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/inventory-port/sync	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/inventory-port/sync	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/inventory-port/sync	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/inventory-port/sync	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/inventory-port/sync	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/inventory-port/sync	dashboard	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	dashboard+andre	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	dashboard+wrong_andre	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	dashboard+empty_andre	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	dashboard+svc_as_andre	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	dashboard+agenttok_as_andre	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	ooh_agent	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	ooh_agent+andre	503	PASSED	ok INVENTORY_PORT_NOT_CONNECTED
+POST	/ooh/v1/inventory-port/sync	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/inventory-port/sync	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/principal-agent	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/principal-agent	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/principal-agent	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/principal-agent	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/principal-agent	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/principal-agent	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/principal-agent	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/principal-agent	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/principal-agent	dashboard	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/principal-agent	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/principal-agent	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/principal-agent-determinations	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/principal-agent-determinations	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/principal-agent-determinations	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/principal-agent-determinations	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/principal-agent-determinations	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/principal-agent-determinations	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/principal-agent-determinations	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/principal-agent-determinations	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/principal-agent-determinations	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/principal-agent-determinations	dashboard+andre	200	PASSED	ok None
+POST	/ooh/v1/principal-agent-determinations	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/principal-agent-determinations	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/principal-agent-determinations	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/principal-agent-determinations	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/principal-agent-determinations	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/principal-agent-determinations	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/kill-switches	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/kill-switches	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/kill-switches	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/kill-switches	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/kill-switches	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/kill-switches	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/kill-switches	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/kill-switches	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/kill-switches	dashboard	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/kill-switches	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/kill-switches	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/kill-switches	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/kill-switches	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/kill-switches	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/kill-switches	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/kill-switches	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/kill-switches	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/kill-switches	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/kill-switches	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/kill-switches	dashboard	200	PASSED	ok None
+POST	/ooh/v1/kill-switches	dashboard+andre	200	PASSED	ok None
+POST	/ooh/v1/kill-switches	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/kill-switches	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/kill-switches	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/kill-switches	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/kill-switches	ooh_agent	200	PASSED	ok None
+POST	/ooh/v1/kill-switches	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	compliance_38	200	PASSED	ok None
+POST	/ooh/v1/kill-switches	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/kill-switches	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns	dashboard	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	dashboard+andre	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	dashboard+wrong_andre	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	dashboard+empty_andre	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	dashboard+svc_as_andre	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	dashboard+agenttok_as_andre	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	ooh_agent	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	ooh_agent+andre	201	PASSED	ok None
+POST	/ooh/v1/tenants/{tid}/campaigns	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	hub+own_tenant	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	hub+other_tenant	404	REFUSED	ok TENANT_NOT_FOUND
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	hub+no_tenant	403	REFUSED	ok TENANT_TOKEN_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	hub+wrong_tenant	403	REFUSED	ok TENANT_TOKEN_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	hub+andre_own_tenant	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	dashboard	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/exposure	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	dashboard	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	ooh_agent	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/transitions	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	dashboard	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	dashboard+andre	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	dashboard+wrong_andre	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	dashboard+empty_andre	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	dashboard+svc_as_andre	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	dashboard+agenttok_as_andre	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	ooh_agent	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	ooh_agent+andre	409	PASSED	ok UNIT_ALREADY_REGISTERED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	dashboard	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	dashboard+wrong_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	dashboard+empty_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	dashboard+svc_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	dashboard+agenttok_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	ooh_agent	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	ooh_agent+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/availability	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	dashboard	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	dashboard+wrong_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	dashboard+empty_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	dashboard+svc_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	dashboard+agenttok_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	ooh_agent	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	ooh_agent+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-evidence	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/hold-decisions	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	dashboard	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	dashboard+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	dashboard+wrong_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	dashboard+empty_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	dashboard+svc_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	dashboard+agenttok_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	ooh_agent	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	ooh_agent+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/flight	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	dashboard	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	ooh_agent	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/prices	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	dashboard	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	dashboard+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	dashboard+wrong_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	dashboard+empty_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	dashboard+svc_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	dashboard+agenttok_as_andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	ooh_agent	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	ooh_agent+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/brief	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	dashboard	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	dashboard+andre	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	dashboard+wrong_andre	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	dashboard+empty_andre	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	dashboard+svc_as_andre	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	dashboard+agenttok_as_andre	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	ooh_agent	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	ooh_agent+andre	409	PASSED	ok RATE_CARD_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/inventory/{uid}/rate-card-estimates	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	dashboard	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/plan	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	dashboard	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	dashboard+wrong_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	dashboard+empty_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	dashboard+svc_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	dashboard+agenttok_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	ooh_agent	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	ooh_agent+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/markup-evidence	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/commercial-model	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/client-approval	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-verifications	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	dashboard	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	dashboard+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	dashboard+wrong_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	dashboard+empty_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	dashboard+svc_as_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	dashboard+agenttok_as_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	finance_31	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	finance_31+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/finance-verifications	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	dashboard+andre	409	PASSED	ok STATE_NOT_ELIGIBLE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/funds-reconfirmations	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	dashboard	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	dashboard+wrong_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	dashboard+empty_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	dashboard+svc_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	dashboard+agenttok_as_andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	ooh_agent	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	ooh_agent+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	dashboard+andre	403	PASSED	ok KILLED_TENANT
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/contracts/{kid}/approve	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	dashboard+andre	409	PASSED	ok VERSION_STALE
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	dashboard	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	ooh_agent	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	ooh_agent+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	dashboard+andre	409	PASSED	ok DUPLICATE_ORDER_BLOCKED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/submit	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	dashboard	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	dashboard+andre	409	PASSED	ok SUBMISSION_NOT_PENDING
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	dashboard+wrong_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	dashboard+empty_andre	403	REFUSED	ok ANDRE_APPROVAL_REQUIRED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	dashboard+svc_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	dashboard+agenttok_as_andre	403	REFUSED	ok ANDRE_APPROVAL_INVALID
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/tenants/{tid}/campaigns/{cid}/authorizations/{aid}/outcome	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+POST	/ooh/v1/jobs/{name}/run	wrong_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/jobs/{name}/run	andre_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/jobs/{name}/run	caller_as_bearer	401	REFUSED	ok invalid token
+POST	/ooh/v1/jobs/{name}/run	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/jobs/{name}/run	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/jobs/{name}/run	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/jobs/{name}/run	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/jobs/{name}/run	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+POST	/ooh/v1/jobs/{name}/run	dashboard	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	dashboard+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	dashboard+wrong_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	dashboard+empty_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	dashboard+svc_as_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	dashboard+agenttok_as_andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	scheduler	200	PASSED	ok None
+POST	/ooh/v1/jobs/{name}/run	scheduler+andre	200	PASSED	ok None
+POST	/ooh/v1/jobs/{name}/run	compliance_38	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	compliance_38+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+POST	/ooh/v1/jobs/{name}/run	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/audit/integrity	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/integrity	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/integrity	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/integrity	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/integrity	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/integrity	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/integrity	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/integrity	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/integrity	dashboard	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/audit/integrity	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/integrity	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/audit/export	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/export	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/export	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/export	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/export	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/export	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/export	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/export	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/export	dashboard	200	PASSED	ok None
+GET	/ooh/v1/audit/export	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/audit/export	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/export	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/export	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/export	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/export	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/audit/export	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/audit/export	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/export	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	no_bearer	401	REFUSED	ok missing or malformed Authorization header (expected: Bearer <token>)
+GET	/ooh/v1/audit/evidence	wrong_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/evidence	andre_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/evidence	caller_as_bearer	401	REFUSED	ok invalid token
+GET	/ooh/v1/audit/evidence	bearer_no_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/evidence	bearer_wrong_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/evidence	andre_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/evidence	service_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/evidence	tenant_as_caller	403	REFUSED	ok CALLER_UNKNOWN
+GET	/ooh/v1/audit/evidence	dashboard	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	dashboard+andre	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	dashboard+wrong_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	dashboard+empty_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	dashboard+svc_as_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	dashboard+agenttok_as_andre	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	ooh_agent	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	ooh_agent+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	scheduler	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	scheduler+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	compliance_38	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	compliance_38+andre	200	PASSED	ok None
+GET	/ooh/v1/audit/evidence	finance_31	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	finance_31+andre	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	hub+own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	hub+other_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	hub+no_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	hub+wrong_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	hub+andre_own_tenant	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	ooh_agent+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	dashboard+andre+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED
+GET	/ooh/v1/audit/evidence	finance_31+tenant_tok	403	REFUSED	ok CALLER_NOT_ALLOWED

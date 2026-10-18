@@ -1,0 +1,226 @@
+{
+ "res": {
+  "W1": [
+   201,
+   {
+    "tenant_id": "t-before",
+    "killed": false,
+    "created_at": "2026-10-18T07:57:29Z",
+    "campaigns": 0
+   }
+  ],
+  "ledger_after_W1": {
+   "entries": 2,
+   "ooh_anchors": 1,
+   "last_summary": "tenant_created #1"
+  },
+  "W2": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "after_W2": {
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.line"
+   ],
+   "dir_mode": "0o500",
+   "dir_writable": false,
+   "log_lines": 1,
+   "pending_sha256": "f6655f6b3200a842aee151060c0819f34adc81b732e7938dd473af6d19a2f566",
+   "status_integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T07:57:29Z",
+    "problem": "a ledger answer was lost; the pending line is rolled forward at the next integrity check"
+   },
+   "local_tenants": [
+    "t-before"
+   ],
+   "ledger": {
+    "entries": 3,
+    "ooh_anchors": 1,
+    "last_summary": "tenant_created tenant:t-x"
+   },
+   "service_alive": true
+  },
+  "W3": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "after_W3": {
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.line"
+   ],
+   "dir_mode": "0o500",
+   "dir_writable": false,
+   "log_lines": 1,
+   "pending_sha256": "f6655f6b3200a842aee151060c0819f34adc81b732e7938dd473af6d19a2f566",
+   "local_tenants": [
+    "t-before"
+   ],
+   "ledger": {
+    "entries": 3,
+    "ooh_anchors": 1,
+    "last_summary": "tenant_created tenant:t-x"
+   }
+  },
+  "audit_fault": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T07:57:40Z",
+    "problem": "the ledger cannot be read"
+   },
+   "ledger_valid": false,
+   "log_length": 1
+  },
+  "W3b": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "job1": [
+   200,
+   {
+    "job": "integrity",
+    "integrity": {
+     "ok": false,
+     "checked_at": "2026-10-18T07:57:52Z",
+     "problem": "the ledger cannot be read"
+    },
+    "ledger_valid": false
+   }
+  ],
+  "after_job1": {
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.line"
+   ],
+   "dir_mode": "0o700",
+   "dir_writable": true,
+   "log_lines": 1,
+   "pending_sha256": "f6655f6b3200a842aee151060c0819f34adc81b732e7938dd473af6d19a2f566",
+   "local_tenants": [
+    "t-before"
+   ]
+  },
+  "job2": [
+   200,
+   {
+    "job": "integrity",
+    "integrity": {
+     "ok": true,
+     "checked_at": "2026-10-18T07:58:03Z",
+     "problem": null
+    },
+    "ledger_valid": true
+   }
+  ],
+  "after_job2": {
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "dir_mode": "0o700",
+   "dir_writable": true,
+   "log_lines": 2,
+   "pending_sha256": null,
+   "local_tenants": [
+    "t-before",
+    "t-x"
+   ],
+   "ledger": {
+    "entries": 4,
+    "ooh_anchors": 2,
+    "last_summary": "tenant_created #2"
+   }
+  },
+  "W2_retry": [
+   201,
+   {
+    "tenant_id": "t-x",
+    "killed": false,
+    "created_at": "2026-10-18T07:57:29Z",
+    "campaigns": 0
+   }
+  ],
+  "W4": [
+   201,
+   {
+    "tenant_id": "t-after",
+    "killed": false,
+    "created_at": "2026-10-18T07:58:03Z",
+    "campaigns": 0
+   }
+  ],
+  "final": {
+   "log_tenants": [
+    "t-before",
+    "t-x",
+    "t-after"
+   ],
+   "log_length": 3,
+   "ledger_anchors": 3,
+   "ooh_dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ],
+   "integrity": {
+    "integrity": {
+     "ok": true,
+     "checked_at": "2026-10-18T07:58:03Z",
+     "problem": null
+    },
+    "ledger_valid": true,
+    "log_length": 3
+   },
+   "ledger_verify": {
+    "entries": 6,
+    "valid": true
+   }
+  }
+ },
+ "relay": [
+  {
+   "event_id": "ooh-anc-e124abec0b5126a1087feacf7554f9d1a6bff004",
+   "summary": "tenant_created #2",
+   "request_sha256": "8aade3021055ce62fd8f7cb3cc6f16762312768ddca724f171109d062dd67fe6",
+   "state_on_arrival": {
+    "ooh_dir": [
+     "ooh.lock",
+     "ooh_log.jsonl",
+     "pending.line"
+    ],
+    "dir_mode": "0o700",
+    "dir_writable": true,
+    "log_lines": 1,
+    "pending_sha256": "f6655f6b3200a842aee151060c0819f34adc81b732e7938dd473af6d19a2f566"
+   },
+   "state_after_chmod": {
+    "ooh_dir": [
+     "ooh.lock",
+     "ooh_log.jsonl",
+     "pending.line"
+    ],
+    "dir_mode": "0o500",
+    "dir_writable": false,
+    "log_lines": 1,
+    "pending_sha256": "f6655f6b3200a842aee151060c0819f34adc81b732e7938dd473af6d19a2f566"
+   },
+   "ledger_rotate": "signal 9 ledger pid 32502 returncode -9",
+   "ledger_status_line": "HTTP/1.1 401 Unauthorized",
+   "ledger_body": "{\"error\":\"missing, malformed, or invalid Authorization header (expected: Bearer <token>)\"}",
+   "passed_back": "verbatim"
+  }
+ ]
+}

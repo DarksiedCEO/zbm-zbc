@@ -1,0 +1,29 @@
+[211138.78] started ledger pid 30182 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server extra_env {}
+[211138.82] started service pid 30183 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api extra_env {}
+[211139.15] service health {'status': 'ok'}
+[211139.16] status.integrity {'ok': True, 'checked_at': '2026-10-18T07:54:05Z', 'problem': None} ports {'finance_31': 'NOT_CONNECTED', 'vendor_orders': 'NOT_CONNECTED', 'esign': 'NOT_CONNECTED', 'inventory_data': 'NOT_CONNECTED', 'measurement': 'NOT_CONNECTED', 'programmatic_dooh': 'NOT_CONNECTED'}
+[211139.24] W1 (201, {'tenant_id': 't-before', 'killed': False, 'created_at': '2026-10-18T07:54:06Z', 'campaigns': 0})
+[211139.34] W2 (201, {'tenant_id': 't-x', 'killed': False, 'created_at': '2026-10-18T07:54:06Z', 'campaigns': 0})
+[211139.35] audit before rollback {'integrity': {'ok': True, 'checked_at': '2026-10-18T07:54:05Z', 'problem': None}, 'ledger_valid': True, 'log_length': 2}
+[211139.35] SIGKILL ledger pid 30182 returncode -9
+[211139.35] ROLLBACK: removed last ledger line {"seq": 3, "department": "ooh", "event_type": "log_anchor", "payload": null, "summary": "tenant_created #2", "sha256": "787291b0a93c29b4a92b78461c1734576f36d1d255a77cf845d8bf4771f87334"} ledger lines 4 -> 3
+[211139.36] started ledger pid 30189 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server extra_env {}
+[211139.38] ledger start WITHOUT reset rc 1 refusal: ledger-rust: REFUSING TO START — ledger log at /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/iw_c_3.12/ledger/ledger.jsonl failed to load: ledger head checkpoint check failed: the log /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/iw_c_3.12/ledger/ledger.jsonl holds 3 entries but the head checkpoint records 4 (head hash b32ba2b12a7e08f21375d720e914c689b3dd385744f6dcf6ed0d4161812b7d7d): acknowledged entries were removed (t
+[211150.40] audit while the ledger refuses to start {'integrity': {'ok': False, 'checked_at': '2026-10-18T07:54:17Z', 'problem': 'the ledger cannot be read'}, 'ledger_valid': False, 'log_length': 2}
+[211150.41] W3 while ledger refuses (503, {'detail': 'INTEGRITY_UNVERIFIED', 'maybe': False})
+[211150.42] started ledger pid 30446 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server extra_env {'LEDGER_ALLOW_RESET': '4:b32ba2b12a7e08f2/3:b9687ce38a6a1d50'}
+[211150.54] ledger operator-reset run exited rc 0 (applies the reset, exits without serving)
+[211150.54] started ledger pid 30447 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/target/release/server extra_env {}
+[211150.55] ledger health (plain start on the rolled-back, reset log) {'service': 'ledger-rust', 'status': 'ok'}
+[211150.56] ledger after reset {'entries': 3, 'ooh_anchors': 1}
+[211161.58] POST /jobs/integrity/run (200, {'job': 'integrity', 'integrity': {'ok': False, 'checked_at': '2026-10-18T07:54:28Z', 'problem': 'local log line 2 has no matching anchor on the ledger'}, 'ledger_valid': True})
+[211161.58] audit after rollback {'integrity': {'ok': False, 'checked_at': '2026-10-18T07:54:28Z', 'problem': 'local log line 2 has no matching anchor on the ledger'}, 'ledger_valid': True, 'log_length': 2}
+[211161.59] W4 after rollback detected (503, {'detail': 'INTEGRITY_UNVERIFIED', 'maybe': False})
+[211161.60] ledger after W4 {'entries': 3, 'ooh_anchors': 1}
+[211161.75] service SIGTERM exit 143
+[211161.75] started service pid 30501 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python -m api extra_env {}
+[211162.08] service health after restart {'status': 'degraded'}
+[211162.09] status.integrity after service restart {'ok': False, 'checked_at': '2026-10-18T07:54:28Z', 'problem': 'local log line 2 has no matching anchor on the ledger'}
+[211162.10] W5 after service restart (503, {'detail': 'INTEGRITY_UNVERIFIED', 'maybe': False})
+[211162.11] ledger final {'entries': 3, 'ooh_anchors': 1} local tenants ['t-before', 't-x']
+RESULT PASS

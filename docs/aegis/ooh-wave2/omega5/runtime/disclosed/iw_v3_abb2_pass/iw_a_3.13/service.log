@@ -1,0 +1,35 @@
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [75924]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:51403 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51455 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51458 - "GET /ooh/v1/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51459 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [75944]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:51403 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51532 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51534 - "GET /ooh/v1/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51537 - "GET /ooh/v1/audit/export?since=1&limit=1000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51539 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:51542 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [75944]
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [75947]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:51403 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51629 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51631 - "GET /ooh/v1/audit/export?since=1&limit=1000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51633 - "GET /ooh/v1/audit/integrity HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51642 - "GET /ooh/v1/audit/evidence?limit=200&offset=0 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [75947]

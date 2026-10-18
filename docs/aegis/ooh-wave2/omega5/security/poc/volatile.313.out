@@ -1,0 +1,8 @@
+/private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+submit c1: {"detail":"LEDGER_UNAVAILABLE","maybe":true}
+engage during wedge: 200 recorded= False capabilities.submission= False volatile_unrecorded= [{'kind': 'capability', 'arg': 'submission'}]
+GET /kill-switches: {'capabilities': {'campaigns': False, 'inventory': False, 'prices': False, 'funds': False, 'purchase': False, 'submission': False, 'registry': False}, 'volatile_unrecorded': [{'kind': 'capability', 'arg': 'submission'}]}
+kill_code(submission) = KILLED_CAPABILITY
+after heal: integrity True c1 state SUBMISSION_UNKNOWN volatile [{'kind': 'capability', 'arg': 'submission'}]
+submit c2 after heal (kill volatile): 403 {"detail":"KILLED_CAPABILITY"}

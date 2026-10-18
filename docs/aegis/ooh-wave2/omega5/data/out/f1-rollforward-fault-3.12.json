@@ -1,0 +1,182 @@
+{
+ "record_then_lose/record_then_losex1": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "record_then_lose/record_then_losex2": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "record_then_lose/record_then_losex3": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "record_then_lose/lose_unrecordedx1": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "record_then_lose/lose_unrecordedx2": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "record_then_lose/lose_unrecordedx3": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "lose_unrecorded/record_then_losex1": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "lose_unrecorded/record_then_losex2": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "lose_unrecorded/record_then_losex3": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "lose_unrecorded/lose_unrecordedx1": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "lose_unrecorded/lose_unrecordedx2": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ },
+ "lose_unrecorded/lose_unrecordedx3": {
+  "first": 503,
+  "integrity_trail": [
+   false,
+   false,
+   false,
+   true,
+   true
+  ],
+  "t-x_present": true,
+  "write_after": 201,
+  "anchors": 15,
+  "lines": 15,
+  "distinct_anchor_ids": 15,
+  "restart_ok": true
+ }
+}

@@ -1,0 +1,12 @@
+{"py": "3.13", "id": "NOOP", "tail": "12 passed, 1 warning in 0.83s", "fails": []}
+{"py": "3.13", "id": "X7-01", "tail": "1 failed, 11 passed, 1 warning in 0.74s", "fails": ["test_P_x701_symlinked_log_is_not_followed"]}
+{"py": "3.13", "id": "X7-02", "tail": "1 failed, 11 passed, 1 warning in 0.73s", "fails": ["test_P_x702_new_log_file_is_0600"]}
+{"py": "3.13", "id": "X7-11", "tail": "1 failed, 11 passed, 1 warning in 0.82s", "fails": ["test_P_x711_cut_back_is_fsynced"]}
+{"py": "3.13", "id": "X7-13", "tail": "1 failed, 11 passed, 1 warning in 0.70s", "fails": ["test_P_x713_adoption_is_fsynced"]}
+{"py": "3.13", "id": "X7-14", "tail": "1 failed, 11 passed, 1 warning in 0.75s", "fails": ["test_P_x714_stale_prepared_line_is_refused"]}
+{"py": "3.13", "id": "X7-18", "tail": "2 failed, 10 passed, 1 warning in 0.79s", "fails": ["test_P_x718_service_pending_kept_is_exact_and_restart_is_clean", "test_P_x718_stale_longer_tmp_does_not_leak_into_pending_line"]}
+{"py": "3.13", "id": "X7-19", "tail": "1 failed, 11 passed, 1 warning in 0.82s", "fails": ["test_P_x719_symlinked_pending_tmp_is_not_followed"]}
+{"py": "3.13", "id": "X7-20", "tail": "1 failed, 11 passed, 1 warning in 0.87s", "fails": ["test_P_x720_pending_file_is_0600"]}
+{"py": "3.13", "id": "X7-27", "tail": "1 failed, 11 passed, 1 warning in 0.81s", "fails": ["test_P_x727_write_pending_refuses_when_closed"]}
+{"py": "3.13", "id": "X7-28", "tail": "1 failed, 11 passed, 1 warning in 0.81s", "fails": ["test_P_x728_clear_pending_refuses_when_closed"]}
+{"py": "3.13", "id": "X7-31", "tail": "1 failed, 11 passed, 1 warning in 0.78s", "fails": ["test_P_x731_clear_pending_forgets_memory_copy"]}

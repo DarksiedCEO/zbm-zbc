@@ -1,0 +1,29 @@
+{
+ "integrity_at_start": {
+  "ok": true,
+  "checked_at": "2026-10-16T18:00:00Z",
+  "problem": null
+ },
+ "integrity_job": {
+  "job": "integrity",
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "ledger_valid": true
+ },
+ "audit_integrity": {
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "ledger_valid": true,
+  "log_length": 70
+ },
+ "write_after_disk_edit": 200,
+ "log_lines_mem": 71,
+ "disk_verify": false,
+ "restart": "REFUSED StoreCorrupt: log line 25 does not match its own hash"
+}

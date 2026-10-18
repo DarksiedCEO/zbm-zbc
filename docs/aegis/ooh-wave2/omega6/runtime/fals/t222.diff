@@ -1,0 +1,11 @@
+--- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/src/services/ooh-py/src/store.py	2026-10-18 00:46:39
++++ store.py	2026-10-18 00:53:11
+@@ -259,7 +259,7 @@
+                 except FileNotFoundError:
+                     pass
+                 except OSError as exc:
+-                    raise StoreWriteError(f"pending line could not be removed: {type(exc).__name__}") from exc
++                    pass  # AEGIS-RUNTIME omega6 falsifier T222: swallow the unlink failure
+ 
+     # a pending line found at start whose anchor is not on the ledger is kept aside, not trusted (AEGIS R4-1):
+     # if the ledger later shows its anchor (it was in flight when the process stopped), it is appended then

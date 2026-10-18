@@ -1,0 +1,36 @@
+3.12   40 BROKEN L2.vendor-text-pii-redacted-in-local-log 
+3.12   40 BROKEN L2.vendor-text-pii-redacted-in-views {"untrusted": true, "personal_data_redacted": true, "text": "call Jane at [redacted] or [redacted], SSN 123-45-6789, card 4111 1111 1111 1111", "truncated": false, "sha256": "7a17a96c4b149f50eabb655e1
+3.12   40 HELD   L1.ledger-body-keys-only-ids-hash-summary ['actor', 'department', 'event_id', 'event_type', 'payload_sha256', 'subject_id', 'summary']
+3.12   40 HELD   L1s.hash-id-fields-are-pure-hex-ids 
+3.12   40 HELD   L1s.no-full-pii-strings-anywhere 
+3.12   40 HELD   L1s.no-pii-needles-in-text-fields 
+3.12   40 HELD   L3.pii-key-Phone-Number-refused {"detail": [{"loc": ["body", "nested.Phone-Number"], "msg": "personal or account data is never taken here (no 
+3.12   40 HELD   L3.pii-key-card_number-refused {"detail": [{"loc": ["body", "nested.card_number"], "msg": "personal or account data is never taken here (no I
+3.12   40 HELD   L3.pii-key-date_of_birth-refused {"detail": [{"loc": ["body", "nested.date_of_birth"], "msg": "personal or account data is never taken here (no
+3.12   40 HELD   L3.pii-key-email-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+3.12   40 HELD   L3.pii-key-emailAddress-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+3.12   40 HELD   L3.pii-key-ip_address-refused {"detail": [{"loc": ["body", "nested.ip_address"], "msg": "personal or account data is never taken here (no IP
+3.12   40 HELD   L3.pii-key-phone-refused {"detail": [{"loc": ["body", "nested.phone"], "msg": "personal or account data is never taken here (no IP, dev
+3.12   40 HELD   L3.pii-key-phoneNumber-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+3.12   40 HELD   L3.pii-key-routing_number-refused {"detail": [{"loc": ["body", "nested.routing_number"], "msg": "personal or account data is never taken here (n
+3.12   40 HELD   L3.pii-key-ssn-refused {"detail": [{"loc": ["body", "nested.ssn"], "msg": "personal or account data is never taken here (no IP, devic
+3.12   40 HELD   L4.phone-in-campaign-name-refused {"detail":"ATTRIBUTE_VALUE_PERSONAL_DATA","field":"name"}
+3.12   40 SUMMARY 15 held, 2 broken
+3.13   40 BROKEN L2.vendor-text-pii-redacted-in-local-log 
+3.13   40 BROKEN L2.vendor-text-pii-redacted-in-views {"untrusted": true, "personal_data_redacted": true, "text": "call Jane at [redacted] or [redacted], SSN 123-45-6789, card 4111 1111 1111 1111", "truncated": false, "sha256": "7a17a96c4b149f50eabb655e1
+3.13   40 HELD   L1.ledger-body-keys-only-ids-hash-summary ['actor', 'department', 'event_id', 'event_type', 'payload_sha256', 'subject_id', 'summary']
+3.13   40 HELD   L1s.hash-id-fields-are-pure-hex-ids 
+3.13   40 HELD   L1s.no-full-pii-strings-anywhere 
+3.13   40 HELD   L1s.no-pii-needles-in-text-fields 
+3.13   40 HELD   L3.pii-key-Phone-Number-refused {"detail": [{"loc": ["body", "nested.Phone-Number"], "msg": "personal or account data is never taken here (no 
+3.13   40 HELD   L3.pii-key-card_number-refused {"detail": [{"loc": ["body", "nested.card_number"], "msg": "personal or account data is never taken here (no I
+3.13   40 HELD   L3.pii-key-date_of_birth-refused {"detail": [{"loc": ["body", "nested.date_of_birth"], "msg": "personal or account data is never taken here (no
+3.13   40 HELD   L3.pii-key-email-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+3.13   40 HELD   L3.pii-key-emailAddress-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+3.13   40 HELD   L3.pii-key-ip_address-refused {"detail": [{"loc": ["body", "nested.ip_address"], "msg": "personal or account data is never taken here (no IP
+3.13   40 HELD   L3.pii-key-phone-refused {"detail": [{"loc": ["body", "nested.phone"], "msg": "personal or account data is never taken here (no IP, dev
+3.13   40 HELD   L3.pii-key-phoneNumber-refused {"detail": [{"loc": ["body", "expected_version"], "msg": "Field required", "type": "missing"}, {"loc": ["body"
+3.13   40 HELD   L3.pii-key-routing_number-refused {"detail": [{"loc": ["body", "nested.routing_number"], "msg": "personal or account data is never taken here (n
+3.13   40 HELD   L3.pii-key-ssn-refused {"detail": [{"loc": ["body", "nested.ssn"], "msg": "personal or account data is never taken here (no IP, devic
+3.13   40 HELD   L4.phone-in-campaign-name-refused {"detail":"ATTRIBUTE_VALUE_PERSONAL_DATA","field":"name"}
+3.13   40 SUMMARY 15 held, 2 broken

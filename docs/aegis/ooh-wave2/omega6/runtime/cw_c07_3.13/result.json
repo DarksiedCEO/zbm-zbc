@@ -1,0 +1,102 @@
+{
+ "res": {
+  "W2": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "dir_after": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "status_after": {
+   "ok": false,
+   "checked_at": "2026-10-18T07:56:29Z",
+   "problem": "a log line was anchored but not written; it is rolled forward at the next integrity check"
+  },
+  "W3": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "W3b": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "audit": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T07:56:46Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "dir_after_recover": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "tenants_after_recover": [
+   [
+    "t-before",
+    "t-x"
+   ],
+   2
+  ],
+  "W4": [
+   201,
+   {
+    "tenant_id": "t-after",
+    "killed": false,
+    "created_at": "2026-10-18T07:56:46Z",
+    "campaigns": 0
+   }
+  ],
+  "final": {
+   "log_tenants": [
+    "t-before",
+    "t-x",
+    "t-after"
+   ],
+   "log_length": 3,
+   "ledger_anchors": 3,
+   "ledger_tenant_created_evidence": [
+    "tenant:t-before",
+    "tenant:t-x",
+    "tenant:t-after"
+   ],
+   "integrity": {
+    "integrity": {
+     "ok": true,
+     "checked_at": "2026-10-18T07:56:46Z",
+     "problem": null
+    },
+    "ledger_valid": true,
+    "log_length": 3
+   },
+   "ledger_verify": {
+    "entries": 6,
+    "valid": true
+   }
+  }
+ },
+ "relay": [
+  {
+   "scen": "c07",
+   "forwarded": "log_anchor",
+   "ledger_status_line": "HTTP/1.1 201 Created",
+   "event_id": "ooh-anc-89e7a8206615aebac29a145f872ee7c8b2828a3e",
+   "summary": "tenant_created #2",
+   "chmod": "ooh_log.jsonl -> 0o400",
+   "service_answer": "passed back (anchor recorded)"
+  }
+ ]
+}

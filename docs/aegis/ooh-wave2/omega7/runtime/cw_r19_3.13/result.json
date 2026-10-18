@@ -1,0 +1,108 @@
+{
+ "res": {
+  "W2": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "dir_after": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "status_after": {
+   "ok": true,
+   "checked_at": "2026-10-18T10:27:21Z",
+   "problem": null
+  },
+  "W3": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "tenants_after_ledger_restart": [
+   [
+    "t-before"
+   ],
+   1
+  ],
+  "audit": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T10:27:38Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 1
+  },
+  "dir_after_recover": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "tenants_after_recover": [
+   [
+    "t-before"
+   ],
+   1
+  ],
+  "W4": [
+   201,
+   {
+    "tenant_id": "t-after",
+    "killed": false,
+    "created_at": "2026-10-18T10:27:38Z",
+    "campaigns": 0
+   }
+  ],
+  "final": {
+   "log_tenants": [
+    "t-before",
+    "t-after"
+   ],
+   "log_length": 2,
+   "ledger_anchors": 2,
+   "ledger_tenant_created_evidence": [
+    "tenant:t-before",
+    "tenant:t-x",
+    "tenant:t-after"
+   ],
+   "integrity": {
+    "integrity": {
+     "ok": true,
+     "checked_at": "2026-10-18T10:27:39Z",
+     "problem": null
+    },
+    "ledger_valid": true,
+    "log_length": 2
+   },
+   "ledger_verify": {
+    "entries": 5,
+    "valid": true
+   }
+  },
+  "W2_retry_after": [
+   201,
+   {
+    "tenant_id": "t-x",
+    "killed": false,
+    "created_at": "2026-10-18T10:27:39Z",
+    "campaigns": 0
+   }
+  ]
+ },
+ "relay": [
+  {
+   "scen": "r19",
+   "forwarded": "tenant_created",
+   "ledger_status_line": "HTTP/1.1 201 Created",
+   "event_id": "ooh-evd-6a42a425e6b89762bb3c9c67682595a6cc9cb4f6",
+   "summary": "tenant_created tenant:t-x",
+   "ledger_killed": "SIGKILL pid 63044 returncode -9",
+   "listener_closed_before_answer_passed": true,
+   "service_answer": "passed back (evidence recorded); next connect refused"
+  }
+ ]
+}

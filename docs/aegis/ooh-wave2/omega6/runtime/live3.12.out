@@ -1,0 +1,49 @@
+[ 210885.09] started ledger pid=26417
+[ 210885.53] ledger health: {'service': 'ledger-rust', 'status': 'ok'}
+[ 210885.77]   CHECK PASS: a NOT_BUILT setting (a vendor ordering port) refuses start
+[ 210886.00]   CHECK PASS: production without a data directory refuses start
+[ 210886.00] started service pid=26476
+[ 210886.68]   CHECK PASS: durable, production mode, integrity verified against the real ledger, Andre configured
+[ 210886.76]   CHECK PASS: every port is NOT_CONNECTED; funds need Andre's gate AND Finance (31)'s verification; no agent is built
+[ 210886.96]   CHECK PASS: a second process on the same data directory refuses
+[ 210887.04]   CHECK PASS: the roster is 23 capabilities as data, none built, none able to commit
+[ 210887.05]   CHECK PASS: the roster carries the blueprint's section 40 names and the section 42 cell, none built yet
+[ 210887.32]   CHECK PASS: only Andre creates a tenant
+[ 210887.60]   CHECK PASS: the vendor registry is Andre's; a respelt vendor id is refused; agents read it
+[ 210887.74]   CHECK PASS: principal vs agent starts UNDETERMINED (purchases blocked); only Andre records counsel's confirmation
+[ 210888.04]   CHECK PASS: a market starts with all four readiness flags NOT_MET; only Andre raises one
+[ 210888.47]   CHECK PASS: the agent records the client's brief (budget, formats, flight window)
+[ 210888.51]   CHECK PASS: the hub sees its own campaign; another tenant's answers exactly like a missing one
+[ 210889.01]   CHECK PASS: the lifecycle advances step by step (only Andre approves the plan); a gated state and a skipped step are refused even for Andre
+[ 210889.31]   CHECK PASS: a face enters the registry from a named rate card; a vendor-API source is NOT_CONNECTED; an unsourced attribute is UNKNOWN
+[ 210890.52]   CHECK PASS: availability cannot skip to a confirmed hold; only Andre confirms one, from the vendor evidence an agent attached
+[ 210890.82]   CHECK PASS: the plan prices the quoted face at its quote and fits the brief; the markup needs recorded evidence
+[ 210891.28]   CHECK PASS: only Andre prices the deal; the 15% suggestion is not applied; the sell price is the quote x the disclosed 20% markup
+[ 210891.73]   CHECK PASS: the client's approval is recorded by Andre only
+[ 210892.01]   CHECK PASS: a 0.00 record is refused; partial funds put the campaign in FUNDING_REQUIRED and the purchase is refused FUNDS_NOT_VERIFIED; an agent cannot verify funds
+[ 210892.22]   CHECK PASS: one bank transfer funds one record, however its reference is spelt; 100% prepaid moves it to FUNDS_VERIFIED, labelled OBSERVED
+[ 210892.24]   CHECK PASS: once the proposal went out the flight is locked: a 12-month flight under a 1-month quote is refused
+[ 210892.97]   CHECK PASS: Andre's gate alone never buys: Finance (31) verifies the cleared funds (FINANCIALLY_VERIFIED); not even Andre can post it
+[ 210892.98]   CHECK PASS: the agent drafts the vendor contract from the IO; card is refused; only Andre approves its terms; no purchase without it
+[ 210893.19]   CHECK PASS: the purchase gate refuses a quote-to-order mismatch, a substituted vendor, an expired authority, and an agent
+[ 210893.52]   CHECK PASS: Compliance stops purchases with a kill switch; only Andre releases it
+[ 210893.83]   CHECK PASS: Andre authorizes; the order is submitted once (SUBMISSION_UNKNOWN); the same request answers the same; a new request is DUPLICATE_ORDER_BLOCKED
+[ 210893.85]   CHECK PASS: an order whose answer is unknown counts as committed; a timeout is not an outcome
+[ 210894.00]   CHECK PASS: the vendor's answer books it: BOOKED, the face BOOKING_CONFIRMED, the injected vendor text changed nothing
+[ 210894.01]   CHECK PASS: a bank account key anywhere in a body is refused 422 and not echoed
+[ 210894.20] stopped service pid=26476 (exit 143)
+[ 210894.20] started service pid=26616
+[ 210894.64]   CHECK PASS: after a restart the log re-verifies against the ledger and the campaign is exactly as it was
+[ 210894.66]   CHECK PASS: the integrity route reports the ledger's real verdict
+[ 210894.67] evidence view: 42 committed, 9 attempted
+[ 210894.68]   CHECK PASS: the evidence view marks each logical action committed exactly once against the real ledger
+[ 210894.96] stopped service pid=26616 (exit 143)
+[ 210895.00] started service pid=26621
+[ 210895.43]   CHECK PASS: a truncated log is detected against the ledger and nothing that needs the log takes effect
+[ 210895.67] stopped service pid=26621 (exit 143)
+[ 210895.68] ledger: 93 entries, 93 from ooh; ooh types: availability_moved, campaign_brief_set, campaign_created, campaign_transition, client_approval_recorded_by_andre, client_funds_verified_by_andre, client_funds_verified_by_finance_31, commercial_model_set, hold_confirmed_by_andre, hold_evidence_submitted, inventory_added, inventory_face_registered, inventory_source_recorded, kill_switch_set, log_anchor, market_readiness_raised_by_andre, markup_evidence_recorded, price_recorded, principal_agent_determination_recorded_by_andre, purchase_authorized_by_andre, purchase_gate_refused, purchase_order_outcome_recorded, purchase_order_submitted_by_andre, supplier_attribute_sourced, tenant_created, vendor_contract_drafted, vendor_contract_terms_approved_by_andre, vendor_registered
+[ 210895.68]   CHECK PASS: approvals, funds, authorization, submission, outcome and refusals are typed events
+[ 210895.68]   CHECK PASS: no vendor text, amount, bank reference or vendor reference in the clear in ooh's ledger events
+[ 210895.69]   CHECK PASS: ledger verifies valid
+[ 210895.69] 37/37 checks passed
+work dir kept (LIVE_WORK_DIR): /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega6/runtime/live3.12/ooh-live-lco3q75f

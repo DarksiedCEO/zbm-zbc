@@ -1,0 +1,183 @@
+{"id": "X-T09", "desc": "andre_if_presented: caller", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 109.23s (0:01:49)", "fails": [], "secs": 110}
+{"id": "X-T11", "desc": "scoped: tid regex", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 109.72s (0:01:49)", "fails": [], "secs": 110}
+{"id": "X-T02", "desc": "hub without tenant token", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 109.73s (0:01:49)", "fails": [], "secs": 110}
+{"id": "X-T05", "desc": "scoped: missing tenant 404", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.02s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-T06", "desc": "andre_scoped: missing tenant 404", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.03s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-Q10", "desc": "gate at submit: state", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.03s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-Q02", "desc": "gate: QUOTE_RETIRED removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.48s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-Q07", "desc": "contract gate: vendor match", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.26s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M043", "desc": "svc_campaigns.py:L580 kill-switch check removed (self.check_kill(tenant=tid, capability=\"inventory\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.23s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M047", "desc": "svc_campaigns.py:L1059 kill-switch check removed (self.check_kill(tenant=tid, capability=\"funds\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.61s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M042", "desc": "svc_campaigns.py:L443 kill-switch check removed (self.check_kill(tenant=tid, capability=\"inventory\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.45s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M046", "desc": "svc_campaigns.py:L965 kill-switch check removed (self.check_kill(tenant=tid, capability=\"funds\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.62s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M034", "desc": "svc_campaigns.py:L1326 kill-switch check removed (self.check_kill(tenant=tid))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.23s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-M032", "desc": "svc_campaigns.py:L911 kill-switch check removed (self.check_kill(tenant=tid, capability=\"campaigns\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.54s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-M031", "desc": "svc_campaigns.py:L877 kill-switch check removed (self.check_kill(tenant=tid, capability=\"prices\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.83s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-M029", "desc": "svc_campaigns.py:L751 kill-switch check removed (self.check_kill(tenant=tid, capability=\"prices\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.98s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-M027", "desc": "svc_campaigns.py:L374 kill-switch check removed (self.check_kill(tenant=tid, capability=\"campaigns\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.07s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M028", "desc": "svc_campaigns.py:L526 kill-switch check removed (self.check_kill(tenant=tid, capability=\"inventory\"))", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.39s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M024", "desc": "gate: unit in another campaign", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.65s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-M023", "desc": "inventory duplicates", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.76s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-M022", "desc": "currency unsupported", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.67s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-M017", "desc": "price amount > 0", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.11s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M013", "desc": "client approval state", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.80s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-M016", "desc": "price currency", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.11s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-M012", "desc": "client approval: sell price current", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.35s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-M006", "desc": "reconfirm: commitments ignored", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.59s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-H06", "desc": "hold: decision parse", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.41s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-H03", "desc": "hold: unit version changed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.00s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-H02", "desc": "hold: flight changed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.80s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-G38", "desc": "Finance: approval id not matched (C58)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.10s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-G37", "desc": "Finance: boundary <=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.55s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-G36", "desc": "Finance: others ignored", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.83s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-G30", "desc": "gate: funds cleared in full", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.01s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-G32", "desc": "gate: funds boundary >=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.26s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-G31", "desc": "gate: other open authorizations ignored", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.62s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-G23", "desc": "face check: self-unit exclusion removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.60s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-G22", "desc": "face check: vendor removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.71s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-G16", "desc": "missing buy limit not refused", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.89s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-G09", "desc": "7-day limit also at submit", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.52s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-G06", "desc": "signer not checked", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.66s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-D20", "desc": "rate card as_of", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.20s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-D26", "desc": "instrument words: prepaidcard", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.60s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-D18", "desc": "card join length cap", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.67s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-D11", "desc": "card: 15-digit prefix", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.57s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-D10", "desc": "pii: spans", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.22s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-D04", "desc": "pii: overlapping spans", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.85s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-D03", "desc": "pii: redact fallback", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.46s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-D02", "desc": "pii: redact iterations", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.55s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-API069", "desc": "route L688: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.82s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-API068", "desc": "route L683: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.91s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-API067", "desc": "route L679: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.67s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API066", "desc": "route L673: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.92s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-API062", "desc": "route L663: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.91s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-API064", "desc": "route L667: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.39s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-API061", "desc": "route L659: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.03s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API059", "desc": "route L655: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.45s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API057", "desc": "route L650: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.32s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API056", "desc": "route L646: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.36s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API055", "desc": "route L641: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.81s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-API053", "desc": "route L636: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.74s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API050", "desc": "route L626: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.13s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-API048", "desc": "route L622: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.03s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-API046", "desc": "route L618: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.08s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-API045", "desc": "route L611: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.97s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-API044", "desc": "route L605: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.17s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-API043", "desc": "route L600: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.35s (0:01:52)", "fails": [], "secs": 113}
+{"id": "X-API041", "desc": "route L591: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.01s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API042", "desc": "route L596: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.78s (0:01:51)", "fails": [], "secs": 113}
+{"id": "X-API036", "desc": "route L570: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.58s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API040", "desc": "route L587: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.48s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API035", "desc": "route L566: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.08s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API034", "desc": "route L562: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.92s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API033", "desc": "route L557: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.20s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API032", "desc": "route L552: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.52s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API031", "desc": "route L548: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 109.65s (0:01:49)", "fails": [], "secs": 110}
+{"id": "X-API030", "desc": "route L544: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.73s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API029", "desc": "route L537: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.13s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API028", "desc": "route L532: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.28s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API026", "desc": "route L528: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.40s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API025", "desc": "route L524: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.49s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API024", "desc": "route L520: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.66s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API023", "desc": "route L514: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.92s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API022", "desc": "route L510: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 109.92s (0:01:49)", "fails": [], "secs": 111}
+{"id": "X-API021", "desc": "route L506: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.87s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API020", "desc": "route L502: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.80s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API019", "desc": "route L498: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.16s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API018", "desc": "route L494: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.74s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API017", "desc": "route L486: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.86s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API016", "desc": "route L482: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.30s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API015", "desc": "route L478: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.22s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API014", "desc": "route L474: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.38s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API013", "desc": "route L468: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.99s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API012", "desc": "route L461: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.93s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API011", "desc": "route L457: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.87s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API009", "desc": "route L451: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.29s (0:01:50)", "fails": [], "secs": 111}
+{"id": "X-API008", "desc": "route L447: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.76s (0:01:50)", "fails": [], "secs": 112}
+{"id": "X-API007", "desc": "route L443: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.01s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API005", "desc": "route L439: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.10s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API004", "desc": "route L435: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.35s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API003", "desc": "route L427: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.19s (0:01:51)", "fails": [], "secs": 112}
+{"id": "X-API002", "desc": "route L401: service bearer removed", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.87s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-9", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.18s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-88", "desc": "' > '->' >= '@62", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.45s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-87", "desc": "' <= '->' < '@62", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.58s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-8", "desc": "' and '->' or '@32", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.50s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-79", "desc": "'\\\\bFalse\\\\b'->'True'@54", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.29s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-78", "desc": "'\\\\bFalse\\\\b'->'True'@97", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.54s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-77", "desc": "'\\\\[-1\\\\]'->'[0]'@25", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.29s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-74", "desc": "'\\\\[-1\\\\]'->'[0]'@22", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.99s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-7", "desc": "' and '->' or '@68", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.82s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-62", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.90s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-60", "desc": "'\\\\bmax\\\\('->'min('@39", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.90s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-6", "desc": "' and '->' or '@61", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.09s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-5", "desc": "' and '->' or '@48", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.07s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-49", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.76s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-47", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.89s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-46", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.85s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-40", "desc": "' > '->' >= '@64", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.27s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-4", "desc": "' and '->' or '@70", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.18s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-376", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.62s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-371", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.82s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-358", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.26s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-357", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.70s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-356", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.11s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-352", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.49s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-351", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.42s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-349", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 113.20s (0:01:53)", "fails": [], "secs": 114}
+{"id": "W34-348", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.87s (0:01:52)", "fails": [], "secs": 114}
+{"id": "W34-345", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 113.64s (0:01:53)", "fails": [], "secs": 114}
+{"id": "W34-344", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.95s (0:01:52)", "fails": [], "secs": 114}
+{"id": "W34-343", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.63s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-334", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.85s (0:01:52)", "fails": [], "secs": 114}
+{"id": "W34-332", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.16s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-330", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.19s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-328", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.85s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-324", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.72s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-322", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.86s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-316", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.55s (0:01:50)", "fails": [], "secs": 111}
+{"id": "W34-310", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.68s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-306", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.40s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-303", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.00s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-304", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.66s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-302", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.97s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-30", "desc": "' \\\\+ 1\\\\b'->''@40", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.51s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-3", "desc": "' and '->' or '@23", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.10s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-296", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.56s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-295", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.95s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-294", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.58s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-28", "desc": "' > '->' >= '@44", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.69s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-278", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.32s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-277", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.16s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-275", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.14s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-272", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.97s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-270", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 110.95s (0:01:50)", "fails": [], "secs": 112}
+{"id": "W34-271", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.88s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-27", "desc": "' > '->' >= '@17", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.03s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-268", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.41s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-266", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.01s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-265", "desc": "manual", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.33s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-264", "desc": "'\\\\b120\\\\b'->'121'@34", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.31s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-26", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.39s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-255", "desc": "' > '->' >= '@18", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.47s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-246", "desc": "' or '->' and '@62", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.89s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-214", "desc": "' and '->' or '@24", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.94s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-205", "desc": "' or '->' and '@55", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.58s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-2", "desc": "' and '->' or '@50", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.75s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-184", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.00s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-183", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.71s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-180", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.76s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-181", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.34s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-179", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.54s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-177", "desc": "' or '->' and '@24", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.03s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-175", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.29s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-168", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.15s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-160", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.53s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-159", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.67s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-157", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.41s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-154", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.00s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-153", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.97s (0:01:51)", "fails": [], "secs": 113}
+{"id": "W34-15", "desc": "call->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.54s (0:01:51)", "fails": [], "secs": 112}
+{"id": "W34-146", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.10s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-145", "desc": "if->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 112.73s (0:01:52)", "fails": [], "secs": 113}
+{"id": "W34-143", "desc": "stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "767 passed, 1 warning in 111.76s (0:01:51)", "fails": [], "secs": 113}

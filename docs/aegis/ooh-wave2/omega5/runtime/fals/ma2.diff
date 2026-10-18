@@ -1,0 +1,5 @@
+diff -r /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/src/services/ooh-py/src/service.py /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega5/runtime/fals/ma2/services/ooh-py/src/service.py
+428c428
+<             e = by_id.get(eid)
+---
+>             e = None  # MUTANT: a disk/aside line is never vouched

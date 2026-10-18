@@ -1,0 +1,6 @@
+SHA ce665c5 tree 5530ba0 interp /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14 seed 9 cycles 20 ledger-kill real ledger sha256 f3da9d7b
+workdir /var/folders/2_/q80gd3fn3f50pcmk1qlw7gnh0000gn/T/tmp9gixnp82
+writers joined; status now: {'ok': False, 'checked_at': '2026-10-18T07:53:21Z', 'problem': 'a ledger answer was lost; the pending line is rolled forward at the next integrity check'}
+status integrity: {'ok': False, 'checked_at': '2026-10-18T07:53:21Z', 'problem': 'a ledger answer was lost; the pending line is rolled forward at the next integrity check'}
+{"seed": 9, "cycles": 20, "kill_ledger": true, "acked": 1529, "unacked_first": 287, "refused_first": 1167, "log_tenants": 1529, "dups": [], "acked_missing": [], "unrecoverable": [], "integrity": {"integrity": {"ok": true, "checked_at": "2026-10-18T07:55:48Z", "problem": null}, "ledger_valid": true, "log_length": 1529}, "ledger_valid": {"entries": 3062, "valid": true}, "log_len": 1529, "anchors": 1529, "pending_files": []}
+RESULT PASS

@@ -1,0 +1,198 @@
+{"id": "A031", "desc": "L77 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.31s (0:01:35)", "fails": [], "secs": 96}
+{"id": "A049", "desc": "L109 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.91s (0:01:35)", "fails": [], "secs": 97}
+{"id": "A030", "desc": "L77 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.92s (0:01:35)", "fails": [], "secs": 97}
+{"id": "A037", "desc": "L97 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.92s (0:01:35)", "fails": [], "secs": 97}
+{"id": "A036", "desc": "L97 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.38s (0:01:36)", "fails": [], "secs": 97}
+{"id": "A045", "desc": "L106 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.38s (0:01:36)", "fails": [], "secs": 97}
+{"id": "NOOP", "desc": "noop", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.53s (0:01:36)", "fails": [], "secs": 97}
+{"id": "A047", "desc": "L107 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.53s (0:01:36)", "fails": [], "secs": 97}
+{"id": "A055", "desc": "L118 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.74s (0:01:34)", "fails": [], "secs": 95}
+{"id": "A053", "desc": "L113 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.39s (0:01:35)", "fails": [], "secs": 96}
+{"id": "A058", "desc": "L127 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.00s (0:01:36)", "fails": [], "secs": 97}
+{"id": "A056", "desc": "L119 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.07s (0:01:36)", "fails": [], "secs": 97}
+{"id": "A063", "desc": "L135 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.62s (0:01:35)", "fails": [], "secs": 96}
+{"id": "A065", "desc": "L135 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.00s (0:01:35)", "fails": [], "secs": 97}
+{"id": "A059", "desc": "L128 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.12s (0:01:36)", "fails": [], "secs": 97}
+{"id": "A064", "desc": "L135 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 96.08s (0:01:36)", "fails": [], "secs": 97}
+{"id": "A066", "desc": "L135 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.38s (0:01:34)", "fails": [], "secs": 95}
+{"id": "A067", "desc": "L135 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.97s (0:01:34)", "fails": [], "secs": 96}
+{"id": "A070", "desc": "L140 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.55s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B011", "desc": "L468 and->or", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.77s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B012", "desc": "L468 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.77s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B014", "desc": "L468 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.66s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B019", "desc": "L499 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.65s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B021", "desc": "L500 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.58s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B030", "desc": "L522 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.09s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B031", "desc": "L523 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.63s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B046", "desc": "L535 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.73s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B034", "desc": "L526 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.60s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B037", "desc": "L527 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.28s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B035", "desc": "L526 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.65s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B036", "desc": "L526 cmp->>=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.65s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B052", "desc": "L536 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.71s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B053", "desc": "L536 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.67s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B057", "desc": "L543 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.17s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B069", "desc": "L550 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.98s (0:01:34)", "fails": [], "secs": 96}
+{"id": "B065", "desc": "L550 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.76s (0:01:35)", "fails": [], "secs": 97}
+{"id": "B071", "desc": "L550 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.29s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B080", "desc": "L553 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.04s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B067", "desc": "L550 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.77s (0:01:35)", "fails": [], "secs": 97}
+{"id": "B079", "desc": "L553 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.71s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B083", "desc": "L556 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.09s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B084", "desc": "L556 and->or", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.20s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B085", "desc": "L556 or->and", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.71s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B087", "desc": "L556 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.11s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B089", "desc": "L556 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.32s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B095", "desc": "L556 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.95s (0:01:34)", "fails": [], "secs": 96}
+{"id": "B094", "desc": "L556 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.46s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B093", "desc": "L556 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.50s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B097", "desc": "L556 cmp->==", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.16s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B100", "desc": "L562 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.35s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B104", "desc": "L564 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.95s (0:01:33)", "fails": [], "secs": 95}
+{"id": "B106", "desc": "L564 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.65s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B110", "desc": "L565 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.31s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B123", "desc": "L576 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.12s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B108", "desc": "L564 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.41s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B122", "desc": "L576 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.37s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B124", "desc": "L577 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.35s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B125", "desc": "L578 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.97s (0:01:33)", "fails": [], "secs": 95}
+{"id": "B126", "desc": "L580 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.40s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B127", "desc": "L580 cmp->in", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.31s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B128", "desc": "L581 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.51s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B129", "desc": "L582 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.82s (0:01:34)", "fails": [], "secs": 96}
+{"id": "B130", "desc": "L582 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.98s (0:01:34)", "fails": [], "secs": 96}
+{"id": "B131", "desc": "L582 cmp-><", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.03s (0:01:35)", "fails": [], "secs": 96}
+{"id": "B132", "desc": "L584 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.66s (0:01:33)", "fails": [], "secs": 94}
+{"id": "B133", "desc": "L584 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.48s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B134", "desc": "L584 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.02s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B135", "desc": "L584 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.02s (0:01:34)", "fails": [], "secs": 95}
+{"id": "B136", "desc": "L584 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.32s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T011", "desc": "L56 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.33s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T012", "desc": "L56 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.80s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T016", "desc": "L67 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.61s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T020", "desc": "L68 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.98s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T022", "desc": "L68 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.19s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T024", "desc": "L68 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.86s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T032", "desc": "L71 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.04s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T034", "desc": "L72 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.54s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T036", "desc": "L73 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.60s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T048", "desc": "L83 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.27s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T038", "desc": "L74 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.53s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T049", "desc": "L84 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.66s (0:01:33)", "fails": [], "secs": 94}
+{"id": "T050", "desc": "L84 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.43s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T051", "desc": "L84 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.03s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T052", "desc": "L84 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.82s (0:01:33)", "fails": [], "secs": 94}
+{"id": "T053", "desc": "L84 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.49s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T057", "desc": "L91 drop not", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.35s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T069", "desc": "L103 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.35s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T062", "desc": "L98 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.60s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T071", "desc": "L103 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.04s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T072", "desc": "L103 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.95s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T074", "desc": "L103 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.80s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T076", "desc": "L104 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.33s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T081", "desc": "L107 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.15s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T079", "desc": "L106 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.52s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T085", "desc": "L115 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.13s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T084", "desc": "L115 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.59s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T086", "desc": "L115 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.47s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T087", "desc": "L115 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.92s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T088", "desc": "L115 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.77s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T119", "desc": "L152 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.52s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T120", "desc": "L153 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.36s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T121", "desc": "L153 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.47s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T122", "desc": "L153 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.12s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T123", "desc": "L153 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.22s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T124", "desc": "L153 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.61s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T126", "desc": "L156 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.18s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T127", "desc": "L157 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.07s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T128", "desc": "L165 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.49s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T130", "desc": "L166 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.25s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T131", "desc": "L167 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.71s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T132", "desc": "L168 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.44s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T134", "desc": "L169 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.69s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T136", "desc": "L170 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.98s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T138", "desc": "L171 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.47s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T139", "desc": "L172 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.59s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T144", "desc": "L178 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.81s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T147", "desc": "L181 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.14s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T148", "desc": "L181 and->or", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.93s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T149", "desc": "L181 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.93s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T150", "desc": "L181 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.53s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T151", "desc": "L181 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.07s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T152", "desc": "L181 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.15s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T154", "desc": "L181 cmp->!=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.11s (0:01:35)", "fails": [], "secs": 96}
+{"id": "T153", "desc": "L181 cmp->!=", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.10s (0:01:35)", "fails": [], "secs": 96}
+{"id": "T155", "desc": "L182 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.72s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T157", "desc": "L183 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.52s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T163", "desc": "L189 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.55s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T159", "desc": "L184 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.78s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T165", "desc": "L192 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.65s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T166", "desc": "L193 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.02s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T168", "desc": "L197 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.09s (0:01:35)", "fails": [], "secs": 96}
+{"id": "T167", "desc": "L196 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.11s (0:01:35)", "fails": [], "secs": 96}
+{"id": "T169", "desc": "L201 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.42s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T170", "desc": "L204 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.28s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T172", "desc": "L207 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.29s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T171", "desc": "L205 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.69s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T175", "desc": "L211 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.06s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T176", "desc": "L211 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.11s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T178", "desc": "L211 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.43s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T177", "desc": "L211 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.44s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T179", "desc": "L211 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.37s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T180", "desc": "L217 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.96s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T181", "desc": "L217 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.81s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T182", "desc": "L219 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.79s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T183", "desc": "L220 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.27s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T184", "desc": "L220 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.51s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T185", "desc": "L220 and->or", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.98s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T186", "desc": "L220 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.36s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T187", "desc": "L220 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.37s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T189", "desc": "L220 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.60s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T190", "desc": "L220 drop not", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.40s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T188", "desc": "L220 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.83s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T191", "desc": "L221 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.09s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T192", "desc": "L222 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.85s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T194", "desc": "L223 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.11s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T193", "desc": "L223 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.62s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T195", "desc": "L223 or->and", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.15s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T196", "desc": "L223 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.99s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T197", "desc": "L223 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.63s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T198", "desc": "L223 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.62s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T199", "desc": "L223 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.35s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T200", "desc": "L223 cmp->==", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.00s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T201", "desc": "L223 drop not", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.60s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T202", "desc": "L224 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.64s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T203", "desc": "L226 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.28s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T204", "desc": "L227 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.89s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T206", "desc": "L230 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.18s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T205", "desc": "L228 bool flip", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.58s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T212", "desc": "L244 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.49s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T216", "desc": "L246 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.92s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T222", "desc": "L262 raise->pass", "py": "3.13", "ign_new": false, "rc": 1, "tail": "2 failed, 775 passed, 1 warning in 94.22s (0:01:34)", "fails": ["tests/test_aegis_omega5_mutation.py::test_t222_unremovable_pending_after_certain_refusal_answers_maybe", "tests/test_aegis_omega5_mutation.py::test_t222_store_clear_pending_raises_when_the_file_cannot_be_removed"], "secs": 95}
+{"id": "T218", "desc": "L254 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.80s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T223", "desc": "L271 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.76s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T227", "desc": "L273 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.29s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T232", "desc": "L279 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.65s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T225", "desc": "L272 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 95.07s (0:01:35)", "fails": [], "secs": 96}
+{"id": "T233", "desc": "L279 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.85s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T234", "desc": "L279 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.77s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T235", "desc": "L279 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.45s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T236", "desc": "L279 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.33s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T245", "desc": "L282 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.41s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T246", "desc": "L282 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 93.91s (0:01:33)", "fails": [], "secs": 95}
+{"id": "T247", "desc": "L288 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.27s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T248", "desc": "L290 cond->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.90s (0:01:34)", "fails": [], "secs": 96}
+{"id": "T255", "desc": "L300 return->None", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.55s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T251", "desc": "L296 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.73s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T256", "desc": "L300 return->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.21s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T257", "desc": "L300 return->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.69s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T258", "desc": "L300 return->(None, False)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.27s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T259", "desc": "L300 return->(None, True)", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.22s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T269", "desc": "L306 operand->True", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.55s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T270", "desc": "L306 operand->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 94.29s (0:01:34)", "fails": [], "secs": 95}
+{"id": "T276", "desc": "L320 cond->False", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 87.53s (0:01:27)", "fails": [], "secs": 88}
+{"id": "T278", "desc": "L321 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 87.46s (0:01:27)", "fails": [], "secs": 88}
+{"id": "T279", "desc": "L322 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 87.14s (0:01:27)", "fails": [], "secs": 88}
+{"id": "T283", "desc": "L328 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 86.74s (0:01:26)", "fails": [], "secs": 87}
+{"id": "T285", "desc": "L333 stmt->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 86.67s (0:01:26)", "fails": [], "secs": 87}
+{"id": "T286", "desc": "L336 raise->pass", "py": "3.13", "ign_new": false, "rc": 0, "tail": "777 passed, 1 warning in 86.00s (0:01:26)", "fails": [], "secs": 86}

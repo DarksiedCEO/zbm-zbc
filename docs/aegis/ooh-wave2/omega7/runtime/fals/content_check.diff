@@ -1,0 +1,11 @@
+--- /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/src/services/ooh-py/src/store.py	2026-10-18 03:18:35
++++ /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/fals/tree/services/ooh-py/src/store.py	2026-10-18 03:24:35
+@@ -180,7 +180,7 @@
+                     size = os.fstat(fd).st_size
+                     if size == expected + len(line) + 1 and os.pread(fd, len(line) + 1, expected) == line + b"\n":
+                         os.fsync(fd)                  # already on disk: adopt it
+-                    elif size != expected:
++                    elif size != expected or os.pread(fd, expected, 0) != b"".join(ln + b"\n" for ln in self._lines):
+                         raise StoreWriteError("the log file and memory disagree; refusing to write")
+                     else:
+                         payload = line + b"\n"

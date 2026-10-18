@@ -1,0 +1,28 @@
+{"py": "3.12", "id": "NOOP", "desc": "noop", "fails": [], "tail": "10 passed, 1 warning in 0.53s"}
+{"py": "3.12", "id": "H198", "desc": "L316 operand->True", "fails": ["test_h198_first_forced_check_reads_the_ledger_soon_after_host_boot"], "tail": "1 failed, 9 passed, 1 warning in 0.54s"}
+{"py": "3.12", "id": "H229", "desc": "L327 operand->True", "fails": ["test_h229_settling_failure_is_the_problem_reported"], "tail": "1 failed, 9 passed, 1 warning in 0.54s"}
+{"py": "3.12", "id": "H399", "desc": "L417 bool flip", "fails": ["test_h399_stale_pending_is_set_aside_before_removal"], "tail": "1 failed, 9 passed, 1 warning in 0.55s"}
+{"py": "3.12", "id": "H448", "desc": "L439 bool flip", "fails": ["test_h448_set_aside_line_appended_late_clears_the_set_aside_copy"], "tail": "1 failed, 9 passed, 1 warning in 0.54s"}
+{"py": "3.12", "id": "V001", "desc": "L151 str 'line_sha256'->XX", "fails": ["test_v001_anchor_payload_wire_format_is_fixed"], "tail": "1 failed, 9 passed, 1 warning in 0.54s"}
+{"py": "3.12", "id": "V045", "desc": "L247 str 'checked_at'->XX", "fails": ["test_v045_v047_unremovable_pending_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.55s"}
+{"py": "3.12", "id": "V046", "desc": "L248 str 'problem'->XX", "fails": ["test_v045_v047_unremovable_pending_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.54s"}
+{"py": "3.12", "id": "V047", "desc": "L248 str 'the pending line could not be '->XX", "fails": ["test_v045_v047_unremovable_pending_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.55s"}
+{"py": "3.12", "id": "V082", "desc": "L205 str 'checked_at'->XX", "fails": ["test_v082_v083_lost_answer_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.55s"}
+{"py": "3.12", "id": "V083", "desc": "L205 str 'problem'->XX", "fails": ["test_v082_v083_lost_answer_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.55s"}
+{"py": "3.12", "id": "V084", "desc": "L211 str 'checked_at'->XX", "fails": ["test_v084_v085_anchored_not_written_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.54s"}
+{"py": "3.12", "id": "V085", "desc": "L211 str 'problem'->XX", "fails": ["test_v084_v085_anchored_not_written_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.56s"}
+{"py": "3.12", "id": "T222", "desc": "L262 raise->pass", "fails": ["test_t222_unremovable_pending_after_certain_refusal_answers_maybe", "test_t222_store_clear_pending_raises_when_the_file_cannot_be_removed"], "tail": "2 failed, 8 passed, 1 warning in 0.58s"}
+{"py": "3.13", "id": "NOOP", "desc": "noop", "fails": [], "tail": "10 passed, 1 warning in 0.58s"}
+{"py": "3.13", "id": "H198", "desc": "L316 operand->True", "fails": ["test_h198_first_forced_check_reads_the_ledger_soon_after_host_boot"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "H229", "desc": "L327 operand->True", "fails": ["test_h229_settling_failure_is_the_problem_reported"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "H399", "desc": "L417 bool flip", "fails": ["test_h399_stale_pending_is_set_aside_before_removal"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "H448", "desc": "L439 bool flip", "fails": ["test_h448_set_aside_line_appended_late_clears_the_set_aside_copy"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "V001", "desc": "L151 str 'line_sha256'->XX", "fails": ["test_v001_anchor_payload_wire_format_is_fixed"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "V045", "desc": "L247 str 'checked_at'->XX", "fails": ["test_v045_v047_unremovable_pending_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "V046", "desc": "L248 str 'problem'->XX", "fails": ["test_v045_v047_unremovable_pending_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "V047", "desc": "L248 str 'the pending line could not be '->XX", "fails": ["test_v045_v047_unremovable_pending_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "V082", "desc": "L205 str 'checked_at'->XX", "fails": ["test_v082_v083_lost_answer_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.60s"}
+{"py": "3.13", "id": "V083", "desc": "L205 str 'problem'->XX", "fails": ["test_v082_v083_lost_answer_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.59s"}
+{"py": "3.13", "id": "V084", "desc": "L211 str 'checked_at'->XX", "fails": ["test_v084_v085_anchored_not_written_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.60s"}
+{"py": "3.13", "id": "V085", "desc": "L211 str 'problem'->XX", "fails": ["test_v084_v085_anchored_not_written_integrity_record"], "tail": "1 failed, 9 passed, 1 warning in 0.60s"}
+{"py": "3.13", "id": "T222", "desc": "L262 raise->pass", "fails": ["test_t222_unremovable_pending_after_certain_refusal_answers_maybe", "test_t222_store_clear_pending_raises_when_the_file_cannot_be_removed"], "tail": "2 failed, 8 passed, 1 warning in 0.60s"}

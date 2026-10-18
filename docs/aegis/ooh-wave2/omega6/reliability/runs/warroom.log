@@ -1,0 +1,10 @@
+warroom SHA ce665c5 tree 5530ba0 /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/bin/python Python 3.12.14
+seed 1 exit 0
+Gate: **PASS**. LLM personas: NOT_CONNECTED (deterministic personas only).
+| Department | Gate | Cases | PASS | FAIL | ERROR | MUST pass rate (excl. known) | SHOULD score | Known failures |
+seed 7 exit 0
+Gate: **PASS**. LLM personas: NOT_CONNECTED (deterministic personas only).
+| Department | Gate | Cases | PASS | FAIL | ERROR | MUST pass rate (excl. known) | SHOULD score | Known failures |
+seed 13 exit 0
+Gate: **PASS**. LLM personas: NOT_CONNECTED (deterministic personas only).
+| Department | Gate | Cases | PASS | FAIL | ERROR | MUST pass rate (excl. known) | SHOULD score | Known failures |

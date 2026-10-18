@@ -1,0 +1,253 @@
+{
+ "warroom": 1,
+ "seed": 1,
+ "variants_override": null,
+ "llm_personas": "NOT_CONNECTED",
+ "gate": "PASS",
+ "departments": {
+  "ooh-py": {
+   "department": "ooh-py",
+   "gate": "PASS",
+   "cases": 156,
+   "outcomes": {
+    "PASS": 156,
+    "FAIL": 0,
+    "ERROR": 0
+   },
+   "must_pass_rate": 1.0,
+   "should_score": null,
+   "should_checks": 0,
+   "by_scenario": {
+    "amount-off-the-quote": {
+     "cases": 8,
+     "pass": 8,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "duplicate-submission": {
+     "cases": 1,
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "face-clash-across-tenants": {
+     "cases": 5,
+     "pass": 5,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "face-registered-twice": {
+     "cases": 19,
+     "pass": 19,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "funds-of-nothing": {
+     "cases": 1,
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "funds-reference-respelt": {
+     "cases": 27,
+     "pass": 27,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "funds-zero-padded": {
+     "cases": 15,
+     "pass": 15,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "one-unit-two-quotes": {
+     "cases": 1,
+     "pass": 1,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "outcome-during-dispute": {
+     "cases": 2,
+     "pass": 2,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "someone-else-approves-a-contract": {
+     "cases": 3,
+     "pass": 3,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "someone-else-authorizes": {
+     "cases": 4,
+     "pass": 4,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "someone-else-confirms-a-hold": {
+     "cases": 3,
+     "pass": 3,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "vendor-spoofing": {
+     "cases": 32,
+     "pass": 32,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "vendor-substitution": {
+     "cases": 19,
+     "pass": 19,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    },
+    "vendor-text-injection": {
+     "cases": 16,
+     "pass": 16,
+     "fail": 0,
+     "error": 0,
+     "known_failure": 0
+    }
+   },
+   "by_transform": {
+    "(base)": {
+     "cases": 64,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "case_flip": {
+     "cases": 16,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "fullwidth": {
+     "cases": 31,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "homoglyph": {
+     "cases": 17,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "homoglyph_wide": {
+     "cases": 2,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "html_wrap": {
+     "cases": 1,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "injection": {
+     "cases": 2,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "leetspeak": {
+     "cases": 7,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "letter_punct": {
+     "cases": 11,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "long_body": {
+     "cases": 2,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "quoted_reply": {
+     "cases": 4,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "signature": {
+     "cases": 2,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "soft_hyphen": {
+     "cases": 23,
+     "must_fail": 0,
+     "should_miss": 0
+    },
+    "zero_width": {
+     "cases": 23,
+     "must_fail": 0,
+     "should_miss": 0
+    }
+   },
+   "new_must_failures": [],
+   "errors": [],
+   "known_failures": [],
+   "should_misses": []
+  }
+ },
+ "timing": {
+  "note": "measured, reported, never asserted; not part of the deterministic result",
+  "slowest_cases_ms": [
+   {
+    "case_id": "ooh-py/funds-reference-respelt#000.1@1",
+    "ms": 339.4
+   },
+   {
+    "case_id": "ooh-py/funds-reference-respelt#001.1@1",
+    "ms": 284.7
+   },
+   {
+    "case_id": "ooh-py/funds-reference-respelt#000.2@1",
+    "ms": 245.6
+   },
+   {
+    "case_id": "ooh-py/funds-reference-respelt#003.2@1",
+    "ms": 238.4
+   },
+   {
+    "case_id": "ooh-py/face-clash-across-tenants#001.0@1",
+    "ms": 236.4
+   },
+   {
+    "case_id": "ooh-py/funds-zero-padded#005.1@1",
+    "ms": 231.4
+   },
+   {
+    "case_id": "ooh-py/face-clash-across-tenants#000.0@1",
+    "ms": 231.2
+   },
+   {
+    "case_id": "ooh-py/funds-reference-respelt#001.0@1",
+    "ms": 227.8
+   },
+   {
+    "case_id": "ooh-py/face-clash-across-tenants#004.0@1",
+    "ms": 225.7
+   },
+   {
+    "case_id": "ooh-py/face-clash-across-tenants#002.0@1",
+    "ms": 225.6
+   }
+  ],
+  "per_department_ms": {
+   "ooh-py": 21524.0
+  }
+ }
+}

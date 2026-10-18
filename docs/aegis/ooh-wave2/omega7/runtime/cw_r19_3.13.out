@@ -1,0 +1,26 @@
+[220334.25] started ledger pid 63044 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
+[220334.28] started service pid 63045 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
+[220334.73] service health {'status': 'ok'}
+[220334.74] status.integrity {'ok': True, 'checked_at': '2026-10-18T10:27:21Z', 'problem': None} ports {'finance_31': 'NOT_CONNECTED', 'vendor_orders': 'NOT_CONNECTED', 'esign': 'NOT_CONNECTED', 'inventory_data': 'NOT_CONNECTED', 'measurement': 'NOT_CONNECTED', 'programmatic_dooh': 'NOT_CONNECTED'}
+[220334.84] W1 before (201, {'tenant_id': 't-before', 'killed': False, 'created_at': '2026-10-18T10:27:21Z', 'campaigns': 0})
+[220334.89] RELAY {"scen": "r19", "forwarded": "tenant_created", "ledger_status_line": "HTTP/1.1 201 Created", "event_id": "ooh-evd-6a42a425e6b89762bb3c9c67682595a6cc9cb4f6", "summary": "tenant_created tenant:t-x", "ledger_killed": "SIGKILL pid 63044 returncode -9", "listener_closed_before_answer_passed": true, "service_answer": "passed back (evidence recorded); next connect refused"}
+[220334.91] W2 (fault armed) (503, {'detail': 'LEDGER_UNAVAILABLE', 'maybe': False})
+[220334.91] ooh dir ['ooh.lock', 'ooh_log.jsonl']
+[220334.92] status.integrity after fault {'ok': True, 'checked_at': '2026-10-18T10:27:21Z', 'problem': None}
+[220334.93] W3 while ledger down (503, {'detail': 'LEDGER_UNAVAILABLE', 'maybe': False})
+[220334.93] started ledger pid 63049 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega7/runtime/target/release/server
+[220334.94] ledger health after restart {'service': 'ledger-rust', 'status': 'ok'}
+[220334.96] relay listener closed (connects to the ledger URL now refused)
+[220335.44] log tenants after ledger restart (before integrity) (['t-before'], 1)
+[220335.44] sleep 16s
+[220351.46] GET /audit/integrity {'integrity': {'ok': True, 'checked_at': '2026-10-18T10:27:38Z', 'problem': None}, 'ledger_valid': True, 'log_length': 1}
+[220351.46] ooh dir ['ooh.lock', 'ooh_log.jsonl']
+[220351.47] log tenants after recovery (['t-before'], 1)
+[220351.53] W4 new write (201, {'tenant_id': 't-after', 'killed': False, 'created_at': '2026-10-18T10:27:38Z', 'campaigns': 0})
+[220351.75] service SIGTERM exit 143
+[220351.75] started service pid 63288 cmd /private/tmp/claude-501/-Users-andrelove-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/bin/python -m api
+[220352.31] service health after restart {'status': 'ok'}
+[220352.37] FINAL {"log_tenants": ["t-before", "t-after"], "log_length": 2, "ledger_anchors": 2, "ledger_tenant_created_evidence": ["tenant:t-before", "tenant:t-x", "tenant:t-after"], "integrity": {"integrity": {"ok": true, "checked_at": "2026-10-18T10:27:39Z", "problem": null}, "ledger_valid": true, "log_length": 2}, "ledger_verify": {"entries": 5, "valid": true}}
+[220352.37] EVIDENCE VIEW {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle", "total": 3, "committed": 2, "attempted": 1, "limit": 200, "offset": 0, "evidence": [{"event_id": "ooh-evd-bb03ebc9fb70954edf23c4c3d6867723e61fcbeb", "event_type": "tenant_created", "subject_id": "tenant:t-before", "ledger_seq": 0, "payload_sha256": "613fef7a0a237acf19c988acbe705c10b355eb4a346f754bd27b20ddd33618f9", "status": "committed", "seq": 1, "rk": "tenant|t-before|3293955c-85e4-4534-8426-1dad34175ae4", "log_kind": "tenant_created"}, {"event_id": "ooh-evd-6a42a425e6b89762bb3c9c67682595a6cc9cb4f6", "event_type": "tenant_created", "subject_id": "tenant:t-x", "ledger_seq": 2, "payload_sha256": "97316901e635d60b05dd2fd46f31f76b8e09dd0a5b393e7a5436df1d27d9545b", "status": "attempted", "seq": null, "rk": null, "log_kind": null}, {"event_id": "ooh-evd-06b57e26c512a742ca1c4b2143fa47aeba24e2f9", "event_type": "tenant_created", "subject_id": "tenant:t-after", "ledger_seq": 3, "payload_sha256": "df4a9830953edf1f3862c89b00daa86a6f9bf7f8d6465d4aeb7082a3a214eaa6", "status": "committed", "seq": 2, "rk": "tenant|t-after|02cdd4e6-bd67-440d-9741-d631930f438c", "log_kind": "tenant_created"}], "log_length": 2}
+[220352.44] informative: client retry of the refused request_id (201, {'tenant_id': 't-x', 'killed': False, 'created_at': '2026-10-18T10:27:39Z', 'campaigns': 0})
+RESULT PASS

@@ -1,0 +1,2 @@
+{"py": "3.13", "id": "NOOP", "tail": "13 passed, 1 warning in 1.22s", "fails": []}
+{"py": "3.13", "id": "X7-18", "tail": "3 failed, 10 passed, 1 warning in 0.88s", "fails": ["test_P_x718_restart_rolls_the_anchored_line_forward_despite_a_stale_tmp", "test_P_x718_service_pending_kept_is_exact_and_restart_is_clean", "test_P_x718_stale_longer_tmp_does_not_leak_into_pending_line"]}
