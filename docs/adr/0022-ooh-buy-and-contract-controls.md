@@ -343,8 +343,9 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   exactly when the screen finds personal data.
 - **Hidden characters (source M-1, data D10-M1).** `screen_form` also removes private-use, unassigned and invisible
   filler characters and drops a combining mark on a digit; it reads every other non-printable character as a space
-  and collapses runs of spaces. A hidden character is read both ways: removed (it rejoins a card's digit group) and as
-  a space (it keeps an SSN's groups apart); personal data in either form counts.
+  and collapses runs of spaces. For campaign names and `ref` attributes (`has_personal_data`) a hidden character is read both ways: removed
+  (it rejoins a card's digit group) and as a space (it keeps an SSN's groups apart). The three screened free-text fields
+  read it removed only: their digit-cluster rule (below) does not depend on separators (AEGIS r11 source S-2).
 - **SSN separators (data D10-H1, High):** superseded by the design change below.
 - **Reliability:** a failed close after a written and fsynced log line no longer loses it (F1); the request hash is
   computed once per body, cached by a digest of the body in memory only (F2); the FIFO and symlink tests clean up.
@@ -377,6 +378,19 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   `tests/test_ooh2_pii1_cluster_rule.py`. Workarounds for preparers: put a word between the numbers ("2026-11-01 to
   2026-11-30"), use the typed `latitude`/`longitude` attributes (not screened), keep long references out of free
   text.
+- **Founder decisions after AEGIS round 11 (f5ee168, superseded):**
+  - *Separators:* only the ASCII letters A-Z and a-z end a digit cluster; every other character joins it, Unicode
+    letters that look like punctuation included ("ー", "ʼ", "ǀ", tatweel: runtime O11-1, security S11-1, source S-5).
+  - *HTML entities:* the text is also screened with entities decoded (repeatedly, for "&amp;nbsp;"), and kept decoded
+    when that form holds personal data ("4111&nbsp;1111&nbsp;…", "123&ndash;45&ndash;6789": security S11-2, data
+    D11-L2). Tags such as `<br>` are letters and still end a cluster.
+  - *Spellings of @ and .:* the cluster rule runs on the text as kept and again after "%40", "&#64;" and the like are
+    read, so such a spelling cannot hide digits (source S-1).
+  - *Unassigned characters* are kept as typed, neither removed nor read as a space, so the kept text and the request
+    hash do not depend on the Python build's Unicode version (reliability N1; 627 code points differ between Unicode
+    15.0 in Python 3.12 and 15.1 in 3.13). The cluster rule joins across them.
+  - *False positives* are accepted for now (OOH2-PII-1-FP); next wave: structured vendor fields for location, ZIP and
+    dates (OOH2-PII-1-STRUCT).
 - **Not changed.** Campaign names, `ref` attributes and the client funds reference keep their earlier rules
   (e-mail, phone, card and SSN shapes; `names_a_card` for the funds reference). The 13 other reference fields stay
   unscreened (OOH2-R9-SEC-F4).

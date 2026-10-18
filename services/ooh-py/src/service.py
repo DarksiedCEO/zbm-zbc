@@ -86,8 +86,9 @@ _SHA_CACHE: "OrderedDict[str, str]" = OrderedDict()      # raw-body digest -> re
 
 
 def request_sha(body: dict) -> str:
-    """The idempotency hash of a request. Personal data is redacted first, so the hash kept in the log never stands for
-    a card number or an SSN; a body without personal data hashes as before (logs written earlier still replay). The
+    """The idempotency hash of a request. The vendor text is hashed as kept (screen form, personal data
+    redacted), so the hash in the log never stands for a card number or an SSN; a body without vendor text hashes as
+    before, and one whose vendor text is already in screen form too (AEGIS r11 source S-3). The
     screen runs once per body (AEGIS r10 reliability F2: it ran twice per request, under the service lock); the cache
     is keyed by a digest of the body, never by the body, and is never written anywhere."""
     key = hashlib.sha256(canonical(body).encode("utf-8")).hexdigest()

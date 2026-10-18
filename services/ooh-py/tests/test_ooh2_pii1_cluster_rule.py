@@ -100,3 +100,93 @@ def test_cluster_the_ref_attribute_kind_and_campaign_names_keep_the_old_screen()
     # the founder scoped the rule to the three fields; other screened values keep the e-mail/phone/card/SSN rules
     assert not pii.has_personal_data("ZIP 90028-1234") and pii.free_text_has_personal_data("ZIP 90028-1234")
     assert sc.names_a_card("4111-1111-1111-1111") and not sc.names_a_card("021000021")
+
+
+# ---------------------------------------------------------------- AEGIS r11 source S-1: spellings cannot hide digits
+
+SPELLED = ["1234567%40", "1234567&#64;", "123-45-67%40", "4111 1111 1111 11%40", "12 34 56 7&#64;"]
+
+
+@pytest.mark.parametrize("text", SPELLED)
+def test_cluster_an_at_spelling_cannot_hide_digits(text):
+    kept, kinds = pii.screen_free_text(f"note {text} end")
+    assert kinds and sum(ch.isdigit() for ch in kept) < 9, (kept, kinds)
+
+
+@pytest.mark.parametrize("text", SPELLED)
+def test_cluster_an_at_spelling_cannot_hide_digits_in_the_fields(h, text):
+    test_cluster_vendor_text_is_redacted_and_hashed_redacted(h, text)
+    test_cluster_face_text_attribute_is_refused(h, text)
+
+
+def test_cluster_the_kept_text_never_holds_a_cluster():
+    import random
+    rnd = random.Random(20261018)
+    alphabet = list("0123456789 -._:/,|+%@#&;x4") + ["%40", "&#64;", "&#x40;", "&commat;", "[at]", "(dot)", "\u200b",
+                                                       "\u3164", "\ue000", "\u0664", "a", "Z", "&nbsp;", "&ndash;",
+                                                       "&amp;", "&#52;", "\u30fc", "\u02bc", "\u2ffc", "\u0378"]
+    for _ in range(20000):
+        t = "".join(rnd.choice(alphabet) for _ in range(rnd.randint(1, 30)))
+        kept, _kinds = pii.screen_free_text(t)
+        for form in (kept, pii.screen_form(kept), pii._norm(kept), pii._norm(_unescape(kept))):
+            assert not pii.number_cluster_spans(form), (t, kept)
+
+
+# ---------------------------------------------------------------- founder decisions after r11 (Oct 18 2026)
+# 2: only ASCII letters A-Z / a-z end a digit cluster; every other character, Unicode letters that look like
+#    punctuation included, joins it (runtime O11-1, security S11-1, source S-5)
+# 3: HTML entities are decoded and the decoded text is screened too (security S11-2, data D11-L2)
+# 1: unassigned characters are kept as typed, so the kept text and the hash do not depend on the Unicode version (N1)
+
+LOOKALIKE = ['1234ʼ56789', '12ー34ー56ー789', '41ー11ー11ー11ー11ー11ー11ー11', '123ǀ456ǀ789', '123ـ456ـ789', '123ː45ː6789', '123ˉ45ˉ6789', '123ꞏ45ꞏ6789', '123一456一789', '12α34α56789']
+ENTITIES = ['4111&nbsp;1111&nbsp;1111&nbsp;1111', '123&ndash;45&ndash;6789', 'SSN 123&nbsp;45&nbsp;6789', '4111&#32;1111&#32;1111&#32;1111', '4111&#x2D;1111&#x2D;1111&#x2D;1111', '4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111', '&#52;111 1111 1111 1111']
+
+
+@pytest.mark.parametrize("text", LOOKALIKE + ENTITIES)
+def test_decisions_screen_finds_it(text):
+    kept, kinds = pii.screen_free_text(f"note {text} end")
+    assert kinds, (text, kept)
+    for form in (kept, pii._norm(kept), pii._norm(_unescape(kept))):
+        assert not pii.number_cluster_spans(form), (text, kept)
+
+
+def _unescape(t):
+    import html
+    for _ in range(3):
+        t = html.unescape(t)
+    return t
+
+
+@pytest.mark.parametrize("text", LOOKALIKE + ENTITIES)
+def test_decisions_vendor_text_is_redacted_and_the_face_attribute_refused(h, text):
+    test_cluster_vendor_text_is_redacted_and_hashed_redacted(h, text)
+    test_cluster_face_text_attribute_is_refused(h, text)
+
+
+@pytest.mark.parametrize("ref", ["123" + chr(0x2bc) + "456789", "4111&nbsp;1111&nbsp;1111&nbsp;1111"])
+def test_decisions_client_approval_doc_ref_is_refused(h, ref):
+    # the reference's own pattern (ASCII letters, digits, . _ : -) refuses these before the personal-data screen
+    ctx = h.to_proposal_sent("acme")
+    lines, events = len(h.svc.log), len(h.ledger.events)
+    r = h.approve(ctx, client_approval_doc_ref=ref)
+    assert r.status_code == 422, r.text
+    assert len(h.svc.log) == lines and len(h.ledger.events) == events
+
+
+def test_decisions_ascii_letters_still_end_a_cluster():
+    assert pii.screen_free_text("1234x56789") == ("1234x56789", [])
+    assert pii.screen_free_text("14x48 bulletin, 2026-11-01 to 2026-11-30")[1] == []
+
+
+def test_decisions_entities_without_digits_are_kept_as_typed():
+    assert pii.screen_free_text("fine &amp; dandy 14x48") == ("fine &amp; dandy 14x48", [])
+
+
+@pytest.mark.parametrize("cp", [0x0378, 0x2FFC, 0x31EF, 0x2EBF0])
+def test_decisions_unassigned_characters_are_kept_so_the_hash_is_stable(cp):
+    # U+2FFC-2FFF, U+31EF and U+2EBF0.. are unassigned in Unicode 15.0 (Python 3.12) and assigned in 15.1 (3.13)
+    text = "faces west " + chr(cp) + " lit"
+    assert pii.screen_free_text(text) == (text, [])
+    import service as SV
+    from ledger import payload_sha256 as p
+    assert SV.request_sha({"request_id": "r", "vendor_text": text}) == p({"request_id": "r", "vendor_text": text})

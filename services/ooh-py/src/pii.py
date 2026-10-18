@@ -34,6 +34,7 @@ Names, spelled-out digits and letters used as separators cannot be detected reli
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 
@@ -76,11 +77,15 @@ _INTL_MIN_DIGITS = 8
 # the variation selectors.
 _INVISIBLE = re.compile("[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\ufe00-\ufe0f\uffa0"
                         "\U000e0100-\U000e01ef]")
-_REMOVED = ("Cf", "Co", "Cn")        # format, private-use and unassigned characters: removed, not read as a space
+# format and private-use characters: removed, not read as a space. Unassigned characters (Cn) are neither removed nor
+# read as a space but kept as typed (founder decision, AEGIS r11 reliability N1: which code points are unassigned
+# differs between Unicode versions, so removing them made the kept text and the request hash depend on the Python
+# build); the digit-cluster rule joins across them anyway.
+_REMOVED = ("Cf", "Co")
 
 
 def strip_format(text: str, hidden: str = "") -> str:
-    """NFKC; zero-width, format, private-use, unassigned and the invisible characters above replaced by ``hidden``
+    """NFKC; zero-width, format, private-use and the invisible characters above replaced by ``hidden``
     (removed by default), and a combining mark on a digit dropped (AEGIS r9 security F2, r10 source M-1); every decimal
     digit of any script read as its ASCII digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Removing a hidden character
     rejoins a digit group it split (a card); reading it as a space keeps it as a separator (an SSN): the screen reads
@@ -104,7 +109,8 @@ def screen_form(text: str, hidden: str = "") -> str:
     text while storage read a cleaned copy, so "123  45  6789" was redacted in the line but hashed in clear):
     ``strip_format``, every other non-printable character (controls, line and paragraph separators, other spaces)
     read as a space, and runs of spaces collapsed to one."""
-    return " ".join("".join(ch if ch.isprintable() else " " for ch in strip_format(text, hidden)).split())
+    return " ".join("".join(ch if ch.isprintable() or unicodedata.category(ch) == "Cn" else " "
+                            for ch in strip_format(text, hidden)).split())
 
 
 def _norm(text: str, hidden: str = "") -> str:
@@ -239,15 +245,20 @@ def _redact_once(t: str) -> str:
 CLUSTER_MIN_DIGITS = 9
 
 
+_ASCII_LETTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+
+
 def number_cluster_spans(t: str) -> list:
-    """The spans, first digit to last, of every run of text without a letter that holds CLUSTER_MIN_DIGITS digits."""
+    """The spans, first digit to last, of every run of text without an ASCII letter that holds CLUSTER_MIN_DIGITS
+    digits. Only A-Z and a-z end a cluster (founder decision, AEGIS r11 runtime O11-1 / security S11-1: Unicode letters
+    that look like punctuation, "ー", "ʼ", "ǀ", tatweel, joined digits unseen); every other character joins it."""
     out, first, last, count = [], None, None, 0
     for i, ch in enumerate(t + "a"):
-        if ch.isalpha():
+        if ch in _ASCII_LETTERS:
             if count >= CLUSTER_MIN_DIGITS:
                 out.append((first, last + 1))
             first, last, count = None, None, 0
-        elif ch.isdigit():
+        elif "0" <= ch <= "9":
             first = i if first is None else first
             last, count = i, count + 1
     return out
@@ -269,16 +280,12 @@ def _free_text_spans(t: str) -> list:
     return sorted(_spans(t) + number_cluster_spans(t))
 
 
-def screen_free_text(text: str) -> tuple:
-    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. With nothing
-    found, the text as kept is ``screen_form(text)``; else every e-mail, phone, card, SSN and digit cluster is
-    "[redacted]" in the normalised text, repeated until none is left."""
-    t = _norm(text)
-    kinds = set()
+def _redact_all(t: str, find, kinds: set) -> str:
+    """``t`` with every span ``find`` reports replaced by "[redacted]" (labelled into ``kinds``), until none is left."""
     for _ in range(4):
-        spans = _free_text_spans(t)
+        spans = sorted(find(t))
         if not spans:
-            break
+            return t
         out, pos = [], 0
         for lo, hi in spans:
             if hi <= pos:
@@ -288,9 +295,29 @@ def screen_free_text(text: str) -> tuple:
             out.append("[redacted]")
             pos = hi
         t = "".join(out) + t[pos:]
-    else:
-        if _free_text_spans(t):
-            t = "[redacted]"
+    return "[redacted]" if find(t) else t
+
+
+def screen_free_text(text: str) -> tuple:
+    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. The cluster
+    rule runs first on the text as it would be kept (``screen_form``), then once more with the e-mail, phone, card and
+    SSN rules after the @ and . spellings are read (``_norm``): a cluster either form shows is redacted (AEGIS r11
+    source S-1: "1234567%40" lost two digits to the "@" spelling and kept nine). With nothing found, the text as kept
+    is ``screen_form(text)``."""
+    kinds = set()
+    t = _redact_all(screen_form(text), number_cluster_spans, kinds)
+    t = _redact_all(_norm(t), _free_text_spans, kinds)
+    # HTML entities (founder decision, AEGIS r11 security S11-2: "4111&nbsp;1111&nbsp;…", "123&ndash;45&ndash;6789"):
+    # the decoded text is screened too, and kept decoded when it holds personal data; decoding is repeated for
+    # entities that spell entities ("&amp;nbsp;")
+    decoded = t
+    for _ in range(3):
+        once = html.unescape(decoded)
+        if once == decoded:
+            break
+        decoded = once
+    if decoded != t and _free_text_spans(_norm(decoded)):
+        t = _redact_all(_norm(decoded), _free_text_spans, kinds)
     if not kinds:
         return screen_form(text), []
     return " ".join(t.split()), sorted(kinds)

@@ -57,7 +57,7 @@ PROBES = SPACED + HIDDEN + ["faces west 14x48", "123 - 45 - 6789", "ref 2026-10-
 
 @pytest.mark.parametrize("text", PROBES)
 def test_r10_storage_redacts_exactly_when_the_screen_finds_personal_data(text):
-    assert sc.observed(text)["personal_data_redacted"] is pii.has_personal_data(text)
+    assert sc.observed(text)["personal_data_redacted"] is pii.free_text_has_personal_data(text)   # r11: one screen
 
 
 def test_r10_marks_on_letters_are_kept():
