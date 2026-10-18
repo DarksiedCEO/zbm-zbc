@@ -1,0 +1,5 @@
+'4\u200b111 1111 1111 1111' pii.has_personal_data(raw)= True | after observed() pre-pass: '4 111 1111 1111 1111' False | observed: x 4 111 1111 1111 1111
+'41\ufeff11 1111 1111 1111' pii.has_personal_data(raw)= True | after observed() pre-pass: '41 11 1111 1111 1111' False | observed: x 41 11 1111 1111 1111
+'4111 1111 1111 111\u20601' pii.has_personal_data(raw)= True | after observed() pre-pass: '4111 1111 1111 111 1' False | observed: x 4111 1111 1111 111 1
+'123-4\u200b5-6789' pii.has_personal_data(raw)= True | after observed() pre-pass: '123-4 5-6789' False | observed: x 123-4 5-6789
+'4111\u200b1111\u200b1111\u200b1111' pii.has_personal_data(raw)= True | after observed() pre-pass: '4111 1111 1111 1111' True | observed: x [redacted]

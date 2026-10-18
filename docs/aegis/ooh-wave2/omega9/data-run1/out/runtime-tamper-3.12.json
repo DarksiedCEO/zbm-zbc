@@ -1,0 +1,29 @@
+{
+ "integrity_at_start": {
+  "ok": true,
+  "checked_at": "2026-10-16T18:00:00Z",
+  "problem": null
+ },
+ "integrity_job": {
+  "job": "integrity",
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+  },
+  "ledger_valid": true
+ },
+ "audit_integrity": {
+  "integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+  },
+  "ledger_valid": true,
+  "log_length": 70
+ },
+ "write_after_disk_edit": 503,
+ "log_lines_mem": 70,
+ "file_problem": "the local log file differs from the lines this service holds: an operator must inspect it",
+ "restart": "REFUSED StoreCorrupt: log line 25 does not match its own hash"
+}

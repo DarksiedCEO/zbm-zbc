@@ -1,0 +1,332 @@
+{
+ "scen": "symzero",
+ "mode": "HW",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/src91",
+ "python": "3.13.9",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt9-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 70464,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T14:54:15Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.135,
+  "file_before": "missing",
+  "file_after": "ccc2f5ef69db64e92c6e5aa58fd597f6dd88cdd9d9710776ac5bb783a63226da",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 71504
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T14:54:16Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.141,
+  "file_before": "ccc2f5ef69db64e92c6e5aa58fd597f6dd88cdd9d9710776ac5bb783a63226da",
+  "file_after": "cb3879879f464c8c201fefcd0d5e19c491eec85fdbec20a7d5894b79d046afab",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72992
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "cb3879879f464c8c201fefcd0d5e19c491eec85fdbec20a7d5894b79d046afab",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 72944
+ },
+ "fault": {
+  "orig_sha": "cb3879879f464c8c201fefcd0d5e19c491eec85fdbec20a7d5894b79d046afab",
+  "disk": {
+   "kind": "symlink->/dev/zero",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "W3": {
+  "status": 503,
+  "body": {
+   "detail": "STORE_UNAVAILABLE",
+   "maybe": true
+  },
+  "elapsed_s": 0.129,
+  "file_before": "symlink->/dev/zero",
+  "file_after": "symlink->/dev/zero",
+  "file_unchanged": true,
+  "kind_after": "symlink->/dev/zero",
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": true,
+  "rss_kb": 72992
+ },
+ "A1": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T14:54:27Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.022,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 74480
+ },
+ "A2": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T14:54:27Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.015,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 75168
+ },
+ "J1": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T14:54:27Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.019,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 77392
+ },
+ "ST": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T14:54:27Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   }
+  },
+  "elapsed_s": 0.011
+ },
+ "J2": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T14:54:27Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.018,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 79584
+ },
+ "W4": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.006,
+  "file_before": "symlink->/dev/zero",
+  "file_after": "symlink->/dev/zero",
+  "file_unchanged": true,
+  "kind_after": "symlink->/dev/zero",
+  "anchors_before": 3,
+  "anchors_after": 3,
+  "pending_present": true,
+  "rss_kb": 79584
+ },
+ "after_writes": {
+  "disk": {
+   "kind": "symlink->/dev/zero",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.line"
+   ]
+  },
+  "target_unchanged": null,
+  "rss_kb": 79584
+ },
+ "J3": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T14:54:27Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.038,
+  "file": "f9a6e5692cc737459deaf764286d6e81746998852f7cdf97d798b742b529e35b",
+  "rss_kb": 82464
+ },
+ "A3": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T14:54:27Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 3
+  },
+  "elapsed_s": 0.01,
+  "file": "f9a6e5692cc737459deaf764286d6e81746998852f7cdf97d798b742b529e35b",
+  "rss_kb": 83184
+ },
+ "after_putback": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "f9a6e5692cc737459deaf764286d6e81746998852f7cdf97d798b742b529e35b",
+   "size": 2037,
+   "lines": 3,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 3
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T14:54:27Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.012,
+  "file_before": "f9a6e5692cc737459deaf764286d6e81746998852f7cdf97d798b742b529e35b",
+  "file_after": "f9a6e5692cc737459deaf764286d6e81746998852f7cdf97d798b742b529e35b",
+  "file_unchanged": true,
+  "kind_after": "regular",
+  "anchors_before": 3,
+  "anchors_after": 3,
+  "pending_present": false,
+  "rss_kb": 83184
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T14:54:27Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.149,
+  "file_before": "f9a6e5692cc737459deaf764286d6e81746998852f7cdf97d798b742b529e35b",
+  "file_after": "055fb5ca9c8a6fcb4bb949a9aa581f8deed7312f0715ae5fb1134ae19f8a8366",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false,
+  "rss_kb": 83904
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T14:54:28Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "elapsed_s": 0.014,
+  "file": "055fb5ca9c8a6fcb4bb949a9aa581f8deed7312f0715ae5fb1134ae19f8a8366",
+  "rss_kb": 70720
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T14:54:28Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.131,
+  "file_before": "055fb5ca9c8a6fcb4bb949a9aa581f8deed7312f0715ae5fb1134ae19f8a8366",
+  "file_after": "e750d7482dd7b5469c2397aefaec9feac0daf815a2e2cbcbf362dac0e7f151ef",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false,
+  "rss_kb": 72272
+ },
+ "final": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "e750d7482dd7b5469c2397aefaec9feac0daf815a2e2cbcbf362dac0e7f151ef",
+   "size": 3391,
+   "lines": 5,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 5,
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

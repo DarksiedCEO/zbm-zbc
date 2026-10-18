@@ -1,0 +1,23 @@
+== venv3.12
+>       assert hung == (True, True, True)
+E       assert (False, False, False) == (True, True, True)
+E         
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests/test_zz_aegis_sec8_poc.py:27: AssertionError
+1 failed in 8.73s
+== venv3.13
+>       assert hung == (True, True, True)
+E       assert (False, False, False) == (True, True, True)
+E         
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests/test_zz_aegis_sec8_poc.py:27: AssertionError
+1 failed in 1.74s
+after 4 s: job alive False | write alive False | audit alive False {'job': 200, 'audit': 200, 'write': 503}
+after release: {'job': 200, 'audit': 200, 'write': 503}
+        out = {}
+        def job(): out["job"] = h.post("/jobs/integrity/run", {"request_id": rid()}, caller="scheduler").status_code
+        print("\nafter 4 s: job alive", tj.is_alive(), "| write alive", tw.is_alive(), "| audit alive", tr.is_alive(), out)

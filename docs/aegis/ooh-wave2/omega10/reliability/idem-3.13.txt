@@ -1,0 +1,6 @@
+old
+A 201 B(other card, same id) 409 False C(other text) 409
+after restart, same body 201 True
+new
+A 201 B(other card, same id) 201 True C(other text) 409
+after restart, same body 201 True

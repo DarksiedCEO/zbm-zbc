@@ -1,0 +1,2549 @@
+{
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3",
+ "python": "3.12.14",
+ "cases": [
+  {
+   "kind": "unit.vendor_text",
+   "secret": "123.45.6789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-4137f6ef104da6e82d7924f9f5c0bc79b4d6443d",
+    "campaign_id": "ooh-cmp-095ef66d92f42b31d61de27b7ffd7df4edc845de",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-3a14e9e19be1a8c8021c8e8f31d17f756956268f",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-a02d1da0",
+    "unit_key": "facea2d1da0",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:06Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "123.45.6789",
+    "digits": "123456789",
+    "body_sha": "2705d1456905541c20d2549a2de092158781b899705710a556a1dd1785bbbc89",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "123_45_6789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-9b634fa72a67a02eb59d57dcad7fe2fa2b425f5a",
+    "campaign_id": "ooh-cmp-23bcad3fec2c1ab226aee2b59f8fa9ae2b3afaba",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-149425ad8ad0d50f378c828fdea9f2cf2a187cbd",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-8a2a3890",
+    "unit_key": "face8a2a3890",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:07Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "123_45_6789",
+    "digits": "123456789",
+    "body_sha": "3047bbeb1106327fd6fc5c3c9aec327e995188c2b6f3dd3ce175c09a009a8c1e",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "123/45/6789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-45b5e20147eeefc769deba9241328e2a20acec35",
+    "campaign_id": "ooh-cmp-75023d46b6525df71c098d45ded4bfef24570ad1",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-93cd1ba1a250d930fd767be475ea8138c5d2a895",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-91cef693",
+    "unit_key": "face91cef693",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:09Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "123/45/6789",
+    "digits": "123456789",
+    "body_sha": "a1e21a61737f2cff69167abd00db34215fbed5db9b3bfe27ec6b8fe7abfa9d0c",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "SSN:123.45.6789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-bf02eb04b93defb18958e82e4bf5ca27f9028e1d",
+    "campaign_id": "ooh-cmp-6491ab9a4595fa41f3dffce28b36942482fb43db",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-cb8a881c48c1575782c2ef1436ab2efb6f1727d3",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-37a234f2",
+    "unit_key": "face37a234f2",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact SSN:[redacted] for access",
+     "truncated": false,
+     "sha256": "e49481c56e3f4cb9c93fa797b7187b0cc11e49ded96af3034106040bb3ebf8ea"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:10Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "SSN:123.45.6789",
+    "digits": "123456789",
+    "body_sha": "6fa70ffc456ed9ddcec22967677ebd2bfb71a4da1124e7a4c399aa92d2505627",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact SSN:[redacted] for access",
+    "truncated": false,
+    "sha256": "e49481c56e3f4cb9c93fa797b7187b0cc11e49ded96af3034106040bb3ebf8ea"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "ITIN:912.70.1234",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-baf0c6dec90199ea4a1bd824269bb6a52ef4d982",
+    "campaign_id": "ooh-cmp-629cc57223e53532a5d485d1aec9b59cda63ba71",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-a347ca97b2161e52bd82aab0ded85b73c2d2120a",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-fe57d83f",
+    "unit_key": "facefe57d83f",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact ITIN:[redacted] for access",
+     "truncated": false,
+     "sha256": "fec778b197d484ab1ee78aaeefe0b2e9d31ba1cbb06af73992b4520f08a3a2c6"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:11Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "ITIN:912.70.1234",
+    "digits": "912701234",
+    "body_sha": "c8479c70e08198f7e924e65ccd9e8cdc38cb7bf21810308a3ac6b48f5677e800",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact ITIN:[redacted] for access",
+    "truncated": false,
+    "sha256": "fec778b197d484ab1ee78aaeefe0b2e9d31ba1cbb06af73992b4520f08a3a2c6"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-44db496d91223444016fd72dca77f7f7b022ab0c",
+    "campaign_id": "ooh-cmp-4b3e8e7bb69843db72f5d576c0e92ae289951e85",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-757313c3c410d7b5fa02124ab84d937d68c982fc",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-78b4aa01",
+    "unit_key": "face78b4aa1",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:12Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+    "digits": "4111111111111111",
+    "body_sha": "8fc87dc8f7c9f75e5d60f17266dfbfb07a92cd180245fadce389c21ec470d4b6",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "\u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-e22b94041d780264675d3963ef3a8d7f8d11c1a5",
+    "campaign_id": "ooh-cmp-60731a1f1c7609761105a6239bdee487deb296d5",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-92ae8420aeab07ed72209aa62227910652faa066",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-6f7ddbb0",
+    "unit_key": "face6f7ddbb0",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:13Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "\u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967",
+    "digits": "4111111111111111",
+    "body_sha": "83c73560ed545a6e2ee7486e9c3cddc6406a5ace7c6055212d4f9686db03015a",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f4\u06f4\u06f4\u06f4",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-a89415be0e9f0f4a57b83c9565cfe2e8a57e03dd",
+    "campaign_id": "ooh-cmp-96171e279b0e25b8b423b37d143843293394633a",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-0659a7aaec64fd7e71eb8db2b600a8a66599e9c8",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-0100952b",
+    "unit_key": "face100952b",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:15Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f4\u06f4\u06f4\u06f4",
+    "digits": "5555555555554444",
+    "body_sha": "455d41b588af48174e75976ed2e9f27caaf06f77b41371db58813fa2d3745b3d",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "4111 11\u200b11 1111 1111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-11d0828661404a457a172b073da3bf273ff5c5a1",
+    "campaign_id": "ooh-cmp-a3e07b801d523dd670d600e7ca3fabf22d0469db",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-328f4352dee0769f5aa4476830130609edbfcbdb",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-6ce65375",
+    "unit_key": "face6ce65375",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:16Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "4111 11\u200b11 1111 1111",
+    "digits": "4111111111111111",
+    "body_sha": "a632c565ebb86c25c6f71114ae2f2e1bc6c95c5acb1c078ca2e5071fb340250e",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "4111\u200b1111\u200b1111\u200b1111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-bb9a3e1ae3b0203286964f36c314dacf6bc59ca0",
+    "campaign_id": "ooh-cmp-de11937bfe2e72d7adde8863c054f9d99a22b9fc",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-44f1c0e4cae559857dc25d8c87219a7f6bd29efc",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-5e3c44e6",
+    "unit_key": "face5e3c44e6",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:18Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "4111\u200b1111\u200b1111\u200b1111",
+    "digits": "4111111111111111",
+    "body_sha": "41e81f5e92ef701d2aceddcb9d74f88f321cd5eec2d7952c7e611cc84daa6a94",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "123-4\u200b5-6789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-800ee6182675836c4a19e223a1e914b45b56d53b",
+    "campaign_id": "ooh-cmp-433b00349173be66209947ca949b3a345aa8a9f2",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-8c774e4b0b305bd41c0d92b76cb80abc6a13f388",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-13b85f00",
+    "unit_key": "face13b85f0",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:19Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "123-4\u200b5-6789",
+    "digits": "123456789",
+    "body_sha": "dd64cf7b631501fb4b93fa307add11eb0d25b79887b8941362b8ef92e8aff56c",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "4111 1111 1111 1111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-a62a1ca0334bbb3e0a721ea53a53485128612023",
+    "campaign_id": "ooh-cmp-25441f802fe73b1a283652e749a7f56bb405408e",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-ee2c6286961814482abf9c6a3f10246398b0aacb",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-e32b13bf",
+    "unit_key": "facee32b13bf",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:20Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "4111 1111 1111 1111",
+    "digits": "4111111111111111",
+    "body_sha": "c3b2e2113c7a920da36137c8f33f60dfc28a21b3ae3750204f3ffebf3cd0171b",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "4111-1111-1111-1111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-595ff31eede1be9cf065a11ee93ce133c9fd6512",
+    "campaign_id": "ooh-cmp-f6e5717c8c200f2389181ebec24c807a835b0835",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-13a9855e102e5a684ccdc7fe2ad25319e89992af",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-47fda49f",
+    "unit_key": "face47fda49f",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:22Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "4111-1111-1111-1111",
+    "digits": "4111111111111111",
+    "body_sha": "eae5cfd5e2fb8d0d5b7a45c72aea055a7b0fb42605a0a222d79be83796fb096f",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "5555.5555.5555.4444",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-45e6c929924bc3db304c3b51927c5f9185e31827",
+    "campaign_id": "ooh-cmp-d7d142e0affa80efe7f2f10fba12128fd7c51e3b",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-37e0916e4e8db724b2cb7f3de25697651fb81c9e",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-6539b688",
+    "unit_key": "face6539b688",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:23Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "5555.5555.5555.4444",
+    "digits": "5555555555554444",
+    "body_sha": "6ef86c2dea90daf9673d24dd43d0af11e9e6d717e605fafeb42903c649ffe299",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "4111_1111_1111_1111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-3e11437968e8e371eec8c6535d1f01c4f234eda1",
+    "campaign_id": "ooh-cmp-246d6e9d727b9b41113c247b8c37872d64eebe7f",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-41ec23c478c0187a05113217ac84970c7ec57bd5",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-7bf46730",
+    "unit_key": "face7bf46730",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:24Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "4111_1111_1111_1111",
+    "digits": "4111111111111111",
+    "body_sha": "e19530101402db12a4b57d18e522e977810675b8ea9193d7549874db52214285",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "3782 822463 10005",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-e771aa51bb1255950a443d48dedad28442a13a0a",
+    "campaign_id": "ooh-cmp-cf48a3033cec5b013b159d81aa807d562fabd5f2",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-43ce6a3c61679d271c0404bf40ca1087d34f2051",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-12a3685b",
+    "unit_key": "face12a3685b",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:25Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "3782 822463 10005",
+    "digits": "378282246310005",
+    "body_sha": "88640a8eb07bf424696d7e0834654265aae277ddc159846a10f45877f84ded80",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "123-45-6789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-6397aa8a5cdd081c11d4635570c7b20456ca3cae",
+    "campaign_id": "ooh-cmp-e59aeac0f87ec69d35a8f9a063e7a6f4e9b6708d",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-ce747b27bf92030a96b2de15bcd0d4300d6057b2",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-45de5f45",
+    "unit_key": "face45de5f45",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:27Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "123-45-6789",
+    "digits": "123456789",
+    "body_sha": "4390dfa8eecacb20e77e9e1c1bf31b2afa544b02ce9a2f5efe69b66b570746cc",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "SSN 123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-9f72e73f94d732bb4fcb1a8ca0955c427a2db32c",
+    "campaign_id": "ooh-cmp-e24f91973df27a35a599409e2882a04de3125fdf",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-23caeb60f32543de01bc1a88849859b8635b497a",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-ccf202db",
+    "unit_key": "faceccf202db",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact SSN [redacted] for access",
+     "truncated": false,
+     "sha256": "936acbf13a2b3a8047bb962785304aa83f8aa29374f98a970364984a0ee9dfdc"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:28Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "SSN 123456789",
+    "digits": "123456789",
+    "body_sha": "bebee818363f381019c45827a6aa65d21970cd4c3ecdb0b46e27776a38aba562",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact SSN [redacted] for access",
+    "truncated": false,
+    "sha256": "936acbf13a2b3a8047bb962785304aa83f8aa29374f98a970364984a0ee9dfdc"
+   },
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "secret": "social security number: 123 45 6789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-09f4386bc9f0cef22eff2652e7e929bbb06235e5",
+    "campaign_id": "ooh-cmp-b89b83a3171d83000543b70c4cf5b9107ccb947f",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-9f607814dacc1a35dc5ac1bb772506548508e969",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-f7e1fc65",
+    "unit_key": "facef7e1fc65",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "text": "faces west, contact social security number: [redacted] for access",
+     "truncated": false,
+     "sha256": "9f21b2c9513fcec5334b5161677c8241dfdbeee631163c1bc31513b22b14f048"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T15:58:29Z"
+     }
+    ]
+   },
+   "expect": "201 redacted",
+   "scan": {
+    "secret": "social security number: 123 45 6789",
+    "digits": "123456789",
+    "body_sha": "1a6705e508ccad3c5e1a329bc57ed9f28a5bfe72de7ca6690f091e207f6f1f1b",
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "unit_get_contains_secret": false,
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "text": "faces west, contact social security number: [redacted] for access",
+    "truncated": false,
+    "sha256": "9f21b2c9513fcec5334b5161677c8241dfdbeee631163c1bc31513b22b14f048"
+   },
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "123.45.6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123.45.6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "123_45_6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123_45_6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "123/45/6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123/45/6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "SSN:123.45.6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "SSN:123.45.6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "ITIN:912.70.1234",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "ITIN:912.70.1234",
+    "digits": "912701234",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "\u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "\u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f4\u06f4\u06f4\u06f4",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f4\u06f4\u06f4\u06f4",
+    "digits": "5555555555554444",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "4111 11\u200b11 1111 1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111 11\u200b11 1111 1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "4111\u200b1111\u200b1111\u200b1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111\u200b1111\u200b1111\u200b1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "123-4\u200b5-6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123-4\u200b5-6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "4111 1111 1111 1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111 1111 1111 1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "4111-1111-1111-1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111-1111-1111-1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "5555.5555.5555.4444",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "5555.5555.5555.4444",
+    "digits": "5555555555554444",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "4111_1111_1111_1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111_1111_1111_1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "3782 822463 10005",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "3782 822463 10005",
+    "digits": "378282246310005",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "123-45-6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123-45-6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "SSN 123456789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "SSN 123456789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "secret": "social security number: 123 45 6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "social security number: 123 45 6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "123.45.6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123.45.6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 238,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "123_45_6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123_45_6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 261,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "123/45/6789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123/45/6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 284,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "SSN:123.45.6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "SSN:123.45.6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 307,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "ITIN:912.70.1234",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "ITIN:912.70.1234",
+    "digits": "912701234",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 330,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 353,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "\u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "\u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 376,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f4\u06f4\u06f4\u06f4",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f5\u06f5\u06f5\u06f5-\u06f4\u06f4\u06f4\u06f4",
+    "digits": "5555555555554444",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 399,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "4111 11\u200b11 1111 1111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111 11\u200b11 1111 1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 422,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "4111\u200b1111\u200b1111\u200b1111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111\u200b1111\u200b1111\u200b1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 445,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "123-4\u200b5-6789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123-4\u200b5-6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 468,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "4111-1111-1111-1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111-1111-1111-1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 491,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "5555.5555.5555.4444",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "5555.5555.5555.4444",
+    "digits": "5555555555554444",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 514,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "4111_1111_1111_1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111_1111_1111_1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 537,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "io-4111-1111-1111-1111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "io-4111-1111-1111-1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 560,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "123-45-6789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "123-45-6789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 583,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "SSN:123456789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA",
+    "field": "client_approval_doc_ref"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "SSN:123456789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 606,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "4111 1111 1111 1111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "4111 1111 1111 1111",
+    "digits": "4111111111111111",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 629,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "secret": "SSN 123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "scan": {
+    "secret": "SSN 123456789",
+    "digits": "123456789",
+    "body_sha": null,
+    "hits": [],
+    "files": [
+     "GET /ledger/entries",
+     "data/ooh.lock",
+     "data/ooh_log.jsonl",
+     "ledger_dir/ledger.jsonl.head",
+     "ledger_dir/ledger.jsonl.lock",
+     "ledger_store/ledger.jsonl",
+     "service.log (extra)"
+    ]
+   },
+   "ledger_entries_delta_at_refusal": 0,
+   "log_lines_at_refusal": 652,
+   "state_before": "PROPOSAL_SENT",
+   "state_after_refusal": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "control_approve_status": 200,
+   "absent": true
+  }
+ ],
+ "start": {
+  "status": "ok"
+ },
+ "final_ledger_verify": {
+  "entries": 1306,
+  "valid": true
+ },
+ "final_data_dir": [
+  "ooh.lock",
+  "ooh_log.jsonl"
+ ]
+}

@@ -1,0 +1,42 @@
+== venv3.12
+digits+space             len=4000 screen=0.0024 redact=0.0025 observed=0.0040 request_sha=0.0025
+digit pairs              len=3999 screen=0.0021 redact=0.0021 observed=0.0026 request_sha=0.0022
+4-groups no luhn         len=4000 screen=0.0038 redact=0.0041 observed=0.0045 request_sha=0.0041
+3-groups                 len=4000 screen=0.0072 redact=0.0151 observed=0.0067 request_sha=0.0068
+ssn cue + spaces         len=3993 screen=0.0017 redact=0.0199 observed=0.0031 request_sha=0.0029
+ssn word repeated        len=4000 screen=0.0038 redact=0.0072 observed=0.0021 request_sha=0.0018
+social security spaces   len=3965 screen=0.0016 redact=0.0016 observed=0.0008 request_sha=0.0015
+tax id spaces            len=3956 screen=0.0013 redact=0.0013 observed=0.0006 request_sha=0.0013
+at signs                 len=4000 screen=0.0014 redact=0.0014 observed=0.0018 request_sha=0.0015
+dots digits              len=4000 screen=0.0108 redact=0.0265 observed=0.0108 request_sha=0.0107
+plus digits              len=3999 screen=0.0022 redact=0.0022 observed=0.0027 request_sha=0.0023
+dash digits              len=4000 screen=0.0106 redact=0.0121 observed=0.0108 request_sha=0.0194
+SSN tail                 len=4000 screen=0.0305 redact=0.0093 observed=0.0097 request_sha=0.0096
+mixed sep                len=3996 screen=0.0030 redact=0.0031 observed=0.0037 request_sha=0.0032
+arabic digits            len=4000 screen=0.0027 redact=0.0026 observed=0.0031 request_sha=0.0027
+zw between digits        len=4000 screen=0.0050 redact=0.0096 observed=0.0146 request_sha=0.0149
+letters/digits           len=4000 screen=0.0110 redact=0.0150 observed=0.0277 request_sha=0.0111
+email local              len=3993 screen=0.0099 redact=0.0136 observed=0.0100 request_sha=0.0099
+ssn digit run            len=3997 screen=0.0108 redact=0.0108 observed=0.0114 request_sha=0.0106
+worst total per field 0.0648
+== venv3.13
+digits+space             len=4000 screen=0.0025 redact=0.0025 observed=0.0030 request_sha=0.0030
+digit pairs              len=3999 screen=0.0022 redact=0.0029 observed=0.0026 request_sha=0.0033
+4-groups no luhn         len=4000 screen=0.0208 redact=0.0069 observed=0.0060 request_sha=0.0043
+3-groups                 len=4000 screen=0.0073 redact=0.0073 observed=0.0078 request_sha=0.0073
+ssn cue + spaces         len=3993 screen=0.0019 redact=0.0019 observed=0.0014 request_sha=0.0019
+ssn word repeated        len=4000 screen=0.0134 redact=0.0020 observed=0.0026 request_sha=0.0027
+social security spaces   len=3965 screen=0.0019 redact=0.0019 observed=0.0010 request_sha=0.0020
+tax id spaces            len=3956 screen=0.0017 redact=0.0107 observed=0.0008 request_sha=0.0017
+at signs                 len=4000 screen=0.0016 redact=0.0016 observed=0.0024 request_sha=0.0018
+dots digits              len=4000 screen=0.0139 redact=0.0222 observed=0.0161 request_sha=0.0123
+plus digits              len=3999 screen=0.0024 redact=0.0024 observed=0.0029 request_sha=0.0024
+dash digits              len=4000 screen=0.0123 redact=0.0123 observed=0.0130 request_sha=0.0124
+SSN tail                 len=4000 screen=0.0111 redact=0.0115 observed=0.0115 request_sha=0.0112
+mixed sep                len=3996 screen=0.0032 redact=0.0032 observed=0.0036 request_sha=0.0032
+arabic digits            len=4000 screen=0.0027 redact=0.0027 observed=0.0032 request_sha=0.0027
+zw between digits        len=4000 screen=0.0057 redact=0.0111 observed=0.0169 request_sha=0.0175
+letters/digits           len=4000 screen=0.0131 redact=0.0130 observed=0.0134 request_sha=0.0134
+email local              len=3993 screen=0.0134 redact=0.0119 observed=0.0189 request_sha=0.0115
+ssn digit run            len=3997 screen=0.0207 redact=0.0121 observed=0.0173 request_sha=0.0122
+worst total per field 0.0645

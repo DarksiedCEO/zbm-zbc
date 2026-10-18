@@ -1,0 +1,331 @@
+{
+ "scen": "symzero",
+ "mode": "H",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt10-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 69360,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T15:57:36Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.142,
+  "file_before": "missing",
+  "file_after": "702ec793e72e5dbc75079670e30ff8efabfbc6323942450e3ba71db1afca81c7",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 70320
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T15:57:36Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.117,
+  "file_before": "702ec793e72e5dbc75079670e30ff8efabfbc6323942450e3ba71db1afca81c7",
+  "file_after": "a521c441895c3982d760cbbb6557bb8a0fc87910abfe33b8f87432b592f5b199",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71840
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "a521c441895c3982d760cbbb6557bb8a0fc87910abfe33b8f87432b592f5b199",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71824
+ },
+ "fault": {
+  "orig_sha": "a521c441895c3982d760cbbb6557bb8a0fc87910abfe33b8f87432b592f5b199",
+  "disk": {
+   "kind": "symlink->/dev/zero",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "A1": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:57:47Z",
+    "problem": "the local log file cannot be read (OSError)"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.02,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 72592
+ },
+ "A2": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:57:47Z",
+    "problem": "the local log file cannot be read (OSError)"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.014,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 72592
+ },
+ "J1": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:57:48Z",
+    "problem": "the local log file cannot be read (OSError)"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.018,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 72656
+ },
+ "ST": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:57:48Z",
+    "problem": "the local log file cannot be read (OSError)"
+   }
+  },
+  "elapsed_s": 0.011
+ },
+ "W3": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.008,
+  "file_before": "symlink->/dev/zero",
+  "file_after": "symlink->/dev/zero",
+  "file_unchanged": true,
+  "kind_after": "symlink->/dev/zero",
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72656
+ },
+ "J2": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:57:48Z",
+    "problem": "the local log file cannot be read (OSError)"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.019,
+  "file": "symlink->/dev/zero",
+  "rss_kb": 74032
+ },
+ "W4": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.014,
+  "file_before": "symlink->/dev/zero",
+  "file_after": "symlink->/dev/zero",
+  "file_unchanged": true,
+  "kind_after": "symlink->/dev/zero",
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 74032
+ },
+ "after_writes": {
+  "disk": {
+   "kind": "symlink->/dev/zero",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_unchanged": null,
+  "rss_kb": 74032
+ },
+ "J3": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T15:57:48Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.024,
+  "file": "a521c441895c3982d760cbbb6557bb8a0fc87910abfe33b8f87432b592f5b199",
+  "rss_kb": 74032
+ },
+ "A3": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T15:57:48Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.02,
+  "file": "a521c441895c3982d760cbbb6557bb8a0fc87910abfe33b8f87432b592f5b199",
+  "rss_kb": 74032
+ },
+ "after_putback": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "a521c441895c3982d760cbbb6557bb8a0fc87910abfe33b8f87432b592f5b199",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T15:57:48Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.157,
+  "file_before": "a521c441895c3982d760cbbb6557bb8a0fc87910abfe33b8f87432b592f5b199",
+  "file_after": "8bd54f468bee1f9ccc5aece484d365df8a331a23af99848a5e601682967d02ef",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": false,
+  "rss_kb": 74048
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T15:57:48Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.138,
+  "file_before": "8bd54f468bee1f9ccc5aece484d365df8a331a23af99848a5e601682967d02ef",
+  "file_after": "042f87079813f7de417caf7591b5e6d9b60e4f633a2ce1b821068f3f9fe2f3fa",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false,
+  "rss_kb": 74080
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T15:57:49Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "elapsed_s": 0.024,
+  "file": "042f87079813f7de417caf7591b5e6d9b60e4f633a2ce1b821068f3f9fe2f3fa",
+  "rss_kb": 70048
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T15:57:49Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.145,
+  "file_before": "042f87079813f7de417caf7591b5e6d9b60e4f633a2ce1b821068f3f9fe2f3fa",
+  "file_after": "c34f18082198e3bff6774c714d54afee95c572546ce985a2597996c65d369b48",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false,
+  "rss_kb": 71648
+ },
+ "final": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "c34f18082198e3bff6774c714d54afee95c572546ce985a2597996c65d369b48",
+   "size": 3391,
+   "lines": 5,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 5,
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

@@ -1,0 +1,17 @@
+{
+ "log": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data9work/pii-91-3.12/unit-01a54629/ooh/ooh_log.jsonl",
+ "mode": "ssn_area",
+ "known": "123",
+ "targets": 1,
+ "results": [
+  {
+   "seq": 21,
+   "template": "faces west, contact [redacted] for access",
+   "recovered": "123-45-6789",
+   "candidates_tried": 456790,
+   "seconds": 1.09,
+   "candidates_per_s": 417325
+  }
+ ],
+ "full_space_note": "a 16-digit card with only the 6-digit BIN known: 10^9 Luhn-valid numbers x separators; a 9-digit SSN with nothing known: 10^9. Divide by the measured candidates/s (single CPU core, Python hashlib); not measured on a GPU."
+}

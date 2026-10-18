@@ -1,0 +1,100 @@
+{
+ "scen": "rdir",
+ "mode": "X",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_91ea9a1",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt10-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 69200,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T16:06:37Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.056,
+  "file_before": "missing",
+  "file_after": "8a190041962d56cecb295d1d9a7765c90fde721e3655224f3bcde20202ebc506",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 70192
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T16:06:38Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.096,
+  "file_before": "8a190041962d56cecb295d1d9a7765c90fde721e3655224f3bcde20202ebc506",
+  "file_after": "deaf932656be021d8e140ac238cde668bf0318b5d3995a66be0f37cabfaf6f37",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71712
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "deaf932656be021d8e140ac238cde668bf0318b5d3995a66be0f37cabfaf6f37",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71696
+ },
+ "fault": {
+  "orig_sha": "deaf932656be021d8e140ac238cde668bf0318b5d3995a66be0f37cabfaf6f37",
+  "disk": {
+   "kind": "dir",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "stop": "SIGTERM",
+ "restart_on_fault": {
+  "exited": 1,
+  "after_s": 0.57,
+  "peak_rss_kb": 58928,
+  "log_tail": [
+   "    with open(self.path, \"rb\") as fh:",
+   "         ^^^^^^^^^^^^^^^^^^^^^",
+   "IsADirectoryError: [Errno 21] Is a directory: '/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c91ea9a1_rdir_X_3.12/ooh/ooh_log.jsonl'"
+  ]
+ },
+ "restart_rss_kb": null,
+ "restart_alive": false,
+ "kill_after_restart": "already exited rc 1",
+ "disk_after": {
+  "kind": "dir",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ },
+ "target_unchanged": null
+}

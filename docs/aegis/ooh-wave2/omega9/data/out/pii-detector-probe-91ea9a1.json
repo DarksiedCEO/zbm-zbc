@@ -1,0 +1,127 @@
+[
+{
+"text": "123-45-6789",
+"detected": true,
+"redacted": "x [redacted] y"
+},
+{
+"text": "123.45.6789",
+"detected": false,
+"redacted": "x 123.45.6789 y"
+},
+{
+"text": "123_45_6789",
+"detected": false,
+"redacted": "x 123_45_6789 y"
+},
+{
+"text": "123:45:6789",
+"detected": false,
+"redacted": "x 123:45:6789 y"
+},
+{
+"text": "123/45/6789",
+"detected": false,
+"redacted": "x 123/45/6789 y"
+},
+{
+"text": "123 45 6789",
+"detected": false,
+"redacted": "x 123 45 6789 y"
+},
+{
+"text": "123456789",
+"detected": false,
+"redacted": "x 123456789 y"
+},
+{
+"text": "SSN 123.45.6789",
+"detected": false,
+"redacted": "x SSN 123.45.6789 y"
+},
+{
+"text": "SSN: 123_45_6789",
+"detected": false,
+"redacted": "x SSN: 123_45_6789 y"
+},
+{
+"text": "SSN 123/45/6789",
+"detected": false,
+"redacted": "x SSN 123/45/6789 y"
+},
+{
+"text": "SSN 123:45:6789",
+"detected": false,
+"redacted": "x SSN 123:45:6789 y"
+},
+{
+"text": "SSN 123 45 6789",
+"detected": true,
+"redacted": "x SSN [redacted] y"
+},
+{
+"text": "SSN 123456789",
+"detected": true,
+"redacted": "x SSN [redacted] y"
+},
+{
+"text": "social security number 123.45.6789",
+"detected": false,
+"redacted": "x social security number 123.45.6789 y"
+},
+{
+"text": "tax id 123_45_6789",
+"detected": false,
+"redacted": "x tax id 123_45_6789 y"
+},
+{
+"text": "4111 1111 1111 1111",
+"detected": true,
+"redacted": "x [redacted] y"
+},
+{
+"text": "4111.1111.1111.1111",
+"detected": true,
+"redacted": "x [redacted] y"
+},
+{
+"text": "4111111111111111",
+"detected": true,
+"redacted": "x [redacted] y"
+},
+{
+"text": "٤١١١ ١١١١ ١١١١ ١١١١",
+"detected": false,
+"redacted": "x ٤١١١ ١١١١ ١١١١ ١١١١ y"
+},
+{
+"text": "٤١١١١١١١١١١١١١١١",
+"detected": true,
+"redacted": "x [redacted] y"
+},
+{
+"text": "४१११-११११-११११-११११",
+"detected": false,
+"redacted": "x ४१११-११११-११११-११११ y"
+},
+{
+"text": "٥٥٥٥ ٥٥٥٥ ٥٥٥٥ ٤٤٤٤",
+"detected": false,
+"redacted": "x ٥٥٥٥ ٥٥٥٥ ٥٥٥٥ ٤٤٤٤ y"
+},
+{
+"text": "١٢٣-٤٥-٦٧٨٩",
+"detected": true,
+"redacted": "x [redacted] y"
+},
+{
+"text": "١٢٣.٤٥.٦٧٨٩",
+"detected": false,
+"redacted": "x ١٢٣.٤٥.٦٧٨٩ y"
+},
+{
+"text": "SSN १२३४५६७८९",
+"detected": true,
+"redacted": "x SSN [redacted] y"
+}
+]

@@ -1,0 +1,62 @@
+[
+ {
+  "first": "contact 4111 1111 1111 1111 for access",
+  "retry": "contact 5555 5555 5555 4444 for access",
+  "first_status": 201,
+  "retry_status": 201,
+  "retry_detail": null,
+  "same_unit_answered": true,
+  "lines_added_by_retry": 0,
+  "units": 1
+ },
+ {
+  "first": "contact 123-45-6789 for access",
+  "retry": "contact 987-65-4321 for access",
+  "first_status": 201,
+  "retry_status": 201,
+  "retry_detail": null,
+  "same_unit_answered": true,
+  "lines_added_by_retry": 0,
+  "units": 1
+ },
+ {
+  "first": "contact 123-45-6789 for access",
+  "retry": "contact 4111 1111 1111 1111 for access",
+  "first_status": 201,
+  "retry_status": 201,
+  "retry_detail": null,
+  "same_unit_answered": true,
+  "lines_added_by_retry": 0,
+  "units": 1
+ },
+ {
+  "first": "contact 123-45-6789 for access",
+  "retry": "contact 123-45-6789 for access ",
+  "first_status": 201,
+  "retry_status": 409,
+  "retry_detail": "REQUEST_ID_REUSED",
+  "same_unit_answered": false,
+  "lines_added_by_retry": 0,
+  "units": 1
+ },
+ {
+  "first": "contact 123-45-6789 for access",
+  "retry": "contact 123-45-6789 for access",
+  "first_status": 201,
+  "retry_status": 201,
+  "retry_detail": null,
+  "same_unit_answered": true,
+  "lines_added_by_retry": 0,
+  "units": 1
+ },
+ {
+  "first": "faces west",
+  "retry": "faces west ",
+  "first_status": 201,
+  "retry_status": 409,
+  "retry_detail": "REQUEST_ID_REUSED",
+  "same_unit_answered": false,
+  "lines_added_by_retry": 0,
+  "units": 1
+ }
+]

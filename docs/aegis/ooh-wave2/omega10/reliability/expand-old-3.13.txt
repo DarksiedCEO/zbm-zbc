@@ -1,0 +1,7 @@
+old fdfa+411 normlen 9768 has_ms 6.5 redact_ms 6.5
+old paren-digits normlen 12000 has_ms 23.2 redact_ms 22.8
+old circled-411grp normlen 10000 has_ms 5.0 redact_ms 5.0
+old fdfa-only normlen 72000 has_ms 33.6 redact_ms 33.1
+old 411-dot-fw normlen 4000 has_ms 14.7 redact_ms 15.0
+old phone10 normlen 3993 has_ms 2.0 redact_ms 4.9
+old 4111x normlen 4000 has_ms 2.6 redact_ms 4.9

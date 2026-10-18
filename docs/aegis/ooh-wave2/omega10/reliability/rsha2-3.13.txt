@@ -1,0 +1,2 @@
+new worst 6 request_sha at 4000 chars (min of 5, ms): [('fdfa', 53.6), ('x-after-card', 46.4), ('arabic-run', 34.8), ('long-digit-run', 32.5), ('fw-long-digit-run', 31.7), ('circled-paren', 27.8)]
+old worst 6 request_sha at 4000 chars (min of 5, ms): [('fdfa', 0.0), ('arabic-run', 0.0), ('circled-paren', 0.0), ('fw-long-digit-run', 0.0), ('fullwidth-digits', 0.0), ('nfkc-expand-fdfa-digits', 0.0)]

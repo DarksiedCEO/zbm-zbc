@@ -1,0 +1,100 @@
+{
+ "scen": "rzero",
+ "mode": "X",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_91ea9a1",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt10-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 69168,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T16:07:17Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.106,
+  "file_before": "missing",
+  "file_after": "5c413cf0735fc88e667470754053e9c84d6d55eda05e1cc08c972ad770a8ffbc",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 70128
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T16:07:17Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.051,
+  "file_before": "5c413cf0735fc88e667470754053e9c84d6d55eda05e1cc08c972ad770a8ffbc",
+  "file_after": "399ab2160f5f9853a5d1c7343ab78fbdba772a47fb0dbc819e45e8fee0f68396",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71680
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "399ab2160f5f9853a5d1c7343ab78fbdba772a47fb0dbc819e45e8fee0f68396",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71664
+ },
+ "fault": {
+  "orig_sha": "399ab2160f5f9853a5d1c7343ab78fbdba772a47fb0dbc819e45e8fee0f68396",
+  "disk": {
+   "kind": "symlink->/dev/zero",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "stop": "SIGTERM",
+ "restart_on_fault": {
+  "killed_by_driver_rss_kb": 846416,
+  "after_s": 0.651,
+  "peak_rss_kb": 846416,
+  "log_tail": [
+   "INFO:     Waiting for application shutdown.",
+   "INFO:     Application shutdown complete.",
+   "INFO:     Finished server process [77336]"
+  ]
+ },
+ "restart_rss_kb": null,
+ "restart_alive": false,
+ "kill_after_restart": "already exited rc -9",
+ "disk_after": {
+  "kind": "symlink->/dev/zero",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ },
+ "target_unchanged": null
+}

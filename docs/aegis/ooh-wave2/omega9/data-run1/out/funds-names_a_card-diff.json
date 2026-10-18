@@ -1,0 +1,29 @@
+{
+ "corpus_sha256_prefix": "db210a550d7e001b",
+ "99569bd-3.12": {
+  "n": 77847,
+  "refused_card": 9073,
+  "sha256": "708f82c80a99ceaf0c61ddf039574e3f298998642c578d1826c3341efe3ef004"
+ },
+ "99569bd-3.13": {
+  "n": 77847,
+  "refused_card": 9073,
+  "sha256": "708f82c80a99ceaf0c61ddf039574e3f298998642c578d1826c3341efe3ef004"
+ },
+ "91ea9a1-3.12": {
+  "n": 77847,
+  "refused_card": 9073,
+  "sha256": "708f82c80a99ceaf0c61ddf039574e3f298998642c578d1826c3341efe3ef004"
+ },
+ "91ea9a1-3.13": {
+  "n": 77847,
+  "refused_card": 9073,
+  "sha256": "708f82c80a99ceaf0c61ddf039574e3f298998642c578d1826c3341efe3ef004"
+ },
+ "differences_99569bd_vs_91ea9a1_3.12": 0,
+ "examples": [],
+ "py_312_eq_313": {
+  "99569bd": true,
+  "91ea9a1": true
+ }
+}

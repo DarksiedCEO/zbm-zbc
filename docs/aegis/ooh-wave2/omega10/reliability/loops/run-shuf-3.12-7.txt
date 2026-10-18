@@ -1,0 +1,17 @@
+........................................................................ [ 67%]
+..................................                                       [100%]
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/reliability/loops/bt-3.12/test_r9_rt1_start_refuses_a_sy0/d/ooh_log.jsonl size=195
+
+LEAK-FILE fifo /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/reliability/loops/bt-3.12/test_r9_rt1_start_refuses_a_fi0/d/ooh_log.jsonl size=0
+
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/reliability/loops/bt-3.12/test_r9_rt1_start_refuses_a_li0/d/ooh_log.jsonl size=9
+
+FDCOUNT-AT-END 12
+
+=============================== warnings summary ===============================
+../../../../../../venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+106 passed, 1 warning in 17.49s

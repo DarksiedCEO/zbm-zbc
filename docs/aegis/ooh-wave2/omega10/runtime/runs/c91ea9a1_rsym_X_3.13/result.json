@@ -1,0 +1,133 @@
+{
+ "scen": "rsym",
+ "mode": "X",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_91ea9a1",
+ "python": "3.13.9",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt10-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 70256,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T16:00:41Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.129,
+  "file_before": "missing",
+  "file_after": "663027ae4757bf3e7bd534ed5e359ff71ba74cb62cc29a56818eb3b9e8dbe097",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 71312
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T16:00:41Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.111,
+  "file_before": "663027ae4757bf3e7bd534ed5e359ff71ba74cb62cc29a56818eb3b9e8dbe097",
+  "file_after": "708f4d86abfa6482c58919bb2584b32001678a2b8a8d065784f3062497ed9f7e",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72752
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "708f4d86abfa6482c58919bb2584b32001678a2b8a8d065784f3062497ed9f7e",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 72736
+ },
+ "fault": {
+  "orig_sha": "708f4d86abfa6482c58919bb2584b32001678a2b8a8d065784f3062497ed9f7e",
+  "disk": {
+   "kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c91ea9a1_rsym_X_3.13/same_bytes_target.jsonl",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": "708f4d86abfa6482c58919bb2584b32001678a2b8a8d065784f3062497ed9f7e"
+ },
+ "stop": "SIGTERM",
+ "restart_on_fault": {
+  "health": {
+   "status": "degraded"
+  },
+  "after_s": 0.398,
+  "peak_rss_kb": 69408,
+  "log_tail": [
+   "INFO:     Application startup complete.",
+   "INFO:     Uvicorn running on http://127.0.0.1:55056 (Press CTRL+C to quit)",
+   "INFO:     127.0.0.1:56094 - \"GET /health HTTP/1.1\" 200 OK"
+  ]
+ },
+ "restart_rss_kb": 70480,
+ "restart_alive": true,
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T16:00:52Z",
+    "problem": "the local log file cannot be read (OSError)"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.018,
+  "file": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c91ea9a1_rsym_X_3.13/same_bytes_target.jsonl",
+  "rss_kb": 70592
+ },
+ "W_restart": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.01,
+  "file_before": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c91ea9a1_rsym_X_3.13/same_bytes_target.jsonl",
+  "file_after": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c91ea9a1_rsym_X_3.13/same_bytes_target.jsonl",
+  "file_unchanged": true,
+  "kind_after": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c91ea9a1_rsym_X_3.13/same_bytes_target.jsonl",
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 70640
+ },
+ "kill_after_restart": "SIGTERM",
+ "disk_after": {
+  "kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c91ea9a1_rsym_X_3.13/same_bytes_target.jsonl",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ },
+ "target_unchanged": true
+}

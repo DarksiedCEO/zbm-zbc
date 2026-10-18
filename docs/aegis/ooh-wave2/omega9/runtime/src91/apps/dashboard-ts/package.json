@@ -1,0 +1,26 @@
+{
+  "name": "zbm-revenue-recovery-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/serve.mjs dev",
+    "build": "next build",
+    "start": "node scripts/serve.mjs start",
+    "lint": "tsc --noEmit",
+    "test": "node --test tests/auth.test.ts tests/money.test.ts tests/bind.test.mjs tests/orchestrator-error.test.ts tests/ledger-status.test.ts tests/load-outcome.test.ts tests/finding-view.test.ts tests/status.live.test.mjs",
+    "check:dynamic": "node scripts/check-dynamic.mjs",
+    "hash-password": "node scripts/hash-password.mjs"
+  },
+  "dependencies": {
+    "next": "16.3.8",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/node": "22.9.0"
+  }
+}

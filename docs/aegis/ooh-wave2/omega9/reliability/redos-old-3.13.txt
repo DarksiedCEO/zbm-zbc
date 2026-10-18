@@ -1,0 +1,28 @@
+[old] n=100 top5 by max(has,redact) ms:
+   nfkc-expand-fdfa-digits            has=     0.50 redact=     0.20
+   long-digit-run                     has=     0.17 redact=     0.33
+   digits-4grp-dash                   has=     0.17 redact=     0.17
+   ssn-dashes                         has=     0.17 redact=     0.17
+   digit-sep-digit-no-letters         has=     0.17 redact=     0.17
+   all-max=0.50ms
+[old] n=300 top5 by max(has,redact) ms:
+   long-digit-run                     has=     0.61 redact=     1.22
+   digits-4grp-dash                   has=     0.63 redact=     0.64
+   ssn-dashes                         has=     0.63 redact=     0.63
+   digit-sep-digit-no-letters         has=     0.63 redact=     0.62
+   ssn-itin-longdash                  has=     0.62 redact=     0.60
+   all-max=1.22ms
+[old] n=4000 top5 by max(has,redact) ms:
+   long-digit-run                     has=     9.48 redact=    17.54
+   ssn-dashes                         has=     9.15 redact=     9.47
+   ssn-itin-longdash                  has=     9.37 redact=     9.46
+   digits-4grp-dash                   has=     9.14 redact=     9.00
+   digit-sep-digit-no-letters         has=     9.04 redact=     9.06
+   all-max=17.54ms
+[old] n=16000 top5 by max(has,redact) ms:
+   long-digit-run                     has=    36.06 redact=    71.13
+   ssn-dashes                         has=    37.10 redact=    36.66
+   digits-4grp-dash                   has=    36.42 redact=    36.36
+   digit-sep-digit-no-letters         has=    35.97 redact=    36.06
+   ssn-itin-longdash                  has=    35.64 redact=    34.75
+   all-max=71.13ms

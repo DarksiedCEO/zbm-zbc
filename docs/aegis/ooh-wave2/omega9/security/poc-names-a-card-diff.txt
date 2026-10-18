@@ -1,0 +1,57 @@
+== venv3.12
+old=True  new=False DIFF '4111ı1111ı1111ı1111'
+old=False new=False same '4111İ1111İ1111İ1111'
+old=True  new=False DIFF 'ref 4111ı1111ı1111ı1111'
+old=True  new=True  same '4111 1111 1111 1111'
+old=True  new=True  same '4111-1111-1111-1111'
+old=False new=False same 'BOA-ACH-021000021-20261018'
+old=False new=False same 'ACH-256074974-93982757'
+old=False new=False same 'trace 021000021000001'
+old=False new=False same '2026-10-18-001'
+old=False new=False same 'io-0000012345'
+DIFF 'ref 4242ı4242ı4242ı4242' old True new False
+DIFF '42424ı24242ı42424ı2' old True new False
+DIFF 'ref 4111ı1111ı1111ı1111x' old True new False
+DIFF '37828ı22463ı10005' old True new False
+DIFF 'io-378ı282ı246ı310ı005x' old True new False
+DIFF '8Z569ı4376310.384' old True new False
+DIFF 'ref 42424ı24242ı42424ı2 12' old True new False
+DIFF 'ref 424ı242ı424ı242ı424ı2 12' old True new False
+DIFF 'io-5555ı5555ı5555ı4444x' old True new False
+DIFF 'io-4242ı4242ı4242ı4242x' old True new False
+DIFF 'ref 3782ı8224ı6310ı005x' old True new False
+DIFF '4111ı1111ı1111ı1111x' old True new False
+DIFF '6011ı1111ı1111ı1117 12' old True new False
+DIFF 'ref 4111ı1111ı1111ı1111x' old True new False
+DIFF 'ref 37828ı22463ı10005x' old True new False
+random cases 200000 diffs 5747
+== venv3.13
+old=True  new=False DIFF '4111ı1111ı1111ı1111'
+old=False new=False same '4111İ1111İ1111İ1111'
+old=True  new=False DIFF 'ref 4111ı1111ı1111ı1111'
+old=True  new=True  same '4111 1111 1111 1111'
+old=True  new=True  same '4111-1111-1111-1111'
+old=False new=False same 'BOA-ACH-021000021-20261018'
+old=False new=False same 'ACH-256074974-93982757'
+old=False new=False same 'trace 021000021000001'
+old=False new=False same '2026-10-18-001'
+old=False new=False same 'io-0000012345'
+DIFF 'ref 4242ı4242ı4242ı4242' old True new False
+DIFF '42424ı24242ı42424ı2' old True new False
+DIFF 'ref 4111ı1111ı1111ı1111x' old True new False
+DIFF '37828ı22463ı10005' old True new False
+DIFF 'io-378ı282ı246ı310ı005x' old True new False
+DIFF '8Z569ı4376310.384' old True new False
+DIFF 'ref 42424ı24242ı42424ı2 12' old True new False
+DIFF 'ref 424ı242ı424ı242ı424ı2 12' old True new False
+DIFF 'io-5555ı5555ı5555ı4444x' old True new False
+DIFF 'io-4242ı4242ı4242ı4242x' old True new False
+DIFF 'ref 3782ı8224ı6310ı005x' old True new False
+DIFF '4111ı1111ı1111ı1111x' old True new False
+DIFF '6011ı1111ı1111ı1117 12' old True new False
+DIFF 'ref 4111ı1111ı1111ı1111x' old True new False
+DIFF 'ref 37828ı22463ı10005x' old True new False
+random cases 200000 diffs 5747
+DIFF 'ref 37828ı22463ı10005x' old True new False
+random cases 200000 diffs 5747
+random cases without U+0131: 200000 diffs 0

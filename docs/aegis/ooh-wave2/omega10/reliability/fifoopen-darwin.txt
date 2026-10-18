@@ -1,0 +1,6 @@
+O_WRONLY               -> HANGS (3 s timeout)
+O_WRONLY|O_NONBLOCK    -> OSError: [Errno 6] Device not configured: '/var/folders/2_/q
+O_RDWR                 -> opened
+O_RDWR|O_NONBLOCK      -> opened
+O_RDONLY               -> HANGS (3 s timeout)
+O_RDONLY|O_NONBLOCK    -> opened

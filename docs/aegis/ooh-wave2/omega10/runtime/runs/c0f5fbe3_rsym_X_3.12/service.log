@@ -1,0 +1,37 @@
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [87671]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:51346 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51359 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51362 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:51367 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [87671]
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3/services/ooh-py/src/store.py", line 141, in _read_at_start
+    fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 62] Too many levels of symbolic links: '/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/runs/c0f5fbe3_rsym_X_3.12/ooh/ooh_log.jsonl'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3/services/ooh-py/src/api.py", line 728, in <module>
+    main()
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3/services/ooh-py/src/api.py", line 723, in main
+    app, svc = build()
+               ^^^^^^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3/services/ooh-py/src/api.py", line 713, in build
+    svc = OohService(settings, Recorder(ledger), RecordLog(settings.data_dir), lock_token=token)
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3/services/ooh-py/src/store.py", line 126, in __init__
+    raw = self._read_at_start()
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3/services/ooh-py/src/store.py", line 145, in _read_at_start
+    raise StoreCorrupt(f"the log cannot be opened ({type(exc).__name__}); refusing to start: it must be a "
+store.StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link

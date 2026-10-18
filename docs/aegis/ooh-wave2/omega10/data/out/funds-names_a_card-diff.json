@@ -1,0 +1,23 @@
+{
+ "corpus_n": 77980,
+ "by_tree_python": {
+  "99569bd-3.12": {
+   "refused_card": 9122,
+   "sha256": "1d5f5981a7966eeed328e95ac261262b7870d6cf3f2f853137b0253c03490f53"
+  },
+  "0f5fbe3-3.12": {
+   "refused_card": 9122,
+   "sha256": "1d5f5981a7966eeed328e95ac261262b7870d6cf3f2f853137b0253c03490f53"
+  },
+  "99569bd-3.13": {
+   "refused_card": 9122,
+   "sha256": "1d5f5981a7966eeed328e95ac261262b7870d6cf3f2f853137b0253c03490f53"
+  },
+  "0f5fbe3-3.13": {
+   "refused_card": 9122,
+   "sha256": "1d5f5981a7966eeed328e95ac261262b7870d6cf3f2f853137b0253c03490f53"
+  }
+ },
+ "names_a_card_diff": [],
+ "row_diff_count": 0
+}

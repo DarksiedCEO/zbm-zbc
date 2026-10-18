@@ -1,0 +1,150 @@
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 50.81s
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 42.40s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 38.24s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 30.96s
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=9
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 16.50s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 17.03s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 11.11s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 9.09s
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 8.41s
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=9
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 13.02s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 14.86s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 20.57s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 30.48s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 14.96s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 10.78s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 9.07s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.97s
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 8.02s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 8.38s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 8.10s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.65s
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 8.39s
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=9
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.60s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.45s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.31s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.74s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 8.06s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=207
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=9
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.78s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe1/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.67s
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe0/data/ooh_log.jsonl size=9
+LEAK-FILE sparse /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_com0/data/ooh_log.jsonl size=268435456
+LEAK-FILE symlink /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/reliability/loops/bt-3.13/test_edges_integrity_check_doe2/data/ooh_log.jsonl size=207
+FDCOUNT-AT-END 12
+65 passed, 1 warning in 7.20s

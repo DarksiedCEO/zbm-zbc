@@ -1,0 +1,56 @@
+== venv3.12
+exit 0
+exit 0
+sparse 1073741824 B: file_problem='the local log file differs from the lines this service holds: an operator must inspect it' in 0.00s, maxrss 20 -> 20 MiB (macOS ru_maxrss in bytes)
+append refused in 0.0001s: the log file and memory disagree; refusing to write
+exit 0
+-- matrix
+euid 501
+same_size_edit               file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+grow_junk                    file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+shrink                       file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+prefix_edit                  file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+tail_edit                    file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+tail_append_fake_next        file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+symlink_same_bytes           file!=mem=False file_problem=PROBLEM write=REFUSED(local log open failed: OSError) 
+symlink_diff_bytes           file!=mem=True  file_problem=PROBLEM write=REFUSED(local log open failed: OSError) 
+hardlink_edit                file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+replaced_inode_same          file!=mem=False file_problem=ok write=COMMITTED 
+replaced_inode_diff          file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+deleted                      file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+truncated_to_0               file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+chmod_000_file               file!=mem=True  file_problem=PROBLEM write=REFUSED(local log open failed: PermissionError) 
+chmod_000_dir                file!=mem=True  file_problem=PROBLEM write=REFUSED(local log open failed: PermissionError) 
+edit_then_restore            file!=mem=False file_problem=ok write=COMMITTED 
+-- toctou
+write committed seq 4 | file == memory: False
+file_problem after the race: the local log file differs from the lines this service holds: an operator must inspect it
+next write REFUSED: the log file and memory disagree; refusing to write
+== venv3.13
+exit 0
+exit 0
+sparse 1073741824 B: file_problem='the local log file differs from the lines this service holds: an operator must inspect it' in 0.00s, maxrss 19 -> 19 MiB (macOS ru_maxrss in bytes)
+append refused in 0.0001s: the log file and memory disagree; refusing to write
+exit 0
+-- matrix
+euid 501
+same_size_edit               file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+grow_junk                    file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+shrink                       file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+prefix_edit                  file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+tail_edit                    file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+tail_append_fake_next        file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+symlink_same_bytes           file!=mem=False file_problem=PROBLEM write=REFUSED(local log open failed: OSError) 
+symlink_diff_bytes           file!=mem=True  file_problem=PROBLEM write=REFUSED(local log open failed: OSError) 
+hardlink_edit                file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+replaced_inode_same          file!=mem=False file_problem=ok write=COMMITTED 
+replaced_inode_diff          file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+deleted                      file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+truncated_to_0               file!=mem=True  file_problem=PROBLEM write=REFUSED(the log file and memory disagree; refusing to write) 
+chmod_000_file               file!=mem=True  file_problem=PROBLEM write=REFUSED(local log open failed: PermissionError) 
+chmod_000_dir                file!=mem=True  file_problem=PROBLEM write=REFUSED(local log open failed: PermissionError) 
+edit_then_restore            file!=mem=False file_problem=ok write=COMMITTED 
+-- toctou
+write committed seq 4 | file == memory: False
+file_problem after the race: the local log file differs from the lines this service holds: an operator must inspect it
+next write REFUSED: the log file and memory disagree; refusing to write

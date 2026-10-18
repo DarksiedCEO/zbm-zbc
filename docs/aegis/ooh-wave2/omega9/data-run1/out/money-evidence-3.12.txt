@@ -1,0 +1,183 @@
+live/f1-3.12/c01-funds-anchor-held-live/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c02-funds-anchor-held-live-iw/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c03-funds-anchor-held-rs/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c04-funds-anchor-held-rs-iw/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c05-funds-anchor-not_held-live/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c06-funds-anchor-not_held-live-iw/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c07-funds-anchor-not_held-rs/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c08-funds-anchor-not_held-rs-iw/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c09-funds-evidence-held-live/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c10-funds-evidence-held-rs/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c11-funds-evidence-not_held-live/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c12-funds-evidence-not_held-rs/ {"money_lines": 1, "by_kind": {"funds_verified": 1}, "problems": [], "lines_total": 39, "lines_without_evidence": 0}
+live/f1-3.12/c13-finance-anchor-held-live/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c14-finance-anchor-held-live-iw/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+live/f1-3.12/c15-finance-anchor-held-rs/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c16-finance-anchor-held-rs-iw/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+live/f1-3.12/c17-finance-anchor-not_held-live/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c18-finance-anchor-not_held-live-iw/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+live/f1-3.12/c19-finance-anchor-not_held-rs/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c20-finance-anchor-not_held-rs-iw/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+live/f1-3.12/c21-finance-evidence-held-live/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c22-finance-evidence-held-rs/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c23-finance-evidence-not_held-live/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c24-finance-evidence-not_held-rs/ {"money_lines": 2, "by_kind": {"funds_verified": 1, "finance_verified": 1}, "problems": [], "lines_total": 40, "lines_without_evidence": 0}
+live/f1-3.12/c25-authorize-anchor-held-live/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c26-authorize-anchor-held-live-iw/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c27-authorize-anchor-held-rs/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c28-authorize-anchor-held-rs-iw/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c29-authorize-anchor-not_held-live/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c30-authorize-anchor-not_held-live-iw/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c31-authorize-anchor-not_held-rs/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c32-authorize-anchor-not_held-rs-iw/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c33-authorize-evidence-held-live/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c34-authorize-evidence-held-rs/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c35-authorize-evidence-not_held-live/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c36-authorize-evidence-not_held-rs/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/f1-3.12/c37-submit-anchor-held-live/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c38-submit-anchor-held-live-iw/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 45, "lines_without_evidence": 0}
+live/f1-3.12/c39-submit-anchor-held-rs/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c40-submit-anchor-held-rs-iw/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 45, "lines_without_evidence": 0}
+live/f1-3.12/c41-submit-anchor-not_held-live/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c42-submit-anchor-not_held-live-iw/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 45, "lines_without_evidence": 0}
+live/f1-3.12/c43-submit-anchor-not_held-rs/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c44-submit-anchor-not_held-rs-iw/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 45, "lines_without_evidence": 0}
+live/f1-3.12/c45-submit-evidence-held-live/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c46-submit-evidence-held-rs/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c47-submit-evidence-not_held-live/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/f1-3.12/c48-submit-evidence-not_held-rs/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/scenario-3.12/ {"money_lines": 15, "by_kind": {"funds_verified": 4, "finance_verified": 4, "purchase_authorized": 3, "order_submitted": 2, "order_outcome": 2}, "problems": [], "lines_total": 126, "lines_without_evidence": 0}
+live/commitpath-3.12/c02-authorize/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+live/commitpath-3.12/c02-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 0}
+live/commitpath-3.12/c03/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/commitpath-3.12/c04-cleanupfail/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/commitpath-3.12/c04-control/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/commitpath-3.12/c06-authorize-down/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+live/commitpath-3.12/c06-authorize-refuse_connect/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+live/commitpath-3.12/c06-submit-down/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 42, "lines_without_evidence": 0}
+live/commitpath-3.12/c06-submit-refuse_connect/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 42, "lines_without_evidence": 0}
+live/commitpath-3.12/c07-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+live/commitpath-3.12/c07-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/commitpath-3.12/c08/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 0}
+live/commitpath-3.12/r19-held/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 0}
+live/commitpath-3.12/r19/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 0}
+live/integ-3.12/a-last-lost/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/integ-3.12/a-mid-lost/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/integ-3.12/a-other-log/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 13, "lines_without_evidence": 0}
+live/integ-3.12/a-wrong-ledger/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 0}
+live/integ-3.12/b-unanch-disk/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 1}
+live/integ-3.12/b-unanch-proc/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 1}
+live/integ-3.12/c-crash-after-anchor/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/integ-3.12/c-disk-anch/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 1}
+live/integ-3.12/d-crash-before-anchor/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/integ-3.12/d-disk-unanch/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 1}
+live/integ-3.12/d-moved-late/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 0}
+live/integ-3.12/e-note/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/integ-3.12/e-seo/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/integ-3.12/e-squat-own/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 0}
+live/integ-3.12/f-first/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 2, "lines_without_evidence": 0}
+live/omega6-3.12/a-wire/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 17, "lines_without_evidence": 0}
+live/omega6-3.12/b-401/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega6-3.12/b-down/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega6-3.12/bc-401/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/omega6-3.12/bc-down/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/omega6-3.12/c-bad-aside/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 1}
+live/omega6-3.12/c-bad-file/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 1}
+live/omega6-3.12/c-bad-own/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 14, "lines_without_evidence": 1}
+live/omega6-3.12/c-ok/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 1}
+live/omega7-3.12/a-exact_copy_tail-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+live/omega7-3.12/a-extra_tail-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/a-extra_tail-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-extra_tail-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-extra_tail-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-inplace_same_size-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-inplace_same_size-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-same_size_tail-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/a-same_size_tail-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-same_size_tail-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-shorter_bytes-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-shorter_bytes-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-shorter_line-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/a-shorter_line-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 13, "lines_without_evidence": 0}
+live/omega7-3.12/a-shorter_line-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/a-shorter_line-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/b-dir_0500-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/b-dir_0500-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/b-rename_onto_dir-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/b-rename_onto_dir-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/b-replace_monkeypatched-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/b-replace_monkeypatched-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/b-rlimit_short-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/b-rlimit_short-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/c-rlimit_efbig-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/c-rlimit_efbig-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/c-rlimit_short-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/c-rlimit_short-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+live/omega7-3.12/c-short_and_cutback_fails-submit/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+live/omega7-3.12/c-short_and_cutback_fails-tenant/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/adopt_bad_prefix-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/adopt_bad_prefix-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/deleted-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/deleted-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 13, "lines_without_evidence": 0}
+rl9-3.12/deleted-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/deleted-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/deleted-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/directory-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/directory-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/directory-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/directory-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/exact_copy_tail-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 43, "lines_without_evidence": 0}
+rl9-3.12/exact_copy_tail-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/extra_tail-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/extra_tail-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/extra_tail-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/extra_tail-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/extra_tail-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/fifo-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/fifo-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/fifo-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/fifo-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/fifo-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/first_byte-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/first_byte-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/first_byte-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/inplace_last_line-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/inplace_last_line-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/inplace_last_line-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/inplace_line1-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/inplace_line1-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/inplace_line1-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/inplace_line1-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/inplace_line1-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/last_byte-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/last_byte-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/last_byte-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/middle_byte-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/middle_byte-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/middle_byte-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/middle_byte-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/replaced_identical-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/replaced_identical-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/replaced_identical-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/replaced_other-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/replaced_other-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/replaced_other-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/replaced_other-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/replaced_other-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/same_size_tail-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/shorter_bytes-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/shorter_bytes-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/shorter_bytes-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/shorter_line-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/shorter_line-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/shorter_line-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/symlink_elsewhere-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/symlink_elsewhere-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/symlink_elsewhere-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9-3.12/symlink_identical-at_append-submit-restore/ {"money_lines": 4, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1, "order_submitted": 1}, "problems": [], "lines_total": 44, "lines_without_evidence": 0}
+rl9-3.12/symlink_identical-at_append-tenant-restart/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/symlink_identical-at_append-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/symlink_identical-before-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 16, "lines_without_evidence": 0}
+rl9-3.12/symlink_identical-check_first-tenant-restore/ {"money_lines": 0, "by_kind": {}, "problems": [], "lines_total": 15, "lines_without_evidence": 0}
+rl9m3-3.12/deleted-at_append-submit-restart/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}
+rl9m3-3.12/shorter_line-at_append-submit-restart/ {"money_lines": 3, "by_kind": {"funds_verified": 1, "finance_verified": 1, "purchase_authorized": 1}, "problems": [], "lines_total": 41, "lines_without_evidence": 0}

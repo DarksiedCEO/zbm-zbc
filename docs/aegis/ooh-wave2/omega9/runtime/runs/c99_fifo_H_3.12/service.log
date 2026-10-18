@@ -1,0 +1,10 @@
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [54437]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:52357 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52390 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52395 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:52406 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     Shutting down
+INFO:     Waiting for background tasks to complete. (CTRL+C to force quit)

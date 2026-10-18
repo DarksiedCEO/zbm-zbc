@@ -1,0 +1,17 @@
+## git grep 91ea9a1 docs/ claude/ (<USER> | /Users/ | thereal<USER> | gmail)
+91ea9a1:docs/adr/0007-verification-integrity-architecture.md:380:| WR-F005 | A minor locked as `kid.name@gmail.com` re-applied as `kiԁ.ηame@gmail.com` (Greek eta) under a new clipper id and was attested adult; a zero-width space or soft hyphen in the address did the same (scored SHOULD by the war room, treated as MUST here) | `i07.mailbox_base` folds with the shared lookalike fold `src/lookalikes.py` (one file, byte-identical in clipper-network-py, onboarding-py, service-py and verification-py; hygiene lint L4; generated data checked by `devtools/test_lookalikes.py`): every Cf / Default_Ignorable character removed, NFKC, the final sigma read before casefolding, casefold, diacritics, then `_LOOKALIKE` over creative-py's shared table (`β ɡ η ζ ς` and the wide set) over the Unicode confusables.txt 15.1.0 skeleton (non-Latin-script letters with an ASCII prototype; source vendored at `devtools/lookalikes/confusables-15.1.0.txt`, sha256-pinned). `_LOOKALIKE` stays the top layer: every code point the old fold turned into ASCII folds the same way (exhaustive test), so every stored `email_base` of such an address still matches. The war room's `minor-lookalike-email` scenario no longer downgrades the wide lookalike set or invisible characters |
+91ea9a1:docs/adr/0015-influencer-partnership-department-architecture.md:61:   match the canonical form: `+tags` removed for every domain, and for gmail.com / googlemail.com every dot of the
+91ea9a1:docs/adr/0015-influencer-partnership-department-architecture.md:62:   local part removed and the domain read as gmail.com (AEGIS R1-L2); handles NFKC, lowercased, one `@` dropped,
+91ea9a1:docs/aegis/ooh-wave2/omega8/security.md:96:- `git grep -i <USER> 99569bd -- docs claude`: no matches (exit 1). Whole tree at 99569bd: no matches (exit 1). `<HOME>` is present in 332 files under docs/ and claude/. The only remaining `/Users/` string is `docs/ci.md:277` `/Users/runner/work/_temp`, a GitHub runner path, not personal (`pii-username.txt`).
+91ea9a1:docs/aegis/ooh-wave2/omega8/security/pii-username.txt:5:== /Users/ paths in docs claude
+91ea9a1:docs/aegis/ooh-wave2/omega8/security/pii-username.txt:6:99569bd:docs/ci.md:277:(`/home/runner/work/_temp` on Linux, `/Users/runner/work/_temp` on macOS): outside the checkout (no R1/R2 change),
+91ea9a1:docs/aegis/round-26b/provenance.md:49:author Andre <<OWNER-EMAIL>> 1791042594 -0700
+91ea9a1:docs/aegis/round-26b/provenance.md:50:committer Andre <<OWNER-EMAIL>> 1791042594 -0700
+91ea9a1:docs/ci.md:277:(`/home/runner/work/_temp` on Linux, `/Users/runner/work/_temp` on macOS): outside the checkout (no R1/R2 change),
+count:        9
+## whole tree count
+       0
+## placeholders in docs/claude
+<HOME>     3511
+<USER>        7
+<OWNER-EMAIL>        4

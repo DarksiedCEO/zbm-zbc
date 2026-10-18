@@ -1,0 +1,48 @@
+{
+ "treeA": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data9run2/t-91ea9a1",
+ "treeB": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data9run2/t-91ea9a1",
+ "write": {
+  "unit_card_vendor_text": 201,
+  "face_attr_ssn": 422,
+  "approval_card_ref": 422,
+  "approval_fallback": 200,
+  "submit": 200,
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines": 77,
+  "fmt": [
+   4
+  ]
+ },
+ "read": {
+  "start_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "state_diff_vs_writer": [],
+  "replay_of_writer_approval_request": [
+   200,
+   "ok",
+   "lines_added",
+   0
+  ],
+  "write": 201,
+  "second_restart_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "log_lines": 78
+ },
+ "readback": {
+  "log_lines": 78,
+  "anchors": 78,
+  "problems": []
+ },
+ "old_card_bytes_still_in_log": false,
+ "old_ssn_bytes_still_in_log": false
+}

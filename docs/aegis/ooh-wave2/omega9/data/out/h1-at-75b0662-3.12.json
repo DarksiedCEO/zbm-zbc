@@ -1,0 +1,348 @@
+{
+ "inplace_line1|at_append|tenant|restart": {
+  "kind": "inplace_line1",
+  "when": "at_append",
+  "op": "tenant",
+  "recovery": "restart",
+  "answer": [
+   201,
+   {
+    "tenant_id": "target-1",
+    "killed": false,
+    "created_at": "2026-10-16T18:00:00Z",
+    "campaigns": 0
+   }
+  ],
+  "anchors_at_append": 1,
+  "changed_snapshot": {
+   "kind": "file",
+   "size": 12787,
+   "sha": "874f4e7e7b6eb9164f5da7dbeca9b07ccd6ff27e3d1ed141723f1ca961c1dbe3",
+   "ino": 145079889
+  },
+  "after_snapshot": {
+   "kind": "file",
+   "size": 13484,
+   "sha": "b7b875055059ee52439b7d2fd8da168cda0ec03b329d03adbac0accc563b6798",
+   "ino": 145079889
+  },
+  "path_untouched_by_service": false,
+  "memory_lines_added": 1,
+  "applied": 1,
+  "anchors_added": 1,
+  "ledger_events_added": 2,
+  "note": "write ACCEPTED",
+  "check_after_accept": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "disk_eq_memory_after_accept": false,
+  "final_integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_disk_eq_memory": false,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart": "REFUSED: StoreCorrupt: log line 1 does not match its own hash",
+  "ledger_readback": [
+   "line 1: 0 matching anchors",
+   "line 2: 0 matching anchors",
+   "line 3: 0 matching anchors",
+   "line 4: 0 matching anchors",
+   "line 5: 0 matching anchors",
+   "line 6: 0 matching anchors",
+   "line 7: 0 matching anchors",
+   "line 8: 0 matching anchors",
+   "line 9: 0 matching anchors",
+   "line 10: 0 matching anchors",
+   "line 11: 0 matching anchors",
+   "line 12: 0 matching anchors",
+   "line 13: 0 matching anchors",
+   "line 14: 0 matching anchors"
+  ],
+  "money_evidence": [],
+  "money_lines": 0
+ },
+ "deleted|at_append|tenant|restart": {
+  "kind": "deleted",
+  "when": "at_append",
+  "op": "tenant",
+  "recovery": "restart",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "changed_snapshot": {
+   "kind": "absent"
+  },
+  "after_snapshot": {
+   "kind": "file",
+   "size": 0,
+   "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "ino": 145080331
+  },
+  "path_untouched_by_service": false,
+  "memory_lines_added": 0,
+  "applied": 0,
+  "anchors_added": 1,
+  "ledger_events_added": 2,
+  "check_while_changed_1": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "path_untouched_after_checks": false,
+  "any_ok_while_changed": false,
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "restart_on_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+  },
+  "restart_on_changed_write": 503,
+  "restart_on_changed_path_untouched": false,
+  "files_after_restart_on_changed": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "restart_after_restore": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "applied_after_restore": 0,
+  "lines_added_after_restore": 0,
+  "write_after_restore": 503,
+  "final_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "final_anchors_vs_lines": [
+   14,
+   13
+  ],
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity_ok": false,
+  "restart_state_diff": [],
+  "restart_write": 503,
+  "ledger_readback": [
+   "anchors 14 != lines 13"
+  ],
+  "money_evidence": [],
+  "money_lines": 0
+ },
+ "deleted|at_append|submit|restart": {
+  "kind": "deleted",
+  "when": "at_append",
+  "op": "submit",
+  "recovery": "restart",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "changed_snapshot": {
+   "kind": "absent"
+  },
+  "after_snapshot": {
+   "kind": "file",
+   "size": 0,
+   "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "ino": 145080988
+  },
+  "path_untouched_by_service": false,
+  "memory_lines_added": 0,
+  "applied": 0,
+  "anchors_added": 1,
+  "ledger_events_added": 2,
+  "check_while_changed_1": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "path_untouched_after_checks": false,
+  "any_ok_while_changed": false,
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "restart_on_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors of another ooh log: this log was deleted or replaced"
+  },
+  "restart_on_changed_write": 503,
+  "restart_on_changed_path_untouched": false,
+  "files_after_restart_on_changed": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "restart_after_restore": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "applied_after_restore": 0,
+  "lines_added_after_restore": 0,
+  "write_after_restore": 503,
+  "final_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "final_anchors_vs_lines": [
+   42,
+   41
+  ],
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity_ok": false,
+  "restart_state_diff": [],
+  "restart_write": 503,
+  "ledger_readback": [
+   "anchors 42 != lines 41"
+  ],
+  "money_evidence": [],
+  "money_lines": 3
+ },
+ "shorter_line|at_append|submit|restart": {
+  "kind": "shorter_line",
+  "when": "at_append",
+  "op": "submit",
+  "recovery": "restart",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "anchors_at_append": 1,
+  "changed_snapshot": {
+   "kind": "file",
+   "size": 48373,
+   "sha": "856ce30f1f2d947b10991ce649c5a78b2a3fb3bb982155be0d5b65ef81bbf007",
+   "ino": 145081088
+  },
+  "after_snapshot": {
+   "kind": "file",
+   "size": 48373,
+   "sha": "856ce30f1f2d947b10991ce649c5a78b2a3fb3bb982155be0d5b65ef81bbf007",
+   "ino": 145081088
+  },
+  "path_untouched_by_service": true,
+  "memory_lines_added": 0,
+  "applied": 0,
+  "anchors_added": 1,
+  "ledger_events_added": 2,
+  "check_while_changed_1": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "check_while_changed_2": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  },
+  "next_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "path_untouched_after_checks": true,
+  "any_ok_while_changed": false,
+  "anchors_added_while_changed": 1,
+  "dup_ids_while_changed": 0,
+  "restart_on_changed": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "restart_on_changed_write": 503,
+  "restart_on_changed_path_untouched": true,
+  "files_after_restart_on_changed": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ],
+  "restart_after_restore": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "applied_after_restore": 0,
+  "lines_added_after_restore": 0,
+  "write_after_restore": 503,
+  "final_integrity": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+  },
+  "final_anchors_vs_lines": [
+   42,
+   41
+  ],
+  "final_disk_eq_memory": true,
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "anchors_per_seq_max": 1,
+  "restart_integrity_ok": false,
+  "restart_state_diff": [],
+  "restart_write": 503,
+  "ledger_readback": [
+   "anchors 42 != lines 41"
+  ],
+  "money_evidence": [],
+  "money_lines": 3
+ }
+}

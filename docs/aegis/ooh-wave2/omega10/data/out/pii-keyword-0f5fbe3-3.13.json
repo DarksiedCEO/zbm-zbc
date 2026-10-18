@@ -1,0 +1,656 @@
+[
+ {
+  "field": "unit.vendor_text",
+  "secret": "SSN 123.45.6789",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact SSN [redacted] for access",
+   "truncated": false,
+   "sha256": "936acbf13a2b3a8047bb962785304aa83f8aa29374f98a970364984a0ee9dfdc"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": []
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "SSN 123.45.6789",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "SSN 123.45.6789",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "SSN 123.45.6789",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "SSN 123.45.6789",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "SSN:123.45.6789",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact SSN:[redacted] for access",
+   "truncated": false,
+   "sha256": "e49481c56e3f4cb9c93fa797b7187b0cc11e49ded96af3034106040bb3ebf8ea"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": []
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "SSN:123.45.6789",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "SSN:123.45.6789",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "SSN:123.45.6789",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "SSN:123.45.6789",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "tax id 123_45_6789",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact tax id [redacted] for access",
+   "truncated": false,
+   "sha256": "c1a4a033cfced94cb922a0f8a87916642d96106dcfa49dcd8b4ecf79bf31252d"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": []
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "tax id 123_45_6789",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "tax id 123_45_6789",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "tax id 123_45_6789",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "tax id 123_45_6789",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "ITIN:912.70.1234",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact ITIN:[redacted] for access",
+   "truncated": false,
+   "sha256": "fec778b197d484ab1ee78aaeefe0b2e9d31ba1cbb06af73992b4520f08a3a2c6"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": []
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "ITIN:912.70.1234",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "ITIN:912.70.1234",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "ITIN:912.70.1234",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "ITIN:912.70.1234",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "SSN 123/45/6789",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact SSN [redacted] for access",
+   "truncated": false,
+   "sha256": "936acbf13a2b3a8047bb962785304aa83f8aa29374f98a970364984a0ee9dfdc"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": []
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "SSN 123/45/6789",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "SSN 123/45/6789",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "SSN 123/45/6789",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "SSN 123/45/6789",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "tax id: 123.45.6789",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact tax id: [redacted] for access",
+   "truncated": false,
+   "sha256": "d6926a93b198c0eb4f11722eb4934b80086b4022613f4cddb60b72b77fc85dda"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": []
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "tax id: 123.45.6789",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "tax id: 123.45.6789",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "tax id: 123.45.6789",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": []
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "tax id: 123.45.6789",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": []
+ }
+]

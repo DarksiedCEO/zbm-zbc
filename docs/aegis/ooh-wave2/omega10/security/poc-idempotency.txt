@@ -1,0 +1,28 @@
+== venv3.12
+  from starlette.testclient import TestClient as TestClient  # noqa
+first               (201, 'ooh-inv-21b1d97de00ad2f9510872712e1a9c36f709f060') log 21
+same body retry     (201, 'ooh-inv-21b1d97de00ad2f9510872712e1a9c36f709f060') log 21
+other ordinary text (409, 'REQUEST_ID_REUSED') log 21
+other flight        (409, 'REQUEST_ID_REUSED') log 21
+other card, same id (201, 'ooh-inv-21b1d97de00ad2f9510872712e1a9c36f709f060') log 21
+literal [redacted]  (201, 'ooh-inv-21b1d97de00ad2f9510872712e1a9c36f709f060') log 21
+SSN instead of card (201, 'ooh-inv-21b1d97de00ad2f9510872712e1a9c36f709f060') log 21
+restart replays:
+  request_sha equal for card A / card B / literal: True
+clean first         (201, 'ooh-inv-1015cd394c47c95ca1152506a6d8e51d0cdf918b')
+clean retry         (201, 'ooh-inv-1015cd394c47c95ca1152506a6d8e51d0cdf918b')
+clean different     (409, 'REQUEST_ID_REUSED')
+== venv3.13
+  from starlette.testclient import TestClient as TestClient  # noqa
+first               (201, 'ooh-inv-d1732a5da68716fa7d7a3369cdf2cbf552887277') log 21
+same body retry     (201, 'ooh-inv-d1732a5da68716fa7d7a3369cdf2cbf552887277') log 21
+other ordinary text (409, 'REQUEST_ID_REUSED') log 21
+other flight        (409, 'REQUEST_ID_REUSED') log 21
+other card, same id (201, 'ooh-inv-d1732a5da68716fa7d7a3369cdf2cbf552887277') log 21
+literal [redacted]  (201, 'ooh-inv-d1732a5da68716fa7d7a3369cdf2cbf552887277') log 21
+SSN instead of card (201, 'ooh-inv-d1732a5da68716fa7d7a3369cdf2cbf552887277') log 21
+restart replays:
+  request_sha equal for card A / card B / literal: True
+clean first         (201, 'ooh-inv-4c6d2717e45e410272abb308960e8beecfe4aeec')
+clean retry         (201, 'ooh-inv-4c6d2717e45e410272abb308960e8beecfe4aeec')
+clean different     (409, 'REQUEST_ID_REUSED')

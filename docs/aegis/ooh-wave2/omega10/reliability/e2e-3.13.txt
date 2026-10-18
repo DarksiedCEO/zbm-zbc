@@ -1,0 +1,14 @@
+/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+old benign4000   first=201 replay=201 replay_ms med=4.2 max=5.1 | fresh 201 ms med=12.5 max=13.3
+old fdfa4000     first=201 replay=201 replay_ms med=3.8 max=4.3 | fresh 201 ms med=53.9 max=61.6
+old card+x4000   first=201 replay=201 replay_ms med=3.8 max=4.1 | fresh 201 ms med=59.5 max=65.9
+old digits4000   first=201 replay=201 replay_ms med=3.4 max=3.6 | fresh 201 ms med=42.8 max=49.9
+old GET /markets idle: med=2.8 max=3.4 ms | under 4-thread replay flood: med=12.4 max=16.9 ms, flood 276.3 req/s
+/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+new benign4000   first=201 replay=201 replay_ms med=5.6 max=5.9 | fresh 201 ms med=15.6 max=22.4
+new fdfa4000     first=201 replay=201 replay_ms med=53.6 max=57.2 | fresh 201 ms med=138.9 max=152.9
+new card+x4000   first=201 replay=201 replay_ms med=50.4 max=52.7 | fresh 201 ms med=112.0 max=327.2
+new digits4000   first=201 replay=201 replay_ms med=33.6 max=33.9 | fresh 201 ms med=82.6 max=85.7
+new GET /markets idle: med=2.8 max=3.0 ms | under 4-thread replay flood: med=183.0 max=262.8 ms, flood 16.8 req/s

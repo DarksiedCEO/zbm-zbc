@@ -1,0 +1,2 @@
+rounds 40 threads 12 anomalies 0 exceptions 0 log lines added 40 (expect 40 ) integrity True fp None
+restart ok, lines 53 integrity True

@@ -1,0 +1,16 @@
+== venv3.12
+file_problem returned: the local log file differs from the lines this service holds: an operator must inspect it
+file_problem still blocked after 3 s: False
+append blocked behind the store lock after 3 s: False {'w': 'REFUSED the log file and memory disagree; refusing to write'}
+exit 0
+returned the local log file cannot be read (OSError)
+file_problem reading /dev/zero still running after 4 s: False maxrss MiB 20.078125
+exit 0
+== venv3.13
+file_problem returned: the local log file differs from the lines this service holds: an operator must inspect it
+file_problem still blocked after 3 s: False
+append blocked behind the store lock after 3 s: False {'w': 'REFUSED the log file and memory disagree; refusing to write'}
+exit 0
+returned the local log file cannot be read (OSError)
+file_problem reading /dev/zero still running after 4 s: False maxrss MiB 19.234375
+exit 0

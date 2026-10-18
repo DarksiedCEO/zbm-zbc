@@ -1,0 +1,9 @@
+  from starlette.testclient import TestClient as TestClient  # noqa
+[unit vendor_text, double space] HTTP 201 redacted=True stored text='contact [redacted] now' | secret digits in line: False
+   stored request_sha == sha(raw body): True
+[unit vendor_text, standard dash (control: the fix)] HTTP 201 redacted=True stored text='contact [redacted] now' | secret digits in line: False
+   stored request_sha == sha(raw body): False
+[unit vendor_text, private-use separator] HTTP 201 redacted=True stored text='contact [redacted] now' | secret digits in line: False
+   stored request_sha == sha(raw body): True
+[face text attribute, double space] HTTP 200 line type=None stored value={"personal_data_redacted": true, "sha256": "55a41d585fe54c1d6d59544847f4ab3ec98702a48460f4826d411080b5e467f5", "text": "
+   stored request_sha == sha(raw body): True

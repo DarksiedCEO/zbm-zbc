@@ -1,0 +1,97 @@
+{
+ "scen": "rfifo",
+ "mode": "X",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/src91",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt9-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 68864,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T14:54:25Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.348,
+  "file_before": "missing",
+  "file_after": "46eb39533066481a3ed322fdfe9cec6661adf0ef047e2ced3f35429f0adc610e",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 69920
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T14:54:26Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.446,
+  "file_before": "46eb39533066481a3ed322fdfe9cec6661adf0ef047e2ced3f35429f0adc610e",
+  "file_after": "b443dc9f31eefb275a9f9752a9b8f6eee5f576ae61f65de8f289e1b1542614ae",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71424
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "b443dc9f31eefb275a9f9752a9b8f6eee5f576ae61f65de8f289e1b1542614ae",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71408
+ },
+ "fault": {
+  "orig_sha": "b443dc9f31eefb275a9f9752a9b8f6eee5f576ae61f65de8f289e1b1542614ae",
+  "disk": {
+   "kind": "fifo",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "stop": "SIGTERM",
+ "restart_on_fault": {
+  "timeout": 15,
+  "tail": [
+   "INFO:     Application shutdown complete.",
+   "INFO:     Finished server process [36773]"
+  ]
+ },
+ "restart_rss_kb": 58432,
+ "restart_alive": true,
+ "kill_after_restart": "SIGTERM",
+ "disk_after": {
+  "kind": "fifo",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ },
+ "target_unchanged": null
+}

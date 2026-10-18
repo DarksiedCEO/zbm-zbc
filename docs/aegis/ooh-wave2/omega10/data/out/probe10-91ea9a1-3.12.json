@@ -1,0 +1,497 @@
+[
+{
+"set": "D9",
+"secret": "123.45.6789",
+"secret_escaped": "123.45.6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123.45.6789 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "123_45_6789",
+"secret_escaped": "123_45_6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123_45_6789 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "123/45/6789",
+"secret_escaped": "123/45/6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123/45/6789 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "SSN 123.45.6789",
+"secret_escaped": "SSN 123.45.6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact SSN 123.45.6789 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "SSN:123.45.6789",
+"secret_escaped": "SSN:123.45.6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact SSN:123.45.6789 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "tax id 123_45_6789",
+"secret_escaped": "tax id 123_45_6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact tax id 123_45_6789 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "ITIN:912.70.1234",
+"secret_escaped": "ITIN:912.70.1234",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact ITIN:912.70.1234 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "123:45:6789",
+"secret_escaped": "123:45:6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123:45:6789 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "\u0967\u0968\u0969.\u096a\u096b.\u096c\u096d\u096e\u096f",
+"secret_escaped": "\\u0967\\u0968\\u0969.\\u096a\\u096b.\\u096c\\u096d\\u096e\\u096f",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact \u0967\u0968\u0969.\u096a\u096b.\u096c\u096d\u096e\u096f for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+"secret_escaped": "\\u0664\\u0661\\u0661\\u0661 \\u0661\\u0661\\u0661\\u0661 \\u0661\\u0661\\u0661\\u0661 \\u0661\\u0661\\u0661\\u0661",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact \u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "\u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967",
+"secret_escaped": "\\u096a\\u0967\\u0967\\u0967 \\u0967\\u0967\\u0967\\u0967 \\u0967\\u0967\\u0967\\u0967 \\u0967\\u0967\\u0967\\u0967",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact \u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096a\u096a\u096a\u096a",
+"secret_escaped": "\\u096b\\u096b\\u096b\\u096b-\\u096b\\u096b\\u096b\\u096b-\\u096b\\u096b\\u096b\\u096b-\\u096a\\u096a\\u096a\\u096a",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact \u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096a\u096a\u096a\u096a for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "123-45-6789",
+"secret_escaped": "123-45-6789",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "4111 1111 1111 1111",
+"secret_escaped": "4111 1111 1111 1111",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "4111\u200b1111\u200b1111\u200b1111",
+"secret_escaped": "4111\\u200b1111\\u200b1111\\u200b1111",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "D9",
+"secret": "4111\u01311111\u01311111\u01311111",
+"secret_escaped": "4111\\u01311111\\u01311111\\u01311111",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 4111\u01311111\u01311111\u01311111 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123 45 6789",
+"secret_escaped": "123 45 6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123 - 45 - 6789",
+"secret_escaped": "123 - 45 - 6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 - 45 - 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123 \u2013 45 \u2013 6789",
+"secret_escaped": "123 \\u2013 45 \\u2013 6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 \u2013 45 \u2013 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123--45--6789",
+"secret_escaped": "123--45--6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123--45--6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123,45,6789",
+"secret_escaped": "123,45,6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123,45,6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123|45|6789",
+"secret_escaped": "123|45|6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123|45|6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u00b745\u00b76789",
+"secret_escaped": "123\\xb745\\xb76789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123\u00b745\u00b76789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123 . 45 . 6789",
+"secret_escaped": "123 . 45 . 6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 . 45 . 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123  45  6789",
+"secret_escaped": "123  45  6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123+45+6789",
+"secret_escaped": "123+45+6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123+45+6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123'45'6789",
+"secret_escaped": "123'45'6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123'45'6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123*45*6789",
+"secret_escaped": "123*45*6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123*45*6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "SSN: 123 - 45 - 6789",
+"secret_escaped": "SSN: 123 - 45 - 6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact SSN: 123 - 45 - 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "SSN 123,45,6789",
+"secret_escaped": "SSN 123,45,6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact SSN 123,45,6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "SSN#123-45-6789",
+"secret_escaped": "SSN#123-45-6789",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact SSN#[redacted] for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "tax id: 123456789",
+"secret_escaped": "tax id: 123456789",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact tax id: [redacted] for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "SSN123456789",
+"secret_escaped": "SSN123456789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact SSN123456789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u168045\u16806789",
+"secret_escaped": "123\\u168045\\u16806789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\ue00045\ue0006789",
+"secret_escaped": "123\\ue00045\\ue0006789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u037845\u03786789",
+"secret_escaped": "123\\u037845\\u03786789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u202845\u20286789",
+"secret_escaped": "123\\u202845\\u20286789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u000b45\u000b6789",
+"secret_escaped": "123\\x0b45\\x0b6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u00ad45\u00ad6789",
+"secret_escaped": "123\\xad45\\xad6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 45 6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "1\u030323-45-6789",
+"secret_escaped": "1\\u030323-45-6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 1\u030323-45-6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "4\u0303111 1111 1111 1111",
+"secret_escaped": "4\\u0303111 1111 1111 1111",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 4\u0303111 1111 1111 1111 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "4\ufe0f111 1111 1111 1111",
+"secret_escaped": "4\\ufe0f111 1111 1111 1111",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 4\ufe0f111 1111 1111 1111 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "\u0e54\u0e51\u0e51\u0e51 \u0e51\u0e51\u0e51\u0e51 \u0e51\u0e51\u0e51\u0e51 \u0e51\u0e51\u0e51\u0e51",
+"secret_escaped": "\\u0e54\\u0e51\\u0e51\\u0e51 \\u0e51\\u0e51\\u0e51\\u0e51 \\u0e51\\u0e51\\u0e51\\u0e51 \\u0e51\\u0e51\\u0e51\\u0e51",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact \u0e54\u0e51\u0e51\u0e51 \u0e51\u0e51\u0e51\u0e51 \u0e51\u0e51\u0e51\u0e51 \u0e51\u0e51\u0e51\u0e51 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "\ud835\udfd2111 1111 1111 1111",
+"secret_escaped": "\\U0001d7d2111 1111 1111 1111",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "\u2463111 1111 1111 1111",
+"secret_escaped": "\\u2463111 1111 1111 1111",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "\u0661\u0662\u0663.\u0664\u0665.\u0666\u0667\u0668\u0669",
+"secret_escaped": "\\u0661\\u0662\\u0663.\\u0664\\u0665.\\u0666\\u0667\\u0668\\u0669",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact \u0661\u0662\u0663.\u0664\u0665.\u0666\u0667\u0668\u0669 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "\u0661\u0662\u0663_\u0664\u0665_\u0666\u0667\u0668\u0669",
+"secret_escaped": "\\u0661\\u0662\\u0663_\\u0664\\u0665_\\u0666\\u0667\\u0668\\u0669",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact \u0661\u0662\u0663_\u0664\u0665_\u0666\u0667\u0668\u0669 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "SSN\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669",
+"secret_escaped": "SSN\\u0661\\u0662\\u0663\\u0664\\u0665\\u0666\\u0667\\u0668\\u0669",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact SSN\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u3000-45\u3000-6789",
+"secret_escaped": "123\\u3000-45\\u3000-6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123 -45 -6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u201145\u20116789",
+"secret_escaped": "123\\u201145\\u20116789",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u2e3a45\u2e3a6789",
+"secret_escaped": "123\\u2e3a45\\u2e3a6789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123\u2e3a45\u2e3a6789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\ufe6345\ufe636789",
+"secret_escaped": "123\\ufe6345\\ufe636789",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\uff0d45\uff0d6789",
+"secret_escaped": "123\\uff0d45\\uff0d6789",
+"has_personal_data_raw": true,
+"observed_redacted": true,
+"stored_text": "contact [redacted] for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u02d745\u02d76789",
+"secret_escaped": "123\\u02d745\\u02d76789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123\u02d745\u02d76789 for access",
+"divergent": false
+},
+{
+"set": "NEW",
+"secret": "123\u204345\u20436789",
+"secret_escaped": "123\\u204345\\u20436789",
+"has_personal_data_raw": false,
+"observed_redacted": false,
+"stored_text": "contact 123\u204345\u20436789 for access",
+"divergent": false
+}
+]

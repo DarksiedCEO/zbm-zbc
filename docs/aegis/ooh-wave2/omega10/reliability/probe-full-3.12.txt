@@ -1,0 +1,8 @@
+lines ok 1669 first failure (1669, 'local log write failed: _ShortWrite (short write: 852 of 1169 bytes)')
+file bytes 1948844 mem bytes 1948844 fault None fp None
+retry: local log write failed: _ShortWrite (short write: 852 of 1169 bytes)
+retry: local log write failed: _ShortWrite (short write: 852 of 1169 bytes)
+retry: local log write failed: _ShortWrite (short write: 852 of 1169 bytes)
+restart reads 1669 lines (mem was 1669 )
+  vol entry .fseventsd
+  vol entry data

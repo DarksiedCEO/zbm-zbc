@@ -1,0 +1,95 @@
+{
+ "treeA": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data10run/t-91ea9a1",
+ "treeB": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data10run/t-0f5fbe3",
+ "write": {
+  "unit0": 201,
+  "unit1": 201,
+  "unit2": 201,
+  "face_attr": 200,
+  "submit": 200,
+  "integrity_ok": true,
+  "log_lines": 60,
+  "recorded_requests": 60
+ },
+ "read": {
+  "start_integrity_ok": true,
+  "state_diff_vs_writer": [],
+  "request_sha_vs_line_by_rid": {
+   "equal": 39,
+   "differ": 21,
+   "no_line": 0
+  },
+  "request_sha_writer_fn_vs_reader_fn": {
+   "bodies": 60,
+   "equal": 58,
+   "differ": [
+    [
+     "inventory",
+     "contact 4111 1111 1111 1111 for access"
+    ],
+    [
+     "inventory",
+     "contact 123.45.6789 for access"
+    ]
+   ]
+  },
+  "replays": {
+   "count": 60,
+   "statuses": {
+    "201": 29,
+    "200": 29,
+    "409": 2
+   },
+   "lines_added": 0,
+   "status_differs_from_original": [
+    [
+     "inventory",
+     "contact 4111 1111 1111 1111 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 123.45.6789 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ]
+   ]
+  },
+  "mutated_retries": {
+   "results": [
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "funds-verifications",
+     409
+    ]
+   ],
+   "lines_added": 0
+  },
+  "write": 201,
+  "second_restart_integrity_ok": true,
+  "log_lines": 61
+ },
+ "readback": {
+  "log_lines": 61,
+  "anchors": 61,
+  "problems": []
+ }
+}

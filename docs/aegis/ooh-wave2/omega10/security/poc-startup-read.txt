@@ -1,0 +1,37 @@
+== venv3.12
+fifo           dt=0.000 ok=False err=the log is not a regular file; refusing to start (inspect the data directory)
+symlink        dt=0.000 ok=False err=the log cannot be opened (OSError); refusing to start: it must be a regular file
+symlink_dev    dt=0.000 ok=False err=the log cannot be opened (OSError); refusing to start: it must be a regular file
+directory      dt=0.000 ok=False err=the log is not a regular file; refusing to start (inspect the data directory)
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/security/poc/startup_read.py", line 36, in <module>
+    run_case("unix_socket", lambda p, d: __import__("socket").socket(1, 2).bind(p))
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/security/poc/startup_read.py", line 14, in run_case
+    d = TMP / name; d.mkdir(mode=0o700); p = str(d / ST.LOG_NAME); make(p, d)
+                                                                   ^^^^^^^^^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/security/poc/startup_read.py", line 36, in <lambda>
+    run_case("unix_socket", lambda p, d: __import__("socket").socket(1, 2).bind(p))
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OSError: AF_UNIX path too long
+== venv3.13
+fifo           dt=0.000 ok=False err=the log is not a regular file; refusing to start (inspect the data directory)
+symlink        dt=0.000 ok=False err=the log cannot be opened (OSError); refusing to start: it must be a regular file
+symlink_dev    dt=0.000 ok=False err=the log cannot be opened (OSError); refusing to start: it must be a regular file
+directory      dt=0.000 ok=False err=the log is not a regular file; refusing to start (inspect the data directory)
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/security/poc/startup_read.py", line 36, in <module>
+    run_case("unix_socket", lambda p, d: __import__("socket").socket(1, 2).bind(p))
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/security/poc/startup_read.py", line 14, in run_case
+    d = TMP / name; d.mkdir(mode=0o700); p = str(d / ST.LOG_NAME); make(p, d)
+                                                                   ~~~~^^^^^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/security/poc/startup_read.py", line 36, in <lambda>
+    run_case("unix_socket", lambda p, d: __import__("socket").socket(1, 2).bind(p))
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+OSError: AF_UNIX path too long
+== venv3.12
+regular      reopen records: 1 file_problem: None
+unix_socket  ok=None err=the log cannot be opened (OSError); refusing to start: it must be a re
+== venv3.13
+regular      reopen records: 2 file_problem: None
+unix_socket  ok=None err=the log cannot be opened (OSError); refusing to start: it must be a re

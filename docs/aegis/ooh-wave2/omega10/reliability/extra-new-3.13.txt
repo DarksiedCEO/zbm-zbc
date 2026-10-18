@@ -1,0 +1,4 @@
+[new] n=1000 top4: [('ssn-underscore', 6.9), ('ssn-slash', 6.8), ('ssn-glue', 6.7), ('nd-many', 4.7)]
+[new] n=4000 top4: [('ssn-underscore', 31.3), ('ssn-glue', 31.1), ('ssn-slash', 22.2), ('nd-many', 19.2)]
+[new] n=16000 top4: [('ssn-glue', 115.8), ('ssn-underscore', 114.4), ('ssn-slash', 86.6), ('nd-many', 76.0)]
+[new] families with ratio 16000/4000 > 6 (linear = 4): [('rand1', 9.6)]

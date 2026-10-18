@@ -1,0 +1,12 @@
+old=True  new=True  same '4111ı1111ı1111ı1111'
+old=False new=False same '4111İ1111İ1111İ1111'
+old=True  new=True  same 'ref 4111ı1111ı1111ı1111'
+old=True  new=True  same '4111 1111 1111 1111'
+old=True  new=True  same '4111-1111-1111-1111'
+old=False new=False same 'BOA-ACH-021000021-20261018'
+old=False new=False same 'ACH-256074974-93982757'
+old=False new=False same 'trace 021000021000001'
+old=False new=False same '2026-10-18-001'
+old=False new=False same 'io-0000012345'
+random cases 200000 diffs 0
+random cases without U+0131: 200000 diffs 0

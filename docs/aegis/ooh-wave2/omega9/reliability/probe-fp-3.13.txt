@@ -1,0 +1,48 @@
+fp  os.open raises EIO                           -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  os.open raises ENOENT                        -> the local log file differs from the lines this service holds: an operator must inspect it             leaked_fds=[] fdcount_delta=0 
+fp  os.open raises ELOOP                         -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  os.open raises EAGAIN                        -> the local log file cannot be read (BlockingIOError)                                                   leaked_fds=[] fdcount_delta=0 
+fp  os.open raises EACCES                        -> the local log file cannot be read (PermissionError)                                                   leaked_fds=[] fdcount_delta=0 
+fp  os.open raises EMFILE                        -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  os.open raises ENXIO                         -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  os.open raises EINTR                         -> the local log file cannot be read (InterruptedError)                                                  leaked_fds=[] fdcount_delta=0 
+fp  os.open raises EROFS                         -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  os.fstat raises EIO                          -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  os.pread raises EIO                          -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  os.pread raises EAGAIN                       -> the local log file cannot be read (BlockingIOError)                                                   leaked_fds=[] fdcount_delta=0 
+fp  os.pread raises EINTR                        -> the local log file cannot be read (InterruptedError)                                                  leaked_fds=[] fdcount_delta=0 
+fp  shrinks after fstat (before 1st pread)       -> the local log file differs from the lines this service holds: an operator must inspect it             leaked_fds=[] fdcount_delta=0 
+fp  grows after fstat                            -> None                                                                                                  leaked_fds=[] fdcount_delta=0 
+fp  os.close raises EIO (after closing)          -> RAISED OSError: [Errno 5] close EIO                                                                   leaked_fds=[] fdcount_delta=0 
+fp  pread MemoryError                            -> RAISED MemoryError:                                                                                   leaked_fds=[] fdcount_delta=0 
+fp  pread KeyboardInterrupt                      -> RAISED KeyboardInterrupt:                                                                             leaked_fds=[] fdcount_delta=0 
+fp  symlink to identical bytes                   -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+fp  FIFO (no writer)                             -> the local log file differs from the lines this service holds: an operator must inspect it             leaked_fds=[] fdcount_delta=0 
+fp  file deleted                                 -> the local log file differs from the lines this service holds: an operator must inspect it             leaked_fds=[] fdcount_delta=0 
+fp  path is a directory                          -> the local log file differs from the lines this service holds: an operator must inspect it             leaked_fds=[] fdcount_delta=0 
+fp  chmod 000                                    -> the local log file cannot be read (PermissionError)                                                   leaked_fds=[] fdcount_delta=0 
+fp  unix socket                                  -> the local log file cannot be read (OSError)                                                           leaked_fds=[] fdcount_delta=0 
+wr  os.open raises EIO                           -> StoreWriteError: local log open failed: OSError                                                       leaked_fds=[] fdcount_delta=0 
+wr  os.open raises ENOENT                        -> StoreWriteError: local log open failed: FileNotFoundError                                             leaked_fds=[] fdcount_delta=0 
+wr  os.open raises ELOOP                         -> StoreWriteError: local log open failed: OSError                                                       leaked_fds=[] fdcount_delta=0 
+wr  os.open raises EAGAIN                        -> StoreWriteError: local log open failed: BlockingIOError                                               leaked_fds=[] fdcount_delta=0 
+wr  os.open raises EACCES                        -> StoreWriteError: local log open failed: PermissionError                                               leaked_fds=[] fdcount_delta=0 
+wr  os.open raises EMFILE                        -> StoreWriteError: local log open failed: OSError                                                       leaked_fds=[] fdcount_delta=0 
+wr  os.open raises ENXIO                         -> StoreWriteError: local log open failed: OSError                                                       leaked_fds=[] fdcount_delta=0 
+wr  os.open raises EINTR                         -> StoreWriteError: local log open failed: InterruptedError                                              leaked_fds=[] fdcount_delta=0 
+wr  os.open raises EROFS                         -> StoreWriteError: local log open failed: OSError                                                       leaked_fds=[] fdcount_delta=0 
+wr  os.fstat raises EIO                          -> StoreWriteError: local log write failed: OSError                                                      leaked_fds=[] fdcount_delta=0 
+wr  os.pread raises EIO                          -> StoreWriteError: local log write failed: OSError                                                      leaked_fds=[] fdcount_delta=0 
+wr  os.pread raises EAGAIN                       -> StoreWriteError: local log write failed: BlockingIOError                                              leaked_fds=[] fdcount_delta=0 
+wr  os.pread raises EINTR                        -> StoreWriteError: local log write failed: InterruptedError                                             leaked_fds=[] fdcount_delta=0 
+wr  shrinks after fstat (before 1st pread)       -> StoreWriteError: the log file and memory disagree; refusing to write                                  leaked_fds=[] fdcount_delta=0 
+wr  grows after fstat                            -> WROTE                                                                                                 leaked_fds=[] fdcount_delta=0 
+wr  os.close raises EIO (after closing)          -> RAISED OSError: [Errno 5] close EIO                                                                   leaked_fds=[] fdcount_delta=0 
+wr  pread MemoryError                            -> RAISED MemoryError:                                                                                   leaked_fds=[] fdcount_delta=0 
+wr  pread KeyboardInterrupt                      -> RAISED KeyboardInterrupt:                                                                             leaked_fds=[] fdcount_delta=0 
+wr  symlink to identical bytes                   -> StoreWriteError: local log open failed: OSError                                                       leaked_fds=[] fdcount_delta=0 
+wr  FIFO (no writer)                             -> StoreWriteError: the log file and memory disagree; refusing to write                                  leaked_fds=[] fdcount_delta=0 
+wr  file deleted                                 -> StoreWriteError: the log file and memory disagree; refusing to write                                  leaked_fds=[] fdcount_delta=0 
+wr  path is a directory                          -> StoreWriteError: local log open failed: IsADirectoryError                                             leaked_fds=[] fdcount_delta=0 
+wr  chmod 000                                    -> StoreWriteError: local log open failed: PermissionError                                               leaked_fds=[] fdcount_delta=0 
+wr  unix socket                                  -> StoreWriteError: local log open failed: OSError                                                       leaked_fds=[] fdcount_delta=0 

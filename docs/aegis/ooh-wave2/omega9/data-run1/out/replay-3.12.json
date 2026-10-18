@@ -1,0 +1,103 @@
+{
+ "tests": 870,
+ "instances": 769,
+ "compared": 767,
+ "mismatch": [
+  [
+   "tests/test_aegis_h1_edges.py::test_edges_adoption_fsyncs_the_file_and_writes_nothing_again",
+   [
+    "/tenants/ad-fs: only in replay"
+   ]
+  ],
+  [
+   "tests/test_aegis_h1_edges.py::test_edges_adoption_completes_short_reads_of_the_tail",
+   [
+    "/tenants/ad-short: only in replay"
+   ]
+  ],
+  [
+   "tests/test_aegis_h1_file_content.py::test_h1_adoption_still_works_when_the_file_matches",
+   [
+    "/tenants/ad-2: only in replay"
+   ]
+  ],
+  [
+   "tests/test_aegis_integrity_path.py::test_ip_unanchored_line_appended_to_the_local_log_is_caught",
+   [
+    "/tenants/forged-1: only in replay"
+   ]
+  ],
+  [
+   "tests/test_aegis_integrity_path.py::test_ip_disk_pending_that_does_not_chain_is_not_appended_even_if_anchored",
+   [
+    "/tenants/other-1: only in replay"
+   ]
+  ],
+  [
+   "tests/test_aegis_ooh_r3.py::test_r3h1_the_gate_compares_quoted_and_held_flights_with_the_current_one",
+   [
+    "/prices/ooh-prc-af31c9b4bcede357b2320c2b9932afb3423d8eab/flights/ooh-inv-d323766044d370baa8539d95169ad12710af32ef[1]: '2027-10-31' != '2026-11-30'"
+   ]
+  ],
+  [
+   "tests/test_aegis_ooh_r3.py::test_r3l_the_same_reference_on_another_rail_is_allowed_with_a_warning",
+   [
+    "/funds_evidence/check:boa777: only in live"
+   ]
+  ],
+  [
+   "tests/test_aegis_ooh_w234.py::test_sec_f2_the_empty_plan_guard_names_itself",
+   [
+    "/campaigns/ooh-cmp-9472f1c3dacb953f28756fe5a2fbece00e00cc37/current_sell_price_id: type str != NoneType",
+    "/prices/x: only in live"
+   ]
+  ],
+  [
+   "tests/test_aegis_store_write_path.py::test_adoption_a_line_already_on_disk_is_not_written_twice",
+   [
+    "/tenants/g-3: only in replay"
+   ]
+  ],
+  [
+   "tests/test_contracts.py::test_an_unknown_payment_method_is_refused",
+   [
+    "/vendors/lamar/profile/payment_methods: only in replay"
+   ]
+  ],
+  [
+   "tests/test_finance_verification.py::test_the_gate_rechecks_finance_at_submission",
+   [
+    "/campaigns/ooh-cmp-f89c736ef298a96c7d04093a8e3517f64537b166/finance_verification: type NoneType != dict"
+   ]
+  ],
+  [
+   "tests/test_hold_confirmation.py::test_the_gate_also_refuses_a_confirmed_state_not_set_by_andre",
+   [
+    "/inventory/ooh-inv-7de9f5dce9c223ee0addeafb372aaaad773cc881/hold_confirmed_by: 'ooh_agent' != 'andre'"
+   ]
+  ],
+  [
+   "tests/test_hold_confirmation.py::test_the_campaign_hold_state_counts_only_andres_confirmations",
+   [
+    "/inventory/ooh-inv-8705c292faa5a42200d1a61e2708e4aeafcb9fcd/hold_confirmed_by: type NoneType != str"
+   ]
+  ],
+  [
+   "tests/test_planning.py::test_s34_f1_plan_approval_rechecks_every_line_against_the_brief",
+   [
+    "/campaigns/ooh-cmp-bc670d63efe48bdb0a8f6f316282b35adeca01b3/brief/formats: len 1 != 4"
+   ]
+  ]
+ ],
+ "replay_error": [
+  [
+   "tests/test_aegis_integrity_path.py::test_ip_anchored_line_that_cannot_be_applied_asks_for_an_operator",
+   "KeyError: 'tenant_id'"
+  ],
+  [
+   "tests/test_aegis_omega5_mutation.py::test_h448_set_aside_line_appended_late_clears_the_set_aside_copy",
+   "KeyError: 'tenant_id'"
+  ]
+ ],
+ "skipped": []
+}

@@ -1,0 +1,17 @@
+regular write: WROTE file_problem: None lines 3 filesize lines 3
+O_NONBLOCK on regular fd: True
+restart lines: 3 fp None
+FIFO no other end: write=StoreWriteError: the log file and memory disagree; refusing to write fp=the local log file differs from the lines this ser hung=False
+FIFO reader holds O_RDONLY: write=StoreWriteError: the log file and memory disagree; refusing to write fp=the local log file differs from the lines this ser hung=False
+FIFO holder O_RDWR: write=StoreWriteError: the log file and memory disagree; refusing to write fp=the local log file differs from the lines this ser hung=False read:[Errno 35] Resource temporarily unavailable
+write with close EIO: RAISED OSError: [Errno 5] close EIO | memory lines 2 file lines 3 | fp: the local log file differs from the lines this service holds: an opera
+  next write (new content): StoreWriteError: the log file and memory disagree; refusing to write
+  replay of same prepared record seq/content: WROTE (adopted) lines 3 fp None
+  restart: lines 3 fp None
+disk full [pwrite ENOSPC]: StoreWriteError: local log write failed: OSError | file bytes 508 mem bytes 508 fault=False fp=None | next write: WROTE | lines 3
+disk full [short write]: StoreWriteError: local log write failed: _ShortWrite (short write: 127 of 255 bytes) | file bytes 508 mem bytes 508 fault=False fp=None | next write: WROTE | lines 3
+disk full [partial then ENOSPC]: StoreWriteError: local log write failed: OSError | file bytes 508 mem bytes 508 fault=False fp=None | next write: WROTE | lines 3
+disk full [short write, truncate fails]: StoreWriteError: local log write failed: _ShortWrite (short write: 127 of 255 bytes) | file bytes 635 mem bytes 508 fault=True fp=the local log file differs from the lines this service holds: an operator must inspect it | next write: StoreWriteError: LOCAL_LOG_WRITE_FAULT: a failed log write could not be cut back (_ShortWrite, then OSError | lines 2
+disk full [fsync fails (data reached disk)]: StoreWriteError: local log write failed: OSError | file bytes 508 mem bytes 508 fault=True fp=None | next write: StoreWriteError: LOCAL_LOG_WRITE_FAULT: a failed log write could not be cut back (OSError, then OSError on  | lines 2
+disk full [fsync fails, truncate fails]: StoreWriteError: local log write failed: OSError | file bytes 763 mem bytes 508 fault=True fp=the local log file differs from the lines this service holds: an operator must inspect it | next write: StoreWriteError: LOCAL_LOG_WRITE_FAULT: a failed log write could not be cut back (OSError, then OSError on  | lines 2
+fd delta 0

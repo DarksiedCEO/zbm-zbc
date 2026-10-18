@@ -1,0 +1,2 @@
+[90m9:01AM[0m [32mINF[0m [1mscanned ~34376669 bytes (34.38 MB) in 1.57s[0m
+[90m9:01AM[0m [32mINF[0m [1mno leaks found[0m

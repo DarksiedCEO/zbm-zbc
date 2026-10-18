@@ -1,0 +1,36 @@
+start  15:52:36
+c0f5fbe3_rfifo_X_3.12 rc=0 15:52:48
+c0f5fbe3_rsym_X_3.12 rc=0 15:53:00
+c0f5fbe3_rzero_X_3.12 rc=0 15:53:12
+c0f5fbe3_rdir_X_3.12 rc=1 15:53:24
+c0f5fbe3_e2_W_3.12 rc=0 15:53:48
+c0f5fbe3_e2_I_3.12 rc=0 15:54:13
+c0f5fbe3_e3_W_3.12 rc=0 15:54:38
+c0f5fbe3_e3_I_3.12 rc=0 15:55:02
+c0f5fbe3_m2_W_3.12 rc=0 15:55:27
+c0f5fbe3_m2_I_3.12 rc=0 15:55:52
+c0f5fbe3_m3_W_3.12 rc=0 15:56:17
+c0f5fbe3_m3_I_3.12 rc=0 15:56:41
+c0f5fbe3_fifo_H_3.12 rc=0 15:56:55
+c0f5fbe3_fifo_HW_3.12 rc=0 15:57:09
+c0f5fbe3_symsame_H_3.12 rc=0 15:57:22
+c0f5fbe3_symsame_HW_3.12 rc=0 15:57:36
+c0f5fbe3_symzero_H_3.12 rc=0 15:57:49
+c0f5fbe3_symzero_HW_3.12 rc=0 15:58:04
+pii_c0f5fbe3_3.12 rc=0 16:00:05
+c91ea9a1_rfifo_X_3.12 rc=0 16:00:32
+c91ea9a1_rsym_X_3.12 rc=0 16:00:45
+c91ea9a1_rdir_X_3.12 rc=1 16:00:59
+pii_c91ea9a1_3.12 rc=0 16:02:40
+c75b0662_e2_W_3.12 rc=0 16:03:06
+c75b0662_e2_I_3.12 rc=0 16:03:31
+c75b0662_e3_W_3.12 rc=0 16:03:55
+c75b0662_e3_I_3.12 rc=0 16:04:20
+c75b0662_m2_W_3.12 rc=0 16:04:45
+c75b0662_m2_I_3.12 rc=0 16:05:10
+c75b0662_m3_W_3.12 rc=0 16:05:36
+c75b0662_m3_I_3.12 rc=0 16:06:02
+end 16:06:02
+start zero 16:07:16
+c91ea9a1_rzero_X_3.12 rc=0 16:07:29
+end zero 16:07:29

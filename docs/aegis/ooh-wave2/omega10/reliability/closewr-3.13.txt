@@ -1,0 +1,30 @@
+new
+unexpected OSError
+write whose log-fd close fails: 500 {"detail":"internal error"}
+  memory lines 13 file lines 14
+next write (new request): 503 {"detail":"STORE_UNAVAILABLE","maybe":true}
+retry of the first request id: 503 {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+another new write: 503
+integrity False mem 13 file 14
+after restart: lines 14 integrity False
+--- detail
+live integrity: {'ok': False, 'checked_at': '2026-10-16T18:00:00Z', 'problem': 'this service instance is closed'}
+restarted integrity: {'ok': False, 'checked_at': '2026-10-16T18:00:00Z', 'problem': 'the ledger holds anchors beyond the local log: the log was truncated or rolled back'}
+restarted write: 503 again: 503
+restarted retry of r1: 503
+files: ['ooh.lock', 'ooh_log.jsonl']
+old
+unexpected OSError
+write whose log-fd close fails: 500 {"detail":"internal error"}
+  memory lines 13 file lines 14
+next write (new request): 503 {"detail":"STORE_UNAVAILABLE","maybe":true}
+retry of the first request id: 503 {"detail":"INTEGRITY_UNVERIFIED","maybe":false}
+another new write: 503
+integrity False mem 13 file 14
+after restart: lines 14 integrity False
+--- detail
+live integrity: {'ok': False, 'checked_at': '2026-10-16T18:00:00Z', 'problem': 'this service instance is closed'}
+restarted integrity: {'ok': False, 'checked_at': '2026-10-16T18:00:00Z', 'problem': 'the ledger holds anchors beyond the local log: the log was truncated or rolled back'}
+restarted write: 503 again: 503
+restarted retry of r1: 503
+files: ['ooh.lock', 'ooh_log.jsonl']

@@ -1,0 +1,55 @@
+[
+  {
+    "_fixture_note": "Scheduled 30h before the fixed test 'now' (2026-09-23T12:00:00Z) — past grace period AND past the 24h stale threshold. Expect a CALL-channel (escalation-priority) completion-check task.",
+    "appointment_id": "appt_2001",
+    "customer_id": "cust_f1",
+    "scheduled_at": "2026-09-22T06:00:00Z",
+    "service_type": "water_heater_replacement",
+    "status": "confirmed",
+    "technician_id": "tech_9"
+  },
+  {
+    "_fixture_note": "Scheduled 6h before the fixed test 'now' — past the 2h grace period but NOT stale. Expect an SMS-channel completion-check task.",
+    "appointment_id": "appt_2002",
+    "customer_id": "cust_f2",
+    "scheduled_at": "2026-09-23T06:00:00Z",
+    "service_type": "hvac_tune_up",
+    "status": "scheduled",
+    "technician_id": "tech_4"
+  },
+  {
+    "_fixture_note": "Scheduled 1h before the fixed test 'now' — still within the 2h grace period. Must NOT produce a task yet.",
+    "appointment_id": "appt_2003",
+    "customer_id": "cust_f3",
+    "scheduled_at": "2026-09-23T11:00:00Z",
+    "service_type": "drain_cleaning",
+    "status": "scheduled",
+    "technician_id": "tech_4"
+  },
+  {
+    "_fixture_note": "Control case — already marked completed. Must NOT produce a task even though scheduled_at is well in the past.",
+    "appointment_id": "appt_2004",
+    "customer_id": "cust_f4",
+    "scheduled_at": "2026-09-20T09:00:00Z",
+    "service_type": "electrical_panel_inspection",
+    "status": "completed",
+    "completion_confirmed_at": "2026-09-20T11:30:00Z",
+    "technician_id": "tech_2"
+  },
+  {
+    "_fixture_note": "Control case — cancelled. Must NOT produce a task.",
+    "appointment_id": "appt_2005",
+    "customer_id": "cust_f5",
+    "scheduled_at": "2026-09-21T09:00:00Z",
+    "service_type": "roof_inspection",
+    "status": "cancelled"
+  },
+  {
+    "_fixture_note": "Control case — scheduled in the future. Must NOT produce a task.",
+    "appointment_id": "appt_2006",
+    "customer_id": "cust_f1",
+    "scheduled_at": "2026-09-25T09:00:00Z",
+    "service_type": "gutter_cleaning",
+    "status": "scheduled"
+  }
+]

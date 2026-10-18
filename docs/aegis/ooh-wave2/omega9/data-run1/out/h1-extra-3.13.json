@@ -1,0 +1,60 @@
+{
+ "cached_ok_window": {
+  "forced_check_before_edit": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "audit_integrity_right_after_edit": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "health_right_after_edit": {
+   "status": "ok"
+  },
+  "unforced_check": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "write": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "file_unchanged_by_write": true,
+  "forced_check_after": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the pending line is anchored on the ledger but cannot be written here"
+  }
+ },
+ "compare_then_write_race": {
+  "answer": [
+   201,
+   {
+    "tenant_id": "race-1",
+    "killed": false,
+    "created_at": "2026-10-16T18:00:00Z",
+    "campaigns": 0
+   }
+  ],
+  "raced_at_offset": 12787,
+  "disk_eq_memory_after": false,
+  "integrity_cached_after": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "forced_check_after": {
+   "ok": false,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+  },
+  "next_write": 503,
+  "restart": "REFUSED StoreCorrupt: log line 1 does not match its own hash"
+ }
+}

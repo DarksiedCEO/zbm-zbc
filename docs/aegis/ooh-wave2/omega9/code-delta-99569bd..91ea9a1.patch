@@ -1,0 +1,766 @@
+diff --git a/services/ooh-py/src/pii.py b/services/ooh-py/src/pii.py
+index d72454e..fbb1a33 100644
+--- a/services/ooh-py/src/pii.py
++++ b/services/ooh-py/src/pii.py
+@@ -1,6 +1,7 @@
+-"""Personal data in free text (AEGIS wave 2 F-2, OOH-3/4 security F3, re-verification N1/N3). This department keeps
+-no personal data: an e-mail address or a phone number in a free-text value is refused (attributes, campaign names)
+-or redacted (vendor text).
++"""Personal data in free text (AEGIS wave 2 F-2, OOH-3/4 security F3, re-verification N1/N3, OOH2-PII-1). This
++department keeps no personal data: an e-mail address, a phone number, a payment-card number or a US social security
++number in a free-text value is refused (attributes, campaign names, the client approval document reference) or
++redacted (vendor text), before anything is written to the log or the ledger.
+ 
+ Text is NFKC-normalised; zero-width characters are removed; %40, HTML entities (&#64; &commat; &#46;) and bracket
+ spellings ([at] (at) {at} <at>, [dot] (dot) <dot> [.] (.)) and full-width or ideographic dots are read as the
+@@ -13,6 +14,13 @@ character. Then, case-insensitively:
+   ten or more digits in a row. Separators are spaces, dots, slashes, underscores, every dash and the minus sign,
+   commas, colons, bars, middle dots, apostrophes and ampersands. A number does not start right after a digit or
+   after a digit and a decimal point, so dates, hours, ZIP+4, comma-grouped counts and GPS coordinates pass.
++* payment card (OOH2-PII-1): a run of digit groups, with any separators between them, holding 13-19 digits that
++  start with a card-network prefix and pass the Luhn check (the rule the client funds reference already used:
++  ``card_spans``, which ``svc_campaigns.names_a_card`` calls); an unbroken run of ten or more digits is refused as
++  a phone number anyway;
++* social security number (onboarding-py redaction.py's shapes): ``ddd-dd-dddd`` with a hyphen or another dash, not
++  glued to a word or a dash, and nine digits within 20 characters after "SSN", "social security (number)", "ITIN"
++  or "tax id". A nine-digit run with spaces and no such word is not seen.
+ Known false positives (refused, never stored): a ten-digit reference ("io-0000012345"), "<word> at <word>.<word>"
+ ("14x48 at Wilshire.Blvd"), a three-and-four-digit pair with a dash ("Route 101-2025").
+ Names, spelled-out digits and letters used as separators cannot be detected reliably: preparers must not type them."""
+@@ -73,8 +81,83 @@ def _matches(t: str) -> list:
+     return out + [m for m in _INTL.finditer(t) if sum(ch.isdigit() for ch in m.group()) >= _INTL_MIN_DIGITS]
+ 
+ 
++# Card numbers start with a card-network prefix (IIN): Visa 4, Mastercard 51-55 and 2221-2720, Maestro 50/56-58,
++# Mir 2200-2204, Amex 34/37, JCB 35, Diners 30/36/38/39, Discover, UnionPay and RuPay 6, RuPay 81/82, Uzcard 8600,
++# Troy 9792, Humo 9860 (third delta review F1). A digit run that starts otherwise (0, 1, 7, most of 2, 8 and 9: dates
++# such as 2026…, ABA routing numbers) is never read as a card, so a bank reference with a date is not refused by
++# chance (second delta review E2). A 15-digit run is the length of an ACH trace number, whose ABA routing prefix can
++# be 21-32 or 61-72: it counts only with a prefix no routing prefix starts with (4, 34-38, 50-58, 6011).
++_CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|220[0-4]|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720|3[0-9]|6"
++                          r"|8[12]|8600|9792|9860)")
++_CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
++_DIGIT_RUN = re.compile(r"[0-9]+(?:[^0-9a-z]+[0-9]+)*", re.I)
++_GROUP = re.compile(r"[0-9]+")
++
++
++def aba_routing(digits: str) -> bool:
++    """A nine-digit ABA routing number: 3, 7, 1 weights over its digits sum to a multiple of ten."""
++    if len(digits) != 9:
++        return False
++    return sum(int(d) * w for d, w in zip(digits, (3, 7, 1) * 3)) % 10 == 0
++
++
++def luhn_card(digits: str) -> bool:
++    """A payment-card number, never stored (re-verification N2)."""
++    if not 13 <= len(digits) <= 19 or not _CARD_PREFIX.match(digits) \
++            or (len(digits) == 15 and not _CARD_PREFIX_15.match(digits)):
++        return False
++    total = 0
++    for i, ch in enumerate(reversed(digits)):
++        d = int(ch)
++        if i % 2:
++            d = d * 2 - 9 if d > 4 else d * 2
++        total += d
++    return total % 10 == 0
++
++
++def card_spans(text: str) -> list:
++    """The spans of digit runs (groups split by anything but a letter or a digit) that hold a payment-card number. A
++    card is read across any separators ("4242.4242.4242.4242", "4242_4242…": final red team NF-2), and every
++    contiguous part of a run is a candidate, so a card followed by another group is still seen (delta red team DF-1)."""
++    out = []
++    for run in _DIGIT_RUN.finditer(text):
++        groups = _GROUP.findall(run.group())
++        if any(_card_from(groups, i) for i in range(len(groups))):
++            out.append(run.span())
++    return out
++
++
++def _card_from(groups: list, i: int) -> bool:
++    joined = ""
++    for j in range(i, len(groups)):
++        # card groupings (4-4-4-4, 4-6-5, 4-4-4-4-3) have no group shorter than three digits, so a date's "-10-17" is
++        # never joined into a card; a candidate stops growing past 19 digits, and an ABA routing number (nine digits
++        # passing the routing checksum) is never joined to another group (third delta review F2; fourth G1:
++        # "4242-424242424242" is still a card)
++        if j > i and not all(len(g) >= 3 and not aba_routing(g) for g in (groups[i], groups[j])):
++            return False
++        joined += groups[j]
++        if len(joined) > 19:
++            return False
++        if luhn_card(joined):
++            return True
++    return False
++
++
++# US social security numbers (onboarding-py redaction.py's ``_SSN`` and ``_SSN_VALUE``; every dash, not only "-")
++_DASH = "[-‐-―−]"
++_SSN = re.compile(r"(?<![\w‐-―−-])\d{3}" + _DASH + r"\d{2}" + _DASH + r"\d{4}(?![\w‐-―−-])")
++_SSN_WORDS = r"ssn|social\s+security(?:\s+(?:number|no|nr|#))?|itin|tax\s+id"
++_SSN_VALUE = re.compile(rf"(?<![^\W_])(?:{_SSN_WORDS})(?![^\W_])[^\d\n]{{0,20}}(\d[\d\s‐-―−-]{{7,12}}\d)(?!\d)", re.I)
++
++
++def _ssn_spans(t: str) -> list:
++    out = [m.span() for m in _SSN.finditer(t)]
++    return out + [m.span(1) for m in _SSN_VALUE.finditer(t) if sum(ch.isdigit() for ch in m.group(1)) == 9]
++
++
+ def _spans(t: str) -> list:
+-    return [m.span() for m in _matches(t)]
++    return [m.span() for m in _matches(t)] + card_spans(t) + _ssn_spans(t)
+ 
+ 
+ def has_personal_data(text: str) -> bool:
+@@ -94,8 +177,8 @@ def _redact_once(t: str) -> str:
+ 
+ 
+ def redact(text: str) -> str:
+-    """The normalised text with every e-mail- or phone-like span replaced by "[redacted]" (case is kept), repeated
+-    until none is left (a redaction can bring two parts of a number together: delta red team DF-7)."""
++    """The normalised text with every e-mail-, phone-, card- or SSN-like span replaced by "[redacted]" (case is kept),
++    repeated until none is left (a redaction can bring two parts of a number together: delta red team DF-7)."""
+     t = _norm(text)
+     for _ in range(4):
+         if not _spans(t):
+diff --git a/services/ooh-py/src/store.py b/services/ooh-py/src/store.py
+index 35a439c..c291783 100644
+--- a/services/ooh-py/src/store.py
++++ b/services/ooh-py/src/store.py
+@@ -1,16 +1,20 @@
+ """
+ Local append-only record log and the data-directory lock (ADR 0019; seo-py's, ADR 0017, itself bizdev-py's, ADR
+-0016). Stdlib only. Copied from services/seo-py/src/store.py, unchanged in behaviour (originally services/service-py/src/store.py (itself security-py's as fixed in AEGIS rounds 1-5, ADR 0012 amendments, and
++0016). Stdlib only. Copied from services/seo-py/src/store.py (originally services/service-py/src/store.py (itself security-py's as fixed in AEGIS rounds 1-5, ADR 0012 amendments, and
+ service-py's rounds 1-5e): own pending line kept in memory, a pending line found on disk appended only when the
+ ledger already holds its anchor (else set aside to ``pending.discarded``), an empty line refuses start, exact-size
+ append with adopt / truncate, a closed instance refuses every write, and the flock with a single-use adopt token
+-and a mutex). This department stores no document bodies outside the log (vendor text is kept bounded, in the line).
++and a mutex); since the AEGIS H-1 fix (Oct 18 2026) it differs from seo-py's: the whole file is compared with memory
++before every write and at every integrity check, and ``verify()`` is replaced by ``file_problem()``. This department
++stores no document bodies outside the log (vendor text is kept bounded, in the line).
+ 
+ ``OOH_DATA_DIR/ooh_log.jsonl``: one JSON object per line, ``{"seq", "kind", "at", "data",
+ "prev_line_sha256", "record_sha256"}``; ``prev_line_sha256`` is the SHA-256 of the previous line's exact bytes
+ (64 zeros first) and ``record_sha256`` the line's own hash, so an edit, deletion, reordering or torn write is
+ caught at start (start-up refuses). While the service runs, the file must stay exactly the lines it holds: every
+-write compares the whole file with them first, and every integrity check does too (AEGIS H-1). A whole-file rewrite, a truncated tail or a deleted log is caught against
++write compares the whole file with them first, and so does every integrity check that runs (AEGIS H-1; an unforced
++check returns the last result while it is ok, and a forced one runs at most every 10 s, so between checks it is the
++next write that refuses). A whole-file rewrite, a truncated tail or a deleted log is caught against
+ the ledger instead: every line is anchored on the ledger BEFORE it is written (service._commit).
+ 
+ The pending line closes the crash window between "anchored on the ledger" and "appended here": the exact line
+@@ -22,6 +26,7 @@ from __future__ import annotations
+ import hashlib
+ import json
+ import os
++import stat
+ import threading
+ from typing import Iterator, Optional
+ 
+@@ -175,7 +180,8 @@ class RecordLog:
+ 
+     def append_prepared(self, rec: dict, line: bytes) -> dict:
+         """Append one line. The file must be exactly the in-memory lines before the write, byte for byte (else
+-        refused, the file untouched: AEGIS H-1, a same-size edit of an existing line is refused too); a failed write
++        refused and nothing written: AEGIS H-1, a same-size edit of an existing line is refused too; a deleted file is
++        re-created empty by the open, nothing more); the file must be a regular file (AEGIS r8 M-1); a failed write
+         is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file already holds exactly
+         the in-memory lines followed by this line (a write that reached the disk before an fsync error), it is
+         adopted instead of written twice. The whole file is read before every write: the cost grows with the log."""
+@@ -196,7 +202,10 @@ class RecordLog:
+                 except OSError as exc:
+                     raise StoreWriteError(f"local log open failed: {type(exc).__name__}") from exc
+                 try:
+-                    size = os.fstat(fd).st_size
++                    st = os.fstat(fd)
++                    if not stat.S_ISREG(st.st_mode):        # AEGIS r8 security M-1: never a FIFO or a device
++                        raise StoreWriteError("the log file and memory disagree; refusing to write")
++                    size = st.st_size
+                     adopt = size == expected + len(line) + 1
+                     if not (adopt or size == expected) or _pread_exact(fd, expected, 0) != mem or \
+                             (adopt and _pread_exact(fd, len(line) + 1, expected) != line + b"\n"):
+@@ -237,16 +246,25 @@ class RecordLog:
+         with self.lock:
+             if not self.path:
+                 return None
++            mem = self._memory_bytes()
++            differs = "the local log file differs from the lines this service holds: an operator must inspect it"
++            # AEGIS r8 security M-1: like the write path, never follow a symlink, never block on a FIFO, never read a
++            # device or a file of another size (the read happens under the service lock)
+             try:
+-                with open(self.path, "rb") as fh:
+-                    raw = fh.read()
++                fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+             except FileNotFoundError:
+-                raw = b""                    # no line written yet: no file (a deleted file with lines in memory differs)
++                return differs if mem else None   # no line written yet: no file (a deleted file with lines differs)
+             except OSError as exc:
+                 return f"the local log file cannot be read ({type(exc).__name__})"
+-            if raw != self._memory_bytes():
+-                return "the local log file differs from the lines this service holds: an operator must inspect it"
+-            return None
++            try:
++                st = os.fstat(fd)
++                if not stat.S_ISREG(st.st_mode) or st.st_size != len(mem) or _pread_exact(fd, len(mem), 0) != mem:
++                    return differs
++                return None
++            except OSError as exc:
++                return f"the local log file cannot be read ({type(exc).__name__})"
++            finally:
++                os.close(fd)
+ 
+ 
+     # ------------------------------------------------------------------ pending line (ADR 0012 decision 7)
+diff --git a/services/ooh-py/src/svc_campaigns.py b/services/ooh-py/src/svc_campaigns.py
+index 8ebad92..008239b 100644
+--- a/services/ooh-py/src/svc_campaigns.py
++++ b/services/ooh-py/src/svc_campaigns.py
+@@ -142,36 +142,9 @@ def _spelled_out(value: str) -> list[str]:
+     return out
+ 
+ 
+-# Card numbers start with a card-network prefix (IIN): Visa 4, Mastercard 51-55 and 2221-2720, Maestro 50/56-58,
+-# Mir 2200-2204, Amex 34/37, JCB 35, Diners 30/36/38/39, Discover, UnionPay and RuPay 6, RuPay 81/82, Uzcard 8600,
+-# Troy 9792, Humo 9860 (third delta review F1). A digit run that starts otherwise (0, 1, 7, most of 2, 8 and 9: dates
+-# such as 2026…, ABA routing numbers) is never read as a card, so a bank reference with a date is not refused by
+-# chance (second delta review E2). A 15-digit run is the length of an ACH trace number, whose ABA routing prefix can
+-# be 21-32 or 61-72: it counts only with a prefix no routing prefix starts with (4, 34-38, 50-58, 6011).
+-_CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|220[0-4]|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720|3[0-9]|6"
+-                          r"|8[12]|8600|9792|9860)")
+-_CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
+-
+-
+-def _aba_routing(digits: str) -> bool:
+-    """A nine-digit ABA routing number: 3, 7, 1 weights over its digits sum to a multiple of ten."""
+-    if len(digits) != 9:
+-        return False
+-    return sum(int(d) * w for d, w in zip(digits, (3, 7, 1) * 3)) % 10 == 0
+-
+-
+-def _luhn_card(digits: str) -> bool:
+-    """A payment-card number, never stored (re-verification N2)."""
+-    if not 13 <= len(digits) <= 19 or not _CARD_PREFIX.match(digits) \
+-            or (len(digits) == 15 and not _CARD_PREFIX_15.match(digits)):
+-        return False
+-    total = 0
+-    for i, ch in enumerate(reversed(digits)):
+-        d = int(ch)
+-        if i % 2:
+-            d = d * 2 - 9 if d > 4 else d * 2
+-        total += d
+-    return total % 10 == 0
++# The card and ABA routing rules live in pii.py since OOH2-PII-1 (free text uses them too); the old names stay.
++_aba_routing = pii.aba_routing
++_luhn_card = pii.luhn_card
+ 
+ 
+ # Instruments named in two or more words ("money order", "Western Union"): matched on one token or on adjacent tokens
+@@ -192,26 +165,9 @@ def names_a_card(value: str) -> bool:
+                 for form in (w, w + "s"):                      # plurals too (delta red team DF-5)
+                     if joined == form or (joined.startswith(form) and joined[len(form):].isdigit()):
+                         return True
+-    # A run of digit groups split by separators: every contiguous part of it is a candidate, so a card followed by
+-    # another group ("4242-4242-4242-4242-1228") is still seen (delta red team DF-1).
+-    text = unicodedata.normalize("NFKC", value).casefold()
+-    for run in re.finditer(r"[0-9]+(?:[^0-9a-z]+[0-9]+)*", text):
+-        groups = re.findall(r"[0-9]+", run.group())
+-        for i in range(len(groups)):
+-            joined = ""
+-            for j in range(i, len(groups)):
+-                # card groupings (4-4-4-4, 4-6-5, 4-4-4-4-3) have no group shorter than three digits, so a date's
+-                # "-10-17" is never joined into a card; a candidate stops growing past 19 digits
+-                # and an ABA routing number (nine digits passing the routing checksum) is never joined to another
+-                # group (third delta review F2; fourth G1: "4242-424242424242" is still a card)
+-                if j > i and not all(len(g) >= 3 and not _aba_routing(g) for g in (groups[i], groups[j])):
+-                    break
+-                joined += groups[j]
+-                if len(joined) > 19:
+-                    break
+-                if _luhn_card(joined):
+-                    return True
+-    return False
++    # A run of digit groups split by separators (the rule lives in pii.card_spans, which free text uses too:
++    # OOH2-PII-1).
++    return bool(pii.card_spans(unicodedata.normalize("NFKC", value).casefold()))
+ 
+ 
+ def funds_ref_parts(value: str) -> tuple[set, str]:
+@@ -905,6 +861,8 @@ class CampaignsMixin:
+         with self.lock:
+             self._gate()
+             c = self._campaign(tid, cid)
++            if pii.has_personal_data(body["client_approval_doc_ref"]):     # OOH2-PII-1: refused before any write
++                raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"), field="client_approval_doc_ref")
+             rk = self.rk("client_approval", cid, body)
+             if self._idem("andre", rk, body):
+                 return self.campaign_view(tid, cid)
+diff --git a/services/ooh-py/tests/test_aegis_h1_edges.py b/services/ooh-py/tests/test_aegis_h1_edges.py
+new file mode 100644
+index 0000000..be032a2
+--- /dev/null
++++ b/services/ooh-py/tests/test_aegis_h1_edges.py
+@@ -0,0 +1,265 @@
++"""AEGIS round 8 at 99569bd (mutation BLOCK, test-verification BLOCK, security M-1): edges of the H-1 whole-file compare
++that no test pinned, and the integrity check's read of the file.
++- the compare covers the file's first and last byte (X016, X017);
++- adoption needs this line AND its newline (X011), fsyncs the adopted line (M092/M093), writes nothing again (M091),
++  and completes short reads of the tail (M080);
++- the integrity check reads the file of an empty log too (X024);
++- ``_pread_exact`` stops at the end of the file (M011/M013/X008);
++- the log file is created 0600 (M044);
++- the integrity check never follows a symlink, never blocks on a FIFO, never reads a device, and compares the size
++  before reading (security M-1, L-2)."""
++from __future__ import annotations
++
++import os
++import stat
++import threading
++
++import pytest
++
++import store as ST
++from store import RecordLog, StoreWriteError, _pread_exact
++from test_aegis_h1_file_content import DIFFERS, _disk, _three_lines
++from test_aegis_integrity_path import _check, _new_tenant, env  # noqa: F401  (env is a fixture)
++from test_aegis_store_write_path import _fake_os
++
++
++def _write(h, raw: bytes) -> None:
++    with open(h.svc.log.path, "wb") as fh:
++        fh.write(raw)
++
++
++# ---------------------------------------------------------------- the first and the last byte (X016, X017)
++
++@pytest.mark.parametrize("where", ["first", "last"])
++def test_edges_a_same_size_edit_of_the_files_first_or_last_byte_is_refused(env, where):
++    led, h = env
++    _three_lines(h)
++    raw = _disk(h)
++    i = 0 if where == "first" else len(raw) - 1
++    edited = raw[:i] + (b"[" if where == "first" else b" ") + raw[i + 1:]
++    assert len(edited) == len(raw) and edited != raw
++    _write(h, edited)
++    n = len(h.svc.log)
++    r = _new_tenant(h, f"edge-{where}")
++    assert r.status_code == 503 and r.json() == {"detail": "STORE_UNAVAILABLE", "maybe": True}, r.text
++    assert _disk(h) == edited and len(h.svc.log) == n
++    assert _check(h)["ok"] is False and _disk(h) == edited       # the anchored line cannot roll forward over it either
++
++
++# ---------------------------------------------------------------- adoption (X011, M092/M093, M091, M080)
++
++def _prepared(h, tid):
++    return h.svc.log.prepare("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": tid, "actor": "andre"})
++
++
++def test_edges_adoption_refuses_this_line_without_its_newline(env):
++    led, h = env
++    log = h.svc.log
++    rec, line = _prepared(h, "nl-1")
++    with open(log.path, "ab") as fh:
++        fh.write(line + b"x")                                    # the right size, but not the line and its newline
++    want, n = _disk(h), len(log)
++    with pytest.raises(StoreWriteError, match="the log file and memory disagree"):
++        log.append_prepared(rec, line)
++    assert _disk(h) == want and len(log) == n
++
++
++def _spy(monkeypatch, h):
++    calls = []
++    real = {k: getattr(os, k) for k in ("open", "fsync", "pwrite")}
++    fds = {}
++
++    def opener(path, *a, **k):
++        fd = real["open"](path, *a, **k)
++        fds[fd] = os.fspath(path)
++        return fd
++
++    def fsync(fd):
++        calls.append(("fsync", fds.get(fd)))
++        return real["fsync"](fd)
++
++    def pwrite(fd, data, offset):
++        calls.append(("pwrite", fds.get(fd)))
++        return real["pwrite"](fd, data, offset)
++
++    _fake_os(monkeypatch, open=opener, fsync=fsync, pwrite=pwrite)
++    return calls
++
++
++def test_edges_adoption_fsyncs_the_file_and_writes_nothing_again(env, monkeypatch):
++    led, h = env
++    log = h.svc.log
++    rec, line = _prepared(h, "ad-fs")
++    with open(log.path, "ab") as fh:
++        fh.write(line + b"\n")
++    want = _disk(h)
++    calls = _spy(monkeypatch, h)
++    log.append_prepared(rec, line)
++    monkeypatch.undo()
++    assert ("fsync", log.path) in calls                          # the adopted line is made durable before the answer
++    assert ("pwrite", log.path) not in calls                     # and never written a second time
++    assert _disk(h) == want and log.raw_lines(len(log) - 1) == [line]
++
++
++def test_edges_adoption_completes_short_reads_of_the_tail(env, monkeypatch):
++    led, h = env
++    _three_lines(h)
++    log = h.svc.log
++    rec, line = _prepared(h, "ad-short")
++    with open(log.path, "ab") as fh:
++        fh.write(line + b"\n")
++    real_pread = os.pread
++    _fake_os(monkeypatch, pread=lambda fd, n, off: real_pread(fd, min(n, 7), off))
++    log.append_prepared(rec, line)
++    monkeypatch.undo()
++    assert log.raw_lines(len(log) - 1) == [line] and log.file_problem() is None
++
++
++# ---------------------------------------------------------------- the file of an empty log (X024)
++
++def test_edges_integrity_check_reads_the_file_of_an_empty_log(tmp_path):
++    from helpers import Harness
++    h = Harness(tmp_path, data_dir=str(tmp_path / "data"))
++    try:
++        assert len(h.svc.log) == 0 and h.svc.integrity["ok"] is True
++        _write(h, b"junk\n")
++        assert _check(h)["problem"] == DIFFERS
++    finally:
++        h.svc.close()
++        if h.settings.data_dir_lock is not None:
++            h.settings.data_dir_lock.release()
++
++
++# ---------------------------------------------------------------- _pread_exact stops at the end (M011/M013/X008)
++
++def test_edges_pread_exact_stops_at_the_end_of_the_file(tmp_path, monkeypatch):
++    p = tmp_path / "f"
++    p.write_bytes(b"abcdef")
++    fd = os.open(p, os.O_RDONLY)
++    try:
++        assert _pread_exact(fd, 100, 0) == b"abcdef"             # asked for more than there is: what there is
++        assert _pread_exact(fd, 100, 4) == b"ef"
++        assert _pread_exact(fd, 3, 6) == b""
++        assert _pread_exact(fd, 0, 0) == b""
++        calls = []
++        real_pread = os.pread
++
++        def counting(fd_, n, off):
++            calls.append(n)
++            assert len(calls) < 50, "pread called again and again at the end of the file"
++            return real_pread(fd_, min(n, 2), off)
++
++        _fake_os(monkeypatch, pread=counting)
++        assert _pread_exact(fd, 100, 0) == b"abcdef"             # short reads completed, then the end stops it
++        assert len(calls) == 4
++    finally:
++        os.close(fd)
++
++
++def test_edges_a_file_that_shrinks_after_fstat_is_refused_not_spun_on(env, monkeypatch):
++    led, h = env
++    _three_lines(h)
++    log = h.svc.log
++    real_pread = os.pread
++    state = {"cut": False}
++
++    def shrinking(fd, n, off):
++        if not state["cut"]:
++            state["cut"] = True
++            with open(log.path, "r+b") as fh:                     # someone truncates the file mid-compare
++                fh.truncate(10)
++        return real_pread(fd, n, off)
++
++    _fake_os(monkeypatch, pread=shrinking)
++    done = {}
++
++    def run():
++        try:
++            log.append("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": "shrink", "actor": "andre"})
++        except StoreWriteError as exc:
++            done["err"] = str(exc)
++
++    t = threading.Thread(target=run)
++    t.start()
++    t.join(10)
++    assert not t.is_alive(), "the compare did not stop at the end of the shrunk file"
++    assert "the log file and memory disagree" in done.get("err", "")
++
++
++# ---------------------------------------------------------------- created 0600 (M044)
++
++def test_edges_the_log_file_is_created_owner_only(tmp_path):
++    log = RecordLog(str(tmp_path / "d"))
++    rec, line = log.prepare("tenant_created", "2026-10-18T09:00:00Z", {"tenant_id": "m-1", "actor": "andre"})
++    old = os.umask(0)
++    try:
++        log.append_prepared(rec, line)
++    finally:
++        os.umask(old)
++    assert stat.S_IMODE(os.stat(log.path).st_mode) == 0o600
++
++
++# ---------------------------------------------------------------- what the integrity check reads (security M-1, L-2)
++
++def _swap(h, make):
++    path = h.svc.log.path
++    keep = path + ".keep"
++    os.replace(path, keep)
++    make(path, keep)
++    return keep
++
++
++def test_edges_integrity_check_does_not_block_on_a_fifo(env):
++    led, h = env
++    _three_lines(h)
++    keep = _swap(h, lambda path, keep: os.mkfifo(path, 0o600))
++    out = {}
++    t = threading.Thread(target=lambda: out.setdefault("i", _check(h)))
++    t.start()
++    t.join(10)
++    try:
++        assert not t.is_alive(), "the integrity check blocked on a FIFO"
++        assert out["i"]["ok"] is False and out["i"]["problem"] == DIFFERS, out
++        r = _new_tenant(h, "fifo-w")
++        assert r.status_code == 503, r.text
++    finally:
++        if t.is_alive():                                          # unblock it so the test run can end
++            fd = os.open(h.svc.log.path, os.O_WRONLY | os.O_NONBLOCK)
++            os.close(fd)
++        os.unlink(h.svc.log.path)
++        os.replace(keep, h.svc.log.path)
++
++
++def test_edges_integrity_check_does_not_follow_a_symlink_even_to_identical_bytes(env):
++    led, h = env
++    _three_lines(h)
++    _swap(h, lambda path, keep: os.symlink(keep, path))
++    i = _check(h)
++    assert i["ok"] is False and i["problem"].startswith("the local log file cannot be read"), i
++    r = _new_tenant(h, "link-w")
++    assert r.status_code == 503, r.text                          # the write path refuses a symlink too (O_NOFOLLOW)
++
++
++def test_edges_integrity_check_does_not_read_a_device(env):
++    led, h = env
++    _three_lines(h)
++    if not os.path.exists("/dev/zero"):
++        pytest.skip("no /dev/zero")
++    _swap(h, lambda path, keep: os.symlink("/dev/zero", path))
++    i = _check(h)
++    assert i["ok"] is False, i
++
++
++def test_edges_integrity_check_compares_the_size_before_reading(env):
++    import tracemalloc
++    led, h = env
++    _three_lines(h)
++    with open(h.svc.log.path, "ab") as fh:
++        fh.truncate(256 << 20)                                    # a sparse 256 MiB file
++    tracemalloc.start()
++    try:
++        assert _check(h)["problem"] == DIFFERS
++        peak = tracemalloc.get_traced_memory()[1]
++    finally:
++        tracemalloc.stop()
++    assert peak < (16 << 20), peak                                # refused on its size, not read into memory
+diff --git a/services/ooh-py/tests/test_ooh2_pii1_card_ssn.py b/services/ooh-py/tests/test_ooh2_pii1_card_ssn.py
+new file mode 100644
+index 0000000..69c99b5
+--- /dev/null
++++ b/services/ooh-py/tests/test_ooh2_pii1_card_ssn.py
+@@ -0,0 +1,191 @@
++"""OOH2-PII-1 (High, founder ruling Oct 18 2026; AEGIS security M-1): card numbers and SSNs typed into free text were
++stored as typed. pii.py now also finds Luhn-checked card numbers (any separators between the digit groups, a
++card-network prefix) and SSNs (onboarding-py redaction.py's shapes), so in the three fields of the finding:
++- unit ``vendor_text`` is redacted before the line is written;
++- a face text attribute is refused 422 ATTRIBUTE_VALUE_PERSONAL_DATA, nothing written;
++- ``client_approval_doc_ref`` is refused 422 ATTRIBUTE_VALUE_PERSONAL_DATA, nothing written.
++Every test checks the log file on disk, the pending files and every ledger event, not only the HTTP answer.
++Test values only: public test card numbers and 123-45-6789."""
++from __future__ import annotations
++
++import json
++import os
++
++import pytest
++
++import pii
++from helpers import Harness, rid
++
++CARDS = ["4111 1111 1111 1111", "4111-1111-1111-1111", "4111.1111.1111.1111", "4111_1111_1111_1111",
++         "5555 5555 5555 4444", "3782 822463 10005", "4111111111111111"]
++SSNS = ["123-45-6789", "123‐45‐6789", "SSN 123456789", "social security number: 123 45 6789"]
++SECRETS = CARDS + SSNS
++
++
++def _digits(s: str) -> str:
++    return "".join(ch for ch in s if ch.isdigit())
++
++
++@pytest.fixture
++def h(tmp_path):
++    h = Harness(tmp_path, data_dir=str(tmp_path / "data"))
++    h.tenant("acme")
++    yield h
++    if not h.svc.closed:
++        h.svc.close()
++    if h.settings.data_dir_lock is not None:
++        h.settings.data_dir_lock.release()
++
++
++def _stored(h) -> str:
++    """Everything this service wrote: the log file, the pending files, every ledger event (payload and summary)."""
++    parts = []
++    d = h.settings.data_dir
++    for name in sorted(os.listdir(d)):
++        p = os.path.join(d, name)
++        if os.path.isfile(p) and not name.endswith(".lock"):
++            with open(p, "rb") as fh:
++                parts.append(fh.read().decode("utf-8", "replace"))
++    parts.append(json.dumps(h.ledger.events, default=str))
++    return "\n".join(parts)
++
++
++def _absent(h, secret: str) -> None:
++    stored = _stored(h)
++    assert secret not in stored, secret
++    if len(_digits(secret)) >= 9:                     # also with the separators taken out
++        assert _digits(secret) not in _digits_runs(stored), secret
++
++
++def _digits_runs(text: str) -> set:
++    """Each run of digits and separators, as digits only."""
++    out, cur = set(), ""
++    for ch in text + "x":
++        if ch.isdigit():
++            cur += ch
++        elif ch in " -._:‐":
++            continue
++        else:
++            if cur:
++                out.add(cur)
++            cur = ""
++    return out
++
++
++def _unit(h, vendor_text: str):
++    cid = h.campaign("acme")
++    h.plan("acme", cid)
++    fid = h.face("lamar", f"face-{rid()[:8]}")
++    return cid, h.post(f"/tenants/acme/campaigns/{cid}/inventory",
++                       {"request_id": rid(), "face_id": fid, "flight_start": "2026-11-01", "flight_end": "2026-11-30",
++                        "vendor_text": vendor_text})
++
++
++# ---------------------------------------------------------------- 1. unit vendor_text: redacted before the write
++
++@pytest.mark.parametrize("secret", SECRETS)
++def test_pii1_unit_vendor_text_card_or_ssn_is_redacted_before_the_write(h, secret):
++    cid, r = _unit(h, f"faces west, contact {secret} for access")
++    assert r.status_code == 201, r.text
++    vt = r.json()["vendor_text"]
++    assert vt["personal_data_redacted"] is True and "[redacted]" in vt["text"], vt
++    assert "faces west" in vt["text"]                              # the rest of the text is kept
++    _absent(h, secret)
++    u = h.get(f"/tenants/acme/campaigns/{cid}/inventory/{r.json()['unit_id']}", caller="ooh_agent")
++    assert secret not in u.text
++
++
++# ---------------------------------------------------------------- 2. face text attribute: refused, nothing written
++
++@pytest.mark.parametrize("secret", SECRETS)
++def test_pii1_face_text_attribute_card_or_ssn_is_refused_before_any_write(h, secret):
++    fid = h.face("lamar", "face-attr-1")
++    src = h.source("lamar")                                       # recorded first: it is a write of its own
++    f = h.ok(h.get(f"/faces/{fid}"))
++    lines, events = len(h.svc.log), len(h.ledger.events)
++    r = h.post(f"/faces/{fid}/attributes", {"request_id": rid(), "expected_version": f["version"],
++                                            "attribute": "location_description", "value": f"billing {secret}",
++                                            "source_id": src})
++    assert r.status_code == 422 and r.json()["detail"] == "ATTRIBUTE_VALUE_PERSONAL_DATA", r.text
++    assert len(h.svc.log) == lines and len(h.ledger.events) == events
++    _absent(h, secret)
++
++
++# ---------------------------------------------------------------- 3. client_approval_doc_ref: refused, nothing written
++
++REF_SECRETS = ["4111-1111-1111-1111", "4111_1111_1111_1111", "4111.1111.1111.1111", "io-4111-1111-1111-1111",
++               "123-45-6789", "SSN:123456789"]
++
++
++@pytest.mark.parametrize("secret", REF_SECRETS)
++def test_pii1_client_approval_doc_ref_card_or_ssn_is_refused_before_any_write(h, secret):
++    ctx = h.to_proposal_sent("acme")
++    before = h.view("acme", ctx["cid"])
++    lines, events = len(h.svc.log), len(h.ledger.events)
++    r = h.approve(ctx, client_approval_doc_ref=secret)
++    assert r.status_code == 422, r.text
++    assert r.json()["detail"] == "ATTRIBUTE_VALUE_PERSONAL_DATA", r.text
++    assert len(h.svc.log) == lines and len(h.ledger.events) == events
++    after = h.view("acme", ctx["cid"])
++    assert after["state"] == before["state"] == "PROPOSAL_SENT" and after["version"] == before["version"]
++    _absent(h, secret)
++    h.ok(h.approve(ctx), 200)                                    # control: the signed IO's own reference is accepted
++
++
++# ---------------------------------------------------------------- controls: what is not a card or an SSN passes
++
++@pytest.mark.parametrize("ref", ["io-acme-signed-1", "DOC-2026-10-18-001", "po-12345", "4111-1111-1111-1112"])
++def test_pii1_ordinary_references_are_accepted(h, ref):
++    ctx = h.to_proposal_sent("acme")
++    r = h.approve(ctx, client_approval_doc_ref=ref)
++    assert r.status_code == 200, r.text
++
++
++@pytest.mark.parametrize("text", ["14x48 faces west, lit 6am-midnight, 2026-11-01 to 2026-11-30",
++                                  "4111 1111 1111 1112 is not Luhn-valid", "1234 5678 9012 3452 has no card prefix",
++                                  "permit 123-456-789", "GPS 34.101 -118.3265"])
++def test_pii1_ordinary_vendor_text_is_not_redacted(h, text):
++    _, r = _unit(h, text)
++    assert r.status_code == 201, r.text
++    assert r.json()["vendor_text"] == {**r.json()["vendor_text"], "personal_data_redacted": False, "text": text}
++
++
++def test_pii1_the_controls_are_what_they_claim():
++    assert pii.luhn_card("1234567890123452") is False and _luhn("1234567890123452")    # Luhn-valid, no prefix
++    assert not _luhn("4111111111111112")
++
++
++def _luhn(d: str) -> bool:
++    total = 0
++    for i, ch in enumerate(reversed(d)):
++        n = int(ch)
++        if i % 2:
++            n = n * 2 - 9 if n > 4 else n * 2
++        total += n
++    return total % 10 == 0
++
++
++# ---------------------------------------------------------------- pii.py directly
++
++@pytest.mark.parametrize("secret", SECRETS)
++def test_pii1_has_personal_data_and_redact(secret):
++    text = f"note: {secret} end"
++    assert pii.has_personal_data(text)
++    red = pii.redact(text)
++    assert "[redacted]" in red and red.startswith("note: ") and red.endswith(" end")
++    assert _digits(secret) not in _digits(red)
++
++
++def test_pii1_a_card_followed_by_another_group_is_still_seen():
++    assert pii.has_personal_data("ref 4242-4242-4242-4242-1228")
++    assert pii.card_spans("x 4111 1111 1111 1111 y") == [(2, 21)]
++
++
++def test_pii1_a_routing_number_is_not_joined_into_a_card():
++    assert pii.card_spans("ACH-256074974-93982757") == []
++    assert not pii.has_personal_data("trace 021000021 0000001")
++
++
++def test_pii1_ssn_glued_to_a_word_or_with_other_digit_counts_is_not_an_ssn():
++    for t in ("A123-45-6789", "123-45-67890", "1234-56-7890", "SSN 12345678"):
++        assert pii._ssn_spans(pii._norm(t)) == [], t

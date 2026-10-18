@@ -1,0 +1,37 @@
+{
+ "audit_before": {
+  "ok": true,
+  "checked_at": "2026-10-16T18:00:00Z",
+  "problem": null
+ },
+ "health_after_edit": {
+  "status": "ok"
+ },
+ "status_after_edit": {
+  "ok": true,
+  "checked_at": "2026-10-16T18:00:00Z",
+  "problem": null
+ },
+ "audit_after_edit_within_10s": {
+  "ok": true,
+  "checked_at": "2026-10-16T18:00:00Z",
+  "problem": null
+ },
+ "t_audit": 0.01,
+ "audit_after_10s": {
+  "ok": false,
+  "checked_at": "2026-10-16T18:00:00Z",
+  "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+ },
+ "health_after_forced": {
+  "status": "degraded"
+ },
+ "write": [
+  503,
+  {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  }
+ ],
+ "file_untouched": true
+}

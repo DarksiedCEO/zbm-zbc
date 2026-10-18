@@ -1,0 +1,104 @@
+{
+ "scen": "fifo",
+ "mode": "H",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/src99",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt9-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 69072,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T14:58:33Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.118,
+  "file_before": "missing",
+  "file_after": "146bcec36e5a1f1824f6555d0f063aff77d27e77d0378bf71518cb1cfde31aee",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 70080
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T14:58:33Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.092,
+  "file_before": "146bcec36e5a1f1824f6555d0f063aff77d27e77d0378bf71518cb1cfde31aee",
+  "file_after": "94845662885d553487df4a3ab259715adb1bdbeb574f892cb01ec7776f0469ac",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71552
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "94845662885d553487df4a3ab259715adb1bdbeb574f892cb01ec7776f0469ac",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71536
+ },
+ "fault": {
+  "orig_sha": "94845662885d553487df4a3ab259715adb1bdbeb574f892cb01ec7776f0469ac",
+  "disk": {
+   "kind": "fifo",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "A1": {
+  "status": "transport",
+  "body": "ReadTimeout: timed out",
+  "elapsed_s": 20.005,
+  "file": "fifo",
+  "rss_kb": 72240
+ },
+ "HANG": "A1",
+ "health_during_hang": {
+  "status": "transport",
+  "body": "ReadTimeout: timed out",
+  "elapsed_s": 5.005
+ },
+ "post_during_hang": {
+  "status": "transport",
+  "body": "ReadTimeout: timed out",
+  "elapsed_s": 5.006
+ },
+ "kill": "SIGKILL (SIGTERM ignored 5 s)",
+ "disk_after_kill": {
+  "kind": "fifo",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ }
+}

@@ -1,0 +1,918 @@
+======== c75_e2_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "7811a1627fdd6f3ae5442f5204005f71d2106c6792191bea0c1d2f3a2d848523", "fault_sha": "bbd28750fe4ae22f3c3bed14991412bca55967349bb56fde95cdd5cb59fed208"} pre_rss 71376
+   A_no_write: 200 ok=True '' t=0.019 rss=72096
+   A_no_write_again: 200 ok=True '' t=0.014 rss=72096
+   job_no_write: 200 ok=True '' t=0.014 rss=72128
+   status_after_check: 200 ok=True '' t=0.011
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:55Z", "campaigns": 0 t=0.109 unchanged=False anchors 2->3 pending=False rss=73472
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:57:55Z", "campaigns": 0 t=0.109 unchanged=False anchors 3->4 pending=False rss=74176
+   job_putback: 200 ok=True '' t=0.02 rss=74176
+   A_putback: 200 ok=True '' t=0.014 rss=74176
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:55Z", "campaigns": 0 t=0.01 unchanged=True anchors 4->4 pending=False rss=74176
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:58:06Z", "campaigns": 0 t=0.102 unchanged=False anchors 4->5 pending=False rss=74208
+   A_restart: 200 ok=True '' t=0.014 rss=69088
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:58:07Z", "campaigns t=0.136 unchanged=False anchors 5->6 pending=False rss=70736
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_e2_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "91a7dc013aa181d799be30167479cada71b8dff474fb9782905706380e972d76", "fault_sha": "db72f8438572a7a7425e3fcb56f3ac2c3d0d33469ae2834178674b0423df5aef"} pre_rss 72784
+   A_no_write: 200 ok=True '' t=0.017 rss=72800
+   A_no_write_again: 200 ok=True '' t=0.013 rss=72816
+   job_no_write: 200 ok=True '' t=0.017 rss=74240
+   status_after_check: 200 ok=True '' t=0.009
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:58:01Z", "campaigns": 0 t=0.123 unchanged=False anchors 2->3 pending=False rss=75680
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:58:01Z", "campaigns": 0 t=0.13 unchanged=False anchors 3->4 pending=False rss=77088
+   job_putback: 200 ok=True '' t=0.019 rss=78528
+   A_putback: 200 ok=True '' t=0.015 rss=79360
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:58:01Z", "campaigns": 0 t=0.014 unchanged=True anchors 4->4 pending=False rss=79360
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:58:12Z", "campaigns": 0 t=0.141 unchanged=False anchors 4->5 pending=False rss=80816
+   A_restart: 200 ok=True '' t=0.015 rss=70656
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:58:14Z", "campaigns t=0.17 unchanged=False anchors 5->6 pending=False rss=72176
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_e2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "ea1901a8b785aae8b79039e670d709c9e313ae205ce0c000e22fd4c651090f7a", "fault_sha": "6036b9ed5c8c6b7a48e9f6ecf84ade5c8b6724177bc8564b738f650ae79d3e6a"} pre_rss 71568
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:14Z", "campaigns": 0 t=0.112 unchanged=False anchors 2->3 pending=False rss=72320
+   A_after_W3: 200 ok=True '' t=0.013 rss=72320
+   job_after_W3: 200 ok=True '' t=0.016 rss=72976
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:56:15Z", "campaigns": 0 t=0.159 unchanged=False anchors 3->4 pending=False rss=74368
+   job_putback: 200 ok=True '' t=0.022 rss=75216
+   A_putback: 200 ok=True '' t=0.011 rss=75216
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:14Z", "campaigns": 0 t=0.006 unchanged=True anchors 4->4 pending=False rss=75216
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:56:26Z", "campaigns": 0 t=0.131 unchanged=False anchors 4->5 pending=False rss=75216
+   A_restart: 200 ok=True '' t=0.012 rss=69200
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:56:27Z", "campaigns t=0.138 unchanged=False anchors 5->6 pending=False rss=70736
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_e2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "255f0be2ae13c0222a050ece62d298d789d36128a8e7ac3c11cb0b36d3006c85", "fault_sha": "a6c5b8ec8215efefc870a421988b4062dff0fcaa0a1fdd297fe0adf8bf0e6223"} pre_rss 72672
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:19Z", "campaigns": 0 t=0.169 unchanged=False anchors 2->3 pending=False rss=72688
+   A_after_W3: 200 ok=True '' t=0.02 rss=73424
+   job_after_W3: 200 ok=True '' t=0.017 rss=74848
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:56:19Z", "campaigns": 0 t=0.203 unchanged=False anchors 3->4 pending=False rss=76272
+   job_putback: 200 ok=True '' t=0.018 rss=77808
+   A_putback: 200 ok=True '' t=0.019 rss=78512
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:19Z", "campaigns": 0 t=0.009 unchanged=True anchors 4->4 pending=False rss=78512
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:56:30Z", "campaigns": 0 t=0.172 unchanged=False anchors 4->5 pending=False rss=79984
+   A_restart: 200 ok=True '' t=0.011 rss=70768
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:56:32Z", "campaigns t=0.188 unchanged=False anchors 5->6 pending=False rss=72336
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_e3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "4f95abed5b46af8ab41aebe96507c8364da08f6b71d51f72fc85e02449c645f3", "fault_sha": "e40131ba1a50abad5c34481be5c5faee89e70fb1dbb9fa90af4fb09776f01021"} pre_rss 71968
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:39Z", "campaigns": 0 t=0.144 unchanged=False anchors 2->3 pending=False rss=72672
+   A_after_W3: 200 ok=True '' t=0.016 rss=72672
+   job_after_W3: 200 ok=True '' t=0.018 rss=73488
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:56:40Z", "campaigns": 0 t=0.105 unchanged=False anchors 3->4 pending=False rss=74912
+   job_putback: 200 ok=True '' t=0.025 rss=75584
+   A_putback: 200 ok=True '' t=0.012 rss=75584
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:39Z", "campaigns": 0 t=0.01 unchanged=True anchors 4->4 pending=False rss=75584
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:56:51Z", "campaigns": 0 t=0.208 unchanged=False anchors 4->5 pending=False rss=75584
+   A_restart: 200 ok=True '' t=0.016 rss=69840
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:56:52Z", "campaigns t=0.223 unchanged=False anchors 5->6 pending=False rss=71392
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_e3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "4d9a417502dccc75a20c7c97bd2896ba251f544d5d643f93cec6da609c05a494", "fault_sha": "3ec474f8611e29191c542a7ff65734891b4787b1dad72f7045cc46eeaa0b91ce"} pre_rss 73168
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:44Z", "campaigns": 0 t=0.194 unchanged=False anchors 2->3 pending=False rss=73184
+   A_after_W3: 200 ok=True '' t=0.023 rss=73840
+   job_after_W3: 200 ok=True '' t=0.015 rss=75328
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:56:45Z", "campaigns": 0 t=0.204 unchanged=False anchors 3->4 pending=False rss=76752
+   job_putback: 200 ok=True '' t=0.022 rss=78208
+   A_putback: 200 ok=True '' t=0.011 rss=78944
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:56:44Z", "campaigns": 0 t=0.007 unchanged=True anchors 4->4 pending=False rss=78960
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:56:56Z", "campaigns": 0 t=0.143 unchanged=False anchors 4->5 pending=False rss=80448
+   A_restart: 200 ok=True '' t=0.013 rss=70720
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:56:57Z", "campaigns t=0.187 unchanged=False anchors 5->6 pending=False rss=72304
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_m2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "e546eec3124906266f2227244a8a698f45a8ea99c5b284f68c75cc9aa6d7f5bb", "fault_sha": "db140535b71ce3123f61181aebd1a964e0f6407ce39d409fc894f510b9b46277"} pre_rss 71632
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:05Z", "campaigns": 0 t=0.17 unchanged=False anchors 2->3 pending=False rss=72352
+   A_after_W3: 200 ok=True '' t=0.019 rss=72368
+   job_after_W3: 200 ok=True '' t=0.017 rss=73088
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:57:05Z", "campaigns": 0 t=0.182 unchanged=False anchors 3->4 pending=False rss=74576
+   job_putback: 200 ok=True '' t=0.021 rss=75232
+   A_putback: 200 ok=True '' t=0.018 rss=75232
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:05Z", "campaigns": 0 t=0.008 unchanged=True anchors 4->4 pending=False rss=75232
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:57:16Z", "campaigns": 0 t=0.165 unchanged=False anchors 4->5 pending=False rss=75232
+   A_restart: 200 ok=True '' t=0.015 rss=69280
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:57:17Z", "campaigns t=0.178 unchanged=False anchors 5->6 pending=False rss=70864
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_m2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "c683e137ce0661d812b3371eb7026d539ee08c225b818beb94006a46e73fe80f", "fault_sha": "621cb96fe9a6b8e78d62a6058bfd573cf1e51ca54ea5ed6b092309fee52909fe"} pre_rss 73072
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:10Z", "campaigns": 0 t=0.154 unchanged=False anchors 2->3 pending=False rss=73120
+   A_after_W3: 200 ok=True '' t=0.017 rss=73824
+   job_after_W3: 200 ok=True '' t=0.017 rss=75264
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:57:10Z", "campaigns": 0 t=0.126 unchanged=False anchors 3->4 pending=False rss=76768
+   job_putback: 200 ok=True '' t=0.018 rss=78160
+   A_putback: 200 ok=True '' t=0.015 rss=78864
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:10Z", "campaigns": 0 t=0.01 unchanged=True anchors 4->4 pending=False rss=78880
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:57:21Z", "campaigns": 0 t=0.181 unchanged=False anchors 4->5 pending=False rss=80352
+   A_restart: 200 ok=True '' t=0.014 rss=71008
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:57:23Z", "campaigns t=0.133 unchanged=False anchors 5->6 pending=False rss=72544
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_m3_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "c2af891753a560ca69d0b69a8761d117131078752f073a39218688acedc49ed4", "fault_sha": "6fdb87b94e7a9ba7439be05b13a4daaba2a8420b8da201ca7e50126e2fdef730"} pre_rss 72048
+   A_no_write: 200 ok=True '' t=0.015 rss=72752
+   A_no_write_again: 200 ok=True '' t=0.01 rss=72752
+   job_no_write: 200 ok=True '' t=0.017 rss=72816
+   status_after_check: 200 ok=True '' t=0.009
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:58:20Z", "campaigns": 0 t=0.073 unchanged=False anchors 2->3 pending=False rss=74240
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:58:20Z", "campaigns": 0 t=0.062 unchanged=False anchors 3->4 pending=False rss=74992
+   job_putback: 200 ok=True '' t=0.02 rss=74992
+   A_putback: 200 ok=True '' t=0.013 rss=74992
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:58:20Z", "campaigns": 0 t=0.01 unchanged=True anchors 4->4 pending=False rss=74992
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:58:31Z", "campaigns": 0 t=0.127 unchanged=False anchors 4->5 pending=False rss=75008
+   A_restart: 200 ok=True '' t=0.012 rss=69888
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:58:32Z", "campaigns t=0.09 unchanged=False anchors 5->6 pending=False rss=71440
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_m3_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "ba50d30e751c8c32882503213fbcaf6827a27b98d2900836823598aad7964c2f", "fault_sha": "c33218bb1df5c1b851f230da913990fd5c42dbc2004d0a577c25395fd5b89f84"} pre_rss 72672
+   A_no_write: 200 ok=True '' t=0.02 rss=72688
+   A_no_write_again: 200 ok=True '' t=0.013 rss=72688
+   job_no_write: 200 ok=True '' t=0.016 rss=74048
+   status_after_check: 200 ok=True '' t=0.009
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:58:26Z", "campaigns": 0 t=0.091 unchanged=False anchors 2->3 pending=False rss=75520
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:58:26Z", "campaigns": 0 t=0.085 unchanged=False anchors 3->4 pending=False rss=76976
+   job_putback: 200 ok=True '' t=0.017 rss=78416
+   A_putback: 200 ok=True '' t=0.015 rss=79216
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:58:26Z", "campaigns": 0 t=0.008 unchanged=True anchors 4->4 pending=False rss=79216
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:58:38Z", "campaigns": 0 t=0.109 unchanged=False anchors 4->5 pending=False rss=80672
+   A_restart: 200 ok=True '' t=0.015 rss=70496
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:58:39Z", "campaigns t=0.109 unchanged=False anchors 5->6 pending=False rss=72032
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_m3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "d5d3eae9203a8daf3f625d1cb6035095aaf3516eec1b9c91998578fcc4fa0400", "fault_sha": "08f836c9e94c214833d3aab90bf9f55d056e040b93b7a27204005094a5f0605c"} pre_rss 72032
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:30Z", "campaigns": 0 t=0.17 unchanged=False anchors 2->3 pending=False rss=72720
+   A_after_W3: 200 ok=True '' t=0.016 rss=72720
+   job_after_W3: 200 ok=True '' t=0.015 rss=73408
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:57:30Z", "campaigns": 0 t=0.183 unchanged=False anchors 3->4 pending=False rss=74896
+   job_putback: 200 ok=True '' t=0.02 rss=75600
+   A_putback: 200 ok=True '' t=0.016 rss=75600
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:30Z", "campaigns": 0 t=0.007 unchanged=True anchors 4->4 pending=False rss=75600
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:57:42Z", "campaigns": 0 t=0.176 unchanged=False anchors 4->5 pending=False rss=75600
+   A_restart: 200 ok=True '' t=0.01 rss=68944
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:57:43Z", "campaigns t=0.149 unchanged=False anchors 5->6 pending=False rss=70576
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75_m3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "9c563d57253e63d9a5b76ec26a0e152575bb9106a6f77e7e7929c13724120656", "fault_sha": "136b65f09c91aa720712095d4790458f9fe78b983154a36acfc4f504b4a04f39"} pre_rss 72832
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:35Z", "campaigns": 0 t=0.118 unchanged=False anchors 2->3 pending=False rss=72848
+   A_after_W3: 200 ok=True '' t=0.018 rss=73632
+   job_after_W3: 200 ok=True '' t=0.019 rss=75152
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T14:57:36Z", "campaigns": 0 t=0.142 unchanged=False anchors 3->4 pending=False rss=76512
+   job_putback: 200 ok=True '' t=0.019 rss=78016
+   A_putback: 200 ok=True '' t=0.011 rss=78688
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:57:35Z", "campaigns": 0 t=0.01 unchanged=True anchors 4->4 pending=False rss=78688
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:57:47Z", "campaigns": 0 t=0.152 unchanged=False anchors 4->5 pending=False rss=80240
+   A_restart: 200 ok=True '' t=0.015 rss=70112
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:57:48Z", "campaigns t=0.116 unchanged=False anchors 5->6 pending=False rss=71728
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c91_e2_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "0d166d5e501b17a101d555258cc5c2a509349d5ff2ff5d6baca648e1810eb26c", "fault_sha": "607000b17c84fb20f6216e0cee7ab5ddca5ec945c9b9e8f945438d7512522b51"} pre_rss 71744
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.017 rss=72416
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01 rss=72416
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.016 rss=72480
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.006
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 2->2 pending=False rss=72480
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=72496
+   job_putback: 200 ok=True '' t=0.016 rss=72528
+   A_putback: 200 ok=True '' t=0.01 rss=72528
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:51:50Z", "campaigns": 0 t=0.062 unchanged=False anchors 2->3 pending=False rss=72544
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:51:50Z", "campaigns": 0 t=0.046 unchanged=False anchors 3->4 pending=False rss=74048
+   A_restart: 200 ok=True '' t=0.01 rss=68960
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:51:51Z", "campaigns t=0.05 unchanged=False anchors 4->5 pending=False rss=70576
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_e2_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "627610bf70257a2db8ac0ca1e271f0eb1ae5b33208b88fefa115c0d9e5362190", "fault_sha": "83f8920c068f5e601598230fe6a39d230af6bb57c2ed31044ce761a478630781"} pre_rss 72528
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.015 rss=72592
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.011 rss=72672
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.016 rss=74128
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.007
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 2->2 pending=False rss=74160
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 2->2 pending=False rss=74208
+   job_putback: 200 ok=True '' t=0.015 rss=75696
+   A_putback: 200 ok=True '' t=0.01 rss=76368
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:51:51Z", "campaigns": 0 t=0.054 unchanged=False anchors 2->3 pending=False rss=77808
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:51:51Z", "campaigns": 0 t=0.045 unchanged=False anchors 3->4 pending=False rss=79328
+   A_restart: 200 ok=True '' t=0.019 rss=70352
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:51:52Z", "campaigns t=0.057 unchanged=False anchors 4->5 pending=False rss=72016
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_e2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "61c7dc091d94331129bc13b1daa8eb44b8d72f68c6f7b39567188cd684209ac7", "fault_sha": "aef940f28c74019f247ae882b9b58efa02198d0785ff2fda318eafc421fa568e"} pre_rss 71872
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.089 unchanged=True anchors 2->3 pending=True rss=72608
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.018 rss=72688
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74848
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 3->3 pending=True rss=74848
+   job_putback: 200 ok=True '' t=0.03 rss=74864
+   A_putback: 200 ok=True '' t=0.01 rss=74864
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:50:00Z", "campaigns": 0 t=0.006 unchanged=True anchors 3->3 pending=False rss=74864
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:50:12Z", "campaigns": 0 t=0.091 unchanged=False anchors 3->4 pending=False rss=74880
+   A_restart: 200 ok=True '' t=0.011 rss=69104
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:50:13Z", "campaigns t=0.07 unchanged=False anchors 4->5 pending=False rss=70672
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_e2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "88fe193c4ddfd3620523e4a0b07ff2397e6fc101fbe67bf97de2e123e5e53566", "fault_sha": "f807ddfcfbf337573d9419ac9a0c1110c46ebdc85fb26c69fa829086d98f41d5"} pre_rss 72640
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.068 unchanged=True anchors 2->3 pending=True rss=72688
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=74160
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=76352
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 3->3 pending=True rss=76368
+   job_putback: 200 ok=True '' t=0.031 rss=79296
+   A_putback: 200 ok=True '' t=0.01 rss=80000
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:50:00Z", "campaigns": 0 t=0.007 unchanged=True anchors 3->3 pending=False rss=80048
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:50:12Z", "campaigns": 0 t=0.087 unchanged=False anchors 3->4 pending=False rss=81504
+   A_restart: 200 ok=True '' t=0.012 rss=70336
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:50:13Z", "campaigns t=0.051 unchanged=False anchors 4->5 pending=False rss=71840
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_e3_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "328fa50aeb03a92af520b0769aced3acf080cb901d387fd9a2935ef18dff5966", "fault_sha": "c7a66512dfe918126105319c4a4e7a1e0350d0670827643dae0e8f8a93ecd703"} pre_rss 71760
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.016 rss=72464
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01 rss=72464
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.016 rss=72528
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.006
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=72528
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 2->2 pending=False rss=72560
+   job_putback: 200 ok=True '' t=0.017 rss=72592
+   A_putback: 200 ok=True '' t=0.01 rss=72592
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:52:14Z", "campaigns": 0 t=0.094 unchanged=False anchors 2->3 pending=False rss=72624
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:52:14Z", "campaigns": 0 t=0.044 unchanged=False anchors 3->4 pending=False rss=74048
+   A_restart: 200 ok=True '' t=0.011 rss=69824
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:52:15Z", "campaigns t=0.066 unchanged=False anchors 4->5 pending=False rss=71296
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_e3_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "8f95e5cceb4f2a16e513cd568a80bf23c71f48917a4021e3e303b2fe0b4fe69a", "fault_sha": "e45c72d80ad69ab09aa19be41f3778d24b85125a91979313de400b065a2217b7"} pre_rss 72624
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.019 rss=72720
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01 rss=72800
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.015 rss=74256
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.008
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.008 unchanged=True anchors 2->2 pending=False rss=74288
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 2->2 pending=False rss=74336
+   job_putback: 200 ok=True '' t=0.016 rss=75792
+   A_putback: 200 ok=True '' t=0.013 rss=76400
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:52:16Z", "campaigns": 0 t=0.053 unchanged=False anchors 2->3 pending=False rss=77952
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:52:16Z", "campaigns": 0 t=0.057 unchanged=False anchors 3->4 pending=False rss=79392
+   A_restart: 200 ok=True '' t=0.011 rss=70400
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:52:17Z", "campaigns t=0.056 unchanged=False anchors 4->5 pending=False rss=71904
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_e3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "9f094991859a6530d66323752f3e114f607ecdc3cf4d966def73238c797b50cc", "fault_sha": "a8a35063a9b389565af183921c48df77fbfc06b5eef7a0fef89203c1ba8128ba"} pre_rss 71472
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.091 unchanged=True anchors 2->3 pending=True rss=72320
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.02 rss=72432
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=74528
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.008 unchanged=True anchors 3->3 pending=True rss=74528
+   job_putback: 200 ok=True '' t=0.034 rss=74528
+   A_putback: 200 ok=True '' t=0.01 rss=74528
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:50:25Z", "campaigns": 0 t=0.008 unchanged=True anchors 3->3 pending=False rss=74528
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:50:36Z", "campaigns": 0 t=0.074 unchanged=False anchors 3->4 pending=False rss=74576
+   A_restart: 200 ok=True '' t=0.01 rss=69280
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:50:37Z", "campaigns t=0.104 unchanged=False anchors 4->5 pending=False rss=70944
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_e3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "6a968a02078aacc9bda19d081c9889129b9293c6b12a81a3884d6f87111520a8", "fault_sha": "ef9919773e41a4aedb89fcda509adb0a8dd3c53346cebd1edf9c630eeac4a3ba"} pre_rss 72768
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.091 unchanged=True anchors 2->3 pending=True rss=72816
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=74320
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=76512
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.008 unchanged=True anchors 3->3 pending=True rss=76528
+   job_putback: 200 ok=True '' t=0.032 rss=79440
+   A_putback: 200 ok=True '' t=0.011 rss=80176
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:50:25Z", "campaigns": 0 t=0.007 unchanged=True anchors 3->3 pending=False rss=80208
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:50:37Z", "campaigns": 0 t=0.182 unchanged=False anchors 3->4 pending=False rss=81616
+   A_restart: 200 ok=True '' t=0.017 rss=71040
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:50:38Z", "campaigns t=0.108 unchanged=False anchors 4->5 pending=False rss=72560
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_fifo_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "e50ee7239667c0bc447e0e5f8131dfd75dafcbe561b0dbd88043f3101fe05869", "fault_sha": null} pre_rss 71328
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.153 unchanged=True anchors 2->3 pending=True rss=72080
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.016 unchanged=True anchors 3->3 pending=True rss=74256
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=72160
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.015 rss=72832
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.02 rss=74256
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.006
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74256
+   J3: 200 ok=True '' t=0.031 rss=74320
+   A3: 200 ok=True '' t=0.017 rss=74320
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:28Z", "campaigns": 0 t=0.013 unchanged=True anchors 3->3 pending=False rss=74320
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:29Z", "campaigns": 0 t=0.125 unchanged=False anchors 3->4 pending=False rss=74352
+   A_restart: 200 ok=True '' t=0.014 rss=68864
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:30Z", "campaigns t=0.105 unchanged=False anchors 4->5 pending=False rss=70432
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 74256}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_fifo_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "285a42a576a27149c56e3a26c62a29be57794f5aa51ab7cbb17a303592ca5fc6", "fault_sha": null} pre_rss 72880
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.179 unchanged=True anchors 2->3 pending=True rss=72928
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 3->3 pending=True rss=79408
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=74368
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.014 rss=75088
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.023 rss=77264
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.01
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.026 rss=79392
+   J3: 200 ok=True '' t=0.029 rss=82368
+   A3: 200 ok=True '' t=0.009 rss=83088
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:31Z", "campaigns": 0 t=0.006 unchanged=True anchors 3->3 pending=False rss=83088
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:31Z", "campaigns": 0 t=0.134 unchanged=False anchors 3->4 pending=False rss=83744
+   A_restart: 200 ok=True '' t=0.017 rss=70592
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:32Z", "campaigns t=0.09 unchanged=False anchors 4->5 pending=False rss=72176
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 79408}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_fifo_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "fad14cc3e47486a3e348238885e6ac3d29ccc01eeecdc7e0d6bf25326bf9c84b", "fault_sha": null} pre_rss 72176
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.008 unchanged=True anchors 2->2 pending=False rss=72880
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 2->2 pending=False rss=74352
+   A1: 200 ok=False 'the local log file differs from the lines this service holds' t=0.053 rss=72832
+   A2: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01 rss=72848
+   J1: 200 ok=False 'the local log file differs from the lines this service holds' t=0.014 rss=72880
+   ST: 200 ok=False 'the local log file differs from the lines this service holds' t=0.006
+   J2: 200 ok=False 'the local log file differs from the lines this service holds' t=0.017 rss=74352
+   J3: 200 ok=True '' t=0.014 rss=74352
+   A3: 200 ok=True '' t=0.009 rss=74352
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:15Z", "campaigns": 0 t=0.074 unchanged=False anchors 2->3 pending=False rss=74384
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:15Z", "campaigns": 0 t=0.075 unchanged=False anchors 3->4 pending=False rss=74400
+   A_restart: 200 ok=True '' t=0.011 rss=69456
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:16Z", "campaigns t=0.082 unchanged=False anchors 4->5 pending=False rss=71072
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}, "target_unchanged": null, "rss_kb": 74352}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_fifo_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "91368de721adbbd062a983e78f8da934897d5bcf1c39a22cf612cd2c454a6a1b", "fault_sha": null} pre_rss 72912
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=74432
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.012 unchanged=True anchors 2->2 pending=False rss=75824
+   A1: 200 ok=False 'the local log file differs from the lines this service holds' t=0.019 rss=72976
+   A2: 200 ok=False 'the local log file differs from the lines this service holds' t=0.011 rss=73008
+   J1: 200 ok=False 'the local log file differs from the lines this service holds' t=0.014 rss=74384
+   ST: 200 ok=False 'the local log file differs from the lines this service holds' t=0.006
+   J2: 200 ok=False 'the local log file differs from the lines this service holds' t=0.016 rss=75824
+   J3: 200 ok=True '' t=0.014 rss=77312
+   A3: 200 ok=True '' t=0.012 rss=78048
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:17Z", "campaigns": 0 t=0.088 unchanged=False anchors 2->3 pending=False rss=79568
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:18Z", "campaigns": 0 t=0.089 unchanged=False anchors 3->4 pending=False rss=80992
+   A_restart: 200 ok=True '' t=0.011 rss=70736
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:19Z", "campaigns t=0.095 unchanged=False anchors 4->5 pending=False rss=72288
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}, "target_unchanged": null, "rss_kb": 75824}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m2_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "9ae9cd71f93fda8d126b904c4517e0f6ef02092f9b288cda6576bfd6849a2775", "fault_sha": "077c653cfe4669b48534b6ea0fa38ce6483ed6834fbc647a7f454740ef963b74"} pre_rss 72064
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.02 rss=72848
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.011 rss=72848
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.019 rss=72896
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 2->2 pending=False rss=72896
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 2->2 pending=False rss=72928
+   job_putback: 200 ok=True '' t=0.017 rss=72960
+   A_putback: 200 ok=True '' t=0.01 rss=72960
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:52:38Z", "campaigns": 0 t=0.051 unchanged=False anchors 2->3 pending=False rss=72976
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:52:38Z", "campaigns": 0 t=0.045 unchanged=False anchors 3->4 pending=False rss=74320
+   A_restart: 200 ok=True '' t=0.011 rss=69728
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:52:39Z", "campaigns t=0.058 unchanged=False anchors 4->5 pending=False rss=71296
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m2_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "c6301ba5acc8027ab911a0c32cfd0010cb7929333456dc290089559fc8fdf67a", "fault_sha": "3a39c9f0cb6af3073ee30a8e20ebedfaa89ec1a5455eebd730188bbedb0b8175"} pre_rss 72544
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.023 rss=72608
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01 rss=72672
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.02 rss=74080
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=74128
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=74144
+   job_putback: 200 ok=True '' t=0.015 rss=75584
+   A_putback: 200 ok=True '' t=0.01 rss=76320
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:52:40Z", "campaigns": 0 t=0.046 unchanged=False anchors 2->3 pending=False rss=77792
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:52:40Z", "campaigns": 0 t=0.045 unchanged=False anchors 3->4 pending=False rss=79248
+   A_restart: 200 ok=True '' t=0.01 rss=70192
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:52:41Z", "campaigns t=0.055 unchanged=False anchors 4->5 pending=False rss=71696
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "52ac845c91524c332b78b6c0775c42e1db2c15f6a162c6d0f7e5ae9947c74d9b", "fault_sha": "885b5d7d5e4ba82dfc84084f43de57778f06874ad83e267bddb4d00e1ae889b9"} pre_rss 72016
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.066 unchanged=True anchors 2->3 pending=True rss=72816
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=72880
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=74992
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 3->3 pending=True rss=74992
+   job_putback: 200 ok=True '' t=0.027 rss=74992
+   A_putback: 200 ok=True '' t=0.01 rss=75008
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:50:50Z", "campaigns": 0 t=0.006 unchanged=True anchors 3->3 pending=False rss=75008
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:51:01Z", "campaigns": 0 t=0.059 unchanged=False anchors 3->4 pending=False rss=75040
+   A_restart: 200 ok=True '' t=0.01 rss=70080
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:51:02Z", "campaigns t=0.049 unchanged=False anchors 4->5 pending=False rss=71632
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "e47a51207dbf8172b7340b606d69ddc5160a238b8ee98bf5853c44d06e8d559d", "fault_sha": "ee931a23eaaa5975cd0ef7b8e0eb59f1b957f51e1450226211f6311a21caaa6c"} pre_rss 72704
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.055 unchanged=True anchors 2->3 pending=True rss=72752
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.018 rss=74224
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.02 rss=76448
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 3->3 pending=True rss=76448
+   job_putback: 200 ok=True '' t=0.023 rss=79344
+   A_putback: 200 ok=True '' t=0.011 rss=80096
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:50:50Z", "campaigns": 0 t=0.006 unchanged=True anchors 3->3 pending=False rss=80112
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:51:02Z", "campaigns": 0 t=0.05 unchanged=False anchors 3->4 pending=False rss=81504
+   A_restart: 200 ok=True '' t=0.012 rss=70224
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:51:03Z", "campaigns t=0.046 unchanged=False anchors 4->5 pending=False rss=71680
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m3_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "8e9b80bd1ba41f408d82f24cede7f2dbf64aa37fe933e608cfa20d482bf6fdbd", "fault_sha": "a88d8e8de1bcc1f6de753ac92788bef877e999887a64afd1331504a705c80d55"} pre_rss 71440
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.016 rss=72272
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.01 rss=72272
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.015 rss=72352
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.006
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=72352
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.01 unchanged=True anchors 2->2 pending=False rss=72400
+   job_putback: 200 ok=True '' t=0.016 rss=72416
+   A_putback: 200 ok=True '' t=0.01 rss=72416
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:02Z", "campaigns": 0 t=0.112 unchanged=False anchors 2->3 pending=False rss=72416
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:02Z", "campaigns": 0 t=0.044 unchanged=False anchors 3->4 pending=False rss=73728
+   A_restart: 200 ok=True '' t=0.012 rss=69232
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:03Z", "campaigns t=0.056 unchanged=False anchors 4->5 pending=False rss=70800
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m3_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "e42db6756dd718e0c1426ac2136a36bee5913545c65c7f6ef47123faed97592e", "fault_sha": "164059c7eb329ae979300e2782849ef76f1168c5d1351387863b6dd676f39753"} pre_rss 73232
+   A_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.02 rss=73280
+   A_no_write_again: 200 ok=False 'the local log file differs from the lines this service holds' t=0.011 rss=73296
+   job_no_write: 200 ok=False 'the local log file differs from the lines this service holds' t=0.015 rss=74656
+   status_after_check: 200 ok=False 'the local log file differs from the lines this service holds' t=0.006
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=74704
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 2->2 pending=False rss=74720
+   job_putback: 200 ok=True '' t=0.016 rss=76208
+   A_putback: 200 ok=True '' t=0.01 rss=76896
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:04Z", "campaigns": 0 t=0.051 unchanged=False anchors 2->3 pending=False rss=78400
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:04Z", "campaigns": 0 t=0.045 unchanged=False anchors 3->4 pending=False rss=79856
+   A_restart: 200 ok=True '' t=0.013 rss=70336
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:05Z", "campaigns t=0.057 unchanged=False anchors 4->5 pending=False rss=71872
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "1d79c8479f72af497d791c7d8f9786f46f2aad85d742bc882bbd2d8b0e1316d8", "fault_sha": "b283e36722a8148707be4c94c33d086d11eb03d237535de0f7797e5af47e5d19"} pre_rss 71856
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.047 unchanged=True anchors 2->3 pending=True rss=72640
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.018 rss=72752
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74912
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 3->3 pending=True rss=74912
+   job_putback: 200 ok=True '' t=0.028 rss=74912
+   A_putback: 200 ok=True '' t=0.011 rss=74928
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:51:14Z", "campaigns": 0 t=0.009 unchanged=True anchors 3->3 pending=False rss=74928
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:51:25Z", "campaigns": 0 t=0.071 unchanged=False anchors 3->4 pending=False rss=74928
+   A_restart: 200 ok=True '' t=0.011 rss=69504
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:51:26Z", "campaigns t=0.047 unchanged=False anchors 4->5 pending=False rss=71056
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_m3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "10fe1524f7ce341be92caa6e6fd03529d0214bd2a60fded116a6b07dece7f84c", "fault_sha": "08ca4344ace8bed627beb117b1a4778624135721dba66a0f2de2c03065d258c0"} pre_rss 73232
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.047 unchanged=True anchors 2->3 pending=True rss=73296
+   A_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.018 rss=74720
+   job_after_W3: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=76992
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 3->3 pending=True rss=76992
+   job_putback: 200 ok=True '' t=0.024 rss=79824
+   A_putback: 200 ok=True '' t=0.01 rss=80576
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:51:15Z", "campaigns": 0 t=0.007 unchanged=True anchors 3->3 pending=False rss=80624
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:51:26Z", "campaigns": 0 t=0.046 unchanged=False anchors 3->4 pending=False rss=82048
+   A_restart: 200 ok=True '' t=0.014 rss=70688
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:51:27Z", "campaigns t=0.589 unchanged=False anchors 4->5 pending=False rss=72224
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_rfifo_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "b443dc9f31eefb275a9f9752a9b8f6eee5f576ae61f65de8f289e1b1542614ae", "fault_sha": null} pre_rss 71408
+   restart_on_fault {"timeout": 15, "tail": ["INFO:     Application shutdown complete.", "INFO:     Finished server process [36773]"]}
+   restart_alive true
+   restart_rss_kb 58432
+   kill_after_restart "SIGTERM"
+   target_unchanged null
+   disk_after {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}
+======== c91_rfifo_X_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "3689db4bef1f9c809a1d914d8e127a8e94afd127f7f83741161aa685821d82d4", "fault_sha": null} pre_rss 72736
+   restart_on_fault {"timeout": 15, "tail": ["INFO:     Application shutdown complete.", "INFO:     Finished server process [37053]"]}
+   restart_alive true
+   restart_rss_kb 60096
+   kill_after_restart "SIGTERM"
+   target_unchanged null
+   disk_after {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}
+======== c91_rsym_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "60595f54b2dc4598a06cf53625782f659efbfcdbcb9d1c9e23db60c2919ce3b6", "fault_sha": null} pre_rss 71424
+   A_restart: 200 ok=False 'the local log file cannot be read (OSError)' t=0.011 rss=69008
+   W_restart: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.011 unchanged=True anchors 2->2 pending=False rss=69104
+   restart_on_fault {"status": "degraded"}
+   restart_alive true
+   restart_rss_kb 68832
+   kill_after_restart "SIGTERM"
+   target_unchanged true
+   disk_after {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c91_rsym_X_3.12/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}
+======== c91_rsym_X_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "506a5529b22e29eb36bd1517922b21e9d16fcb55b9d0830c7b3c43ff09748d0f", "fault_sha": null} pre_rss 72800
+   A_restart: 200 ok=False 'the local log file cannot be read (OSError)' t=0.011 rss=70448
+   W_restart: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.014 unchanged=True anchors 2->2 pending=False rss=70496
+   restart_on_fault {"status": "degraded"}
+   restart_alive true
+   restart_rss_kb 70224
+   kill_after_restart "SIGTERM"
+   target_unchanged true
+   disk_after {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c91_rsym_X_3.13/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}
+======== c91_rzero_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "93c9a18bbf9ea2f7879c9b36503914b14295bfb160de707e84e11344c5900c3d", "fault_sha": null} pre_rss 71392
+   restart_on_fault {"exited": -9, "tail": ["INFO:     Application shutdown complete.", "INFO:     Finished server process [65479]"]}
+   restart_alive false
+   restart_rss_kb null
+   kill_after_restart "already exited rc -9"
+   target_unchanged null
+   disk_after {"kind": "symlink->/dev/zero", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}
+======== c91_symsame_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "5e7b80903d78be584a3c715d2343678df5f685210054204521da57fcd1d1e422", "fault_sha": null} pre_rss 71696
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.144 unchanged=True anchors 2->3 pending=True rss=72464
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 3->3 pending=True rss=74576
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=72528
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.013 rss=73152
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=74576
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.009
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.016 rss=74576
+   J3: 200 ok=True '' t=0.036 rss=74592
+   A3: 200 ok=True '' t=0.014 rss=74592
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:56Z", "campaigns": 0 t=0.007 unchanged=True anchors 3->3 pending=False rss=74592
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:56Z", "campaigns": 0 t=0.13 unchanged=False anchors 3->4 pending=False rss=74592
+   A_restart: 200 ok=True '' t=0.018 rss=69680
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:57Z", "campaigns t=0.165 unchanged=False anchors 4->5 pending=False rss=71312
+   after_writes {"disk": {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c91_symsame_HW_3.12/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pend
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_symsame_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "713ae264bb0701c090087bf39fbca0b0197f866f007446e9edca7d7b58db73fa", "fault_sha": null} pre_rss 72944
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.141 unchanged=True anchors 2->3 pending=True rss=72992
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.011 unchanged=True anchors 3->3 pending=True rss=79584
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.02 rss=74480
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.015 rss=75216
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.024 rss=77392
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.01
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.028 rss=79568
+   J3: 200 ok=True '' t=0.025 rss=82560
+   A3: 200 ok=True '' t=0.015 rss=83184
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:59Z", "campaigns": 0 t=0.006 unchanged=True anchors 3->3 pending=False rss=83184
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:59Z", "campaigns": 0 t=0.161 unchanged=False anchors 3->4 pending=False rss=83920
+   A_restart: 200 ok=True '' t=0.017 rss=70128
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:54:00Z", "campaigns t=0.139 unchanged=False anchors 4->5 pending=False rss=71680
+   after_writes {"disk": {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c91_symsame_HW_3.13/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pend
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_symsame_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "cefdad115d7ae5e591584dd86e503fb961ae77dfc2e801872e70ecbfaedfadc6", "fault_sha": null} pre_rss 71344
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 2->2 pending=False rss=72160
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.013 unchanged=True anchors 2->2 pending=False rss=73552
+   A1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.017 rss=72096
+   A2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.009 rss=72096
+   J1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.018 rss=72160
+   ST: 200 ok=False 'the local log file cannot be read (OSError)' t=0.009
+   J2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.023 rss=73552
+   J3: 200 ok=True '' t=0.015 rss=73552
+   A3: 200 ok=True '' t=0.01 rss=73552
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:42Z", "campaigns": 0 t=0.119 unchanged=False anchors 2->3 pending=False rss=73568
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:42Z", "campaigns": 0 t=0.145 unchanged=False anchors 3->4 pending=False rss=73600
+   A_restart: 200 ok=True '' t=0.013 rss=69232
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:43Z", "campaigns t=0.137 unchanged=False anchors 4->5 pending=False rss=70704
+   after_writes {"disk": {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c91_symsame_H_3.12/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}, "tar
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_symsame_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "d591d0d6e032211ebc3cfa6f4dedbcd4b1ee3d2dfdd6927bc7086fc473c35643", "fault_sha": null} pre_rss 72544
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.008 unchanged=True anchors 2->2 pending=False rss=74096
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.013 unchanged=True anchors 2->2 pending=False rss=75584
+   A1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.019 rss=72592
+   A2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.014 rss=72624
+   J1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.017 rss=74064
+   ST: 200 ok=False 'the local log file cannot be read (OSError)' t=0.011
+   J2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.019 rss=75568
+   J3: 200 ok=True '' t=0.019 rss=77104
+   A3: 200 ok=True '' t=0.013 rss=77808
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:53:45Z", "campaigns": 0 t=0.103 unchanged=False anchors 2->3 pending=False rss=79248
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:53:45Z", "campaigns": 0 t=0.135 unchanged=False anchors 3->4 pending=False rss=80752
+   A_restart: 200 ok=True '' t=0.015 rss=70176
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:53:46Z", "campaigns t=0.153 unchanged=False anchors 4->5 pending=False rss=71632
+   after_writes {"disk": {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c91_symsame_H_3.13/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}, "tar
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_symzero_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "6bdf7b9407bcb50f5e1c1377b4ffa64f315ff43e79a808144645fb8aeb151846", "fault_sha": null} pre_rss 71312
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.101 unchanged=True anchors 2->3 pending=True rss=72064
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.013 unchanged=True anchors 3->3 pending=True rss=74352
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.018 rss=72224
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.01 rss=72784
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.023 rss=74352
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.009
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74352
+   J3: 200 ok=True '' t=0.034 rss=74352
+   A3: 200 ok=True '' t=0.018 rss=74352
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:54:23Z", "campaigns": 0 t=0.012 unchanged=True anchors 3->3 pending=False rss=74352
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:54:23Z", "campaigns": 0 t=0.135 unchanged=False anchors 3->4 pending=False rss=74352
+   A_restart: 200 ok=True '' t=0.012 rss=69200
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:54:24Z", "campaigns t=0.084 unchanged=False anchors 4->5 pending=False rss=70800
+   after_writes {"disk": {"kind": "symlink->/dev/zero", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 74352}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_symzero_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "cb3879879f464c8c201fefcd0d5e19c491eec85fdbec20a7d5894b79d046afab", "fault_sha": null} pre_rss 72944
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.129 unchanged=True anchors 2->3 pending=True rss=72992
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 3->3 pending=True rss=79584
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74480
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.015 rss=75168
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=77392
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.011
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.018 rss=79584
+   J3: 200 ok=True '' t=0.038 rss=82464
+   A3: 200 ok=True '' t=0.01 rss=83184
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:54:27Z", "campaigns": 0 t=0.012 unchanged=True anchors 3->3 pending=False rss=83184
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:54:27Z", "campaigns": 0 t=0.149 unchanged=False anchors 3->4 pending=False rss=83904
+   A_restart: 200 ok=True '' t=0.014 rss=70720
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:54:28Z", "campaigns t=0.131 unchanged=False anchors 4->5 pending=False rss=72272
+   after_writes {"disk": {"kind": "symlink->/dev/zero", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 79584}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_symzero_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "d943fbd8ba58d86109e55aefd66bf901c951534fc71345955680ff91788fc265", "fault_sha": null} pre_rss 71632
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 2->2 pending=False rss=72432
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.013 unchanged=True anchors 2->2 pending=False rss=73792
+   A1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.015 rss=72368
+   A2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.01 rss=72368
+   J1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.024 rss=72432
+   ST: 200 ok=False 'the local log file cannot be read (OSError)' t=0.006
+   J2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.019 rss=73792
+   J3: 200 ok=True '' t=0.014 rss=73792
+   A3: 200 ok=True '' t=0.014 rss=73792
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:54:10Z", "campaigns": 0 t=0.16 unchanged=False anchors 2->3 pending=False rss=73824
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:54:10Z", "campaigns": 0 t=0.128 unchanged=False anchors 3->4 pending=False rss=73872
+   A_restart: 200 ok=True '' t=0.011 rss=69072
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:54:11Z", "campaigns t=0.125 unchanged=False anchors 4->5 pending=False rss=70608
+   after_writes {"disk": {"kind": "symlink->/dev/zero", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}, "target_unchanged": null, "rss_kb": 73792}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c91_symzero_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "a165fda37047514b651df46843bd28407dfc8e6f0d36ad884afd932131df8f1a", "fault_sha": null} pre_rss 73120
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.01 unchanged=True anchors 2->2 pending=False rss=74656
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.01 unchanged=True anchors 2->2 pending=False rss=76064
+   A1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.019 rss=73184
+   A2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.011 rss=73216
+   J1: 200 ok=False 'the local log file cannot be read (OSError)' t=0.02 rss=74608
+   ST: 200 ok=False 'the local log file cannot be read (OSError)' t=0.011
+   J2: 200 ok=False 'the local log file cannot be read (OSError)' t=0.019 rss=76064
+   J3: 200 ok=True '' t=0.023 rss=77552
+   A3: 200 ok=True '' t=0.014 rss=78320
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:54:13Z", "campaigns": 0 t=0.116 unchanged=False anchors 2->3 pending=False rss=79792
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:54:13Z", "campaigns": 0 t=0.115 unchanged=False anchors 3->4 pending=False rss=81216
+   A_restart: 200 ok=True '' t=0.018 rss=70480
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:54:14Z", "campaigns t=0.144 unchanged=False anchors 4->5 pending=False rss=72032
+   after_writes {"disk": {"kind": "symlink->/dev/zero", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}, "target_unchanged": null, "rss_kb": 76064}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c99_fifo_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "c38fd492b837c44d42524dab00ab9434800ae01f43c49e565d8d9fca47b6b739", "fault_sha": null} pre_rss 72192
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.065 unchanged=True anchors 2->3 pending=True rss=72864
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.013 unchanged=True anchors 3->3 pending=True rss=75136
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.02 rss=72912
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.01 rss=73680
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=75136
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.007
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=75136
+   J3: 200 ok=True '' t=0.032 rss=75152
+   A3: 200 ok=True '' t=0.014 rss=75152
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:59:31Z", "campaigns": 0 t=0.009 unchanged=True anchors 3->3 pending=False rss=75152
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:59:31Z", "campaigns": 0 t=0.069 unchanged=False anchors 3->4 pending=False rss=75152
+   A_restart: 200 ok=True '' t=0.012 rss=69232
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:59:32Z", "campaigns t=0.046 unchanged=False anchors 4->5 pending=False rss=70784
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 75136}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c99_fifo_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "8349e041a9f1524829e6bb11917ce80a3e596b01e7fd83f872f2ce1cf1a89964", "fault_sha": null} pre_rss 72864
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.07 unchanged=True anchors 2->3 pending=True rss=72928
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.01 unchanged=True anchors 3->3 pending=True rss=79504
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74368
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.014 rss=75136
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.023 rss=77344
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.007
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=79488
+   J3: 200 ok=True '' t=0.032 rss=82432
+   A3: 200 ok=True '' t=0.012 rss=83088
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:59:38Z", "campaigns": 0 t=0.007 unchanged=True anchors 3->3 pending=False rss=83104
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:59:38Z", "campaigns": 0 t=0.092 unchanged=False anchors 3->4 pending=False rss=83792
+   A_restart: 200 ok=True '' t=0.012 rss=70672
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:59:39Z", "campaigns t=0.078 unchanged=False anchors 4->5 pending=False rss=72272
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 79504}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c99_fifo_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "94845662885d553487df4a3ab259715adb1bdbeb574f892cb01ec7776f0469ac", "fault_sha": null} pre_rss 71536
+   A1: transport ReadTimeout: timed out t=20.005 rss=72240
+   health_during_hang: transport ReadTimeout: timed out t=5.005
+   post_during_hang: transport ReadTimeout: timed out t=5.006
+   HANG "A1"
+   kill "SIGKILL (SIGTERM ignored 5 s)"
+   disk_after_kill {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}
+======== c99_fifo_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "0d38c5af0e0dd0f27fe098351dc12ca3cdf58612ea2cfd83224f5519493ef5fa", "fault_sha": null} pre_rss 72624
+   A1: transport ReadTimeout: timed out t=20.008 rss=72624
+   health_during_hang: transport ReadTimeout: timed out t=5.006
+   post_during_hang: transport ReadTimeout: timed out t=5.006
+   HANG "A1"
+   kill "SIGKILL (SIGTERM ignored 5 s)"
+   disk_after_kill {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}
+======== c99_symsame_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "bbccb971486f2fe9d692da75133b8056bf213c8107e230fec91027bda3504035", "fault_sha": null} pre_rss 71680
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.082 unchanged=True anchors 2->3 pending=True rss=73856
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 3->3 pending=True rss=73872
+   A1: 200 ok=True '' t=0.018 rss=72416
+   A2: 200 ok=True '' t=0.014 rss=72416
+   J1: 200 ok=True '' t=0.015 rss=72464
+   ST: 200 ok=True '' t=0.007
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=73872
+   J3: 200 ok=True '' t=0.032 rss=73952
+   A3: 200 ok=True '' t=0.012 rss=74592
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:59:44Z", "campaigns": 0 t=0.01 unchanged=True anchors 3->3 pending=False rss=74592
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:59:45Z", "campaigns": 0 t=0.091 unchanged=False anchors 3->4 pending=False rss=74592
+   A_restart: 200 ok=True '' t=0.012 rss=69392
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:59:46Z", "campaigns t=0.086 unchanged=False anchors 4->5 pending=False rss=70928
+   after_writes {"disk": {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c99_symsame_H_3.12/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pendi
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c99_symsame_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "86c33c170a09e4dec69d87b4123f2221d08418a0e907b65259951fde3c02357d", "fault_sha": null} pre_rss 73264
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.071 unchanged=True anchors 2->3 pending=True rss=76144
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.006 unchanged=True anchors 3->3 pending=True rss=78352
+   A1: 200 ok=True '' t=0.022 rss=73312
+   A2: 200 ok=True '' t=0.011 rss=73312
+   J1: 200 ok=True '' t=0.017 rss=74736
+   ST: 200 ok=True '' t=0.007
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.025 rss=78352
+   J3: 200 ok=True '' t=0.025 rss=81376
+   A3: 200 ok=True '' t=0.013 rss=82032
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:59:52Z", "campaigns": 0 t=0.006 unchanged=True anchors 3->3 pending=False rss=82032
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:59:52Z", "campaigns": 0 t=0.093 unchanged=False anchors 3->4 pending=False rss=83504
+   A_restart: 200 ok=True '' t=0.014 rss=70416
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:59:53Z", "campaigns t=0.08 unchanged=False anchors 4->5 pending=False rss=71968
+   after_writes {"disk": {"kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/runs/c99_symsame_H_3.13/same_bytes_target.jsonl", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pendi
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c99_symzero_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "d2cbd60c79ef9e6cb9aa64f278cbee2c577f3211a33672964e03eb9c9d1a1883", "fault_sha": null} pre_rss 71456
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.075 unchanged=True anchors 2->3 pending=True rss=72080
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.009 unchanged=True anchors 3->3 pending=True rss=74384
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.021 rss=72208
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.013 rss=72976
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.028 rss=74352
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.007
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74384
+   J3: 200 ok=True '' t=0.027 rss=74448
+   A3: 200 ok=True '' t=0.011 rss=74448
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:59:58Z", "campaigns": 0 t=0.006 unchanged=True anchors 3->3 pending=False rss=74448
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:59:58Z", "campaigns": 0 t=0.096 unchanged=False anchors 3->4 pending=False rss=74448
+   A_restart: 200 ok=True '' t=0.013 rss=69152
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:59:59Z", "campaigns t=0.098 unchanged=False anchors 4->5 pending=False rss=70656
+   after_writes {"disk": {"kind": "symlink->/dev/zero", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 74384}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== c99_symzero_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "37ef90c97803765d94a5cabb1f7ae759c2a3c7ddc57a05f2f8961f33c7ee0ff9", "fault_sha": null} pre_rss 72640
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.116 unchanged=True anchors 2->3 pending=True rss=72688
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.007 unchanged=True anchors 3->3 pending=True rss=79232
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=74128
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.013 rss=74896
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.02 rss=77072
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.01
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.02 rss=79216
+   J3: 200 ok=True '' t=0.026 rss=82160
+   A3: 200 ok=True '' t=0.01 rss=82896
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T15:00:05Z", "campaigns": 0 t=0.007 unchanged=True anchors 3->3 pending=False rss=82896
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T15:00:05Z", "campaigns": 0 t=0.112 unchanged=False anchors 3->4 pending=False rss=83600
+   A_restart: 200 ok=True '' t=0.015 rss=70720
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T15:00:06Z", "campaigns t=0.12 unchanged=False anchors 4->5 pending=False rss=72256
+   after_writes {"disk": {"kind": "symlink->/dev/zero", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 79232}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== pii_c91_3.12 python 3.12.14
+  unit.vendor_text                   '4111 1111 1111 1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '4111-1111-1111-1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '5555.5555.5555.4444'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '4111_1111_1111_1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '3782 822463 10005'                        201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '123-45-6789'                              201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   'SSN 123456789'                            201 None                               absent=True hits=[] redacted=True text='faces west, contact SSN [redacted] for access' unit_get_has=False
+  unit.vendor_text                   'social security number: 123 45 6789'      201 None                               absent=True hits=[] redacted=True text='faces west, contact social security number: [redacted] for access' unit_get_has=False
+  face.location_description          '4111 1111 1111 1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '4111-1111-1111-1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '5555.5555.5555.4444'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '4111_1111_1111_1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '3782 822463 10005'                        422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '123-45-6789'                              422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          'SSN 123456789'                            422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          'social security number: 123 45 6789'      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  campaign.client_approval_doc_ref   '4111-1111-1111-1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '5555.5555.5555.4444'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '4111_1111_1111_1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'io-4111-1111-1111-1111'                   422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '123-45-6789'                              422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN:123456789'                            422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '4111 1111 1111 1111'                      422 SCHEMA:string_pattern_mismatch     absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN 123456789'                            422 SCHEMA:string_pattern_mismatch     absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  verify {'entries': 558, 'valid': True} data ['ooh.lock', 'ooh_log.jsonl']
+======== pii_c91_3.13 python 3.13.9
+  unit.vendor_text                   '4111 1111 1111 1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '4111-1111-1111-1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '5555.5555.5555.4444'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '4111_1111_1111_1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '3782 822463 10005'                        201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '123-45-6789'                              201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   'SSN 123456789'                            201 None                               absent=True hits=[] redacted=True text='faces west, contact SSN [redacted] for access' unit_get_has=False
+  unit.vendor_text                   'social security number: 123 45 6789'      201 None                               absent=True hits=[] redacted=True text='faces west, contact social security number: [redacted] for access' unit_get_has=False
+  face.location_description          '4111 1111 1111 1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '4111-1111-1111-1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '5555.5555.5555.4444'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '4111_1111_1111_1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '3782 822463 10005'                        422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '123-45-6789'                              422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          'SSN 123456789'                            422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          'social security number: 123 45 6789'      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  campaign.client_approval_doc_ref   '4111-1111-1111-1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '5555.5555.5555.4444'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '4111_1111_1111_1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'io-4111-1111-1111-1111'                   422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '123-45-6789'                              422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN:123456789'                            422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '4111 1111 1111 1111'                      422 SCHEMA:string_pattern_mismatch     absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN 123456789'                            422 SCHEMA:string_pattern_mismatch     absent=True hits=[] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  verify {'entries': 558, 'valid': True} data ['ooh.lock', 'ooh_log.jsonl']
+======== pii_c99_3.12 python 3.12.14
+  unit.vendor_text                   '4111 1111 1111 1111'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 4111 1111 1111 1111 for access' unit_get_has=True
+  unit.vendor_text                   '4111-1111-1111-1111'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 4111-1111-1111-1111 for access' unit_get_has=True
+  unit.vendor_text                   '5555.5555.5555.4444'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 5555.5555.5555.4444 for access' unit_get_has=True
+  unit.vendor_text                   '4111_1111_1111_1111'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 4111_1111_1111_1111 for access' unit_get_has=True
+  unit.vendor_text                   '3782 822463 10005'                        201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 3782 822463 10005 for access' unit_get_has=True
+  unit.vendor_text                   '123-45-6789'                              201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 123-45-6789 for access' unit_get_has=True
+  unit.vendor_text                   'SSN 123456789'                            201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact SSN 123456789 for access' unit_get_has=True
+  unit.vendor_text                   'social security number: 123 45 6789'      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact social security number: 123 45 6789 for access' unit_get_has=True
+  face.location_description          '4111 1111 1111 1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '4111-1111-1111-1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '5555.5555.5555.4444'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '4111_1111_1111_1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '3782 822463 10005'                        200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '123-45-6789'                              200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          'SSN 123456789'                            200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          'social security number: 123 45 6789'      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  campaign.client_approval_doc_ref   '4111-1111-1111-1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '5555.5555.5555.4444'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '4111_1111_1111_1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   'io-4111-1111-1111-1111'                   200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '123-45-6789'                              200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   'SSN:123456789'                            200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '4111 1111 1111 1111'                      422 SCHEMA:string_pattern_mismatch     absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN 123456789'                            422 SCHEMA:string_pattern_mismatch     absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  verify {'entries': 580, 'valid': True} data ['ooh.lock', 'ooh_log.jsonl']
+======== pii_c99_3.13 python 3.13.9
+  unit.vendor_text                   '4111 1111 1111 1111'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 4111 1111 1111 1111 for access' unit_get_has=True
+  unit.vendor_text                   '4111-1111-1111-1111'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 4111-1111-1111-1111 for access' unit_get_has=True
+  unit.vendor_text                   '5555.5555.5555.4444'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 5555.5555.5555.4444 for access' unit_get_has=True
+  unit.vendor_text                   '4111_1111_1111_1111'                      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 4111_1111_1111_1111 for access' unit_get_has=True
+  unit.vendor_text                   '3782 822463 10005'                        201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 3782 822463 10005 for access' unit_get_has=True
+  unit.vendor_text                   '123-45-6789'                              201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact 123-45-6789 for access' unit_get_has=True
+  unit.vendor_text                   'SSN 123456789'                            201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact SSN 123456789 for access' unit_get_has=True
+  unit.vendor_text                   'social security number: 123 45 6789'      201 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits'], ['data/ooh_log.jsonl', 'sha256(unredacted text)']] redacted=False text='faces west, contact social security number: 123 45 6789 for access' unit_get_has=True
+  face.location_description          '4111 1111 1111 1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '4111-1111-1111-1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '5555.5555.5555.4444'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '4111_1111_1111_1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '3782 822463 10005'                        200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          '123-45-6789'                              200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          'SSN 123456789'                            200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  face.location_description          'social security number: 123 45 6789'      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2
+  campaign.client_approval_doc_ref   '4111-1111-1111-1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '5555.5555.5555.4444'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '4111_1111_1111_1111'                      200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   'io-4111-1111-1111-1111'                   200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '123-45-6789'                              200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   'SSN:123456789'                            200 None                               absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=2 state=CLIENT_APPROVED ver_same=False ctl=409
+  campaign.client_approval_doc_ref   '4111 1111 1111 1111'                      422 SCHEMA:string_pattern_mismatch     absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN 123456789'                            422 SCHEMA:string_pattern_mismatch     absent=False hits=[['data/ooh_log.jsonl', 'literal'], ['data/ooh_log.jsonl', 'digits']] ledgerΔ=0 state=PROPOSAL_SENT ver_same=True ctl=200
+  verify {'entries': 580, 'valid': True} data ['ooh.lock', 'ooh_log.jsonl']
+======== trial_c91_fifo_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "2486fb0f780aeb9884bf9b73a299a52361c6487dd8954dbae3013bb947d65ae6", "fault_sha": null} pre_rss 71456
+   W3: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.004 unchanged=True anchors 2->2 pending=False rss=72240
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.004 unchanged=True anchors 2->2 pending=False rss=73600
+   A1: 200 ok=False 'the local log file differs from the lines this service holds' t=0.013 rss=72224
+   A2: 200 ok=False 'the local log file differs from the lines this service holds' t=0.008 rss=72224
+   J1: 200 ok=False 'the local log file differs from the lines this service holds' t=0.012 rss=72240
+   ST: 200 ok=False 'the local log file differs from the lines this service holds' t=0.005
+   J2: 200 ok=False 'the local log file differs from the lines this service holds' t=0.013 rss=73600
+   J3: 200 ok=True '' t=0.012 rss=73600
+   A3: 200 ok=True '' t=0.008 rss=73600
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:47:31Z", "campaigns": 0 t=0.076 unchanged=False anchors 2->3 pending=False rss=73632
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:47:31Z", "campaigns": 0 t=0.041 unchanged=False anchors 3->4 pending=False rss=73680
+   A_restart: 200 ok=True '' t=0.009 rss=69248
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:47:31Z", "campaigns t=0.051 unchanged=False anchors 4->5 pending=False rss=70848
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl"]}, "target_unchanged": null, "rss_kb": 73600}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== trial_c91_fifo_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "da5f7d34a72392ce76dd36110f6b125b88b14ad9fb5ed74547afc7bbe07c730d", "fault_sha": null} pre_rss 72192
+   W3: 503 {"detail": "STORE_UNAVAILABLE", "maybe": true} t=0.123 unchanged=True anchors 2->3 pending=True rss=72928
+   W4: 503 {"detail": "INTEGRITY_UNVERIFIED", "maybe": false} t=0.008 unchanged=True anchors 3->3 pending=True rss=75072
+   A1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.017 rss=72992
+   A2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.01 rss=73600
+   J1: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.022 rss=75072
+   ST: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.006
+   J2: 200 ok=False 'the pending line is anchored on the ledger but cannot be wri' t=0.019 rss=75072
+   J3: 200 ok=True '' t=0.024 rss=75088
+   A3: 200 ok=True '' t=0.01 rss=75088
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T14:48:03Z", "campaigns": 0 t=0.007 unchanged=True anchors 3->3 pending=False rss=75088
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T14:48:04Z", "campaigns": 0 t=0.053 unchanged=False anchors 3->4 pending=False rss=75088
+   A_restart: 200 ok=True '' t=0.011 rss=69248
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T14:48:05Z", "campaigns t=0.048 unchanged=False anchors 4->5 pending=False rss=70720
+   after_writes {"disk": {"kind": "fifo", "sha256": null, "size": null, "lines": null, "dir": ["ooh.lock", "ooh_log.jsonl", "pending.line"]}, "target_unchanged": null, "rss_kb": 75072}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== trial_pii_c91_3.12 python 3.12.14
+  unit.vendor_text                   '4111 1111 1111 1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '4111-1111-1111-1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '5555.5555.5555.4444'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '4111_1111_1111_1111'                      201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '3782 822463 10005'                        201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   '123-45-6789'                              201 None                               absent=True hits=[] redacted=True text='faces west, contact [redacted] for access' unit_get_has=False
+  unit.vendor_text                   'SSN 123456789'                            201 None                               absent=True hits=[] redacted=True text='faces west, contact SSN [redacted] for access' unit_get_has=False
+  unit.vendor_text                   'social security number: 123 45 6789'      201 None                               absent=True hits=[] redacted=True text='faces west, contact social security number: [redacted] for access' unit_get_has=False
+  face.location_description          '4111 1111 1111 1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '4111-1111-1111-1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '5555.5555.5555.4444'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '4111_1111_1111_1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '3782 822463 10005'                        422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          '123-45-6789'                              422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          'SSN 123456789'                            422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  face.location_description          'social security number: 123 45 6789'      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=0
+  campaign.client_approval_doc_ref   '4111-1111-1111-1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '5555.5555.5555.4444'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '4111_1111_1111_1111'                      422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'io-4111-1111-1111-1111'                   422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '123-45-6789'                              422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN:123456789'                            422 ATTRIBUTE_VALUE_PERSONAL_DATA      absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   '4111 1111 1111 1111'                      422 SCHEMA:string_pattern_mismatch     absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  campaign.client_approval_doc_ref   'SSN 123456789'                            422 SCHEMA:string_pattern_mismatch     absent=True hits=[] ledgerΔ=None state=PROPOSAL_SENT ver_same=True ctl=200
+  verify {'entries': 558, 'valid': True} data ['ooh.lock', 'ooh_log.jsonl']

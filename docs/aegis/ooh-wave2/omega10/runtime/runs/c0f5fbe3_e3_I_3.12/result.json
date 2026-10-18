@@ -1,0 +1,330 @@
+{
+ "scen": "e3",
+ "mode": "I",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega10/runtime/src_0f5fbe3",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt10-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 68992,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T15:54:39Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.15,
+  "file_before": "missing",
+  "file_after": "df404462c37347c03e7b28a0fd1f98c698914cf082db00aa73a1a9776811da0d",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 69968
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T15:54:39Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.091,
+  "file_before": "df404462c37347c03e7b28a0fd1f98c698914cf082db00aa73a1a9776811da0d",
+  "file_after": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71536
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71520
+ },
+ "fault": {
+  "orig_sha": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+  "fault_sha": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "same_size": true,
+  "disk": {
+   "kind": "regular",
+   "sha256": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  }
+ },
+ "A_no_write": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:54:50Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.016,
+  "file": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "rss_kb": 72256
+ },
+ "A_no_write_again": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:54:50Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.013,
+  "file": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "rss_kb": 72256
+ },
+ "job_no_write": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:54:50Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.02,
+  "file": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "rss_kb": 72320
+ },
+ "status_after_check": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T15:54:50Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   }
+  },
+  "elapsed_s": 0.009
+ },
+ "W3": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.01,
+  "file_before": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "file_after": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "file_unchanged": true,
+  "kind_after": "regular",
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72320
+ },
+ "after_W3": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "status": {
+   "status": 200,
+   "body": {
+    "integrity": {
+     "ok": false,
+     "checked_at": "2026-10-18T15:54:50Z",
+     "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+    }
+   },
+   "elapsed_s": 0.008
+  },
+  "file_eq_fault": true
+ },
+ "W4": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.01,
+  "file_before": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "file_after": "96bc1e28603d18a3ec333acc3ff2bb0c31b1696c02e84e305d97a6c1783ed0b0",
+  "file_unchanged": true,
+  "kind_after": "regular",
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72368
+ },
+ "file_eq_fault_before_putback": true,
+ "putback_prefix_is_fault": true,
+ "putback_sha": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+ "job_putback": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T15:55:01Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.02,
+  "file": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+  "rss_kb": 72384
+ },
+ "A_putback": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T15:55:01Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.013,
+  "file": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+  "rss_kb": 72384
+ },
+ "after_putback": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T15:55:01Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.09,
+  "file_before": "e40e764bf26704bb572cdfe68e8281232d4c08a146b8c44ceac5e15db6c1e661",
+  "file_after": "6e7a6dd5b88ae8d9aefc9e17f0a1320da0ad7aa1e6017a82acf7ba8e417700c7",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": false,
+  "rss_kb": 72384
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T15:55:01Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.082,
+  "file_before": "6e7a6dd5b88ae8d9aefc9e17f0a1320da0ad7aa1e6017a82acf7ba8e417700c7",
+  "file_after": "98fc1662de1dd4e7934de55f9182157ee4cfa08eb22c8d7715901c72db646fbc",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false,
+  "rss_kb": 73680
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T15:55:02Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "elapsed_s": 0.017,
+  "file": "98fc1662de1dd4e7934de55f9182157ee4cfa08eb22c8d7715901c72db646fbc",
+  "rss_kb": 69520
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T15:55:02Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.082,
+  "file_before": "98fc1662de1dd4e7934de55f9182157ee4cfa08eb22c8d7715901c72db646fbc",
+  "file_after": "9517756bbe83af09447b75eb03dae4cca9de7e58a6c04f408350b1cfb0bda5a3",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false,
+  "rss_kb": 70992
+ },
+ "final": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "9517756bbe83af09447b75eb03dae4cca9de7e58a6c04f408350b1cfb0bda5a3",
+   "size": 3391,
+   "lines": 5,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 5,
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

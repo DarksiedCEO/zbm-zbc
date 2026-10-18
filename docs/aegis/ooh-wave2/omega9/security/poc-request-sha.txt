@@ -1,0 +1,26 @@
+== venv3.12
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                9ece7f96ed1d53c3f7035696f6a1cd29b6b2160b686b2a84e47251638865fc98
+  sha over raw body (secret)        9ece7f96ed1d53c3f7035696f6a1cd29b6b2160b686b2a84e47251638865fc98 True
+  sha over body with redacted text  400773e2a1c59f4b6f0f393ab161acdc3a05ce6c33b3c26544ab2c9dfc0e67ab False
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                e12c677383053cff594d12984b2afae54c72211da2441d352017533d68841529
+  sha over raw body (secret)        e12c677383053cff594d12984b2afae54c72211da2441d352017533d68841529 True
+  sha over body with redacted text  7ab66787fc210e1391c8222148d87d6aab909ebc94c9c74df38623f0a865ed27 False
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False
+== venv3.13
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                25f9e50f8a0c3d77153e4d4302c0e5d33f5d2d2ca87f8b32c486e85819685e5b
+  sha over raw body (secret)        25f9e50f8a0c3d77153e4d4302c0e5d33f5d2d2ca87f8b32c486e85819685e5b True
+  sha over body with redacted text  b9cabd88130c74e30418108bb839c59fdad610f6e3bf521f8f268652ada50615 False
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                fddadd84c974c145217e2973225838b8b120f6db489eadfca946fefa04742d7e
+  sha over raw body (secret)        fddadd84c974c145217e2973225838b8b120f6db489eadfca946fefa04742d7e True
+  sha over body with redacted text  17869a05d4a9f8b2d1e9eeb43b2e37000a1bd65d515ddee148b30596d7ec5198 False
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False

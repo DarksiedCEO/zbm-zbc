@@ -1,0 +1,16 @@
+OLD99569bd
+n=100 bytes=71482 write_med_ms=4.96 write_max_ms=10.86 check_med_ms=0.04 (file_problem)
+n=1000 bytes=716783 write_med_ms=0.24 write_max_ms=14.63 check_med_ms=0.14 (file_problem)
+n=10000 bytes=7187784 write_med_ms=5.31 write_max_ms=13.64 check_med_ms=1.49 (file_problem)
+NEW91ea9a1
+n=100 bytes=71482 write_med_ms=8.98 write_max_ms=17.08 check_med_ms=0.04 (file_problem)
+n=1000 bytes=716783 write_med_ms=5.25 write_max_ms=14.12 check_med_ms=0.14 (file_problem)
+n=10000 bytes=7187784 write_med_ms=7.26 write_max_ms=13.95 check_med_ms=1.64 (file_problem)
+OLD2
+n=100 bytes=71482 write_med_ms=4.20 write_max_ms=9.70 check_med_ms=0.05 (file_problem)
+n=1000 bytes=716783 write_med_ms=4.21 write_max_ms=10.03 check_med_ms=0.15 (file_problem)
+n=10000 bytes=7187784 write_med_ms=8.79 write_max_ms=13.83 check_med_ms=1.67 (file_problem)
+NEW2
+n=100 bytes=71482 write_med_ms=0.12 write_max_ms=13.68 check_med_ms=0.03 (file_problem)
+n=1000 bytes=716783 write_med_ms=8.16 write_max_ms=13.93 check_med_ms=0.16 (file_problem)
+n=10000 bytes=7187784 write_med_ms=9.46 write_max_ms=17.90 check_med_ms=1.67 (file_problem)

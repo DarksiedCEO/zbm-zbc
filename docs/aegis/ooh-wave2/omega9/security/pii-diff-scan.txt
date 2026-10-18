@@ -1,0 +1,95 @@
+## <OWNER> in 99569bd tree:
+99569bd:docs/aegis/round-26b/provenance.md:2
+## introduced by 99569bd..91ea9a1?
+0
+## git log author emails 84a5377..91ea9a1
+  33 <OWNER-EMAIL> <OWNER-EMAIL>
+## diff 99569bd..91ea9a1 files
+ 253 files changed, 36253 insertions(+), 71 deletions(-)
+## added lines with e-mail / phone / SSN / card shapes
+552:++@pytest.mark.parametrize("which", ["first", "middle", "last"])
+2457:+**(6) OOH2-PII-1: HIGH, open, unfixed at this SHA; blocks.** Tracked (OPEN.md:72). An open HIGH means no GREEN for any scope. The founder's not-a-push-blocker ruling is his authority over pushes
+18915:+  {"customer_id": "cust_1", "email": "amara.legit@example.com", "created_at": "2025-11-02T14:00:00Z", "lifetime_order_count": 4},
+18916:+  {"customer_id": "cust_2", "email": "d.fraudclick@example.com", "created_at": "2026-01-15T09:30:00Z", "lifetime_order_count": 1},
+18917:+  {"customer_id": "cust_3", "email": "priya.stacker@example.com", "created_at": "2025-08-20T11:00:00Z", "lifetime_order_count": 7},
+18918:+  {"customer_id": "cust_4", "email": "j.normal@example.com", "created_at": "2026-02-01T16:45:00Z", "lifetime_order_count": 2},
+18919:+  {"customer_id": "cust_5", "email": "wanda.abandons@example.com", "created_at": "2026-03-10T08:15:00Z", "lifetime_order_count": 3},
+18920:+  {"customer_id": "cust_6", "email": "carlos.recovered@example.com", "created_at": "2026-01-22T13:00:00Z", "lifetime_order_count": 5},
+18921:+  {"customer_id": "cust_7", "email": "nina.subscriber@example.com", "created_at": "2025-05-04T10:00:00Z", "lifetime_order_count": 12},
+18922:+  {"customer_id": "cust_8", "email": "leo.cancelled@example.com", "created_at": "2025-09-18T12:30:00Z", "lifetime_order_count": 3},
+18923:+  {"customer_id": "cust_9", "email": "sofia.pastdue@example.com", "created_at": "2025-12-01T09:00:00Z", "lifetime_order_count": 6}
+22567:+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log f
+22580:+  {"customer_id": "cust_1", "email": "amara.legit@example.com", "created_at": "2025-11-02T14:00:00Z", "lifetime_order_count": 4},
+22581:+  {"customer_id": "cust_2", "email": "d.fraudclick@example.com", "created_at": "2026-01-15T09:30:00Z", "lifetime_order_count": 1},
+22582:+  {"customer_id": "cust_3", "email": "priya.stacker@example.com", "created_at": "2025-08-20T11:00:00Z", "lifetime_order_count": 7},
+22583:+  {"customer_id": "cust_4", "email": "j.normal@example.com", "created_at": "2026-02-01T16:45:00Z", "lifetime_order_count": 2},
+22584:+  {"customer_id": "cust_5", "email": "wanda.abandons@example.com", "created_at": "2026-03-10T08:15:00Z", "lifetime_order_count": 3},
+22585:+  {"customer_id": "cust_6", "email": "carlos.recovered@example.com", "created_at": "2026-01-22T13:00:00Z", "lifetime_order_count": 5},
+22586:+  {"customer_id": "cust_7", "email": "nina.subscriber@example.com", "created_at": "2025-05-04T10:00:00Z", "lifetime_order_count": 12},
+22587:+  {"customer_id": "cust_8", "email": "leo.cancelled@example.com", "created_at": "2025-09-18T12:30:00Z", "lifetime_order_count": 3},
+22588:+  {"customer_id": "cust_9", "email": "sofia.pastdue@example.com", "created_at": "2025-12-01T09:00:00Z", "lifetime_order_count": 6}
+24093:+  - SSN shape: 8b613e3 has 3 lines, all the text `SSN 123-45-6789` inside docs prose: the evidence note and the OOH2-PII-1 row in OPEN.md. That number is the well-known reserved/advertising tes
+24110:+10:+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime l
+24111:+23:+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime l
+24933:+6087:+| OOH2-PII-1 | High (founder ruling 2026-10-18; AEGIS security graded it Medium as M-1) | next OOH wave; blocks production, not the push of ooh-dept-15-wave2 (founder ruling 2026-10-18) |
+25048:+262:+@pytest.mark.parametrize("which", ["first", "middle", "last"])
+25169:+-- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log 
+25170:++- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log 
+25182:+-- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log 
+25183:++- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime log 
+31246:+-| OOH2-PII-1 | High (founder ruling 2026-10-18; AEGIS security graded it Medium as M-1) | next OOH wave; blocks production, not the push of ooh-dept-15-wave2 (founder ruling 2026-10-18) | 2026
+31247:++| OOH2-PII-1 | High (founder ruling 2026-10-18; AEGIS security graded it Medium as M-1) | next OOH wave; blocks production, not the push of ooh-dept-15-wave2 (founder ruling 2026-10-18) | 2026
+31525:++@pytest.mark.parametrize("which", ["first", "middle", "last"])
+31689:+1:10:+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime
+31690:+2:23:+- Personal-data scan of the evidence: only test fixtures (example.com and the L-3 addresses already in the repo, 555 phone numbers, public test card numbers, SSN 123-45-6789). Six runtime
+31695:+   1 +@pytest.mark.parametrize
+32823:+PASSED tests/test_aegis_ooh_final.py::test_df2_df8_these_addresses_and_numbers_are_personal_data[jane@163.com]
+32824:+PASSED tests/test_aegis_ooh_final.py::test_df2_df8_these_addresses_and_numbers_are_personal_data[jane@126.com]
+32827:+PASSED tests/test_aegis_ooh_final.py::test_df2_df8_these_addresses_and_numbers_are_personal_data[Rep 48,310 555 1234]
+32833:+PASSED tests/test_aegis_ooh_final.py::test_df2_df8_these_addresses_and_numbers_are_personal_data[(555) 123-4567]
+## distinct e-mail addresses in added lines 99569bd..91ea9a1
+  12 jane@example.com
+   9 +@pytest.mark.parametrize
+   4 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxjane@example.com
+   4 jane@lamar.com
+   4 jane@163.com
+   4 jane@126.com
+   4 jane.doe@example.com
+   4 bob@lamar.com
+   2 wanda.abandons@example.com
+   2 sofia.pastdue@example.com
+   2 priya.stacker@example.com
+   2 nina.subscriber@example.com
+   2 leo.cancelled@example.com
+   2 j.normal@example.com
+   2 d.fraudclick@example.com
+   2 carlos.recovered@example.com
+   2 amara.legit@example.com
+   2 ++@pytest.mark.parametrize
+   1 +@pytest.fixture
+## distinct SSN shapes
+  18 123-45-6789
+   1 123‐45‐6789
+## 16-digit runs (card) distinct
+   2 1000000000000000
+   4 1000000000000008
+   4 1111111111111111
+   1 1234 5678 9012 3452
+   2 1234567890123452
+   4 2026101700000005
+   4 2223000048400011
+   4 3530111333300000
+   2 4111 1111 1111 1111
+   1 4111 1111 1111 1112
+   7 4111-1111-1111-1111
+   1 4111-1111-1111-1112
+   2 4111.1111.1111.1111
+   9 4111111111111111
+   5 4111111111111112
+   2 4111_1111_1111_1111
+  13 4242-4242-4242-4242
+   5 4242-424242424242
+   9 4242.4242.4242.4242
+   4 42424242-42424242
+## home path / user
+0

@@ -1,0 +1,630 @@
+{
+ "R19": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "pending_file_after": false,
+  "own_pending_after": false,
+  "integrity_ok_after": true,
+  "write_while_down": 503,
+  "recover": true,
+  "refused_1_applied": false,
+  "anchors_added": 0,
+  "tenant_created_events_for_refused_1": 1,
+  "after": 201,
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "R19_held_contrast": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "faults_played": [
+   [
+    "log_anchor",
+    "record_then_lose"
+   ],
+   [
+    "log_anchor",
+    "down"
+   ]
+  ],
+  "pending_file": true,
+  "own_pending": true,
+  "recover": true,
+  "held_1_applied": true,
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C06_authorize": {
+  "op": "authorize",
+  "step": "down",
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "faults_played": [
+   [
+    "purchase_authorized_by_andre",
+    "down"
+   ]
+  ],
+  "log_lines_added": 0,
+  "integrity_ok_after": true,
+  "typed_on_ledger_after_fault": 0,
+  "anchors_added_after_fault": 0,
+  "after_fault": {
+   "orders": 0,
+   "auths": []
+  },
+  "control_same_action": 201,
+  "typed_on_ledger_end": 1,
+  "end": {
+   "orders": 0,
+   "auths": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ]
+  },
+  "final_anchors_vs_lines": [
+   41,
+   41
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 3,
+   "by_kind": {
+    "funds_verified": 1,
+    "finance_verified": 1,
+    "purchase_authorized": 1
+   },
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C06_submit": {
+  "op": "submit",
+  "step": "down",
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "faults_played": [
+   [
+    "purchase_order_submitted_by_andre",
+    "down"
+   ]
+  ],
+  "log_lines_added": 0,
+  "integrity_ok_after": true,
+  "typed_on_ledger_after_fault": 0,
+  "anchors_added_after_fault": 0,
+  "after_fault": {
+   "orders": 0,
+   "auths": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED"
+    ]
+   ]
+  },
+  "control_same_action": 200,
+  "typed_on_ledger_end": 1,
+  "end": {
+   "orders": 1,
+   "auths": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ]
+  },
+  "final_anchors_vs_lines": [
+   42,
+   42
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 4,
+   "by_kind": {
+    "funds_verified": 1,
+    "finance_verified": 1,
+    "purchase_authorized": 1,
+    "order_submitted": 1
+   },
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C06_authorize_transient": {
+  "op": "authorize",
+  "step": "refuse_connect",
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "faults_played": [
+   [
+    "purchase_authorized_by_andre",
+    "refuse_connect"
+   ]
+  ],
+  "log_lines_added": 0,
+  "integrity_ok_after": true,
+  "typed_on_ledger_after_fault": 0,
+  "anchors_added_after_fault": 0,
+  "after_fault": {
+   "orders": 0,
+   "auths": []
+  },
+  "control_same_action": 201,
+  "typed_on_ledger_end": 1,
+  "end": {
+   "orders": 0,
+   "auths": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED",
+     "5000.00"
+    ]
+   ]
+  },
+  "final_anchors_vs_lines": [
+   41,
+   41
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 3,
+   "by_kind": {
+    "funds_verified": 1,
+    "finance_verified": 1,
+    "purchase_authorized": 1
+   },
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C06_submit_transient": {
+  "op": "submit",
+  "step": "refuse_connect",
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "faults_played": [
+   [
+    "purchase_order_submitted_by_andre",
+    "refuse_connect"
+   ]
+  ],
+  "log_lines_added": 0,
+  "integrity_ok_after": true,
+  "typed_on_ledger_after_fault": 0,
+  "anchors_added_after_fault": 0,
+  "after_fault": {
+   "orders": 0,
+   "auths": [
+    [
+     "AUTHORIZED",
+     "NOT_SUBMITTED"
+    ]
+   ]
+  },
+  "control_same_action": 200,
+  "typed_on_ledger_end": 1,
+  "end": {
+   "orders": 1,
+   "auths": [
+    [
+     "AUTHORIZED",
+     "SUBMISSION_UNKNOWN",
+     "5000.00"
+    ]
+   ]
+  },
+  "final_anchors_vs_lines": [
+   42,
+   42
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 4,
+   "by_kind": {
+    "funds_verified": 1,
+    "finance_verified": 1,
+    "purchase_authorized": 1,
+    "order_submitted": 1
+   },
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C02_tenant": {
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added": 0,
+  "log_lines_added": 0,
+  "typed_added_by_failed_try": 1,
+  "pending_file": false,
+  "integrity_ok_after": true,
+  "after_unpatch_same_action": 201,
+  "typed_on_ledger_end": 2,
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C02_authorize": {
+  "op": "authorize",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "anchors_added": 0,
+  "log_lines_added": 0,
+  "typed_added_by_failed_try": 1,
+  "pending_file": false,
+  "integrity_ok_after": true,
+  "after_unpatch_same_action": 201,
+  "typed_on_ledger_end": 2,
+  "orders": 0,
+  "auths": [
+   [
+    "AUTHORIZED",
+    "5000.00"
+   ]
+  ],
+  "final_anchors_vs_lines": [
+   41,
+   41
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 3,
+   "by_kind": {
+    "funds_verified": 1,
+    "finance_verified": 1,
+    "purchase_authorized": 1
+   },
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C03": {
+  "answer": [
+   503,
+   {
+    "detail": "LEDGER_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "faults_played": [
+   [
+    "log_anchor",
+    "lose_unrecorded"
+   ],
+   [
+    "log_anchor",
+    "down"
+   ]
+  ],
+  "own_pending": true,
+  "pending_file": true,
+  "anchor_for_maybe_on_ledger_before_recovery": 0,
+  "recover": true,
+  "maybe_1_applied": true,
+  "anchors_eq_lines": true,
+  "same_request_retry": 201,
+  "after": 201,
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C04": {
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "integrity_ok_after": false,
+  "anchors_added_at_fault": 0,
+  "own_pending_kept": true,
+  "recover": true,
+  "disk_1_applied_after_recovery": true,
+  "anchors_added_after_recovery": 1,
+  "same_request_retry": [
+   201,
+   null
+  ],
+  "after": 201,
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C04_control": {
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": false
+   }
+  ],
+  "integrity_ok_after": true,
+  "anchors_added_at_fault": 0,
+  "own_pending_kept": false,
+  "recover": true,
+  "disk_1_applied_after_recovery": false,
+  "anchors_added_after_recovery": 0,
+  "same_request_retry": [
+   201,
+   null
+  ],
+  "after": 201,
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C07_tenant": {
+  "op": "tenant",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "integrity_ok_after": false,
+  "anchors_minus_lines_at_fault": 1,
+  "second_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "recover": true,
+  "log_lines_added": 1,
+  "blocked_1_applied": false,
+  "anchored_1_applied": true,
+  "anchors_eq_lines": true,
+  "same_request_retry": [
+   201,
+   null
+  ],
+  "after": 201,
+  "final_anchors_vs_lines": [
+   15,
+   15
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C07_submit": {
+  "op": "submit",
+  "answer": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "integrity_ok_after": false,
+  "anchors_minus_lines_at_fault": 1,
+  "second_write": [
+   503,
+   {
+    "detail": "INTEGRITY_UNVERIFIED",
+    "maybe": false
+   }
+  ],
+  "recover": true,
+  "log_lines_added": 1,
+  "blocked_1_applied": false,
+  "orders": 1,
+  "order_lines": 1,
+  "submit_typed_on_ledger": 1,
+  "anchors_eq_lines": true,
+  "same_request_retry": [
+   409,
+   {
+    "detail": "DUPLICATE_ORDER_BLOCKED",
+    "submission_state": "DUPLICATE_BLOCKED"
+   }
+  ],
+  "orders_after_retry": 1,
+  "after": 201,
+  "final_anchors_vs_lines": [
+   43,
+   43
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 4,
+   "by_kind": {
+    "funds_verified": 1,
+    "finance_verified": 1,
+    "purchase_authorized": 1,
+    "order_submitted": 1
+   },
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ },
+ "C08": {
+  "answer": 201,
+  "pending_file": false,
+  "own_pending": false,
+  "anchors_eq_lines": true,
+  "final_anchors_vs_lines": [
+   14,
+   14
+  ],
+  "final_pending_file": false,
+  "final_discarded": false,
+  "dup_event_ids": 0,
+  "restart_integrity_ok": true,
+  "restart_state_diff": [],
+  "readback_problems": [],
+  "money_evidence": {
+   "money_lines": 0,
+   "by_kind": {},
+   "problems": [],
+   "lines_without_evidence": 0
+  }
+ }
+}

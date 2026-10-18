@@ -1,0 +1,97 @@
+{
+ "scen": "rzero",
+ "mode": "X",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega9/runtime/src91",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt9-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 68912,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T15:01:43Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.061,
+  "file_before": "missing",
+  "file_after": "ebd194c56dc30162810aaea1840b935714466aa22534c8c43bea880a260675aa",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 69952
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T15:01:43Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.05,
+  "file_before": "ebd194c56dc30162810aaea1840b935714466aa22534c8c43bea880a260675aa",
+  "file_after": "93c9a18bbf9ea2f7879c9b36503914b14295bfb160de707e84e11344c5900c3d",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71408
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "93c9a18bbf9ea2f7879c9b36503914b14295bfb160de707e84e11344c5900c3d",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71392
+ },
+ "fault": {
+  "orig_sha": "93c9a18bbf9ea2f7879c9b36503914b14295bfb160de707e84e11344c5900c3d",
+  "disk": {
+   "kind": "symlink->/dev/zero",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "stop": "SIGTERM",
+ "restart_on_fault": {
+  "exited": -9,
+  "tail": [
+   "INFO:     Application shutdown complete.",
+   "INFO:     Finished server process [65479]"
+  ]
+ },
+ "restart_rss_kb": null,
+ "restart_alive": false,
+ "kill_after_restart": "already exited rc -9",
+ "disk_after": {
+  "kind": "symlink->/dev/zero",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ },
+ "target_unchanged": null
+}

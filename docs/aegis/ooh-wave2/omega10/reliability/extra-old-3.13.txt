@@ -1,0 +1,4 @@
+[old] n=1000 top4: [('nd-many', 6.4), ('soc-only', 3.5), ('ssn-glue', 3.4), ('ssn-dotchain', 3.2)]
+[old] n=4000 top4: [('nd-many', 24.9), ('rand2', 16.0), ('taxid-nosp', 13.9), ('ssn-underscore', 13.8)]
+[old] n=16000 top4: [('nd-many', 108.2), ('rand1', 65.7), ('rand2', 62.9), ('tin1', 54.2)]
+[old] families with ratio 16000/4000 > 6 (linear = 4): [('rand1', 11.1)]

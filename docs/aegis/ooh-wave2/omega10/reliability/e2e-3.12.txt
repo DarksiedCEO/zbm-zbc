@@ -1,0 +1,5 @@
+new312 benign4000   first=201 replay=201 replay_ms med=7.6 max=11.3 | fresh 201 ms med=26.6 max=38.2
+new312 fdfa4000     first=201 replay=201 replay_ms med=60.0 max=80.9 | fresh 201 ms med=155.8 max=246.4
+new312 card+x4000   first=201 replay=201 replay_ms med=43.0 max=58.7 | fresh 201 ms med=111.9 max=122.4
+new312 digits4000   first=201 replay=201 replay_ms med=35.1 max=36.9 | fresh 201 ms med=78.3 max=86.2
+new312 GET /markets idle: med=3.3 max=16.9 ms | under 4-thread replay flood: med=184.9 max=344.4 ms, flood 17.4 req/s
