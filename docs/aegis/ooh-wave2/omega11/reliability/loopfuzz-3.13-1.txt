@@ -1,0 +1,4 @@
+calls-per-input distribution [(1, 6304), (2, 33426), (3, 270)]
+worst 3 'a@b.coa@b.cotin1[redacted](555) 555-5555+44 20 7946 0958ssn @-'
+fallback(all-redacted) cases 0 []
+slowest short input ms 31.650374992750585 '(555) 555-55551 2 3 4 5 6 7 8 94111 1111 1111 1111-123.1255512345674+44 20 7946 0958123-45-6789'

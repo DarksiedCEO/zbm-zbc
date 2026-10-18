@@ -1,0 +1,4 @@
+fifo_write_first             {'w': 'REFUSED(the log file and memory disagree; refusing to write)', 'fp': 'the local log file differs from the lines this service holds: an operator must inspect it'}
+directory                    {'w': 'REFUSED(local log open failed: IsADirectoryError)', 'fp': 'the local log file differs from the lines this service holds: an operator must inspect it'}
+unix_socket                  {'w': 'REFUSED(local log open failed: OSError)', 'fp': 'the local log file cannot be read (OSError)'}
+sparse_1GiB                  {'w': 'REFUSED(the log file and memory disagree; refusing to write)', 'fp': 'the local log file differs from the lines this service holds: an operator must inspect it'}

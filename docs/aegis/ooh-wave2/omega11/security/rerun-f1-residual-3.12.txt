@@ -1,0 +1,8 @@
+raw='123-45-6789'                has_personal_data(raw)=True  stored_vendor_text(observed)='contact [redacted] now' screened_for_hash='contact [redacted] now'
+    stored request_sha == sha(cleartext body): False  (so one hash per SSN guess confirms it)
+raw='123  45  6789'              has_personal_data(raw)=True  stored_vendor_text(observed)='contact [redacted] now' screened_for_hash='contact [redacted] now'
+    stored request_sha == sha(cleartext body): False  (so one hash per SSN guess confirms it)
+raw='123 \t45 \t6789'            has_personal_data(raw)=True  stored_vendor_text(observed)='contact [redacted] now' screened_for_hash='contact [redacted] now'
+    stored request_sha == sha(cleartext body): False  (so one hash per SSN guess confirms it)
+raw='123\xa0\xa045\xa0\xa06789'  has_personal_data(raw)=True  stored_vendor_text(observed)='contact [redacted] now' screened_for_hash='contact [redacted] now'
+    stored request_sha == sha(cleartext body): False  (so one hash per SSN guess confirms it)

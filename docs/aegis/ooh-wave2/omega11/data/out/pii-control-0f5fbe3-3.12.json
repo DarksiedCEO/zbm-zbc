@@ -1,0 +1,248 @@
+[
+ {
+  "field": "unit.vendor_text",
+  "secret": "123  45  6789",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact [redacted] for access",
+   "truncated": false,
+   "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": true,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "stored_kinds": null,
+  "stored_text": "faces west, contact [redacted] for access",
+  "log_request_sha_eq_hash_of_kept_body": false,
+  "recoverable_by_search": true,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "123  45  6789",
+  "status": [
+   200,
+   null
+  ],
+  "nothing_written": false,
+  "delta": {
+   "log": 1,
+   "ledger": 2,
+   "files_changed": [
+    "ledger/ledger.jsonl",
+    "ledger/ledger.jsonl.head",
+    "ooh/ooh_log.jsonl"
+   ]
+  },
+  "control_status": 409,
+  "line_data": "{\"_obj\": \"ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c\", \"actor\": \"ooh_agent\", \"attribute\": \"location_description\", \"evidence\": [{\"event_id\": \"ooh-evd-36fa085115edebee1de37d9ec639f40a153ad02e\", \"event_type\": \"inventory_face_attribute_sourced\", \"payload\": {\"attribute\": \"location_description\", \"face_id\": \"ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c\", \"rk\": \"face_attr|ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c|e901589f-9ed4-4389-bf81-50f3a8c8d57f\", \"seq\": 17, \"source_id\": \"ooh-src-5cdbb207c673f83aef25e9396aee96d67e3a941e\", \"value\": \"f7fe466121f2efd7855f49d250c7b6950d787ff2df4b9995d",
+  "line_request_sha_eq_raw_body_hash": true,
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "123  45  6789",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "123  45  6789",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "123  45  6789",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "123 45 6789",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "text": "faces west, contact [redacted] for access",
+   "truncated": false,
+   "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "stored_kinds": null,
+  "stored_text": "faces west, contact [redacted] for access",
+  "log_request_sha_eq_hash_of_kept_body": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "123 45 6789",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "123 45 6789",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "123 45 6789",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": [],
+  "class": ""
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "123 45 6789",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": [],
+  "class": ""
+ }
+]

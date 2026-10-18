@@ -1,0 +1,87 @@
+[
+ {
+  "case": "control_regular",
+  "start": "STARTED",
+  "integrity": {
+   "ok": true,
+   "checked_at": "2026-10-16T18:00:00Z",
+   "problem": null
+  },
+  "write": 201,
+  "dir_changed": {
+   "ooh_log.jsonl": [
+    [
+     "file",
+     15133,
+     "2fccd3b90c27abdf67efb6996bfbc880405ec6f543dee695b181166ab892ae37"
+    ],
+    [
+     "file",
+     15794,
+     "102954222558390cfe7685c6bd4dd77002accb7fb99abedeaae02123680de0db"
+    ]
+   ]
+  },
+  "ledger_events_added": 2,
+  "target_or_copy_unchanged": true
+ },
+ {
+  "case": "symlink_identical",
+  "start": "REFUSED StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link",
+  "dir_changed": {},
+  "ledger_events_added": 0,
+  "target_or_copy_unchanged": true,
+  "after_restore": {
+   "integrity_ok": true,
+   "state_diff": []
+  }
+ },
+ {
+  "case": "symlink_dangling",
+  "start": "REFUSED StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link",
+  "dir_changed": {},
+  "ledger_events_added": 0,
+  "target_or_copy_unchanged": true,
+  "after_restore": {
+   "integrity_ok": true,
+   "state_diff": []
+  }
+ },
+ {
+  "case": "fifo",
+  "start": "REFUSED StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)",
+  "dir_changed": {},
+  "ledger_events_added": 0,
+  "target_or_copy_unchanged": true,
+  "after_restore": {
+   "integrity_ok": true,
+   "state_diff": []
+  }
+ },
+ {
+  "case": "directory",
+  "start": "REFUSED StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)",
+  "dir_changed": {},
+  "ledger_events_added": 0,
+  "target_or_copy_unchanged": true,
+  "after_restore": {
+   "integrity_ok": true,
+   "state_diff": []
+  }
+ },
+ {
+  "case": "unix_socket",
+  "start": "REFUSED StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory",
+  "dir_changed": {},
+  "ledger_events_added": 0,
+  "target_or_copy_unchanged": true,
+  "after_restore": {
+   "integrity_ok": true,
+   "state_diff": []
+  }
+ },
+ {
+  "case": "device_mknod",
+  "not_run": "mknod refused: PermissionError 1 (non-root)"
+ }
+]

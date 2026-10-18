@@ -1,0 +1,14 @@
+/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                79c0c9d4586d01e24e824e25a380af5d92d7a6c12a20e4827f8a497e127c3acf
+  sha over raw body (secret)        1409e25b18738242c55438151ad0d7d18ddb11bf3aeadb2aa77bd8c035a5005d False
+  sha over body with redacted text  79c0c9d4586d01e24e824e25a380af5d92d7a6c12a20e4827f8a497e127c3acf True
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                7997dad97db96d34a44bc51d2b887ba51bc08bfef42ff8c68b6bb289986d32b2
+  sha over raw body (secret)        d3658db5b299a4a44e8b502cbbbda92d4e8b5c8efbe9647d064f91b229019996 False
+  sha over body with redacted text  7997dad97db96d34a44bc51d2b887ba51bc08bfef42ff8c68b6bb289986d32b2 True
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False

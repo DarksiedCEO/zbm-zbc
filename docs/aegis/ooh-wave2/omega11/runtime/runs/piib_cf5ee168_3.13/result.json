@@ -1,0 +1,3729 @@
+{
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168",
+ "python": "3.13.9",
+ "cases": [
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "12\u30fc34\u30fc56\u30fc789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-108a15483bbd32c5cc687ff936aa4d4914fe6472",
+    "campaign_id": "ooh-cmp-c18d323cb0febe3bba366c729829b1b2e60faa90",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-d529b3e534ca9d5e8f2899e9e755d4e2ea4801b6",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-230eb7cd",
+    "unit_key": "face230eb7cd",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": false,
+     "personal_data_kinds": [],
+     "text": "faces west, contact 12\u30fc34\u30fc56\u30fc789 for access",
+     "truncated": false,
+     "sha256": "fa9cc506906e8470e467cd2518956447722ab71ece11510c9f2099fc4b7a5b0b"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:52Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "fa9cc506906e8470e467cd2518956447722ab71ece11510c9f2099fc4b7a5b0b",
+    "sha256(NFKC text)": "fa9cc506906e8470e467cd2518956447722ab71ece11510c9f2099fc4b7a5b0b",
+    "sha256(spaces-collapsed text)": "fa9cc506906e8470e467cd2518956447722ab71ece11510c9f2099fc4b7a5b0b",
+    "sha256(raw body bytes)": "b3fed52740ae89fc51bcfd07814f82cb228b161dfc889f0b6fbcee39ab788d18",
+    "sha256(raw body ensure_ascii)": "98cc776ebb17ce6c6dfdda44b454f2936063c678c5060c092f140f61b9a74ff2",
+    "sha256(canonical unredacted body)": "d4d1090498f59a93e8320373d64c6b4f6c4b2a87f18f002a44eb7d47d20d87f6"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u30fc34\u30fc56\u30fc789 for access",
+    "truncated": false,
+    "sha256": "fa9cc506906e8470e467cd2518956447722ab71ece11510c9f2099fc4b7a5b0b"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u30fc34\u30fc56\u30fc789 for access",
+    "truncated": false,
+    "sha256": "fa9cc506906e8470e467cd2518956447722ab71ece11510c9f2099fc4b7a5b0b"
+   },
+   "expected_redacted_request_sha": "d4d1090498f59a93e8320373d64c6b4f6c4b2a87f18f002a44eb7d47d20d87f6",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": false
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "12\u064034\u064056\u0640789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-f8bed7dd681ffd63be1d4e89e7bde175a34b2944",
+    "campaign_id": "ooh-cmp-4bf90a9c75f3209859b5b68ccb468c5e4d7a2d04",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-318539b9c0a65ed570606facc01c9a9dceaf366c",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-f6d7a4e8",
+    "unit_key": "facef6d7a4e8",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": false,
+     "personal_data_kinds": [],
+     "text": "faces west, contact 12\u064034\u064056\u0640789 for access",
+     "truncated": false,
+     "sha256": "72c376a21b6078e5734d5b72a38c12bc913fcb41ec1c3586295538dbaa2afa44"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:53Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "72c376a21b6078e5734d5b72a38c12bc913fcb41ec1c3586295538dbaa2afa44",
+    "sha256(NFKC text)": "72c376a21b6078e5734d5b72a38c12bc913fcb41ec1c3586295538dbaa2afa44",
+    "sha256(spaces-collapsed text)": "72c376a21b6078e5734d5b72a38c12bc913fcb41ec1c3586295538dbaa2afa44",
+    "sha256(raw body bytes)": "c15dfbae17fd143d07b019728ab0404ffb1b2216f579788a285c229505132c4a",
+    "sha256(raw body ensure_ascii)": "e409fb36ecb327bfe00788954934e3100db72cb56ea7d8a381475fa49a27a46e",
+    "sha256(canonical unredacted body)": "8f773a15805962322189c2a0d2e6505e3a539408a9c5f8a59f1e603afd35c557"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u064034\u064056\u0640789 for access",
+    "truncated": false,
+    "sha256": "72c376a21b6078e5734d5b72a38c12bc913fcb41ec1c3586295538dbaa2afa44"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u064034\u064056\u0640789 for access",
+    "truncated": false,
+    "sha256": "72c376a21b6078e5734d5b72a38c12bc913fcb41ec1c3586295538dbaa2afa44"
+   },
+   "expected_redacted_request_sha": "8f773a15805962322189c2a0d2e6505e3a539408a9c5f8a59f1e603afd35c557",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": false
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "12\u02c934\u02c956\u02c9789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-c9bc40c45d1f895cdfeacff2fd1d00494feb2631",
+    "campaign_id": "ooh-cmp-d99966f61b6dc95dd0fdc81806798f18a383be84",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-83189e21a5d4293c68e9c39fa3c904b51b2d0ab5",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-a234a41e",
+    "unit_key": "facea234a41e",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": false,
+     "personal_data_kinds": [],
+     "text": "faces west, contact 12\u02c934\u02c956\u02c9789 for access",
+     "truncated": false,
+     "sha256": "75ac943194f45544a04083536a004c18ac6aec3da05636c357181ce5678aa6dc"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:54Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "75ac943194f45544a04083536a004c18ac6aec3da05636c357181ce5678aa6dc",
+    "sha256(NFKC text)": "75ac943194f45544a04083536a004c18ac6aec3da05636c357181ce5678aa6dc",
+    "sha256(spaces-collapsed text)": "75ac943194f45544a04083536a004c18ac6aec3da05636c357181ce5678aa6dc",
+    "sha256(raw body bytes)": "64306eaf2500b8e3c33ba3718e8af2fc9ad2f2bee7ba17c97720482509d81cbb",
+    "sha256(raw body ensure_ascii)": "ff037a83b531f7e1a7e8dac6bcfeb5aac3225c779de9d8605e5679800c4306fa",
+    "sha256(canonical unredacted body)": "56b2872a83fbb183c5374d5d9efd7cc4d590d2be9dbdf0b5e2700949fb38af3d"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u02c934\u02c956\u02c9789 for access",
+    "truncated": false,
+    "sha256": "75ac943194f45544a04083536a004c18ac6aec3da05636c357181ce5678aa6dc"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u02c934\u02c956\u02c9789 for access",
+    "truncated": false,
+    "sha256": "75ac943194f45544a04083536a004c18ac6aec3da05636c357181ce5678aa6dc"
+   },
+   "expected_redacted_request_sha": "56b2872a83fbb183c5374d5d9efd7cc4d590d2be9dbdf0b5e2700949fb38af3d",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": false
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "12\u142734\u142756\u1427789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-e8d2cd5a92823d1e473f48d4496d065dfd678453",
+    "campaign_id": "ooh-cmp-cd5d92b5b7e26839a2e846d6bde221db6e6e8711",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-c7af4e72a38d5aea530c7af0c7d4e5979be916a5",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-14c70af7",
+    "unit_key": "face14c70af7",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": false,
+     "personal_data_kinds": [],
+     "text": "faces west, contact 12\u142734\u142756\u1427789 for access",
+     "truncated": false,
+     "sha256": "47d3dd0792337a79eb1275e5719dd2a3f82481bfc6778df88f536c947a3c1123"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:55Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "47d3dd0792337a79eb1275e5719dd2a3f82481bfc6778df88f536c947a3c1123",
+    "sha256(NFKC text)": "47d3dd0792337a79eb1275e5719dd2a3f82481bfc6778df88f536c947a3c1123",
+    "sha256(spaces-collapsed text)": "47d3dd0792337a79eb1275e5719dd2a3f82481bfc6778df88f536c947a3c1123",
+    "sha256(raw body bytes)": "2fa22aeeaa61193f8272c95070888eb8a1f861127d3b4c922b57b65d2601891c",
+    "sha256(raw body ensure_ascii)": "1feca2e25042f9e137e19ef5d588406e82ea93668d36f0c7fefa126a37c7296d",
+    "sha256(canonical unredacted body)": "fb02177d90f052087f73f33963c4ea9a9e58630420b3956442149549e8f707dd"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u142734\u142756\u1427789 for access",
+    "truncated": false,
+    "sha256": "47d3dd0792337a79eb1275e5719dd2a3f82481bfc6778df88f536c947a3c1123"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\u142734\u142756\u1427789 for access",
+    "truncated": false,
+    "sha256": "47d3dd0792337a79eb1275e5719dd2a3f82481bfc6778df88f536c947a3c1123"
+   },
+   "expected_redacted_request_sha": "fb02177d90f052087f73f33963c4ea9a9e58630420b3956442149549e8f707dd",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": false
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "12\ua78f34\ua78f56\ua78f789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-c821fd7cf037e2917c5250148aff07cce80b935f",
+    "campaign_id": "ooh-cmp-3d0d014d1200138baa1cb39b22fa413f03cdd7ac",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-5d8c3946db2aa9b153ba542e574f8cf0628edab5",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-8b194d0b",
+    "unit_key": "face8b194d0b",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": false,
+     "personal_data_kinds": [],
+     "text": "faces west, contact 12\ua78f34\ua78f56\ua78f789 for access",
+     "truncated": false,
+     "sha256": "b70a66bde9abed6038c75cf98e598b61d9b33d1c56162c481a9e0734d54c3279"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:56Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "b70a66bde9abed6038c75cf98e598b61d9b33d1c56162c481a9e0734d54c3279",
+    "sha256(NFKC text)": "b70a66bde9abed6038c75cf98e598b61d9b33d1c56162c481a9e0734d54c3279",
+    "sha256(spaces-collapsed text)": "b70a66bde9abed6038c75cf98e598b61d9b33d1c56162c481a9e0734d54c3279",
+    "sha256(raw body bytes)": "97fb9fc4471c0d7ef76120ed66b3b4f18fb4b4275b9f8523f6d36616b7d5c696",
+    "sha256(raw body ensure_ascii)": "a85cd8593533f7be50734859330c194a9cdb65ea0858fd118f3aeb130622d8f8",
+    "sha256(canonical unredacted body)": "ef96ae887e833c922b2486e2ca95e5a0fe7b9ed658a075b34b362be47d0603dc"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\ua78f34\ua78f56\ua78f789 for access",
+    "truncated": false,
+    "sha256": "b70a66bde9abed6038c75cf98e598b61d9b33d1c56162c481a9e0734d54c3279"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 12\ua78f34\ua78f56\ua78f789 for access",
+    "truncated": false,
+    "sha256": "b70a66bde9abed6038c75cf98e598b61d9b33d1c56162c481a9e0734d54c3279"
+   },
+   "expected_redacted_request_sha": "ef96ae887e833c922b2486e2ca95e5a0fe7b9ed658a075b34b362be47d0603dc",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": false
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "4111\u30fc1111\u30fc1111\u30fc1111",
+   "secret_digits": "4111111111111111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-6eb0dbb507d501360ce77d8a3180176f7e999166",
+    "campaign_id": "ooh-cmp-0f60ef3c8dbce45da54abc1142eddfff60a0e81c",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-32be2b9c442be68f1bdaeb3e451714be93bee9f0",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-efbff7cc",
+    "unit_key": "faceefbff7cc",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "card"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:57Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "e46694f906db27d5d53808876c4ce2d3478d821926d09cd761e86d1dec6fbff0",
+    "sha256(NFKC text)": "e46694f906db27d5d53808876c4ce2d3478d821926d09cd761e86d1dec6fbff0",
+    "sha256(spaces-collapsed text)": "e46694f906db27d5d53808876c4ce2d3478d821926d09cd761e86d1dec6fbff0",
+    "sha256(raw body bytes)": "151884cfbe13d7449ebc85cc60c94400860699c4dddff24a22829b42d9ff9270",
+    "sha256(raw body ensure_ascii)": "8a2051f6a8801c9e8a0587d535ec30fdc40cac745eda3ed5b0e5b1d5063b5b0b",
+    "sha256(canonical unredacted body)": "c23f005c82537c2c1589b33a24465083c2f64a98d44cef5b02c5c4da4d0ecfc5"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "07caac631eaccea10a6bc6a8bf44e46a724ccf5a77450f0b099b55fe9d0d71c7",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "4111\u06401111\u06401111\u06401111",
+   "secret_digits": "4111111111111111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-5ef050559d297188fe0be97aa4b8960e086a3d44",
+    "campaign_id": "ooh-cmp-fbadeea26a7b28a4558c8201d88641dc160a3b7e",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-cad449ec05032ee293dc815721c942f75a3cf961",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-9968a8bd",
+    "unit_key": "face9968a8bd",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "card"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:58Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "d0160fddd9d1635287994e15aa41ed80d232ee99fcfcf473d760c315663b7ac7",
+    "sha256(NFKC text)": "d0160fddd9d1635287994e15aa41ed80d232ee99fcfcf473d760c315663b7ac7",
+    "sha256(spaces-collapsed text)": "d0160fddd9d1635287994e15aa41ed80d232ee99fcfcf473d760c315663b7ac7",
+    "sha256(raw body bytes)": "a9a8e44f54804ad34e7e5a02db8a84520a524737fe71a121c9e47913126f6caa",
+    "sha256(raw body ensure_ascii)": "655757bd082a762326b57dec35fd06661efca2755ecd4926425f7c696f2a104d",
+    "sha256(canonical unredacted body)": "3b9cb5887e3210e9e6156ffc6135328b153bf6797e44a36b995244009c6ad6f3"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "e883173c2e0623d605fb633c2251843d2f4ad16882ea02fa92fcca9d61aac7a2",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "4111\u02c91111\u02c91111\u02c91111",
+   "secret_digits": "4111111111111111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-d4cf9a4409e071e5cf2621a2fa694ea39f5aa08c",
+    "campaign_id": "ooh-cmp-ad31ed8df0453ba40a936bff0da16bd07dd30dfa",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-a2e70ca5e92e76facc1ce54018e360a6915f02f1",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-a32b0c46",
+    "unit_key": "facea32b0c46",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "card"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:17:59Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "7e9531f7c11686ab96dcefd0b87c0607cd9208fb5cf8895f0cc2320177b48e88",
+    "sha256(NFKC text)": "7e9531f7c11686ab96dcefd0b87c0607cd9208fb5cf8895f0cc2320177b48e88",
+    "sha256(spaces-collapsed text)": "7e9531f7c11686ab96dcefd0b87c0607cd9208fb5cf8895f0cc2320177b48e88",
+    "sha256(raw body bytes)": "04f88d885cf0584fa8020cbdccd21e447197a6724c6d9eb6836b1556066e8ffa",
+    "sha256(raw body ensure_ascii)": "8a7d8241f4b1db67725bf4c22235b006512fb1ce89595e458d40ab88b96be562",
+    "sha256(canonical unredacted body)": "b4c9aca7f311b92cecc1fc7f407504116eb993459b01ecd6a00768488cd4781c"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "6baef55cc01c2e9316a048e99eea4a924392301dcc863a5c1a563513fa865349",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "4111\u14271111\u14271111\u14271111",
+   "secret_digits": "4111111111111111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-71e7aca3bce09a1bec322cd8b2e88d6a748d4ba1",
+    "campaign_id": "ooh-cmp-1d7f93ead0179a6740e221aae289f5930defa332",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-061dad258752f0ffabeb336d6be73e5d2941e949",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-a258bb3e",
+    "unit_key": "facea258bb3e",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "card"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:01Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "401f955e9af91d735b70a2265fdb8f6dd33d848c0c1d985ca610ba269d871e28",
+    "sha256(NFKC text)": "401f955e9af91d735b70a2265fdb8f6dd33d848c0c1d985ca610ba269d871e28",
+    "sha256(spaces-collapsed text)": "401f955e9af91d735b70a2265fdb8f6dd33d848c0c1d985ca610ba269d871e28",
+    "sha256(raw body bytes)": "c2268f64f671536dba9238db92134077ef619db2befdd46fd07ec2748f447dc6",
+    "sha256(raw body ensure_ascii)": "610d7903b499fc9bb75f87009f55a342c8b6206c489769be62533b59fc359498",
+    "sha256(canonical unredacted body)": "ae2f15974991913b43bffc264902c9f8d2b54104af11420a811c4b3f383ac1f9"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "3bc047d082efc122137f542e2fca52eb72abe38a307f35a578fb8b5a8602d9e7",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "4111\ua78f1111\ua78f1111\ua78f1111",
+   "secret_digits": "4111111111111111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-40227f74a10190fc5dc2d1b0e279cb6ac1f45cac",
+    "campaign_id": "ooh-cmp-eda39490054a46c55ca5f27da963da42ab70385f",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-272f709185bfd360d45b208fc20f0cbbdc1a3b65",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-25ba29d6",
+    "unit_key": "face25ba29d6",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "card"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:02Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "a8bd70bbfe693e73868e662d0d2aa7438cda65560a8788b7b0147dca50dd1a4b",
+    "sha256(NFKC text)": "a8bd70bbfe693e73868e662d0d2aa7438cda65560a8788b7b0147dca50dd1a4b",
+    "sha256(spaces-collapsed text)": "a8bd70bbfe693e73868e662d0d2aa7438cda65560a8788b7b0147dca50dd1a4b",
+    "sha256(raw body bytes)": "aa679e15901096157d778a1b5c171d07b291ecfea9cfc349d51f304edeaac330",
+    "sha256(raw body ensure_ascii)": "3c6f977790869099200abc60b3b4f2d5384472e483daa9ea7412b8169ed42898",
+    "sha256(canonical unredacted body)": "8cfde48e091fea050780856d0409b16d2a4c7d8370ff9af173bc834d5d704d08"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "card"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "2bf7486a3e5b2b403ce5eba2befe3687aa89da0d9d7b1333bd9ea3a4d67cb005",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "123\u30fc45\u30fc6789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-11a93636f938bdd45bcd91f681db3c4d30ec1512",
+    "campaign_id": "ooh-cmp-d4261eba4755fa51ce2c7434c3c5e64ce46ba93d",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-0d28a5e63ec0a47e45b406353b86bfa1770f9691",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-36813ca1",
+    "unit_key": "face36813ca1",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "ssn"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:03Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "829c3dea643d35cbcbac1c777fe944764aba6ecb3f6dc1c0e881ca0ecaaedf99",
+    "sha256(NFKC text)": "829c3dea643d35cbcbac1c777fe944764aba6ecb3f6dc1c0e881ca0ecaaedf99",
+    "sha256(spaces-collapsed text)": "829c3dea643d35cbcbac1c777fe944764aba6ecb3f6dc1c0e881ca0ecaaedf99",
+    "sha256(raw body bytes)": "7673bbfd4a799b6a83c2b7c8b5bd90d31612f751ad2b234b25a11d51c7f4bbbb",
+    "sha256(raw body ensure_ascii)": "604a91ac04363c986e752a89a2eacf085be18c6a25fad80d133950a38998a613",
+    "sha256(canonical unredacted body)": "b66d16f0b8a3f04db424e3b62c4bb90cd42afacb2bd7af89c8702b6680c7e266"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "6c78f56a0a4c6b0094f93698d245b8de42f04751247ac41768736a2734690fa2",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "123\u064045\u06406789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-baf0da6d56af721fbf55d7798879f29dd9ad587a",
+    "campaign_id": "ooh-cmp-4bbfc33cbae97fcc1ea445576e8533b14b79b7d7",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-5b8f7884196c152141b9a8576d8b31685f76266a",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-5882db1b",
+    "unit_key": "face5882db1b",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "ssn"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:04Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "74eab51de08951a53419a1f6566b20e2fc135e2db0b50b9753daacd7716284e3",
+    "sha256(NFKC text)": "74eab51de08951a53419a1f6566b20e2fc135e2db0b50b9753daacd7716284e3",
+    "sha256(spaces-collapsed text)": "74eab51de08951a53419a1f6566b20e2fc135e2db0b50b9753daacd7716284e3",
+    "sha256(raw body bytes)": "b05ccb013aadadbd3d545a99b7b22ee1f20868d66c8da61f33f087ec65ffd1c3",
+    "sha256(raw body ensure_ascii)": "7967d7d67ffbf33272630cd10568647ab22b0aef3a459b198faee861d04248e7",
+    "sha256(canonical unredacted body)": "0b6c251d000332157fe6f49594d512a2d44e86b4515f953d533e763e02fbc515"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "95c5bce64cb01ee33bc042335e595b609146dac411614011701d4b319a25f6e8",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "123\u02c945\u02c96789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-00b360e2e593393c5d10f02e6d5a00e04267f41d",
+    "campaign_id": "ooh-cmp-9803c0c45169814c5f5248bbf163c78bbc554efa",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-3718b83befd4a1045be3fcda30ea27e2d7e1a9d6",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-dac84ca9",
+    "unit_key": "facedac84ca9",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "ssn"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:06Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "9b91ea4bcf06b49e145b72eeeb08b75da8c038a0af9b6c39075dd1ec0cb8f643",
+    "sha256(NFKC text)": "9b91ea4bcf06b49e145b72eeeb08b75da8c038a0af9b6c39075dd1ec0cb8f643",
+    "sha256(spaces-collapsed text)": "9b91ea4bcf06b49e145b72eeeb08b75da8c038a0af9b6c39075dd1ec0cb8f643",
+    "sha256(raw body bytes)": "10ab1d747dfd026f227413cb885b688946d074e5f2725a60a6f09dbeaf307eeb",
+    "sha256(raw body ensure_ascii)": "e97d7a535c9fdf9f02452cd86855be95a8efa8b56897bf8b2d5b206e1a284b65",
+    "sha256(canonical unredacted body)": "21ed0399113331be2f3889f97b796ca9515faa8834c8ca7450050557d6039b30"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "8700138e2602e12e9cc2d4c61441f827373aebc0feb41f5d78098ea43ebe64d5",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "123\u142745\u14276789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-d526b08d28989e2f6e07c447bee8e7817688bf05",
+    "campaign_id": "ooh-cmp-78fd30726658206ba32a41badfdb76863ca83b74",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-df2bfb833759c694998f73237198037e3ca00760",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-83fe688a",
+    "unit_key": "face83fe688a",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "ssn"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:07Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "b59d71e49448798201e02e5376ae2b4fd35eb939f18370bdc5a43c31e3a2b775",
+    "sha256(NFKC text)": "b59d71e49448798201e02e5376ae2b4fd35eb939f18370bdc5a43c31e3a2b775",
+    "sha256(spaces-collapsed text)": "b59d71e49448798201e02e5376ae2b4fd35eb939f18370bdc5a43c31e3a2b775",
+    "sha256(raw body bytes)": "a8b8d627059a246e6a5869ec1359ed09bf9784ed116ef284a19ba8dfdfef6184",
+    "sha256(raw body ensure_ascii)": "e89b54a99e161b2c487eb21649836138b65364822cd169002bbfeb05d1a7f4c6",
+    "sha256(canonical unredacted body)": "6ae74a5c09f4a57908f09eb5c8c0811eb0b0f22727c025f210d660bc1e61cb0f"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "773c52ccff2260703d25bcc73afbb5417d4b77e778d15aa408b589595ea6e95d",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "123\ua78f45\ua78f6789",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-379d72ad8bdc6010ab13d13894e81fbc42fba22b",
+    "campaign_id": "ooh-cmp-e8ae0569ee20b043283ee0d4ab1545b96840ab45",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-08b9ec21b0d10fabe0e628984fccbfaa52d6e618",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-47529edd",
+    "unit_key": "face47529edd",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": true,
+     "personal_data_kinds": [
+      "ssn"
+     ],
+     "text": "faces west, contact [redacted] for access",
+     "truncated": false,
+     "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:08Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "fdb73ada85a4a201cfeb60ad9c2f453346d9272cac22dc65fc731b8eee7a58b5",
+    "sha256(NFKC text)": "fdb73ada85a4a201cfeb60ad9c2f453346d9272cac22dc65fc731b8eee7a58b5",
+    "sha256(spaces-collapsed text)": "fdb73ada85a4a201cfeb60ad9c2f453346d9272cac22dc65fc731b8eee7a58b5",
+    "sha256(raw body bytes)": "6d6f6e207c14d95f480e0f83886f64bf988c2c013f85c9132d131ca2e02cdee1",
+    "sha256(raw body ensure_ascii)": "77530a243a6fc430a4a9c7cdb63651c27b762166bc152e55d57b8b2313481612",
+    "sha256(canonical unredacted body)": "1396157bc45916e8aff98a402e0c13626351f03894e869e65130dcb691fc07f0"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": true,
+    "personal_data_kinds": [
+     "ssn"
+    ],
+    "text": "faces west, contact [redacted] for access",
+    "truncated": false,
+    "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+   },
+   "expected_redacted_request_sha": "7a69ca63f1d5c4dfc8e2e7874b3340d494fb2b1945b2c263a4c644ac16c2cb54",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": true
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "1234\u30fc5678\u30fc9",
+   "secret_digits": "123456789",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-8052b1af4390135b6ad8b5578639ba48a99000d0",
+    "campaign_id": "ooh-cmp-0781e470ba86d5c8400c59a69f9374e808b6b094",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-bf5feceec56feae087c98bdcde44fffd456194e9",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-d0baf2ed",
+    "unit_key": "faced0baf2ed",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": false,
+     "personal_data_kinds": [],
+     "text": "faces west, contact 1234\u30fc5678\u30fc9 for access",
+     "truncated": false,
+     "sha256": "78b7d7be18862928bef463af9e0cfdc158149da0401e19dc24d2de31623fe740"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:09Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "78b7d7be18862928bef463af9e0cfdc158149da0401e19dc24d2de31623fe740",
+    "sha256(NFKC text)": "78b7d7be18862928bef463af9e0cfdc158149da0401e19dc24d2de31623fe740",
+    "sha256(spaces-collapsed text)": "78b7d7be18862928bef463af9e0cfdc158149da0401e19dc24d2de31623fe740",
+    "sha256(raw body bytes)": "5e1ac8fc91054eff06ddcfde209524ece5a56feaf4bbcd3c0df9a0f0a7ceb07c",
+    "sha256(raw body ensure_ascii)": "ceb6ed2b3d8f2b64210e4dd5e3c4bcfee315ae3220eb473fc0e4f657e1de9a90",
+    "sha256(canonical unredacted body)": "c4043850e9a28d71b7b8515f6542f726dfd50a7030e5f4893c060ad5cf51f3a4"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 1234\u30fc5678\u30fc9 for access",
+    "truncated": false,
+    "sha256": "78b7d7be18862928bef463af9e0cfdc158149da0401e19dc24d2de31623fe740"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 1234\u30fc5678\u30fc9 for access",
+    "truncated": false,
+    "sha256": "78b7d7be18862928bef463af9e0cfdc158149da0401e19dc24d2de31623fe740"
+   },
+   "expected_redacted_request_sha": "c4043850e9a28d71b7b8515f6542f726dfd50a7030e5f4893c060ad5cf51f3a4",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": false
+  },
+  {
+   "kind": "unit.vendor_text",
+   "category": "secret",
+   "secret": "41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11",
+   "secret_digits": "4111111111111111",
+   "status": 201,
+   "body": {
+    "unit_id": "ooh-inv-7c5ed168bc0afa3bcd24b10292bbc3e1dc5ee451",
+    "campaign_id": "ooh-cmp-c67dd4799ac890fe1f8d580e2f01528e93be1a98",
+    "tenant_id": "acme",
+    "face_id": "ooh-fce-66d6dcfe4b0e1a360955f08882c3674db99cd7ae",
+    "vendor": "lamar",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "vendor_unit_ref": "face-466a38d5",
+    "unit_key": "face466a38d5",
+    "proof_requirement": "POSTING_PHOTO",
+    "flight": [
+     "2026-11-01",
+     "2026-11-30"
+    ],
+    "vendor_text": {
+     "untrusted": true,
+     "personal_data_redacted": false,
+     "personal_data_kinds": [],
+     "text": "faces west, contact 41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11 for access",
+     "truncated": false,
+     "sha256": "e91b329899d6b0e61950c4a9e560a124699758e6d377dfbe6b6e949563653cf2"
+    },
+    "state": "IDENTIFIED",
+    "version": 1,
+    "vendor_ref": null,
+    "hold_expires_at": null,
+    "evidence_class": null,
+    "hold_flight": null,
+    "hold_confirmed_by": null,
+    "hold_evidence_id": null,
+    "hold_evidence": [],
+    "pre_booking_state": null,
+    "history": [
+     {
+      "from": null,
+      "to": "IDENTIFIED",
+      "actor": "ooh_agent",
+      "at": "2026-10-18T17:18:10Z"
+     }
+    ]
+   },
+   "expect": "201 redacted+kinds",
+   "hashes": {
+    "sha256(raw text)": "e91b329899d6b0e61950c4a9e560a124699758e6d377dfbe6b6e949563653cf2",
+    "sha256(NFKC text)": "e91b329899d6b0e61950c4a9e560a124699758e6d377dfbe6b6e949563653cf2",
+    "sha256(spaces-collapsed text)": "e91b329899d6b0e61950c4a9e560a124699758e6d377dfbe6b6e949563653cf2",
+    "sha256(raw body bytes)": "a5c3173d880b423fc4dbb2645d7de1aec6622462fe66664e472ddf1328125641",
+    "sha256(raw body ensure_ascii)": "12413848da8bd898c7a1e595e0c506c362d9b4ad2ac4fa2f10801e9260730218",
+    "sha256(canonical unredacted body)": "b968edec4d8a76eeb17b269ad59bc48338bed14450854254c9e9feb5e6c02a46"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11 for access",
+    "truncated": false,
+    "sha256": "e91b329899d6b0e61950c4a9e560a124699758e6d377dfbe6b6e949563653cf2"
+   },
+   "unit_get_vendor_text": {
+    "untrusted": true,
+    "personal_data_redacted": false,
+    "personal_data_kinds": [],
+    "text": "faces west, contact 41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11 for access",
+    "truncated": false,
+    "sha256": "e91b329899d6b0e61950c4a9e560a124699758e6d377dfbe6b6e949563653cf2"
+   },
+   "expected_redacted_request_sha": "b968edec4d8a76eeb17b269ad59bc48338bed14450854254c9e9feb5e6c02a46",
+   "redacted_request_sha_in_data_delta": true,
+   "absent": false
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "12\u30fc34\u30fc56\u30fc789",
+   "secret_digits": "123456789",
+   "status": 200,
+   "body": {
+    "face_id": "ooh-fce-8950e520858da94ed9d34ca0a7fc00d1fc6b00fe",
+    "vendor": "lamar",
+    "vendor_face_ref": "face-1d459ec7",
+    "unit_key": "face1d459ec7",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "proof_requirement": "POSTING_PHOTO",
+    "version": 2,
+    "identity": {
+     "value": {
+      "vendor": "lamar",
+      "vendor_face_ref": "face-1d459ec7",
+      "format": "STATIC_BILLBOARD",
+      "market": "los-angeles"
+     },
+     "source_id": "ooh-src-187665831b62dff8dbc1f814a39394e74a01cac5",
+     "source_kind": "RATE_CARD",
+     "as_of": "2026-10-17T17:17:49Z",
+     "evidence_class": "VENDOR_ASSERTED",
+     "recorded_by": "ooh_agent",
+     "recorded_at": "2026-10-18T17:18:11Z"
+    },
+    "attributes": {
+     "latitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "longitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "location_description": {
+      "status": "SOURCED",
+      "value": {
+       "untrusted": true,
+       "personal_data_redacted": false,
+       "personal_data_kinds": [],
+       "text": "billing 12\u30fc34\u30fc56\u30fc789",
+       "truncated": false,
+       "sha256": "8bd1f6e505010a9378632b866662f0b65c73f6ca173af3a91ac92af02448ae42"
+      },
+      "source_id": "ooh-src-88a5967502e7a034b8d5e4224a5c2fdf50c12de3",
+      "source_kind": "RATE_CARD",
+      "as_of": "2026-10-17T17:17:49Z",
+      "evidence_class": "VENDOR_ASSERTED",
+      "recorded_by": "ooh_agent",
+      "recorded_at": "2026-10-18T17:18:11Z",
+      "current": true
+     },
+     "facing": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "width_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "height_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "illuminated": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_amount": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_period_days": {
+      "status": "UNKNOWN",
+      "value": null
+     }
+    },
+    "attribute_history": {
+     "location_description": [
+      {
+       "value": {
+        "untrusted": true,
+        "personal_data_redacted": false,
+        "personal_data_kinds": [],
+        "text": "billing 12\u30fc34\u30fc56\u30fc789",
+        "truncated": false,
+        "sha256": "8bd1f6e505010a9378632b866662f0b65c73f6ca173af3a91ac92af02448ae42"
+       },
+       "source_id": "ooh-src-88a5967502e7a034b8d5e4224a5c2fdf50c12de3",
+       "source_kind": "RATE_CARD",
+       "as_of": "2026-10-17T17:17:49Z",
+       "evidence_class": "VENDOR_ASSERTED",
+       "recorded_by": "ooh_agent",
+       "recorded_at": "2026-10-18T17:18:11Z",
+       "current": true
+      }
+     ]
+    },
+    "avails": []
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "8bd1f6e505010a9378632b866662f0b65c73f6ca173af3a91ac92af02448ae42",
+    "sha256(NFKC text)": "8bd1f6e505010a9378632b866662f0b65c73f6ca173af3a91ac92af02448ae42",
+    "sha256(spaces-collapsed text)": "8bd1f6e505010a9378632b866662f0b65c73f6ca173af3a91ac92af02448ae42",
+    "sha256(raw body bytes)": "45227d3fb2dc4b22d6cb4d73cef9155ca701f75a699dab59fc54ef99fafb7d50",
+    "sha256(raw body ensure_ascii)": "6d1d08e9bb75e937b29993b8819ab18e22877b837cc21a604b698fd5b8ad0ab1",
+    "sha256(canonical unredacted body)": "c55826693f318742a7911b06e4f8020d9d2d11fdd8b3ecb437a533c5534b3017"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "ledger_entries_delta": 2,
+   "absent": false
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "12\u064034\u064056\u0640789",
+   "secret_digits": "123456789",
+   "status": 200,
+   "body": {
+    "face_id": "ooh-fce-de905523ffd39a01f420df088191dfb7adb2bc52",
+    "vendor": "lamar",
+    "vendor_face_ref": "face-33f16752",
+    "unit_key": "face33f16752",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "proof_requirement": "POSTING_PHOTO",
+    "version": 2,
+    "identity": {
+     "value": {
+      "vendor": "lamar",
+      "vendor_face_ref": "face-33f16752",
+      "format": "STATIC_BILLBOARD",
+      "market": "los-angeles"
+     },
+     "source_id": "ooh-src-f18a72d7657d876f7b2fbd7c29e77ee80202b6d7",
+     "source_kind": "RATE_CARD",
+     "as_of": "2026-10-17T17:17:49Z",
+     "evidence_class": "VENDOR_ASSERTED",
+     "recorded_by": "ooh_agent",
+     "recorded_at": "2026-10-18T17:18:11Z"
+    },
+    "attributes": {
+     "latitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "longitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "location_description": {
+      "status": "SOURCED",
+      "value": {
+       "untrusted": true,
+       "personal_data_redacted": false,
+       "personal_data_kinds": [],
+       "text": "billing 12\u064034\u064056\u0640789",
+       "truncated": false,
+       "sha256": "b7e814a4175f6c7d31d9da9aad091cc0b583c9eb4c48b4cb808f4cb5706de552"
+      },
+      "source_id": "ooh-src-40a6b7b7f1042a287d7fb7066bd2ada99a3dfeda",
+      "source_kind": "RATE_CARD",
+      "as_of": "2026-10-17T17:17:49Z",
+      "evidence_class": "VENDOR_ASSERTED",
+      "recorded_by": "ooh_agent",
+      "recorded_at": "2026-10-18T17:18:12Z",
+      "current": true
+     },
+     "facing": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "width_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "height_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "illuminated": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_amount": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_period_days": {
+      "status": "UNKNOWN",
+      "value": null
+     }
+    },
+    "attribute_history": {
+     "location_description": [
+      {
+       "value": {
+        "untrusted": true,
+        "personal_data_redacted": false,
+        "personal_data_kinds": [],
+        "text": "billing 12\u064034\u064056\u0640789",
+        "truncated": false,
+        "sha256": "b7e814a4175f6c7d31d9da9aad091cc0b583c9eb4c48b4cb808f4cb5706de552"
+       },
+       "source_id": "ooh-src-40a6b7b7f1042a287d7fb7066bd2ada99a3dfeda",
+       "source_kind": "RATE_CARD",
+       "as_of": "2026-10-17T17:17:49Z",
+       "evidence_class": "VENDOR_ASSERTED",
+       "recorded_by": "ooh_agent",
+       "recorded_at": "2026-10-18T17:18:12Z",
+       "current": true
+      }
+     ]
+    },
+    "avails": []
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "b7e814a4175f6c7d31d9da9aad091cc0b583c9eb4c48b4cb808f4cb5706de552",
+    "sha256(NFKC text)": "b7e814a4175f6c7d31d9da9aad091cc0b583c9eb4c48b4cb808f4cb5706de552",
+    "sha256(spaces-collapsed text)": "b7e814a4175f6c7d31d9da9aad091cc0b583c9eb4c48b4cb808f4cb5706de552",
+    "sha256(raw body bytes)": "1be922edd9ade4a525833b3518e5dd8e14a5c7f33776f591b4ce1a9a8d140f83",
+    "sha256(raw body ensure_ascii)": "0f8ad94b96f2db6d707a356c114436d9bf6c00d92c0f61877d78213ba3bb9925",
+    "sha256(canonical unredacted body)": "be903cc572fad7600b61f25e434619346319e4c5960f9f66263da915a343566b"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "ledger_entries_delta": 2,
+   "absent": false
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "12\u02c934\u02c956\u02c9789",
+   "secret_digits": "123456789",
+   "status": 200,
+   "body": {
+    "face_id": "ooh-fce-b9f1594a4b6072134cfcf32d39fdbeebe70ae2e2",
+    "vendor": "lamar",
+    "vendor_face_ref": "face-a0430b03",
+    "unit_key": "facea430b3",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "proof_requirement": "POSTING_PHOTO",
+    "version": 2,
+    "identity": {
+     "value": {
+      "vendor": "lamar",
+      "vendor_face_ref": "face-a0430b03",
+      "format": "STATIC_BILLBOARD",
+      "market": "los-angeles"
+     },
+     "source_id": "ooh-src-239452a70e183b92880db17c972110d111a3de93",
+     "source_kind": "RATE_CARD",
+     "as_of": "2026-10-17T17:17:49Z",
+     "evidence_class": "VENDOR_ASSERTED",
+     "recorded_by": "ooh_agent",
+     "recorded_at": "2026-10-18T17:18:12Z"
+    },
+    "attributes": {
+     "latitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "longitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "location_description": {
+      "status": "SOURCED",
+      "value": {
+       "untrusted": true,
+       "personal_data_redacted": false,
+       "personal_data_kinds": [],
+       "text": "billing 12\u02c934\u02c956\u02c9789",
+       "truncated": false,
+       "sha256": "a5d866c3b41753f384818a793de18c6cc7d68f754a42d2bcc7a081cd47f457ce"
+      },
+      "source_id": "ooh-src-e00b0a119cf767472b2620de73fb5513890ec9ed",
+      "source_kind": "RATE_CARD",
+      "as_of": "2026-10-17T17:17:49Z",
+      "evidence_class": "VENDOR_ASSERTED",
+      "recorded_by": "ooh_agent",
+      "recorded_at": "2026-10-18T17:18:12Z",
+      "current": true
+     },
+     "facing": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "width_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "height_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "illuminated": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_amount": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_period_days": {
+      "status": "UNKNOWN",
+      "value": null
+     }
+    },
+    "attribute_history": {
+     "location_description": [
+      {
+       "value": {
+        "untrusted": true,
+        "personal_data_redacted": false,
+        "personal_data_kinds": [],
+        "text": "billing 12\u02c934\u02c956\u02c9789",
+        "truncated": false,
+        "sha256": "a5d866c3b41753f384818a793de18c6cc7d68f754a42d2bcc7a081cd47f457ce"
+       },
+       "source_id": "ooh-src-e00b0a119cf767472b2620de73fb5513890ec9ed",
+       "source_kind": "RATE_CARD",
+       "as_of": "2026-10-17T17:17:49Z",
+       "evidence_class": "VENDOR_ASSERTED",
+       "recorded_by": "ooh_agent",
+       "recorded_at": "2026-10-18T17:18:12Z",
+       "current": true
+      }
+     ]
+    },
+    "avails": []
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "a5d866c3b41753f384818a793de18c6cc7d68f754a42d2bcc7a081cd47f457ce",
+    "sha256(NFKC text)": "a5d866c3b41753f384818a793de18c6cc7d68f754a42d2bcc7a081cd47f457ce",
+    "sha256(spaces-collapsed text)": "a5d866c3b41753f384818a793de18c6cc7d68f754a42d2bcc7a081cd47f457ce",
+    "sha256(raw body bytes)": "1ed2ef64d2dfa904bdfbae966be7096afef1257b1c89cc3ebb3315353f02053b",
+    "sha256(raw body ensure_ascii)": "83e781902cff7a829fdf7fc4d33416e61edcdbdc65176feadbf67a27399802c7",
+    "sha256(canonical unredacted body)": "14faf7dcac4979ca8340f9809858386a1081cf8c8d453f9ec9d911d51a53fa61"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "ledger_entries_delta": 2,
+   "absent": false
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "12\u142734\u142756\u1427789",
+   "secret_digits": "123456789",
+   "status": 200,
+   "body": {
+    "face_id": "ooh-fce-3522e23ab938ca2593134321a44bcca192a3f057",
+    "vendor": "lamar",
+    "vendor_face_ref": "face-03466c83",
+    "unit_key": "face3466c83",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "proof_requirement": "POSTING_PHOTO",
+    "version": 2,
+    "identity": {
+     "value": {
+      "vendor": "lamar",
+      "vendor_face_ref": "face-03466c83",
+      "format": "STATIC_BILLBOARD",
+      "market": "los-angeles"
+     },
+     "source_id": "ooh-src-abe88a536bf1e0f91c0a7f696462e6b8bd2ab025",
+     "source_kind": "RATE_CARD",
+     "as_of": "2026-10-17T17:17:49Z",
+     "evidence_class": "VENDOR_ASSERTED",
+     "recorded_by": "ooh_agent",
+     "recorded_at": "2026-10-18T17:18:13Z"
+    },
+    "attributes": {
+     "latitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "longitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "location_description": {
+      "status": "SOURCED",
+      "value": {
+       "untrusted": true,
+       "personal_data_redacted": false,
+       "personal_data_kinds": [],
+       "text": "billing 12\u142734\u142756\u1427789",
+       "truncated": false,
+       "sha256": "2dbcaf296f7164db28365acefd2267bdd4f1d9663d61c0666a3d572bfde77d6c"
+      },
+      "source_id": "ooh-src-e41d8ba7c801c579db318e478e39d59100ea8047",
+      "source_kind": "RATE_CARD",
+      "as_of": "2026-10-17T17:17:49Z",
+      "evidence_class": "VENDOR_ASSERTED",
+      "recorded_by": "ooh_agent",
+      "recorded_at": "2026-10-18T17:18:13Z",
+      "current": true
+     },
+     "facing": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "width_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "height_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "illuminated": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_amount": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_period_days": {
+      "status": "UNKNOWN",
+      "value": null
+     }
+    },
+    "attribute_history": {
+     "location_description": [
+      {
+       "value": {
+        "untrusted": true,
+        "personal_data_redacted": false,
+        "personal_data_kinds": [],
+        "text": "billing 12\u142734\u142756\u1427789",
+        "truncated": false,
+        "sha256": "2dbcaf296f7164db28365acefd2267bdd4f1d9663d61c0666a3d572bfde77d6c"
+       },
+       "source_id": "ooh-src-e41d8ba7c801c579db318e478e39d59100ea8047",
+       "source_kind": "RATE_CARD",
+       "as_of": "2026-10-17T17:17:49Z",
+       "evidence_class": "VENDOR_ASSERTED",
+       "recorded_by": "ooh_agent",
+       "recorded_at": "2026-10-18T17:18:13Z",
+       "current": true
+      }
+     ]
+    },
+    "avails": []
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "2dbcaf296f7164db28365acefd2267bdd4f1d9663d61c0666a3d572bfde77d6c",
+    "sha256(NFKC text)": "2dbcaf296f7164db28365acefd2267bdd4f1d9663d61c0666a3d572bfde77d6c",
+    "sha256(spaces-collapsed text)": "2dbcaf296f7164db28365acefd2267bdd4f1d9663d61c0666a3d572bfde77d6c",
+    "sha256(raw body bytes)": "5122b8642f81a8bfd9cfd6789ea4940f2f2d95f32a6da5f2f4fefaf41cb1975b",
+    "sha256(raw body ensure_ascii)": "af030c6201beb45e6d7b31899f62be715f8e916c6e6fedc9b9d170b88bc864b7",
+    "sha256(canonical unredacted body)": "64006efa7e36b856647bc61bd4cec43c99a5f9f8bd7cbdd2d4dfe7b9c38f4bd5"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "ledger_entries_delta": 2,
+   "absent": false
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "12\ua78f34\ua78f56\ua78f789",
+   "secret_digits": "123456789",
+   "status": 200,
+   "body": {
+    "face_id": "ooh-fce-2814b5b4a53453143785e7c7ffb0d44e8a82dd7b",
+    "vendor": "lamar",
+    "vendor_face_ref": "face-32dac9e3",
+    "unit_key": "face32dac9e3",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "proof_requirement": "POSTING_PHOTO",
+    "version": 2,
+    "identity": {
+     "value": {
+      "vendor": "lamar",
+      "vendor_face_ref": "face-32dac9e3",
+      "format": "STATIC_BILLBOARD",
+      "market": "los-angeles"
+     },
+     "source_id": "ooh-src-2a30f109733237cc54f67282df944d05bc1958df",
+     "source_kind": "RATE_CARD",
+     "as_of": "2026-10-17T17:17:49Z",
+     "evidence_class": "VENDOR_ASSERTED",
+     "recorded_by": "ooh_agent",
+     "recorded_at": "2026-10-18T17:18:13Z"
+    },
+    "attributes": {
+     "latitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "longitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "location_description": {
+      "status": "SOURCED",
+      "value": {
+       "untrusted": true,
+       "personal_data_redacted": false,
+       "personal_data_kinds": [],
+       "text": "billing 12\ua78f34\ua78f56\ua78f789",
+       "truncated": false,
+       "sha256": "13dbe018ce0071835abb075cd5aaa4ad9ad73966e735b5191ed4d927fa23b9c3"
+      },
+      "source_id": "ooh-src-9a15286ef83c117557b7be4852755e5844256612",
+      "source_kind": "RATE_CARD",
+      "as_of": "2026-10-17T17:17:49Z",
+      "evidence_class": "VENDOR_ASSERTED",
+      "recorded_by": "ooh_agent",
+      "recorded_at": "2026-10-18T17:18:14Z",
+      "current": true
+     },
+     "facing": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "width_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "height_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "illuminated": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_amount": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_period_days": {
+      "status": "UNKNOWN",
+      "value": null
+     }
+    },
+    "attribute_history": {
+     "location_description": [
+      {
+       "value": {
+        "untrusted": true,
+        "personal_data_redacted": false,
+        "personal_data_kinds": [],
+        "text": "billing 12\ua78f34\ua78f56\ua78f789",
+        "truncated": false,
+        "sha256": "13dbe018ce0071835abb075cd5aaa4ad9ad73966e735b5191ed4d927fa23b9c3"
+       },
+       "source_id": "ooh-src-9a15286ef83c117557b7be4852755e5844256612",
+       "source_kind": "RATE_CARD",
+       "as_of": "2026-10-17T17:17:49Z",
+       "evidence_class": "VENDOR_ASSERTED",
+       "recorded_by": "ooh_agent",
+       "recorded_at": "2026-10-18T17:18:14Z",
+       "current": true
+      }
+     ]
+    },
+    "avails": []
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "13dbe018ce0071835abb075cd5aaa4ad9ad73966e735b5191ed4d927fa23b9c3",
+    "sha256(NFKC text)": "13dbe018ce0071835abb075cd5aaa4ad9ad73966e735b5191ed4d927fa23b9c3",
+    "sha256(spaces-collapsed text)": "13dbe018ce0071835abb075cd5aaa4ad9ad73966e735b5191ed4d927fa23b9c3",
+    "sha256(raw body bytes)": "3a76e5773e59347b472a28f75c6e144e72f0e5d13610f983c3ddf53b5f8e498c",
+    "sha256(raw body ensure_ascii)": "f391dab20345d844810af13c2e851e81e65dc9200859f695865f7cc12f67faf8",
+    "sha256(canonical unredacted body)": "882ded1200225af7087e89d02c61ee944b32398db27592afddbba0de0b44752e"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "ledger_entries_delta": 2,
+   "absent": false
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "4111\u30fc1111\u30fc1111\u30fc1111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "9ade83ab307c8ad26149abf495a2f344703261a22e65be5944c42384b02291a6",
+    "sha256(NFKC text)": "9ade83ab307c8ad26149abf495a2f344703261a22e65be5944c42384b02291a6",
+    "sha256(spaces-collapsed text)": "9ade83ab307c8ad26149abf495a2f344703261a22e65be5944c42384b02291a6",
+    "sha256(raw body bytes)": "e1373b37a5b4d02b9a4ab246866968a12c210e657cc5d55ebe05f4647983197a",
+    "sha256(raw body ensure_ascii)": "e05892aa2ec3e7614524bdc133e0e56b61fe7eafe8e147349ab1c3b115ded243",
+    "sha256(canonical unredacted body)": "5a7bb42eb65abafcaa7facda386245aab4d1ac7ea34b83303f88587fe5ebee1f"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "4111\u06401111\u06401111\u06401111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "74b5bb79d5570543466b3113d8d2dcf821bca0e68e4859feac7b9890bc5947c3",
+    "sha256(NFKC text)": "74b5bb79d5570543466b3113d8d2dcf821bca0e68e4859feac7b9890bc5947c3",
+    "sha256(spaces-collapsed text)": "74b5bb79d5570543466b3113d8d2dcf821bca0e68e4859feac7b9890bc5947c3",
+    "sha256(raw body bytes)": "2d263eaa2832ee056250d562e8202c2772c800eee21c4694ce858a83f344e8e8",
+    "sha256(raw body ensure_ascii)": "63e80ed43fa4d228f04b6e46a62ffa65d8d6a7e8494041c2154cb7fa29705ab0",
+    "sha256(canonical unredacted body)": "9d39123da8e4e30b1ba3827946a60143ad9685ef024006354cb26d834ac2e923"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "4111\u02c91111\u02c91111\u02c91111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "5ad14105d47e9bcb6b73ccfaa31d57c3944e30c7f8e56a9eea4e5ae14d6c6db6",
+    "sha256(NFKC text)": "5ad14105d47e9bcb6b73ccfaa31d57c3944e30c7f8e56a9eea4e5ae14d6c6db6",
+    "sha256(spaces-collapsed text)": "5ad14105d47e9bcb6b73ccfaa31d57c3944e30c7f8e56a9eea4e5ae14d6c6db6",
+    "sha256(raw body bytes)": "1c1d2613e223392e8a049236d21c73171cd23a04d5254c25410d49ceae867149",
+    "sha256(raw body ensure_ascii)": "85c4f0b9d4f84a180103769fbbbd7d6d39f1fb27a1c8e25a7bfab092e3e6e4d3",
+    "sha256(canonical unredacted body)": "2ca2835ae64080a0d3f76a164a5d3e881a9b6b43e92195708811e23e0c6683a9"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "4111\u14271111\u14271111\u14271111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "fe75f281efe3b6abd268e45450fd8f78fbb3b19cab83ea87a6f2e9300abca7e2",
+    "sha256(NFKC text)": "fe75f281efe3b6abd268e45450fd8f78fbb3b19cab83ea87a6f2e9300abca7e2",
+    "sha256(spaces-collapsed text)": "fe75f281efe3b6abd268e45450fd8f78fbb3b19cab83ea87a6f2e9300abca7e2",
+    "sha256(raw body bytes)": "e0b35c42262808470416e410f3f9f2484d1a627fce393d8afd38f6e5d2a9a551",
+    "sha256(raw body ensure_ascii)": "82a9c8d7a15638af026f74d4022f2159201eb5fca0a9c1123fac96ffa60ff014",
+    "sha256(canonical unredacted body)": "2a9bca3e970020c734117522dbe9200bf4be22fd33d6e3019e56f24fb3b0e735"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "4111\ua78f1111\ua78f1111\ua78f1111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "715ab2aee0917a9945edc79b034509a5516e268c53fea8c9053ba4bd085efc51",
+    "sha256(NFKC text)": "715ab2aee0917a9945edc79b034509a5516e268c53fea8c9053ba4bd085efc51",
+    "sha256(spaces-collapsed text)": "715ab2aee0917a9945edc79b034509a5516e268c53fea8c9053ba4bd085efc51",
+    "sha256(raw body bytes)": "21cce9900b3eea230e705c93c8230a550f592d8397674a20e7aed542c660ff11",
+    "sha256(raw body ensure_ascii)": "80ab87e3b2579b633aa3f6388f41172ecc9ad1262ebce79d82933d15e6a0d58c",
+    "sha256(canonical unredacted body)": "bdf4d4d4cd68095cf5565aebe53782f13b62db9fe50d4af1c2ae62771069b28b"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "123\u30fc45\u30fc6789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "00054ff827e893d04b432af372cf4373e280d8c85aec71cab1efbdc0e48c535a",
+    "sha256(NFKC text)": "00054ff827e893d04b432af372cf4373e280d8c85aec71cab1efbdc0e48c535a",
+    "sha256(spaces-collapsed text)": "00054ff827e893d04b432af372cf4373e280d8c85aec71cab1efbdc0e48c535a",
+    "sha256(raw body bytes)": "008678ec8481a8c6a8f0c34888453a1d0aad357e2a155a5d0f74c4667a2a7451",
+    "sha256(raw body ensure_ascii)": "2947da52d27819418db38d3c8b75eb71dc12941eba2dc78fd1835e3104334f34",
+    "sha256(canonical unredacted body)": "21840e840e6f91c09b84f060f3c77fae6bc77a43cbe96086b9136c97622dea0f"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "123\u064045\u06406789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "384f5441061575bf3a053065aba548c3622a197df8a98399940f49522a7e3adc",
+    "sha256(NFKC text)": "384f5441061575bf3a053065aba548c3622a197df8a98399940f49522a7e3adc",
+    "sha256(spaces-collapsed text)": "384f5441061575bf3a053065aba548c3622a197df8a98399940f49522a7e3adc",
+    "sha256(raw body bytes)": "50a2299fdef86461f349c222bfe458975f4e432d1c93b6d1e265887aa6d1bb1e",
+    "sha256(raw body ensure_ascii)": "67a215a9dc0486c2ef93072bfb95c8fb94f38abafefc4b617d833ca63bd1b56b",
+    "sha256(canonical unredacted body)": "0f00da470ff919a20d860dfe36b19cbfa7ce706bc930c626e9f399fe7b2e3e07"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "123\u02c945\u02c96789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "7ddea2b38f534f81573372c3746caae0c250e9303ab14cb8f510fa5945e4ea68",
+    "sha256(NFKC text)": "7ddea2b38f534f81573372c3746caae0c250e9303ab14cb8f510fa5945e4ea68",
+    "sha256(spaces-collapsed text)": "7ddea2b38f534f81573372c3746caae0c250e9303ab14cb8f510fa5945e4ea68",
+    "sha256(raw body bytes)": "205d502003553d2e97e072e1abc2b5d403e94ce8e3c50f0f39f7ff56a42079d6",
+    "sha256(raw body ensure_ascii)": "7322d2ec9b609589e17d3ee983fe991676f3d20d9bb85738ee84eefdefdc47e6",
+    "sha256(canonical unredacted body)": "0ce5f91fb8d8e257a8e2a52a6751d3784c64f3ede9e7e15374741ffaa12878bc"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "123\u142745\u14276789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "4cf399bd42c6850077912cec0968b09c5a35dd172903312e59e16f93bd50fc8b",
+    "sha256(NFKC text)": "4cf399bd42c6850077912cec0968b09c5a35dd172903312e59e16f93bd50fc8b",
+    "sha256(spaces-collapsed text)": "4cf399bd42c6850077912cec0968b09c5a35dd172903312e59e16f93bd50fc8b",
+    "sha256(raw body bytes)": "9d83af55ab901ca339a2858abda22cb548f01eb52a5bfa246d43c974b1c6197a",
+    "sha256(raw body ensure_ascii)": "b23d365816600b878da3f2dd9c73c6173287366e401b710956b409909ffc5af6",
+    "sha256(canonical unredacted body)": "74ddb13fee48944f950bfd34bff5a5580fa2cd247fa7c704d459a527c580afdc"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "123\ua78f45\ua78f6789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": "ATTRIBUTE_VALUE_PERSONAL_DATA"
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "fe05372c95dcfef53ff01de3625f23184c58059af03adfc795ad043cf170ce07",
+    "sha256(NFKC text)": "fe05372c95dcfef53ff01de3625f23184c58059af03adfc795ad043cf170ce07",
+    "sha256(spaces-collapsed text)": "fe05372c95dcfef53ff01de3625f23184c58059af03adfc795ad043cf170ce07",
+    "sha256(raw body bytes)": "5bf360b463ff5987c0f89d66465d8524920f2c51415d682e3401bb2bd3562aae",
+    "sha256(raw body ensure_ascii)": "08eda722355dc77af15a8baa7234a245a288fbde689b0041f6472a4c316f092c",
+    "sha256(canonical unredacted body)": "e46269c5e184e6c25d93e04fbea9b5151b255e7b44975bac3d6e54a192456928"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "absent": true
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "1234\u30fc5678\u30fc9",
+   "secret_digits": "123456789",
+   "status": 200,
+   "body": {
+    "face_id": "ooh-fce-1b6ce4823cfdd4086c501bf720e517da315f40b1",
+    "vendor": "lamar",
+    "vendor_face_ref": "face-74a58c14",
+    "unit_key": "face74a58c14",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "proof_requirement": "POSTING_PHOTO",
+    "version": 2,
+    "identity": {
+     "value": {
+      "vendor": "lamar",
+      "vendor_face_ref": "face-74a58c14",
+      "format": "STATIC_BILLBOARD",
+      "market": "los-angeles"
+     },
+     "source_id": "ooh-src-6c45477061c7c1b831cd84c6a3e6c42dd82aabe2",
+     "source_kind": "RATE_CARD",
+     "as_of": "2026-10-17T17:17:49Z",
+     "evidence_class": "VENDOR_ASSERTED",
+     "recorded_by": "ooh_agent",
+     "recorded_at": "2026-10-18T17:18:20Z"
+    },
+    "attributes": {
+     "latitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "longitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "location_description": {
+      "status": "SOURCED",
+      "value": {
+       "untrusted": true,
+       "personal_data_redacted": false,
+       "personal_data_kinds": [],
+       "text": "billing 1234\u30fc5678\u30fc9",
+       "truncated": false,
+       "sha256": "c69b367df99d36a021bca55f28f89458bf27c60743b09fdc42d9c1f08a7abcc7"
+      },
+      "source_id": "ooh-src-175a4b1988c7544d9441c1782706a3eedc03a29a",
+      "source_kind": "RATE_CARD",
+      "as_of": "2026-10-17T17:17:49Z",
+      "evidence_class": "VENDOR_ASSERTED",
+      "recorded_by": "ooh_agent",
+      "recorded_at": "2026-10-18T17:18:21Z",
+      "current": true
+     },
+     "facing": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "width_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "height_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "illuminated": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_amount": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_period_days": {
+      "status": "UNKNOWN",
+      "value": null
+     }
+    },
+    "attribute_history": {
+     "location_description": [
+      {
+       "value": {
+        "untrusted": true,
+        "personal_data_redacted": false,
+        "personal_data_kinds": [],
+        "text": "billing 1234\u30fc5678\u30fc9",
+        "truncated": false,
+        "sha256": "c69b367df99d36a021bca55f28f89458bf27c60743b09fdc42d9c1f08a7abcc7"
+       },
+       "source_id": "ooh-src-175a4b1988c7544d9441c1782706a3eedc03a29a",
+       "source_kind": "RATE_CARD",
+       "as_of": "2026-10-17T17:17:49Z",
+       "evidence_class": "VENDOR_ASSERTED",
+       "recorded_by": "ooh_agent",
+       "recorded_at": "2026-10-18T17:18:21Z",
+       "current": true
+      }
+     ]
+    },
+    "avails": []
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "c69b367df99d36a021bca55f28f89458bf27c60743b09fdc42d9c1f08a7abcc7",
+    "sha256(NFKC text)": "c69b367df99d36a021bca55f28f89458bf27c60743b09fdc42d9c1f08a7abcc7",
+    "sha256(spaces-collapsed text)": "c69b367df99d36a021bca55f28f89458bf27c60743b09fdc42d9c1f08a7abcc7",
+    "sha256(raw body bytes)": "6c17a29917e4d9afc163efda5072dfc0ac2654a04035298f62571a134047dadf",
+    "sha256(raw body ensure_ascii)": "dafb7026fe3baa492fb983b88422d67955af440edac8efb9fc063b5557fcf31d",
+    "sha256(canonical unredacted body)": "1789932ac83026bc21eb781855127fd0e369e33e84f13407838ce1c7c00991e5"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "ledger_entries_delta": 2,
+   "absent": false
+  },
+  {
+   "kind": "face.location_description",
+   "category": "secret",
+   "secret": "41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11",
+   "secret_digits": "4111111111111111",
+   "status": 200,
+   "body": {
+    "face_id": "ooh-fce-e2eccf2d4bf2f2782bb70c1bb755c502aa087e7f",
+    "vendor": "lamar",
+    "vendor_face_ref": "face-e6c351b3",
+    "unit_key": "facee6c351b3",
+    "format": "STATIC_BILLBOARD",
+    "market": "los-angeles",
+    "proof_requirement": "POSTING_PHOTO",
+    "version": 2,
+    "identity": {
+     "value": {
+      "vendor": "lamar",
+      "vendor_face_ref": "face-e6c351b3",
+      "format": "STATIC_BILLBOARD",
+      "market": "los-angeles"
+     },
+     "source_id": "ooh-src-3f1f5b1813776f1172edba00f5554b5bc19d3e41",
+     "source_kind": "RATE_CARD",
+     "as_of": "2026-10-17T17:17:49Z",
+     "evidence_class": "VENDOR_ASSERTED",
+     "recorded_by": "ooh_agent",
+     "recorded_at": "2026-10-18T17:18:21Z"
+    },
+    "attributes": {
+     "latitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "longitude": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "location_description": {
+      "status": "SOURCED",
+      "value": {
+       "untrusted": true,
+       "personal_data_redacted": false,
+       "personal_data_kinds": [],
+       "text": "billing 41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11",
+       "truncated": false,
+       "sha256": "fc8e10e9e6c8e8ab7fe7d95ad622a65e363cb4a8eb2f7bfdc71fa341517484b9"
+      },
+      "source_id": "ooh-src-8b16c7cf19c28b186f0c7f57ee05aba3dc929155",
+      "source_kind": "RATE_CARD",
+      "as_of": "2026-10-17T17:17:49Z",
+      "evidence_class": "VENDOR_ASSERTED",
+      "recorded_by": "ooh_agent",
+      "recorded_at": "2026-10-18T17:18:21Z",
+      "current": true
+     },
+     "facing": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "width_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "height_ft": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "illuminated": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_amount": {
+      "status": "UNKNOWN",
+      "value": null
+     },
+     "rate_card_period_days": {
+      "status": "UNKNOWN",
+      "value": null
+     }
+    },
+    "attribute_history": {
+     "location_description": [
+      {
+       "value": {
+        "untrusted": true,
+        "personal_data_redacted": false,
+        "personal_data_kinds": [],
+        "text": "billing 41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11",
+        "truncated": false,
+        "sha256": "fc8e10e9e6c8e8ab7fe7d95ad622a65e363cb4a8eb2f7bfdc71fa341517484b9"
+       },
+       "source_id": "ooh-src-8b16c7cf19c28b186f0c7f57ee05aba3dc929155",
+       "source_kind": "RATE_CARD",
+       "as_of": "2026-10-17T17:17:49Z",
+       "evidence_class": "VENDOR_ASSERTED",
+       "recorded_by": "ooh_agent",
+       "recorded_at": "2026-10-18T17:18:21Z",
+       "current": true
+      }
+     ]
+    },
+    "avails": []
+   },
+   "expect": "422 ATTRIBUTE_VALUE_PERSONAL_DATA",
+   "hashes": {
+    "sha256(raw text)": "fc8e10e9e6c8e8ab7fe7d95ad622a65e363cb4a8eb2f7bfdc71fa341517484b9",
+    "sha256(NFKC text)": "fc8e10e9e6c8e8ab7fe7d95ad622a65e363cb4a8eb2f7bfdc71fa341517484b9",
+    "sha256(spaces-collapsed text)": "fc8e10e9e6c8e8ab7fe7d95ad622a65e363cb4a8eb2f7bfdc71fa341517484b9",
+    "sha256(raw body bytes)": "110aaaca95d2d6e1bdbddb44f2ffbd858c3266684c39bd4ecc07b40e3962ec8e",
+    "sha256(raw body ensure_ascii)": "f8c11de50a72684217fbeffe9a4a076595029c0036987118ce705cc1b622cb45",
+    "sha256(canonical unredacted body)": "ed077c70405d80d5f59a8dd5601ef2afe8b268bbbba6f0001fd8430ee27de983"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "hits_delta": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(NFKC text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(canonical unredacted body)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(raw text)"
+    ],
+    [
+     "data/ooh_log.jsonl",
+     "sha256(spaces-collapsed text)"
+    ]
+   ],
+   "ledger_entries_delta": 2,
+   "absent": false
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "12\u30fc34\u30fc56\u30fc789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "acd78b4fa3f9251a0c4ee71fcaaccd882ad22c0114451e537a56b58d63be5c2c",
+    "sha256(NFKC text)": "acd78b4fa3f9251a0c4ee71fcaaccd882ad22c0114451e537a56b58d63be5c2c",
+    "sha256(spaces-collapsed text)": "acd78b4fa3f9251a0c4ee71fcaaccd882ad22c0114451e537a56b58d63be5c2c",
+    "sha256(raw body bytes)": "c7d813adac02e7b33fb9a96e1a0c8df4dcbe6e030e9bf23c4f5940e9816abadf",
+    "sha256(raw body ensure_ascii)": "44bd252e4a3dd07040ad28d0766c2bec6852b190477ad92c7f6c6a8435b20cc0",
+    "sha256(canonical unredacted body)": "04dfb778a34c14da3e866d6ba1dc15870ee725e18676c80a550e28840dd43c96"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ]
+   ],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": false
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "12\u064034\u064056\u0640789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "ebda97ce5aaa20b8add09f2601e979d8f13068bc3d7d977fd88de4ba8bc9e992",
+    "sha256(NFKC text)": "ebda97ce5aaa20b8add09f2601e979d8f13068bc3d7d977fd88de4ba8bc9e992",
+    "sha256(spaces-collapsed text)": "ebda97ce5aaa20b8add09f2601e979d8f13068bc3d7d977fd88de4ba8bc9e992",
+    "sha256(raw body bytes)": "75194c9f6b0a007915b6f1f3cd27f0531eac19113b7dd74366e6b78673c2bc26",
+    "sha256(raw body ensure_ascii)": "0f3b18cdb3947f779dbde585c7c99e53e2df7c969dab5c753f4e512066617a96",
+    "sha256(canonical unredacted body)": "a753f533145fd3e135eb8051c54939077d65bc6929f58635c33eceaaf04ce38c"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ]
+   ],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": false
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "12\u02c934\u02c956\u02c9789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "07b67f70b0b97e5c27f433f8effd2d577e49a634a173ab23d16c878fba9e5576",
+    "sha256(NFKC text)": "07b67f70b0b97e5c27f433f8effd2d577e49a634a173ab23d16c878fba9e5576",
+    "sha256(spaces-collapsed text)": "07b67f70b0b97e5c27f433f8effd2d577e49a634a173ab23d16c878fba9e5576",
+    "sha256(raw body bytes)": "c3c345a2fbaa146220192dcbe6ad2f4fc50e97a628b2415ab5936dc1a919347a",
+    "sha256(raw body ensure_ascii)": "4cf8518724fa5e97944c53b7d7391c96241da906bcebbae00361ebcb49a4b97d",
+    "sha256(canonical unredacted body)": "80e175e174226776e063ad5bffedc5164d2544d9ab5e979c93cd94d6ad63aa29"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ]
+   ],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": false
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "12\u142734\u142756\u1427789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "77d1592733adcaf760a6756d2af36707b92e4a536f13e0e60c1b400e005ea238",
+    "sha256(NFKC text)": "77d1592733adcaf760a6756d2af36707b92e4a536f13e0e60c1b400e005ea238",
+    "sha256(spaces-collapsed text)": "77d1592733adcaf760a6756d2af36707b92e4a536f13e0e60c1b400e005ea238",
+    "sha256(raw body bytes)": "53cbf1b4c226b5cd1372f620195be6628eaa0be57b34453ea26bda84b26d49a5",
+    "sha256(raw body ensure_ascii)": "fefb255a62cf1f9d43135c98327b96458c60be936f505de8cef8f47163a4e7a9",
+    "sha256(canonical unredacted body)": "86d9eae47432bb8381244e4164fd73d376a98a2497732c654af8dedb4b092304"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ]
+   ],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": false
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "12\ua78f34\ua78f56\ua78f789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "280d567efd960d7ec675f73f8901bf5cc7b0a8cc895c9f29acd4e44c5df852ab",
+    "sha256(NFKC text)": "280d567efd960d7ec675f73f8901bf5cc7b0a8cc895c9f29acd4e44c5df852ab",
+    "sha256(spaces-collapsed text)": "280d567efd960d7ec675f73f8901bf5cc7b0a8cc895c9f29acd4e44c5df852ab",
+    "sha256(raw body bytes)": "2587e4d7495c9c4f99a2cdc98df1685da7ef56db6fb38c1f1e7c00519e1f8e7d",
+    "sha256(raw body ensure_ascii)": "8f034b1c284b51a81d175d1068f6378a4cbe6d68eb78d24bcc737def0f1cd131",
+    "sha256(canonical unredacted body)": "8394d4aea4c98f5d205c8c4de2968de6884913980df179dd695e0b2889a1fd7f"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ]
+   ],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": false
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "4111\u30fc1111\u30fc1111\u30fc1111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "42ad061f4871bc107b9de439818ea225b5d2f195ce68cdfb5643c639a86a09a9",
+    "sha256(NFKC text)": "42ad061f4871bc107b9de439818ea225b5d2f195ce68cdfb5643c639a86a09a9",
+    "sha256(spaces-collapsed text)": "42ad061f4871bc107b9de439818ea225b5d2f195ce68cdfb5643c639a86a09a9",
+    "sha256(raw body bytes)": "b79c978f82961b160a19535863d32e7edfe209053fe2dcefda9af513498b17ef",
+    "sha256(raw body ensure_ascii)": "7324c1b57cec6146db8c2637077f7a3f6477965c81d10aec8a8a43461ffdf7e1",
+    "sha256(canonical unredacted body)": "b1d27ea88c08a482c36f858b0aa2b33b2c3dc3858c2fd03561169663213dbd5e"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "4111\u06401111\u06401111\u06401111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "641a02abb1397bbc36d25259a2d35c1dd444f6117b5cd360e5c81f607abc1923",
+    "sha256(NFKC text)": "641a02abb1397bbc36d25259a2d35c1dd444f6117b5cd360e5c81f607abc1923",
+    "sha256(spaces-collapsed text)": "641a02abb1397bbc36d25259a2d35c1dd444f6117b5cd360e5c81f607abc1923",
+    "sha256(raw body bytes)": "ebed9bb76e9025072cc0f8cd3eaff7596e8f9b20c4aeac9d672a653a0a619114",
+    "sha256(raw body ensure_ascii)": "edee191d57295ee4a48b7ce508b110356c2c690dfdd08fa06ae7387ab6c433a2",
+    "sha256(canonical unredacted body)": "508e14f5eef49740bc105821065d592cb311c4e41def23a7dd683960a079d09a"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "4111\u02c91111\u02c91111\u02c91111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "9b9ac29e8818088f2631ab60260ed4d0e1f7a5b269938afa8d0fdd57b3d81481",
+    "sha256(NFKC text)": "9b9ac29e8818088f2631ab60260ed4d0e1f7a5b269938afa8d0fdd57b3d81481",
+    "sha256(spaces-collapsed text)": "9b9ac29e8818088f2631ab60260ed4d0e1f7a5b269938afa8d0fdd57b3d81481",
+    "sha256(raw body bytes)": "7ec5333ca0e929162c234c7b8925f5bb1a3d05942a686849c6affd84a9853646",
+    "sha256(raw body ensure_ascii)": "af4a0bc41bbb3307aa73c22cb68393984aa3789e57eea2545f173be0fa169cc0",
+    "sha256(canonical unredacted body)": "30d6b29f19bb16ad685f9391eed5ec1bbb85db16f8f0f4fe78d85e0412f2f992"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "4111\u14271111\u14271111\u14271111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "75e34311b3108bdcba9e2985935dc9dd6328ae497725459c2d94f5195f0bcf99",
+    "sha256(NFKC text)": "75e34311b3108bdcba9e2985935dc9dd6328ae497725459c2d94f5195f0bcf99",
+    "sha256(spaces-collapsed text)": "75e34311b3108bdcba9e2985935dc9dd6328ae497725459c2d94f5195f0bcf99",
+    "sha256(raw body bytes)": "eb634bb690b4851aa6c418121870af0cdbc4321c2db002a16d34e48b146cbbb2",
+    "sha256(raw body ensure_ascii)": "ab402441acd5ebaa0f8501fbd5325faed761e2a701a0f0efb4b08ccc2d23a1bd",
+    "sha256(canonical unredacted body)": "caedd719f9820b4d3e63acb022c2acfc8479c6bd3f8fda09f83bfa4d43bf932e"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "4111\ua78f1111\ua78f1111\ua78f1111",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "cad9181938939a8869fbabd296a1feb890fb927d68e09688426d805296440197",
+    "sha256(NFKC text)": "cad9181938939a8869fbabd296a1feb890fb927d68e09688426d805296440197",
+    "sha256(spaces-collapsed text)": "cad9181938939a8869fbabd296a1feb890fb927d68e09688426d805296440197",
+    "sha256(raw body bytes)": "1f7f3a5db1d2c47e6d14fc0deb5a4bd712760f81c3bbc8465f3b1e47d6fa3dc7",
+    "sha256(raw body ensure_ascii)": "e3c0d492af690d735d212d49f89cf64786cc8c1f1f873472878cee586c0d0265",
+    "sha256(canonical unredacted body)": "e4a666b5b9f747eef292de72531a80336e59709169cdb4f271695b856cec3834"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "123\u30fc45\u30fc6789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "3e6da48226a3be045e6bc10a60f660c2675753b9f77b5abac1bda5cc7313db80",
+    "sha256(NFKC text)": "3e6da48226a3be045e6bc10a60f660c2675753b9f77b5abac1bda5cc7313db80",
+    "sha256(spaces-collapsed text)": "3e6da48226a3be045e6bc10a60f660c2675753b9f77b5abac1bda5cc7313db80",
+    "sha256(raw body bytes)": "dfe849cbcdc855dac289fef51eef8c8e76da93f3f6d7349497f296067337a753",
+    "sha256(raw body ensure_ascii)": "e30a07fd962fe879a0ceb9b70e0bb619fd32c34c65fadc76adb9ea77fce94c92",
+    "sha256(canonical unredacted body)": "c42e41244c03b278ea3fddf24a8a4dad7d52da29c341b9a4ab696e8529803aab"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "123\u064045\u06406789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "f4e509cc39cd92a4a865e811034cd3a919788b0ec45315103a592163abd88995",
+    "sha256(NFKC text)": "f4e509cc39cd92a4a865e811034cd3a919788b0ec45315103a592163abd88995",
+    "sha256(spaces-collapsed text)": "f4e509cc39cd92a4a865e811034cd3a919788b0ec45315103a592163abd88995",
+    "sha256(raw body bytes)": "6b4814b1e914b35dbe55e839c1deb149da7969ce7ab1bd2d62ec8af355f64482",
+    "sha256(raw body ensure_ascii)": "c93cef60a24e35a59d1ad3c8cfede80c1b7159517eb13b699e40c8b98da9b7ea",
+    "sha256(canonical unredacted body)": "b47bbcce211674790dd5594b1d703f900c8660dbf98d07c9c6e1c726bdaddd2e"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "123\u02c945\u02c96789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "556a2822cc546e4f55a902335d7aa1ee2775275b968047ae9c0ba59b7247f1e0",
+    "sha256(NFKC text)": "556a2822cc546e4f55a902335d7aa1ee2775275b968047ae9c0ba59b7247f1e0",
+    "sha256(spaces-collapsed text)": "556a2822cc546e4f55a902335d7aa1ee2775275b968047ae9c0ba59b7247f1e0",
+    "sha256(raw body bytes)": "86a28684de967171c10a56c87c4137edb21b73728c33832853baf4d178b9a413",
+    "sha256(raw body ensure_ascii)": "daf771612fb73f758fc7e36570aa173c1f334a79f87aca78493c7be8dec31f65",
+    "sha256(canonical unredacted body)": "cb5089bea842ff70447bc9271f22c60816a952cf4e26a4a469f676b2df853785"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "123\u142745\u14276789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "a96f8c45e2b41201fc476916f472a3d18d0d8a5141c03b575cca8711db44a876",
+    "sha256(NFKC text)": "a96f8c45e2b41201fc476916f472a3d18d0d8a5141c03b575cca8711db44a876",
+    "sha256(spaces-collapsed text)": "a96f8c45e2b41201fc476916f472a3d18d0d8a5141c03b575cca8711db44a876",
+    "sha256(raw body bytes)": "b0ba0a9f45db7510b2a6acfaa5ad3b89c3372b42dc2a77d7935066ab60e57486",
+    "sha256(raw body ensure_ascii)": "0a33e6519fc3f8b319f6fc247019db4c8af48eff7723ecffc44498a00fbdd1b9",
+    "sha256(canonical unredacted body)": "7b7798165441dfe71a01eae72ce382c9c3518de5e84b295632d355d0472db5d5"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "123\ua78f45\ua78f6789",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "397dc7fb5a03f8f0c764f590fce20d0f48f4b0d35e6052ba65fc8473c3b2d4b7",
+    "sha256(NFKC text)": "397dc7fb5a03f8f0c764f590fce20d0f48f4b0d35e6052ba65fc8473c3b2d4b7",
+    "sha256(spaces-collapsed text)": "397dc7fb5a03f8f0c764f590fce20d0f48f4b0d35e6052ba65fc8473c3b2d4b7",
+    "sha256(raw body bytes)": "7ce85195a032fcb2d4337cafe9536a9da5105c1790dcf6d3c63881c63bd928c5",
+    "sha256(raw body ensure_ascii)": "a5f664280387a2d57299cce01e13a6dcb655b665ccbd391c53c5949bb66c1dcd",
+    "sha256(canonical unredacted body)": "e3591a70bf3dd5b9b6296d4b64c4aabdf8e19667f6ec5af9e1c8d44e71d674d0"
+   },
+   "hits_cumulative": [],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": true
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "1234\u30fc5678\u30fc9",
+   "secret_digits": "123456789",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "49d333a6637738be8f0d1e98185f8f9c1485ebd588d21cd79360b3618c79370a",
+    "sha256(NFKC text)": "49d333a6637738be8f0d1e98185f8f9c1485ebd588d21cd79360b3618c79370a",
+    "sha256(spaces-collapsed text)": "49d333a6637738be8f0d1e98185f8f9c1485ebd588d21cd79360b3618c79370a",
+    "sha256(raw body bytes)": "edc0951089248194cabf8ac6bbeb62126ee440dba445f06c956b189550c85e51",
+    "sha256(raw body ensure_ascii)": "367c03e892832eb118436db16f25d3c3315713f6e452c0dc187d8036072c344c",
+    "sha256(canonical unredacted body)": "cbff612dd2b58e4f0601c6b458ae56e690b75258b64fa3f002e632a80fd4a57b"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ]
+   ],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": false
+  },
+  {
+   "kind": "campaign.client_approval_doc_ref",
+   "category": "secret",
+   "secret": "41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11",
+   "secret_digits": "4111111111111111",
+   "status": 422,
+   "body": {
+    "detail": [
+     {
+      "loc": [
+       "body",
+       "client_approval_doc_ref"
+      ],
+      "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+      "type": "string_pattern_mismatch"
+     }
+    ],
+    "errors_total": 1
+   },
+   "expect": "422",
+   "hashes": {
+    "sha256(raw text)": "a37151544dd175eec8f6720460cbc768f58df3a877ef291e8b3c859f6be13e25",
+    "sha256(NFKC text)": "a37151544dd175eec8f6720460cbc768f58df3a877ef291e8b3c859f6be13e25",
+    "sha256(spaces-collapsed text)": "a37151544dd175eec8f6720460cbc768f58df3a877ef291e8b3c859f6be13e25",
+    "sha256(raw body bytes)": "e4bf8a32867d7f44cd41ffd1607c38e943eb88ecb9bfee980b3b1d6191496c6d",
+    "sha256(raw body ensure_ascii)": "d953d233298da35fafe52ba73c5242eeef62f348342fdfbd7b9db2c01cb49574",
+    "sha256(canonical unredacted body)": "bbe6837636e02feb76166706ad4137007a2b2c4138e606ccf49e3d400c6648da"
+   },
+   "hits_cumulative": [
+    [
+     "data/ooh_log.jsonl",
+     "literal (\\u-decoded)"
+    ]
+   ],
+   "hits_delta": [],
+   "ledger_entries_delta": 0,
+   "state_before": "PROPOSAL_SENT",
+   "state_after": "PROPOSAL_SENT",
+   "version_unchanged": true,
+   "absent": false
+  }
+ ],
+ "start": {
+  "status": "ok"
+ },
+ "doc_ref_control_approve": 200,
+ "idem": {
+  "first": {
+   "status": 201,
+   "unit_id": "ooh-inv-183c565fbaf9681207e36cef3f96f8e88623db2a",
+   "detail": null
+  },
+  "other_ssn_same_rid": {
+   "status": 201,
+   "unit_id": "ooh-inv-183c565fbaf9681207e36cef3f96f8e88623db2a",
+   "detail": null
+  },
+  "other_text_same_rid": {
+   "status": 409,
+   "unit_id": null,
+   "detail": "REQUEST_ID_REUSED"
+  }
+ },
+ "final_ledger_verify": {
+  "entries": 464,
+  "valid": true
+ },
+ "final_data_dir": [
+  "ooh.lock",
+  "ooh_log.jsonl"
+ ]
+}

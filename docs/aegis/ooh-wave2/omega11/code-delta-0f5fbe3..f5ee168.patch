@@ -1,0 +1,733 @@
+diff --git a/services/ooh-py/src/pii.py b/services/ooh-py/src/pii.py
+index 44493ca..93f3ef9 100644
+--- a/services/ooh-py/src/pii.py
++++ b/services/ooh-py/src/pii.py
+@@ -3,7 +3,9 @@ department keeps no personal data: an e-mail address, a phone number, a payment-
+ number in a free-text value is refused (attributes, campaign names, the client approval document reference) or
+ redacted (vendor text), before anything is written to the log or the ledger.
+ 
+-Text is NFKC-normalised; zero-width characters are removed; %40, HTML entities (&#64; &commat; &#46;) and bracket
++Every screen reads ``screen_form`` (vendor text is stored in it too): NFKC; zero-width, format, private-use,
++unassigned and invisible filler characters removed, and a combining mark on a digit dropped; every script's decimal
++digits read as ASCII; any other non-printable character read as a space and runs of spaces collapsed. Then %40, HTML entities (&#64; &commat; &#46;) and bracket
+ spellings ([at] (at) {at} <at>, [dot] (dot) <dot> [.] (.)) and full-width or ideographic dots are read as the
+ character. Then, case-insensitively:
+ * e-mail: ``@`` (spaces allowed around it) followed by a domain that starts with a letter and has a dotted TLD, or
+@@ -18,9 +20,14 @@ character. Then, case-insensitively:
+   start with a card-network prefix and pass the Luhn check (the rule the client funds reference already used:
+   ``card_spans``, which ``svc_campaigns.names_a_card`` calls); an unbroken run of ten or more digits is refused as
+   a phone number anyway;
+-* social security number (onboarding-py redaction.py's shapes): ``ddd-dd-dddd`` with a hyphen or another dash, not
+-  glued to a word or a dash, and nine digits within 20 characters after "SSN", "social security (number)", "ITIN"
+-  or "tax id". A nine-digit run with spaces and no such word is not seen.
++* social security number (onboarding-py redaction.py's shapes, widened in AEGIS r9): 3-2-4 digits split by any
++  dash, a dot, an underscore, a colon, a slash or one space (runs of spaces are one space by then), not inside a
++  longer digit run (letters may touch it), and nine digits within 20 characters after "SSN", "social security
++  (number)", "ITIN", "TIN" or "tax id", which may touch them. Not seen: nine digits with no separator and no such
++  word; "123 - 45 - 6789" (a separator with spaces around it); digit groups split by letters, %20 or entities.
++In the three screened free-text fields of OOH2-PII-1 (unit vendor text, face text attributes, the client approval
++document reference) one more rule decides, before any of the shapes below matter: any cluster of nine or more digits
++joined by characters that are not letters is personal data (``screen_free_text``; founder design change, ADR 0022).
+ Known false positives (refused, never stored): a ten-digit reference ("io-0000012345"), "<word> at <word>.<word>"
+ ("14x48 at Wilshire.Blvd"), a three-and-four-digit pair with a dash ("Route 101-2025").
+ Names, spelled-out digits and letters used as separators cannot be detected reliably: preparers must not type them."""
+@@ -64,23 +71,45 @@ _INTL = re.compile(r"(?<![\w+])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
+ _INTL_MIN_DIGITS = 8
+ 
+ 
+-def strip_format(text: str) -> str:
+-    """NFKC; zero-width and every other format character removed (they hide nothing once gone: AEGIS r9 security F2,
+-    a zero-width character inside a card's digit group split it); every decimal digit of any script read as its ASCII
+-    digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Vendor text is stored in this form too."""
+-    t = unicodedata.normalize("NFKC", text)
+-    t = _ZW.sub("", t)
+-    t = "".join("" if unicodedata.category(ch) == "Cf" else
+-                str(unicodedata.decimal(ch)) if ch > "\x7f" and unicodedata.category(ch) == "Nd" else ch for ch in t)
+-    return t
++# Characters that show nothing but are not format characters (AEGIS r10 source M-1): the combining grapheme joiner,
++# Hangul and Mongolian fillers, Khmer inherent vowels, Mongolian variation selectors, the blank braille pattern and
++# the variation selectors.
++_INVISIBLE = re.compile("[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\ufe00-\ufe0f\uffa0"
++                        "\U000e0100-\U000e01ef]")
++_REMOVED = ("Cf", "Co", "Cn")        # format, private-use and unassigned characters: removed, not read as a space
+ 
+ 
+-def _norm(text: str) -> str:
+-    """``strip_format``; every control character and line or paragraph separator read as a space (it is a space once
+-    vendor text is stored, red team OOH-3/4 F4); %40, HTML entities and bracket spellings of @ and . read as the
+-    character."""
+-    t = strip_format(text)
+-    t = "".join(" " if unicodedata.category(ch) in ("Cc", "Zl", "Zp") else ch for ch in t)
++def strip_format(text: str, hidden: str = "") -> str:
++    """NFKC; zero-width, format, private-use, unassigned and the invisible characters above replaced by ``hidden``
++    (removed by default), and a combining mark on a digit dropped (AEGIS r9 security F2, r10 source M-1); every decimal
++    digit of any script read as its ASCII digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Removing a hidden character
++    rejoins a digit group it split (a card); reading it as a space keeps it as a separator (an SSN): the screen reads
++    both forms."""
++    t = _INVISIBLE.sub(hidden, _ZW.sub(hidden, unicodedata.normalize("NFKC", text)))
++    out = []
++    for ch in t:
++        cat = unicodedata.category(ch)
++        if cat in ("Mn", "Mc", "Me") and out and out[-1].isdigit():
++            continue
++        if cat in _REMOVED:
++            if hidden:
++                out.append(hidden)
++            continue
++        out.append(str(unicodedata.decimal(ch)) if ch > "\x7f" and cat == "Nd" else ch)
++    return "".join(out)
++
++
++def screen_form(text: str, hidden: str = "") -> str:
++    """The one form every screen reads and vendor text is stored in (AEGIS r10 security F1: the screen read the raw
++    text while storage read a cleaned copy, so "123  45  6789" was redacted in the line but hashed in clear):
++    ``strip_format``, every other non-printable character (controls, line and paragraph separators, other spaces)
++    read as a space, and runs of spaces collapsed to one."""
++    return " ".join("".join(ch if ch.isprintable() else " " for ch in strip_format(text, hidden)).split())
++
++
++def _norm(text: str, hidden: str = "") -> str:
++    """``screen_form``; %40, HTML entities and bracket spellings of @ and . read as the character."""
++    t = screen_form(text, hidden)
+     t = t.replace("%40", "@")
+     t = _AT_SPELLINGS.sub("@", t)
+     return _DOT_SPELLINGS.sub(".", t)
+@@ -154,27 +183,39 @@ def _card_from(groups: list, i: int) -> bool:
+     return False
+ 
+ 
+-# US social security numbers (onboarding-py redaction.py's two shapes, widened by AEGIS r9 security F3): 3-2-4 digits
+-# split by any dash, a dot, an underscore, a colon, a slash or a space, not inside a longer digit run (letters may touch
+-# it: "x123-45-6789", "io-123-45-6789"); and nine digits within 20 characters after an SSN word, which may touch them
+-# ("SSN123456789", "TIN 123456789").
+-_SSEP = "[-‐-―−._:/ ]"
++# US social security numbers (onboarding-py redaction.py's two shapes, made general in AEGIS r10 after separator
++# lists kept missing spellings: r9 F3, r10 data D10-H1): 3, 2 and 4 digits split by one to three characters that are
++# neither letters nor digits ("123-45-6789", "123 - 45 - 6789", "123--45--6789", "123..45..6789", "123,45,6789",
++# "123|45|6789"), not inside a longer digit run (letters may touch it); and nine digits, one to three such characters
++# allowed between any two, within 20 characters after an SSN word, which may touch them ("SSN123456789", "TIN 123 45
++# 6789").
++_SSEP = r"[^0-9A-Za-z\n]{1,3}"
+ _SSN = re.compile(r"(?<!\d)\d{3}" + _SSEP + r"\d{2}" + _SSEP + r"\d{4}(?!\d)")
+ _SSN_WORDS = r"ssn|social\s*security(?:\s*(?:number|no|nr|#))?|itin|tin|tax\s*id"
+-_SSN_VALUE = re.compile(rf"(?<![a-z])(?:{_SSN_WORDS})(?![a-z])[^\d\n]{{0,20}}(\d[\d\s‐-―−._:/-]{{7,12}}\d)(?!\d)", re.I)
++_SSN_VALUE = re.compile(rf"(?<![a-z])(?:{_SSN_WORDS})(?![a-z])[^\d\n]{{0,20}}(\d(?:[^0-9A-Za-z\n]{{0,3}}\d){{8}})(?!\d)",
++                        re.I)
+ 
+ 
+ def _ssn_spans(t: str) -> list:
+     out = [m.span() for m in _SSN.finditer(t)]
+-    return out + [m.span(1) for m in _SSN_VALUE.finditer(t) if sum(ch.isdigit() for ch in m.group(1)) == 9]
++    return out + [m.span(1) for m in _SSN_VALUE.finditer(t)]
+ 
+ 
+ def _spans(t: str) -> list:
+     return [m.span() for m in _matches(t)] + card_spans(t) + _ssn_spans(t)
+ 
+ 
++def _screened_form(text: str) -> str:
++    """The form the screen found personal data in: hidden characters removed, else read as spaces."""
++    t = _norm(text)
++    if _spans(t):
++        return t
++    alt = _norm(text, " ")
++    return alt if _spans(alt) else t
++
++
+ def has_personal_data(text: str) -> bool:
+-    return bool(_spans(_norm(text)))
++    return bool(_spans(_screened_form(text)))
+ 
+ 
+ def _redact_once(t: str) -> str:
+@@ -189,10 +230,80 @@ def _redact_once(t: str) -> str:
+     return "".join(out) + t[pos:]
+ 
+ 
++# The three screened free-text fields of OOH2-PII-1 (unit vendor text, a face text attribute, the client approval
++# document reference): founder design change, Oct 18 2026, to end the spelling-by-spelling loop. After ``_norm``, any
++# cluster of CLUSTER_MIN_DIGITS or more digits joined by characters that are not letters — whatever those characters
++# are — is personal data. The card and SSN rules no longer decide; they only label what was redacted. Trade-off
++# (accepted): a date range, a price list or a reference with nine or more digits and no letter between them is
++# redacted or refused too ("2026-11-01 - 2026-11-30", "io-2026-1018-0001").
++CLUSTER_MIN_DIGITS = 9
++
++
++def number_cluster_spans(t: str) -> list:
++    """The spans, first digit to last, of every run of text without a letter that holds CLUSTER_MIN_DIGITS digits."""
++    out, first, last, count = [], None, None, 0
++    for i, ch in enumerate(t + "a"):
++        if ch.isalpha():
++            if count >= CLUSTER_MIN_DIGITS:
++                out.append((first, last + 1))
++            first, last, count = None, None, 0
++        elif ch.isdigit():
++            first = i if first is None else first
++            last, count = i, count + 1
++    return out
++
++
++def _label(seg: str) -> str:
++    if "@" in seg or _EMAIL_WORD.search(seg):
++        return "email"
++    if card_spans(seg):
++        return "card"
++    if _ssn_spans(seg):
++        return "ssn"
++    if _PHONE.search(seg) or _INTL.search(seg):
++        return "phone"
++    return "number"
++
++
++def _free_text_spans(t: str) -> list:
++    return sorted(_spans(t) + number_cluster_spans(t))
++
++
++def screen_free_text(text: str) -> tuple:
++    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. With nothing
++    found, the text as kept is ``screen_form(text)``; else every e-mail, phone, card, SSN and digit cluster is
++    "[redacted]" in the normalised text, repeated until none is left."""
++    t = _norm(text)
++    kinds = set()
++    for _ in range(4):
++        spans = _free_text_spans(t)
++        if not spans:
++            break
++        out, pos = [], 0
++        for lo, hi in spans:
++            if hi <= pos:
++                continue
++            kinds.add(_label(t[lo:hi]))
++            out.append(t[pos:max(lo, pos)])
++            out.append("[redacted]")
++            pos = hi
++        t = "".join(out) + t[pos:]
++    else:
++        if _free_text_spans(t):
++            t = "[redacted]"
++    if not kinds:
++        return screen_form(text), []
++    return " ".join(t.split()), sorted(kinds)
++
++
++def free_text_has_personal_data(text: str) -> bool:
++    return bool(screen_free_text(text)[1])
++
++
+ def redact(text: str) -> str:
+     """The normalised text with every e-mail-, phone-, card- or SSN-like span replaced by "[redacted]" (case is kept),
+     repeated until none is left (a redaction can bring two parts of a number together: delta red team DF-7)."""
+-    t = _norm(text)
++    t = _screened_form(text)
+     for _ in range(4):
+         if not _spans(t):
+             return t
+diff --git a/services/ooh-py/src/service.py b/services/ooh-py/src/service.py
+index 031f301..320dbb6 100644
+--- a/services/ooh-py/src/service.py
++++ b/services/ooh-py/src/service.py
+@@ -27,6 +27,7 @@ import json
+ import re
+ import threading
+ import time
++from collections import OrderedDict
+ from datetime import datetime
+ from typing import Optional
+ 
+@@ -35,7 +36,8 @@ import policy
+ from clock import Clock, SystemClock, iso
+ from config import Settings
+ from errors import Conflict, NotFound, Unavailable
+-from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
++from ledger import (DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id,
++                    payload_sha256)
+ from reasons import R
+ from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
+ from svc_campaigns import CampaignsMixin
+@@ -66,22 +68,40 @@ def sha256_hex(data: bytes) -> str:
+ 
+ 
+ def _screened(v):
+-    """A request body as it may be kept (AEGIS r9 security F1: a plain hash of a body with a card number or an SSN in
+-    its vendor text, next to the rest of the body, gave the number back by search). Vendor text is the only free text
+-    that is stored after redaction (every other screened field is refused), so it is the only value replaced; ids and
+-    references are hashed as sent, so two different requests never hash alike."""
++    """A request body as it may be kept (AEGIS r9/r10 security F1: a hash of a body with a card number or an SSN in its
++    vendor text, next to the rest of the body, gave the number back by search). Vendor text is the only free text that
++    is stored after redaction (the other screened fields are refused), so it is replaced by the text as kept,
++    always (founder design change, Oct 18 2026: the hash uses the redacted text only); ids and references are hashed
++    as sent."""
+     if isinstance(v, dict):
+-        return {k: (pii.redact(x) if k == "vendor_text" and isinstance(x, str) and pii.has_personal_data(x)
+-                    else _screened(x)) for k, x in v.items()}
++        return {k: (pii.screen_free_text(x)[0] if k == "vendor_text" and isinstance(x, str) else _screened(x))
++                for k, x in v.items()}
+     if isinstance(v, list):
+         return [_screened(x) for x in v]
+     return v
+ 
+ 
++_SHA_LOCK = threading.Lock()
++_SHA_CACHE: "OrderedDict[str, str]" = OrderedDict()      # raw-body digest -> request hash; memory only, 64 entries
++
++
+ def request_sha(body: dict) -> str:
+     """The idempotency hash of a request. Personal data is redacted first, so the hash kept in the log never stands for
+-    a card number or an SSN; a body without personal data hashes as before (logs written earlier still replay)."""
+-    return payload_sha256(_screened(body))
++    a card number or an SSN; a body without personal data hashes as before (logs written earlier still replay). The
++    screen runs once per body (AEGIS r10 reliability F2: it ran twice per request, under the service lock); the cache
++    is keyed by a digest of the body, never by the body, and is never written anywhere."""
++    key = hashlib.sha256(canonical(body).encode("utf-8")).hexdigest()
++    with _SHA_LOCK:
++        hit = _SHA_CACHE.get(key)
++        if hit is not None:
++            _SHA_CACHE.move_to_end(key)
++            return hit
++    value = payload_sha256(_screened(body))
++    with _SHA_LOCK:
++        _SHA_CACHE[key] = value
++        while len(_SHA_CACHE) > 64:
++            _SHA_CACHE.popitem(last=False)
++    return value
+ 
+ 
+ class OohService(TenantsMixin, CampaignsMixin, InventoryMixin, PlanningMixin, ContractsMixin):
+diff --git a/services/ooh-py/src/store.py b/services/ooh-py/src/store.py
+index 045b4aa..8d81ac8 100644
+--- a/services/ooh-py/src/store.py
++++ b/services/ooh-py/src/store.py
+@@ -23,6 +23,7 @@ is fsynced to ``pending.line`` before the anchor, and removed after the append.
+ 
+ from __future__ import annotations
+ 
++import errno
+ import hashlib
+ import json
+ import os
+@@ -142,8 +143,8 @@ class RecordLog:
+         except FileNotFoundError:
+             return None
+         except OSError as exc:
+-            raise StoreCorrupt(f"the log cannot be opened ({type(exc).__name__}); refusing to start: it must be a "
+-                               "regular file, not a link") from exc
++            why = "it must be a regular file, not a link" if exc.errno == errno.ELOOP else "inspect the data directory"
++            raise StoreCorrupt(f"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}") from exc
+         try:
+             st = os.fstat(fd)
+             if not stat.S_ISREG(st.st_mode):
+@@ -262,7 +263,7 @@ class RecordLog:
+                 except OSError as exc:
+                     raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
+                 finally:
+-                    os.close(fd)
++                    _close_quietly(fd)    # r10 REL F1: the line is fsynced; a failed close must not lose it
+             self._lines.append(line)
+             return rec
+ 
+diff --git a/services/ooh-py/src/svc_campaigns.py b/services/ooh-py/src/svc_campaigns.py
+index ca114b8..f529198 100644
+--- a/services/ooh-py/src/svc_campaigns.py
++++ b/services/ooh-py/src/svc_campaigns.py
+@@ -61,11 +61,10 @@ def observed(text: Optional[str]) -> Optional[dict]:
+     bounded, marked untrusted (section 52)."""
+     if text is None:
+         return None
+-    s = " ".join("".join(ch if ch.isprintable() else " " for ch in pii.strip_format(text)).split())   # r9 F2
+-    redacted = pii.has_personal_data(s)
+-    if redacted:
+-        s = " ".join(pii.redact(s).split())
+-    return {"untrusted": True, "personal_data_redacted": redacted, "text": s[:OBSERVED_MAX], "truncated": len(s) > OBSERVED_MAX,
++    s, kinds = pii.screen_free_text(text)    # OOH2-PII-1 design change: digit clusters, labelled (ADR 0022)
++    redacted = bool(kinds)
++    return {"untrusted": True, "personal_data_redacted": redacted, "personal_data_kinds": kinds, "text": s[:OBSERVED_MAX],
++            "truncated": len(s) > OBSERVED_MAX,
+             "sha256": hashlib.sha256(s.encode("utf-8", "surrogatepass")).hexdigest()}
+ 
+ 
+@@ -861,7 +860,7 @@ class CampaignsMixin:
+         with self.lock:
+             self._gate()
+             c = self._campaign(tid, cid)
+-            if pii.has_personal_data(body["client_approval_doc_ref"]):     # OOH2-PII-1: refused before any write
++            if pii.free_text_has_personal_data(body["client_approval_doc_ref"]):   # OOH2-PII-1: before any write
+                 raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"), field="client_approval_doc_ref")
+             rk = self.rk("client_approval", cid, body)
+             if self._idem("andre", rk, body):
+diff --git a/services/ooh-py/src/svc_inventory.py b/services/ooh-py/src/svc_inventory.py
+index 9f7ace6..33bf409 100644
+--- a/services/ooh-py/src/svc_inventory.py
++++ b/services/ooh-py/src/svc_inventory.py
+@@ -41,7 +41,7 @@ _FEET = re.compile(r"[0-9]{1,4}(\.[0-9]{1,2})?")
+ _INT = re.compile(r"[1-9][0-9]{0,6}")
+ _MONEY = re.compile(r"(0|[1-9][0-9]{0,11})\.[0-9]{2}")
+ _REF = re.compile(r"[A-Za-z0-9._:-]{1,100}")
+-from pii import has_personal_data as personal_data_in   # noqa: E402  (AEGIS wave 2 F-2, OOH-3/4 F3)
++from pii import free_text_has_personal_data, has_personal_data as personal_data_in   # noqa: E402  (AEGIS wave 2 F-2)
+ 
+ 
+ class PortNotConnected(Exception):
+@@ -70,7 +70,9 @@ def parse_value(kind: str, value: str):
+     """The typed value of an attribute (a string in the body), or raises Invalid. Text is vendor data: untrusted."""
+     def bad():
+         return Invalid(R("ATTRIBUTE_VALUE_INVALID"))
+-    if kind in ("text", "ref") and personal_data_in(value):   # red team OOH-3/4 F10: refs too (dates are not phones)
++    if kind == "text" and free_text_has_personal_data(value):   # OOH2-PII-1: the digit-cluster screen (ADR 0022)
++        raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"))
++    if kind == "ref" and personal_data_in(value):   # red team OOH-3/4 F10: refs too (dates are not phones)
+         raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"))
+     if kind in ("lat", "lon"):
+         if not (_LAT if kind == "lat" else _LON).fullmatch(value):
+diff --git a/services/ooh-py/tests/test_aegis_ooh_final.py b/services/ooh-py/tests/test_aegis_ooh_final.py
+index 18ab1a9..6c0b2c5 100644
+--- a/services/ooh-py/tests/test_aegis_ooh_final.py
++++ b/services/ooh-py/tests/test_aegis_ooh_final.py
+@@ -114,9 +114,10 @@ PERSONAL = ["call 555−123−4567", "call 555-1234", "+52 55 1234 5678", "+44 2
+             "jane@example[.]com", "jane@example(.)com", "jane<at>example<dot>com", "555,123,4567", "555 | 123 | 4567",
+             "555·123·4567", "jane@example。com", "tel:555:123:4567", "JANE@EXAMPLE.COM", "Jane.Doe@Example.Com",
+             "555‎123‎4567", "ref 123456789012"]
+-ORDINARY = ["Digital @ Sunset. Faces west", "Install crew @ Lamar. No access Sundays", "GPS 34.101 -118.3265",
+-            "34.0522, 118.2437", "Open at 6.pm daily", "lit 06:00-24:00", "Flight 2026-11-01 to 2026-11-28",
+-            "ZIP 90028-1234", "1,250,000 weekly impressions", "+15% markup suggested", "14x48 bulletin"]
++# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
++ORDINARY = ["Digital @ Sunset. Faces west", "Install crew @ Lamar. No access Sundays",
++            "Open at 6.pm daily", "lit 06:00-24:00", "Flight 2026-11-01 to 2026-11-28",
++            "1,250,000 weekly impressions", "+15% markup suggested", "14x48 bulletin"]
+ 
+ 
+ @pytest.mark.parametrize("text", PERSONAL)
+@@ -330,7 +331,8 @@ def test_df2_vendor_text_with_an_address_is_redacted(acme):
+     assert vt["personal_data_redacted"] is True and "163" not in vt["text"] and "06:00-24:00" in vt["text"]
+ 
+ 
+-@pytest.mark.parametrize("text", ["$12,500.00 per 4 weeks", "+1 234 567", "GPS 34.0522, -118.2437"])
++# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
++@pytest.mark.parametrize("text", ["$12,500.00 per 4 weeks", "+1 234 567"])
+ def test_df3_df8_ordinary_text_is_accepted(acme, text):
+     assert not pii.has_personal_data(text)
+     acme.ok(_text_attr(acme, f"df3-{abs(hash(text)) % 10 ** 6}", text))
+diff --git a/services/ooh-py/tests/test_aegis_ooh_w234.py b/services/ooh-py/tests/test_aegis_ooh_w234.py
+index 6694517..0f3acf3 100644
+--- a/services/ooh-py/tests/test_aegis_ooh_w234.py
++++ b/services/ooh-py/tests/test_aegis_ooh_w234.py
+@@ -318,7 +318,8 @@ def test_rv_n1_the_remaining_email_and_phone_spellings_are_caught(acme, text):
+     h.refused(r, 422, "ATTRIBUTE_VALUE_PERSONAL_DATA")
+ 
+ 
+-@pytest.mark.parametrize("text", ["Posting 2026-11-01 to 2026-11-30", "Lit 06:00-24:00 daily", "ZIP 90210-1234",
++# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
++@pytest.mark.parametrize("text", ["Posting 2026-11-01 to 2026-11-30", "Lit 06:00-24:00 daily",
+                                   "1,250,000 weekly impressions (vendor-stated)", "I-405 N at Wilshire Blvd, exit 55",
+                                   "12345 Ventura Blvd, Studio City CA 91604"])
+ def test_rv_n3_ordinary_ooh_text_passes_the_screen(acme, text):
+@@ -333,7 +334,7 @@ def test_rv_n3_ordinary_ooh_text_passes_the_screen(acme, text):
+ def test_rv_n3_redaction_keeps_the_case_and_the_flight_dates(acme):
+     h = acme
+     cid = h.campaign()
+-    uid = h.unit("acme", cid, ref="vt-2", text="Flight 2026-11-01..2026-11-30. Call Jane at 213-555-0100.")
++    uid = h.unit("acme", cid, ref="vt-2", text="Flight 2026-11-01 to 2026-11-30. Call Jane at 213-555-0100.")   # "..": one digit cluster now
+     t = h.svc.inventory[uid]["vendor_text"]["text"]
+     assert "2026-11-01" in t and "Flight" in t and "Jane" in t and "0100" not in t
+ 
+diff --git a/services/ooh-py/tests/test_aegis_r10_screen_form.py b/services/ooh-py/tests/test_aegis_r10_screen_form.py
+new file mode 100644
+index 0000000..7e0f59e
+--- /dev/null
++++ b/services/ooh-py/tests/test_aegis_r10_screen_form.py
+@@ -0,0 +1,111 @@
++"""AEGIS round 10 at 0f5fbe3 (security BLOCK F1 residual; source M-1, M-2, L-1..L-3):
++- F1: every screen and the stored vendor text read one form (``pii.screen_form``), so a value redacted in the line
++  is also redacted in the request hash, and a face text attribute that storage would redact is refused: "123  45
++  6789" (two spaces), a tab or a no-break space between the groups;
++- M-1: invisible characters that are not format characters (combining grapheme joiner, variation selectors, Hangul
++  and Mongolian fillers, the blank braille pattern), private-use characters and a combining mark on a digit no
++  longer hide a card or an SSN; letters keep their marks;
++- consistency: for every probe text, the stored vendor text is redacted exactly when the screen finds personal data.
++Test values only: public test card numbers and 123-45-6789."""
++from __future__ import annotations
++
++import json
++
++import pytest
++
++import pii
++import svc_campaigns as sc
++from helpers import rid
++from ledger import payload_sha256
++from test_aegis_r9_pii_hardening import _unit_body
++from test_ooh2_pii1_card_ssn import _absent, h  # noqa: F401  (h is a fixture)
++
++SPACED = ["123  45  6789", "123\t45\t6789", "123 45 6789", "4111  1111  1111  1111", "4111 1111 1111 1111"]
++HIDDEN = ["4111 11͏11 1111 1111", "4111 11️11 1111 1111", "4111 1111 11ㅤ11 1111",
++          "4111 1111 11⠀11 1111", "4111 1111 11឵11 1111", "4111 1111 11\U000e010011 1111",
++          "4111 1111 11᠋11 1111", "4111 1111 11ᅟ11 1111", "4111 1111 1111 1111",
++          "4111 1111 11̃11 1111", "123-4͏5-6789", "123-4ㅤ5-6789"]
++
++
++@pytest.mark.parametrize("secret", SPACED + HIDDEN)
++def test_r10_vendor_text_is_redacted_and_the_hash_never_holds_it(h, secret):
++    cid, body = _unit_body(h, f"contact {secret} now")
++    r = h.post(f"/tenants/acme/campaigns/{cid}/inventory", body)
++    assert r.status_code == 201, r.text
++    assert r.json()["vendor_text"]["personal_data_redacted"] is True, r.json()["vendor_text"]
++    line = json.loads(h.svc.log.raw_lines(len(h.svc.log) - 1)[0])
++    assert line["data"]["request_sha"] != payload_sha256(body)              # never the hash of the clear body
++    _absent(h, pii.screen_form(secret))
++
++
++@pytest.mark.parametrize("secret", SPACED + HIDDEN)
++def test_r10_face_text_attribute_is_refused(h, secret):
++    fid = h.face("lamar", "face-r10")
++    src = h.source("lamar")
++    f = h.ok(h.get(f"/faces/{fid}"))
++    lines, events = len(h.svc.log), len(h.ledger.events)
++    r = h.post(f"/faces/{fid}/attributes", {"request_id": rid(), "expected_version": f["version"],
++                                            "attribute": "location_description", "value": f"billing {secret}",
++                                            "source_id": src})
++    assert r.status_code == 422 and r.json()["detail"] == "ATTRIBUTE_VALUE_PERSONAL_DATA", r.text
++    assert len(h.svc.log) == lines and len(h.ledger.events) == events
++
++
++PROBES = SPACED + HIDDEN + ["faces west 14x48", "123 - 45 - 6789", "ref 2026-10-18", "नमस्ते 14x48",
++                            "call 310 555 1234", "x" * 50 + " 4111 1111 1111 1111", "café open 6am"]
++
++
++@pytest.mark.parametrize("text", PROBES)
++def test_r10_storage_redacts_exactly_when_the_screen_finds_personal_data(text):
++    assert sc.observed(text)["personal_data_redacted"] is pii.has_personal_data(text)
++
++
++def test_r10_marks_on_letters_are_kept():
++    assert pii.screen_form("नमस्ते") == "नमस्ते"
++    assert pii.screen_form("café") == "café"                       # NFKC composes it
++    assert pii.screen_form("4̃ 1") == "4 1"                              # a mark on a digit is dropped
++
++
++def test_r10_screen_form_is_idempotent():
++    for t in PROBES:
++        assert pii.screen_form(pii.screen_form(t)) == pii.screen_form(t)
++
++
++# ---------------------------------------------------------------- r10 data D10-H1 / D10-M1: separators and hidden characters
++
++D10 = ['123 - 45 - 6789', '123 – 45 – 6789', 'SSN: 123 - 45 - 6789', '123--45--6789', '123..45..6789', '123 . 45 . 6789', '123,45,6789', 'SSN 123,45,6789', '123|45|6789', '123·45·6789', '123+45+6789', '1̃23-45-6789', '4̃111 1111 1111 1111', '123\u168045\u16806789', '123\ue00045\ue0006789', '123\u037845\u03786789', '123\u206045\u20606789', 'TIN 123 45 6789']
++D10_REFS = ['123--45--6789', '123..45..6789', 'SSN:123-45-6789']
++
++
++@pytest.mark.parametrize("secret", D10)
++def test_r10_d10_vendor_text_is_redacted_and_the_hash_never_holds_it(h, secret):
++    test_r10_vendor_text_is_redacted_and_the_hash_never_holds_it(h, secret)
++    for form in (pii.screen_form(secret), pii.screen_form(secret, " ")):
++        _absent(h, form)
++
++
++@pytest.mark.parametrize("secret", D10)
++def test_r10_d10_face_text_attribute_is_refused(h, secret):
++    test_r10_face_text_attribute_is_refused(h, secret)
++
++
++@pytest.mark.parametrize("secret", D10_REFS)
++def test_r10_d10_client_approval_doc_ref_is_refused(h, secret):
++    ctx = h.to_proposal_sent("acme")
++    lines, events = len(h.svc.log), len(h.ledger.events)
++    r = h.approve(ctx, client_approval_doc_ref=secret)
++    assert r.status_code == 422 and r.json()["detail"] == "ATTRIBUTE_VALUE_PERSONAL_DATA", r.text
++    assert len(h.svc.log) == lines and len(h.ledger.events) == events
++
++
++@pytest.mark.parametrize("secret", D10)
++def test_r10_d10_storage_and_screen_agree(secret):
++    assert sc.observed("x " + secret + " y")["personal_data_redacted"] is pii.has_personal_data(secret) is True
++    assert not any(ch.isdigit() for ch in pii.redact(secret))
++
++
++def test_r10_hidden_characters_rejoin_a_card_and_separate_an_ssn():
++    card = "4111 11" + chr(0xe000) + "11 1111 1111"                       # removed: the group is whole again
++    ssn = "123" + chr(0xe000) + "45" + chr(0xe000) + "6789"               # read as a space: the groups are apart
++    assert pii.has_personal_data(card) and pii.has_personal_data(ssn)
++    assert pii.screen_form(card) == "4111 1111 1111 1111" and pii.screen_form(ssn, " ") == "123 45 6789"
+diff --git a/services/ooh-py/tests/test_aegis_r9_pii_hardening.py b/services/ooh-py/tests/test_aegis_r9_pii_hardening.py
+index 3d38549..a177306 100644
+--- a/services/ooh-py/tests/test_aegis_r9_pii_hardening.py
++++ b/services/ooh-py/tests/test_aegis_r9_pii_hardening.py
+@@ -54,9 +54,10 @@ def test_r9_f1_request_hash_is_over_the_redacted_body(h):
+     kept = line["data"]["request_sha"]
+     assert kept != payload_sha256(body)                                     # never the raw body's hash
+     assert kept == payload_sha256({**body, "vendor_text": pii.redact(body["vendor_text"])})
++    n = len(h.svc.log)
+     again = h.post(f"/tenants/acme/campaigns/{cid}/inventory", body)        # the same request is still a replay
+     assert again.status_code in (200, 201) and again.json()["unit_id"] == r.json()["unit_id"], again.text
+-    assert len(h.svc.log) == len(h.svc.log)
++    assert len(h.svc.log) == n                                              # and appends nothing
+     _absent(h, secret)
+ 
+ 
+@@ -113,8 +114,9 @@ def test_r9_client_approval_doc_ref_ssn_forms_are_refused(h, secret):
+     _absent(h, secret)
+ 
+ 
+-@pytest.mark.parametrize("text", ["v1.2.3 build 2026.10.18", "14x48, 2026-11-01 to 2026-11-30", "Austin 123456789",
+-                                  "routing 021000021", "unit 12 45 678"])
++# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
++@pytest.mark.parametrize("text", ["v1.2.3 build 2026.10.18", "14x48 faces west, 2026-11-01 to 2026-11-30",
++                                  "unit 12 45 678"])
+ def test_r9_ordinary_text_still_passes(h, text):
+     cid, body = _unit_body(h, text)
+     r = h.post(f"/tenants/acme/campaigns/{cid}/inventory", body)
+@@ -159,6 +161,7 @@ def test_r9_rt1_start_refuses_a_fifo_without_blocking(tmp_path):
+     alive, out = _started_or_refused(d)
+     if alive:                                                       # unblock the thread so the run can end
+         os.close(os.open(os.path.join(d, ST.LOG_NAME), os.O_WRONLY | os.O_NONBLOCK))
++    os.unlink(os.path.join(d, ST.LOG_NAME))                         # r10 REL F5: leave no FIFO behind
+     assert not alive, "start-up blocked on a FIFO"
+     assert "not a regular file" in out.get("err", ""), out
+ 
+@@ -171,6 +174,7 @@ def test_r9_rt1_start_refuses_a_symlinked_log(tmp_path):
+     real.write_bytes(open(log.path, "rb").read())
+     d = _data_dir_with(tmp_path, lambda p, t: os.symlink(str(real), p))
+     alive, out = _started_or_refused(d)
++    os.unlink(os.path.join(d, ST.LOG_NAME))
+     assert not alive and "it must be a regular file, not a link" in out.get("err", ""), out
+ 
+ 
+@@ -179,6 +183,7 @@ def test_r9_rt1_start_refuses_a_link_to_a_device_without_reading_it(tmp_path):
+         pytest.skip("no /dev/zero")
+     d = _data_dir_with(tmp_path, lambda p, t: os.symlink("/dev/zero", p))
+     alive, out = _started_or_refused(d)
++    os.unlink(os.path.join(d, ST.LOG_NAME))
+     assert not alive and "err" in out, out
+ 
+ 
+diff --git a/services/ooh-py/tests/test_ooh2_pii1_card_ssn.py b/services/ooh-py/tests/test_ooh2_pii1_card_ssn.py
+index 7801cb3..2eac919 100644
+--- a/services/ooh-py/tests/test_ooh2_pii1_card_ssn.py
++++ b/services/ooh-py/tests/test_ooh2_pii1_card_ssn.py
+@@ -134,16 +134,17 @@ def test_pii1_client_approval_doc_ref_card_or_ssn_is_refused_before_any_write(h,
+ 
+ # ---------------------------------------------------------------- controls: what is not a card or an SSN passes
+ 
+-@pytest.mark.parametrize("ref", ["io-acme-signed-1", "DOC-2026-10-18-001", "po-12345", "4111-1111-1111-1112"])
++# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
++@pytest.mark.parametrize("ref", ["io-acme-signed-1", "DOC-2026-Oct-18", "po-12345"])
+ def test_pii1_ordinary_references_are_accepted(h, ref):
+     ctx = h.to_proposal_sent("acme")
+     r = h.approve(ctx, client_approval_doc_ref=ref)
+     assert r.status_code == 200, r.text
+ 
+ 
++# OOH2-PII-1 digit-cluster rule: GPS, ZIP+4 and the like moved to test_ooh2_pii1_cluster_rule.py
+ @pytest.mark.parametrize("text", ["14x48 faces west, lit 6am-midnight, 2026-11-01 to 2026-11-30",
+-                                  "4111 1111 1111 1112 is not Luhn-valid", "1234 5678 9012 3452 has no card prefix",
+-                                  "permit 123-456-789", "GPS 34.101 -118.3265"])
++                                  "permit 123-45 at 6789 Sunset"])
+ def test_pii1_ordinary_vendor_text_is_not_redacted(h, text):
+     _, r = _unit(h, text)
+     assert r.status_code == 201, r.text
+diff --git a/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py b/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
+new file mode 100644
+index 0000000..e877327
+--- /dev/null
++++ b/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
+@@ -0,0 +1,102 @@
++"""OOH2-PII-1, founder design change (Oct 18 2026): in the three screened free-text fields (unit vendor text, a face
++text attribute, the client approval document reference), after normalising, any cluster of nine or more digits joined
++by characters that are not letters is personal data — whatever the separators are. The card and SSN rules only label
++what was redacted. The request hash uses the vendor text as kept (redacted).
++
++This file pins the rule both ways: every spelling that got through a separator list earlier is caught, and the
++accepted false positives (ordinary text that holds such a cluster) are refused or redacted, so the trade-off is a
++tested, documented property rather than an accident. Test values only."""
++from __future__ import annotations
++
++import json
++
++import pytest
++
++import pii
++import svc_campaigns as sc
++from helpers import rid
++from ledger import payload_sha256
++from test_aegis_r9_pii_hardening import _unit_body
++from test_ooh2_pii1_card_ssn import _absent, h  # noqa: F401  (h is a fixture)
++
++# every separator, grouping and hidden-character spelling seen across rounds 8-10, and some never seen
++CAUGHT = ["123-45-6789", "123 - 45 - 6789", "123--45--6789", "123..45..6789", "123,45,6789", "123|45|6789",
++          "123+45+6789", "123~45~6789", "123 ** 45 ** 6789", "123  45  6789", "123/45/6789", "123:45:6789",
++          "1 2 3 4 5 6 7 8 9", "12-34-56-789", "4111 1111 1111 1111", "4111-1111-1111-1111", "4 1 1 1 1 1 1 1 1 1",
++          "4111 1111 1111 1112", "1234 5678 9012 3452", "021000021", "123456789"]
++# accepted false positives: ordinary text that holds a cluster of nine or more digits with no letter in it
++FALSE_POSITIVES = ["GPS 34.101 -118.3265", "34.0522, 118.2437", "ZIP 90028-1234", "Flight 2026-11-01..2026-11-30",
++                   "routing 021000021", "permit 123-456-789", "DOC-2026-10-18-001"]
++# still accepted: eight digits or fewer between letters
++ACCEPTED = ["Flight 2026-11-01 to 2026-11-30", "lit 06:00-24:00", "1,250,000 weekly impressions", "14x48 bulletin",
++            "$12,500.00 per 4 weeks", "Panels 101 and 205 on Sunset", "12345 Ventura Blvd, Studio City CA 91604"]
++
++
++@pytest.mark.parametrize("text", CAUGHT + FALSE_POSITIVES)
++def test_cluster_free_text_screen_finds_it(text):
++    kept, kinds = pii.screen_free_text(f"note {text} end")
++    assert kinds, text
++    assert sum(ch.isdigit() for ch in kept) < 9 and kept.startswith("note") and kept.endswith("end"), kept
++
++
++@pytest.mark.parametrize("text", ACCEPTED)
++def test_cluster_eight_digits_or_fewer_between_letters_pass(text):
++    assert pii.screen_free_text(text) == (pii.screen_form(text), [])
++
++
++def test_cluster_labels_say_what_was_redacted():
++    assert pii.screen_free_text("a 4111 1111 1111 1111 b")[1] == ["card"]
++    assert pii.screen_free_text("a 123-45-6789 b")[1] == ["ssn"]
++    assert pii.screen_free_text("a 21-34-55-89 0 b")[1] == ["number"]
++    assert pii.screen_free_text("jane@example.com and 4111 1111 1111 1111")[1] == ["card", "email"]
++
++
++@pytest.mark.parametrize("text", CAUGHT + FALSE_POSITIVES)
++def test_cluster_vendor_text_is_redacted_and_hashed_redacted(h, text):
++    cid, body = _unit_body(h, f"contact {text} now")
++    r = h.post(f"/tenants/acme/campaigns/{cid}/inventory", body)
++    assert r.status_code == 201, r.text
++    vt = r.json()["vendor_text"]
++    assert vt["personal_data_redacted"] is True and vt["personal_data_kinds"], vt
++    line = json.loads(h.svc.log.raw_lines(len(h.svc.log) - 1)[0])
++    assert line["data"]["request_sha"] == payload_sha256({**body, "vendor_text": vt["text"]})   # the text as kept
++    assert line["data"]["request_sha"] != payload_sha256(body)
++    _absent(h, text)
++
++
++@pytest.mark.parametrize("text", CAUGHT + FALSE_POSITIVES)
++def test_cluster_face_text_attribute_is_refused(h, text):
++    fid = h.face("lamar", "face-cl")
++    src = h.source("lamar")
++    f = h.ok(h.get(f"/faces/{fid}"))
++    lines, events = len(h.svc.log), len(h.ledger.events)
++    r = h.post(f"/faces/{fid}/attributes", {"request_id": rid(), "expected_version": f["version"],
++                                            "attribute": "location_description", "value": f"note {text}",
++                                            "source_id": src})
++    assert r.status_code == 422 and r.json()["detail"] == "ATTRIBUTE_VALUE_PERSONAL_DATA", r.text
++    assert len(h.svc.log) == lines and len(h.ledger.events) == events
++
++
++@pytest.mark.parametrize("ref", ["123-45-6789", "123--45--6789", "123..45..6789", "4111-1111-1111-1111",
++                                 "DOC-2026-10-18-001", "io-123456789"])
++def test_cluster_client_approval_doc_ref_is_refused(h, ref):
++    ctx = h.to_proposal_sent("acme")
++    lines, events = len(h.svc.log), len(h.ledger.events)
++    r = h.approve(ctx, client_approval_doc_ref=ref)
++    assert r.status_code == 422 and r.json()["detail"] == "ATTRIBUTE_VALUE_PERSONAL_DATA", r.text
++    assert len(h.svc.log) == lines and len(h.ledger.events) == events
++
++
++@pytest.mark.parametrize("text", ACCEPTED)
++def test_cluster_ordinary_text_is_kept_and_hashed_as_kept(h, text):
++    cid, body = _unit_body(h, text)
++    r = h.post(f"/tenants/acme/campaigns/{cid}/inventory", body)
++    assert r.status_code == 201, r.text
++    vt = r.json()["vendor_text"]
++    assert vt["personal_data_redacted"] is False and vt["personal_data_kinds"] == [] and vt["text"] == text, vt
++
++
++def test_cluster_the_ref_attribute_kind_and_campaign_names_keep_the_old_screen():
++    # the founder scoped the rule to the three fields; other screened values keep the e-mail/phone/card/SSN rules
++    assert not pii.has_personal_data("ZIP 90028-1234") and pii.free_text_has_personal_data("ZIP 90028-1234")
++    assert sc.names_a_card("4111-1111-1111-1111") and not sc.names_a_card("021000021")

@@ -1,0 +1,14 @@
+/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.12/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+first               (201, 'ooh-inv-7781d5494c0a72e3cfbf35c7092aaa62e0b5f90b') log 21
+same body retry     (201, 'ooh-inv-7781d5494c0a72e3cfbf35c7092aaa62e0b5f90b') log 21
+other ordinary text (409, 'REQUEST_ID_REUSED') log 21
+other flight        (409, 'REQUEST_ID_REUSED') log 21
+other card, same id (201, 'ooh-inv-7781d5494c0a72e3cfbf35c7092aaa62e0b5f90b') log 21
+literal [redacted]  (201, 'ooh-inv-7781d5494c0a72e3cfbf35c7092aaa62e0b5f90b') log 21
+SSN instead of card (201, 'ooh-inv-7781d5494c0a72e3cfbf35c7092aaa62e0b5f90b') log 21
+restart replays:
+  request_sha equal for card A / card B / literal: True
+clean first         (201, 'ooh-inv-f906ecf8c5789c53d38c9a225ddef8e6faa5bc8b')
+clean retry         (201, 'ooh-inv-f906ecf8c5789c53d38c9a225ddef8e6faa5bc8b')
+clean different     (409, 'REQUEST_ID_REUSED')

@@ -1,0 +1,623 @@
+earlier(omega9/10)                       4111 1111 1111 1111                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111 1111 1111 1111                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111 1111 1111 1111                                          appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111 1111 1111 1111                                          pend file=True leaks=0
+earlier(omega9/10)                       4111 1111 1111 1111                                          disc file=True leaks=0
+earlier(omega9/10)                       4111-1111-1111-1111                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111-1111-1111-1111                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111-1111-1111-1111                                          appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111-1111-1111-1111                                          pend file=True leaks=0
+earlier(omega9/10)                       4111-1111-1111-1111                                          disc file=True leaks=0
+earlier(omega9/10)                       4111.1111.1111.1111                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111.1111.1111.1111                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111.1111.1111.1111                                          appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111.1111.1111.1111                                          pend file=True leaks=0
+earlier(omega9/10)                       4111.1111.1111.1111                                          disc file=True leaks=0
+earlier(omega9/10)                       4111_1111_1111_1111                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111_1111_1111_1111                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111_1111_1111_1111                                          appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111_1111_1111_1111                                          pend file=True leaks=0
+earlier(omega9/10)                       4111_1111_1111_1111                                          disc file=True leaks=0
+earlier(omega9/10)                       4111111111111111                                             unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111111111111111                                             face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111111111111111                                             appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111111111111111                                             pend file=True leaks=0
+earlier(omega9/10)                       4111111111111111                                             disc file=True leaks=0
+earlier(omega9/10)                       5555 5555 5555 4444                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       5555 5555 5555 4444                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       5555 5555 5555 4444                                          appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       5555 5555 5555 4444                                          pend file=True leaks=0
+earlier(omega9/10)                       5555 5555 5555 4444                                          disc file=True leaks=0
+earlier(omega9/10)                       2223 0031 2200 3222                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       2223 0031 2200 3222                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       2223 0031 2200 3222                                          appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       2223 0031 2200 3222                                          pend file=True leaks=0
+earlier(omega9/10)                       2223 0031 2200 3222                                          disc file=True leaks=0
+earlier(omega9/10)                       3782 822463 10005                                            unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       3782 822463 10005                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       3782 822463 10005                                            appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       3782 822463 10005                                            pend file=True leaks=0
+earlier(omega9/10)                       3782 822463 10005                                            disc file=True leaks=0
+earlier(omega9/10)                       6011 1111 1111 1117                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       6011 1111 1111 1117                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       6011 1111 1111 1117                                          appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       6011 1111 1111 1117                                          pend file=True leaks=0
+earlier(omega9/10)                       6011 1111 1111 1117                                          disc file=True leaks=0
+earlier(omega9/10)                       4111/1111/1111/1111                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111/1111/1111/1111                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111/1111/1111/1111                                          appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111/1111/1111/1111                                          pend file=True leaks=0
+earlier(omega9/10)                       4111/1111/1111/1111                                          disc file=True leaks=0
+earlier(omega9/10)                       4111 \u2013 1111 \u2013 1111 \u2013 1111                     unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111 \u2013 1111 \u2013 1111 \u2013 1111                     face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111 \u2013 1111 \u2013 1111 \u2013 1111                     appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111 \u2013 1111 \u2013 1111 \u2013 1111                     pend file=True leaks=0
+earlier(omega9/10)                       4111 \u2013 1111 \u2013 1111 \u2013 1111                     disc file=True leaks=0
+earlier(omega9/10)                       \uff14\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       \uff14\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       \uff14\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       \uff14\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 pend file=True leaks=0
+earlier(omega9/10)                       \uff14\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 \uff11\uff11\uff11\uff11 disc file=True leaks=0
+earlier(omega9/10)                       4111\u200b1111\u200b1111\u200b1111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111\u200b1111\u200b1111\u200b1111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111\u200b1111\u200b1111\u200b1111                           appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111\u200b1111\u200b1111\u200b1111                           pend file=True leaks=0
+earlier(omega9/10)                       4111\u200b1111\u200b1111\u200b1111                           disc file=True leaks=0
+earlier(omega9/10)                       4111\xa01111\xa01111\xa01111                                 unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111\xa01111\xa01111\xa01111                                 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111\xa01111\xa01111\xa01111                                 appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111\xa01111\xa01111\xa01111                                 pend file=True leaks=0
+earlier(omega9/10)                       4111\xa01111\xa01111\xa01111                                 disc file=True leaks=0
+earlier(omega9/10)                       4242-4242-4242-4242-1228                                     unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4242-4242-4242-4242-1228                                     face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4242-4242-4242-4242-1228                                     appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4242-4242-4242-4242-1228                                     pend file=True leaks=0
+earlier(omega9/10)                       4242-4242-4242-4242-1228                                     disc file=True leaks=0
+earlier(omega9/10)                       123-45-6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       123-45-6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123-45-6789                                                  appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123-45-6789                                                  pend file=True leaks=0
+earlier(omega9/10)                       123-45-6789                                                  disc file=True leaks=0
+earlier(omega9/10)                       123\u201045\u20106789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       123\u201045\u20106789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123\u201045\u20106789                                        appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123\u201045\u20106789                                        pend file=True leaks=0
+earlier(omega9/10)                       123\u201045\u20106789                                        disc file=True leaks=0
+earlier(omega9/10)                       123\u201345\u20136789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       123\u201345\u20136789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123\u201345\u20136789                                        appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123\u201345\u20136789                                        pend file=True leaks=0
+earlier(omega9/10)                       123\u201345\u20136789                                        disc file=True leaks=0
+earlier(omega9/10)                       SSN 123456789                                                unit 201 red=True kinds=['number'] kept='faces west, contact SSN [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       SSN 123456789                                                face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       SSN 123456789                                                appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       SSN 123456789                                                pend file=True leaks=0
+earlier(omega9/10)                       SSN 123456789                                                disc file=True leaks=0
+earlier(omega9/10)                       SSN: 123 45 6789                                             unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN: [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       SSN: 123 45 6789                                             face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       SSN: 123 45 6789                                             appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       SSN: 123 45 6789                                             pend file=True leaks=0
+earlier(omega9/10)                       SSN: 123 45 6789                                             disc file=True leaks=0
+earlier(omega9/10)                       social security number: 123 45 6789                          unit 201 red=True kinds=['ssn'] kept='faces west, contact social security number: [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       social security number: 123 45 6789                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       social security number: 123 45 6789                          appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       social security number: 123 45 6789                          pend file=True leaks=0
+earlier(omega9/10)                       social security number: 123 45 6789                          disc file=True leaks=0
+earlier(omega9/10)                       tax id 123-45-6789                                           unit 201 red=True kinds=['ssn'] kept='faces west, contact tax id [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       tax id 123-45-6789                                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       tax id 123-45-6789                                           appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       tax id 123-45-6789                                           pend file=True leaks=0
+earlier(omega9/10)                       tax id 123-45-6789                                           disc file=True leaks=0
+earlier(omega9/10)                       ITIN 912-70-1234                                             unit 201 red=True kinds=['ssn'] kept='faces west, contact ITIN [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       ITIN 912-70-1234                                             face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       ITIN 912-70-1234                                             appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       ITIN 912-70-1234                                             pend file=True leaks=0
+earlier(omega9/10)                       ITIN 912-70-1234                                             disc file=True leaks=0
+D9-H1                                    \u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1                                    \u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    \u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1                                    \u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 pend file=True leaks=0
+D9-H1                                    \u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 disc file=True leaks=0
+earlier(omega9/10)                       \u06f4\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1 unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       \u06f4\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       \u06f4\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1 appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       \u06f4\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1 pend file=True leaks=0
+earlier(omega9/10)                       \u06f4\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1\u06f1 disc file=True leaks=0
+D9-H1                                    \u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1                                    \u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    \u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1                                    \u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 pend file=True leaks=0
+D9-H1                                    \u096a\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 \u0967\u0967\u0967\u0967 disc file=True leaks=0
+D9-H1                                    \u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096a\u096a\u096a\u096a unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1                                    \u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096a\u096a\u096a\u096a face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    \u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096a\u096a\u096a\u096a appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1                                    \u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096a\u096a\u096a\u096a pend file=True leaks=0
+D9-H1                                    \u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096b\u096b\u096b\u096b-\u096a\u096a\u096a\u096a disc file=True leaks=0
+D9-H1                                    123.45.6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1                                    123.45.6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    123.45.6789                                                  appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    123.45.6789                                                  pend file=True leaks=0
+D9-H1                                    123.45.6789                                                  disc file=True leaks=0
+D9-H1                                    123_45_6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1                                    123_45_6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    123_45_6789                                                  appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    123_45_6789                                                  pend file=True leaks=0
+D9-H1                                    123_45_6789                                                  disc file=True leaks=0
+D9-H1                                    123/45/6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1                                    123/45/6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    123/45/6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1                                    123/45/6789                                                  pend file=True leaks=0
+D9-H1                                    123/45/6789                                                  disc file=True leaks=0
+earlier(omega9/10)                       123 45 6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       123 45 6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123 45 6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123 45 6789                                                  pend file=True leaks=0
+earlier(omega9/10)                       123 45 6789                                                  disc file=True leaks=0
+was-non-detection                        123456789                                                    unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+was-non-detection                        123456789                                                    face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+was-non-detection                        123456789                                                    appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+was-non-detection                        123456789                                                    pend file=True leaks=0
+was-non-detection                        123456789                                                    disc file=True leaks=0
+earlier(omega9/10)                       \u0661\u0662\u0663-\u0664\u0665-\u0666\u0667\u0668\u0669     unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       \u0661\u0662\u0663-\u0664\u0665-\u0666\u0667\u0668\u0669     face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       \u0661\u0662\u0663-\u0664\u0665-\u0666\u0667\u0668\u0669     appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       \u0661\u0662\u0663-\u0664\u0665-\u0666\u0667\u0668\u0669     pend file=True leaks=0
+earlier(omega9/10)                       \u0661\u0662\u0663-\u0664\u0665-\u0666\u0667\u0668\u0669     disc file=True leaks=0
+earlier(omega9/10)                       SSN \u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669   unit 201 red=True kinds=['number'] kept='faces west, contact SSN [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       SSN \u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669   face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       SSN \u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669   appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       SSN \u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669   pend file=True leaks=0
+earlier(omega9/10)                       SSN \u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669   disc file=True leaks=0
+D9-H1                                    \u0967\u0968\u0969.\u096a\u096b.\u096c\u096d\u096e\u096f     unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1                                    \u0967\u0968\u0969.\u096a\u096b.\u096c\u096d\u096e\u096f     face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1                                    \u0967\u0968\u0969.\u096a\u096b.\u096c\u096d\u096e\u096f     appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1                                    \u0967\u0968\u0969.\u096a\u096b.\u096c\u096d\u096e\u096f     pend file=True leaks=0
+D9-H1                                    \u0967\u0968\u0969.\u096a\u096b.\u096c\u096d\u096e\u096f     disc file=True leaks=0
+earlier(omega9/10)                       123:45:6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       123:45:6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123:45:6789                                                  appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       123:45:6789                                                  pend file=True leaks=0
+earlier(omega9/10)                       123:45:6789                                                  disc file=True leaks=0
+earlier(omega9/10)                       4111\u01311111\u01311111\u01311111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+earlier(omega9/10)                       4111\u01311111\u01311111\u01311111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111\u01311111\u01311111\u01311111                           appr 422 schema nothing_written=True control=200 leaks=0
+earlier(omega9/10)                       4111\u01311111\u01311111\u01311111                           pend file=True leaks=0
+earlier(omega9/10)                       4111\u01311111\u01311111\u01311111                           disc file=True leaks=0
+D10-H1                                   123 - 45 - 6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123 - 45 - 6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123 - 45 - 6789                                              appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   123 - 45 - 6789                                              pend file=True leaks=0
+D10-H1                                   123 - 45 - 6789                                              disc file=True leaks=0
+D10-H1                                   123 \u2013 45 \u2013 6789                                    unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123 \u2013 45 \u2013 6789                                    face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123 \u2013 45 \u2013 6789                                    appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   123 \u2013 45 \u2013 6789                                    pend file=True leaks=0
+D10-H1                                   123 \u2013 45 \u2013 6789                                    disc file=True leaks=0
+D10-H1                                   123--45--6789                                                unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123--45--6789                                                face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123--45--6789                                                appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123--45--6789                                                pend file=True leaks=0
+D10-H1                                   123--45--6789                                                disc file=True leaks=0
+D10-H1                                   123,45,6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123,45,6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123,45,6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   123,45,6789                                                  pend file=True leaks=0
+D10-H1                                   123,45,6789                                                  disc file=True leaks=0
+D10-H1                                   123|45|6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123|45|6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123|45|6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   123|45|6789                                                  pend file=True leaks=0
+D10-H1                                   123|45|6789                                                  disc file=True leaks=0
+D10-H1                                   123\xb745\xb76789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123\xb745\xb76789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123\xb745\xb76789                                            appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   123\xb745\xb76789                                            pend file=True leaks=0
+D10-H1                                   123\xb745\xb76789                                            disc file=True leaks=0
+D10-H1                                   123 . 45 . 6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123 . 45 . 6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123 . 45 . 6789                                              appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   123 . 45 . 6789                                              pend file=True leaks=0
+D10-H1                                   123 . 45 . 6789                                              disc file=True leaks=0
+D10-H1                                   123+45+6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123+45+6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123+45+6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   123+45+6789                                                  pend file=True leaks=0
+D10-H1                                   123+45+6789                                                  disc file=True leaks=0
+D10-H1                                   SSN: 123 - 45 - 6789                                         unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN: [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   SSN: 123 - 45 - 6789                                         face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   SSN: 123 - 45 - 6789                                         appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   SSN: 123 - 45 - 6789                                         pend file=True leaks=0
+D10-H1                                   SSN: 123 - 45 - 6789                                         disc file=True leaks=0
+D10-H1                                   SSN 123,45,6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   SSN 123,45,6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   SSN 123,45,6789                                              appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   SSN 123,45,6789                                              pend file=True leaks=0
+D10-H1                                   SSN 123,45,6789                                              disc file=True leaks=0
+D10-H1                                   SSN:123--45--6789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN:[redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   SSN:123--45--6789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   SSN:123--45--6789                                            appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   SSN:123--45--6789                                            pend file=True leaks=0
+D10-H1                                   SSN:123--45--6789                                            disc file=True leaks=0
+D10-H1                                   123..45..6789                                                unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   123..45..6789                                                face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123..45..6789                                                appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   123..45..6789                                                pend file=True leaks=0
+D10-H1                                   123..45..6789                                                disc file=True leaks=0
+D10-H1                                   1\u030323-45-6789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   1\u030323-45-6789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   1\u030323-45-6789                                            appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   1\u030323-45-6789                                            pend file=True leaks=0
+D10-H1                                   1\u030323-45-6789                                            disc file=True leaks=0
+D10-H1                                   4\u0303111 1111 1111 1111                                    unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-H1                                   4\u0303111 1111 1111 1111                                    face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-H1                                   4\u0303111 1111 1111 1111                                    appr 422 schema nothing_written=True control=200 leaks=0
+D10-H1                                   4\u0303111 1111 1111 1111                                    pend file=True leaks=0
+D10-H1                                   4\u0303111 1111 1111 1111                                    disc file=True leaks=0
+D10-M1                                   123  45  6789                                                unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-M1                                   123  45  6789                                                face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-M1                                   123  45  6789                                                appr 422 schema nothing_written=True control=200 leaks=0
+D10-M1                                   123  45  6789                                                pend file=True leaks=0
+D10-M1                                   123  45  6789                                                disc file=True leaks=0
+D10-M1                                   123\u168045\u16806789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-M1                                   123\u168045\u16806789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-M1                                   123\u168045\u16806789                                        appr 422 schema nothing_written=True control=200 leaks=0
+D10-M1                                   123\u168045\u16806789                                        pend file=True leaks=0
+D10-M1                                   123\u168045\u16806789                                        disc file=True leaks=0
+D10-M1                                   123\ue00045\ue0006789                                        unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-M1                                   123\ue00045\ue0006789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-M1                                   123\ue00045\ue0006789                                        appr 422 schema nothing_written=True control=200 leaks=0
+D10-M1                                   123\ue00045\ue0006789                                        pend file=True leaks=0
+D10-M1                                   123\ue00045\ue0006789                                        disc file=True leaks=0
+D10-M1                                   123\u037845\u03786789                                        unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+D10-M1                                   123\u037845\u03786789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D10-M1                                   123\u037845\u03786789                                        appr 422 schema nothing_written=True control=200 leaks=0
+D10-M1                                   123\u037845\u03786789                                        pend file=True leaks=0
+D10-M1                                   123\u037845\u03786789                                        disc file=True leaks=0
+D9-H1-keyword                            SSN 123.45.6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1-keyword                            SSN 123.45.6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            SSN 123.45.6789                                              appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1-keyword                            SSN 123.45.6789                                              pend file=True leaks=0
+D9-H1-keyword                            SSN 123.45.6789                                              disc file=True leaks=0
+D9-H1-keyword                            SSN:123.45.6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN:[redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1-keyword                            SSN:123.45.6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            SSN:123.45.6789                                              appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            SSN:123.45.6789                                              pend file=True leaks=0
+D9-H1-keyword                            SSN:123.45.6789                                              disc file=True leaks=0
+D9-H1-keyword                            tax id 123_45_6789                                           unit 201 red=True kinds=['ssn'] kept='faces west, contact tax id [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1-keyword                            tax id 123_45_6789                                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            tax id 123_45_6789                                           appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1-keyword                            tax id 123_45_6789                                           pend file=True leaks=0
+D9-H1-keyword                            tax id 123_45_6789                                           disc file=True leaks=0
+D9-H1-keyword                            ITIN:912.70.1234                                             unit 201 red=True kinds=['ssn'] kept='faces west, contact ITIN:[redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1-keyword                            ITIN:912.70.1234                                             face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            ITIN:912.70.1234                                             appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            ITIN:912.70.1234                                             pend file=True leaks=0
+D9-H1-keyword                            ITIN:912.70.1234                                             disc file=True leaks=0
+D9-H1-keyword                            SSN 123/45/6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1-keyword                            SSN 123/45/6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            SSN 123/45/6789                                              appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1-keyword                            SSN 123/45/6789                                              pend file=True leaks=0
+D9-H1-keyword                            SSN 123/45/6789                                              disc file=True leaks=0
+D9-H1-keyword                            tax id: 123.45.6789                                          unit 201 red=True kinds=['ssn'] kept='faces west, contact tax id: [redacted] for access' reqsha=kept:True raw:False leaks=0
+D9-H1-keyword                            tax id: 123.45.6789                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+D9-H1-keyword                            tax id: 123.45.6789                                          appr 422 schema nothing_written=True control=200 leaks=0
+D9-H1-keyword                            tax id: 123.45.6789                                          pend file=True leaks=0
+D9-H1-keyword                            tax id: 123.45.6789                                          disc file=True leaks=0
+new-cluster                              123 456 789                                                  unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              123 456 789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123 456 789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              123 456 789                                                  pend file=True leaks=0
+new-cluster                              123 456 789                                                  disc file=True leaks=0
+new-cluster                              123-456-789                                                  unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              123-456-789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123-456-789                                                  appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123-456-789                                                  pend file=True leaks=0
+new-cluster                              123-456-789                                                  disc file=True leaks=0
+new-cluster                              1234 56789                                                   unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              1234 56789                                                   face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              1234 56789                                                   appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              1234 56789                                                   pend file=True leaks=0
+new-cluster                              1234 56789                                                   disc file=True leaks=0
+new-cluster                              12345 6789                                                   unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              12345 6789                                                   face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              12345 6789                                                   appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              12345 6789                                                   pend file=True leaks=0
+new-cluster                              12345 6789                                                   disc file=True leaks=0
+new-cluster                              SSN 123 456 789                                              unit 201 red=True kinds=['number'] kept='faces west, contact SSN [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              SSN 123 456 789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              SSN 123 456 789                                              appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              SSN 123 456 789                                              pend file=True leaks=0
+new-cluster                              SSN 123 456 789                                              disc file=True leaks=0
+new-cluster                              SSN#123-45-6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact SSN#[redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              SSN#123-45-6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              SSN#123-45-6789                                              appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              SSN#123-45-6789                                              pend file=True leaks=0
+new-cluster                              SSN#123-45-6789                                              disc file=True leaks=0
+new-cluster                              (123) 45-6789                                                unit 201 red=True kinds=['ssn'] kept='faces west, contact ([redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              (123) 45-6789                                                face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              (123) 45-6789                                                appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              (123) 45-6789                                                pend file=True leaks=0
+new-cluster                              (123) 45-6789                                                disc file=True leaks=0
+new-cluster                              123*45*6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              123*45*6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123*45*6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              123*45*6789                                                  pend file=True leaks=0
+new-cluster                              123*45*6789                                                  disc file=True leaks=0
+new-cluster                              123#45#6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              123#45#6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123#45#6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              123#45#6789                                                  pend file=True leaks=0
+new-cluster                              123#45#6789                                                  disc file=True leaks=0
+new-cluster                              123~45~6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              123~45~6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123~45~6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              123~45~6789                                                  pend file=True leaks=0
+new-cluster                              123~45~6789                                                  disc file=True leaks=0
+new-cluster                              123'45'6789                                                  unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              123'45'6789                                                  face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123'45'6789                                                  appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              123'45'6789                                                  pend file=True leaks=0
+new-cluster                              123'45'6789                                                  disc file=True leaks=0
+new-cluster                              123%2045%206789                                              unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cluster                              123%2045%206789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cluster                              123%2045%206789                                              appr 422 schema nothing_written=True control=200 leaks=0
+new-cluster                              123%2045%206789                                              pend file=True leaks=0
+new-cluster                              123%2045%206789                                              disc file=True leaks=0
+new-wide-sep                             123 -/- 45 -/- 6789                                          unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             123 -/- 45 -/- 6789                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             123 -/- 45 -/- 6789                                          appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             123 -/- 45 -/- 6789                                          pend file=True leaks=0
+new-wide-sep                             123 -/- 45 -/- 6789                                          disc file=True leaks=0
+new-wide-sep                             4111  --  1111  --  1111  --  1111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             4111  --  1111  --  1111  --  1111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             4111  --  1111  --  1111  --  1111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             4111  --  1111  --  1111  --  1111                           pend file=True leaks=0
+new-wide-sep                             4111  --  1111  --  1111  --  1111                           disc file=True leaks=0
+new-wide-sep                             123 ... 45 ... 6789                                          unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             123 ... 45 ... 6789                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             123 ... 45 ... 6789                                          appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             123 ... 45 ... 6789                                          pend file=True leaks=0
+new-wide-sep                             123 ... 45 ... 6789                                          disc file=True leaks=0
+new-wide-sep                             123 / 45 / 6789                                              unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             123 / 45 / 6789                                              face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             123 / 45 / 6789                                              appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             123 / 45 / 6789                                              pend file=True leaks=0
+new-wide-sep                             123 / 45 / 6789                                              disc file=True leaks=0
+new-wide-sep                             123\n45\n6789                                                unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             123\n45\n6789                                                face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             123\n45\n6789                                                appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             123\n45\n6789                                                pend file=True leaks=0
+new-wide-sep                             123\n45\n6789                                                disc file=True leaks=0
+new-wide-sep                             123\t45\t6789                                                unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             123\t45\t6789                                                face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             123\t45\t6789                                                appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             123\t45\t6789                                                pend file=True leaks=0
+new-wide-sep                             123\t45\t6789                                                disc file=True leaks=0
+new-wide-sep                             4111\n1111\n1111\n1111                                       unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             4111\n1111\n1111\n1111                                       face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             4111\n1111\n1111\n1111                                       appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             4111\n1111\n1111\n1111                                       pend file=True leaks=0
+new-wide-sep                             4111\n1111\n1111\n1111                                       disc file=True leaks=0
+new-wide-sep                             123\r\n45\r\n6789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-wide-sep                             123\r\n45\r\n6789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-wide-sep                             123\r\n45\r\n6789                                            appr 422 schema nothing_written=True control=200 leaks=0
+new-wide-sep                             123\r\n45\r\n6789                                            pend file=True leaks=0
+new-wide-sep                             123\r\n45\r\n6789                                            disc file=True leaks=0
+new-unicode-space                        123\xa045\xa06789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-unicode-space                        123\xa045\xa06789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-unicode-space                        123\xa045\xa06789                                            appr 422 schema nothing_written=True control=200 leaks=0
+new-unicode-space                        123\xa045\xa06789                                            pend file=True leaks=0
+new-unicode-space                        123\xa045\xa06789                                            disc file=True leaks=0
+new-unicode-space                        123\u200745\u20076789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-unicode-space                        123\u200745\u20076789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-unicode-space                        123\u200745\u20076789                                        appr 422 schema nothing_written=True control=200 leaks=0
+new-unicode-space                        123\u200745\u20076789                                        pend file=True leaks=0
+new-unicode-space                        123\u200745\u20076789                                        disc file=True leaks=0
+new-unicode-space                        123\u300045\u30006789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-unicode-space                        123\u300045\u30006789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-unicode-space                        123\u300045\u30006789                                        appr 422 schema nothing_written=True control=200 leaks=0
+new-unicode-space                        123\u300045\u30006789                                        pend file=True leaks=0
+new-unicode-space                        123\u300045\u30006789                                        disc file=True leaks=0
+new-unicode-space                        4111\u202f1111\u202f1111\u202f1111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-unicode-space                        4111\u202f1111\u202f1111\u202f1111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-unicode-space                        4111\u202f1111\u202f1111\u202f1111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-unicode-space                        4111\u202f1111\u202f1111\u202f1111                           pend file=True leaks=0
+new-unicode-space                        4111\u202f1111\u202f1111\u202f1111                           disc file=True leaks=0
+new-digit-forms                          \uff11\uff12\uff13\uff0d\uff14\uff15\uff0d\uff16\uff17\uff18\uff19 unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-digit-forms                          \uff11\uff12\uff13\uff0d\uff14\uff15\uff0d\uff16\uff17\uff18\uff19 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-digit-forms                          \uff11\uff12\uff13\uff0d\uff14\uff15\uff0d\uff16\uff17\uff18\uff19 appr 422 schema nothing_written=True control=200 leaks=0
+new-digit-forms                          \uff11\uff12\uff13\uff0d\uff14\uff15\uff0d\uff16\uff17\uff18\uff19 pend file=True leaks=0
+new-digit-forms                          \uff11\uff12\uff13\uff0d\uff14\uff15\uff0d\uff16\uff17\uff18\uff19 disc file=True leaks=0
+new-digit-forms                          \xb9\xb2\xb3-\u2074\u2075-\u2076\u2077\u2078\u2079           unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-digit-forms                          \xb9\xb2\xb3-\u2074\u2075-\u2076\u2077\u2078\u2079           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-digit-forms                          \xb9\xb2\xb3-\u2074\u2075-\u2076\u2077\u2078\u2079           appr 422 schema nothing_written=True control=200 leaks=0
+new-digit-forms                          \xb9\xb2\xb3-\u2074\u2075-\u2076\u2077\u2078\u2079           pend file=True leaks=0
+new-digit-forms                          \xb9\xb2\xb3-\u2074\u2075-\u2076\u2077\u2078\u2079           disc file=True leaks=0
+new-digit-forms                          \U0001d7cf\U0001d7d0\U0001d7d1-\U0001d7d2\U0001d7d3-\U0001d7d4\U0001d7d5\U0001d7d6\U0001d7d7 unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-digit-forms                          \U0001d7cf\U0001d7d0\U0001d7d1-\U0001d7d2\U0001d7d3-\U0001d7d4\U0001d7d5\U0001d7d6\U0001d7d7 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-digit-forms                          \U0001d7cf\U0001d7d0\U0001d7d1-\U0001d7d2\U0001d7d3-\U0001d7d4\U0001d7d5\U0001d7d6\U0001d7d7 appr 422 schema nothing_written=True control=200 leaks=0
+new-digit-forms                          \U0001d7cf\U0001d7d0\U0001d7d1-\U0001d7d2\U0001d7d3-\U0001d7d4\U0001d7d5\U0001d7d6\U0001d7d7 pend file=True leaks=0
+new-digit-forms                          \U0001d7cf\U0001d7d0\U0001d7d1-\U0001d7d2\U0001d7d3-\U0001d7d4\U0001d7d5\U0001d7d6\U0001d7d7 disc file=True leaks=0
+new-digit-forms                          \u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd     unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-digit-forms                          \u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd     face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-digit-forms                          \u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd     appr 422 schema nothing_written=True control=200 leaks=0
+new-digit-forms                          \u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd     pend file=True leaks=0
+new-digit-forms                          \u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd     disc file=True leaks=0
+new-digit-forms                          1\u20e32\u20e33\u20e3-4\u20e35\u20e3-6\u20e37\u20e38\u20e39\u20e3 unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-digit-forms                          1\u20e32\u20e33\u20e3-4\u20e35\u20e3-6\u20e37\u20e38\u20e39\u20e3 face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-digit-forms                          1\u20e32\u20e33\u20e3-4\u20e35\u20e3-6\u20e37\u20e38\u20e39\u20e3 appr 422 schema nothing_written=True control=200 leaks=0
+new-digit-forms                          1\u20e32\u20e33\u20e3-4\u20e35\u20e3-6\u20e37\u20e38\u20e39\u20e3 pend file=True leaks=0
+new-digit-forms                          1\u20e32\u20e33\u20e3-4\u20e35\u20e3-6\u20e37\u20e38\u20e39\u20e3 disc file=True leaks=0
+new-digit-forms                          \u0e51\u0e52\u0e53-\u0e54\u0e55-\u0e56\u0e57\u0e58\u0e59     unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-digit-forms                          \u0e51\u0e52\u0e53-\u0e54\u0e55-\u0e56\u0e57\u0e58\u0e59     face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-digit-forms                          \u0e51\u0e52\u0e53-\u0e54\u0e55-\u0e56\u0e57\u0e58\u0e59     appr 422 schema nothing_written=True control=200 leaks=0
+new-digit-forms                          \u0e51\u0e52\u0e53-\u0e54\u0e55-\u0e56\u0e57\u0e58\u0e59     pend file=True leaks=0
+new-digit-forms                          \u0e51\u0e52\u0e53-\u0e54\u0e55-\u0e56\u0e57\u0e58\u0e59     disc file=True leaks=0
+new-hidden                               123\u200b-45-6789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-hidden                               123\u200b-45-6789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-hidden                               123\u200b-45-6789                                            appr 422 schema nothing_written=True control=200 leaks=0
+new-hidden                               123\u200b-45-6789                                            pend file=True leaks=0
+new-hidden                               123\u200b-45-6789                                            disc file=True leaks=0
+new-hidden                               123\u2060 45 \u20606789                                      unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-hidden                               123\u2060 45 \u20606789                                      face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-hidden                               123\u2060 45 \u20606789                                      appr 422 schema nothing_written=True control=200 leaks=0
+new-hidden                               123\u2060 45 \u20606789                                      pend file=True leaks=0
+new-hidden                               123\u2060 45 \u20606789                                      disc file=True leaks=0
+new-hidden                               1\ufe0f23-45-6789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-hidden                               1\ufe0f23-45-6789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-hidden                               1\ufe0f23-45-6789                                            appr 422 schema nothing_written=True control=200 leaks=0
+new-hidden                               1\ufe0f23-45-6789                                            pend file=True leaks=0
+new-hidden                               1\ufe0f23-45-6789                                            disc file=True leaks=0
+new-hidden                               123\u3164 45 6789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-hidden                               123\u3164 45 6789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-hidden                               123\u3164 45 6789                                            appr 422 schema nothing_written=True control=200 leaks=0
+new-hidden                               123\u3164 45 6789                                            pend file=True leaks=0
+new-hidden                               123\u3164 45 6789                                            disc file=True leaks=0
+new-hidden                               123-\u030345-6789                                            unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-hidden                               123-\u030345-6789                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-hidden                               123-\u030345-6789                                            appr 422 schema nothing_written=True control=200 leaks=0
+new-hidden                               123-\u030345-6789                                            pend file=True leaks=0
+new-hidden                               123-\u030345-6789                                            disc file=True leaks=0
+new-hidden                               4111\u034f1111\u034f1111\u034f1111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-hidden                               4111\u034f1111\u034f1111\u034f1111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-hidden                               4111\u034f1111\u034f1111\u034f1111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-hidden                               4111\u034f1111\u034f1111\u034f1111                           pend file=True leaks=0
+new-hidden                               4111\u034f1111\u034f1111\u034f1111                           disc file=True leaks=0
+new-hidden                               123\U000e0101-45-6789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-hidden                               123\U000e0101-45-6789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-hidden                               123\U000e0101-45-6789                                        appr 422 schema nothing_written=True control=200 leaks=0
+new-hidden                               123\U000e0101-45-6789                                        pend file=True leaks=0
+new-hidden                               123\U000e0101-45-6789                                        disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u30fc45\u30fc6789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u30fc45\u30fc6789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u30fc45\u30fc6789                                        appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u30fc45\u30fc6789                                        pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u30fc45\u30fc6789                                        disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u064045\u06406789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u064045\u06406789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u064045\u06406789                                        appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u064045\u06406789                                        pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u064045\u06406789                                        disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\ua4f845\ua4f86789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\ua4f845\ua4f86789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\ua4f845\ua4f86789                                        appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\ua4f845\ua4f86789                                        pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\ua4f845\ua4f86789                                        disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u01c045\u01c06789                                        unit 201 red=True kinds=['ssn'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u01c045\u01c06789                                        face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u01c045\u01c06789                                        appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u01c045\u01c06789                                        pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 123\u01c045\u01c06789                                        disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u30fc1111\u30fc1111\u30fc1111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u30fc1111\u30fc1111\u30fc1111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u30fc1111\u30fc1111\u30fc1111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u30fc1111\u30fc1111\u30fc1111                           pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u30fc1111\u30fc1111\u30fc1111                           disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u06401111\u06401111\u06401111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u06401111\u06401111\u06401111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u06401111\u06401111\u06401111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u06401111\u06401111\u06401111                           pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u06401111\u06401111\u06401111                           disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\ua4f81111\ua4f81111\ua4f81111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\ua4f81111\ua4f81111\ua4f81111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\ua4f81111\ua4f81111\ua4f81111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\ua4f81111\ua4f81111\ua4f81111                           pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\ua4f81111\ua4f81111\ua4f81111                           disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u01c01111\u01c01111\u01c01111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u01c01111\u01c01111\u01c01111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u01c01111\u01c01111\u01c01111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u01c01111\u01c01111\u01c01111                           pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u01c01111\u01c01111\u01c01111                           disc file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u31611111\u31611111\u31611111                           unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u31611111\u31611111\u31611111                           face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u31611111\u31611111\u31611111                           appr 422 schema nothing_written=True control=200 leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u31611111\u31611111\u31611111                           pend file=True leaks=0
+new-lookalike-letter-sep(SSN/card shape) 4111\u31611111\u31611111\u31611111                           disc file=True leaks=0
+new-cards                                3056 9309 0259 04                                            unit 201 red=True kinds=['number'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cards                                3056 9309 0259 04                                            face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cards                                3056 9309 0259 04                                            appr 422 schema nothing_written=True control=200 leaks=0
+new-cards                                3056 9309 0259 04                                            pend file=True leaks=0
+new-cards                                3056 9309 0259 04                                            disc file=True leaks=0
+new-cards                                6011 0009 9013 9424                                          unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cards                                6011 0009 9013 9424                                          face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cards                                6011 0009 9013 9424                                          appr 422 schema nothing_written=True control=200 leaks=0
+new-cards                                6011 0009 9013 9424                                          pend file=True leaks=0
+new-cards                                6011 0009 9013 9424                                          disc file=True leaks=0
+new-cards                                card4111111111111111exp                                      unit 201 red=True kinds=['card'] kept='faces west, contact card[redacted]exp for access' reqsha=kept:True raw:False leaks=0
+new-cards                                card4111111111111111exp                                      face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cards                                card4111111111111111exp                                      appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cards                                card4111111111111111exp                                      pend file=True leaks=0
+new-cards                                card4111111111111111exp                                      disc file=True leaks=0
+new-cards                                5555555555554444                                             unit 201 red=True kinds=['card'] kept='faces west, contact [redacted] for access' reqsha=kept:True raw:False leaks=0
+new-cards                                5555555555554444                                             face 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cards                                5555555555554444                                             appr 422 ATTRIBUTE_VALUE_PERSONAL_DATA nothing_written=True control=200 leaks=0
+new-cards                                5555555555554444                                             pend file=True leaks=0
+new-cards                                5555555555554444                                             disc file=True leaks=0
+letter-sep(design: not detected)         123\u30fc456\u30fc789                                        unit 201 red=False kinds=[] kept='faces west, contact 123ー456ー789 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         123\u30fc456\u30fc789                                        face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         123\u30fc456\u30fc789                                        appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         123\u30fc456\u30fc789                                        pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         123\u30fc456\u30fc789                                        disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         123\ua4f8456\ua4f8789                                        unit 201 red=False kinds=[] kept='faces west, contact 123ꓸ456ꓸ789 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         123\ua4f8456\ua4f8789                                        face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         123\ua4f8456\ua4f8789                                        appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         123\ua4f8456\ua4f8789                                        pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         123\ua4f8456\ua4f8789                                        disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         123\u01c0456\u01c0789                                        unit 201 red=False kinds=[] kept='faces west, contact 123ǀ456ǀ789 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         123\u01c0456\u01c0789                                        face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         123\u01c0456\u01c0789                                        appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         123\u01c0456\u01c0789                                        pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         123\u01c0456\u01c0789                                        disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         123&nbsp;45&nbsp;6789                                        unit 201 red=False kinds=[] kept='faces west, contact 123&nbsp;45&nbsp;6789 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         123&nbsp;45&nbsp;6789                                        face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         123&nbsp;45&nbsp;6789                                        appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         123&nbsp;45&nbsp;6789                                        pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         123&nbsp;45&nbsp;6789                                        disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         4111&nbsp;1111&nbsp;1111&nbsp;1111                           unit 201 red=False kinds=[] kept='faces west, contact 4111&nbsp;1111&nbsp;1111&nbsp;1111 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         4111&nbsp;1111&nbsp;1111&nbsp;1111                           face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         4111&nbsp;1111&nbsp;1111&nbsp;1111                           appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         4111&nbsp;1111&nbsp;1111&nbsp;1111                           pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         4111&nbsp;1111&nbsp;1111&nbsp;1111                           disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         SSN 123&nbsp;45&nbsp;6789                                    unit 201 red=False kinds=[] kept='faces west, contact SSN 123&nbsp;45&nbsp;6789 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         SSN 123&nbsp;45&nbsp;6789                                    face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         SSN 123&nbsp;45&nbsp;6789                                    appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         SSN 123&nbsp;45&nbsp;6789                                    pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         SSN 123&nbsp;45&nbsp;6789                                    disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         4111<br>1111<br>1111<br>1111                                 unit 201 red=False kinds=[] kept='faces west, contact 4111<br>1111<br>1111<br>1111 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         4111<br>1111<br>1111<br>1111                                 face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         4111<br>1111<br>1111<br>1111                                 appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         4111<br>1111<br>1111<br>1111                                 pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         4111<br>1111<br>1111<br>1111                                 disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         123a45a6789                                                  unit 201 red=False kinds=[] kept='faces west, contact 123a45a6789 for access' reqsha=kept:True raw:True leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         123a45a6789                                                  face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         123a45a6789                                                  appr 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view2:clear']
+letter-sep(design: not detected)         123a45a6789                                                  pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         123a45a6789                                                  disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         123\u24d045\u24d06789                                        unit 201 red=False kinds=[] kept='faces west, contact 123a45a6789 for access' reqsha=kept:True raw:False leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         123\u24d045\u24d06789                                        face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         123\u24d045\u24d06789                                        appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         123\u24d045\u24d06789                                        pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         123\u24d045\u24d06789                                        disc file=True leaks=['ooh/pending.discarded:clear']
+letter-sep(design: not detected)         123\u212245\u21226789                                        unit 201 red=False kinds=[] kept='faces west, contact 123TM45TM6789 for access' reqsha=kept:True raw:False leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'view3:clear']
+letter-sep(design: not detected)         123\u212245\u21226789                                        face 200 schema nothing_written=False control=409 leaks=['ooh/ooh_log.jsonl:clear', 'view0:clear', 'face_view:clear']
+letter-sep(design: not detected)         123\u212245\u21226789                                        appr 422 schema nothing_written=True control=200 leaks=0
+letter-sep(design: not detected)         123\u212245\u21226789                                        pend file=True leaks=['ooh/pending.line:clear', 'after-ooh/ooh_log.jsonl:clear']
+letter-sep(design: not detected)         123\u212245\u21226789                                        disc file=True leaks=['ooh/pending.discarded:clear']
+
+CLASS TABLE
+earlier(omega9/10) {'cases': 145, 'leak_cases': 0, 'unit': 29, 'unit_redacted': 29, 'unit_201': 29, 'reqsha_kept': 29, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 87, 'units_ne_1': 0, 'other_body_409': 29, 'face': 29, 'face_refused': 29, 'face_refused_clean': 29, 'face_refused_pd': 29, 'appr': 29, 'appr_refused': 29, 'appr_refused_clean': 29, 'appr_refused_pd': 7, 'pend': 29, 'pend_file': 29, 'disc': 29, 'disc_file': 29}
+D9-H1 {'cases': 35, 'leak_cases': 0, 'unit': 7, 'unit_redacted': 7, 'unit_201': 7, 'reqsha_kept': 7, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 21, 'units_ne_1': 0, 'other_body_409': 7, 'face': 7, 'face_refused': 7, 'face_refused_clean': 7, 'face_refused_pd': 7, 'appr': 7, 'appr_refused': 7, 'appr_refused_clean': 7, 'appr_refused_pd': 2, 'pend': 7, 'pend_file': 7, 'disc': 7, 'disc_file': 7}
+was-non-detection {'cases': 5, 'leak_cases': 0, 'unit': 1, 'unit_redacted': 1, 'unit_201': 1, 'reqsha_kept': 1, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 3, 'units_ne_1': 0, 'other_body_409': 1, 'face': 1, 'face_refused': 1, 'face_refused_clean': 1, 'face_refused_pd': 1, 'appr': 1, 'appr_refused': 1, 'appr_refused_clean': 1, 'appr_refused_pd': 1, 'pend': 1, 'pend_file': 1, 'disc': 1, 'disc_file': 1}
+D10-H1 {'cases': 70, 'leak_cases': 0, 'unit': 14, 'unit_redacted': 14, 'unit_201': 14, 'reqsha_kept': 14, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 42, 'units_ne_1': 0, 'other_body_409': 14, 'face': 14, 'face_refused': 14, 'face_refused_clean': 14, 'face_refused_pd': 14, 'appr': 14, 'appr_refused': 14, 'appr_refused_clean': 14, 'appr_refused_pd': 3, 'pend': 14, 'pend_file': 14, 'disc': 14, 'disc_file': 14}
+D10-M1 {'cases': 20, 'leak_cases': 0, 'unit': 4, 'unit_redacted': 4, 'unit_201': 4, 'reqsha_kept': 4, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 12, 'units_ne_1': 0, 'other_body_409': 4, 'face': 4, 'face_refused': 4, 'face_refused_clean': 4, 'face_refused_pd': 4, 'appr': 4, 'appr_refused': 4, 'appr_refused_clean': 4, 'appr_refused_pd': 0, 'pend': 4, 'pend_file': 4, 'disc': 4, 'disc_file': 4}
+D9-H1-keyword {'cases': 30, 'leak_cases': 0, 'unit': 6, 'unit_redacted': 6, 'unit_201': 6, 'reqsha_kept': 6, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 18, 'units_ne_1': 0, 'other_body_409': 6, 'face': 6, 'face_refused': 6, 'face_refused_clean': 6, 'face_refused_pd': 6, 'appr': 6, 'appr_refused': 6, 'appr_refused_clean': 6, 'appr_refused_pd': 2, 'pend': 6, 'pend_file': 6, 'disc': 6, 'disc_file': 6}
+new-cluster {'cases': 60, 'leak_cases': 0, 'unit': 12, 'unit_redacted': 12, 'unit_201': 12, 'reqsha_kept': 12, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 36, 'units_ne_1': 0, 'other_body_409': 12, 'face': 12, 'face_refused': 12, 'face_refused_clean': 12, 'face_refused_pd': 12, 'appr': 12, 'appr_refused': 12, 'appr_refused_clean': 12, 'appr_refused_pd': 1, 'pend': 12, 'pend_file': 12, 'disc': 12, 'disc_file': 12}
+new-wide-sep {'cases': 40, 'leak_cases': 0, 'unit': 8, 'unit_redacted': 8, 'unit_201': 8, 'reqsha_kept': 8, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 24, 'units_ne_1': 0, 'other_body_409': 8, 'face': 8, 'face_refused': 8, 'face_refused_clean': 8, 'face_refused_pd': 8, 'appr': 8, 'appr_refused': 8, 'appr_refused_clean': 8, 'appr_refused_pd': 0, 'pend': 8, 'pend_file': 8, 'disc': 8, 'disc_file': 8}
+new-unicode-space {'cases': 20, 'leak_cases': 0, 'unit': 4, 'unit_redacted': 4, 'unit_201': 4, 'reqsha_kept': 4, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 12, 'units_ne_1': 0, 'other_body_409': 4, 'face': 4, 'face_refused': 4, 'face_refused_clean': 4, 'face_refused_pd': 4, 'appr': 4, 'appr_refused': 4, 'appr_refused_clean': 4, 'appr_refused_pd': 0, 'pend': 4, 'pend_file': 4, 'disc': 4, 'disc_file': 4}
+new-digit-forms {'cases': 30, 'leak_cases': 0, 'unit': 6, 'unit_redacted': 6, 'unit_201': 6, 'reqsha_kept': 6, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 18, 'units_ne_1': 0, 'other_body_409': 6, 'face': 6, 'face_refused': 6, 'face_refused_clean': 6, 'face_refused_pd': 6, 'appr': 6, 'appr_refused': 6, 'appr_refused_clean': 6, 'appr_refused_pd': 0, 'pend': 6, 'pend_file': 6, 'disc': 6, 'disc_file': 6}
+new-hidden {'cases': 35, 'leak_cases': 0, 'unit': 7, 'unit_redacted': 7, 'unit_201': 7, 'reqsha_kept': 7, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 21, 'units_ne_1': 0, 'other_body_409': 7, 'face': 7, 'face_refused': 7, 'face_refused_clean': 7, 'face_refused_pd': 7, 'appr': 7, 'appr_refused': 7, 'appr_refused_clean': 7, 'appr_refused_pd': 0, 'pend': 7, 'pend_file': 7, 'disc': 7, 'disc_file': 7}
+new-lookalike-letter-sep(SSN/card shape) {'cases': 45, 'leak_cases': 0, 'unit': 9, 'unit_redacted': 9, 'unit_201': 9, 'reqsha_kept': 9, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 27, 'units_ne_1': 0, 'other_body_409': 9, 'face': 9, 'face_refused': 9, 'face_refused_clean': 9, 'face_refused_pd': 9, 'appr': 9, 'appr_refused': 9, 'appr_refused_clean': 9, 'appr_refused_pd': 0, 'pend': 9, 'pend_file': 9, 'disc': 9, 'disc_file': 9}
+new-cards {'cases': 20, 'leak_cases': 0, 'unit': 4, 'unit_redacted': 4, 'unit_201': 4, 'reqsha_kept': 4, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 12, 'units_ne_1': 0, 'other_body_409': 4, 'face': 4, 'face_refused': 4, 'face_refused_clean': 4, 'face_refused_pd': 4, 'appr': 4, 'appr_refused': 4, 'appr_refused_clean': 4, 'appr_refused_pd': 2, 'pend': 4, 'pend_file': 4, 'disc': 4, 'disc_file': 4}
+letter-sep(design: not detected) {'cases': 50, 'leak_cases': 41, 'unit': 10, 'unit_redacted': 0, 'unit_201': 10, 'reqsha_kept': 10, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 30, 'units_ne_1': 0, 'other_body_409': 10, 'face': 10, 'face_accepted': 10, 'appr': 10, 'appr_refused': 9, 'appr_refused_clean': 9, 'appr_refused_pd': 0, 'pend': 10, 'pend_file': 10, 'disc': 10, 'disc_file': 10, 'appr_accepted': 1}
+TOTAL {'cases': 605, 'leak_cases': 41, 'unit': 121, 'unit_redacted': 111, 'unit_201': 121, 'reqsha_kept': 121, 'reqsha_raw': 0, 'dup_lines': 0, 'dup_events': 0, 'replays': 363, 'units_ne_1': 0, 'other_body_409': 121, 'face': 121, 'face_refused': 111, 'face_refused_clean': 111, 'face_refused_pd': 111, 'appr': 121, 'appr_refused': 120, 'appr_refused_clean': 120, 'appr_refused_pd': 18, 'pend': 121, 'pend_file': 121, 'disc': 121, 'disc_file': 121, 'face_accepted': 10, 'appr_accepted': 1}
+ERRORS []

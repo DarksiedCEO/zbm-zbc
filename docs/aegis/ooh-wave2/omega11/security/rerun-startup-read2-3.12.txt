@@ -1,0 +1,2 @@
+regular      reopen records: 1 file_problem: None
+unix_socket  ok=None err=the log cannot be opened (OSError); refusing to start: inspect the dat

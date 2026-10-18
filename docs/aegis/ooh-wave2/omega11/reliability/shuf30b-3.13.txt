@@ -1,0 +1,30 @@
+shuf1: FDCOUNT-AT-END 12
+shuf1: 324 passed, 1 warning in 97.78s (0:01:37)
+shuf3: FDCOUNT-AT-END 12
+shuf3: 324 passed, 1 warning in 83.10s (0:01:23)
+shuf4: FDCOUNT-AT-END 12
+shuf4: 324 passed, 1 warning in 92.58s (0:01:32)
+shuf5: FDCOUNT-AT-END 12
+shuf5: 324 passed, 1 warning in 98.65s (0:01:38)
+shuf6: FDCOUNT-AT-END 12
+shuf6: 324 passed, 1 warning in 118.29s (0:01:58)
+shuf7: FDCOUNT-AT-END 12
+shuf7: 324 passed, 1 warning in 106.38s (0:01:46)
+shuf8: FDCOUNT-AT-END 12
+shuf8: 324 passed, 1 warning in 62.39s (0:01:02)
+shuf9: FDCOUNT-AT-END 12
+shuf9: 324 passed, 1 warning in 57.25s
+shuf10: FDCOUNT-AT-END 12
+shuf10: 324 passed, 1 warning in 54.38s
+shuf11: FDCOUNT-AT-END 12
+shuf11: 324 passed, 1 warning in 58.99s
+shuf12: FDCOUNT-AT-END 12
+shuf12: 324 passed, 1 warning in 53.99s
+shuf13: FDCOUNT-AT-END 12
+shuf13: 324 passed, 1 warning in 50.86s
+shuf14: FDCOUNT-AT-END 12
+shuf14: 324 passed, 1 warning in 70.28s (0:01:10)
+shuf15: FDCOUNT-AT-END 12
+shuf15: 324 passed, 1 warning in 73.24s (0:01:13)
+shuf16: FDCOUNT-AT-END 12
+shuf16: 324 passed, 1 warning in 18.40s

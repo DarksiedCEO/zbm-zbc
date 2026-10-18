@@ -1,0 +1,12 @@
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                714fee9bafc46ae4ecd5144bcdd0b56eab7e0d87e66a5c15c08920a6dd7e41a4
+  sha over raw body (secret)        bd18248a4a980eb243a78a1e77955c525e46f60ba27e92e9ba68b89932f5533d False
+  sha over body with redacted text  714fee9bafc46ae4ecd5144bcdd0b56eab7e0d87e66a5c15c08920a6dd7e41a4 True
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False
+HTTP 201 | stored text: faces west, contact [redacted] for access | secret in line: False
+  stored request_sha                9bda143922007fac7e91c006c28cfba12e8f265931d76e093b1dcab5624de8f2
+  sha over raw body (secret)        a313bbf724a45519cf0cbdbb94fb5d8bdeaaefb372108a51636caafdd29eb6f0 False
+  sha over body with redacted text  9bda143922007fac7e91c006c28cfba12e8f265931d76e093b1dcab5624de8f2 True
+  every other body field is in the line: request_id True face_id True flight True
+  request_sha in /audit/export: False

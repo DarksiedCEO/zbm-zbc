@@ -1,0 +1,4 @@
+python 3.12 seq: runs=30 all_324_passed=      30 not=       0 failed/error-lines=0 LEAK-THREAD=0 LEAK-FILE=0 fdcount[  30 FDCOUNT-AT-END 12;]
+python 3.12 shuf: runs=30 all_324_passed=      30 not=       0 failed/error-lines=0 LEAK-THREAD=0 LEAK-FILE=0 fdcount[  30 FDCOUNT-AT-END 12;]
+python 3.13 seq: runs=30 all_324_passed=      30 not=       0 failed/error-lines=0 LEAK-THREAD=0 LEAK-FILE=0 fdcount[  30 FDCOUNT-AT-END 12;]
+python 3.13 shuf: runs=30 all_324_passed=      30 not=       0 failed/error-lines=0 LEAK-THREAD=0 LEAK-FILE=0 fdcount[  30 FDCOUNT-AT-END 12;]

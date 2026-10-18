@@ -1,0 +1,8 @@
+[
+  {"_fixture_note": "LEAK — server confirmed the order happened, but the pixel never recorded it (classic iOS/ad-blocker loss). Channel credit and optimization data both vanish for a real, paid conversion.",
+   "order_id": "ord_3001", "channel": "meta_ads", "order_value_usd": 210.00, "pixel_attributed": false, "server_confirmed": true},
+  {"_fixture_note": "CONTROL — pixel and server agree. Must NOT be flagged.",
+   "order_id": "ord_3002", "channel": "google_ads", "order_value_usd": 95.00, "pixel_attributed": true, "server_confirmed": true},
+  {"_fixture_note": "CONTROL — pixel fired but server never confirmed a real order (e.g. a test/duplicate pixel fire). This is a DIFFERENT problem (overcounting, not undercounting) and out of scope for this agent, which only looks for lost server-confirmed revenue.",
+   "order_id": "ord_3003", "channel": "tiktok_ads", "order_value_usd": 40.00, "pixel_attributed": true, "server_confirmed": false}
+]

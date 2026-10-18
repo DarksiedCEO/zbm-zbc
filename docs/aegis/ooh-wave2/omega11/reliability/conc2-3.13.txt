@@ -1,0 +1,1 @@
+threads 12 ids 100 posts 1200 exceptions 0 [] anomalies 0 log lines added 100 (expect 100) cache len 64 integrity True fp None

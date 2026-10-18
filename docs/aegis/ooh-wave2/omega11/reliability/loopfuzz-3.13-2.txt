@@ -1,0 +1,4 @@
+calls-per-input distribution [(1, 6232), (2, 33513), (3, 255)]
+worst 3 '4111 1111 1111 1111123(555) 555-5555a@b.coa@b.cocom (555) 555-5555[redacted]com@-'
+fallback(all-redacted) cases 0 []
+slowest short input ms 41.415459010750055 'tinx.(555) 555-5555@a at b.co.4111 1111 1111 1111'

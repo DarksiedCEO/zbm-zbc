@@ -1,0 +1,332 @@
+{
+ "scen": "symsame",
+ "mode": "HW",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168",
+ "python": "3.12.14",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt11-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 68880,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T17:14:18Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.115,
+  "file_before": "missing",
+  "file_after": "bd6b04831773f2a71b4c13fd2d3c9a3fffad4573443e9c6264cba1ebe54eecdf",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 69920
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T17:14:18Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.112,
+  "file_before": "bd6b04831773f2a71b4c13fd2d3c9a3fffad4573443e9c6264cba1ebe54eecdf",
+  "file_after": "44000031c50f2331480edc333a117ce224d1dc0ba78e4e9ce93b31e2e30d3824",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 71456
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "44000031c50f2331480edc333a117ce224d1dc0ba78e4e9ce93b31e2e30d3824",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 71440
+ },
+ "fault": {
+  "orig_sha": "44000031c50f2331480edc333a117ce224d1dc0ba78e4e9ce93b31e2e30d3824",
+  "disk": {
+   "kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": "44000031c50f2331480edc333a117ce224d1dc0ba78e4e9ce93b31e2e30d3824"
+ },
+ "W3": {
+  "status": 503,
+  "body": {
+   "detail": "STORE_UNAVAILABLE",
+   "maybe": true
+  },
+  "elapsed_s": 0.121,
+  "file_before": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "file_after": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "file_unchanged": true,
+  "kind_after": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": true,
+  "rss_kb": 72112
+ },
+ "A1": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T17:14:29Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.02,
+  "file": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "rss_kb": 72176
+ },
+ "A2": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T17:14:29Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.011,
+  "file": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "rss_kb": 72800
+ },
+ "J1": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T17:14:29Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.024,
+  "file": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "rss_kb": 74384
+ },
+ "ST": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T17:14:29Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   }
+  },
+  "elapsed_s": 0.013
+ },
+ "J2": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-18T17:14:29Z",
+    "problem": "the pending line is anchored on the ledger but cannot be written here"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.023,
+  "file": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "rss_kb": 74384
+ },
+ "W4": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.01,
+  "file_before": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "file_after": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "file_unchanged": true,
+  "kind_after": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+  "anchors_before": 3,
+  "anchors_after": 3,
+  "pending_present": true,
+  "rss_kb": 74384
+ },
+ "after_writes": {
+  "disk": {
+   "kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl",
+    "pending.line"
+   ]
+  },
+  "target_unchanged": true,
+  "rss_kb": 74384
+ },
+ "J3": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T17:14:30Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.032,
+  "file": "ecf0d571e237604805fca3c308b54b0d58480fa80f7e996cf59c1733297fb186",
+  "rss_kb": 74464
+ },
+ "A3": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T17:14:30Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 3
+  },
+  "elapsed_s": 0.015,
+  "file": "ecf0d571e237604805fca3c308b54b0d58480fa80f7e996cf59c1733297fb186",
+  "rss_kb": 74464
+ },
+ "after_putback": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "ecf0d571e237604805fca3c308b54b0d58480fa80f7e996cf59c1733297fb186",
+   "size": 2037,
+   "lines": 3,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 3
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-18T17:14:29Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.007,
+  "file_before": "ecf0d571e237604805fca3c308b54b0d58480fa80f7e996cf59c1733297fb186",
+  "file_after": "ecf0d571e237604805fca3c308b54b0d58480fa80f7e996cf59c1733297fb186",
+  "file_unchanged": true,
+  "kind_after": "regular",
+  "anchors_before": 3,
+  "anchors_after": 3,
+  "pending_present": false,
+  "rss_kb": 74464
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-18T17:14:30Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.102,
+  "file_before": "ecf0d571e237604805fca3c308b54b0d58480fa80f7e996cf59c1733297fb186",
+  "file_after": "f56ee5a06a0fbd191cbc777d7339f1881b5927ac51d8ecc3029917b1ce417850",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false,
+  "rss_kb": 74464
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-18T17:14:30Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "elapsed_s": 0.018,
+  "file": "f56ee5a06a0fbd191cbc777d7339f1881b5927ac51d8ecc3029917b1ce417850",
+  "rss_kb": 68896
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-18T17:14:31Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.145,
+  "file_before": "f56ee5a06a0fbd191cbc777d7339f1881b5927ac51d8ecc3029917b1ce417850",
+  "file_after": "09b51f9b34e5f8f6741bce13b79147d6a4a7306ca7e7293dd18ec3fe9e02203b",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false,
+  "rss_kb": 70512
+ },
+ "final": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "09b51f9b34e5f8f6741bce13b79147d6a4a7306ca7e7293dd18ec3fe9e02203b",
+   "size": 3391,
+   "lines": 5,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 5,
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

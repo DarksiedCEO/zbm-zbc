@@ -1,0 +1,44 @@
+clean 3-line log                               -> STARTED lines=3                                                                                                hung=False leaked=[] fddelta=0
+os.open raises EIO                             -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory                hung=False leaked=[] fddelta=0
+os.open raises ELOOP                           -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a li       hung=False leaked=[] fddelta=0
+os.open raises ENXIO                           -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory                hung=False leaked=[] fddelta=0
+os.open raises EAGAIN                          -> StoreCorrupt: the log cannot be opened (BlockingIOError); refusing to start: inspect the data directory        hung=False leaked=[] fddelta=0
+os.open raises EMFILE                          -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory                hung=False leaked=[] fddelta=0
+os.open raises EACCES                          -> StoreCorrupt: the log cannot be opened (PermissionError); refusing to start: inspect the data directory        hung=False leaked=[] fddelta=0
+os.open raises EINTR                           -> StoreCorrupt: the log cannot be opened (InterruptedError); refusing to start: inspect the data directory       hung=False leaked=[] fddelta=0
+os.open raises EROFS                           -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory                hung=False leaked=[] fddelta=0
+os.open raises ENOENT                          -> STARTED lines=0                                                                                                hung=False leaked=[] fddelta=0
+os.open raises ENFILE                          -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory                hung=False leaked=[] fddelta=0
+os.open raises ENOMEM                          -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory                hung=False leaked=[] fddelta=0
+os.pread raises EIO                            -> StoreCorrupt: the log cannot be read (OSError); refusing to start                                              hung=False leaked=[] fddelta=0
+os.pread raises EAGAIN                         -> StoreCorrupt: the log cannot be read (BlockingIOError); refusing to start                                      hung=False leaked=[] fddelta=0
+os.pread raises EINTR                          -> StoreCorrupt: the log cannot be read (InterruptedError); refusing to start                                     hung=False leaked=[] fddelta=0
+os.pread raises EINVAL                         -> StoreCorrupt: the log cannot be read (OSError); refusing to start                                              hung=False leaked=[] fddelta=0
+os.fstat raises EIO                            -> StoreCorrupt: the log cannot be read (OSError); refusing to start                                              hung=False leaked=[] fddelta=0
+pread MemoryError                              -> RAISED MemoryError:                                                                                            hung=False leaked=[] fddelta=0
+pread KeyboardInterrupt                        -> RAISED KeyboardInterrupt:                                                                                      hung=False leaked=[] fddelta=0
+pread returns 7 bytes at a time                -> STARTED lines=3                                                                                                hung=False leaked=[] fddelta=0
+shrinks to 10 after fstat                      -> StoreCorrupt: log ends with a torn line; refusing to start (inspect the file)                                  hung=False leaked=[] fddelta=0
+shrinks to exactly 1 line after fstat          -> STARTED lines=1                                                                                                hung=False leaked=[] fddelta=0
+shrinks to 0 after fstat                       -> STARTED lines=0                                                                                                hung=False leaked=[] fddelta=0
+grows by junk after fstat                      -> STARTED lines=3                                                                                                hung=False leaked=[] fddelta=0
+grows by newline-only after fstat              -> STARTED lines=3                                                                                                hung=False leaked=[] fddelta=0
+start with os.close raising EIO (after close) -> STARTED lines=3
+real state: symlink                            -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a li       hung=False leaked=[] fddelta=0
+real state: FIFO no writer                     -> StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)                    hung=False leaked=[] fddelta=0
+real state: directory                          -> StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)                    hung=False leaked=[] fddelta=0
+real state: unix socket                        -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: inspect the data directory                hung=False leaked=[] fddelta=-1
+real state: symlink to /dev/zero               -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a li       hung=False leaked=[] fddelta=0
+real state: dangling symlink                   -> StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a li       hung=False leaked=[] fddelta=0
+real state: chmod 000                          -> StoreCorrupt: the log cannot be opened (PermissionError); refusing to start: inspect the data directory        hung=False leaked=[] fddelta=0
+real state: empty file                         -> STARTED lines=0                                                                                                hung=False leaked=[] fddelta=0
+real state: torn tail                          -> StoreCorrupt: log ends with a torn line; refusing to start (inspect the file)                                  hung=False leaked=[] fddelta=0
+real state: FIFO with a holder                 -> StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)                    hung=False leaked=[] fddelta=-1
+sparse file 256MiB                             -> StoreCorrupt: log ends with a torn line; refusing to start (inspect the file)                                  hung=False leaked=[] fddelta=0
+   maxrss MiB so far 279.15625 t=0.0s
+sparse file 1GiB                               -> StoreCorrupt: log ends with a torn line; refusing to start (inspect the file)                                  hung=False leaked=[] fddelta=0
+   maxrss MiB so far 1303.1875 t=0.1s
+sparse file 3GiB                               -> StoreCorrupt: the log cannot be read (OSError); refusing to start                                              hung=False leaked=[] fddelta=0
+   maxrss MiB so far 1303.234375 t=0.0s
+sparse file 1TiB                               -> StoreCorrupt: the log cannot be read (OSError); refusing to start                                              hung=False leaked=[] fddelta=0
+   maxrss MiB so far 1304.3125 t=0.0s

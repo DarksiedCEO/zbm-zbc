@@ -1,0 +1,4 @@
+calls-per-input distribution [(1, 6358), (2, 33400), (3, 242)]
+worst 3 '(555) 555-5555tin@a@b.coa@b.cosocial security number: 421 2 3 4 5 6 7 8 9[at]4111 1111 1111 1111a at b.co123%40'
+fallback(all-redacted) cases 0 []
+slowest short input ms 162.13529201922938 '123 45 67891 2 3 4 5 6 7 8 9[dot][at]social security number: 5551234567x1 2 3 4 5 6 7 8 9@123-45-67

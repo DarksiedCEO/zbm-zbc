@@ -1,0 +1,3 @@
+card: shapes 15, secrets per shape 4, shapes where different secrets hash differently: none
+ssn: shapes 15, secrets per shape 3, shapes where different secrets hash differently: none
+distinct kept texts: {'contact [redacted] now': 92, 'contact [redacted][redacted] now': 4, 'contact SSN[redacted] now': 3, 'contact TIN [redacted] now': 3, 'contact x[redacted] now': 3}

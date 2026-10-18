@@ -1,0 +1,13 @@
+calls=3 ms=9.0 outlen=2970 kinds=['email', 'phone'] sep='' seed='a@b.coa@b.cotin1[redacted'
+calls=3 ms=9.9 outlen=3050 kinds=['email', 'phone'] sep=' ' seed='a@b.coa@b.cotin1[redacted'
+calls=3 ms=9.5 outlen=3050 kinds=['email', 'phone'] sep='\n' seed='a@b.coa@b.cotin1[redacted'
+calls=3 ms=6.6 outlen=1726 kinds=['email', 'phone'] sep='' seed='4111 1111 1111 1111123(55'
+calls=3 ms=6.5 outlen=1799 kinds=['email', 'phone'] sep=' ' seed='4111 1111 1111 1111123(55'
+calls=3 ms=7.1 outlen=1799 kinds=['email', 'phone'] sep='\n' seed='4111 1111 1111 1111123(55'
+calls=3 ms=5.7 outlen=2240 kinds=['email', 'phone'] sep='' seed='(555) 555-5555tin@a@b.coa'
+calls=3 ms=4.9 outlen=2222 kinds=['email', 'phone'] sep=' ' seed='(555) 555-5555tin@a@b.coa'
+calls=3 ms=5.9 outlen=2222 kinds=['email', 'phone'] sep='\n' seed='(555) 555-5555tin@a@b.coa'
+calls=3 ms=7.7 outlen=2672 kinds=['email', 'phone'] sep='' seed='67896789tin@acom123.co@94'
+calls=3 ms=7.4 outlen=2630 kinds=['email', 'number'] sep=' ' seed='67896789tin@acom123.co@94'
+calls=3 ms=7.5 outlen=2630 kinds=['email', 'number'] sep='\n' seed='67896789tin@acom123.co@94'
+forced persistent span -> ('[redacted]', ['number'])

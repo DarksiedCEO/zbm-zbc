@@ -1,0 +1,8 @@
+digit-dash           n=1000:4.3ms n=4000:16.1ms n=16000:75.8ms n=64000:313.9ms
+digits-then-letter   n=1000:5.6ms n=4000:40.9ms n=16000:103.0ms n=64000:411.9ms
+email-nospace        n=1000:1.2ms n=4000:9.0ms n=16000:23.7ms n=64000:85.6ms
+fdfa                 n=1000:17.0ms n=4000:81.8ms n=16000:330.0ms n=64000:1358.5ms
+ssn-wordglue         n=1000:5.8ms n=4000:26.2ms n=16000:120.1ms n=64000:406.1ms
+phone                n=1000:2.7ms n=4000:10.9ms n=16000:53.6ms n=64000:220.0ms
+mixed                n=1000:1.3ms n=4000:5.3ms n=16000:28.9ms n=64000:78.1ms
+zw-ssn               n=1000:1.0ms n=4000:4.1ms n=16000:16.5ms n=64000:77.5ms

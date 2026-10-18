@@ -1,0 +1,11 @@
+threads 16 wrong hashes 0 exceptions 0 [] max cache len seen 64 final len 64
+distinct bodies 112 distinct true hashes 64 (equal hashes for different bodies are the redaction design: same PII-redacted text)
+canonical-equal-but-hash-different: 0
+diff-canonical cache returns a's hash for b: False | uncached hashes differ: True
+diff-canonical cache returns a's hash for b: False | uncached hashes differ: True
+diff-canonical cache returns a's hash for b: False | uncached hashes differ: True
+diff-canonical cache returns a's hash for b: False | uncached hashes differ: True
+same-canonical cache returns a's hash for b: True | uncached hashes differ: True
+same-canonical cache returns a's hash for b: False | uncached hashes differ: False
+diff-canonical cache returns a's hash for b: False | uncached hashes differ: True
+diff-canonical cache returns a's hash for b: False | uncached hashes differ: True

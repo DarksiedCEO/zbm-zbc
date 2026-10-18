@@ -1,0 +1,16 @@
+seq1: FDCOUNT-AT-END 12
+seq1: 324 passed, 1 warning in 26.72s
+seq2: FDCOUNT-AT-END 12
+seq2: 324 passed, 1 warning in 34.56s
+seq3: FDCOUNT-AT-END 12
+seq3: 324 passed, 1 warning in 51.62s
+seq4: FDCOUNT-AT-END 12
+seq4: 324 passed, 1 warning in 133.71s (0:02:13)
+seq6: FDCOUNT-AT-END 12
+seq6: 324 passed, 1 warning in 62.67s (0:01:02)
+seq7: FDCOUNT-AT-END 12
+seq7: 324 passed, 1 warning in 127.43s (0:02:07)
+seq8: FDCOUNT-AT-END 12
+seq8: 324 passed, 1 warning in 123.19s (0:02:03)
+seq9: FDCOUNT-AT-END 12
+seq9: 324 passed, 1 warning in 131.26s (0:02:11)

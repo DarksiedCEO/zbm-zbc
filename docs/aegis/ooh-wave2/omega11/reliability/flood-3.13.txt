@@ -1,0 +1,8 @@
+old fresh: 4 flood threads 8.7 req/s; GET /markets med=425 max=491 ms; log lines 98
+copy313 fresh: 4 flood threads 7.2 req/s; GET /markets med=503 max=973 ms; log lines 100
+old replay-evicted: 4 flood threads 21.7 req/s; GET /markets med=157 max=202 ms; log lines 14
+copy313 replay-evicted: 4 flood threads 58.4 req/s; GET /markets med=41 max=88 ms; log lines 14
+old fresh: 4 flood threads 9.0 req/s; GET /markets med=419 max=436 ms; log lines 101
+copy313 fresh: 4 flood threads 7.2 req/s; GET /markets med=513 max=941 ms; log lines 99
+old replay-evicted: 4 flood threads 21.9 req/s; GET /markets med=157 max=211 ms; log lines 14
+copy313 replay-evicted: 4 flood threads 57.9 req/s; GET /markets med=41 max=48 ms; log lines 14

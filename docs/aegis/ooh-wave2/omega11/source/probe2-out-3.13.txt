@@ -1,0 +1,7 @@
+numeric-not-digit-not-alpha survivors: 881 [('0x9f4', 'BENGALI CURRENCY NUMERATOR ONE', 'No'), ('0x9f5', 'BENGALI CURRENCY NUMERATOR TWO', 'No'), ('0x9f6', 'BENGALI CURRENCY NUMERATOR THREE', 'No'), ('0x9f7', 'BENGALI CURRENCY NUMERATOR FOUR', 'No'), ('0x9f8', 'BENGALI CURRENCY NUMERATOR ONE LESS THAN THE DENOMINATOR', 'No')] ['Nl', 'No']
+Nd chars not read as ASCII: 0
+VIOL '3󠄁746306)2_(%40' '3746306)2_(%40' []
+VIOL '1a25|:/4–87)%4077&0a\u20282~9́977·0' '1a25|:/4–87)%4077&0a 2~9977·0' []
+VIOL '9%40(6ㅤ１ -/~\xa08230' '9%40(61 -/~ 8230' []
+VIOL "8１383ǀ,٣1%401'7523" "81383ǀ,31%401'7523" []
+fuzz violations 16

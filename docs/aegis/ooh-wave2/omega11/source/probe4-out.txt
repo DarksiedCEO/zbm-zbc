@@ -1,0 +1,5 @@
+'a  b' False
+'trailing ' False
+'plain text' True
+'٣ lights' False
+'café' False

@@ -1,0 +1,797 @@
+======== c75b0662_e2_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "3f30d4820c3be20cf8504c855402695b5da582441c1d5847917087cb4f0ba902", "fault_sha": "df4cecd855b0b2164a2d1b8506b58688c61838868621b0c29b10bb474dd69e3e", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:15:25Z", "campaigns": 0} t=0.176 unchanged=False anchors 0->1 pending=False kind=regular rss=70016
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:15:25Z", "campaigns": 0} t=0.128 unchanged=False anchors 1->2 pending=False kind=regular rss=71536
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:36Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.019 rss=72256
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:36Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.014 rss=72256
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:15:36Z", "problem": null}, "ledger_valid": true} t=0.016 rss=72304
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:36Z", "problem": null}} t=0.01 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:15:36Z", "campaigns": 0} t=0.162 unchanged=False anchors 2->3 pending=False kind=regular rss=73744
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:15:36Z", "campaigns": 0} t=0.147 unchanged=False anchors 3->4 pending=False kind=regular rss=74400
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:15:48Z", "problem": null}, "ledger_valid": true} t=0.018 rss=74400
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:48Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.01 rss=74400
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:15:36Z", "campaigns": 0} t=0.006 unchanged=True anchors 4->4 pending=False kind=regular rss=74400
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:15:48Z", "campaigns": 0} t=0.147 unchanged=False anchors 4->5 pending=False kind=regular rss=74416
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:48Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.016 rss=69504
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:15:49Z", "campaigns": 0} t=0.12 unchanged=False anchors 5->6 pending=False kind=regular rss=71088
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_e2_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "c95a8ef4ddad7852e13bff6f82cae65f1772d080a9510050ad12e419d02eb78a", "fault_sha": "434c9502cefd4773e3bc5a9ba80765046a52baf103480487b2c155d30129486c", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:10:46Z", "campaigns": 0} t=0.129 unchanged=False anchors 0->1 pending=False kind=regular rss=71456
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:10:47Z", "campaigns": 0} t=0.107 unchanged=False anchors 1->2 pending=False kind=regular rss=72928
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:58Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.019 rss=72960
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:58Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.014 rss=72992
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:10:58Z", "problem": null}, "ledger_valid": true} t=0.019 rss=74384
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:58Z", "problem": null}} t=0.007 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:10:58Z", "campaigns": 0} t=0.148 unchanged=False anchors 2->3 pending=False kind=regular rss=75856
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:10:58Z", "campaigns": 0} t=0.118 unchanged=False anchors 3->4 pending=False kind=regular rss=77280
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:11:09Z", "problem": null}, "ledger_valid": true} t=0.017 rss=78768
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:09Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.01 rss=79504
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:10:58Z", "campaigns": 0} t=0.007 unchanged=True anchors 4->4 pending=False kind=regular rss=79536
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:11:09Z", "campaigns": 0} t=0.14 unchanged=False anchors 4->5 pending=False kind=regular rss=80992
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:10Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.013 rss=70368
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:11:10Z", "campaigns": 0} t=0.131 unchanged=False anchors 5->6 pending=False kind=regular rss=71856
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_e2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "af6653aa78df4a4c02b5669876c687d1cab008c8878d8ee8319a6b771cbb0f06", "fault_sha": "f59986b0addb69cec46397195a99d313d7b945db2d57d79002337ac7f35ef01e", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:15:00Z", "campaigns": 0} t=0.149 unchanged=False anchors 0->1 pending=False kind=regular rss=70192
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:15:00Z", "campaigns": 0} t=0.147 unchanged=False anchors 1->2 pending=False kind=regular rss=71760
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:15:11Z", "campaigns": 0} t=0.175 unchanged=False anchors 2->3 pending=False kind=regular rss=72480
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:12Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.02 rss=72496
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:15:12Z", "problem": null}, "ledger_valid": true} t=0.023 rss=73264
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:15:12Z", "campaigns": 0} t=0.16 unchanged=False anchors 3->4 pending=False kind=regular rss=74688
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:15:23Z", "problem": null}, "ledger_valid": true} t=0.021 rss=75408
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:23Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.016 rss=75408
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:15:11Z", "campaigns": 0} t=0.009 unchanged=True anchors 4->4 pending=False kind=regular rss=75408
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:15:23Z", "campaigns": 0} t=0.141 unchanged=False anchors 4->5 pending=False kind=regular rss=75408
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:15:24Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.012 rss=69248
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:15:24Z", "campaigns": 0} t=0.136 unchanged=False anchors 5->6 pending=False kind=regular rss=70816
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_e2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "76f93cc8e2bdbbd90ecb9aeb679d357be9b68175efc4dad07949f94ecb2affa8", "fault_sha": "29f26e9c7718607eec40513acb4bdf4e6285cd08c248bf86bd10068b41ce577d", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:10:21Z", "campaigns": 0} t=0.179 unchanged=False anchors 0->1 pending=False kind=regular rss=71536
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:10:21Z", "campaigns": 0} t=0.134 unchanged=False anchors 1->2 pending=False kind=regular rss=73072
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:10:32Z", "campaigns": 0} t=0.113 unchanged=False anchors 2->3 pending=False kind=regular rss=73072
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:32Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.012 rss=73760
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:10:32Z", "problem": null}, "ledger_valid": true} t=0.017 rss=75264
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:10:32Z", "campaigns": 0} t=0.119 unchanged=False anchors 3->4 pending=False kind=regular rss=76736
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:10:43Z", "problem": null}, "ledger_valid": true} t=0.019 rss=78192
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:43Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.012 rss=78880
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:10:32Z", "campaigns": 0} t=0.005 unchanged=True anchors 4->4 pending=False kind=regular rss=78880
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:10:44Z", "campaigns": 0} t=0.201 unchanged=False anchors 4->5 pending=False kind=regular rss=80416
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:44Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.014 rss=70240
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:10:45Z", "campaigns": 0} t=0.165 unchanged=False anchors 5->6 pending=False kind=regular rss=71744
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_e3_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "6bfb7e853a751ced4f86b726cc92a410e2991deb3fa1385d09272f6370997bf2", "fault_sha": "02db0fad3e87d99e33778cf6f89431ad421375ad550faa823b95d67ee37bb294", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:16:15Z", "campaigns": 0} t=0.517 unchanged=False anchors 0->1 pending=False kind=regular rss=69984
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:16:15Z", "campaigns": 0} t=0.128 unchanged=False anchors 1->2 pending=False kind=regular rss=71472
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:27Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.018 rss=72160
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:27Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.011 rss=72160
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:16:27Z", "problem": null}, "ledger_valid": true} t=0.018 rss=72208
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:27Z", "problem": null}} t=0.008 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:16:27Z", "campaigns": 0} t=0.102 unchanged=False anchors 2->3 pending=False kind=regular rss=73632
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:16:27Z", "campaigns": 0} t=0.097 unchanged=False anchors 3->4 pending=False kind=regular rss=74448
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:16:38Z", "problem": null}, "ledger_valid": true} t=0.02 rss=74448
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:38Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.015 rss=74448
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:16:27Z", "campaigns": 0} t=0.008 unchanged=True anchors 4->4 pending=False kind=regular rss=74448
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:16:38Z", "campaigns": 0} t=0.11 unchanged=False anchors 4->5 pending=False kind=regular rss=74480
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:39Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.017 rss=69872
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:16:39Z", "campaigns": 0} t=0.112 unchanged=False anchors 5->6 pending=False kind=regular rss=71440
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_e3_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "e46d73cb5318331e011005ee6a361c5762a3bf4a18f6a2bd2d908789a8e953bd", "fault_sha": "5d1037cd3a78cb5f7fb157927041fbf3b5f45f0564fcad7b32add4dc2ba57f76", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:11:37Z", "campaigns": 0} t=0.13 unchanged=False anchors 0->1 pending=False kind=regular rss=71184
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:11:37Z", "campaigns": 0} t=0.072 unchanged=False anchors 1->2 pending=False kind=regular rss=72640
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:48Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.022 rss=72672
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:48Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.013 rss=72720
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:11:48Z", "problem": null}, "ledger_valid": true} t=0.019 rss=74192
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:48Z", "problem": null}} t=0.01 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:11:48Z", "campaigns": 0} t=0.111 unchanged=False anchors 2->3 pending=False kind=regular rss=75664
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:11:48Z", "campaigns": 0} t=0.13 unchanged=False anchors 3->4 pending=False kind=regular rss=77088
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:12:00Z", "problem": null}, "ledger_valid": true} t=0.021 rss=78544
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:00Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.015 rss=79280
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:11:48Z", "campaigns": 0} t=0.007 unchanged=True anchors 4->4 pending=False kind=regular rss=79280
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:12:00Z", "campaigns": 0} t=0.105 unchanged=False anchors 4->5 pending=False kind=regular rss=80768
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:00Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.013 rss=70656
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:12:01Z", "campaigns": 0} t=0.157 unchanged=False anchors 5->6 pending=False kind=regular rss=72160
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_e3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "1b96191a9b077168d3234a65546d47ea4db32cc09b155410578d19c7b31511a0", "fault_sha": "8bbca0ec34ca403e7fd1bc53f8f2cd1cf0811e4c946fc7854a1fd15460a8293d", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:15:50Z", "campaigns": 0} t=0.124 unchanged=False anchors 0->1 pending=False kind=regular rss=70448
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:15:50Z", "campaigns": 0} t=0.12 unchanged=False anchors 1->2 pending=False kind=regular rss=71968
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:16:01Z", "campaigns": 0} t=0.118 unchanged=False anchors 2->3 pending=False kind=regular rss=72640
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:01Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.018 rss=72656
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:16:01Z", "problem": null}, "ledger_valid": true} t=0.019 rss=73408
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:16:01Z", "campaigns": 0} t=0.105 unchanged=False anchors 3->4 pending=False kind=regular rss=74880
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:16:13Z", "problem": null}, "ledger_valid": true} t=0.021 rss=75600
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:13Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.011 rss=75600
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:16:01Z", "campaigns": 0} t=0.007 unchanged=True anchors 4->4 pending=False kind=regular rss=75600
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:16:13Z", "campaigns": 0} t=0.123 unchanged=False anchors 4->5 pending=False kind=regular rss=75600
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:13Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.012 rss=69392
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:16:14Z", "campaigns": 0} t=0.13 unchanged=False anchors 5->6 pending=False kind=regular rss=70960
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_e3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "b4d8ff197275770449107cb4222dc2551d5bd5d68719062edf65d0e2c47a0caa", "fault_sha": "75e25b4180c7d8aa5800136df1fba7531aaaefb99e64238c42174766f9b153af", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:11:12Z", "campaigns": 0} t=0.156 unchanged=False anchors 0->1 pending=False kind=regular rss=71072
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:11:12Z", "campaigns": 0} t=0.132 unchanged=False anchors 1->2 pending=False kind=regular rss=72624
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:11:23Z", "campaigns": 0} t=0.136 unchanged=False anchors 2->3 pending=False kind=regular rss=72672
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:23Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.025 rss=73344
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:11:23Z", "problem": null}, "ledger_valid": true} t=0.024 rss=74768
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:11:23Z", "campaigns": 0} t=0.121 unchanged=False anchors 3->4 pending=False kind=regular rss=76208
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:11:35Z", "problem": null}, "ledger_valid": true} t=0.019 rss=77680
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:35Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.013 rss=78352
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:11:23Z", "campaigns": 0} t=0.009 unchanged=True anchors 4->4 pending=False kind=regular rss=78368
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:11:35Z", "campaigns": 0} t=0.127 unchanged=False anchors 4->5 pending=False kind=regular rss=79856
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:35Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.015 rss=70480
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:11:36Z", "campaigns": 0} t=0.099 unchanged=False anchors 5->6 pending=False kind=regular rss=72064
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m2_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "caf9e7267dd348e680bcb0eeb42e382980e5df925fb94432a85123803fe01afb", "fault_sha": "33c6a39db8701291c44dc596572bef9b3cdeac561f69d6424331f313bef264f2", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:17:05Z", "campaigns": 0} t=0.104 unchanged=False anchors 0->1 pending=False kind=regular rss=70640
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:17:05Z", "campaigns": 0} t=0.11 unchanged=False anchors 1->2 pending=False kind=regular rss=72176
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:17Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.078 rss=72848
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:17Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.034 rss=72848
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:17:17Z", "problem": null}, "ledger_valid": true} t=0.078 rss=72912
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:17Z", "problem": null}} t=0.046 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:17:17Z", "campaigns": 0} t=0.125 unchanged=False anchors 2->3 pending=False kind=regular rss=74320
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:17:17Z", "campaigns": 0} t=0.097 unchanged=False anchors 3->4 pending=False kind=regular rss=75024
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:17:28Z", "problem": null}, "ledger_valid": true} t=0.017 rss=75024
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:28Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.014 rss=75024
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:17:17Z", "campaigns": 0} t=0.011 unchanged=True anchors 4->4 pending=False kind=regular rss=75024
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:17:29Z", "campaigns": 0} t=0.09 unchanged=False anchors 4->5 pending=False kind=regular rss=75040
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:29Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.014 rss=69840
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:17:30Z", "campaigns": 0} t=0.093 unchanged=False anchors 5->6 pending=False kind=regular rss=71504
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m2_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "5602fafa75bef31eb7ce99eda2581c3c138e60f2a9e2ee5072e29f7ac6118f9d", "fault_sha": "bc141c7d218d1d363392e4b1430c9edc30ffc2d137b7f8e067f09393d94c7dd2", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:12:28Z", "campaigns": 0} t=0.144 unchanged=False anchors 0->1 pending=False kind=regular rss=70944
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:12:28Z", "campaigns": 0} t=0.136 unchanged=False anchors 1->2 pending=False kind=regular rss=72496
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:39Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.018 rss=72528
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:39Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.013 rss=72544
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:12:39Z", "problem": null}, "ledger_valid": true} t=0.019 rss=73984
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:39Z", "problem": null}} t=0.009 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:12:39Z", "campaigns": 0} t=0.129 unchanged=False anchors 2->3 pending=False kind=regular rss=75344
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:12:39Z", "campaigns": 0} t=0.099 unchanged=False anchors 3->4 pending=False kind=regular rss=76816
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:12:50Z", "problem": null}, "ledger_valid": true} t=0.017 rss=78256
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:50Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.019 rss=79040
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:12:39Z", "campaigns": 0} t=0.009 unchanged=True anchors 4->4 pending=False kind=regular rss=79040
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:12:51Z", "campaigns": 0} t=0.157 unchanged=False anchors 4->5 pending=False kind=regular rss=80512
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:51Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.027 rss=70688
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:12:52Z", "campaigns": 0} t=0.203 unchanged=False anchors 5->6 pending=False kind=regular rss=72240
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "3a6a96c20cab84533ce4e7710930fc3f41b24b0f180abc666ff4d63e47c51eb9", "fault_sha": "1c34ce1c83966f103c88a2c96e922657f41575bf5315b964f388ba4522b3066c", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:16:40Z", "campaigns": 0} t=0.165 unchanged=False anchors 0->1 pending=False kind=regular rss=70368
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:16:40Z", "campaigns": 0} t=0.143 unchanged=False anchors 1->2 pending=False kind=regular rss=71888
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:16:52Z", "campaigns": 0} t=0.104 unchanged=False anchors 2->3 pending=False kind=regular rss=72624
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:16:52Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.02 rss=72640
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:16:52Z", "problem": null}, "ledger_valid": true} t=0.017 rss=73424
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:16:52Z", "campaigns": 0} t=0.106 unchanged=False anchors 3->4 pending=False kind=regular rss=74896
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:17:03Z", "problem": null}, "ledger_valid": true} t=0.02 rss=75568
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:03Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.015 rss=75584
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:16:52Z", "campaigns": 0} t=0.009 unchanged=True anchors 4->4 pending=False kind=regular rss=75584
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:17:03Z", "campaigns": 0} t=0.111 unchanged=False anchors 4->5 pending=False kind=regular rss=75584
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:04Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.015 rss=69792
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:17:04Z", "campaigns": 0} t=0.096 unchanged=False anchors 5->6 pending=False kind=regular rss=71296
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "02a3df24b7045abbb1b2b3d2444d42e1448dd039a43e8004de44c072a12951ad", "fault_sha": "3e8bd083ad5ad39f6996b647f5496e14609df7d73543ea71cb6732c09aa506c0", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:12:02Z", "campaigns": 0} t=0.109 unchanged=False anchors 0->1 pending=False kind=regular rss=71728
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:12:02Z", "campaigns": 0} t=0.125 unchanged=False anchors 1->2 pending=False kind=regular rss=73264
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:12:13Z", "campaigns": 0} t=0.129 unchanged=False anchors 2->3 pending=False kind=regular rss=73280
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:14Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.018 rss=73936
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:12:14Z", "problem": null}, "ledger_valid": true} t=0.02 rss=75408
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:12:14Z", "campaigns": 0} t=0.135 unchanged=False anchors 3->4 pending=False kind=regular rss=76864
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:12:25Z", "problem": null}, "ledger_valid": true} t=0.019 rss=78336
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:25Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.014 rss=79008
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:12:13Z", "campaigns": 0} t=0.008 unchanged=True anchors 4->4 pending=False kind=regular rss=79008
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:12:25Z", "campaigns": 0} t=0.14 unchanged=False anchors 4->5 pending=False kind=regular rss=80432
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:26Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.018 rss=71072
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:12:26Z", "campaigns": 0} t=0.117 unchanged=False anchors 5->6 pending=False kind=regular rss=72592
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m3_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "5b9bc62d0d75c04661019b2e912f06a909f1f0ce796e58459ec758d25db533e9", "fault_sha": "d27bff3be5ef158fdce13f351f1d8c611c9e59d1b0927d25f7aa908190d5f733", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:17:56Z", "campaigns": 0} t=0.178 unchanged=False anchors 0->1 pending=False kind=regular rss=69680
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:17:56Z", "campaigns": 0} t=0.138 unchanged=False anchors 1->2 pending=False kind=regular rss=71200
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:18:07Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.019 rss=71920
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:18:07Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.013 rss=71968
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:18:07Z", "problem": null}, "ledger_valid": true} t=0.019 rss=72032
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:18:07Z", "problem": null}} t=0.007 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:18:07Z", "campaigns": 0} t=0.125 unchanged=False anchors 2->3 pending=False kind=regular rss=73408
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:18:07Z", "campaigns": 0} t=0.118 unchanged=False anchors 3->4 pending=False kind=regular rss=74080
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:18:19Z", "problem": null}, "ledger_valid": true} t=0.017 rss=74080
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:18:19Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.013 rss=74080
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:18:07Z", "campaigns": 0} t=0.005 unchanged=True anchors 4->4 pending=False kind=regular rss=74080
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:18:19Z", "campaigns": 0} t=0.114 unchanged=False anchors 4->5 pending=False kind=regular rss=74112
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:18:19Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.018 rss=69584
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:18:20Z", "campaigns": 0} t=0.13 unchanged=False anchors 5->6 pending=False kind=regular rss=71040
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m3_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "7a1c49e66162dbbe3a10f1ce9a07de11245579ddc0086935bf063c68221f571e", "fault_sha": "d039b501a3da71abfa70d947e8e5e8c0bbc91a8783dc0266d2969cc194ddf155", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:13:18Z", "campaigns": 0} t=0.128 unchanged=False anchors 0->1 pending=False kind=regular rss=71088
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:13:18Z", "campaigns": 0} t=0.119 unchanged=False anchors 1->2 pending=False kind=regular rss=72544
+   A_no_write: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:29Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.02 rss=72544
+   A_no_write_again: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:29Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.011 rss=72576
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:13:29Z", "problem": null}, "ledger_valid": true} t=0.017 rss=74048
+   status_after_check: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:29Z", "problem": null}} t=0.011 rss=None
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:13:29Z", "campaigns": 0} t=0.1 unchanged=False anchors 2->3 pending=False kind=regular rss=75520
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:13:29Z", "campaigns": 0} t=0.123 unchanged=False anchors 3->4 pending=False kind=regular rss=76944
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:13:40Z", "problem": null}, "ledger_valid": true} t=0.018 rss=78400
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:40Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.014 rss=79152
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:13:29Z", "campaigns": 0} t=0.01 unchanged=True anchors 4->4 pending=False kind=regular rss=79168
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:13:41Z", "campaigns": 0} t=0.125 unchanged=False anchors 4->5 pending=False kind=regular rss=80640
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:41Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.011 rss=70800
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:13:42Z", "campaigns": 0} t=0.136 unchanged=False anchors 5->6 pending=False kind=regular rss=72304
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "9477d4563322d86eb7ab045db80236381eb050b9dbd94d070dab1a7c55874e25", "fault_sha": "615c008ddd73270d901da132ad5e019b49b0139c8f18175c96bd350ca94da3b5", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:17:31Z", "campaigns": 0} t=0.083 unchanged=False anchors 0->1 pending=False kind=regular rss=70352
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:17:31Z", "campaigns": 0} t=0.095 unchanged=False anchors 1->2 pending=False kind=regular rss=71808
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:17:42Z", "campaigns": 0} t=0.218 unchanged=False anchors 2->3 pending=False kind=regular rss=72544
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:43Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.018 rss=72560
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:17:43Z", "problem": null}, "ledger_valid": true} t=0.027 rss=73376
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:17:43Z", "campaigns": 0} t=0.17 unchanged=False anchors 3->4 pending=False kind=regular rss=74832
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:17:54Z", "problem": null}, "ledger_valid": true} t=0.02 rss=75648
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:54Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.016 rss=75648
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:17:42Z", "campaigns": 0} t=0.012 unchanged=True anchors 4->4 pending=False kind=regular rss=75648
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:17:54Z", "campaigns": 0} t=0.186 unchanged=False anchors 4->5 pending=False kind=regular rss=75648
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:17:55Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.013 rss=69280
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:17:55Z", "campaigns": 0} t=0.137 unchanged=False anchors 5->6 pending=False kind=regular rss=70848
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== c75b0662_m3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "779a3c3d748809cb4e91d0d1079206805fbdf82c49a97e436db74fc5e9dd71da", "fault_sha": "ec2c58e583e59f7896e46536b40e16c55dd3bcdcba6699c5622517bb569032aa", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:12:53Z", "campaigns": 0} t=0.099 unchanged=False anchors 0->1 pending=False kind=regular rss=71344
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:12:53Z", "campaigns": 0} t=0.123 unchanged=False anchors 1->2 pending=False kind=regular rss=72864
+   W3: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:13:04Z", "campaigns": 0} t=0.123 unchanged=False anchors 2->3 pending=False kind=regular rss=72896
+   A_after_W3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:04Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.017 rss=73584
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:13:04Z", "problem": null}, "ledger_valid": true} t=0.017 rss=75104
+   W4: 201 {"tenant_id": "t-y", "killed": false, "created_at": "2026-10-18T17:13:05Z", "campaigns": 0} t=0.099 unchanged=False anchors 3->4 pending=False kind=regular rss=76528
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:13:16Z", "problem": null}, "ledger_valid": true} t=0.022 rss=77952
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:16Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.012 rss=78640
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:13:04Z", "campaigns": 0} t=0.008 unchanged=True anchors 4->4 pending=False kind=regular rss=78656
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:13:16Z", "campaigns": 0} t=0.08 unchanged=False anchors 4->5 pending=False kind=regular rss=80144
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:16Z", "problem": null}, "ledger_valid": true, "log_length": 5} t=0.01 rss=70640
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:13:17Z", "campaigns": 0} t=0.144 unchanged=False anchors 5->6 pending=False kind=regular rss=72176
+   FINAL lines 6 anchors 6 verify {'entries': 12, 'valid': True} ['t-before', 't-mid', 't-x', 't-y', 't-z', 't-after']
+======== cf5ee168_e2_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "52988a1aaf78fd70889f545bb6dbf57ababc4d33e289c1d2e65b7c6dda808f7d", "fault_sha": "c3a9c9a5e5a08ca1b4f4fe07712a736bf5b8f02ed6725852c2d69e99ac140463", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:10:40Z", "campaigns": 0} t=0.168 unchanged=False anchors 0->1 pending=False kind=regular rss=70416
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:10:40Z", "campaigns": 0} t=0.158 unchanged=False anchors 1->2 pending=False kind=regular rss=71968
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:10:51Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.017 rss=72656
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:10:51Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.012 rss=72656
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:10:51Z", "problem": "the local log file differs from the lines this servi t=0.022 rss=72704
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:10:51Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.007 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.008 unchanged=True anchors 2->2 pending=False kind=regular rss=72720
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.012 unchanged=True anchors 2->2 pending=False kind=regular rss=72800
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:11:03Z", "problem": null}, "ledger_valid": true} t=0.016 rss=72800
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:03Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.017 rss=72800
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:11:03Z", "campaigns": 0} t=0.145 unchanged=False anchors 2->3 pending=False kind=regular rss=72800
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:11:03Z", "campaigns": 0} t=0.155 unchanged=False anchors 3->4 pending=False kind=regular rss=74192
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:03Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.01 rss=69408
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:11:04Z", "campaigns": 0} t=0.173 unchanged=False anchors 4->5 pending=False kind=regular rss=70880
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_e2_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "6af1b495e88918ef90438856447459ffc8127097de2ed7284e0385c135923450", "fault_sha": "788ecf64e05d329e7c8ce78d0e141fe45011be9a50cc4051037a98f3bb9f0f6b", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:05:51Z", "campaigns": 0} t=0.143 unchanged=False anchors 0->1 pending=False kind=regular rss=71920
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:05:52Z", "campaigns": 0} t=0.165 unchanged=False anchors 1->2 pending=False kind=regular rss=73440
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:06:03Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.022 rss=73440
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:06:03Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.014 rss=73472
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:06:03Z", "problem": "the local log file differs from the lines this servi t=0.018 rss=74928
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:06:03Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.01 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.007 unchanged=True anchors 2->2 pending=False kind=regular rss=74960
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.007 unchanged=True anchors 2->2 pending=False kind=regular rss=74992
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:06:14Z", "problem": null}, "ledger_valid": true} t=0.016 rss=76464
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:06:14Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.011 rss=77200
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:06:14Z", "campaigns": 0} t=0.143 unchanged=False anchors 2->3 pending=False kind=regular rss=78640
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:06:14Z", "campaigns": 0} t=0.111 unchanged=False anchors 3->4 pending=False kind=regular rss=80080
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:06:15Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.014 rss=70576
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:06:15Z", "campaigns": 0} t=0.145 unchanged=False anchors 4->5 pending=False kind=regular rss=72096
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_e2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "a8e95d0d6c985dd71cf18ba3f250700a58611deafbca54f60af6e716b80b3dfd", "fault_sha": "879b30b696e2e0a737d25e6ecd3d910cd84ec9fb721c6f6d7da9fa9ea12dd1dd", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:10:15Z", "campaigns": 0} t=0.166 unchanged=False anchors 0->1 pending=False kind=regular rss=69696
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:10:15Z", "campaigns": 0} t=0.162 unchanged=False anchors 1->2 pending=False kind=regular rss=71136
+   W3: 503 "STORE_UNAVAILABLE" t=0.127 unchanged=True anchors 2->3 pending=True kind=regular rss=71888
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:10:27Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.019 rss=71968
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:10:27Z", "problem": "the pending line is anchored on the ledger but canno t=0.022 rss=74032
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.015 unchanged=True anchors 3->3 pending=True kind=regular rss=74032
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:10:38Z", "problem": null}, "ledger_valid": true} t=0.037 rss=74064
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:38Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.013 rss=74064
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:10:26Z", "campaigns": 0} t=0.011 unchanged=True anchors 3->3 pending=False kind=regular rss=74064
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:10:38Z", "campaigns": 0} t=0.132 unchanged=False anchors 3->4 pending=False kind=regular rss=74080
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:39Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.015 rss=69328
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:10:39Z", "campaigns": 0} t=0.133 unchanged=False anchors 4->5 pending=False kind=regular rss=70896
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_e2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "d32b10d7e569997678b088e70555257a6073f42f3120beee6d83b581176c8a14", "fault_sha": "ecff69cc161c93a29cae8f51560c246f8cb0cb353a952e30e79ce2cd6d16e78e", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:05:26Z", "campaigns": 0} t=0.131 unchanged=False anchors 0->1 pending=False kind=regular rss=71504
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:05:26Z", "campaigns": 0} t=0.153 unchanged=False anchors 1->2 pending=False kind=regular rss=73056
+   W3: 503 "STORE_UNAVAILABLE" t=0.135 unchanged=True anchors 2->3 pending=True kind=regular rss=73056
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:05:38Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.027 rss=74608
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:05:38Z", "problem": "the pending line is anchored on the ledger but canno t=0.02 rss=76704
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.009 unchanged=True anchors 3->3 pending=True kind=regular rss=76704
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:05:49Z", "problem": null}, "ledger_valid": true} t=0.04 rss=79680
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:05:49Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.012 rss=80352
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:05:38Z", "campaigns": 0} t=0.007 unchanged=True anchors 3->3 pending=False kind=regular rss=80352
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:05:49Z", "campaigns": 0} t=0.122 unchanged=False anchors 3->4 pending=False kind=regular rss=81824
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:05:50Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.018 rss=70464
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:05:50Z", "campaigns": 0} t=0.13 unchanged=False anchors 4->5 pending=False kind=regular rss=72016
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_e3_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "a693c147eed1c8e10eb12b0cce6f1858d2704e17a9d1b2c6ad3443072bf8e82b", "fault_sha": "d23a57ad51f37858a8662d48173edd44e63a57698cb500635c279030d1941f58", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:11:30Z", "campaigns": 0} t=0.087 unchanged=False anchors 0->1 pending=False kind=regular rss=69952
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:11:30Z", "campaigns": 0} t=0.086 unchanged=False anchors 1->2 pending=False kind=regular rss=71488
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:11:41Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.018 rss=72224
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:11:41Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.01 rss=72224
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:11:41Z", "problem": "the local log file differs from the lines this servi t=0.019 rss=72240
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:11:41Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.015 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.015 unchanged=True anchors 2->2 pending=False kind=regular rss=72256
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.013 unchanged=True anchors 2->2 pending=False kind=regular rss=72320
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:11:52Z", "problem": null}, "ledger_valid": true} t=0.019 rss=72336
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:52Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.014 rss=72336
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:11:52Z", "campaigns": 0} t=0.084 unchanged=False anchors 2->3 pending=False kind=regular rss=72336
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:11:52Z", "campaigns": 0} t=0.106 unchanged=False anchors 3->4 pending=False kind=regular rss=73744
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:53Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.014 rss=69168
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:11:54Z", "campaigns": 0} t=0.103 unchanged=False anchors 4->5 pending=False kind=regular rss=70704
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_e3_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "8509ad6da9c67841c5c0754a2a9b74f7c573df684edc3cb0ddab91af84fefe09", "fault_sha": "dd098c1dd7b66a3bfe39efb4b16ed0ea7fc669c64aabf6028004f88338cba2ff", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:06:41Z", "campaigns": 0} t=0.177 unchanged=False anchors 0->1 pending=False kind=regular rss=70832
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:06:42Z", "campaigns": 0} t=0.15 unchanged=False anchors 1->2 pending=False kind=regular rss=72400
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:06:53Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.023 rss=72400
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:06:53Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.027 rss=72432
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:06:53Z", "problem": "the local log file differs from the lines this servi t=0.021 rss=73920
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:06:53Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.017 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.011 unchanged=True anchors 2->2 pending=False kind=regular rss=73920
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.008 unchanged=True anchors 2->2 pending=False kind=regular rss=73984
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:07:04Z", "problem": null}, "ledger_valid": true} t=0.019 rss=75424
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:07:04Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.021 rss=76144
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:07:04Z", "campaigns": 0} t=0.151 unchanged=False anchors 2->3 pending=False kind=regular rss=77632
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:07:04Z", "campaigns": 0} t=0.175 unchanged=False anchors 3->4 pending=False kind=regular rss=79152
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:07:05Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.017 rss=70528
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:07:06Z", "campaigns": 0} t=0.131 unchanged=False anchors 4->5 pending=False kind=regular rss=72128
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_e3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "16fecc3bcc79f212757574a05834ff0da449d4b63bff731b7498c0fa16a783d0", "fault_sha": "302d3375bbad6b05252f0381cc19ac54d104b6f6fbc7138b5aa639cc58627648", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:11:05Z", "campaigns": 0} t=0.14 unchanged=False anchors 0->1 pending=False kind=regular rss=70080
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:11:05Z", "campaigns": 0} t=0.119 unchanged=False anchors 1->2 pending=False kind=regular rss=71600
+   W3: 503 "STORE_UNAVAILABLE" t=0.12 unchanged=True anchors 2->3 pending=True kind=regular rss=72304
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:11:16Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.021 rss=72368
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:11:16Z", "problem": "the pending line is anchored on the ledger but canno t=0.027 rss=74640
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.009 unchanged=True anchors 3->3 pending=True kind=regular rss=74640
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:11:27Z", "problem": null}, "ledger_valid": true} t=0.032 rss=74672
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:27Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.015 rss=74672
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:11:16Z", "campaigns": 0} t=0.007 unchanged=True anchors 3->3 pending=False kind=regular rss=74688
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:11:28Z", "campaigns": 0} t=0.133 unchanged=False anchors 3->4 pending=False kind=regular rss=74720
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:11:28Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.015 rss=69344
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:11:29Z", "campaigns": 0} t=0.135 unchanged=False anchors 4->5 pending=False kind=regular rss=70896
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_e3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "605a2ecfeaf7c97af41c3e7d0597f08be9eb47166bcfa22a1ac54cf0f1d12962", "fault_sha": "6f0e3c230b73a9c8bc6599d1167b425a0e82fd665b6de42110880199dcb4b9d5", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:06:16Z", "campaigns": 0} t=0.132 unchanged=False anchors 0->1 pending=False kind=regular rss=71296
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:06:16Z", "campaigns": 0} t=0.169 unchanged=False anchors 1->2 pending=False kind=regular rss=72832
+   W3: 503 "STORE_UNAVAILABLE" t=0.136 unchanged=True anchors 2->3 pending=True kind=regular rss=72848
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:06:28Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.024 rss=74320
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:06:28Z", "problem": "the pending line is anchored on the ledger but canno t=0.026 rss=76544
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.006 unchanged=True anchors 3->3 pending=True kind=regular rss=76544
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:06:39Z", "problem": null}, "ledger_valid": true} t=0.042 rss=79488
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:06:39Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.012 rss=80208
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:06:28Z", "campaigns": 0} t=0.01 unchanged=True anchors 3->3 pending=False kind=regular rss=80208
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:06:39Z", "campaigns": 0} t=0.172 unchanged=False anchors 3->4 pending=False kind=regular rss=81696
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:06:40Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.013 rss=70688
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:06:40Z", "campaigns": 0} t=0.125 unchanged=False anchors 4->5 pending=False kind=regular rss=72208
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_fifo_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "6f711ce1ef0ff079282fd9bb88d5ad56421377f66a642fd79fb17ad90d7e7db9", "fault_sha": null, "target_sha": null} kind fifo
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:13:49Z", "campaigns": 0} t=0.154 unchanged=False anchors 0->1 pending=False kind=regular rss=69952
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:13:50Z", "campaigns": 0} t=0.134 unchanged=False anchors 1->2 pending=False kind=regular rss=71440
+   W3: 503 "STORE_UNAVAILABLE" t=0.148 unchanged=True anchors 2->3 pending=True kind=fifo rss=72160
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:01Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.02 rss=72256
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:01Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.017 rss=72896
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:01Z", "problem": "the pending line is anchored on the ledger but canno t=0.028 rss=74320
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:01Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}} t=0.011 rss=None
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:01Z", "problem": "the pending line is anchored on the ledger but canno t=0.021 rss=74336
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.008 unchanged=True anchors 3->3 pending=True kind=fifo rss=74352
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:14:01Z", "problem": null}, "ledger_valid": true} t=0.034 rss=74384
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:01Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.016 rss=74384
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:14:01Z", "campaigns": 0} t=0.01 unchanged=True anchors 3->3 pending=False kind=regular rss=74384
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:14:01Z", "campaigns": 0} t=0.153 unchanged=False anchors 3->4 pending=False kind=regular rss=74384
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:02Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.019 rss=69056
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:14:02Z", "campaigns": 0} t=0.146 unchanged=False anchors 4->5 pending=False kind=regular rss=70656
+   after_writes {'disk': {'kind': 'fifo', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl', 'pending.line']}, 'target_unchanged': None, 'rss_kb': 74352}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_fifo_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "77cf3767f2650d957d62af3edf6a1b9396b517662c0caea095e7c6bd7c551bc1", "fault_sha": null, "target_sha": null} kind fifo
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:08:59Z", "campaigns": 0} t=0.125 unchanged=False anchors 0->1 pending=False kind=regular rss=71040
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:08:59Z", "campaigns": 0} t=0.105 unchanged=False anchors 1->2 pending=False kind=regular rss=72528
+   W3: 503 "STORE_UNAVAILABLE" t=0.117 unchanged=True anchors 2->3 pending=True kind=fifo rss=72528
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:10Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.02 rss=74048
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:10Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.01 rss=74736
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:10Z", "problem": "the pending line is anchored on the ledger but canno t=0.026 rss=76864
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:10Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}} t=0.006 rss=None
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:10Z", "problem": "the pending line is anchored on the ledger but canno t=0.016 rss=79024
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.006 unchanged=True anchors 3->3 pending=True kind=fifo rss=79040
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:09:10Z", "problem": null}, "ledger_valid": true} t=0.025 rss=82000
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:10Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.011 rss=82688
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:09:10Z", "campaigns": 0} t=0.007 unchanged=True anchors 3->3 pending=False kind=regular rss=82688
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:09:10Z", "campaigns": 0} t=0.116 unchanged=False anchors 3->4 pending=False kind=regular rss=83424
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:11Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.012 rss=70480
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:09:11Z", "campaigns": 0} t=0.116 unchanged=False anchors 4->5 pending=False kind=regular rss=72032
+   after_writes {'disk': {'kind': 'fifo', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl', 'pending.line']}, 'target_unchanged': None, 'rss_kb': 79040}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_fifo_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "7dad3f32f49357346acff7c8fcada66e3ae9f775062f67cb5c1394969e89d30f", "fault_sha": null, "target_sha": null} kind fifo
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:13:36Z", "campaigns": 0} t=0.134 unchanged=False anchors 0->1 pending=False kind=regular rss=69840
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:13:36Z", "campaigns": 0} t=0.142 unchanged=False anchors 1->2 pending=False kind=regular rss=71328
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:13:47Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.023 rss=72064
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:13:47Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.013 rss=72064
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:13:47Z", "problem": "the local log file differs from the lines this servi t=0.015 rss=72112
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:13:47Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.008 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.008 unchanged=True anchors 2->2 pending=False kind=fifo rss=72128
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:13:47Z", "problem": "the local log file differs from the lines this servi t=0.021 rss=73568
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.007 unchanged=True anchors 2->2 pending=False kind=fifo rss=73568
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:13:47Z", "problem": null}, "ledger_valid": true} t=0.017 rss=73568
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:47Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.012 rss=73568
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:13:47Z", "campaigns": 0} t=0.141 unchanged=False anchors 2->3 pending=False kind=regular rss=73568
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:13:47Z", "campaigns": 0} t=0.147 unchanged=False anchors 3->4 pending=False kind=regular rss=73632
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:48Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.016 rss=69008
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:13:48Z", "campaigns": 0} t=0.131 unchanged=False anchors 4->5 pending=False kind=regular rss=70608
+   after_writes {'disk': {'kind': 'fifo', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']}, 'target_unchanged': None, 'rss_kb': 73568}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_fifo_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "f5aa570ec0e392075a9e2843900f45fa7a93f1ce425dcd68ae46bc30f74d6a4a", "fault_sha": null, "target_sha": null} kind fifo
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:08:45Z", "campaigns": 0} t=0.143 unchanged=False anchors 0->1 pending=False kind=regular rss=71168
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:08:46Z", "campaigns": 0} t=0.121 unchanged=False anchors 1->2 pending=False kind=regular rss=72704
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:08:57Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.015 rss=72704
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:08:57Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.01 rss=72720
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:08:57Z", "problem": "the local log file differs from the lines this servi t=0.019 rss=74160
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:08:57Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.01 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.006 unchanged=True anchors 2->2 pending=False kind=fifo rss=74176
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:08:57Z", "problem": "the local log file differs from the lines this servi t=0.014 rss=75632
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.01 unchanged=True anchors 2->2 pending=False kind=fifo rss=75648
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:08:57Z", "problem": null}, "ledger_valid": true} t=0.015 rss=77184
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:08:57Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.014 rss=77920
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:08:57Z", "campaigns": 0} t=0.096 unchanged=False anchors 2->3 pending=False kind=regular rss=79424
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:08:57Z", "campaigns": 0} t=0.085 unchanged=False anchors 3->4 pending=False kind=regular rss=80848
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:08:58Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.01 rss=70368
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:08:58Z", "campaigns": 0} t=0.108 unchanged=False anchors 4->5 pending=False kind=regular rss=71920
+   after_writes {'disk': {'kind': 'fifo', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']}, 'target_unchanged': None, 'rss_kb': 75648}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m2_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "a4b494c551663080eccf993f2255c62336caaede7c2f5d8dff31911467b76c5f", "fault_sha": "a476008f29212a56a41dfbba56e0a9b092928c03410d89fb27ca84ed0d21da68", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:12:20Z", "campaigns": 0} t=0.147 unchanged=False anchors 0->1 pending=False kind=regular rss=70096
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:12:20Z", "campaigns": 0} t=0.132 unchanged=False anchors 1->2 pending=False kind=regular rss=71632
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:12:31Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.015 rss=72384
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:12:31Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.015 rss=72384
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:12:31Z", "problem": "the local log file differs from the lines this servi t=0.021 rss=72448
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:12:31Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.011 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.011 unchanged=True anchors 2->2 pending=False kind=regular rss=72464
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.007 unchanged=True anchors 2->2 pending=False kind=regular rss=72528
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:12:42Z", "problem": null}, "ledger_valid": true} t=0.022 rss=72544
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:42Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.011 rss=72544
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:12:43Z", "campaigns": 0} t=0.079 unchanged=False anchors 2->3 pending=False kind=regular rss=72560
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:12:43Z", "campaigns": 0} t=0.081 unchanged=False anchors 3->4 pending=False kind=regular rss=73792
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:43Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.014 rss=69344
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:12:44Z", "campaigns": 0} t=0.778 unchanged=False anchors 4->5 pending=False kind=regular rss=70880
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m2_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "5f355e9dcf6b98f09d1907bdbbd8cf09acec31fa097d0806a26c96464f942bbb", "fault_sha": "130b7729e1b52167447e971a698c23389f7195029a0f946a6b4e11a5574e5c4c", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:07:32Z", "campaigns": 0} t=0.142 unchanged=False anchors 0->1 pending=False kind=regular rss=70976
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:07:32Z", "campaigns": 0} t=0.127 unchanged=False anchors 1->2 pending=False kind=regular rss=72528
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:07:43Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.018 rss=72544
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:07:43Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.01 rss=72560
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:07:43Z", "problem": "the local log file differs from the lines this servi t=0.017 rss=74000
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:07:43Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.005 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.005 unchanged=True anchors 2->2 pending=False kind=regular rss=74048
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.007 unchanged=True anchors 2->2 pending=False kind=regular rss=74080
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:07:55Z", "problem": null}, "ledger_valid": true} t=0.015 rss=75536
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:07:55Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.01 rss=76192
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:07:55Z", "campaigns": 0} t=0.115 unchanged=False anchors 2->3 pending=False kind=regular rss=77696
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:07:55Z", "campaigns": 0} t=0.129 unchanged=False anchors 3->4 pending=False kind=regular rss=79184
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:07:55Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.01 rss=70032
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:07:56Z", "campaigns": 0} t=0.11 unchanged=False anchors 4->5 pending=False kind=regular rss=71680
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m2_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "89a32034f229ff3851aa27f989e27e48a8841c57bb2b359fde54afec4fec8158", "fault_sha": "fdfd7942a3f7df60b5e5c638ef584cae19be56524425f6d13fd850d66aea71a0", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:11:55Z", "campaigns": 0} t=0.13 unchanged=False anchors 0->1 pending=False kind=regular rss=69744
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:11:55Z", "campaigns": 0} t=0.146 unchanged=False anchors 1->2 pending=False kind=regular rss=71184
+   W3: 503 "STORE_UNAVAILABLE" t=0.088 unchanged=True anchors 2->3 pending=True kind=regular rss=71904
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:12:06Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.021 rss=71952
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:12:06Z", "problem": "the pending line is anchored on the ledger but canno t=0.022 rss=74048
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.009 unchanged=True anchors 3->3 pending=True kind=regular rss=74048
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:12:17Z", "problem": null}, "ledger_valid": true} t=0.036 rss=74048
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:17Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.015 rss=74048
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:12:06Z", "campaigns": 0} t=0.01 unchanged=True anchors 3->3 pending=False kind=regular rss=74048
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:12:17Z", "campaigns": 0} t=0.143 unchanged=False anchors 3->4 pending=False kind=regular rss=74064
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:12:18Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.012 rss=69136
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:12:19Z", "campaigns": 0} t=0.174 unchanged=False anchors 4->5 pending=False kind=regular rss=70736
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m2_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "2646aa35cd7c426d754d14feed41df52a9f6c7d54f0b9954b7cfec90afbd26c1", "fault_sha": "3ecf988f620f4cb08b2afe1a6bf80cd78ba1f7422b787fa5c1aa5214e60ec0b0", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:07:07Z", "campaigns": 0} t=0.123 unchanged=False anchors 0->1 pending=False kind=regular rss=71616
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:07:07Z", "campaigns": 0} t=0.107 unchanged=False anchors 1->2 pending=False kind=regular rss=73152
+   W3: 503 "STORE_UNAVAILABLE" t=0.126 unchanged=True anchors 2->3 pending=True kind=regular rss=73152
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:07:18Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.019 rss=74704
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:07:18Z", "problem": "the pending line is anchored on the ledger but canno t=0.022 rss=76768
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.012 unchanged=True anchors 3->3 pending=True kind=regular rss=76768
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:07:29Z", "problem": null}, "ledger_valid": true} t=0.176 rss=79744
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:07:29Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.086 rss=80432
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:07:18Z", "campaigns": 0} t=0.086 unchanged=True anchors 3->3 pending=False kind=regular rss=80432
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:07:30Z", "campaigns": 0} t=0.15 unchanged=False anchors 3->4 pending=False kind=regular rss=81936
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:07:31Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.015 rss=70704
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:07:31Z", "campaigns": 0} t=0.095 unchanged=False anchors 4->5 pending=False kind=regular rss=72192
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m3_I_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "69186ce92be359976538b98544a91b59f2c992f11ae6c48cac5a153497e3a1a5", "fault_sha": "8e2e6c9e6558870c0e4ee32044aa5640ef19492b9138549554f4fa90f7b868cb", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:13:11Z", "campaigns": 0} t=0.13 unchanged=False anchors 0->1 pending=False kind=regular rss=69920
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:13:11Z", "campaigns": 0} t=0.16 unchanged=False anchors 1->2 pending=False kind=regular rss=71408
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:13:22Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.017 rss=72144
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:13:22Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.012 rss=72144
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:13:22Z", "problem": "the local log file differs from the lines this servi t=0.019 rss=72208
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:13:22Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.01 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.008 unchanged=True anchors 2->2 pending=False kind=regular rss=72224
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.006 unchanged=True anchors 2->2 pending=False kind=regular rss=72288
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:13:33Z", "problem": null}, "ledger_valid": true} t=0.021 rss=72288
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:33Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.015 rss=72288
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:13:33Z", "campaigns": 0} t=0.1 unchanged=False anchors 2->3 pending=False kind=regular rss=72288
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:13:33Z", "campaigns": 0} t=0.119 unchanged=False anchors 3->4 pending=False kind=regular rss=73600
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:34Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.022 rss=69312
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:13:35Z", "campaigns": 0} t=0.144 unchanged=False anchors 4->5 pending=False kind=regular rss=70832
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m3_I_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "6f5a6050b0318ca3a96f66ec4806c0c74250ce901ec80b3efb92b9931e9fe2cc", "fault_sha": "0d9de743f818ae17d11b005e2006291e993f6a3bca5ed67287f329cd49dbe484", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:08:21Z", "campaigns": 0} t=0.105 unchanged=False anchors 0->1 pending=False kind=regular rss=71328
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:08:21Z", "campaigns": 0} t=0.12 unchanged=False anchors 1->2 pending=False kind=regular rss=72896
+   A_no_write: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:08:32Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.013 rss=72896
+   A_no_write_again: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:08:32Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.013 rss=72928
+   job_no_write: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:08:32Z", "problem": "the local log file differs from the lines this servi t=0.021 rss=74400
+   status_after_check: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:08:32Z", "problem": "the local log file differs from the lines this service holds: an operato t=0.006 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.007 unchanged=True anchors 2->2 pending=False kind=regular rss=74400
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.006 unchanged=True anchors 2->2 pending=False kind=regular rss=74464
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:08:43Z", "problem": null}, "ledger_valid": true} t=0.016 rss=75920
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:08:43Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.011 rss=76672
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:08:43Z", "campaigns": 0} t=0.096 unchanged=False anchors 2->3 pending=False kind=regular rss=78080
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:08:44Z", "campaigns": 0} t=0.087 unchanged=False anchors 3->4 pending=False kind=regular rss=79616
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:08:44Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.01 rss=70544
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:08:45Z", "campaigns": 0} t=0.106 unchanged=False anchors 4->5 pending=False kind=regular rss=72112
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m3_W_3.12 python 3.12.14
+  fault {"same_size": true, "orig_sha": "b71f81d249d01a48600d9cb2feb733f0e7682de254d16593e5ce764c4a85081c", "fault_sha": "6e5a07f59c36dee9e67f9d895c2b20734239f36192c81651135387a693c6384b", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:12:46Z", "campaigns": 0} t=0.127 unchanged=False anchors 0->1 pending=False kind=regular rss=70288
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:12:46Z", "campaigns": 0} t=0.09 unchanged=False anchors 1->2 pending=False kind=regular rss=71776
+   W3: 503 "STORE_UNAVAILABLE" t=0.175 unchanged=True anchors 2->3 pending=True kind=regular rss=72544
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:12:57Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.021 rss=72672
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:12:57Z", "problem": "the pending line is anchored on the ledger but canno t=0.027 rss=74736
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.013 unchanged=True anchors 3->3 pending=True kind=regular rss=74736
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:13:08Z", "problem": null}, "ledger_valid": true} t=0.034 rss=74736
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:08Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.011 rss=74736
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:12:57Z", "campaigns": 0} t=0.007 unchanged=True anchors 3->3 pending=False kind=regular rss=74736
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:13:09Z", "campaigns": 0} t=0.146 unchanged=False anchors 3->4 pending=False kind=regular rss=74736
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:13:09Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.009 rss=69312
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:13:10Z", "campaigns": 0} t=0.164 unchanged=False anchors 4->5 pending=False kind=regular rss=70864
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_m3_W_3.13 python 3.13.9
+  fault {"same_size": true, "orig_sha": "e944fd769713f398103fdbe2623a168e2d0774c951fd9952a21b71b77d9a6249", "fault_sha": "309cad7dc5b6d6034d807052eaefaaa2561ce4758b221fa1322e3e11dce9b2ff", "target_sha": null} kind regular
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:07:57Z", "campaigns": 0} t=0.056 unchanged=False anchors 0->1 pending=False kind=regular rss=71424
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:07:57Z", "campaigns": 0} t=0.057 unchanged=False anchors 1->2 pending=False kind=regular rss=72928
+   W3: 503 "STORE_UNAVAILABLE" t=0.117 unchanged=True anchors 2->3 pending=True kind=regular rss=72928
+   A_after_W3: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:08:08Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.015 rss=74400
+   job_after_W3: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:08:08Z", "problem": "the pending line is anchored on the ledger but canno t=0.017 rss=76528
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.01 unchanged=True anchors 3->3 pending=True kind=regular rss=76544
+   job_putback: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:08:19Z", "problem": null}, "ledger_valid": true} t=0.026 rss=79520
+   A_putback: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:08:19Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.01 rss=80192
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:08:08Z", "campaigns": 0} t=0.01 unchanged=True anchors 3->3 pending=False kind=regular rss=80224
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:08:19Z", "campaigns": 0} t=0.1 unchanged=False anchors 3->4 pending=False kind=regular rss=81696
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:08:20Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.011 rss=70048
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:08:20Z", "campaigns": 0} t=0.095 unchanged=False anchors 4->5 pending=False kind=regular rss=71680
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_rdir_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "eba953854ac020b45ab76f4b0e3881b3e4fbb7dba910a6951f690a0daedfbad9", "fault_sha": null, "target_sha": null} kind dir
+   restart_on_fault {"exited": 1, "after_s": 0.29, "peak_rss_kb": 58656, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 151, in _read_at_start", "    raise StoreCorrupt(\"the log is not a regular file; refusing to start (inspect the data directory)\")", "store.StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'dir', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_rdir_X_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "6789a4516a1d73b56754b64c00ac759d847cf12b0f492758f27a7357f85c02de", "fault_sha": null, "target_sha": null} kind dir
+   restart_on_fault {"exited": 1, "after_s": 0.513, "peak_rss_kb": 59424, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 151, in _read_at_start", "    raise StoreCorrupt(\"the log is not a regular file; refusing to start (inspect the data directory)\")", "store.StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'dir', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_rfifo_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "a34a9566c7e8765bbcaed127d58aba8ffa870110aa36436b6ec9565efca9a2a1", "fault_sha": null, "target_sha": null} kind fifo
+   restart_on_fault {"exited": 1, "after_s": 0.295, "peak_rss_kb": 59184, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 151, in _read_at_start", "    raise StoreCorrupt(\"the log is not a regular file; refusing to start (inspect the data directory)\")", "store.StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'fifo', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_rfifo_X_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "9c8ca5849063ae89ff03e0730a2b370413386451009887b6e2872e5773d09a06", "fault_sha": null, "target_sha": null} kind fifo
+   restart_on_fault {"exited": 1, "after_s": 0.473, "peak_rss_kb": 59392, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 151, in _read_at_start", "    raise StoreCorrupt(\"the log is not a regular file; refusing to start (inspect the data directory)\")", "store.StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'fifo', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_rperm_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "cba7694f9d56b9d9d75a66b33ada9708a3814de8701e7e7e4f2392a28786ccca", "fault_sha": null, "target_sha": null} kind regular
+   restart_on_fault {"exited": 1, "after_s": 0.272, "peak_rss_kb": 58656, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 147, in _read_at_start", "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc", "store.StoreCorrupt: the log cannot be opened (PermissionError); refusing to start: inspect the data directory"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'regular', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_rperm_X_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "1cde3ede88d18d474dcb141e651702803d5f6cf5dbda5777cc7b321663af82bc", "fault_sha": null, "target_sha": null} kind regular
+   restart_on_fault {"exited": 1, "after_s": 0.324, "peak_rss_kb": 60080, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 147, in _read_at_start", "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc", "store.StoreCorrupt: the log cannot be opened (PermissionError); refusing to start: inspect the data directory"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'regular', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_rsym_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "b3ab09683362b20fa580e245f99ba7854e25d03121960ea05d291a48cc20335c", "fault_sha": null, "target_sha": "b3ab09683362b20fa580e245f99ba7854e25d03121960ea05d291a48cc20335c"} kind symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_rsym_X_3.12/same_bytes_target.jsonl
+   restart_on_fault {"exited": 1, "after_s": 0.311, "peak_rss_kb": 58400, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 147, in _read_at_start", "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc", "store.StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_rsym_X_3.12/same_bytes_target.jsonl', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged True
+======== cf5ee168_rsym_X_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "03a7668e752b7903a76207faf76e0869d465b85ec6e56fa7e052e103b996be6d", "fault_sha": null, "target_sha": "03a7668e752b7903a76207faf76e0869d465b85ec6e56fa7e052e103b996be6d"} kind symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_rsym_X_3.13/same_bytes_target.jsonl
+   restart_on_fault {"exited": 1, "after_s": 0.339, "peak_rss_kb": 59344, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 147, in _read_at_start", "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc", "store.StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_rsym_X_3.13/same_bytes_target.jsonl', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged True
+======== cf5ee168_rzero_X_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "257dbea1ef906845d628b50365741fcad5e48c1c060ddaa1ddf6a08c1704dd32", "fault_sha": null, "target_sha": null} kind symlink->/dev/zero
+   restart_on_fault {"exited": 1, "after_s": 0.32, "peak_rss_kb": 58368, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 147, in _read_at_start", "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc", "store.StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'symlink->/dev/zero', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_rzero_X_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "46b00bc68d17dbd41a2254577122dc850bb861525be9db97e0c9873ab9daed01", "fault_sha": null, "target_sha": null} kind symlink->/dev/zero
+   restart_on_fault {"exited": 1, "after_s": 0.345, "peak_rss_kb": 59472, "log_tail": ["  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/src_f5ee168/services/ooh-py/src/store.py\", line 147, in _read_at_start", "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc", "store.StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link"]}
+   stop SIGTERM kill_after already exited rc 1 disk_after {'kind': 'symlink->/dev/zero', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']} target_unchanged None
+======== cf5ee168_symsame_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "44000031c50f2331480edc333a117ce224d1dc0ba78e4e9ce93b31e2e30d3824", "fault_sha": null, "target_sha": "44000031c50f2331480edc333a117ce224d1dc0ba78e4e9ce93b31e2e30d3824"} kind symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:14:18Z", "campaigns": 0} t=0.115 unchanged=False anchors 0->1 pending=False kind=regular rss=69920
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:14:18Z", "campaigns": 0} t=0.112 unchanged=False anchors 1->2 pending=False kind=regular rss=71456
+   W3: 503 "STORE_UNAVAILABLE" t=0.121 unchanged=True anchors 2->3 pending=True kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl rss=72112
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:29Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.02 rss=72176
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:29Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.011 rss=72800
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:29Z", "problem": "the pending line is anchored on the ledger but canno t=0.024 rss=74384
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:29Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}} t=0.013 rss=None
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:29Z", "problem": "the pending line is anchored on the ledger but canno t=0.023 rss=74384
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.01 unchanged=True anchors 3->3 pending=True kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl rss=74384
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:14:30Z", "problem": null}, "ledger_valid": true} t=0.032 rss=74464
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:30Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.015 rss=74464
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:14:29Z", "campaigns": 0} t=0.007 unchanged=True anchors 3->3 pending=False kind=regular rss=74464
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:14:30Z", "campaigns": 0} t=0.102 unchanged=False anchors 3->4 pending=False kind=regular rss=74464
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:30Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.018 rss=68896
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:14:31Z", "campaigns": 0} t=0.145 unchanged=False anchors 4->5 pending=False kind=regular rss=70512
+   after_writes {'disk': {'kind': 'symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.12/same_bytes_target.jsonl', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl', 'pending.line']}, 'target_unchanged': True, 'rss_kb': 74384}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_symsame_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "ca868c8a4b276e7ae03b4b24cd9faf451a03be757eeed06be0a0aa872db4b90c", "fault_sha": null, "target_sha": "ca868c8a4b276e7ae03b4b24cd9faf451a03be757eeed06be0a0aa872db4b90c"} kind symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.13/same_bytes_target.jsonl
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:09:27Z", "campaigns": 0} t=0.135 unchanged=False anchors 0->1 pending=False kind=regular rss=71072
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:09:27Z", "campaigns": 0} t=0.14 unchanged=False anchors 1->2 pending=False kind=regular rss=72544
+   W3: 503 "STORE_UNAVAILABLE" t=0.107 unchanged=True anchors 2->3 pending=True kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.13/same_bytes_target.jsonl rss=72560
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:38Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.026 rss=74080
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:38Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.01 rss=74800
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:38Z", "problem": "the pending line is anchored on the ledger but canno t=0.025 rss=77040
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:38Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}} t=0.005 rss=None
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:38Z", "problem": "the pending line is anchored on the ledger but canno t=0.017 rss=79184
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.006 unchanged=True anchors 3->3 pending=True kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.13/same_bytes_target.jsonl rss=79200
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:09:38Z", "problem": null}, "ledger_valid": true} t=0.041 rss=82128
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:38Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.012 rss=82832
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:09:38Z", "campaigns": 0} t=0.008 unchanged=True anchors 3->3 pending=False kind=regular rss=82832
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:09:38Z", "campaigns": 0} t=0.151 unchanged=False anchors 3->4 pending=False kind=regular rss=83552
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:39Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.011 rss=70496
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:09:39Z", "campaigns": 0} t=0.126 unchanged=False anchors 4->5 pending=False kind=regular rss=72032
+   after_writes {'disk': {'kind': 'symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_HW_3.13/same_bytes_target.jsonl', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl', 'pending.line']}, 'target_unchanged': True, 'rss_kb': 79200}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_symsame_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "ecefe345c3f23209c7425513611e25f163416152304f6b562713e830a0b82d4d", "fault_sha": null, "target_sha": "ecefe345c3f23209c7425513611e25f163416152304f6b562713e830a0b82d4d"} kind symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.12/same_bytes_target.jsonl
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:14:03Z", "campaigns": 0} t=0.811 unchanged=False anchors 0->1 pending=False kind=regular rss=70256
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:14:04Z", "campaigns": 0} t=0.188 unchanged=False anchors 1->2 pending=False kind=regular rss=71648
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:15Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.02 rss=72384
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:15Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.018 rss=72384
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:15Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.017 rss=72416
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:15Z", "problem": "the local log file cannot be read (OSError)"}} t=0.006 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.01 unchanged=True anchors 2->2 pending=False kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.12/same_bytes_target.jsonl rss=72448
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:15Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.019 rss=73920
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.009 unchanged=True anchors 2->2 pending=False kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.12/same_bytes_target.jsonl rss=73920
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:14:16Z", "problem": null}, "ledger_valid": true} t=0.018 rss=73920
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:16Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.012 rss=73920
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:14:16Z", "campaigns": 0} t=0.118 unchanged=False anchors 2->3 pending=False kind=regular rss=73936
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:14:16Z", "campaigns": 0} t=0.135 unchanged=False anchors 3->4 pending=False kind=regular rss=73968
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:16Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.014 rss=69568
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:14:17Z", "campaigns": 0} t=0.166 unchanged=False anchors 4->5 pending=False kind=regular rss=71168
+   after_writes {'disk': {'kind': 'symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.12/same_bytes_target.jsonl', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']}, 'target_unchanged': True, 'rss_kb': 73920}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_symsame_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "17ababaaa5f8ba8147d6f9fd2ddacb421259393524e00a98edb7b2ac09aff867", "fault_sha": null, "target_sha": "17ababaaa5f8ba8147d6f9fd2ddacb421259393524e00a98edb7b2ac09aff867"} kind symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.13/same_bytes_target.jsonl
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:09:12Z", "campaigns": 0} t=0.122 unchanged=False anchors 0->1 pending=False kind=regular rss=71328
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:09:12Z", "campaigns": 0} t=0.141 unchanged=False anchors 1->2 pending=False kind=regular rss=72784
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:23Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.019 rss=72800
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:23Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.077 rss=72816
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:24Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.076 rss=74304
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:24Z", "problem": "the local log file cannot be read (OSError)"}} t=0.076 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.07 unchanged=True anchors 2->2 pending=False kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.13/same_bytes_target.jsonl rss=74304
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:24Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.023 rss=75824
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.01 unchanged=True anchors 2->2 pending=False kind=symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.13/same_bytes_target.jsonl rss=75840
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:09:24Z", "problem": null}, "ledger_valid": true} t=0.013 rss=77280
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:24Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.016 rss=78016
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:09:24Z", "campaigns": 0} t=0.103 unchanged=False anchors 2->3 pending=False kind=regular rss=79456
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:09:24Z", "campaigns": 0} t=0.119 unchanged=False anchors 3->4 pending=False kind=regular rss=80928
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:25Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.015 rss=70576
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:09:25Z", "campaigns": 0} t=0.152 unchanged=False anchors 4->5 pending=False kind=regular rss=72016
+   after_writes {'disk': {'kind': 'symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega11/runtime/runs/cf5ee168_symsame_H_3.13/same_bytes_target.jsonl', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']}, 'target_unchanged': True, 'rss_kb': 75840}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_symzero_HW_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "13289f2948288adaad00bc96726a94bd8f793668a4516d8667359aa2b5eb2083", "fault_sha": null, "target_sha": null} kind symlink->/dev/zero
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:14:46Z", "campaigns": 0} t=0.139 unchanged=False anchors 0->1 pending=False kind=regular rss=70512
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:14:46Z", "campaigns": 0} t=0.128 unchanged=False anchors 1->2 pending=False kind=regular rss=72016
+   W3: 503 "STORE_UNAVAILABLE" t=0.114 unchanged=True anchors 2->3 pending=True kind=symlink->/dev/zero rss=72816
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:57Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.019 rss=72880
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:57Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.014 rss=73520
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:57Z", "problem": "the pending line is anchored on the ledger but canno t=0.023 rss=74912
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:57Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}} t=0.01 rss=None
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:57Z", "problem": "the pending line is anchored on the ledger but canno t=0.026 rss=74928
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.008 unchanged=True anchors 3->3 pending=True kind=symlink->/dev/zero rss=74944
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:14:57Z", "problem": null}, "ledger_valid": true} t=0.034 rss=74976
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:57Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.01 rss=74976
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:14:57Z", "campaigns": 0} t=0.01 unchanged=True anchors 3->3 pending=False kind=regular rss=74976
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:14:58Z", "campaigns": 0} t=0.147 unchanged=False anchors 3->4 pending=False kind=regular rss=74976
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:58Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.016 rss=69216
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:14:59Z", "campaigns": 0} t=0.105 unchanged=False anchors 4->5 pending=False kind=regular rss=70816
+   after_writes {'disk': {'kind': 'symlink->/dev/zero', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl', 'pending.line']}, 'target_unchanged': None, 'rss_kb': 74944}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_symzero_HW_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "6cac579c1db62d36daed69adaf6d591621e1810efae2db3fab27d26c0a4d35c3", "fault_sha": null, "target_sha": null} kind symlink->/dev/zero
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:09:55Z", "campaigns": 0} t=0.176 unchanged=False anchors 0->1 pending=False kind=regular rss=70928
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:09:55Z", "campaigns": 0} t=0.143 unchanged=False anchors 1->2 pending=False kind=regular rss=72432
+   W3: 503 "STORE_UNAVAILABLE" t=0.139 unchanged=True anchors 2->3 pending=True kind=symlink->/dev/zero rss=72448
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:10:06Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.023 rss=73904
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:10:06Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}, t=0.013 rss=74624
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:10:06Z", "problem": "the pending line is anchored on the ledger but canno t=0.023 rss=76816
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:10:06Z", "problem": "the pending line is anchored on the ledger but cannot be written here"}} t=0.009 rss=None
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:10:06Z", "problem": "the pending line is anchored on the ledger but canno t=0.018 rss=78976
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.013 unchanged=True anchors 3->3 pending=True kind=symlink->/dev/zero rss=78992
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:10:06Z", "problem": null}, "ledger_valid": true} t=0.036 rss=81904
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:06Z", "problem": null}, "ledger_valid": true, "log_length": 3} t=0.014 rss=82624
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:10:06Z", "campaigns": 0} t=0.011 unchanged=True anchors 3->3 pending=False kind=regular rss=82624
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:10:06Z", "campaigns": 0} t=0.151 unchanged=False anchors 3->4 pending=False kind=regular rss=83328
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:10:07Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.011 rss=70160
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:10:07Z", "campaigns": 0} t=0.136 unchanged=False anchors 4->5 pending=False kind=regular rss=71792
+   after_writes {'disk': {'kind': 'symlink->/dev/zero', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl', 'pending.line']}, 'target_unchanged': None, 'rss_kb': 78992}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_symzero_H_3.12 python 3.12.14
+  fault {"same_size": null, "orig_sha": "d8c3f6b566855080b433c5053887cfd4a64c536ef7ad4b7570d59b731bbd5308", "fault_sha": null, "target_sha": null} kind symlink->/dev/zero
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:14:32Z", "campaigns": 0} t=0.132 unchanged=False anchors 0->1 pending=False kind=regular rss=70000
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:14:32Z", "campaigns": 0} t=0.139 unchanged=False anchors 1->2 pending=False kind=regular rss=71568
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:43Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.018 rss=72240
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:43Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.015 rss=72240
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:43Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.02 rss=72304
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:14:43Z", "problem": "the local log file cannot be read (OSError)"}} t=0.01 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.011 unchanged=True anchors 2->2 pending=False kind=symlink->/dev/zero rss=72320
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:14:43Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.019 rss=73840
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.01 unchanged=True anchors 2->2 pending=False kind=symlink->/dev/zero rss=73840
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:14:43Z", "problem": null}, "ledger_valid": true} t=0.015 rss=73840
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:43Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.014 rss=73840
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:14:44Z", "campaigns": 0} t=0.098 unchanged=False anchors 2->3 pending=False kind=regular rss=73856
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:14:44Z", "campaigns": 0} t=0.109 unchanged=False anchors 3->4 pending=False kind=regular rss=73888
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:14:44Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.012 rss=69744
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:14:45Z", "campaigns": 0} t=0.146 unchanged=False anchors 4->5 pending=False kind=regular rss=71296
+   after_writes {'disk': {'kind': 'symlink->/dev/zero', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']}, 'target_unchanged': None, 'rss_kb': 73840}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== cf5ee168_symzero_H_3.13 python 3.13.9
+  fault {"same_size": null, "orig_sha": "074c8c94afe3b33c93e08219979914288e73443a0493bf35da873f9c1b6467b0", "fault_sha": null, "target_sha": null} kind symlink->/dev/zero
+   W1: 201 {"tenant_id": "t-before", "killed": false, "created_at": "2026-10-18T17:09:41Z", "campaigns": 0} t=0.157 unchanged=False anchors 0->1 pending=False kind=regular rss=71184
+   W2: 201 {"tenant_id": "t-mid", "killed": false, "created_at": "2026-10-18T17:09:41Z", "campaigns": 0} t=0.142 unchanged=False anchors 1->2 pending=False kind=regular rss=72768
+   A1: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:52Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.018 rss=72784
+   A2: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:52Z", "problem": "the local log file cannot be read (OSError)"}, "ledger_valid": true, "lo t=0.012 rss=72816
+   J1: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:52Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.019 rss=74240
+   ST: 200 {"integrity": {"ok": false, "checked_at": "2026-10-18T17:09:52Z", "problem": "the local log file cannot be read (OSError)"}} t=0.008 rss=None
+   W3: 503 "INTEGRITY_UNVERIFIED" t=0.008 unchanged=True anchors 2->2 pending=False kind=symlink->/dev/zero rss=74256
+   J2: 200 {"job": "integrity", "integrity": {"ok": false, "checked_at": "2026-10-18T17:09:52Z", "problem": "the local log file cannot be read (OSError)"}, "ledg t=0.021 rss=75648
+   W4: 503 "INTEGRITY_UNVERIFIED" t=0.012 unchanged=True anchors 2->2 pending=False kind=symlink->/dev/zero rss=75680
+   J3: 200 {"job": "integrity", "integrity": {"ok": true, "checked_at": "2026-10-18T17:09:52Z", "problem": null}, "ledger_valid": true} t=0.013 rss=77200
+   A3: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:52Z", "problem": null}, "ledger_valid": true, "log_length": 2} t=0.012 rss=77936
+   W3_retry: 201 {"tenant_id": "t-x", "killed": false, "created_at": "2026-10-18T17:09:52Z", "campaigns": 0} t=0.134 unchanged=False anchors 2->3 pending=False kind=regular rss=79408
+   W5: 201 {"tenant_id": "t-z", "killed": false, "created_at": "2026-10-18T17:09:52Z", "campaigns": 0} t=0.129 unchanged=False anchors 3->4 pending=False kind=regular rss=80816
+   A_restart: 200 {"integrity": {"ok": true, "checked_at": "2026-10-18T17:09:53Z", "problem": null}, "ledger_valid": true, "log_length": 4} t=0.013 rss=70272
+   W_restart: 201 {"tenant_id": "t-after", "killed": false, "created_at": "2026-10-18T17:09:53Z", "campaigns": 0} t=0.14 unchanged=False anchors 4->5 pending=False kind=regular rss=71808
+   after_writes {'disk': {'kind': 'symlink->/dev/zero', 'sha256': None, 'size': None, 'lines': None, 'dir': ['ooh.lock', 'ooh_log.jsonl']}, 'target_unchanged': None, 'rss_kb': 75680}
+   FINAL lines 5 anchors 5 verify {'entries': 10, 'valid': True} ['t-before', 't-mid', 't-x', 't-z', 't-after']
+======== pii_c0f5fbe3_3.12 python 3.12.14
+   (see pii_table.txt)
+======== pii_c0f5fbe3_3.13 python 3.13.9
+   (see pii_table.txt)
+======== pii_cf5ee168_3.12 python 3.12.14
+   (see pii_table.txt)
+======== pii_cf5ee168_3.13 python 3.13.9
+   (see pii_table.txt)
+======== piib_c0f5fbe3_3.12 python 3.12.14
+   (see pii_table.txt)
+======== piib_c0f5fbe3_3.13 python 3.13.9
+   (see pii_table.txt)
+======== piib_cf5ee168_3.12 python 3.12.14
+   (see pii_table.txt)
+======== piib_cf5ee168_3.13 python 3.13.9
+   (see pii_table.txt)
+TOTAL non-201 POSTs 56, file changed in 0; max call duration 0.811s; rss range 68896-83552 kB

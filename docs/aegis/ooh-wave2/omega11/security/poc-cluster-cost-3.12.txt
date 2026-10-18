@@ -1,0 +1,9 @@
+9-digit clusters + letter  len=4000 dt=0.0173s kinds=['number'] kept_len=4400
+1- x2000                   len=4000 dt=0.0144s kinds=['number'] kept_len=11
+card+letter                len=4000 dt=0.0035s kinds=['card', 'number'] kept_len=2363
+ssn+letter                 len=4000 dt=0.0044s kinds=['ssn'] kept_len=3715
+emails                     len=4000 dt=0.0041s kinds=['email', 'number'] kept_len=5175
+digit+space                len=4000 dt=0.0038s kinds=['number'] kept_len=10
+phones+letters             len=4000 dt=0.0043s kinds=['phone'] kept_len=3468
+redaction regrowth         len=4000 dt=0.0095s kinds=['number'] kept_len=3999
+worst 0.0173s

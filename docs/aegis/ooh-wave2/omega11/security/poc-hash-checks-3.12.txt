@@ -1,0 +1,29 @@
+(1) bodies 453, failing 0
+    template 'contact {} now': distinct request_sha over all secrets/forms = 5; equals hash of literal '[redacted]' body: False
+    template '{}': distinct request_sha over all secrets/forms = 5; equals hash of literal '[redacted]' body: False
+    template 'faces west; ref {}; call': distinct request_sha over all secrets/forms = 5; equals hash of literal '[redacted]' body: False
+    cache entries after sweep: 64 (bound 64)
+(2) idempotency, POST inventory, one request_id per group
+  [same body / different ordinary text]
+     'faces west'                                 -> 201 ooh-inv-cef979c2b5cd7e0730b0a6b32baec53e314397ff
+     'faces west'                                 -> 201 ooh-inv-cef979c2b5cd7e0730b0a6b32baec53e314397ff
+     'faces east'                                 -> 409 REQUEST_ID_REUSED
+     "first text + {'flight_end': '2026-12-15'}"  -> 409 REQUEST_ID_REUSED
+  [different card / SSN, same template]
+     'call 4111 1111 1111 1111'                   -> 201 ooh-inv-7cc10408cf65a0c56721caf41166145a511f11bf
+     'call 4242 4242 4242 4242'                   -> 201 ooh-inv-7cc10408cf65a0c56721caf41166145a511f11bf
+     'call 123-45-6789'                           -> 201 ooh-inv-7cc10408cf65a0c56721caf41166145a511f11bf
+     'call [redacted]'                            -> 201 ooh-inv-7cc10408cf65a0c56721caf41166145a511f11bf
+  [normalisation-only differences (non-PII)]
+     'Face A  west'                               -> 201 ooh-inv-80de9f44cbf8f7895a6f32639961db0ca24fcc0c
+     'Face A west'                                -> 201 ooh-inv-80de9f44cbf8f7895a6f32639961db0ca24fcc0c
+     'Ｆａｃｅ Ａ west'                                -> 201 ooh-inv-80de9f44cbf8f7895a6f32639961db0ca24fcc0c
+     'Face\u200b A west'                          -> 201 ooh-inv-80de9f44cbf8f7895a6f32639961db0ca24fcc0c
+  [accepted false positive: date ranges]
+     'dates 2026-11-01 - 2026-11-30'              -> 201 ooh-inv-4493b84e0a9117f4e6035a5f0250ef381db4048f
+     'dates 2026-12-01 - 2026-12-31'              -> 201 ooh-inv-4493b84e0a9117f4e6035a5f0250ef381db4048f
+  [short numbers differ (not redacted)]
+     'rate 100 200'                               -> 201 ooh-inv-286eb2ca5861575c26d0e25caaa03c4dbc3c8a3c
+     'rate 100 300'                               -> 409 REQUEST_ID_REUSED
+(3) nested vendor_text on price / hold-evidence / contract lines: stored request_sha vs kept-text hash
+   price HTTP 201 | card digits in log: False | '4111 1111' in log: False

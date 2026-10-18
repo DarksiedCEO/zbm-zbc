@@ -1,0 +1,23 @@
+'jane\u200bat\u200bexample.com' ('janeatexample.com', []) | old: True
+'janeㅤatㅤexample.com' ('janeatexample.com', []) | old: True
+'jane\u200b@\u200bexample.com' ('[redacted]', ['email']) | old: True
+'janeㅤ@example.com' ('[redacted]', ['email']) | old: True
+'call 310ㅤ555ㅤ1234' ('call [redacted]', ['phone']) | old: True
+'310\u200b555\u200b1234' ('[redacted]', ['phone']) | old: True
+'555-1234' ('[redacted]', ['phone']) | old: True
+'a 12345678 b' ('a 12345678 b', []) | old: False
+'123ǀ456ǀ789' ('123ǀ456ǀ789', []) | old: False
+'123ǀ456ǀ789' ('123ǀ456ǀ789', []) | old: False
+'123一456一789' ('123一456一789', []) | old: False
+'123́456 789 12' ('[redacted]', ['number']) | old: False
+'①②③④⑤⑥⑦⑧⑨' ('[redacted]', ['number']) | old: False
+'❶❷❸❹❺❻❼❽❾' ('[redacted]', ['number']) | old: False
+'१२३-४५-६७८९' ('[redacted]', ['ssn']) | old: True
+'jane at example.com' ('[redacted]', ['email']) | old: True
+'x@y.com 555-1234' ('[redacted] [redacted]', ['email', 'phone']) | old: True
+'Austin 123456789' ('Austin [redacted]', ['number']) | old: False
+'SSN 123 45 678 9' ('SSN [redacted]', ['number']) | old: True
+'1 2 3 4 5 6 7 8\n9' ('[redacted]', ['number']) | old: False
+'12345678\xad9' ('[redacted]', ['number']) | old: False
+'12345678%209' ('[redacted]', ['number']) | old: False
+'12345678&#57;' ('[redacted];', ['number']) | old: False
