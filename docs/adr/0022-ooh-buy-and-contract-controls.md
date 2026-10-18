@@ -186,6 +186,19 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
   fails answers maybe=true; an anchored but unwritten line stops writes until it is rolled forward; a committed write
   leaves no pending file.
 
+### AEGIS mutation gate BLOCK at 5116917 (Oct 17 2026)
+- **Untested integrity-check paths.** The gate mutated every line of the integrity path (`_commit` through
+  `_anchor_problem`, 417 mutants); 234 survived the suite and it showed 170 of them change behaviour. The code was
+  right; no test pinned it. `tests/test_aegis_integrity_path.py` pins each path (counts: docs/test-counts.md): a lost, swapped or foreign
+  anchor and an unanchored local line are caught; a pending line found on disk is appended only when the ledger already
+  holds its exact ooh anchor, else set aside and revived when the anchor appears; a line with a bad actor, an unknown
+  kind or a broken chain is never appended; an own pending line is kept while the ledger is down; store failures, an
+  unreadable ledger, a closed instance, the retry timers, the audit route and `_commit`'s own guards.
+- **Left as equivalent (21):** H085, H192, H198, H229, H252-H255, H311, H322, H344, H357, H371, H384, H399, H416,
+  H432, H441, H448, H453, H469. Each only adds a ledger read, changes a value no caller reads, rewrites a value to
+  itself, or sits behind an earlier check that refuses first (the epoch check before the per-line subject check;
+  `INTEGRITY_RETRY_S` > `FORCED_MIN_S`; `_after_integrity` does nothing).
+
 ## What OOH-4 does NOT do
 
 - **No taxes, fees or permits** (final red team PF-2): no sales tax, production, installation, permit or municipal

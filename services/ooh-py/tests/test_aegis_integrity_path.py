@@ -1,0 +1,622 @@
+"""AEGIS mutation gate BLOCK at 5116917: the integrity check had paths no test pinned.
+
+``verify_integrity`` settles the pending line, then checks every local line against its ledger anchor. These tests
+drive each path and check what the service then does (integrity, writes accepted or refused, what was appended):
+- the per-line anchor check (``_anchor_problem``): a lost, swapped or foreign anchor, an unanchored local line, and
+  anchors beyond the log are each caught;
+- a pending line found on disk (``_settle_pending`` / ``_roll_forward`` with ``rerecord=False``): appended only when
+  the ledger already holds its exact anchor (ooh department, right payload, right subject), else set aside in
+  ``pending.discarded`` and revived only when that anchor appears; a line with a bad actor, an unknown kind or a broken
+  chain is never appended;
+- this process's own pending line: kept while the ledger is down, dropped to the file path when stale;
+- store failures while settling, an unreadable ledger, a closed instance, the retry timers and a log write fault."""
+from __future__ import annotations
+
+import json
+import os
+import time
+
+import pytest
+
+from errors import Unavailable
+from helpers import FakeLedger, Harness, rid
+from service import DEPARTMENT, FORCED_MIN_S, INTEGRITY_RETRY_S, INTERNAL, sha256_hex
+from store import DISCARDED_NAME, StoreWriteError
+from test_aegis_omega_red import _ScriptedLedger
+
+
+class _CountingLedger(_ScriptedLedger):
+    def __init__(self):
+        super().__init__()
+        self.reads = 0
+        self.fail_reads_after = None      # fail every read after this many more
+
+    def entries(self):
+        self.reads += 1
+        if self.fail_reads_after is not None:
+            if self.fail_reads_after <= 0:
+                self.fail_reads = True
+            self.fail_reads_after -= 1
+        return super().entries()
+
+
+@pytest.fixture
+def env(tmp_path):
+    led = _CountingLedger()
+    h = Harness(tmp_path, data_dir=str(tmp_path / "data"), ledger=led)
+    h.tenant("acme")
+    assert h.svc.integrity["ok"] is True
+    return led, h
+
+
+def _check(h):
+    h.svc._last_integrity_try = 0
+    return h.svc.verify_integrity(force=True, always=True)
+
+
+def _new_tenant(h, tid):
+    return h.post("/tenants", {"request_id": rid(), "tenant_id": tid}, andre=True)
+
+
+def _anchors(led):
+    return [e for e in led.events if e["event_type"] == "log_anchor"]
+
+
+def _forget(led, e):
+    led.events.remove(e)
+    del led.by_id[e["event_id"]]
+
+
+def _line(h, tid, actor="andre", kind="tenant_created", data=None):
+    """The exact next log line (chained to the log), not written anywhere."""
+    d = data if data is not None else {"tenant_id": tid, "actor": actor}
+    rec, line = h.svc.log.prepare(kind, "2026-10-16T18:00:00Z", d)
+    return rec, line
+
+
+def _anchor_for(h, rec, line, department=DEPARTMENT, subject=None, payload_over=None):
+    """Record the ledger anchor a line would get from ``_commit`` (optionally a wrong one)."""
+    line_sha = sha256_hex(line)
+    epoch = h.svc.log.epoch or line_sha[:16]
+    eid, payload = h.svc._anchor_ids(epoch, rec["seq"], line_sha)
+    if payload_over:
+        payload = {**payload, **payload_over}
+    h.ledger.record_event(eid, department, "log_anchor", "andre", subject or f"log:{epoch}", payload, "test")
+    return eid
+
+
+def _pending_on_disk(h, line):
+    with open(h.svc.log.pending_path, "wb") as fh:
+        fh.write(line)
+    h.svc._own_pending = None          # found on disk, not written by this process
+
+
+def _discarded(h):
+    p = os.path.join(h.svc.settings.data_dir, DISCARDED_NAME)
+    return open(p, "rb").read() if os.path.exists(p) else None
+
+
+# ---------------------------------------------------------------- the per-line anchor check
+
+def test_ip_last_anchor_lost_on_the_ledger_is_caught(env):
+    led, h = env
+    _forget(led, _anchors(led)[-1])
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == f"local log line {len(h.svc.log)} has no matching anchor on the ledger"
+    assert _new_tenant(h, "x-1").json()["detail"] == "INTEGRITY_UNVERIFIED"
+
+
+def test_ip_middle_anchor_lost_on_the_ledger_is_caught(env):
+    led, h = env
+    _forget(led, _anchors(led)[1])
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "local log line 2 has no matching anchor on the ledger"
+
+
+def test_ip_unanchored_line_appended_to_the_local_log_is_caught(env):
+    led, h = env
+    rec, line = _line(h, "forged-1")
+    h.svc.log.append_prepared(rec, line)            # validly chained, but no anchor on the ledger
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == f"local log line {rec['seq']} has no matching anchor on the ledger"
+    assert _new_tenant(h, "x-2").json()["detail"] == "INTEGRITY_UNVERIFIED"
+    h2 = h.restart()
+    assert h2.svc.integrity["ok"] is False
+
+
+def test_ip_anchor_with_another_payload_is_caught(env):
+    led, h = env
+    _anchors(led)[2]["payload_sha256"] = "0" * 64
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "local log line 3 has no matching anchor on the ledger"
+
+
+def test_ip_anchor_of_another_log_is_caught(env):
+    led, h = env
+    _anchors(led)[0]["subject_id"] = "log:0123456789abcdef"
+    i = _check(h)
+    assert i["ok"] is False and "another ooh log" in i["problem"]
+
+
+def test_ip_anchor_beyond_the_local_log_is_caught(env):
+    led, h = env
+    rec, line = _line(h, "ghost-1")
+    _anchor_for(h, rec, line)                        # the ledger holds an anchor the log never got
+    h.svc._own_pending = None
+    i = _check(h)
+    assert i["ok"] is False and "beyond the local log" in i["problem"]
+
+
+def test_ip_other_department_and_other_event_types_are_ignored(env):
+    led, h = env
+    epoch = h.svc.log.epoch
+    led.record_event("seo-anc-1", "seo", "log_anchor", "andre", f"log:{epoch}", {"x": 1}, "other dept")
+    led.record_event("ooh-other-1", DEPARTMENT, "note", "andre", f"log:{epoch}", {"x": 2}, "other type")
+    assert _check(h)["ok"] is True
+    h.ok(_new_tenant(h, "ok-1"), 201)
+
+
+# ---------------------------------------------------------------- a pending line found on disk
+
+def test_ip_disk_pending_with_its_anchor_is_appended_and_applied(env):
+    led, h = env
+    rec, line = _line(h, "crashed-1")
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    assert _check(h)["ok"] is True
+    assert len(h.svc.log) == n + 1 and "crashed-1" in h.svc.tenants
+    assert not os.path.exists(h.svc.log.pending_path) and _discarded(h) is None
+    h.ok(_new_tenant(h, "after-1"), 201)
+
+
+def test_ip_disk_pending_rolls_forward_across_a_restart(env):
+    led, h = env
+    rec, line = _line(h, "crashed-2")
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    h2 = h.restart()
+    assert h2.svc.integrity["ok"] is True and "crashed-2" in h2.svc.tenants
+    assert len(_anchors(led)) == len(h2.svc.log)
+
+
+def test_ip_disk_pending_without_anchor_is_set_aside_not_applied(env):
+    led, h = env
+    rec, line = _line(h, "unanchored-1")
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    assert _check(h)["ok"] is True
+    assert len(h.svc.log) == n and "unanchored-1" not in h.svc.tenants
+    assert not os.path.exists(h.svc.log.pending_path)
+    assert _discarded(h) == line
+
+
+def test_ip_set_aside_line_is_appended_when_its_anchor_appears(env):
+    led, h = env
+    rec, line = _line(h, "late-1")
+    _pending_on_disk(h, line)
+    assert _check(h)["ok"] is True and _discarded(h) == line
+    _anchor_for(h, rec, line)                        # it was in flight; the ledger records it late
+    assert _check(h)["ok"] is True, h.svc.integrity
+    assert "late-1" in h.svc.tenants and _discarded(h) is None
+    assert len(_anchors(led)) == len(h.svc.log)
+
+
+def test_ip_set_aside_line_that_went_stale_is_cleared(env):
+    led, h = env
+    rec, line = _line(h, "stale-1")
+    _pending_on_disk(h, line)
+    assert _check(h)["ok"] is True and _discarded(h) == line
+    h.ok(_new_tenant(h, "moved-on-1"), 201)          # the log moved on: the set-aside line no longer chains
+    assert _check(h)["ok"] is True
+    assert _discarded(h) is None and "stale-1" not in h.svc.tenants
+
+
+def test_ip_set_aside_line_without_anchor_stays_set_aside(env):
+    led, h = env
+    rec, line = _line(h, "waiting-1")
+    _pending_on_disk(h, line)
+    _check(h)
+    assert _check(h)["ok"] is True
+    assert _discarded(h) == line and "waiting-1" not in h.svc.tenants
+
+
+def test_ip_disk_pending_that_does_not_chain_is_not_appended_even_if_anchored(env):
+    led, h = env
+    rec, line = _line(h, "old-1")
+    _anchor_for(h, rec, line)
+    h.svc.log.append_prepared(*_line(h, "other-1"))  # a different line took that seq locally
+    _pending_on_disk(h, line)
+    _check(h)
+    assert "old-1" not in h.svc.tenants
+    assert not os.path.exists(h.svc.log.pending_path)
+
+
+@pytest.mark.parametrize("actor", ["Bad Actor", "a" * 65, ""])
+def test_ip_anchored_disk_pending_with_an_invalid_actor_is_not_appended(env, actor):
+    led, h = env
+    rec, line = _line(h, "badactor-1", actor=actor)
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    _check(h)
+    assert len(h.svc.log) == n and "badactor-1" not in h.svc.tenants
+    assert _discarded(h) is None and not os.path.exists(h.svc.log.pending_path)   # stale: set aside and cleared
+
+
+def test_ip_anchored_disk_pending_with_a_non_string_actor_is_not_appended(env):
+    led, h = env
+    rec, line = _line(h, "numactor-1", data={"tenant_id": "numactor-1", "actor": 7})
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    _check(h)
+    assert len(h.svc.log) == n and "numactor-1" not in h.svc.tenants
+
+
+def test_ip_anchored_disk_pending_of_an_unknown_kind_is_not_appended(env):
+    led, h = env
+    rec, line = _line(h, "x", kind="no_such_kind", data={"actor": "andre"})
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    _check(h)
+    assert len(h.svc.log) == n and _discarded(h) is None and not os.path.exists(h.svc.log.pending_path)
+
+
+def test_ip_disk_pending_with_a_wrong_anchor_payload_is_not_appended(env):
+    led, h = env
+    rec, line = _line(h, "wrongpay-1")
+    _anchor_for(h, rec, line, payload_over={"line_sha256": "f" * 64})
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    _check(h)
+    assert len(h.svc.log) == n and "wrongpay-1" not in h.svc.tenants
+    assert _discarded(h) == line
+
+
+def test_ip_disk_pending_with_a_wrong_anchor_subject_is_not_appended(env):
+    led, h = env
+    rec, line = _line(h, "wrongsub-1")
+    _anchor_for(h, rec, line, subject="log:ffffffffffffffff")
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    _check(h)
+    assert len(h.svc.log) == n and "wrongsub-1" not in h.svc.tenants
+    assert _discarded(h) == line
+
+
+def test_ip_disk_pending_vouched_only_by_another_department_is_not_appended(env):
+    led, h = env
+    rec, line = _line(h, "foreign-1")
+    _anchor_for(h, rec, line, department="seo")       # same id and payload, but not an ooh anchor
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    i = _check(h)
+    assert len(h.svc.log) == n and "foreign-1" not in h.svc.tenants
+    assert _discarded(h) == line
+    assert i["ok"] is True, i
+
+
+def test_ip_anchored_line_that_cannot_be_applied_asks_for_an_operator(env):
+    led, h = env
+    rec, line = _line(h, "x", data={"actor": "andre"})      # tenant_created without tenant_id
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    i = _check(h)
+    assert i["ok"] is False and "operator must inspect" in i["problem"]
+    assert len(h.svc.log) == n + 1
+    assert _new_tenant(h, "x-3").json()["detail"] == "INTEGRITY_UNVERIFIED"
+
+
+def test_ip_set_aside_failure_blocks(env, monkeypatch):
+    led, h = env
+    rec, line = _line(h, "noaside-1")
+    _pending_on_disk(h, line)
+
+    def fail(*a, **k):
+        raise StoreWriteError("disk full")
+
+    monkeypatch.setattr(h.svc.log, "write_discarded", fail)
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "the pending line could not be set aside"
+    assert os.path.exists(h.svc.log.pending_path)
+
+
+def test_ip_disk_pending_append_failure_blocks_and_recovers(env, monkeypatch):
+    led, h = env
+    rec, line = _line(h, "noappend-1")
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    real = h.svc.log.append_prepared
+
+    def fail(*a, **k):
+        raise StoreWriteError("fsync failed")
+
+    monkeypatch.setattr(h.svc.log, "append_prepared", fail)
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "the pending line is anchored on the ledger but cannot be written here"
+    assert os.path.exists(h.svc.log.pending_path) and "noappend-1" not in h.svc.tenants
+    monkeypatch.setattr(h.svc.log, "append_prepared", real)
+    assert _check(h)["ok"] is True and "noappend-1" in h.svc.tenants
+
+
+# ---------------------------------------------------------------- this process's own pending line
+
+def test_ip_own_pending_kept_while_the_ledger_is_down(env):
+    led, h = env
+    led.script = ["lose_unrecorded", "unreachable"]
+    assert _new_tenant(h, "own-1").json()["maybe"] is True
+    led.fail = True
+    i = _check(h)
+    assert i["ok"] is False and "could not be anchored yet" in i["problem"]
+    assert h.svc._own_pending is not None and os.path.exists(h.svc.log.pending_path)
+    assert _new_tenant(h, "x-4").json()["detail"] == "INTEGRITY_UNVERIFIED"
+    led.fail = False
+    assert _check(h)["ok"] is True and "own-1" in h.svc.tenants
+    assert h.svc._own_pending is None and not os.path.exists(h.svc.log.pending_path)
+
+
+def test_ip_own_pending_that_went_stale_falls_through_to_the_file_path(env):
+    led, h = env
+    rec, line = _line(h, "stale-own-1")
+    h.ok(_new_tenant(h, "moved-on-2"), 201)          # the line no longer chains
+    h.svc._own_pending = line
+    n = len(h.svc.log)
+    assert _check(h)["ok"] is True
+    assert h.svc._own_pending is None and len(h.svc.log) == n and "stale-own-1" not in h.svc.tenants
+
+
+def test_ip_own_pending_clear_failure_blocks(env, monkeypatch):
+    led, h = env
+    led.script = ["lose_unrecorded", "unreachable"]
+    assert _new_tenant(h, "own-2").status_code == 503
+
+    def fail(*a, **k):
+        raise StoreWriteError("unlink failed")
+
+    monkeypatch.setattr(h.svc.log, "clear_pending", fail)
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "the pending line could not be removed"
+    assert "own-2" in h.svc.tenants                    # appended; only the clean-up failed
+
+
+def test_ip_own_pending_roll_forward_append_failure_blocks(env, monkeypatch):
+    led, h = env
+    led.script = ["lose_unrecorded", "unreachable"]
+    assert _new_tenant(h, "own-3").status_code == 503
+
+    def fail(*a, **k):
+        raise StoreWriteError("fsync failed")
+
+    monkeypatch.setattr(h.svc.log, "append_prepared", fail)
+    i = _check(h)
+    assert i["ok"] is False and "cannot be written here" in i["problem"]
+    assert "own-3" not in h.svc.tenants and h.svc._own_pending is not None
+
+
+# ---------------------------------------------------------------- reads, timers, closed, faults
+
+def test_ip_unreadable_ledger_blocks_until_it_reads_again(env):
+    led, h = env
+    led.fail_reads = True
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "the ledger cannot be read"
+    assert _new_tenant(h, "x-5").json()["detail"] == "INTEGRITY_UNVERIFIED"
+    led.fail_reads = False
+    assert _check(h)["ok"] is True
+    h.ok(_new_tenant(h, "ok-2"), 201)
+
+
+def test_ip_unreadable_ledger_at_start_blocks_writes(env):
+    led, h = env
+    led.fail_reads = True
+    h2 = h.restart()
+    assert h2.svc.integrity == {**h2.svc.integrity, "ok": False, "problem": "the ledger cannot be read"}
+    assert _new_tenant(h2, "x-6").json()["detail"] == "INTEGRITY_UNVERIFIED"
+
+
+def test_ip_ledger_unreadable_right_after_a_roll_forward_blocks(env):
+    led, h = env
+    rec, line = _line(h, "rf-1")
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+    led.fail_reads_after = 1                          # the first read works, the re-read after the roll-forward fails
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "the ledger cannot be read"
+    assert "rf-1" in h.svc.tenants
+
+
+def test_ip_closed_instance_does_no_ledger_io(env):
+    led, h = env
+    h.svc.close()
+    before = led.reads
+    i = h.svc.verify_integrity(force=True, always=True)
+    assert i["ok"] is False and i["problem"] == "this service instance is closed"
+    assert led.reads == before
+
+
+def test_ip_forced_check_is_rate_limited_unless_always(env):
+    led, h = env
+    _check(h)
+    before = led.reads
+    assert h.svc.verify_integrity(force=True) == h.svc.integrity   # within FORCED_MIN_S: the cached verdict
+    assert led.reads == before
+    h.svc.verify_integrity(force=True, always=True)
+    assert led.reads == before + 1
+    h.svc._last_integrity_try = time.monotonic() - FORCED_MIN_S - 1
+    h.svc.verify_integrity(force=True)
+    assert led.reads == before + 2
+
+
+def test_ip_unforced_check_is_skipped_when_ok_and_retried_after_the_interval(env):
+    led, h = env
+    before = led.reads
+    assert h.svc.verify_integrity()["ok"] is True
+    assert led.reads == before                         # ok: no ledger read
+    h.svc.integrity = {"ok": False, "checked_at": None, "problem": "test"}
+    h.svc._last_integrity_try = time.monotonic()
+    assert h.svc.verify_integrity()["problem"] == "test" and led.reads == before
+    h.svc._last_integrity_try = time.monotonic() - INTEGRITY_RETRY_S - 1
+    assert h.svc.verify_integrity()["ok"] is True and led.reads == before + 1
+
+
+def test_ip_local_log_write_fault_blocks(env):
+    led, h = env
+    h.svc.log.fault = "cut back failed"
+    i = _check(h)
+    assert i["ok"] is False and i["problem"] == "LOCAL_LOG_WRITE_FAULT: cut back failed"
+
+
+def test_ip_audit_reports_the_ledger_verdict_and_log_length(env):
+    led, h = env
+    r = h.svc.audit_integrity()
+    assert r == {"integrity": r["integrity"], "ledger_valid": True, "log_length": len(h.svc.log)}
+    assert r["integrity"]["ok"] is True
+    led.verify_result = False
+    assert h.svc.audit_integrity()["ledger_valid"] is False
+
+
+def test_ip_unforced_check_never_reads_while_ok_however_long_ago(env):
+    led, h = env
+    h.svc._last_integrity_try = time.monotonic() - 10 * INTEGRITY_RETRY_S
+    before = led.reads
+    assert h.svc.verify_integrity() == h.svc.integrity and h.svc.integrity["ok"] is True
+    assert led.reads == before
+
+
+def test_ip_audit_is_rate_limited(env):
+    led, h = env
+    h.svc.audit_integrity()
+    before = led.reads
+    h.svc.audit_integrity()                            # within FORCED_MIN_S: no second full ledger read
+    assert led.reads == before
+
+
+class _VerifyCounter:
+    def __init__(self, led, on_verify=None):
+        self.led, self.n, self.on_verify = led, 0, on_verify
+
+    def __call__(self):
+        self.n += 1
+        if self.on_verify:
+            self.on_verify()
+        return True
+
+
+def test_ip_audit_on_a_closed_instance_refuses_without_asking_the_ledger(env, monkeypatch):
+    led, h = env
+    v = _VerifyCounter(led)
+    monkeypatch.setattr(led, "verify", v)
+    h.svc.close()
+    with pytest.raises(Unavailable, match="SERVICE_CLOSED"):
+        h.svc.audit_integrity()
+    assert v.n == 0
+
+
+def test_ip_audit_closed_during_the_ledger_verify_refuses(env, monkeypatch):
+    led, h = env
+    v = _VerifyCounter(led, on_verify=h.svc.close)
+    monkeypatch.setattr(led, "verify", v)
+    with pytest.raises(Unavailable, match="SERVICE_CLOSED"):
+        h.svc.audit_integrity()
+    assert v.n == 1
+
+
+def test_ip_ooh_event_of_another_type_does_not_vouch_for_a_disk_pending_line(env):
+    led, h = env
+    rec, line = _line(h, "nottype-1")
+    line_sha = sha256_hex(line)
+    epoch = h.svc.log.epoch
+    eid, payload = h.svc._anchor_ids(epoch, rec["seq"], line_sha)
+    led.record_event(eid, DEPARTMENT, "note", "andre", f"log:{epoch}", payload, "same id, not an anchor")
+    _pending_on_disk(h, line)
+    n = len(h.svc.log)
+    i = _check(h)
+    assert len(h.svc.log) == n and "nottype-1" not in h.svc.tenants and _discarded(h) == line
+    assert i["ok"] is True, i
+
+
+def test_ip_stale_own_pending_still_settles_the_line_on_disk(env):
+    led, h = env
+    rec, line = _line(h, "disk-2")                     # the same next seq; anchored, found on disk
+    _anchor_for(h, rec, line)
+    with open(h.svc.log.pending_path, "wb") as fh:
+        fh.write(line)
+    h.svc._own_pending = b'{"not": "a log line"}'     # this process's line, no longer the next line
+    n = len(h.svc.log)
+    assert _check(h)["ok"] is True, h.svc.integrity
+    assert len(h.svc.log) == n + 1 and "disk-2" in h.svc.tenants
+    assert h.svc._own_pending is None and not os.path.exists(h.svc.log.pending_path)
+
+
+def test_ip_appended_disk_pending_is_never_set_aside(env, monkeypatch):
+    led, h = env
+    rec, line = _line(h, "noaside-2")
+    _anchor_for(h, rec, line)
+    _pending_on_disk(h, line)
+
+    def fail(*a, **k):
+        raise StoreWriteError("disk full")
+
+    monkeypatch.setattr(h.svc.log, "write_discarded", fail)    # only a line that was NOT appended is set aside
+    assert _check(h)["ok"] is True, h.svc.integrity
+    assert "noaside-2" in h.svc.tenants
+
+
+def test_ip_first_line_of_an_empty_log_rolls_forward_under_its_own_epoch(tmp_path):
+    led = _CountingLedger()
+    h = Harness(tmp_path, data_dir=str(tmp_path / "data"), ledger=led)
+    assert len(h.svc.log) == 0
+    led.script = ["lose_unrecorded", "unreachable"]
+    assert _new_tenant(h, "first-1").json()["maybe"] is True
+    assert _check(h)["ok"] is True, h.svc.integrity
+    assert "first-1" in h.svc.tenants and len(h.svc.log) == 1
+    assert {e["subject_id"] for e in _anchors(led)} == {f"log:{h.svc.log.epoch}"}
+    h2 = h.restart()
+    assert h2.svc.integrity["ok"] is True
+
+
+# ---------------------------------------------------------------- _commit's own guards (behind the API's gate)
+
+def test_ip_commit_refuses_on_a_closed_instance(env):
+    led, h = env
+    h.svc._closed = True
+    with pytest.raises(Unavailable, match="SERVICE_CLOSED"):
+        h.svc._commit("tenant_created", {"tenant_id": "direct-1", "actor": "andre"}, "andre")
+    assert "direct-1" not in h.svc.tenants
+
+
+def test_ip_commit_refuses_while_integrity_is_not_ok(env):
+    led, h = env
+    h.svc.integrity = {"ok": False, "checked_at": None, "problem": "test"}
+    n = len(_anchors(led))
+    with pytest.raises(Unavailable, match="INTEGRITY_UNVERIFIED"):
+        h.svc._commit("tenant_created", {"tenant_id": "direct-2", "actor": "andre"}, "andre")
+    assert "direct-2" not in h.svc.tenants and len(_anchors(led)) == n
+
+
+def test_ip_commit_returns_the_record_it_appended(env):
+    led, h = env
+    rec = h.svc._commit("tenant_created", {"tenant_id": "direct-3", "actor": "andre"}, "andre")
+    assert isinstance(rec, dict) and rec["seq"] == len(h.svc.log) and rec["kind"] == "tenant_created"
+
+
+def test_ip_commit_takes_the_actor_from_the_data_else_the_caller(env):
+    led, h = env
+    h.svc._commit("tenant_created", {"tenant_id": "direct-4"}, "andre")
+    assert json.loads(h.svc.log.raw_lines()[-1])["data"]["actor"] == "andre"
+    assert _anchors(led)[-1]["actor"] == "andre"
+    h.svc._commit("tenant_created", {"tenant_id": "direct-5", "actor": "ooh_agent"}, "andre")
+    assert _anchors(led)[-1]["actor"] == "ooh_agent"            # the anchor's actor is the line's
+
+
+def test_ip_commit_without_evidence_names_none_and_internal_key_is_scoped(env):
+    led, h = env
+    h.svc._commit("tenant_created", {"tenant_id": "direct-6", "actor": "andre"}, "andre")
+    assert "evidence" not in json.loads(h.svc.log.raw_lines()[-1])["data"]
+    h.svc._commit("tenant_created", {"tenant_id": "direct-7", "actor": "andre"}, "andre",
+                  evidence=("tenant_created", "direct-7", {"tenant_id": "direct-7"}, ("direct-7",)))
+    named = json.loads(h.svc.log.raw_lines()[-1])["data"]["evidence"]
+    assert named[0]["payload"]["rk"] == f"{INTERNAL}|tenant_created"
