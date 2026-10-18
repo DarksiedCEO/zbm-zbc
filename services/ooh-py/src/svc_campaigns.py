@@ -142,36 +142,9 @@ def _spelled_out(value: str) -> list[str]:
     return out
 
 
-# Card numbers start with a card-network prefix (IIN): Visa 4, Mastercard 51-55 and 2221-2720, Maestro 50/56-58,
-# Mir 2200-2204, Amex 34/37, JCB 35, Diners 30/36/38/39, Discover, UnionPay and RuPay 6, RuPay 81/82, Uzcard 8600,
-# Troy 9792, Humo 9860 (third delta review F1). A digit run that starts otherwise (0, 1, 7, most of 2, 8 and 9: dates
-# such as 2026…, ABA routing numbers) is never read as a card, so a bank reference with a date is not refused by
-# chance (second delta review E2). A 15-digit run is the length of an ACH trace number, whose ABA routing prefix can
-# be 21-32 or 61-72: it counts only with a prefix no routing prefix starts with (4, 34-38, 50-58, 6011).
-_CARD_PREFIX = re.compile(r"^(?:4|5[0-8]|220[0-4]|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720|3[0-9]|6"
-                          r"|8[12]|8600|9792|9860)")
-_CARD_PREFIX_15 = re.compile(r"^(?:4|3[4-8]|5[0-8]|6011)")
-
-
-def _aba_routing(digits: str) -> bool:
-    """A nine-digit ABA routing number: 3, 7, 1 weights over its digits sum to a multiple of ten."""
-    if len(digits) != 9:
-        return False
-    return sum(int(d) * w for d, w in zip(digits, (3, 7, 1) * 3)) % 10 == 0
-
-
-def _luhn_card(digits: str) -> bool:
-    """A payment-card number, never stored (re-verification N2)."""
-    if not 13 <= len(digits) <= 19 or not _CARD_PREFIX.match(digits) \
-            or (len(digits) == 15 and not _CARD_PREFIX_15.match(digits)):
-        return False
-    total = 0
-    for i, ch in enumerate(reversed(digits)):
-        d = int(ch)
-        if i % 2:
-            d = d * 2 - 9 if d > 4 else d * 2
-        total += d
-    return total % 10 == 0
+# The card and ABA routing rules live in pii.py since OOH2-PII-1 (free text uses them too); the old names stay.
+_aba_routing = pii.aba_routing
+_luhn_card = pii.luhn_card
 
 
 # Instruments named in two or more words ("money order", "Western Union"): matched on one token or on adjacent tokens
@@ -192,26 +165,9 @@ def names_a_card(value: str) -> bool:
                 for form in (w, w + "s"):                      # plurals too (delta red team DF-5)
                     if joined == form or (joined.startswith(form) and joined[len(form):].isdigit()):
                         return True
-    # A run of digit groups split by separators: every contiguous part of it is a candidate, so a card followed by
-    # another group ("4242-4242-4242-4242-1228") is still seen (delta red team DF-1).
-    text = unicodedata.normalize("NFKC", value).casefold()
-    for run in re.finditer(r"[0-9]+(?:[^0-9a-z]+[0-9]+)*", text):
-        groups = re.findall(r"[0-9]+", run.group())
-        for i in range(len(groups)):
-            joined = ""
-            for j in range(i, len(groups)):
-                # card groupings (4-4-4-4, 4-6-5, 4-4-4-4-3) have no group shorter than three digits, so a date's
-                # "-10-17" is never joined into a card; a candidate stops growing past 19 digits
-                # and an ABA routing number (nine digits passing the routing checksum) is never joined to another
-                # group (third delta review F2; fourth G1: "4242-424242424242" is still a card)
-                if j > i and not all(len(g) >= 3 and not _aba_routing(g) for g in (groups[i], groups[j])):
-                    break
-                joined += groups[j]
-                if len(joined) > 19:
-                    break
-                if _luhn_card(joined):
-                    return True
-    return False
+    # A run of digit groups split by separators (the rule lives in pii.card_spans, which free text uses too:
+    # OOH2-PII-1).
+    return bool(pii.card_spans(unicodedata.normalize("NFKC", value).casefold()))
 
 
 def funds_ref_parts(value: str) -> tuple[set, str]:
@@ -905,6 +861,8 @@ class CampaignsMixin:
         with self.lock:
             self._gate()
             c = self._campaign(tid, cid)
+            if pii.has_personal_data(body["client_approval_doc_ref"]):     # OOH2-PII-1: refused before any write
+                raise Invalid(R("ATTRIBUTE_VALUE_PERSONAL_DATA"), field="client_approval_doc_ref")
             rk = self.rk("client_approval", cid, body)
             if self._idem("andre", rk, body):
                 return self.campaign_view(tid, cid)

@@ -261,6 +261,33 @@ vendors are paid by ACH or check only, never card; max single purchase $10,000; 
 - The other blockers of that verdict (card/SSN `OOH2-PII-1`, T222, the Medium/Low rows, the missing
   test-verification report) are tracked in docs/findings/OPEN.md and docs/aegis/ooh-wave2/.
 
+
+### OOH2-PII-1: card numbers and SSNs in free text (Oct 18 2026)
+- **The finding (High, founder ruling; AEGIS security M-1).** `pii.py` refused or redacted only e-mail addresses and
+  phone numbers, so a card number or an SSN typed into unit vendor text, a face text attribute or the client approval
+  document reference was stored as typed, against "a card number must never be stored" (Funds section above).
+- **Fix (ooh-py only), modelled on onboarding-py `redaction.py`:**
+  - `pii.py` also finds payment-card numbers: a run of digit groups with any separators between them, holding 13-19
+    digits with a card-network prefix that pass the Luhn check. It is the rule the client funds reference already
+    used (`names_a_card`), moved into `pii.card_spans` so free text and the funds reference share one rule; the old
+    names `svc_campaigns._luhn_card` and `_aba_routing` stay as aliases.
+  - `pii.py` also finds SSNs with onboarding-py's two shapes: `ddd-dd-dddd` (any dash) not glued to a word, and
+    nine digits within 20 characters after "SSN", "social security (number)", "ITIN" or "tax id".
+  - Every field `pii.py` already screened now refuses or redacts them too: vendor text is redacted before the line
+    is written (all vendor-text routes go through `observed`), text and ref attributes and campaign names are
+    refused 422 `ATTRIBUTE_VALUE_PERSONAL_DATA`.
+  - The client approval document reference was not screened at all; it is now refused 422
+    `ATTRIBUTE_VALUE_PERSONAL_DATA` before the idempotency lookup and before anything is written.
+  - Tests: `tests/test_ooh2_pii1_card_ssn.py` checks the HTTP answer and, after it, the log file, the pending files
+    and every ledger event (payload and summary) for each card and SSN form, in each of the three fields, plus
+    controls (ordinary references, non-Luhn and no-prefix numbers, dates, GPS, permits) that must pass.
+- **Known limits (accepted):** a nine-digit SSN with spaces or no separators and no SSN word is not seen; a card
+  number spelled in words or split by letters is not seen; a reference that happens to hold a Luhn-valid
+  card-shaped run is refused (fail closed).
+- **Still required before real client data (founder ruling Oct 18 2026):** the card and SSN text already in the
+  local log is test data and stays; a documented and tested purge/re-key step must exist before production (see
+  docs/findings/OPEN.md OOH2-PII-1).
+
 ## What OOH-4 does NOT do
 
 - **No taxes, fees or permits** (final red team PF-2): no sales tax, production, installation, permit or municipal
