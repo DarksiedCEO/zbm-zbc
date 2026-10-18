@@ -1,0 +1,24 @@
+amps=0 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=0 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=1 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=1 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=2 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=2 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=3 card: kinds=[] kept='4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111' fixedpoint-passes-of-kept=4 cluster-in-decoded-kept=True fte=True
+amps=3 ssn: kinds=[] kept='SSN 123&amp;amp;amp;nbsp;45&amp;amp;amp;nbsp;6789' fixedpoint-passes-of-kept=4 cluster-in-decoded-kept=True fte=True
+amps=4 card: kinds=[] kept='4111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111' fixedpoint-passes-of-kept=5 cluster-in-decoded-kept=True fte=True
+amps=4 ssn: kinds=[] kept='SSN 123&amp;amp;amp;amp;nbsp;45&amp;amp;amp;amp;nbsp;6789' fixedpoint-passes-of-kept=5 cluster-in-decoded-kept=True fte=True
+amps=5 card: kinds=[] kept='4111&amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;nbsp;1111' fixedpoint-passes-of-kept=6 cluster-in-decoded-kept=True fte=True
+amps=5 ssn: kinds=[] kept='SSN 123&amp;amp;amp;amp;amp;nbsp;45&amp;amp;amp;amp;amp;nbsp;6789' fixedpoint-passes-of-kept=6 cluster-in-decoded-kept=True fte=True
+amps=6 card: kinds=[] kept='4111&amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;nbsp;1111' fixedpoint-passes-of-kept=7 cluster-in-decoded-kept=True fte=True
+amps=6 ssn: kinds=[] kept='SSN 123&amp;amp;amp;amp;amp;amp;nbsp;45&amp;amp;amp;amp;amp;amp;nbsp;6789' fixedpoint-passes-of-kept=7 cluster-in-decoded-kept=True fte=True
+amps=7 card: kinds=[] kept='4111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111' fixedpoint-passes-of-kept=8 cluster-in-decoded-kept=True fte=True
+amps=7 ssn: kinds=[] kept='SSN 123&amp;amp;amp;amp;amp;amp;amp;nbsp;45&amp;amp;amp;amp;amp;amp;amp;nbsp;6789' fixedpoint-passes-of-kept=8 cluster-in-decoded-kept=True fte=True
+num amps 0 ['number'] '[redacted]'
+num amps 1 ['card'] '[redacted]'
+num amps 2 ['card'] '[redacted]'
+num amps 3 ['number'] '[redacted]'
+num amps 4 [] '4111&amp;amp;amp;amp;#32;1111&amp;amp;amp;amp;#32;1111&amp;
+num amps 5 [] '4111&amp;amp;amp;amp;amp;#32;1111&amp;amp;amp;amp;amp;#32;1
+num amps 6 [] '4111&amp;amp;amp;amp;amp;amp;#32;1111&amp;amp;amp;amp;amp;a
+num amps 7 [] '4111&amp;amp;amp;amp;amp;amp;amp;#32;1111&amp;amp;amp;amp;a

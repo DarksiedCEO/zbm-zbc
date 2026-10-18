@@ -1,0 +1,67 @@
+extra_tail|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+extra_tail|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+extra_tail|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+shorter_bytes|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+shorter_bytes|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+shorter_bytes|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+shorter_line|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+shorter_line|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+shorter_line|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+inplace_line1|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+inplace_line1|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+inplace_line1|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+inplace_last_line|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+inplace_last_line|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+inplace_last_line|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+first_byte|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+first_byte|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+first_byte|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+last_byte|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+last_byte|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+last_byte|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+middle_byte|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+middle_byte|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+middle_byte|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+deleted|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=False okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> FAIL PATH_WRITTEN
+deleted|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=False okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> FAIL PATH_WRITTEN
+deleted|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+replaced_other|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+replaced_other|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+replaced_other|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+replaced_identical|before|tenant|restore: answer=201  untouched=False okWhileChanged=None applied/lines after restore=None/None anchors/lines=[14, 14] dup=0 restart_ok=True -> PASS
+replaced_identical|at_append|tenant|restore: answer=201  untouched=False okWhileChanged=None applied/lines after restore=None/None anchors/lines=[14, 14] dup=0 restart_ok=True -> PASS
+replaced_identical|check_first|tenant|restore: answer=201  untouched=False okWhileChanged=None applied/lines after restore=None/None anchors/lines=[14, 14] dup=0 restart_ok=True -> PASS
+symlink_identical|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+symlink_identical|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+symlink_identical|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+symlink_elsewhere|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+symlink_elsewhere|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+symlink_elsewhere|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+fifo|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+fifo|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+fifo|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+directory|before|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+directory|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+directory|check_first|tenant|restore: answer=503 INTEGRITY_UNVERIFIED untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 14] dup=0 restart_ok=True -> FAIL recovery applied=0 lines=0
+same_size_tail|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+exact_copy_tail|at_append|tenant|restore: answer=201  untouched=True okWhileChanged=None applied/lines after restore=None/None anchors/lines=[14, 14] dup=0 restart_ok=True -> PASS
+adopt_bad_prefix|at_append|tenant|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+inplace_line1|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> PASS
+middle_byte|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> PASS
+deleted|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=False okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> FAIL PATH_WRITTEN
+replaced_other|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> PASS
+symlink_identical|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> PASS
+fifo|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> PASS
+adopt_bad_prefix|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> PASS
+exact_copy_tail|at_append|submit|restore: answer=200  untouched=True okWhileChanged=None applied/lines after restore=None/None anchors/lines=[42, 42] dup=0 restart_ok=True -> PASS
+extra_tail|at_append|submit|restore: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[43, 43] dup=0 restart_ok=True -> PASS
+inplace_line1|at_append|tenant|restart: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+deleted|at_append|tenant|restart: answer=503 STORE_UNAVAILABLE untouched=False okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[14, 13] dup=0 restart_ok=False -> FAIL PATH_WRITTEN,recovery applied=0 lines=0,not_ok_after_restore,anchors!=lines [14, 13],restart False,readback ['anchors 14 != lines 13'] []
+replaced_other|at_append|tenant|restart: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+symlink_identical|at_append|tenant|restart: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+fifo|at_append|tenant|restart: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+directory|at_append|tenant|restart: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+extra_tail|at_append|tenant|restart: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=1/1 anchors/lines=[15, 15] dup=0 restart_ok=True -> PASS
+deleted|at_append|submit|restart: answer=503 STORE_UNAVAILABLE untouched=False okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[42, 41] dup=0 restart_ok=False -> FAIL PATH_WRITTEN,recovery applied=0 lines=0,not_ok_after_restore,anchors!=lines [42, 41],restart False,readback ['anchors 42 != lines 41'] []
+shorter_line|at_append|submit|restart: answer=503 STORE_UNAVAILABLE untouched=True okWhileChanged=False applied/lines after restore=0/0 anchors/lines=[42, 41] dup=0 restart_ok=False -> FAIL recovery applied=0 lines=0,not_ok_after_restore,anchors!=lines [42, 41],restart False,readback ['anchors 42 != lines 41'] []
+TOTAL 66 cases, 20 failing

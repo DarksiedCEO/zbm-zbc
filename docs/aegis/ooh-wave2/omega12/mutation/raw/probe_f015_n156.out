@@ -1,0 +1,6 @@
+py3.12 tree file_problem on a read error -> 'the local log file cannot be read (OSError)' | names_a_card(fullwidth 4242...) -> True | ascii -> True
+py3.12 probe_F015 file_problem on a read error -> None | names_a_card(fullwidth 4242...) -> True | ascii -> True
+py3.12 probe_N156 file_problem on a read error -> 'the local log file cannot be read (OSError)' | names_a_card(fullwidth 4242...) -> False | ascii -> True
+py3.13 tree file_problem on a read error -> 'the local log file cannot be read (OSError)' | names_a_card(fullwidth 4242...) -> True | ascii -> True
+py3.13 probe_F015 file_problem on a read error -> None | names_a_card(fullwidth 4242...) -> True | ascii -> True
+py3.13 probe_N156 file_problem on a read error -> 'the local log file cannot be read (OSError)' | names_a_card(fullwidth 4242...) -> False | ascii -> True

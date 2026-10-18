@@ -1,0 +1,14 @@
+-- 3.12
+N 600000 violations {'other': 4948}
+other ('2\ue0008Z&ndash;9①&nbsp;3551%40️~&#52;&#x2&shy;&#46;5', '28Z&ndash;91&nbsp;3551%40~&#52;&#x2&shy;&#46;5', ['decoded', 'sf_decoded'])
+other ('_%409(7\xa0&shy;&#x200b;53\u0378²|&#x200b;一&#52;\ue000\n&#x40;_7x&#65;~8\n]0&#65;&commat;&ndash;&period;²2', '_%409(7 &shy;&#x200b;53\u03782|&#x200b;一&#52; &#x40;_7x&#65;~8 ]0&#65;&commat;&ndash;&period;22', ['decoded', 'sf_decoded'])
+other ("8)&#52;8&#65;@\u200b１,a7\n47;'1_%40;21-\u0378~&#xff11;—&nbsp\xa09\t", "8)&#52;8&#65;@1,a7 47;'1_%40;21-\u0378~&#xff11;—&nbsp 9", ['decoded', 'sf_decoded'])
+other ('é4340́&nbsp71&#xff11;一%405ʼaー́5&NewLine;9', 'é4340&nbsp71&#xff11;一%405ʼaー́5&NewLine;9', ['decoded', 'sf_decoded'])
+other ('.&#x40;&Tab;\u200bʼZ&#xff11;\U0002ebf0󠄁683&amp;;4&#52;x①603①,&amp;amp;①&#x200b;٣3%40&#x2', '.&#x40;&Tab;ʼZ&#xff11;\U0002ebf0683&amp;;4&#52;x16031,&amp;amp;1&#x200b;33%40&#x2', ['decoded', 'sf_decoded'])
+-- 3.13
+N 600000 violations {'other': 4948}
+other ('2\ue0008Z&ndash;9①&nbsp;3551%40️~&#52;&#x2&shy;&#46;5', '28Z&ndash;91&nbsp;3551%40~&#52;&#x2&shy;&#46;5', ['decoded', 'sf_decoded'])
+other ('_%409(7\xa0&shy;&#x200b;53\u0378²|&#x200b;一&#52;\ue000\n&#x40;_7x&#65;~8\n]0&#65;&commat;&ndash;&period;²2', '_%409(7 &shy;&#x200b;53\u03782|&#x200b;一&#52; &#x40;_7x&#65;~8 ]0&#65;&commat;&ndash;&period;22', ['decoded', 'sf_decoded'])
+other ("8)&#52;8&#65;@\u200b１,a7\n47;'1_%40;21-\u0378~&#xff11;—&nbsp\xa09\t", "8)&#52;8&#65;@1,a7 47;'1_%40;21-\u0378~&#xff11;—&nbsp 9", ['decoded', 'sf_decoded'])
+other ('é4340́&nbsp71&#xff11;一%405ʼaー́5&NewLine;9', 'é4340&nbsp71&#xff11;一%405ʼaー́5&NewLine;9', ['decoded', 'sf_decoded'])
+other ('.&#x40;&Tab;\u200bʼZ&#xff11;𮯰󠄁683&amp;;4&#52;x①603①,&amp;amp;①&#x200b;٣3%40&#x2', '.&#x40;&Tab;ʼZ&#xff11;𮯰683&amp;;4&#52;x16031,&amp;amp;1&#x200b;33%40&#x2', ['decoded', 'sf_decoded'])

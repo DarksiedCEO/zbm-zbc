@@ -1,0 +1,176 @@
+49,54c49,54
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &nbsp;                              kept='note 4111&nbsp;1111&nbsp;1111&nbsp;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &nbsp;                               kept='note 123&nbsp;45&nbsp;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &nbsp                               kept='note 4111&nbsp1111&nbsp1111&nbsp1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &nbsp                                kept='note 123&nbsp45&nbsp6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &ndash;                             kept='note 4111&ndash;1111&ndash;1111&ndash;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &ndash;                              kept='note 123&ndash;45&ndash;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &nbsp;                              kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &nbsp;                               kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &nbsp                               kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &nbsp                                kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &ndash;                             kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &ndash;                              kept='note [redacted] end'
+61,62c61,62
+< KEPT      kinds=-            asciiDigitsKept=19 isdigitKept=19 card sep &#x2D;                              kept='note 4111&#x2D;1111&#x2D;1111&#x2D;1111 end'
+< KEPT      kinds=-            asciiDigitsKept=11 isdigitKept=11 ssn sep &#x2D;                               kept='note 123&#x2D;45&#x2D;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &#x2D;                              kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &#x2D;                               kept='note [redacted] end'
+65,66c65,66
+< KEPT      kinds=-            asciiDigitsKept=19 isdigitKept=19 card sep &#X2D;                              kept='note 4111&#X2D;1111&#X2D;1111&#X2D;1111 end'
+< KEPT      kinds=-            asciiDigitsKept=11 isdigitKept=11 ssn sep &#X2D;                               kept='note 123&#X2D;45&#X2D;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &#X2D;                              kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &#X2D;                               kept='note [redacted] end'
+69,72c69,72
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &amp;nbsp;                          kept='note 4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111 en
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &amp;nbsp;                           kept='note 123&amp;nbsp;45&amp;nbsp;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &amp;amp;nbsp;                      kept='note 4111&amp;amp;nbsp;1111&amp;amp;nbsp;1111&amp;amp;
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &amp;amp;nbsp;                       kept='note 123&amp;amp;nbsp;45&amp;amp;nbsp;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &amp;nbsp;                          kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &amp;nbsp;                           kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &amp;amp;nbsp;                      kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &amp;amp;nbsp;                       kept='note [redacted] end'
+77,78c77,78
+< KEPT      kinds=-            asciiDigitsKept=22 isdigitKept=22 card sep &#38;nbsp;                          kept='note 4111&#38;nbsp;1111&#38;nbsp;1111&#38;nbsp;1111 en
+< KEPT      kinds=-            asciiDigitsKept=13 isdigitKept=13 ssn sep &#38;nbsp;                           kept='note 123&#38;nbsp;45&#38;nbsp;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &#38;nbsp;                          kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &#38;nbsp;                           kept='note [redacted] end'
+81,92c81,92
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &zwnj;                              kept='note 4111&zwnj;1111&zwnj;1111&zwnj;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &zwnj;                               kept='note 123&zwnj;45&zwnj;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &shy;                               kept='note 4111&shy;1111&shy;1111&shy;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &shy;                                kept='note 123&shy;45&shy;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &lrm;                               kept='note 4111&lrm;1111&lrm;1111&lrm;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &lrm;                                kept='note 123&lrm;45&lrm;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &NoBreak;                           kept='note 4111&NoBreak;1111&NoBreak;1111&NoBreak;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &NoBreak;                            kept='note 123&NoBreak;45&NoBreak;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &hyphen;                            kept='note 4111&hyphen;1111&hyphen;1111&hyphen;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &hyphen;                             kept='note 123&hyphen;45&hyphen;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &dash;                              kept='note 4111&dash;1111&dash;1111&dash;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &dash;                               kept='note 123&dash;45&dash;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &zwnj;                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn sep &zwnj;                               kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &shy;                               kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn sep &shy;                                kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &lrm;                               kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn sep &lrm;                                kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &NoBreak;                           kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn sep &NoBreak;                            kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &hyphen;                            kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &hyphen;                             kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &dash;                              kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &dash;                               kept='note [redacted] end'
+95,100c95,100
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &colon;                             kept='note 4111&colon;1111&colon;1111&colon;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &colon;                              kept='note 123&colon;45&colon;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &sol;                               kept='note 4111&sol;1111&sol;1111&sol;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &sol;                                kept='note 123&sol;45&sol;6789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &MediumSpace;                       kept='note 4111&MediumSpace;1111&MediumSpace;1111&MediumSpac
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &MediumSpace;                        kept='note 123&MediumSpace;45&MediumSpace;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &colon;                             kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &colon;                              kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &sol;                               kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &sol;                                kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &MediumSpace;                       kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &MediumSpace;                        kept='note [redacted] end'
+103,104c103,104
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sep &nbsp ;                             kept='note 4111&nbsp ;1111&nbsp ;1111&nbsp ;1111 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn sep &nbsp ;                              kept='note 123&nbsp ;45&nbsp ;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &nbsp ;                             kept='note [redacted] end'
+> redacted  kinds=ssn          asciiDigitsKept= 0 isdigitKept= 0 ssn sep &nbsp ;                              kept='note [redacted] end'
+109,110c109,110
+< KEPT      kinds=-            asciiDigitsKept=25 isdigitKept=25 card sep &#x200B;                            kept='note 4111&#x200B;1111&#x200B;1111&#x200B;1111 end'
+< KEPT      kinds=-            asciiDigitsKept=15 isdigitKept=15 ssn sep &#x200B;                             kept='note 123&#x200B;45&#x200B;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sep &#x200B;                            kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn sep &#x200B;                             kept='note [redacted] end'
+113c113
+< KEPT      kinds=-            asciiDigitsKept=32 isdigitKept=32 card hex digits &#x34;                       kept='note &#x34;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card hex digits &#x34;                       kept='note [redacted] end'
+115,118c115,118
+< KEPT      kinds=-            asciiDigitsKept=32 isdigitKept=32 card hex digits no ;                         kept='note &#x34&#x31&#x31&#x31&#x31&#x31&#x31&#x31&#x31&#x3
+< KEPT      kinds=-            asciiDigitsKept=32 isdigitKept=32 card fullwidth digit entities &#xFF14;       kept='note &#xff14;&#xff11;&#xff11;&#xff11;&#xff11;&#xff11;&
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card sup entities &sup1;                     kept='note 4&sup1;&sup1;&sup1;&sup1;&sup1;&sup1;&sup1;&sup1;
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn &frac12; style                           kept='note 123&half;45&half;6789 end'
+---
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card hex digits no ;                         kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card fullwidth digit entities &#xFF14;       kept='note [redacted] end'
+> redacted  kinds=card         asciiDigitsKept= 0 isdigitKept= 0 card sup entities &sup1;                     kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn &frac12; style                           kept='note [redacted] end'
+142c142
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn arabic letter between                    kept='note 1234ا56789 end'
+---
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn arabic letter between                    kept='note [redacted] end'
+164,175c164,175
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card dingbat negative circled ➊              kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn  dingbat negative circled ➊              kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card mixed 8 ascii+8 dingbat negative circled ➊ kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card dingbat sans circled ➀                  kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn  dingbat sans circled ➀                  kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card mixed 8 ascii+8 dingbat sans circled ➀  kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card double circled ⓵                        kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn  double circled ⓵                        kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card mixed 8 ascii+8 double circled ⓵        kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card ethiopic ፩                              kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn  ethiopic ፩                              kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card mixed 8 ascii+8 ethiopic ፩              kept='note [redacted] end'
+---
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept=16 card dingbat negative circled ➊              kept='note ❹❶❶❶ ❶❶❶❶ ❶❶❶❶ ❶❶❶❶ end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept= 9 ssn  dingbat negative circled ➊              kept='note ❹❶❶-❶❶-❶❶❶❶ end'
+> KEPT      kinds=-            asciiDigitsKept= 8 isdigitKept=16 card mixed 8 ascii+8 dingbat negative circled ➊ kept='note 4111 1111 ❶❶❶❶ ❶❶❶❶ end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept=16 card dingbat sans circled ➀                  kept='note ➃➀➀➀ ➀➀➀➀ ➀➀➀➀ ➀➀➀➀ end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept= 9 ssn  dingbat sans circled ➀                  kept='note ➃➀➀-➀➀-➀➀➀➀ end'
+> KEPT      kinds=-            asciiDigitsKept= 8 isdigitKept=16 card mixed 8 ascii+8 dingbat sans circled ➀  kept='note 4111 1111 ➀➀➀➀ ➀➀➀➀ end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept=16 card double circled ⓵                        kept='note ⓸⓵⓵⓵ ⓵⓵⓵⓵ ⓵⓵⓵⓵ ⓵⓵⓵⓵ end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept= 9 ssn  double circled ⓵                        kept='note ⓸⓵⓵-⓵⓵-⓵⓵⓵⓵ end'
+> KEPT      kinds=-            asciiDigitsKept= 8 isdigitKept=16 card mixed 8 ascii+8 double circled ⓵        kept='note 4111 1111 ⓵⓵⓵⓵ ⓵⓵⓵⓵ end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept=16 card ethiopic ፩                              kept='note ፬፩፩፩ ፩፩፩፩ ፩፩፩፩ ፩፩፩፩ end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept= 9 ssn  ethiopic ፩                              kept='note ፬፩፩-፩፩-፩፩፩፩ end'
+> KEPT      kinds=-            asciiDigitsKept= 8 isdigitKept=16 card mixed 8 ascii+8 ethiopic ፩              kept='note 4111 1111 ፩፩፩፩ ፩፩፩፩ end'
+185,187c185,187
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card kharoshthi 𐩀                            kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn  kharoshthi 𐩀                            kept='note [redacted] end'
+< redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card mixed 8 ascii+8 kharoshthi 𐩀            kept='note [redacted] end'
+---
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept=16 card kharoshthi 𐩀                            kept='note 𐩃𐩀𐩀𐩀 𐩀𐩀𐩀𐩀 𐩀𐩀𐩀𐩀 𐩀𐩀𐩀𐩀 end'
+> KEPT      kinds=-            asciiDigitsKept= 0 isdigitKept= 9 ssn  kharoshthi 𐩀                            kept='note 𐩃𐩀𐩀-𐩀𐩀-𐩀𐩀𐩀𐩀 end'
+> KEPT      kinds=-            asciiDigitsKept= 8 isdigitKept=16 card mixed 8 ascii+8 kharoshthi 𐩀            kept='note 4111 1111 𐩀𐩀𐩀𐩀 𐩀𐩀𐩀𐩀 end'
+192,205c192,205
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn 4-5 sep 'ʼ'                              kept='note 1234ʼ56789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card 2-digit groups sep 'ʼ'                  kept='note 41ʼ11ʼ11ʼ11ʼ11ʼ11ʼ11ʼ11 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn 4-5 sep 'ー'                              kept='note 1234ー56789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card 2-digit groups sep 'ー'                  kept='note 41ー11ー11ー11ー11ー11ー11ー11 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn 4-5 sep 'ـ'                              kept='note 1234ـ56789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card 2-digit groups sep 'ـ'                  kept='note 41ـ11ـ11ـ11ـ11ـ11ـ11ـ11 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn 4-5 sep 'ǀ'                              kept='note 1234ǀ56789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card 2-digit groups sep 'ǀ'                  kept='note 41ǀ11ǀ11ǀ11ǀ11ǀ11ǀ11ǀ11 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn 4-5 sep '々'                              kept='note 1234々56789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card 2-digit groups sep '々'                  kept='note 41々11々11々11々11々11々11々11 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn 4-5 sep 'ο'                              kept='note 1234ο56789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card 2-digit groups sep 'ο'                  kept='note 41ο11ο11ο11ο11ο11ο11ο11 end'
+< KEPT      kinds=-            asciiDigitsKept= 9 isdigitKept= 9 ssn 4-5 sep 'а'                              kept='note 1234а56789 end'
+< KEPT      kinds=-            asciiDigitsKept=16 isdigitKept=16 card 2-digit groups sep 'а'                  kept='note 41а11а11а11а11а11а11а11 end'
+---
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn 4-5 sep 'ʼ'                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card 2-digit groups sep 'ʼ'                  kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn 4-5 sep 'ー'                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card 2-digit groups sep 'ー'                  kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn 4-5 sep 'ـ'                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card 2-digit groups sep 'ـ'                  kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn 4-5 sep 'ǀ'                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card 2-digit groups sep 'ǀ'                  kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn 4-5 sep '々'                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card 2-digit groups sep '々'                  kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn 4-5 sep 'ο'                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card 2-digit groups sep 'ο'                  kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 ssn 4-5 sep 'а'                              kept='note [redacted] end'
+> redacted  kinds=number       asciiDigitsKept= 0 isdigitKept= 0 card 2-digit groups sep 'а'                  kept='note [redacted] end'

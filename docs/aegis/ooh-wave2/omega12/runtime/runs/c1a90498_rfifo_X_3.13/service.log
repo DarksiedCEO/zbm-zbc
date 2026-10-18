@@ -1,0 +1,29 @@
+ooh-py: GIL switch interval in force: 1000 us
+INFO:     Started server process [78925]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:62869 (Press CTRL+C to quit)
+INFO:     127.0.0.1:62904 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62907 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     127.0.0.1:62915 - "POST /ooh/v1/tenants HTTP/1.1" 201 Created
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [78925]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/src_1a90498/services/ooh-py/src/api.py", line 728, in <module>
+    main()
+    ~~~~^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/src_1a90498/services/ooh-py/src/api.py", line 723, in main
+    app, svc = build()
+               ~~~~~^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/src_1a90498/services/ooh-py/src/api.py", line 713, in build
+    svc = OohService(settings, Recorder(ledger), RecordLog(settings.data_dir), lock_token=token)
+                                                 ~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/src_1a90498/services/ooh-py/src/store.py", line 127, in __init__
+    raw = self._read_at_start()
+  File "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/src_1a90498/services/ooh-py/src/store.py", line 151, in _read_at_start
+    raise StoreCorrupt("the log is not a regular file; refusing to start (inspect the data directory)")
+store.StoreCorrupt: the log is not a regular file; refusing to start (inspect the data directory)

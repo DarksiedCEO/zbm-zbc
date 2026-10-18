@@ -1,0 +1,26 @@
+[
+  {
+    "_fixture_note": "LEAK — status is explicitly lapsed_no_renewal_attempt. The renewal engine never fired at all; this is the exact pattern the agent exists to catch.",
+    "subscription_id": "sub_2001", "customer_id": "cust_7", "plan_price_usd": 39.00,
+    "renewal_interval_days": 30, "last_renewal_at": "2026-04-15T00:00:00Z",
+    "next_renewal_due_at": "2026-05-15T00:00:00Z", "status": "lapsed_no_renewal_attempt"
+  },
+  {
+    "_fixture_note": "CONTROL — active, current. Must NOT be flagged.",
+    "subscription_id": "sub_2002", "customer_id": "cust_7", "plan_price_usd": 39.00,
+    "renewal_interval_days": 30, "last_renewal_at": "2026-06-01T00:00:00Z",
+    "next_renewal_due_at": "2026-07-01T00:00:00Z", "status": "active"
+  },
+  {
+    "_fixture_note": "CONTROL — customer cancelled on purpose. This is not a leak (no trigger failure, a deliberate choice), must NOT be flagged as renewal-never-triggered.",
+    "subscription_id": "sub_2003", "customer_id": "cust_8", "plan_price_usd": 25.00,
+    "renewal_interval_days": 30, "last_renewal_at": "2026-03-01T00:00:00Z",
+    "next_renewal_due_at": "2026-04-01T00:00:00Z", "status": "cancelled"
+  },
+  {
+    "_fixture_note": "CONTROL — past_due but a renewal ATTEMPT did happen (last_renewal_at is recent, close to due date) — this is a failed-payment case, a different leak category than 'never triggered', must NOT be flagged by this agent.",
+    "subscription_id": "sub_2004", "customer_id": "cust_9", "plan_price_usd": 75.00,
+    "renewal_interval_days": 30, "last_renewal_at": "2026-06-03T00:00:00Z",
+    "next_renewal_due_at": "2026-06-03T00:00:00Z", "status": "past_due"
+  }
+]

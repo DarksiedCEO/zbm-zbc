@@ -1,0 +1,43 @@
+start 18:04:04
+pause pytest=4 18:04:04
+pause pytest=4 18:04:14
+pause pytest=5 18:04:24
+pause pytest=6 18:04:34
+pause pytest=6 18:04:44
+pause pytest=5 18:04:54
+pause pytest=7 18:05:04
+pause pytest=7 18:05:14
+pause pytest=7 18:05:24
+pause pytest=7 18:05:34
+pause pytest=7 18:05:44
+pause pytest=7 18:05:54
+pause pytest=7 18:06:04
+pause pytest=7 18:06:14
+pause pytest=6 18:06:24
+pause pytest=6 18:06:34
+pause pytest=5 18:06:44
+pause pytest=6 18:06:54
+pause pytest=6 18:07:04
+pause pytest=6 18:07:14
+pause pytest=6 18:07:25
+pause pytest=5 18:07:35
+pause pytest=6 18:07:45
+pause pytest=6 18:07:55
+pause pytest=6 18:08:05
+pause pytest=5 18:08:15
+pause pytest=4 18:08:25
+pause pytest=4 18:08:35
+pause pytest=4 18:08:45
+pause pytest=5 18:08:55
+pii_c1a90498_3.12 rc=0 18:33:11 pytest=3
+c1a90498_rfifo_X_3.12 rc=0 18:33:23 pytest=3
+c1a90498_rsym_X_3.12 rc=0 18:33:35 pytest=3
+c1a90498_rzero_X_3.12 rc=0 18:33:47 pytest=3
+c1a90498_rdir_X_3.12 rc=0 18:33:59 pytest=3
+c1a90498_rperm_X_3.12 rc=0 18:34:12 pytest=3
+c1a90498_e2_W_3.12 rc=0 18:34:36 pytest=3
+c1a90498_m3_I_3.12 rc=0 18:35:00 pytest=3
+c1a90498_fifo_H_3.12 rc=0 18:35:13 pytest=3
+c75b0662_e2_W_3.12 rc=0 18:35:37 pytest=3
+pii_cf5ee168_3.12 rc=0 18:58:52 pytest=2
+end 18:58:52

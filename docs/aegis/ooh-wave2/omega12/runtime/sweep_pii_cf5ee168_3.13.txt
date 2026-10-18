@@ -1,0 +1,176 @@
+run pii_cf5ee168_3.13 files 7 ['ledger/ledger.jsonl', 'ledger/ledger.jsonl.head', 'ledger/ledger.jsonl.lock', 'ledger.log', 'ooh/ooh.lock', 'ooh/ooh_log.jsonl', 'service.log'] hashes 1338
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl clusters: 108 ['123456789', '123456789', '123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl clusters: 60 ['4111111111111111', '4111111111111111', '4111111111111111']
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 975
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 983
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 991
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1499
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 1503
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1507
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 975
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 983
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 991
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1499
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 1503
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1507
+  HASH fa9cc506906e8470 unit.vendor_text '12\u30fc34\u30fc56\u30fc789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 4eec7de2cfa901ce unit.vendor_text '12\u30fc34\u30fc56\u30fc789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 72c376a21b6078e5 unit.vendor_text '12\u064034\u064056\u0640789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 6d5e37f3b78aa036 unit.vendor_text '12\u064034\u064056\u0640789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 75ac943194f45544 unit.vendor_text '12\u02c934\u02c956\u02c9789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 34cd367bbf5de9c2 unit.vendor_text '12\u02c934\u02c956\u02c9789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 47d3dd0792337a79 unit.vendor_text '12\u142734\u142756\u1427789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH afbb00acdac83065 unit.vendor_text '12\u142734\u142756\u1427789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH b70a66bde9abed60 unit.vendor_text '12\ua78f34\ua78f56\ua78f789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 5347c2bbacc3b748 unit.vendor_text '12\ua78f34\ua78f56\ua78f789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH fdd5f83794fc434a unit.vendor_text '12\u02bc34\u02bc56\u02bc789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 20c56280d76358b1 unit.vendor_text '12\u02bc34\u02bc56\u02bc789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH e91b329899d6b0e6 unit.vendor_text '41&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 48b75af667fb2dd8 unit.vendor_text '41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH a8748e1fd4529fcb unit.vendor_text '41\u064011\u064011\u064011\u064011\u064011\u064011\u064011' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 6a4f1985329198b3 unit.vendor_text '41\u064011\u064011\u064011\u064011\u064011\u064011\u064011' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH c57eddde9b9bb177 unit.vendor_text '41\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 11d08d0c24a9e341 unit.vendor_text '41\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH f5b5081fb4989b07 unit.vendor_text '41\u142711\u142711\u142711\u142711\u142711\u142711\u142711' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH e52efa8240aa34d1 unit.vendor_text '41\u142711\u142711\u142711\u142711\u142711\u142711\u142711' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 6f0df2915fd15453 unit.vendor_text '41\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 9367272b87e987ff unit.vendor_text '41\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 7add9d4f94953d07 unit.vendor_text '41\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 032a801c995c50d6 unit.vendor_text '41\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH bada5ebf899113a9 unit.vendor_text '1234\u30fc56789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 25f9d4a8621b409e unit.vendor_text '1234\u30fc56789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH caceb2efb5848b64 unit.vendor_text '1234\u064056789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH b406f1bcad9af7cc unit.vendor_text '1234\u064056789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 5cf2a8ef2ba3d1ff unit.vendor_text '1234\u02c956789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 095b01602dc949a6 unit.vendor_text '1234\u02c956789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 552ddc140f9979c8 unit.vendor_text '1234\u142756789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 85c332024a8ffb2c unit.vendor_text '1234\u142756789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH f92bb87caee4b3ff unit.vendor_text '1234\ua78f56789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 29a4275a8d793f1e unit.vendor_text '1234\ua78f56789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 75a8d8e41ab503d3 unit.vendor_text '1234\u02bc56789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 91c9261756967845 unit.vendor_text '1234\u02bc56789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 78b7d7be18862928 unit.vendor_text '1234\u30fc5678\u30fc9' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH ee3472d6044da409 unit.vendor_text '1234\u30fc5678\u30fc9' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 8d734df30a7a32d5 unit.vendor_text '12\u01c034\u01c056\u01c0789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH b15597ada56f8989 unit.vendor_text '12\u01c034\u01c056\u01c0789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 05869cff39e61a22 unit.vendor_text '12\u03bf34\u03bf56\u03bf789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH c4662b63954ed702 unit.vendor_text '12\u03bf34\u03bf56\u03bf789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH a2bd17f5604db792 unit.vendor_text '41\u300511\u300511\u300511\u300511\u300511\u300511\u300511' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 3af6a2479a9a45b6 unit.vendor_text '41\u300511\u300511\u300511\u300511\u300511\u300511\u300511' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 652a9a887c826af1 unit.vendor_text '4111&nbsp;1111&nbsp;1111&nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH a5da1a2aac5ceb29 unit.vendor_text '4111&nbsp;1111&nbsp;1111&nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 508fdcfec35ae264 unit.vendor_text '123&ndash;45&ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH cd34c1d22e746c57 unit.vendor_text '123&ndash;45&ndash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH c871d48892ed2b6d unit.vendor_text '4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 54e92f0cb3451563 unit.vendor_text '4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 3be4604f113cf84c unit.vendor_text '123&amp;ndash;45&amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH bc321b649b771343 unit.vendor_text '123&amp;ndash;45&amp;ndash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 14791b22b177bf2e unit.vendor_text '123&amp;amp;ndash;45&amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH d952c06a9a1fa6bc unit.vendor_text '123&amp;amp;ndash;45&amp;amp;ndash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 08fedfe3b8f85906 unit.vendor_text '123&amp;#45;45&amp;#45;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 590054d70966dfd4 unit.vendor_text '123&amp;#45;45&amp;#45;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 2250ed593b03fc9b unit.vendor_text '&#x31;&#x32;&#x33;&#x34;&#x35;&#x36;&#x37;&#x38;&#x39;' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 65a9ba031b1c892c unit.vendor_text '&#x31;&#x32;&#x33;&#x34;&#x35;&#x36;&#x37;&#x38;&#x39;' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH aaa02a74f80c0f74 unit.vendor_text '123&#x2D;45&#x2D;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 4be35d82f29e4ecf unit.vendor_text '123&#x2D;45&#x2D;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH eec35de350e8b654 unit.vendor_text '4111&#x20;1111&#x20;1111&#x20;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH c815237712c7a5ba unit.vendor_text '4111&#x20;1111&#x20;1111&#x20;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 7dfd2fa298a6a978 unit.vendor_text '123&mdash;45&mdash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 53e4ad9b4b1a8bc3 unit.vendor_text '123&mdash;45&mdash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH fddeb4a60a8da103 unit.vendor_text '12&middot;34&middot;56&middot;789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 6464809aae81c149 unit.vendor_text '12&middot;34&middot;56&middot;789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 273d4faf161e8a5b unit.vendor_text '123&shy;45&shy;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 0ec34d5fe0c56181 unit.vendor_text '123&shy;45&shy;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 834bb16dde8f12d9 unit.vendor_text '4111&zwj;1111&zwj;1111&zwj;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH f8e012a89448a536 unit.vendor_text '4111&zwj;1111&zwj;1111&zwj;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 78bbd3049a52fbfd unit.vendor_text '4111&nbsp1111&nbsp1111&nbsp1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 4b4bb92dc26a13ae unit.vendor_text '4111&nbsp1111&nbsp1111&nbsp1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 8b38077799885c98 unit.vendor_text '12&hyphen;34&hyphen;56&hyphen;789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 5c7999fd8c1b3289 unit.vendor_text '12&hyphen;34&hyphen;56&hyphen;789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH ea2515d226be0c4d unit.vendor_text '4111&NonBreakingSpace;1111&NonBreakingSpace;1111&NonBreakingSpace;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH fa8eaa66a1116116 unit.vendor_text '4111&NonBreakingSpace;1111&NonBreakingSpace;1111&NonBreakingSpace;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH fa5b32c60a83c152 unit.vendor_text '41&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH a97577bb0ffce0a6 unit.vendor_text '41&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH cf50917c79f5da9f unit.vendor_text '12&#x2D;34&#x2D;56&#x2D;789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH a1f94875e816e38b unit.vendor_text '12&#x2D;34&#x2D;56&#x2D;789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 8bd1f6e505010a93 face.location_description '12\u30fc34\u30fc56\u30fc789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH e435036f24ca6c90 face.location_description '12\u30fc34\u30fc56\u30fc789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH b7e814a4175f6c7d face.location_description '12\u064034\u064056\u0640789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH d98fb75bd5909b10 face.location_description '12\u064034\u064056\u0640789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH a5d866c3b41753f3 face.location_description '12\u02c934\u02c956\u02c9789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 4ecdb4627ebdef89 face.location_description '12\u02c934\u02c956\u02c9789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 2dbcaf296f7164db face.location_description '12\u142734\u142756\u1427789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH caad4189728dea1e face.location_description '12\u142734\u142756\u1427789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 13dbe018ce007183 face.location_description '12\ua78f34\ua78f56\ua78f789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 69a8ba4e046cfa97 face.location_description '12\ua78f34\ua78f56\ua78f789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH ea4932648c08e562 face.location_description '12\u02bc34\u02bc56\u02bc789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 45924daf6bce782e face.location_description '12\u02bc34\u02bc56\u02bc789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH fc8e10e9e6c8e8ab face.location_description '41&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 4b275d29bdb1eb54 face.location_description '41\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11\u30fc11' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 2a34690eadbaa5aa face.location_description '41\u064011\u064011\u064011\u064011\u064011\u064011\u064011' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH f5008f7eac3ddf5d face.location_description '41\u064011\u064011\u064011\u064011\u064011\u064011\u064011' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH feaaef97696eecae face.location_description '41\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 55d5fdf071731691 face.location_description '41\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911\u02c911' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 2ea6a3f1beace818 face.location_description '41\u142711\u142711\u142711\u142711\u142711\u142711\u142711' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 7e5da37f19751028 face.location_description '41\u142711\u142711\u142711\u142711\u142711\u142711\u142711' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH b615d2523efdf0a2 face.location_description '41\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH f0e6226b4eee57c7 face.location_description '41\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11\ua78f11' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 744287d7040c0087 face.location_description '41\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 450e5f8a18e79863 face.location_description '41\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11\u02bc11' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 1eda971d570d5034 face.location_description '1234\u30fc56789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 6cea478ca206763f face.location_description '1234\u30fc56789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH cf1c92cb648097a0 face.location_description '1234\u064056789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 9ed1cb650b79ec50 face.location_description '1234\u064056789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 06ab3963c980f238 face.location_description '1234\u02c956789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 868d3a22f1e97598 face.location_description '1234\u02c956789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 53330cd3320a147c face.location_description '1234\u142756789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 7c350c37cc7cbe6a face.location_description '1234\u142756789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 2846e74ef816f7c0 face.location_description '1234\ua78f56789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 0f0ce4e1f8ccba26 face.location_description '1234\ua78f56789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 2bb49148c3c5b46c face.location_description '1234\u02bc56789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 9ad518f4beec6944 face.location_description '1234\u02bc56789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH c69b367df99d36a0 face.location_description '1234\u30fc5678\u30fc9' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 218e71929d53fc70 face.location_description '1234\u30fc5678\u30fc9' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH b5c8d6b7a6f0cc5f face.location_description '12\u01c034\u01c056\u01c0789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 9b2284a2e174ed29 face.location_description '12\u01c034\u01c056\u01c0789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH e38742a2a6fe99e7 face.location_description '12\u03bf34\u03bf56\u03bf789' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 6d6766a8718079a9 face.location_description '12\u03bf34\u03bf56\u03bf789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH f01ca56841d4a5e7 face.location_description '41\u300511\u300511\u300511\u300511\u300511\u300511\u300511' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 899ab145322c648d face.location_description '41\u300511\u300511\u300511\u300511\u300511\u300511\u300511' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH ffa63f8c841bdc0a face.location_description '4111&nbsp;1111&nbsp;1111&nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 37e0751ffdeb64d7 face.location_description '4111&nbsp;1111&nbsp;1111&nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 03224f17317804ed face.location_description '123&ndash;45&ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH d9ae6726b1136517 face.location_description '123&ndash;45&ndash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 1665aef97f64b1ac face.location_description '4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH caf080a9f8de5f55 face.location_description '4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH e126349bbe218a2a face.location_description '123&amp;ndash;45&amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH c7d6275e7a902438 face.location_description '123&amp;ndash;45&amp;ndash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 1ff70c1d830c230f face.location_description '123&amp;amp;ndash;45&amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 9efa06d1ce4735dd face.location_description '123&amp;amp;ndash;45&amp;amp;ndash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 1a4d6ed46f4d0d4f face.location_description '123&amp;#45;45&amp;#45;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 5137534e8a6e9fc5 face.location_description '123&amp;#45;45&amp;#45;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 7673f5eb7f329ef5 face.location_description '&#x31;&#x32;&#x33;&#x34;&#x35;&#x36;&#x37;&#x38;&#x39;' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH bdda415750150fce face.location_description '&#x31;&#x32;&#x33;&#x34;&#x35;&#x36;&#x37;&#x38;&#x39;' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 14c92ddc11fd0f37 face.location_description '123&#x2D;45&#x2D;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 26f3dd7a7c7a4700 face.location_description '123&#x2D;45&#x2D;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH ecdf7a7f5d77bc17 face.location_description '4111&#x20;1111&#x20;1111&#x20;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH e86ada45e887d305 face.location_description '4111&#x20;1111&#x20;1111&#x20;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH d0b43fd0d746f875 face.location_description '123&mdash;45&mdash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH aca7577723f70dee face.location_description '123&mdash;45&mdash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 80cd2f801b4fadb0 face.location_description '12&middot;34&middot;56&middot;789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 8de6b13848a50800 face.location_description '12&middot;34&middot;56&middot;789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 23e8fc0dff4f3a1a face.location_description '123&shy;45&shy;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 437c58da88302b3b face.location_description '123&shy;45&shy;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH d421defff4f71c89 face.location_description '4111&zwj;1111&zwj;1111&zwj;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH c8bf35644679cf7c face.location_description '4111&zwj;1111&zwj;1111&zwj;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 87a120f37ff2c877 face.location_description '4111&nbsp1111&nbsp1111&nbsp1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH e4fc5ae1ebf1e571 face.location_description '4111&nbsp1111&nbsp1111&nbsp1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 9951392b3cf20336 face.location_description '12&hyphen;34&hyphen;56&hyphen;789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH d60623f36018d21b face.location_description '12&hyphen;34&hyphen;56&hyphen;789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH a47cfa60eb8cac3c face.location_description '4111&NonBreakingSpace;1111&NonBreakingSpace;1111&NonBreakingSpace;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH fd88c7029bd63b24 face.location_description '4111&NonBreakingSpace;1111&NonBreakingSpace;1111&NonBreakingSpace;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 1e9e99fd612dbd36 face.location_description '41&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 077c19021862a0f5 face.location_description '41&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11&#x30FC;11' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 7e5e54aad7c5ff19 face.location_description '12&#x2D;34&#x2D;56&#x2D;789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH ff2ad18099410cc1 face.location_description '12&#x2D;34&#x2D;56&#x2D;789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+sweep done

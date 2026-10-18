@@ -1,0 +1,46 @@
+{
+ "python": "3.12.14",
+ "by_expect": {
+  "design_miss": {
+   "false": 15
+  },
+  "detect_if_fully_decoded": {
+   "false": 1
+  },
+  "detect": {
+   "true": 165,
+   "false": 6
+  }
+ },
+ "detect_expected_but_missed": [
+  [
+   "new-digit-forms",
+   "\\u24f5\\u24f6\\u24f7-\\u24f8\\u24f9-\\u24fa\\u24fb\\u24fc\\u24fd"
+  ],
+  [
+   "r12-entity-deep",
+   "4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111"
+  ],
+  [
+   "r12-nondecimal-digit",
+   "\\u24f8\\u24f5\\u24f5\\u24f5 \\u24f5\\u24f5\\u24f5\\u24f5 \\u24f5\\u24f5\\u24f5\\u24f5 \\u24f5\\u24f5\\u24f5\\u24f5"
+  ],
+  [
+   "r12-nondecimal-digit",
+   "\\u2779\\u2776\\u2776\\u2776-\\u2776\\u2776\\u2776\\u2776-\\u2776\\u2776\\u2776\\u2776-\\u2776\\u2776\\u2776\\u2776"
+  ],
+  [
+   "r12-nondecimal-digit",
+   "\\u2780\\u2781\\u2782-\\u2783\\u2784-\\u2785\\u2786\\u2787\\u2788"
+  ],
+  [
+   "r12-nondecimal-digit",
+   "\\u1369\\u136a\\u136b-\\u136c\\u136d-\\u136e\\u136f\\u1370\\u1371"
+  ],
+  [
+   "r12-nondecimal-digit",
+   "SSN \\u278a\\u278b\\u278c \\u278d\\u278e \\u278f\\u2790\\u2791\\u2792"
+  ]
+ ],
+ "design_miss_but_detected": []
+}

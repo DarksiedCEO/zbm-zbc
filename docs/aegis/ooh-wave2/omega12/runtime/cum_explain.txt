@@ -1,0 +1,16 @@
+secret cases 360 with cumulative hits 76 with delta hits 0 digits of those: ['4111111111111111'] kinds: ['campaign.client_approval_doc_ref', 'face.location_description']
+secret cases whose digits are 4111111111111111 in face/doc_ref: 76
+first secret case with a cumulative hit: index 183 face.location_description '4111 1111 1111 1111'
+the case before: '1\u06623-\u096a5-6\u0e578\uff19' secret
+ooh/ooh_log.jsonl lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [999, 1471] nested probe lines: [999, 1471]
+ledger/ledger.jsonl lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [] nested probe lines: []
+service.log lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [] nested probe lines: []
+ledger.log lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [] nested probe lines: []
+secret cases 360 with cumulative hits 76 with delta hits 0 digits of those: ['4111111111111111'] kinds: ['campaign.client_approval_doc_ref', 'face.location_description']
+secret cases whose digits are 4111111111111111 in face/doc_ref: 76
+first secret case with a cumulative hit: index 183 face.location_description '4111 1111 1111 1111'
+the case before: '1\u06623-\u096a5-6\u0e578\uff19' secret
+ooh/ooh_log.jsonl lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [999, 1471] nested probe lines: [999, 1471]
+ledger/ledger.jsonl lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [] nested probe lines: []
+service.log lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [] nested probe lines: []
+ledger.log lines with 4111111111111111 in an ASCII-letter cluster of the entity-decoded line: [] nested probe lines: []

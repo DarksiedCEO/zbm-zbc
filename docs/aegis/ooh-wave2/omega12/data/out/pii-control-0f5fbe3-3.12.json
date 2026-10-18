@@ -1,0 +1,32 @@
+[
+ {
+  "class": "",
+  "field": "unit_case",
+  "secret": "123  45  6789",
+  "error": "Traceback (most recent call last):\n  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/data/poc/pii_persist12.py\", line 219, in <module>\n    try: res.append({**fn(s), \"class\": _c, \"expect\": EXPECT.get(s, \"\")})\n                                                     ^^^^^^\nNameError: name 'EXPECT' is not defined\n"
+ },
+ {
+  "class": "",
+  "field": "face_case",
+  "secret": "123  45  6789",
+  "error": "Traceback (most recent call last):\n  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/data/poc/pii_persist12.py\", line 219, in <module>\n    try: res.append({**fn(s), \"class\": _c, \"expect\": EXPECT.get(s, \"\")})\n                                                     ^^^^^^\nNameError: name 'EXPECT' is not defined\n"
+ },
+ {
+  "class": "",
+  "field": "approval_case",
+  "secret": "123  45  6789",
+  "error": "Traceback (most recent call last):\n  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/data/poc/pii_persist12.py\", line 219, in <module>\n    try: res.append({**fn(s), \"class\": _c, \"expect\": EXPECT.get(s, \"\")})\n                                                     ^^^^^^\nNameError: name 'EXPECT' is not defined\n"
+ },
+ {
+  "class": "",
+  "field": "pending_case",
+  "secret": "123  45  6789",
+  "error": "Traceback (most recent call last):\n  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/data/poc/pii_persist12.py\", line 219, in <module>\n    try: res.append({**fn(s), \"class\": _c, \"expect\": EXPECT.get(s, \"\")})\n                                                     ^^^^^^\nNameError: name 'EXPECT' is not defined\n"
+ },
+ {
+  "class": "",
+  "field": "<lambda>",
+  "secret": "123  45  6789",
+  "error": "Traceback (most recent call last):\n  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/data/poc/pii_persist12.py\", line 219, in <module>\n    try: res.append({**fn(s), \"class\": _c, \"expect\": EXPECT.get(s, \"\")})\n                                                     ^^^^^^\nNameError: name 'EXPECT' is not defined\n"
+ }
+]

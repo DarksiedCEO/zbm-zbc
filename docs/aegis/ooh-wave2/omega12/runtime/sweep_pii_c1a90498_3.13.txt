@@ -1,0 +1,15 @@
+run pii_c1a90498_3.13 files 7 ['ledger/ledger.jsonl', 'ledger/ledger.jsonl.head', 'ledger/ledger.jsonl.lock', 'ledger.log', 'ooh/ooh.lock', 'ooh/ooh_log.jsonl', 'service.log'] hashes 1338
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl clusters: 4 ['4111111111111111', '4111111111111111', '4111111111111111']
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 975
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 983
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 991
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1459
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 1463
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1467
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 975
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 983
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 991
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1459
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl line 1463
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl line 1467
+sweep done

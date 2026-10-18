@@ -1,0 +1,100 @@
+{
+ "scen": "rsym",
+ "mode": "X",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/src_1a90498",
+ "python": "3.13.9",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt12-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 70448,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-18T18:38:21Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.074,
+  "file_before": "missing",
+  "file_after": "d9a205f008642da7d0a072c188421d3729c28be9a12fda15ff62ce174e1d4bfa",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 71392
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-18T18:38:21Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.063,
+  "file_before": "d9a205f008642da7d0a072c188421d3729c28be9a12fda15ff62ce174e1d4bfa",
+  "file_after": "54b91c44437f3e0c7c6d3419d16f252f7a9a095c59294ece29dc68ec092df222",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72864
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "54b91c44437f3e0c7c6d3419d16f252f7a9a095c59294ece29dc68ec092df222",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 72848
+ },
+ "fault": {
+  "orig_sha": "54b91c44437f3e0c7c6d3419d16f252f7a9a095c59294ece29dc68ec092df222",
+  "disk": {
+   "kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/runs/c1a90498_rsym_X_3.13/same_bytes_target.jsonl",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": "54b91c44437f3e0c7c6d3419d16f252f7a9a095c59294ece29dc68ec092df222"
+ },
+ "stop": "SIGTERM",
+ "restart_on_fault": {
+  "exited": 1,
+  "after_s": 0.258,
+  "peak_rss_kb": 59600,
+  "log_tail": [
+   "  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/src_1a90498/services/ooh-py/src/store.py\", line 147, in _read_at_start",
+   "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc",
+   "store.StoreCorrupt: the log cannot be opened (OSError); refusing to start: it must be a regular file, not a link"
+  ]
+ },
+ "restart_rss_kb": null,
+ "restart_alive": false,
+ "kill_after_restart": "already exited rc 1",
+ "disk_after": {
+  "kind": "symlink->/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/runtime/runs/c1a90498_rsym_X_3.13/same_bytes_target.jsonl",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ },
+ "target_unchanged": true
+}

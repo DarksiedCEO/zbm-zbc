@@ -1,0 +1,8 @@
+== 3.12
+non-ASCII code points whose NFKC holds an ASCII letter (they end a cluster): 1130
+  of them, 1234<c>56789 kept: 1130
+S11-5 normalisation-only differences under one request_id: 201 | 201 | 201 | 201
+== 3.13
+non-ASCII code points whose NFKC holds an ASCII letter (they end a cluster): 1130
+  of them, 1234<c>56789 kept: 1130
+S11-5 normalisation-only differences under one request_id: 201 | 201 | 201 | 201

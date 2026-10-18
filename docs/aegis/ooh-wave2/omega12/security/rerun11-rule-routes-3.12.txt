@@ -1,0 +1,34 @@
+## unit vendor_text (POST inventory)
+card ASCII letter x      HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+card 8 + word + 8        HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+ssn ASCII letter x       HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+ssn 4-5 U+02BC ʼ         HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+ssn 2-3-4 U+30FC ー       HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+ssn 4-5 U+0640 tatweel   HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+card &nbsp;              HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+ssn &ndash;              HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+card hex entities        HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+card ideographic zero    HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+card suzhou              HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+## face text attribute location_description (POST /faces/{id}/attributes)
+card ASCII letter x      HTTP 200 reached=log/pending,export
+card 8 + word + 8        HTTP 200 reached=log/pending,export
+ssn ASCII letter x       HTTP 200 reached=log/pending,export
+ssn 4-5 U+02BC ʼ         HTTP 422 reached=-
+ssn 2-3-4 U+30FC ー       HTTP 422 reached=-
+ssn 4-5 U+0640 tatweel   HTTP 422 reached=-
+card &nbsp;              HTTP 422 reached=-
+ssn &ndash;              HTTP 422 reached=-
+card hex entities        HTTP 422 reached=-
+card ideographic zero    HTTP 200 reached=log/pending,export
+card suzhou              HTTP 200 reached=log/pending,export
+## client_approval_doc_ref (Ref pattern [A-Za-z0-9._:-]{1,100})
+card ASCII letter x      HTTP 200                                  reached=log/pending,ledger,export
+ssn ASCII letter x       HTTP 200                                  reached=log/pending,ledger,export
+card letters+dots        HTTP 200                                  reached=log/pending,ledger,export
+ssn 4-5 with letter      HTTP 200                                  reached=log/pending,ledger,export
+ssn standard             HTTP 422 ATTRIBUTE_VALUE_PERSONAL_DATA    reached=-
+card hyphen              HTTP 422 ATTRIBUTE_VALUE_PERSONAL_DATA    reached=-
+## split across two requests (two units, one face each): ssn 12345 + 6789
+  'ssn part 12345' HTTP 201 reached=log/pending,export
+  'ssn part 6789' HTTP 201 reached=log/pending,export

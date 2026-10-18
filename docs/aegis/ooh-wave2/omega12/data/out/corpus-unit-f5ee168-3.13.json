@@ -1,0 +1,174 @@
+{
+ "python": "3.13.9",
+ "by_expect": {
+  "design_miss": {
+   "false": 15
+  },
+  "detect": {
+   "true": 133,
+   "false": 38
+  },
+  "detect_if_fully_decoded": {
+   "false": 1
+  }
+ },
+ "detect_expected_but_missed": [
+  [
+   "letter-sep(design: not detected)",
+   "123\\u30fc456\\u30fc789"
+  ],
+  [
+   "letter-sep(design: not detected)",
+   "123\\ua4f8456\\ua4f8789"
+  ],
+  [
+   "letter-sep(design: not detected)",
+   "123\\u01c0456\\u01c0789"
+  ],
+  [
+   "letter-sep(design: not detected)",
+   "123&nbsp;45&nbsp;6789"
+  ],
+  [
+   "letter-sep(design: not detected)",
+   "4111&nbsp;1111&nbsp;1111&nbsp;1111"
+  ],
+  [
+   "letter-sep(design: not detected)",
+   "SSN 123&nbsp;45&nbsp;6789"
+  ],
+  [
+   "r12-lookalike",
+   "1234\\u02bc56789"
+  ],
+  [
+   "r12-lookalike",
+   "12\\u30fc34\\u30fc56\\u30fc789"
+  ],
+  [
+   "r12-lookalike",
+   "41\\u30fc11\\u30fc11\\u30fc11\\u30fc11\\u30fc11\\u30fc11\\u30fc11"
+  ],
+  [
+   "r12-lookalike",
+   "123\\u0640456\\u0640789"
+  ],
+  [
+   "r12-lookalike",
+   "123\\u4e00456\\u4e00789"
+  ],
+  [
+   "r12-lookalike",
+   "12\\u03b134\\u03b156789"
+  ],
+  [
+   "r12-lookalike",
+   "123\\u0430456\\u0430789"
+  ],
+  [
+   "r12-lookalike",
+   "123\\u3161456\\u3161789"
+  ],
+  [
+   "r12-lookalike",
+   "123\\u0e01456\\u0e01789"
+  ],
+  [
+   "r12-lookalike",
+   "123\\xe9456\\xe9789"
+  ],
+  [
+   "r12-lookalike",
+   "123\\u0131456\\u0131789"
+  ],
+  [
+   "r12-entity",
+   "123&ndash;45&ndash;6789"
+  ],
+  [
+   "r12-entity",
+   "4111&#x2D;1111&#x2D;1111&#x2D;1111"
+  ],
+  [
+   "r12-entity",
+   "4111&#X2d;1111&#X2d;1111&#X2d;1111"
+  ],
+  [
+   "r12-entity",
+   "4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111"
+  ],
+  [
+   "r12-entity",
+   "4111&amp;amp;nbsp;1111&amp;amp;nbsp;1111&amp;amp;nbsp;1111"
+  ],
+  [
+   "r12-entity",
+   "&#x34;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;"
+  ],
+  [
+   "r12-entity",
+   "123&NonBreakingSpace;45&NonBreakingSpace;6789"
+  ],
+  [
+   "r12-entity",
+   "123&nbsp45&nbsp6789"
+  ],
+  [
+   "r12-entity",
+   "123&mdash;45&mdash;6789"
+  ],
+  [
+   "r12-entity",
+   "123&hyphen;45&hyphen;6789"
+  ],
+  [
+   "r12-entity",
+   "4111&#x200B;1111&#x200B;1111&#x200B;1111"
+  ],
+  [
+   "r12-entity",
+   "123&sol;45&sol;6789"
+  ],
+  [
+   "r12-entity",
+   "4111&ensp;1111&emsp;1111&thinsp;1111"
+  ],
+  [
+   "r12-entity",
+   "123&#x2010;45&#x2010;6789"
+  ],
+  [
+   "r12-entity",
+   "123&minus;45&minus;6789"
+  ],
+  [
+   "r12-entity",
+   "SSN&colon; 123&ndash;45&ndash;6789"
+  ],
+  [
+   "r12-entity-deep",
+   "4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111"
+  ],
+  [
+   "r12-unassigned-sep",
+   "123\\U0002ebf0456\\U0002ebf0789"
+  ],
+  [
+   "r12-at-spelling",
+   "1234567%40"
+  ],
+  [
+   "r12-at-spelling",
+   "1234567&#64;"
+  ],
+  [
+   "r12-at-spelling",
+   "123-45-67%40"
+  ],
+  [
+   "r12-at-spelling",
+   "12 34 56 7&#64;"
+  ]
+ ],
+ "design_miss_but_detected": []
+}

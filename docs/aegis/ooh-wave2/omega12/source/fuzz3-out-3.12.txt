@@ -1,0 +1,11 @@
+N 600000 violations {'A_decoded_screenform_only(%40-class)': 4931, 'B_other_forms': 17}
+A_decoded_screenform_only(%40-class) ('2\ue0008Z&ndash;9①&nbsp;3551%40️~&#52;&#x2&shy;&#46;5', '28Z&ndash;91&nbsp;3551%40~&#52;&#x2&shy;&#46;5', ['decoded', 'sf_decoded'])
+A_decoded_screenform_only(%40-class) ('_%409(7\xa0&shy;&#x200b;53\u0378²|&#x200b;一&#52;\ue000\n&#x40;_7x&#65;~8\n]0&#65;&commat;&ndash;&period;²2', '_%409(7 &shy;&#x200b;53\u03782|&#x200b;一&#52; &#x40;_7x&#65;~8 ]0&#65;&commat;&ndash;&period;22', ['decoded', 'sf_decoded'])
+A_decoded_screenform_only(%40-class) ("8)&#52;8&#65;@\u200b１,a7\n47;'1_%40;21-\u0378~&#xff11;—&nbsp\xa09\t", "8)&#52;8&#65;@1,a7 47;'1_%40;21-\u0378~&#xff11;—&nbsp 9", ['decoded', 'sf_decoded'])
+A_decoded_screenform_only(%40-class) ('é4340́&nbsp71&#xff11;一%405ʼaー́5&NewLine;9', 'é4340&nbsp71&#xff11;一%405ʼaー́5&NewLine;9', ['decoded', 'sf_decoded'])
+A_decoded_screenform_only(%40-class) ('.&#x40;&Tab;\u200bʼZ&#xff11;\U0002ebf0󠄁683&amp;;4&#52;x①603①,&amp;amp;①&#x200b;٣3%40&#x2', '.&#x40;&Tab;ʼZ&#xff11;\U0002ebf0683&amp;;4&#52;x16031,&amp;amp;1&#x200b;33%40&#x2', ['decoded', 'sf_decoded'])
+B_other_forms ('85४a&zwj;́²8\u31ef\u31ef&#x34;&nbspǀ4&#46;[26)2,–1&nbspـ', '854a&zwj;́28\u31ef\u31ef&#x34;&nbspǀ4&#46;[26)2,–1&nbspـ', ['decoded_norm_sf'])
+B_other_forms ('\ue000ーㅤZ(&#591́\u0378&#8203;2%40<at>_&#5ᵼe𝟘 [at]ー15&#8203;a&shy;\u200b́%40[at]610一9&#52;33+️', 'ーZ(&#[redacted]@_&#5ᵼe0 @ー15&#8203;a&shy;́@@610一9&#52;33+', ['decoded_norm_sf'])
+B_other_forms ('8é745&#97;&#x200b;́60#44|381\U0002ebf0ㅤx61٣49', '8é745&#97;&#x200b;́60#44|381\U0002ebf0x61349', ['decoded_norm_sf'])
+B_other_forms ('0%\n796\U0002ebf018&nbsp2]&#65;&zwj;́382&#x26&#xff11;7&commat;(|ǀ ', '0% 796\U0002ebf018&nbsp2]&#65;&zwj;́382&#x26&#xff11;7&commat;(|ǀ', ['decoded_norm_sf'])
+B_other_forms ('—@一)—9|15\U0002ebf0\n\u2ffc4&#5&shy;\t43&amp\u200b́<at>#ʼ4.109１1#', '—@一)—9|15\U0002ebf0 \u2ffc4&#5&shy; 43&amṕ<at>#ʼ4.10911#', ['norm_decoded', 'decoded_norm_sf'])

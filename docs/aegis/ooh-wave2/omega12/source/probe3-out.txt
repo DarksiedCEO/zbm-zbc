@@ -1,0 +1,26 @@
+-- 3.12
+'12345a&zwj;&#769;6789' -> '12345a&zwj;&#769;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'12345a&#8205;&#x301;6789' -> '12345a&#8205;&#x301;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'12345a&shy;&#769;6789' -> '12345a&shy;&#769;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'12345a&#x200b;&#769;6789' -> '12345a&#x200b;&#769;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'4111e&#8203;&#769;1111e&#8203;&#769;1111e&#8203;&#769;1111' -> '4111e&#[redacted]e&#[redacted]e&#[redacted]' ['number'] | decoded+sf+sf: '4111é1111é1111é1111' | sf idempotent: False
+'12345a\u200b́6789' -> '[redacted]' ['number'] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'123456789' -> '[redacted]' ['number'] | decoded+sf+sf: '123456789' | sf idempotent: True
+'1234&#8203;56789' -> '[redacted]' ['number'] | decoded+sf+sf: '123456789' | sf idempotent: True
+'123456&amp;amp;amp;amp;nbsp;789' -> '123456&amp;amp;amp;amp;nbsp;789' [] | decoded+sf+sf: '123456 789' | sf idempotent: True
+'123&amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;ndash;6789' -> '123&amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;ndash;6789' [] | decoded+sf+sf: '123–45–6789' | sf idempotent: True
+'1234567&nbsp;%40' -> '1234567&nbsp;%40' [] | decoded+sf+sf: '1234567 %40' | sf idempotent: True
+'123456&nbsp;%4089' -> '123456&nbsp;%4089' [] | decoded+sf+sf: '123456 %4089' | sf idempotent: True
+-- 3.13
+'12345a&zwj;&#769;6789' -> '12345a&zwj;&#769;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'12345a&#8205;&#x301;6789' -> '12345a&#8205;&#x301;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'12345a&shy;&#769;6789' -> '12345a&shy;&#769;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'12345a&#x200b;&#769;6789' -> '12345a&#x200b;&#769;6789' [] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'4111e&#8203;&#769;1111e&#8203;&#769;1111e&#8203;&#769;1111' -> '4111e&#[redacted]e&#[redacted]e&#[redacted]' ['number'] | decoded+sf+sf: '4111é1111é1111é1111' | sf idempotent: False
+'12345a\u200b́6789' -> '[redacted]' ['number'] | decoded+sf+sf: '12345á6789' | sf idempotent: False
+'123456789' -> '[redacted]' ['number'] | decoded+sf+sf: '123456789' | sf idempotent: True
+'1234&#8203;56789' -> '[redacted]' ['number'] | decoded+sf+sf: '123456789' | sf idempotent: True
+'123456&amp;amp;amp;amp;nbsp;789' -> '123456&amp;amp;amp;amp;nbsp;789' [] | decoded+sf+sf: '123456 789' | sf idempotent: True
+'123&amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;ndash;6789' -> '123&amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;ndash;6789' [] | decoded+sf+sf: '123–45–6789' | sf idempotent: True
+'1234567&nbsp;%40' -> '1234567&nbsp;%40' [] | decoded+sf+sf: '1234567 %40' | sf idempotent: True
+'123456&nbsp;%4089' -> '123456&nbsp;%4089' [] | decoded+sf+sf: '123456 %4089' | sf idempotent: True

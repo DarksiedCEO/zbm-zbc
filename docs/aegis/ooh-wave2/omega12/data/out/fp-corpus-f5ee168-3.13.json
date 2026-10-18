@@ -1,0 +1,2217 @@
+[
+ {
+  "class": "address",
+  "text": "1600 Wilshire Blvd, Los Angeles, CA 90017",
+  "unit": [
+   201,
+   false,
+   [],
+   "1600 Wilshire Blvd, Los Angeles, CA 90017"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "1600-Wilshire-Blvd,-Los-Angeles,-CA-90017",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "address",
+  "text": "I-405 N at Exit 53, 0.4 mi past Sunset Blvd",
+  "unit": [
+   201,
+   false,
+   [],
+   "I-405 N at Exit 53, 0.4 mi past Sunset Blvd"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "I-405-N-at-Exit-53,-0.4-mi-past-Sunset-Blvd",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "address",
+  "text": "12500 Riverside Dr, Studio City, CA 91607-3413",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "12500 Riverside Dr, Studio City, CA [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "12500-Riverside-Dr,-Studio-City,-CA-91607-3413",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "address",
+  "text": "NWC of 5th Ave & 42nd St, New York, NY 10017",
+  "unit": [
+   201,
+   false,
+   [],
+   "NWC of 5th Ave & 42nd St, New York, NY 10017"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "NWC-of-5th-Ave-&-42nd-St,-New-York,-NY-10017",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "address",
+  "text": "Hwy 101 SB, 1,200 ft N of Exit 432",
+  "unit": [
+   201,
+   false,
+   [],
+   "Hwy 101 SB, 1,200 ft N of Exit 432"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Hwy-101-SB,-1,200-ft-N-of-Exit-432",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "address",
+  "text": "Unit 4B, 2210 W Olympic Blvd, LA 90006",
+  "unit": [
+   201,
+   false,
+   [],
+   "Unit 4B, 2210 W Olympic Blvd, LA 90006"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Unit-4B,-2210-W-Olympic-Blvd,-LA-90006",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "zip+4",
+  "text": "ZIP 90017-2001",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "ZIP [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "ZIP-90017-2001",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "zip+4",
+  "text": "90017-2001",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "90017-2001",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "zip+4",
+  "text": "CA 90017-2001 and 90015-1234",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "CA [redacted] and [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "CA-90017-2001-and-90015-1234",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "zip+4",
+  "text": "90210-1234, 90211-5678",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "90210-1234,-90211-5678",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "zip+4",
+  "text": "zip 902101234",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "zip [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "zip-902101234",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "flight 2026-11-01 to 2026-11-30",
+  "unit": [
+   201,
+   false,
+   [],
+   "flight 2026-11-01 to 2026-11-30"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "flight-2026-11-01-to-2026-11-30",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "flight 2026-11-01 - 2026-11-30",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "flight [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "flight-2026-11-01---2026-11-30",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "2026-11-01/2026-11-30",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "2026-11-01/2026-11-30",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "11/01/2026-11/30/2026",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "11/01/2026-11/30/2026",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "Nov 1 2026 - Nov 30 2026",
+  "unit": [
+   201,
+   false,
+   [],
+   "Nov 1 2026 - Nov 30 2026"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Nov-1-2026---Nov-30-2026",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "posting 11/01/26, takedown 11/29/26",
+  "unit": [
+   201,
+   false,
+   [],
+   "posting 11/01/26, takedown 11/29/26"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "posting-11/01/26,-takedown-11/29/26",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "weeks 45-48 2026",
+  "unit": [
+   201,
+   false,
+   [],
+   "weeks 45-48 2026"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "weeks-45-48-2026",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "20261101-20261130",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "20261101-20261130",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "2026-11-01 2026-11-15 2026-11-30",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "2026-11-01-2026-11-15-2026-11-30",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "flight dates: 2026-11-01, 2026-11-30",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "flight dates: [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "flight-dates:-2026-11-01,-2026-11-30",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "flight/date",
+  "text": "4 week flight starting 2026-11-02 (Mon)",
+  "unit": [
+   201,
+   false,
+   [],
+   "4 week flight starting 2026-11-02 (Mon)"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "4-week-flight-starting-2026-11-02-(Mon)",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "gps",
+  "text": "34.0522, -118.2437",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "34.0522,--118.2437",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "gps",
+  "text": "lat 34.052235 lon -118.243683",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "lat 34.052235 lon -[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "lat-34.052235-lon--118.243683",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "gps",
+  "text": "34.052235,-118.243683",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "34.052235,-118.243683",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "gps",
+  "text": "GPS 40.758896 -73.985130",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "GPS [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "GPS-40.758896--73.985130",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "gps",
+  "text": "34°03'08.0\"N 118°14'37.3\"W",
+  "unit": [
+   201,
+   false,
+   [],
+   "34°03'08.0\"N 118°14'37.3\"W"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "34°03'08.0\"N-118°14'37.3\"W",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "gps",
+  "text": "N 34.0522 W 118.2437",
+  "unit": [
+   201,
+   false,
+   [],
+   "N 34.0522 W 118.2437"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "N-34.0522-W-118.2437",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "price",
+  "text": "$12,500.00 per 4 weeks",
+  "unit": [
+   201,
+   false,
+   [],
+   "$12,500.00 per 4 weeks"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "$12,500.00-per-4-weeks",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "price",
+  "text": "rate 12500.00 net, 15% agency",
+  "unit": [
+   201,
+   false,
+   [],
+   "rate 12500.00 net, 15% agency"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "rate-12500.00-net,-15%-agency",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "price",
+  "text": "$1,250,000.00 annual",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "$[redacted] annual"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "$1,250,000.00-annual",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "price",
+  "text": "12,500.00 / 13,750.00 / 15,000.00",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "12,500.00-/-13,750.00-/-15,000.00",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "price",
+  "text": "$4,500 - $6,000 / period",
+  "unit": [
+   201,
+   false,
+   [],
+   "$4,500 - $6,000 / period"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "$4,500---$6,000-/-period",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "price",
+  "text": "CPM $3.25, 1,250,000 impressions",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "CPM $[redacted] impressions"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "CPM-$3.25,-1,250,000-impressions",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "price",
+  "text": "price 1,250.00/4wks; prod 350.00",
+  "unit": [
+   201,
+   false,
+   [],
+   "price 1,250.00/4wks; prod 350.00"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "price-1,250.00/4wks;-prod-350.00",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "impressions",
+  "text": "weekly impressions 1,250,000",
+  "unit": [
+   201,
+   false,
+   [],
+   "weekly impressions 1,250,000"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "weekly-impressions-1,250,000",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "impressions",
+  "text": "18+ impressions 2,345,678 / 4 weeks",
+  "unit": [
+   201,
+   false,
+   [],
+   "18+ impressions 2,345,678 / 4 weeks"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "18+-impressions-2,345,678-/-4-weeks",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "impressions",
+  "text": "Geopath ID 12345678, weekly imps 456789",
+  "unit": [
+   201,
+   false,
+   [],
+   "Geopath ID 12345678, weekly imps 456789"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Geopath-ID-12345678,-weekly-imps-456789",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "impressions",
+  "text": "impressions: 1250000 (18+), 980000 (A25-54)",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "impressions: [redacted] (A25-54)"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "impressions:-1250000-(18+),-980000-(A25-54)",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "impressions",
+  "text": "A18+ 1,234,567 | A25-54 765,432",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "A[redacted] | A[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "A18+-1,234,567-|-A25-54-765,432",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "permit",
+  "text": "permit LA-2026-001234",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "permit LA-[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "permit-LA-2026-001234",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "permit",
+  "text": "City of LA permit #2026-0012345",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "City of LA permit #[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "City-of-LA-permit-#2026-0012345",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "permit",
+  "text": "Caltrans permit 07-2026-123456",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "Caltrans permit [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "Caltrans-permit-07-2026-123456",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "permit",
+  "text": "permit 2026-001234 exp 2027-01-31",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "permit [redacted] exp 2027-01-31"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "permit-2026-001234-exp-2027-01-31",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "permit",
+  "text": "Outdoor Advertising Permit No. 123456789",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "Outdoor Advertising Permit No. [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "Outdoor-Advertising-Permit-No.-123456789",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "permit",
+  "text": "permit no. 07-123-456789",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "permit no. [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "permit-no.-07-123-456789",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "io-2026-1018-0001",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "io-[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "io-2026-1018-0001",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "IO #2026-10180001",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "IO #[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "IO-#2026-10180001",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "PO 4500012345",
+  "unit": [
+   201,
+   true,
+   [
+    "phone"
+   ],
+   "PO [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "PO-4500012345",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "contract 2026-OOH-000123",
+  "unit": [
+   201,
+   false,
+   [],
+   "contract 2026-OOH-000123"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "contract-2026-OOH-000123",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "ref 12345-678-90",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "ref [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "ref-12345-678-90",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "inv 2026-11-000123-01",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "inv [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "inv-2026-11-000123-01",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "order 0001234567",
+  "unit": [
+   201,
+   true,
+   [
+    "phone"
+   ],
+   "order [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "order-0001234567",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "panel 0123-4567",
+  "unit": [
+   201,
+   false,
+   [],
+   "panel 0123-4567"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "panel-0123-4567",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "unit LA-0451-N",
+  "unit": [
+   201,
+   false,
+   [],
+   "unit LA-0451-N"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "unit-LA-0451-N",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "Geopath 31234567",
+  "unit": [
+   201,
+   false,
+   [],
+   "Geopath 31234567"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Geopath-31234567",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "PO-2026-1018 / IO-2026-1019",
+  "unit": [
+   201,
+   false,
+   [],
+   "PO-2026-1018 / IO-2026-1019"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "PO-2026-1018-/-IO-2026-1019",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "ref",
+  "text": "ref ABC-123456789",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "ref ABC-[redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "ref-ABC-123456789",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "spec/time",
+  "text": "14x48 bulletin, 10:00-22:00 lit",
+  "unit": [
+   201,
+   false,
+   [],
+   "14x48 bulletin, 10:00-22:00 lit"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "14x48-bulletin,-10:00-22:00-lit",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "spec/time",
+  "text": "8s spot, 6 per minute, 06:00-24:00",
+  "unit": [
+   201,
+   false,
+   [],
+   "8s spot, 6 per minute, 06:00-24:00"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "8s-spot,-6-per-minute,-06:00-24:00",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "spec/time",
+  "text": "1920x1080 px, 10 s loop",
+  "unit": [
+   201,
+   false,
+   [],
+   "1920x1080 px, 10 s loop"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "1920x1080-px,-10-s-loop",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "spec/time",
+  "text": "1080 x 1920 x 8s",
+  "unit": [
+   201,
+   false,
+   [],
+   "1080 x 1920 x 8s"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "1080-x-1920-x-8s",
+   200,
+   null
+  ]
+ },
+ {
+  "class": "spec/time",
+  "text": "face 14'x48', 672 sq ft",
+  "unit": [
+   201,
+   false,
+   [],
+   "face 14'x48', 672 sq ft"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "face-14'x48',-672-sq-ft",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "spec/time",
+  "text": "dwell 8 sec, 7,560 spots/week",
+  "unit": [
+   201,
+   false,
+   [],
+   "dwell 8 sec, 7,560 spots/week"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "dwell-8-sec,-7,560-spots/week",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "phone/contact (true positives for comparison)",
+  "text": "call 310-555-0142",
+  "unit": [
+   201,
+   true,
+   [
+    "phone"
+   ],
+   "call [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "call-310-555-0142",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "phone/contact (true positives for comparison)",
+  "text": "ops (310) 555-0142 ext 12",
+  "unit": [
+   201,
+   true,
+   [
+    "phone"
+   ],
+   "ops [redacted] ext 12"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "ops-(310)-555-0142-ext-12",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "phone/contact (true positives for comparison)",
+  "text": "fax 310.555.0143",
+  "unit": [
+   201,
+   true,
+   [
+    "phone"
+   ],
+   "fax [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "fax-310.555.0143",
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "掲出期間 2026年11月1日〜2026年11月30日",
+  "unit": [
+   201,
+   false,
+   [],
+   "掲出期間 2026年11月1日〜2026年11月30日"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "掲出期間-2026年11月1日〜2026年11月30日",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "東京都渋谷区 1丁目2番3号 150-0002",
+  "unit": [
+   201,
+   true,
+   [
+    "phone"
+   ],
+   "東京都渋谷区 1丁目2番3号 [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "東京都渋谷区-1丁目2番3号-150-0002",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "период 01.11.2026–30.11.2026",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "период [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "период-01.11.2026–30.11.2026",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "ул. Тверская 12, стр. 3, 125009",
+  "unit": [
+   201,
+   false,
+   [],
+   "ул. Тверская 12, стр. 3, 125009"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "ул.-Тверская-12,-стр.-3,-125009",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "περίοδος 1/11/2026 έως 30/11/2026",
+  "unit": [
+   201,
+   false,
+   [],
+   "περίοδος 1/11/2026 έως 30/11/2026"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "περίοδος-1/11/2026-έως-30/11/2026",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "パネル 14×48 第0451号 点灯 10時〜22時",
+  "unit": [
+   201,
+   false,
+   [],
+   "パネル 14×48 第0451号 点灯 10時〜22時"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "パネル-14×48-第0451号-点灯-10時〜22時",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "서울 강남구 테헤란로 152, 06236",
+  "unit": [
+   201,
+   false,
+   [],
+   "서울 강남구 테헤란로 152, 06236"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "서울-강남구-테헤란로-152,-06236",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "الفترة 2026/11/01 إلى 2026/11/30",
+  "unit": [
+   201,
+   false,
+   [],
+   "الفترة 2026/11/01 إلى 2026/11/30"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "الفترة-2026/11/01-إلى-2026/11/30",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "Café Lumière façade 1250 à 1300 rue Sainte-Catherine",
+  "unit": [
+   201,
+   false,
+   [],
+   "Café Lumière façade 1250 à 1300 rue Sainte-Catherine"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Café-Lumière-façade-1250-à-1300-rue-Sainte-Catherine",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "non-Latin script (r12)",
+  "text": "Straße 12, 10115 Berlin, Fläche 3×4 m",
+  "unit": [
+   201,
+   false,
+   [],
+   "Straße 12, 10115 Berlin, Fläche 3×4 m"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Straße-12,-10115-Berlin,-Fläche-3×4-m",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "HTML entity (r12)",
+  "text": "Wilshire &amp; 5th, CA 90017",
+  "unit": [
+   201,
+   false,
+   [],
+   "Wilshire &amp; 5th, CA 90017"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "Wilshire-&amp;-5th,-CA-90017",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "HTML entity (r12)",
+  "text": "flight 2026&ndash;11&ndash;01 to 2026&ndash;11&ndash;30",
+  "unit": [
+   201,
+   false,
+   [],
+   "flight 2026&ndash;11&ndash;01 to 2026&ndash;11&ndash;30"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "flight-2026&ndash;11&ndash;01-to-2026&ndash;11&ndash;30",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "HTML entity (r12)",
+  "text": "14&times;48 bulletin &ndash; lit",
+  "unit": [
+   201,
+   false,
+   [],
+   "14&times;48 bulletin &ndash; lit"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "14&times;48-bulletin-&ndash;-lit",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "HTML entity (r12)",
+  "text": ",500&nbsp;net &middot; 4&nbsp;weeks",
+  "unit": [
+   201,
+   false,
+   [],
+   ",500&nbsp;net &middot; 4&nbsp;weeks"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   ",500&nbsp;net-&middot;-4&nbsp;weeks",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "HTML entity (r12)",
+  "text": "ZIP 90017&#8209;2001",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "ZIP [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "ZIP-90017&#8209;2001",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "HTML entity (r12)",
+  "text": "R&amp;D campus, Bldg&nbsp;4",
+  "unit": [
+   201,
+   false,
+   [],
+   "R&amp;D campus, Bldg&nbsp;4"
+  ],
+  "face": [
+   200,
+   null
+  ],
+  "approval_ref": [
+   "R&amp;D-campus,-Bldg&nbsp;4",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "mixed realistic",
+  "text": "Lamar LA bulletin #0451, 1600 Wilshire Blvd 90017-2001, flight 2026-11-01 - 2026-11-30, $12,500.00 net",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "Lamar LA bulletin #0451, 1600 Wilshire Blvd [redacted], flight [redacted] net"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "Lamar-LA-bulletin-#0451,-1600-Wilshire-Blvd-90017-2001,-flight-2026-11-01---2026-11-30,-$12,500.00-net",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "mixed realistic",
+  "text": "Clear Channel digital, 34.0522,-118.2437, 1,250,000 imps, permit 2026-001234",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "Clear Channel digital, [redacted] imps, permit [redacted]"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "Clear-Channel-digital,-34.0522,-118.2437,-1,250,000-imps,-permit-2026-001234",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ },
+ {
+  "class": "mixed realistic",
+  "text": "OUTFRONT Hwy 101 SB @ Exit 432; IO 2026-1018-0001; posting 11/01/2026",
+  "unit": [
+   201,
+   true,
+   [
+    "number"
+   ],
+   "OUTFRONT Hwy 101 SB @ Exit 432; IO [redacted]; posting 11/01/2026"
+  ],
+  "face": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "approval_ref": [
+   "OUTFRONT-Hwy-101-SB-@-Exit-432;-IO-2026-1018-0001;-posting-11/01/2026",
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ]
+ }
+]

@@ -1,0 +1,245 @@
+diff --git a/services/ooh-py/src/pii.py b/services/ooh-py/src/pii.py
+index 93f3ef9..7ac2003 100644
+--- a/services/ooh-py/src/pii.py
++++ b/services/ooh-py/src/pii.py
+@@ -34,6 +34,7 @@ Names, spelled-out digits and letters used as separators cannot be detected reli
+ 
+ from __future__ import annotations
+ 
++import html
+ import re
+ import unicodedata
+ 
+@@ -76,11 +77,15 @@ _INTL_MIN_DIGITS = 8
+ # the variation selectors.
+ _INVISIBLE = re.compile("[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\ufe00-\ufe0f\uffa0"
+                         "\U000e0100-\U000e01ef]")
+-_REMOVED = ("Cf", "Co", "Cn")        # format, private-use and unassigned characters: removed, not read as a space
++# format and private-use characters: removed, not read as a space. Unassigned characters (Cn) are neither removed nor
++# read as a space but kept as typed (founder decision, AEGIS r11 reliability N1: which code points are unassigned
++# differs between Unicode versions, so removing them made the kept text and the request hash depend on the Python
++# build); the digit-cluster rule joins across them anyway.
++_REMOVED = ("Cf", "Co")
+ 
+ 
+ def strip_format(text: str, hidden: str = "") -> str:
+-    """NFKC; zero-width, format, private-use, unassigned and the invisible characters above replaced by ``hidden``
++    """NFKC; zero-width, format, private-use and the invisible characters above replaced by ``hidden``
+     (removed by default), and a combining mark on a digit dropped (AEGIS r9 security F2, r10 source M-1); every decimal
+     digit of any script read as its ASCII digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Removing a hidden character
+     rejoins a digit group it split (a card); reading it as a space keeps it as a separator (an SSN): the screen reads
+@@ -104,7 +109,8 @@ def screen_form(text: str, hidden: str = "") -> str:
+     text while storage read a cleaned copy, so "123  45  6789" was redacted in the line but hashed in clear):
+     ``strip_format``, every other non-printable character (controls, line and paragraph separators, other spaces)
+     read as a space, and runs of spaces collapsed to one."""
+-    return " ".join("".join(ch if ch.isprintable() else " " for ch in strip_format(text, hidden)).split())
++    return " ".join("".join(ch if ch.isprintable() or unicodedata.category(ch) == "Cn" else " "
++                            for ch in strip_format(text, hidden)).split())
+ 
+ 
+ def _norm(text: str, hidden: str = "") -> str:
+@@ -239,15 +245,20 @@ def _redact_once(t: str) -> str:
+ CLUSTER_MIN_DIGITS = 9
+ 
+ 
++_ASCII_LETTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
++
++
+ def number_cluster_spans(t: str) -> list:
+-    """The spans, first digit to last, of every run of text without a letter that holds CLUSTER_MIN_DIGITS digits."""
++    """The spans, first digit to last, of every run of text without an ASCII letter that holds CLUSTER_MIN_DIGITS
++    digits. Only A-Z and a-z end a cluster (founder decision, AEGIS r11 runtime O11-1 / security S11-1: Unicode letters
++    that look like punctuation, "ー", "ʼ", "ǀ", tatweel, joined digits unseen); every other character joins it."""
+     out, first, last, count = [], None, None, 0
+     for i, ch in enumerate(t + "a"):
+-        if ch.isalpha():
++        if ch in _ASCII_LETTERS:
+             if count >= CLUSTER_MIN_DIGITS:
+                 out.append((first, last + 1))
+             first, last, count = None, None, 0
+-        elif ch.isdigit():
++        elif "0" <= ch <= "9":
+             first = i if first is None else first
+             last, count = i, count + 1
+     return out
+@@ -269,16 +280,12 @@ def _free_text_spans(t: str) -> list:
+     return sorted(_spans(t) + number_cluster_spans(t))
+ 
+ 
+-def screen_free_text(text: str) -> tuple:
+-    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. With nothing
+-    found, the text as kept is ``screen_form(text)``; else every e-mail, phone, card, SSN and digit cluster is
+-    "[redacted]" in the normalised text, repeated until none is left."""
+-    t = _norm(text)
+-    kinds = set()
++def _redact_all(t: str, find, kinds: set) -> str:
++    """``t`` with every span ``find`` reports replaced by "[redacted]" (labelled into ``kinds``), until none is left."""
+     for _ in range(4):
+-        spans = _free_text_spans(t)
++        spans = sorted(find(t))
+         if not spans:
+-            break
++            return t
+         out, pos = [], 0
+         for lo, hi in spans:
+             if hi <= pos:
+@@ -288,9 +295,29 @@ def screen_free_text(text: str) -> tuple:
+             out.append("[redacted]")
+             pos = hi
+         t = "".join(out) + t[pos:]
+-    else:
+-        if _free_text_spans(t):
+-            t = "[redacted]"
++    return "[redacted]" if find(t) else t
++
++
++def screen_free_text(text: str) -> tuple:
++    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. The cluster
++    rule runs first on the text as it would be kept (``screen_form``), then once more with the e-mail, phone, card and
++    SSN rules after the @ and . spellings are read (``_norm``): a cluster either form shows is redacted (AEGIS r11
++    source S-1: "1234567%40" lost two digits to the "@" spelling and kept nine). With nothing found, the text as kept
++    is ``screen_form(text)``."""
++    kinds = set()
++    t = _redact_all(screen_form(text), number_cluster_spans, kinds)
++    t = _redact_all(_norm(t), _free_text_spans, kinds)
++    # HTML entities (founder decision, AEGIS r11 security S11-2: "4111&nbsp;1111&nbsp;…", "123&ndash;45&ndash;6789"):
++    # the decoded text is screened too, and kept decoded when it holds personal data; decoding is repeated for
++    # entities that spell entities ("&amp;nbsp;")
++    decoded = t
++    for _ in range(3):
++        once = html.unescape(decoded)
++        if once == decoded:
++            break
++        decoded = once
++    if decoded != t and _free_text_spans(_norm(decoded)):
++        t = _redact_all(_norm(decoded), _free_text_spans, kinds)
+     if not kinds:
+         return screen_form(text), []
+     return " ".join(t.split()), sorted(kinds)
+diff --git a/services/ooh-py/src/service.py b/services/ooh-py/src/service.py
+index 320dbb6..6c7233e 100644
+--- a/services/ooh-py/src/service.py
++++ b/services/ooh-py/src/service.py
+@@ -86,8 +86,9 @@ _SHA_CACHE: "OrderedDict[str, str]" = OrderedDict()      # raw-body digest -> re
+ 
+ 
+ def request_sha(body: dict) -> str:
+-    """The idempotency hash of a request. Personal data is redacted first, so the hash kept in the log never stands for
+-    a card number or an SSN; a body without personal data hashes as before (logs written earlier still replay). The
++    """The idempotency hash of a request. The vendor text is hashed as kept (screen form, personal data
++    redacted), so the hash in the log never stands for a card number or an SSN; a body without vendor text hashes as
++    before, and one whose vendor text is already in screen form too (AEGIS r11 source S-3). The
+     screen runs once per body (AEGIS r10 reliability F2: it ran twice per request, under the service lock); the cache
+     is keyed by a digest of the body, never by the body, and is never written anywhere."""
+     key = hashlib.sha256(canonical(body).encode("utf-8")).hexdigest()
+diff --git a/services/ooh-py/tests/test_aegis_r10_screen_form.py b/services/ooh-py/tests/test_aegis_r10_screen_form.py
+index 7e0f59e..b5e703c 100644
+--- a/services/ooh-py/tests/test_aegis_r10_screen_form.py
++++ b/services/ooh-py/tests/test_aegis_r10_screen_form.py
+@@ -57,7 +57,7 @@ PROBES = SPACED + HIDDEN + ["faces west 14x48", "123 - 45 - 6789", "ref 2026-10-
+ 
+ @pytest.mark.parametrize("text", PROBES)
+ def test_r10_storage_redacts_exactly_when_the_screen_finds_personal_data(text):
+-    assert sc.observed(text)["personal_data_redacted"] is pii.has_personal_data(text)
++    assert sc.observed(text)["personal_data_redacted"] is pii.free_text_has_personal_data(text)   # r11: one screen
+ 
+ 
+ def test_r10_marks_on_letters_are_kept():
+diff --git a/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py b/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
+index e877327..c87fb62 100644
+--- a/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
++++ b/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
+@@ -100,3 +100,93 @@ def test_cluster_the_ref_attribute_kind_and_campaign_names_keep_the_old_screen()
+     # the founder scoped the rule to the three fields; other screened values keep the e-mail/phone/card/SSN rules
+     assert not pii.has_personal_data("ZIP 90028-1234") and pii.free_text_has_personal_data("ZIP 90028-1234")
+     assert sc.names_a_card("4111-1111-1111-1111") and not sc.names_a_card("021000021")
++
++
++# ---------------------------------------------------------------- AEGIS r11 source S-1: spellings cannot hide digits
++
++SPELLED = ["1234567%40", "1234567&#64;", "123-45-67%40", "4111 1111 1111 11%40", "12 34 56 7&#64;"]
++
++
++@pytest.mark.parametrize("text", SPELLED)
++def test_cluster_an_at_spelling_cannot_hide_digits(text):
++    kept, kinds = pii.screen_free_text(f"note {text} end")
++    assert kinds and sum(ch.isdigit() for ch in kept) < 9, (kept, kinds)
++
++
++@pytest.mark.parametrize("text", SPELLED)
++def test_cluster_an_at_spelling_cannot_hide_digits_in_the_fields(h, text):
++    test_cluster_vendor_text_is_redacted_and_hashed_redacted(h, text)
++    test_cluster_face_text_attribute_is_refused(h, text)
++
++
++def test_cluster_the_kept_text_never_holds_a_cluster():
++    import random
++    rnd = random.Random(20261018)
++    alphabet = list("0123456789 -._:/,|+%@#&;x4") + ["%40", "&#64;", "&#x40;", "&commat;", "[at]", "(dot)", "\u200b",
++                                                       "\u3164", "\ue000", "\u0664", "a", "Z", "&nbsp;", "&ndash;",
++                                                       "&amp;", "&#52;", "\u30fc", "\u02bc", "\u2ffc", "\u0378"]
++    for _ in range(20000):
++        t = "".join(rnd.choice(alphabet) for _ in range(rnd.randint(1, 30)))
++        kept, _kinds = pii.screen_free_text(t)
++        for form in (kept, pii.screen_form(kept), pii._norm(kept), pii._norm(_unescape(kept))):
++            assert not pii.number_cluster_spans(form), (t, kept)
++
++
++# ---------------------------------------------------------------- founder decisions after r11 (Oct 18 2026)
++# 2: only ASCII letters A-Z / a-z end a digit cluster; every other character, Unicode letters that look like
++#    punctuation included, joins it (runtime O11-1, security S11-1, source S-5)
++# 3: HTML entities are decoded and the decoded text is screened too (security S11-2, data D11-L2)
++# 1: unassigned characters are kept as typed, so the kept text and the hash do not depend on the Unicode version (N1)
++
++LOOKALIKE = ['1234ʼ56789', '12ー34ー56ー789', '41ー11ー11ー11ー11ー11ー11ー11', '123ǀ456ǀ789', '123ـ456ـ789', '123ː45ː6789', '123ˉ45ˉ6789', '123ꞏ45ꞏ6789', '123一456一789', '12α34α56789']
++ENTITIES = ['4111&nbsp;1111&nbsp;1111&nbsp;1111', '123&ndash;45&ndash;6789', 'SSN 123&nbsp;45&nbsp;6789', '4111&#32;1111&#32;1111&#32;1111', '4111&#x2D;1111&#x2D;1111&#x2D;1111', '4111&amp;nbsp;1111&amp;nbsp;1111&amp;nbsp;1111', '&#52;111 1111 1111 1111']
++
++
++@pytest.mark.parametrize("text", LOOKALIKE + ENTITIES)
++def test_decisions_screen_finds_it(text):
++    kept, kinds = pii.screen_free_text(f"note {text} end")
++    assert kinds, (text, kept)
++    for form in (kept, pii._norm(kept), pii._norm(_unescape(kept))):
++        assert not pii.number_cluster_spans(form), (text, kept)
++
++
++def _unescape(t):
++    import html
++    for _ in range(3):
++        t = html.unescape(t)
++    return t
++
++
++@pytest.mark.parametrize("text", LOOKALIKE + ENTITIES)
++def test_decisions_vendor_text_is_redacted_and_the_face_attribute_refused(h, text):
++    test_cluster_vendor_text_is_redacted_and_hashed_redacted(h, text)
++    test_cluster_face_text_attribute_is_refused(h, text)
++
++
++@pytest.mark.parametrize("ref", ["123" + chr(0x2bc) + "456789", "4111&nbsp;1111&nbsp;1111&nbsp;1111"])
++def test_decisions_client_approval_doc_ref_is_refused(h, ref):
++    # the reference's own pattern (ASCII letters, digits, . _ : -) refuses these before the personal-data screen
++    ctx = h.to_proposal_sent("acme")
++    lines, events = len(h.svc.log), len(h.ledger.events)
++    r = h.approve(ctx, client_approval_doc_ref=ref)
++    assert r.status_code == 422, r.text
++    assert len(h.svc.log) == lines and len(h.ledger.events) == events
++
++
++def test_decisions_ascii_letters_still_end_a_cluster():
++    assert pii.screen_free_text("1234x56789") == ("1234x56789", [])
++    assert pii.screen_free_text("14x48 bulletin, 2026-11-01 to 2026-11-30")[1] == []
++
++
++def test_decisions_entities_without_digits_are_kept_as_typed():
++    assert pii.screen_free_text("fine &amp; dandy 14x48") == ("fine &amp; dandy 14x48", [])
++
++
++@pytest.mark.parametrize("cp", [0x0378, 0x2FFC, 0x31EF, 0x2EBF0])
++def test_decisions_unassigned_characters_are_kept_so_the_hash_is_stable(cp):
++    # U+2FFC-2FFF, U+31EF and U+2EBF0.. are unassigned in Unicode 15.0 (Python 3.12) and assigned in 15.1 (3.13)
++    text = "faces west " + chr(cp) + " lit"
++    assert pii.screen_free_text(text) == (text, [])
++    import service as SV
++    from ledger import payload_sha256 as p
++    assert SV.request_sha({"request_id": "r", "vendor_text": text}) == p({"request_id": "r", "vendor_text": text})

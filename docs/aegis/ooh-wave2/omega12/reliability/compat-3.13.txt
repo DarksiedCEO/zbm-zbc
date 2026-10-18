@@ -1,0 +1,8 @@
+'faces west on Wilshire'     hashes as before: True
+'faces  west'                hashes as before: False
+'faces west\n'               hashes as before: False
+'line1\nline2'               hashes as before: False
+'café Ａ'                     hashes as before: False
+'a\u200bb'                   hashes as before: False
+'tab\there'                  hashes as before: False
+' lead'                      hashes as before: False

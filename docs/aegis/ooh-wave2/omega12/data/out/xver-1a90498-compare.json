@@ -1,0 +1,313 @@
+{
+ "base": [
+  "3.12.14",
+  "15.0.0"
+ ],
+ "3.13.9 (15.1.0)": {
+  "cn_in_base": 825345,
+  "assigned_in_other": 627,
+  "assigned_in_other_by_cat": {
+   "So": 5,
+   "Lo": 622
+  },
+  "faces_template_hash_differs": 0,
+  "cluster_template_hash_differs": 0,
+  "kinds_differ": 0,
+  "faces_hash_differs_by_cat_change": {},
+  "cluster_hash_differs_by_cat_change": {},
+  "examples": {
+   "faces_hash": [],
+   "faces_kinds": [],
+   "cluster_hash": [],
+   "cluster_kinds": []
+  }
+ },
+ "3.14.4 (16.0.0)": {
+  "cn_in_base": 825345,
+  "assigned_in_other": 5812,
+  "assigned_in_other_by_cat": {
+   "Mn": 36,
+   "Po": 12,
+   "Lu": 27,
+   "Ll": 25,
+   "So": 742,
+   "Lo": 4865,
+   "Nd": 80,
+   "Lm": 7,
+   "Pd": 1,
+   "Sm": 2,
+   "Mc": 15
+  },
+  "faces_template_hash_differs": 106,
+  "cluster_template_hash_differs": 26,
+  "kinds_differ": 106,
+  "faces_hash_differs_by_cat_change": {
+   "Cn->Nd": 80,
+   "Cn->So": 26
+  },
+  "cluster_hash_differs_by_cat_change": {
+   "Cn->So": 26
+  },
+  "examples": {
+   "faces_hash": [
+    [
+     "U+10D40",
+     "Cn",
+     "Nd",
+     "e392465c9d8368c3",
+     "e4c1d472d2b84a4f"
+    ],
+    [
+     "U+10D41",
+     "Cn",
+     "Nd",
+     "f4c517ade8f9a347",
+     "1ab176ef386f5cf8"
+    ],
+    [
+     "U+10D42",
+     "Cn",
+     "Nd",
+     "e5cd31af2d21cd08",
+     "225d24442b8bdacb"
+    ],
+    [
+     "U+10D43",
+     "Cn",
+     "Nd",
+     "01a19c8778ed80e0",
+     "3e2f867af14ee522"
+    ],
+    [
+     "U+10D44",
+     "Cn",
+     "Nd",
+     "da2fae46cbcb7736",
+     "3c4bf9fd309a1026"
+    ],
+    [
+     "U+10D45",
+     "Cn",
+     "Nd",
+     "527e84ed90fda175",
+     "99b95f79f628085c"
+    ],
+    [
+     "U+10D46",
+     "Cn",
+     "Nd",
+     "3e45a6ace61b9dda",
+     "c9372f18b1c8c8f8"
+    ],
+    [
+     "U+10D47",
+     "Cn",
+     "Nd",
+     "fe0f4f3afd6e07a4",
+     "f17a76f7943b2d41"
+    ],
+    [
+     "U+10D48",
+     "Cn",
+     "Nd",
+     "39511d4cdc2c6293",
+     "408f87e80e05c1ab"
+    ],
+    [
+     "U+10D49",
+     "Cn",
+     "Nd",
+     "5f7398c516b99db3",
+     "fad6cedd6f5e5de5"
+    ],
+    [
+     "U+116D0",
+     "Cn",
+     "Nd",
+     "a873033cafe6860f",
+     "e4c1d472d2b84a4f"
+    ],
+    [
+     "U+116D1",
+     "Cn",
+     "Nd",
+     "4a609fd38f425a08",
+     "1ab176ef386f5cf8"
+    ]
+   ],
+   "faces_kinds": [],
+   "cluster_hash": [
+    [
+     "U+1CCD6",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "84fd14f8d232fd17"
+    ],
+    [
+     "U+1CCD7",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "bdcda7cee577b1ed"
+    ],
+    [
+     "U+1CCD8",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "6b622888aa5316a6"
+    ],
+    [
+     "U+1CCD9",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "bf7d22f838e05bc2"
+    ],
+    [
+     "U+1CCDA",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "4cca08c2ef66aedd"
+    ],
+    [
+     "U+1CCDB",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "3dbf9fb31d9c1cb1"
+    ],
+    [
+     "U+1CCDC",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "0add3fe8253b6379"
+    ],
+    [
+     "U+1CCDD",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "8fd906ef8f2953c6"
+    ],
+    [
+     "U+1CCDE",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "49c2eaedf25b3330"
+    ],
+    [
+     "U+1CCDF",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "4b386001a7fcb2d9"
+    ],
+    [
+     "U+1CCE0",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "02b72cebea8334f4"
+    ],
+    [
+     "U+1CCE1",
+     "Cn",
+     "So",
+     "4c231197633f01c2",
+     "8f4c422d45b32358"
+    ]
+   ],
+   "cluster_kinds": [
+    [
+     "U+10D40",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D41",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D42",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D43",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D44",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D45",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D46",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D47",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D48",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+10D49",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+116D0",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ],
+    [
+     "U+116D1",
+     "Cn",
+     "Nd",
+     "number",
+     "phone"
+    ]
+   ]
+  }
+ }
+}

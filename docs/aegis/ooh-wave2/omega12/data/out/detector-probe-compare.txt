@@ -1,0 +1,7 @@
+ssn True
+card True
+nine True
+nine_hexent True
+True True
+Counter({'Ll': 412, 'Lu': 398, 'So': 268, 'Lm': 65, 'Nl': 32, 'Lt': 4, 'Lo': 2, 'Sc': 1})
+{'U+0099'}

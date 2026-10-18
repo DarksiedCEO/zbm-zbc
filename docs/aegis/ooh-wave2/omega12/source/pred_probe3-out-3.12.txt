@@ -1,0 +1,5 @@
+explained by @-spelling: 0 unexplained: 0
+'1234567%40' ('[redacted]', ['number']) [redacted]
+'1234567&#64;' ('[redacted];', ['number']) [redacted];
+'12345678&#x40;' ('12345678&#x40;', []) 12345678&#x40;
+'note 1234567%40 end' ('note [redacted] end', ['number']) note [redacted] end

@@ -1,0 +1,11213 @@
+{
+ "summary": {
+  "python": "3.13.9",
+  "unidata": "15.1.0",
+  "n": 1244,
+  "sf_is_ascii_digit": 700,
+  "run9_detected": 800,
+  "tail_detected": 800,
+  "not_detected_run9_by_cat": {
+   "No": 231,
+   "Nl": 148,
+   "Lo": 65
+  }
+ },
+ "rows": [
+  {
+   "cp": "U+00B2",
+   "cat": "No",
+   "name": "SUPERSCRIPT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+00B3",
+   "cat": "No",
+   "name": "SUPERSCRIPT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+00B9",
+   "cat": "No",
+   "name": "SUPERSCRIPT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0660",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0661",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0662",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0663",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0664",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0665",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0666",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0667",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0668",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0669",
+   "cat": "Nd",
+   "name": "ARABIC-INDIC DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F0",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F1",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F2",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F3",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F4",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F5",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F6",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F7",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F8",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+06F9",
+   "cat": "Nd",
+   "name": "EXTENDED ARABIC-INDIC DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C0",
+   "cat": "Nd",
+   "name": "NKO DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C1",
+   "cat": "Nd",
+   "name": "NKO DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C2",
+   "cat": "Nd",
+   "name": "NKO DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C3",
+   "cat": "Nd",
+   "name": "NKO DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C4",
+   "cat": "Nd",
+   "name": "NKO DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C5",
+   "cat": "Nd",
+   "name": "NKO DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C6",
+   "cat": "Nd",
+   "name": "NKO DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C7",
+   "cat": "Nd",
+   "name": "NKO DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C8",
+   "cat": "Nd",
+   "name": "NKO DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+07C9",
+   "cat": "Nd",
+   "name": "NKO DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0966",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0967",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0968",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0969",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+096A",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+096B",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+096C",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+096D",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+096E",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+096F",
+   "cat": "Nd",
+   "name": "DEVANAGARI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09E6",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09E7",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09E8",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09E9",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09EA",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09EB",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09EC",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09ED",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09EE",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+09EF",
+   "cat": "Nd",
+   "name": "BENGALI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A66",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A67",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A68",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A69",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A6A",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A6B",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A6C",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A6D",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A6E",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0A6F",
+   "cat": "Nd",
+   "name": "GURMUKHI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AE6",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AE7",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AE8",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AE9",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AEA",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AEB",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AEC",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AED",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AEE",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0AEF",
+   "cat": "Nd",
+   "name": "GUJARATI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B66",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B67",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B68",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B69",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B6A",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B6B",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B6C",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B6D",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B6E",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0B6F",
+   "cat": "Nd",
+   "name": "ORIYA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BE6",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BE7",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BE8",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BE9",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BEA",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BEB",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BEC",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BED",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BEE",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0BEF",
+   "cat": "Nd",
+   "name": "TAMIL DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C66",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C67",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C68",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C69",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C6A",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C6B",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C6C",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C6D",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C6E",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C6F",
+   "cat": "Nd",
+   "name": "TELUGU DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0C78",
+   "cat": "No",
+   "name": "TELUGU FRACTION DIGIT ZERO FOR ODD POWERS OF FOUR",
+   "sf": "\u0c78",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+0C79",
+   "cat": "No",
+   "name": "TELUGU FRACTION DIGIT ONE FOR ODD POWERS OF FOUR",
+   "sf": "\u0c79",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+0C7A",
+   "cat": "No",
+   "name": "TELUGU FRACTION DIGIT TWO FOR ODD POWERS OF FOUR",
+   "sf": "\u0c7a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+0C7B",
+   "cat": "No",
+   "name": "TELUGU FRACTION DIGIT THREE FOR ODD POWERS OF FOUR",
+   "sf": "\u0c7b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+0C7C",
+   "cat": "No",
+   "name": "TELUGU FRACTION DIGIT ONE FOR EVEN POWERS OF FOUR",
+   "sf": "\u0c7c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+0C7D",
+   "cat": "No",
+   "name": "TELUGU FRACTION DIGIT TWO FOR EVEN POWERS OF FOUR",
+   "sf": "\u0c7d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+0C7E",
+   "cat": "No",
+   "name": "TELUGU FRACTION DIGIT THREE FOR EVEN POWERS OF FOUR",
+   "sf": "\u0c7e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+0CE6",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CE7",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CE8",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CE9",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CEA",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CEB",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CEC",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CED",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CEE",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0CEF",
+   "cat": "Nd",
+   "name": "KANNADA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D66",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D67",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D68",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D69",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D6A",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D6B",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D6C",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D6D",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D6E",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0D6F",
+   "cat": "Nd",
+   "name": "MALAYALAM DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DE6",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DE7",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DE8",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DE9",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DEA",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DEB",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DEC",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DED",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DEE",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0DEF",
+   "cat": "Nd",
+   "name": "SINHALA LITH DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E50",
+   "cat": "Nd",
+   "name": "THAI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E51",
+   "cat": "Nd",
+   "name": "THAI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E52",
+   "cat": "Nd",
+   "name": "THAI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E53",
+   "cat": "Nd",
+   "name": "THAI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E54",
+   "cat": "Nd",
+   "name": "THAI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E55",
+   "cat": "Nd",
+   "name": "THAI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E56",
+   "cat": "Nd",
+   "name": "THAI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E57",
+   "cat": "Nd",
+   "name": "THAI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E58",
+   "cat": "Nd",
+   "name": "THAI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0E59",
+   "cat": "Nd",
+   "name": "THAI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED0",
+   "cat": "Nd",
+   "name": "LAO DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED1",
+   "cat": "Nd",
+   "name": "LAO DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED2",
+   "cat": "Nd",
+   "name": "LAO DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED3",
+   "cat": "Nd",
+   "name": "LAO DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED4",
+   "cat": "Nd",
+   "name": "LAO DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED5",
+   "cat": "Nd",
+   "name": "LAO DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED6",
+   "cat": "Nd",
+   "name": "LAO DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED7",
+   "cat": "Nd",
+   "name": "LAO DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED8",
+   "cat": "Nd",
+   "name": "LAO DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0ED9",
+   "cat": "Nd",
+   "name": "LAO DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F20",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F21",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F22",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F23",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F24",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F25",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F26",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F27",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F28",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+0F29",
+   "cat": "Nd",
+   "name": "TIBETAN DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1040",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1041",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1042",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1043",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1044",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1045",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1046",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1047",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1048",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1049",
+   "cat": "Nd",
+   "name": "MYANMAR DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1090",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1091",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1092",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1093",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1094",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1095",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1096",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1097",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1098",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1099",
+   "cat": "Nd",
+   "name": "MYANMAR SHAN DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1369",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT ONE",
+   "sf": "\u1369",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+136A",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT TWO",
+   "sf": "\u136a",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+136B",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT THREE",
+   "sf": "\u136b",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+136C",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT FOUR",
+   "sf": "\u136c",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+136D",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT FIVE",
+   "sf": "\u136d",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+136E",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT SIX",
+   "sf": "\u136e",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+136F",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT SEVEN",
+   "sf": "\u136f",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1370",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT EIGHT",
+   "sf": "\u1370",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1371",
+   "cat": "No",
+   "name": "ETHIOPIC DIGIT NINE",
+   "sf": "\u1371",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E0",
+   "cat": "Nd",
+   "name": "KHMER DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E1",
+   "cat": "Nd",
+   "name": "KHMER DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E2",
+   "cat": "Nd",
+   "name": "KHMER DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E3",
+   "cat": "Nd",
+   "name": "KHMER DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E4",
+   "cat": "Nd",
+   "name": "KHMER DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E5",
+   "cat": "Nd",
+   "name": "KHMER DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E6",
+   "cat": "Nd",
+   "name": "KHMER DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E7",
+   "cat": "Nd",
+   "name": "KHMER DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E8",
+   "cat": "Nd",
+   "name": "KHMER DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17E9",
+   "cat": "Nd",
+   "name": "KHMER DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+17F0",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK SON",
+   "sf": "\u17f0",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F1",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK MUOY",
+   "sf": "\u17f1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F2",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK PII",
+   "sf": "\u17f2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F3",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK BEI",
+   "sf": "\u17f3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F4",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK BUON",
+   "sf": "\u17f4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F5",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK PRAM",
+   "sf": "\u17f5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F6",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK PRAM-MUOY",
+   "sf": "\u17f6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F7",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK PRAM-PII",
+   "sf": "\u17f7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F8",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK PRAM-BEI",
+   "sf": "\u17f8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+17F9",
+   "cat": "No",
+   "name": "KHMER SYMBOL LEK ATTAK PRAM-BUON",
+   "sf": "\u17f9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1810",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1811",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1812",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1813",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1814",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1815",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1816",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1817",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1818",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1819",
+   "cat": "Nd",
+   "name": "MONGOLIAN DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1946",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1947",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1948",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1949",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+194A",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+194B",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+194C",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+194D",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+194E",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+194F",
+   "cat": "Nd",
+   "name": "LIMBU DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D0",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D1",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D2",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D3",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D4",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D5",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D6",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D7",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D8",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19D9",
+   "cat": "Nd",
+   "name": "NEW TAI LUE DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+19DA",
+   "cat": "No",
+   "name": "NEW TAI LUE THAM DIGIT ONE",
+   "sf": "\u19da",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A80",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A81",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A82",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A83",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A84",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A85",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A86",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A87",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A88",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A89",
+   "cat": "Nd",
+   "name": "TAI THAM HORA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A90",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A91",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A92",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A93",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A94",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A95",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A96",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A97",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A98",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1A99",
+   "cat": "Nd",
+   "name": "TAI THAM THAM DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B50",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B51",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B52",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B53",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B54",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B55",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B56",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B57",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B58",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1B59",
+   "cat": "Nd",
+   "name": "BALINESE DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB0",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB1",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB2",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB3",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB4",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB5",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB6",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB7",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB8",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1BB9",
+   "cat": "Nd",
+   "name": "SUNDANESE DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C40",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C41",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C42",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C43",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C44",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C45",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C46",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C47",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C48",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C49",
+   "cat": "Nd",
+   "name": "LEPCHA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C50",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C51",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C52",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C53",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C54",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C55",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C56",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C57",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C58",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1C59",
+   "cat": "Nd",
+   "name": "OL CHIKI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2070",
+   "cat": "No",
+   "name": "SUPERSCRIPT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2074",
+   "cat": "No",
+   "name": "SUPERSCRIPT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2075",
+   "cat": "No",
+   "name": "SUPERSCRIPT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2076",
+   "cat": "No",
+   "name": "SUPERSCRIPT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2077",
+   "cat": "No",
+   "name": "SUPERSCRIPT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2078",
+   "cat": "No",
+   "name": "SUPERSCRIPT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2079",
+   "cat": "No",
+   "name": "SUPERSCRIPT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2080",
+   "cat": "No",
+   "name": "SUBSCRIPT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2081",
+   "cat": "No",
+   "name": "SUBSCRIPT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2082",
+   "cat": "No",
+   "name": "SUBSCRIPT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2083",
+   "cat": "No",
+   "name": "SUBSCRIPT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2084",
+   "cat": "No",
+   "name": "SUBSCRIPT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2085",
+   "cat": "No",
+   "name": "SUBSCRIPT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2086",
+   "cat": "No",
+   "name": "SUBSCRIPT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2087",
+   "cat": "No",
+   "name": "SUBSCRIPT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2088",
+   "cat": "No",
+   "name": "SUBSCRIPT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2089",
+   "cat": "No",
+   "name": "SUBSCRIPT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+215F",
+   "cat": "No",
+   "name": "FRACTION NUMERATOR ONE",
+   "sf": "1\u2044",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2160",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL ONE",
+   "sf": "I",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2161",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL TWO",
+   "sf": "II",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2162",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL THREE",
+   "sf": "III",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2163",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL FOUR",
+   "sf": "IV",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2164",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL FIVE",
+   "sf": "V",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2165",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL SIX",
+   "sf": "VI",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2166",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL SEVEN",
+   "sf": "VII",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2167",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL EIGHT",
+   "sf": "VIII",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2168",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL NINE",
+   "sf": "IX",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2170",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL ONE",
+   "sf": "i",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2171",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL TWO",
+   "sf": "ii",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2172",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL THREE",
+   "sf": "iii",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2173",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL FOUR",
+   "sf": "iv",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2174",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL FIVE",
+   "sf": "v",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2175",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL SIX",
+   "sf": "vi",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2176",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL SEVEN",
+   "sf": "vii",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2177",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL EIGHT",
+   "sf": "viii",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2178",
+   "cat": "Nl",
+   "name": "SMALL ROMAN NUMERAL NINE",
+   "sf": "ix",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2185",
+   "cat": "Nl",
+   "name": "ROMAN NUMERAL SIX LATE FORM",
+   "sf": "\u2185",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2189",
+   "cat": "No",
+   "name": "VULGAR FRACTION ZERO THIRDS",
+   "sf": "0\u20443",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2460",
+   "cat": "No",
+   "name": "CIRCLED DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2461",
+   "cat": "No",
+   "name": "CIRCLED DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2462",
+   "cat": "No",
+   "name": "CIRCLED DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2463",
+   "cat": "No",
+   "name": "CIRCLED DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2464",
+   "cat": "No",
+   "name": "CIRCLED DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2465",
+   "cat": "No",
+   "name": "CIRCLED DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2466",
+   "cat": "No",
+   "name": "CIRCLED DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2467",
+   "cat": "No",
+   "name": "CIRCLED DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2468",
+   "cat": "No",
+   "name": "CIRCLED DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2474",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT ONE",
+   "sf": "(1)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2475",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT TWO",
+   "sf": "(2)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2476",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT THREE",
+   "sf": "(3)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2477",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT FOUR",
+   "sf": "(4)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2478",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT FIVE",
+   "sf": "(5)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2479",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT SIX",
+   "sf": "(6)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+247A",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT SEVEN",
+   "sf": "(7)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+247B",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT EIGHT",
+   "sf": "(8)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+247C",
+   "cat": "No",
+   "name": "PARENTHESIZED DIGIT NINE",
+   "sf": "(9)",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2488",
+   "cat": "No",
+   "name": "DIGIT ONE FULL STOP",
+   "sf": "1.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2489",
+   "cat": "No",
+   "name": "DIGIT TWO FULL STOP",
+   "sf": "2.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+248A",
+   "cat": "No",
+   "name": "DIGIT THREE FULL STOP",
+   "sf": "3.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+248B",
+   "cat": "No",
+   "name": "DIGIT FOUR FULL STOP",
+   "sf": "4.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+248C",
+   "cat": "No",
+   "name": "DIGIT FIVE FULL STOP",
+   "sf": "5.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+248D",
+   "cat": "No",
+   "name": "DIGIT SIX FULL STOP",
+   "sf": "6.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+248E",
+   "cat": "No",
+   "name": "DIGIT SEVEN FULL STOP",
+   "sf": "7.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+248F",
+   "cat": "No",
+   "name": "DIGIT EIGHT FULL STOP",
+   "sf": "8.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2490",
+   "cat": "No",
+   "name": "DIGIT NINE FULL STOP",
+   "sf": "9.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24EA",
+   "cat": "No",
+   "name": "CIRCLED DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24F5",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT ONE",
+   "sf": "\u24f5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24F6",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT TWO",
+   "sf": "\u24f6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24F7",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT THREE",
+   "sf": "\u24f7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24F8",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT FOUR",
+   "sf": "\u24f8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24F9",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT FIVE",
+   "sf": "\u24f9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24FA",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT SIX",
+   "sf": "\u24fa",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24FB",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT SEVEN",
+   "sf": "\u24fb",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24FC",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT EIGHT",
+   "sf": "\u24fc",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24FD",
+   "cat": "No",
+   "name": "DOUBLE CIRCLED DIGIT NINE",
+   "sf": "\u24fd",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+24FF",
+   "cat": "No",
+   "name": "NEGATIVE CIRCLED DIGIT ZERO",
+   "sf": "\u24ff",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2776",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT ONE",
+   "sf": "\u2776",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2777",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT TWO",
+   "sf": "\u2777",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2778",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT THREE",
+   "sf": "\u2778",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2779",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT FOUR",
+   "sf": "\u2779",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+277A",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT FIVE",
+   "sf": "\u277a",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+277B",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT SIX",
+   "sf": "\u277b",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+277C",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT SEVEN",
+   "sf": "\u277c",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+277D",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT EIGHT",
+   "sf": "\u277d",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+277E",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED DIGIT NINE",
+   "sf": "\u277e",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2780",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT ONE",
+   "sf": "\u2780",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2781",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT TWO",
+   "sf": "\u2781",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2782",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT THREE",
+   "sf": "\u2782",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2783",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT FOUR",
+   "sf": "\u2783",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2784",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT FIVE",
+   "sf": "\u2784",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2785",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT SIX",
+   "sf": "\u2785",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2786",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT SEVEN",
+   "sf": "\u2786",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2787",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT EIGHT",
+   "sf": "\u2787",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2788",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT NINE",
+   "sf": "\u2788",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+278A",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT ONE",
+   "sf": "\u278a",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+278B",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT TWO",
+   "sf": "\u278b",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+278C",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT THREE",
+   "sf": "\u278c",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+278D",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT FOUR",
+   "sf": "\u278d",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+278E",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT FIVE",
+   "sf": "\u278e",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+278F",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT SIX",
+   "sf": "\u278f",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2790",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT SEVEN",
+   "sf": "\u2790",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2791",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT EIGHT",
+   "sf": "\u2791",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+2792",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT NINE",
+   "sf": "\u2792",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+3007",
+   "cat": "Nl",
+   "name": "IDEOGRAPHIC NUMBER ZERO",
+   "sf": "\u3007",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3021",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL ONE",
+   "sf": "\u3021",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3022",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL TWO",
+   "sf": "\u3022",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3023",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL THREE",
+   "sf": "\u3023",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3024",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL FOUR",
+   "sf": "\u3024",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3025",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL FIVE",
+   "sf": "\u3025",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3026",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL SIX",
+   "sf": "\u3026",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3027",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL SEVEN",
+   "sf": "\u3027",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3028",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL EIGHT",
+   "sf": "\u3028",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3029",
+   "cat": "Nl",
+   "name": "HANGZHOU NUMERAL NINE",
+   "sf": "\u3029",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3192",
+   "cat": "No",
+   "name": "IDEOGRAPHIC ANNOTATION ONE MARK",
+   "sf": "\u4e00",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3193",
+   "cat": "No",
+   "name": "IDEOGRAPHIC ANNOTATION TWO MARK",
+   "sf": "\u4e8c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3194",
+   "cat": "No",
+   "name": "IDEOGRAPHIC ANNOTATION THREE MARK",
+   "sf": "\u4e09",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3195",
+   "cat": "No",
+   "name": "IDEOGRAPHIC ANNOTATION FOUR MARK",
+   "sf": "\u56db",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3220",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH ONE",
+   "sf": "(\u4e00)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3221",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH TWO",
+   "sf": "(\u4e8c)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3222",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH THREE",
+   "sf": "(\u4e09)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3223",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH FOUR",
+   "sf": "(\u56db)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3224",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH FIVE",
+   "sf": "(\u4e94)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3225",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH SIX",
+   "sf": "(\u516d)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3226",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH SEVEN",
+   "sf": "(\u4e03)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3227",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH EIGHT",
+   "sf": "(\u516b)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3228",
+   "cat": "No",
+   "name": "PARENTHESIZED IDEOGRAPH NINE",
+   "sf": "(\u4e5d)",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3280",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH ONE",
+   "sf": "\u4e00",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3281",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH TWO",
+   "sf": "\u4e8c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3282",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH THREE",
+   "sf": "\u4e09",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3283",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH FOUR",
+   "sf": "\u56db",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3284",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH FIVE",
+   "sf": "\u4e94",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3285",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH SIX",
+   "sf": "\u516d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3286",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH SEVEN",
+   "sf": "\u4e03",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3287",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH EIGHT",
+   "sf": "\u516b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3288",
+   "cat": "No",
+   "name": "CIRCLED IDEOGRAPH NINE",
+   "sf": "\u4e5d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3405",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-3405",
+   "sf": "\u3405",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3483",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-3483",
+   "sf": "\u3483",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+382A",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-382A",
+   "sf": "\u382a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+3B4D",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-3B4D",
+   "sf": "\u3b4d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E00",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E00",
+   "sf": "\u4e00",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E03",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E03",
+   "sf": "\u4e03",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E09",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E09",
+   "sf": "\u4e09",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E24",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E24",
+   "sf": "\u4e24",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E5D",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E5D",
+   "sf": "\u4e5d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E8C",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E8C",
+   "sf": "\u4e8c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E94",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E94",
+   "sf": "\u4e94",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4E96",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4E96",
+   "sf": "\u4e96",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4EE8",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4EE8",
+   "sf": "\u4ee8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4F0D",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4F0D",
+   "sf": "\u4f0d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+4FE9",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-4FE9",
+   "sf": "\u4fe9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5006",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5006",
+   "sf": "\u5006",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5169",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5169",
+   "sf": "\u5169",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+516B",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-516B",
+   "sf": "\u516b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+516D",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-516D",
+   "sf": "\u516d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+53C1",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-53C1",
+   "sf": "\u53c1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+53C2",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-53C2",
+   "sf": "\u53c2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+53C3",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-53C3",
+   "sf": "\u53c3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+53C4",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-53C4",
+   "sf": "\u53c4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+56DB",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-56DB",
+   "sf": "\u56db",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+58F1",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-58F1",
+   "sf": "\u58f1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+58F9",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-58F9",
+   "sf": "\u58f9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5E7A",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5E7A",
+   "sf": "\u5e7a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5EFE",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5EFE",
+   "sf": "\u5efe",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5F0C",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5F0C",
+   "sf": "\u5f0c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5F0D",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5F0D",
+   "sf": "\u5f0d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5F0E",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5F0E",
+   "sf": "\u5f0e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+5F10",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-5F10",
+   "sf": "\u5f10",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+62D0",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-62D0",
+   "sf": "\u62d0",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+634C",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-634C",
+   "sf": "\u634c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+67D2",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-67D2",
+   "sf": "\u67d2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+6D1E",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-6D1E",
+   "sf": "\u6d1e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+6F06",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-6F06",
+   "sf": "\u6f06",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+7396",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-7396",
+   "sf": "\u7396",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+8086",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-8086",
+   "sf": "\u8086",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+8CAE",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-8CAE",
+   "sf": "\u8cae",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+8CB3",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-8CB3",
+   "sf": "\u8cb3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+8D30",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-8D30",
+   "sf": "\u8d30",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+920E",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-920E",
+   "sf": "\u920e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+94A9",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-94A9",
+   "sf": "\u94a9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+9646",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-9646",
+   "sf": "\u9646",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+9678",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-9678",
+   "sf": "\u9678",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+96F6",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-96F6",
+   "sf": "\u96f6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A620",
+   "cat": "Nd",
+   "name": "VAI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A621",
+   "cat": "Nd",
+   "name": "VAI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A622",
+   "cat": "Nd",
+   "name": "VAI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A623",
+   "cat": "Nd",
+   "name": "VAI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A624",
+   "cat": "Nd",
+   "name": "VAI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A625",
+   "cat": "Nd",
+   "name": "VAI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A626",
+   "cat": "Nd",
+   "name": "VAI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A627",
+   "cat": "Nd",
+   "name": "VAI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A628",
+   "cat": "Nd",
+   "name": "VAI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A629",
+   "cat": "Nd",
+   "name": "VAI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A6E6",
+   "cat": "Nl",
+   "name": "BAMUM LETTER MO",
+   "sf": "\ua6e6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6E7",
+   "cat": "Nl",
+   "name": "BAMUM LETTER MBAA",
+   "sf": "\ua6e7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6E8",
+   "cat": "Nl",
+   "name": "BAMUM LETTER TET",
+   "sf": "\ua6e8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6E9",
+   "cat": "Nl",
+   "name": "BAMUM LETTER KPA",
+   "sf": "\ua6e9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6EA",
+   "cat": "Nl",
+   "name": "BAMUM LETTER TEN",
+   "sf": "\ua6ea",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6EB",
+   "cat": "Nl",
+   "name": "BAMUM LETTER NTUU",
+   "sf": "\ua6eb",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6EC",
+   "cat": "Nl",
+   "name": "BAMUM LETTER SAMBA",
+   "sf": "\ua6ec",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6ED",
+   "cat": "Nl",
+   "name": "BAMUM LETTER FAAMAE",
+   "sf": "\ua6ed",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6EE",
+   "cat": "Nl",
+   "name": "BAMUM LETTER KOVUU",
+   "sf": "\ua6ee",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A6EF",
+   "cat": "Nl",
+   "name": "BAMUM LETTER KOGHOM",
+   "sf": "\ua6ef",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+A8D0",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D1",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D2",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D3",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D4",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D5",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D6",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D7",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D8",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A8D9",
+   "cat": "Nd",
+   "name": "SAURASHTRA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A900",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A901",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A902",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A903",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A904",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A905",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A906",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A907",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A908",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A909",
+   "cat": "Nd",
+   "name": "KAYAH LI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D0",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D1",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D2",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D3",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D4",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D5",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D6",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D7",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D8",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9D9",
+   "cat": "Nd",
+   "name": "JAVANESE DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F0",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F1",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F2",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F3",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F4",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F5",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F6",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F7",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F8",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+A9F9",
+   "cat": "Nd",
+   "name": "MYANMAR TAI LAING DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA50",
+   "cat": "Nd",
+   "name": "CHAM DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA51",
+   "cat": "Nd",
+   "name": "CHAM DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA52",
+   "cat": "Nd",
+   "name": "CHAM DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA53",
+   "cat": "Nd",
+   "name": "CHAM DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA54",
+   "cat": "Nd",
+   "name": "CHAM DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA55",
+   "cat": "Nd",
+   "name": "CHAM DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA56",
+   "cat": "Nd",
+   "name": "CHAM DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA57",
+   "cat": "Nd",
+   "name": "CHAM DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA58",
+   "cat": "Nd",
+   "name": "CHAM DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+AA59",
+   "cat": "Nd",
+   "name": "CHAM DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF0",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF1",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF2",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF3",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF4",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF5",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF6",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF7",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF8",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+ABF9",
+   "cat": "Nd",
+   "name": "MEETEI MAYEK DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+F96B",
+   "cat": "Lo",
+   "name": "CJK COMPATIBILITY IDEOGRAPH-F96B",
+   "sf": "\u53c3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+F978",
+   "cat": "Lo",
+   "name": "CJK COMPATIBILITY IDEOGRAPH-F978",
+   "sf": "\u5169",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+F9B2",
+   "cat": "Lo",
+   "name": "CJK COMPATIBILITY IDEOGRAPH-F9B2",
+   "sf": "\u96f6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+F9D1",
+   "cat": "Lo",
+   "name": "CJK COMPATIBILITY IDEOGRAPH-F9D1",
+   "sf": "\u516d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+F9D3",
+   "cat": "Lo",
+   "name": "CJK COMPATIBILITY IDEOGRAPH-F9D3",
+   "sf": "\u9678",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+FF10",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF11",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF12",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF13",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF14",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF15",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF16",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF17",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF18",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+FF19",
+   "cat": "Nd",
+   "name": "FULLWIDTH DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10107",
+   "cat": "No",
+   "name": "AEGEAN NUMBER ONE",
+   "sf": "\ud800\udd07",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10108",
+   "cat": "No",
+   "name": "AEGEAN NUMBER TWO",
+   "sf": "\ud800\udd08",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10109",
+   "cat": "No",
+   "name": "AEGEAN NUMBER THREE",
+   "sf": "\ud800\udd09",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1010A",
+   "cat": "No",
+   "name": "AEGEAN NUMBER FOUR",
+   "sf": "\ud800\udd0a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1010B",
+   "cat": "No",
+   "name": "AEGEAN NUMBER FIVE",
+   "sf": "\ud800\udd0b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1010C",
+   "cat": "No",
+   "name": "AEGEAN NUMBER SIX",
+   "sf": "\ud800\udd0c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1010D",
+   "cat": "No",
+   "name": "AEGEAN NUMBER SEVEN",
+   "sf": "\ud800\udd0d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1010E",
+   "cat": "No",
+   "name": "AEGEAN NUMBER EIGHT",
+   "sf": "\ud800\udd0e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1010F",
+   "cat": "No",
+   "name": "AEGEAN NUMBER NINE",
+   "sf": "\ud800\udd0f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10142",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC ATTIC ONE DRACHMA",
+   "sf": "\ud800\udd42",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10143",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC ATTIC FIVE",
+   "sf": "\ud800\udd43",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10148",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC ATTIC FIVE TALENTS",
+   "sf": "\ud800\udd48",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1014F",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC ATTIC FIVE STATERS",
+   "sf": "\ud800\udd4f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10158",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC HERAEUM ONE PLETHRON",
+   "sf": "\ud800\udd58",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10159",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC THESPIAN ONE",
+   "sf": "\ud800\udd59",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1015A",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC HERMIONIAN ONE",
+   "sf": "\ud800\udd5a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1015B",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC EPIDAUREAN TWO",
+   "sf": "\ud800\udd5b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1015C",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC THESPIAN TWO",
+   "sf": "\ud800\udd5c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1015D",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC CYRENAIC TWO DRACHMAS",
+   "sf": "\ud800\udd5d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1015E",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC EPIDAUREAN TWO DRACHMAS",
+   "sf": "\ud800\udd5e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1015F",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC TROEZENIAN FIVE",
+   "sf": "\ud800\udd5f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10173",
+   "cat": "Nl",
+   "name": "GREEK ACROPHONIC DELPHIC FIVE MNAS",
+   "sf": "\ud800\udd73",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1018A",
+   "cat": "No",
+   "name": "GREEK ZERO SIGN",
+   "sf": "\ud800\udd8a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E1",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT ONE",
+   "sf": "\ud800\udee1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E2",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT TWO",
+   "sf": "\ud800\udee2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E3",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT THREE",
+   "sf": "\ud800\udee3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E4",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT FOUR",
+   "sf": "\ud800\udee4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E5",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT FIVE",
+   "sf": "\ud800\udee5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E6",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT SIX",
+   "sf": "\ud800\udee6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E7",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT SEVEN",
+   "sf": "\ud800\udee7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E8",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT EIGHT",
+   "sf": "\ud800\udee8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+102E9",
+   "cat": "No",
+   "name": "COPTIC EPACT DIGIT NINE",
+   "sf": "\ud800\udee9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10320",
+   "cat": "No",
+   "name": "OLD ITALIC NUMERAL ONE",
+   "sf": "\ud800\udf20",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10321",
+   "cat": "No",
+   "name": "OLD ITALIC NUMERAL FIVE",
+   "sf": "\ud800\udf21",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+103D1",
+   "cat": "Nl",
+   "name": "OLD PERSIAN NUMBER ONE",
+   "sf": "\ud800\udfd1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+103D2",
+   "cat": "Nl",
+   "name": "OLD PERSIAN NUMBER TWO",
+   "sf": "\ud800\udfd2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+104A0",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A1",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A2",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A3",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A4",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A5",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A6",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A7",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A8",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+104A9",
+   "cat": "Nd",
+   "name": "OSMANYA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10858",
+   "cat": "No",
+   "name": "IMPERIAL ARAMAIC NUMBER ONE",
+   "sf": "\ud802\udc58",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10859",
+   "cat": "No",
+   "name": "IMPERIAL ARAMAIC NUMBER TWO",
+   "sf": "\ud802\udc59",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1085A",
+   "cat": "No",
+   "name": "IMPERIAL ARAMAIC NUMBER THREE",
+   "sf": "\ud802\udc5a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10879",
+   "cat": "No",
+   "name": "PALMYRENE NUMBER ONE",
+   "sf": "\ud802\udc79",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1087A",
+   "cat": "No",
+   "name": "PALMYRENE NUMBER TWO",
+   "sf": "\ud802\udc7a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1087B",
+   "cat": "No",
+   "name": "PALMYRENE NUMBER THREE",
+   "sf": "\ud802\udc7b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1087C",
+   "cat": "No",
+   "name": "PALMYRENE NUMBER FOUR",
+   "sf": "\ud802\udc7c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1087D",
+   "cat": "No",
+   "name": "PALMYRENE NUMBER FIVE",
+   "sf": "\ud802\udc7d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108A7",
+   "cat": "No",
+   "name": "NABATAEAN NUMBER ONE",
+   "sf": "\ud802\udca7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108A8",
+   "cat": "No",
+   "name": "NABATAEAN NUMBER TWO",
+   "sf": "\ud802\udca8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108A9",
+   "cat": "No",
+   "name": "NABATAEAN NUMBER THREE",
+   "sf": "\ud802\udca9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108AA",
+   "cat": "No",
+   "name": "NABATAEAN NUMBER FOUR",
+   "sf": "\ud802\udcaa",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108AB",
+   "cat": "No",
+   "name": "NABATAEAN CRUCIFORM NUMBER FOUR",
+   "sf": "\ud802\udcab",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108AC",
+   "cat": "No",
+   "name": "NABATAEAN NUMBER FIVE",
+   "sf": "\ud802\udcac",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108FB",
+   "cat": "No",
+   "name": "HATRAN NUMBER ONE",
+   "sf": "\ud802\udcfb",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+108FC",
+   "cat": "No",
+   "name": "HATRAN NUMBER FIVE",
+   "sf": "\ud802\udcfc",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10916",
+   "cat": "No",
+   "name": "PHOENICIAN NUMBER ONE",
+   "sf": "\ud802\udd16",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1091A",
+   "cat": "No",
+   "name": "PHOENICIAN NUMBER TWO",
+   "sf": "\ud802\udd1a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1091B",
+   "cat": "No",
+   "name": "PHOENICIAN NUMBER THREE",
+   "sf": "\ud802\udd1b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C0",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER ONE",
+   "sf": "\ud802\uddc0",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C1",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER TWO",
+   "sf": "\ud802\uddc1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C2",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER THREE",
+   "sf": "\ud802\uddc2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C3",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER FOUR",
+   "sf": "\ud802\uddc3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C4",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER FIVE",
+   "sf": "\ud802\uddc4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C5",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER SIX",
+   "sf": "\ud802\uddc5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C6",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER SEVEN",
+   "sf": "\ud802\uddc6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C7",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER EIGHT",
+   "sf": "\ud802\uddc7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+109C8",
+   "cat": "No",
+   "name": "MEROITIC CURSIVE NUMBER NINE",
+   "sf": "\ud802\uddc8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10A40",
+   "cat": "No",
+   "name": "KHAROSHTHI DIGIT ONE",
+   "sf": "\ud802\ude40",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10A41",
+   "cat": "No",
+   "name": "KHAROSHTHI DIGIT TWO",
+   "sf": "\ud802\ude41",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10A42",
+   "cat": "No",
+   "name": "KHAROSHTHI DIGIT THREE",
+   "sf": "\ud802\ude42",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10A43",
+   "cat": "No",
+   "name": "KHAROSHTHI DIGIT FOUR",
+   "sf": "\ud802\ude43",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10A7D",
+   "cat": "No",
+   "name": "OLD SOUTH ARABIAN NUMBER ONE",
+   "sf": "\ud802\ude7d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10A9D",
+   "cat": "No",
+   "name": "OLD NORTH ARABIAN NUMBER ONE",
+   "sf": "\ud802\ude9d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10AEB",
+   "cat": "No",
+   "name": "MANICHAEAN NUMBER ONE",
+   "sf": "\ud802\udeeb",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10AEC",
+   "cat": "No",
+   "name": "MANICHAEAN NUMBER FIVE",
+   "sf": "\ud802\udeec",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B58",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PARTHIAN NUMBER ONE",
+   "sf": "\ud802\udf58",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B59",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PARTHIAN NUMBER TWO",
+   "sf": "\ud802\udf59",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B5A",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PARTHIAN NUMBER THREE",
+   "sf": "\ud802\udf5a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B5B",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PARTHIAN NUMBER FOUR",
+   "sf": "\ud802\udf5b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B78",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PAHLAVI NUMBER ONE",
+   "sf": "\ud802\udf78",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B79",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PAHLAVI NUMBER TWO",
+   "sf": "\ud802\udf79",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B7A",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PAHLAVI NUMBER THREE",
+   "sf": "\ud802\udf7a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10B7B",
+   "cat": "No",
+   "name": "INSCRIPTIONAL PAHLAVI NUMBER FOUR",
+   "sf": "\ud802\udf7b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10BA9",
+   "cat": "No",
+   "name": "PSALTER PAHLAVI NUMBER ONE",
+   "sf": "\ud802\udfa9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10BAA",
+   "cat": "No",
+   "name": "PSALTER PAHLAVI NUMBER TWO",
+   "sf": "\ud802\udfaa",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10BAB",
+   "cat": "No",
+   "name": "PSALTER PAHLAVI NUMBER THREE",
+   "sf": "\ud802\udfab",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10BAC",
+   "cat": "No",
+   "name": "PSALTER PAHLAVI NUMBER FOUR",
+   "sf": "\ud802\udfac",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10CFA",
+   "cat": "No",
+   "name": "OLD HUNGARIAN NUMBER ONE",
+   "sf": "\ud803\udcfa",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10CFB",
+   "cat": "No",
+   "name": "OLD HUNGARIAN NUMBER FIVE",
+   "sf": "\ud803\udcfb",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10D30",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D31",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D32",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D33",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D34",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D35",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D36",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D37",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D38",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10D39",
+   "cat": "Nd",
+   "name": "HANIFI ROHINGYA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E60",
+   "cat": "No",
+   "name": "RUMI DIGIT ONE",
+   "sf": "\ud803\ude60",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E61",
+   "cat": "No",
+   "name": "RUMI DIGIT TWO",
+   "sf": "\ud803\ude61",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E62",
+   "cat": "No",
+   "name": "RUMI DIGIT THREE",
+   "sf": "\ud803\ude62",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E63",
+   "cat": "No",
+   "name": "RUMI DIGIT FOUR",
+   "sf": "\ud803\ude63",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E64",
+   "cat": "No",
+   "name": "RUMI DIGIT FIVE",
+   "sf": "\ud803\ude64",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E65",
+   "cat": "No",
+   "name": "RUMI DIGIT SIX",
+   "sf": "\ud803\ude65",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E66",
+   "cat": "No",
+   "name": "RUMI DIGIT SEVEN",
+   "sf": "\ud803\ude66",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E67",
+   "cat": "No",
+   "name": "RUMI DIGIT EIGHT",
+   "sf": "\ud803\ude67",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10E68",
+   "cat": "No",
+   "name": "RUMI DIGIT NINE",
+   "sf": "\ud803\ude68",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+10F1D",
+   "cat": "No",
+   "name": "OLD SOGDIAN NUMBER ONE",
+   "sf": "\ud803\udf1d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10F1E",
+   "cat": "No",
+   "name": "OLD SOGDIAN NUMBER TWO",
+   "sf": "\ud803\udf1e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10F1F",
+   "cat": "No",
+   "name": "OLD SOGDIAN NUMBER THREE",
+   "sf": "\ud803\udf1f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10F20",
+   "cat": "No",
+   "name": "OLD SOGDIAN NUMBER FOUR",
+   "sf": "\ud803\udf20",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10F21",
+   "cat": "No",
+   "name": "OLD SOGDIAN NUMBER FIVE",
+   "sf": "\ud803\udf21",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10F51",
+   "cat": "No",
+   "name": "SOGDIAN NUMBER ONE",
+   "sf": "\ud803\udf51",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10FC5",
+   "cat": "No",
+   "name": "CHORASMIAN NUMBER ONE",
+   "sf": "\ud803\udfc5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10FC6",
+   "cat": "No",
+   "name": "CHORASMIAN NUMBER TWO",
+   "sf": "\ud803\udfc6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10FC7",
+   "cat": "No",
+   "name": "CHORASMIAN NUMBER THREE",
+   "sf": "\ud803\udfc7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+10FC8",
+   "cat": "No",
+   "name": "CHORASMIAN NUMBER FOUR",
+   "sf": "\ud803\udfc8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11052",
+   "cat": "No",
+   "name": "BRAHMI NUMBER ONE",
+   "sf": "\ud804\udc52",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11053",
+   "cat": "No",
+   "name": "BRAHMI NUMBER TWO",
+   "sf": "\ud804\udc53",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11054",
+   "cat": "No",
+   "name": "BRAHMI NUMBER THREE",
+   "sf": "\ud804\udc54",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11055",
+   "cat": "No",
+   "name": "BRAHMI NUMBER FOUR",
+   "sf": "\ud804\udc55",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11056",
+   "cat": "No",
+   "name": "BRAHMI NUMBER FIVE",
+   "sf": "\ud804\udc56",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11057",
+   "cat": "No",
+   "name": "BRAHMI NUMBER SIX",
+   "sf": "\ud804\udc57",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11058",
+   "cat": "No",
+   "name": "BRAHMI NUMBER SEVEN",
+   "sf": "\ud804\udc58",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11059",
+   "cat": "No",
+   "name": "BRAHMI NUMBER EIGHT",
+   "sf": "\ud804\udc59",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1105A",
+   "cat": "No",
+   "name": "BRAHMI NUMBER NINE",
+   "sf": "\ud804\udc5a",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11066",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11067",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11068",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11069",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1106A",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1106B",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1106C",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1106D",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1106E",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1106F",
+   "cat": "Nd",
+   "name": "BRAHMI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F0",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F1",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F2",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F3",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F4",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F5",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F6",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F7",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F8",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+110F9",
+   "cat": "Nd",
+   "name": "SORA SOMPENG DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11136",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11137",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11138",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11139",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1113A",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1113B",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1113C",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1113D",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1113E",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1113F",
+   "cat": "Nd",
+   "name": "CHAKMA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D0",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D1",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D2",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D3",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D4",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D5",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D6",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D7",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D8",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111D9",
+   "cat": "Nd",
+   "name": "SHARADA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+111E1",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT ONE",
+   "sf": "\ud804\udde1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E2",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT TWO",
+   "sf": "\ud804\udde2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E3",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT THREE",
+   "sf": "\ud804\udde3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E4",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT FOUR",
+   "sf": "\ud804\udde4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E5",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT FIVE",
+   "sf": "\ud804\udde5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E6",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT SIX",
+   "sf": "\ud804\udde6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E7",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT SEVEN",
+   "sf": "\ud804\udde7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E8",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT EIGHT",
+   "sf": "\ud804\udde8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+111E9",
+   "cat": "No",
+   "name": "SINHALA ARCHAIC DIGIT NINE",
+   "sf": "\ud804\udde9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+112F0",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F1",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F2",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F3",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F4",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F5",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F6",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F7",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F8",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+112F9",
+   "cat": "Nd",
+   "name": "KHUDAWADI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11450",
+   "cat": "Nd",
+   "name": "NEWA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11451",
+   "cat": "Nd",
+   "name": "NEWA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11452",
+   "cat": "Nd",
+   "name": "NEWA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11453",
+   "cat": "Nd",
+   "name": "NEWA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11454",
+   "cat": "Nd",
+   "name": "NEWA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11455",
+   "cat": "Nd",
+   "name": "NEWA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11456",
+   "cat": "Nd",
+   "name": "NEWA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11457",
+   "cat": "Nd",
+   "name": "NEWA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11458",
+   "cat": "Nd",
+   "name": "NEWA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11459",
+   "cat": "Nd",
+   "name": "NEWA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D0",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D1",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D2",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D3",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D4",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D5",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D6",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D7",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D8",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+114D9",
+   "cat": "Nd",
+   "name": "TIRHUTA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11650",
+   "cat": "Nd",
+   "name": "MODI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11651",
+   "cat": "Nd",
+   "name": "MODI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11652",
+   "cat": "Nd",
+   "name": "MODI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11653",
+   "cat": "Nd",
+   "name": "MODI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11654",
+   "cat": "Nd",
+   "name": "MODI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11655",
+   "cat": "Nd",
+   "name": "MODI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11656",
+   "cat": "Nd",
+   "name": "MODI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11657",
+   "cat": "Nd",
+   "name": "MODI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11658",
+   "cat": "Nd",
+   "name": "MODI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11659",
+   "cat": "Nd",
+   "name": "MODI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C0",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C1",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C2",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C3",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C4",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C5",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C6",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C7",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C8",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+116C9",
+   "cat": "Nd",
+   "name": "TAKRI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11730",
+   "cat": "Nd",
+   "name": "AHOM DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11731",
+   "cat": "Nd",
+   "name": "AHOM DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11732",
+   "cat": "Nd",
+   "name": "AHOM DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11733",
+   "cat": "Nd",
+   "name": "AHOM DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11734",
+   "cat": "Nd",
+   "name": "AHOM DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11735",
+   "cat": "Nd",
+   "name": "AHOM DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11736",
+   "cat": "Nd",
+   "name": "AHOM DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11737",
+   "cat": "Nd",
+   "name": "AHOM DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11738",
+   "cat": "Nd",
+   "name": "AHOM DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11739",
+   "cat": "Nd",
+   "name": "AHOM DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E0",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E1",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E2",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E3",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E4",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E5",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E6",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E7",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E8",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+118E9",
+   "cat": "Nd",
+   "name": "WARANG CITI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11950",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11951",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11952",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11953",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11954",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11955",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11956",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11957",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11958",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11959",
+   "cat": "Nd",
+   "name": "DIVES AKURU DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C50",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C51",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C52",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C53",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C54",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C55",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C56",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C57",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C58",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C59",
+   "cat": "Nd",
+   "name": "BHAIKSUKI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11C5A",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER ONE",
+   "sf": "\ud807\udc5a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C5B",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER TWO",
+   "sf": "\ud807\udc5b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C5C",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER THREE",
+   "sf": "\ud807\udc5c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C5D",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER FOUR",
+   "sf": "\ud807\udc5d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C5E",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER FIVE",
+   "sf": "\ud807\udc5e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C5F",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER SIX",
+   "sf": "\ud807\udc5f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C60",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER SEVEN",
+   "sf": "\ud807\udc60",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C61",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER EIGHT",
+   "sf": "\ud807\udc61",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11C62",
+   "cat": "No",
+   "name": "BHAIKSUKI NUMBER NINE",
+   "sf": "\ud807\udc62",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+11D50",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D51",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D52",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D53",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D54",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D55",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D56",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D57",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D58",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11D59",
+   "cat": "Nd",
+   "name": "MASARAM GONDI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA0",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA1",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA2",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA3",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA4",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA5",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA6",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA7",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA8",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11DA9",
+   "cat": "Nd",
+   "name": "GUNJALA GONDI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F50",
+   "cat": "Nd",
+   "name": "KAWI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F51",
+   "cat": "Nd",
+   "name": "KAWI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F52",
+   "cat": "Nd",
+   "name": "KAWI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F53",
+   "cat": "Nd",
+   "name": "KAWI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F54",
+   "cat": "Nd",
+   "name": "KAWI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F55",
+   "cat": "Nd",
+   "name": "KAWI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F56",
+   "cat": "Nd",
+   "name": "KAWI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F57",
+   "cat": "Nd",
+   "name": "KAWI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F58",
+   "cat": "Nd",
+   "name": "KAWI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+11F59",
+   "cat": "Nd",
+   "name": "KAWI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+12400",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO ASH",
+   "sf": "\ud809\udc00",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12401",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE ASH",
+   "sf": "\ud809\udc01",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12402",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR ASH",
+   "sf": "\ud809\udc02",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12403",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE ASH",
+   "sf": "\ud809\udc03",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12404",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX ASH",
+   "sf": "\ud809\udc04",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12405",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN ASH",
+   "sf": "\ud809\udc05",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12406",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT ASH",
+   "sf": "\ud809\udc06",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12407",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE ASH",
+   "sf": "\ud809\udc07",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12408",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE DISH",
+   "sf": "\ud809\udc08",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12409",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR DISH",
+   "sf": "\ud809\udc09",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1240A",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE DISH",
+   "sf": "\ud809\udc0a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1240B",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX DISH",
+   "sf": "\ud809\udc0b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1240C",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN DISH",
+   "sf": "\ud809\udc0c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1240D",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT DISH",
+   "sf": "\ud809\udc0d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1240E",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE DISH",
+   "sf": "\ud809\udc0e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1240F",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR U",
+   "sf": "\ud809\udc0f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12410",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE U",
+   "sf": "\ud809\udc10",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12411",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX U",
+   "sf": "\ud809\udc11",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12412",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN U",
+   "sf": "\ud809\udc12",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12413",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT U",
+   "sf": "\ud809\udc13",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12414",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE U",
+   "sf": "\ud809\udc14",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12415",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN ONE GESH2",
+   "sf": "\ud809\udc15",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12416",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO GESH2",
+   "sf": "\ud809\udc16",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12417",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE GESH2",
+   "sf": "\ud809\udc17",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12418",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR GESH2",
+   "sf": "\ud809\udc18",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12419",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE GESH2",
+   "sf": "\ud809\udc19",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1241A",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX GESH2",
+   "sf": "\ud809\udc1a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1241B",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN GESH2",
+   "sf": "\ud809\udc1b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1241C",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT GESH2",
+   "sf": "\ud809\udc1c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1241D",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE GESH2",
+   "sf": "\ud809\udc1d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1241E",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN ONE GESHU",
+   "sf": "\ud809\udc1e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1241F",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO GESHU",
+   "sf": "\ud809\udc1f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12420",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE GESHU",
+   "sf": "\ud809\udc20",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12421",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR GESHU",
+   "sf": "\ud809\udc21",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12422",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE GESHU",
+   "sf": "\ud809\udc22",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12423",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO SHAR2",
+   "sf": "\ud809\udc23",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12424",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE SHAR2",
+   "sf": "\ud809\udc24",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12425",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE SHAR2 VARIANT FORM",
+   "sf": "\ud809\udc25",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12426",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR SHAR2",
+   "sf": "\ud809\udc26",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12427",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE SHAR2",
+   "sf": "\ud809\udc27",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12428",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX SHAR2",
+   "sf": "\ud809\udc28",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12429",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN SHAR2",
+   "sf": "\ud809\udc29",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1242A",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT SHAR2",
+   "sf": "\ud809\udc2a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1242B",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE SHAR2",
+   "sf": "\ud809\udc2b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1242C",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN ONE SHARU",
+   "sf": "\ud809\udc2c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1242D",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO SHARU",
+   "sf": "\ud809\udc2d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1242E",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE SHARU",
+   "sf": "\ud809\udc2e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1242F",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE SHARU VARIANT FORM",
+   "sf": "\ud809\udc2f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12430",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR SHARU",
+   "sf": "\ud809\udc30",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12431",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE SHARU",
+   "sf": "\ud809\udc31",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12434",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN ONE BURU",
+   "sf": "\ud809\udc34",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12435",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO BURU",
+   "sf": "\ud809\udc35",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12436",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE BURU",
+   "sf": "\ud809\udc36",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12437",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE BURU VARIANT FORM",
+   "sf": "\ud809\udc37",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12438",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR BURU",
+   "sf": "\ud809\udc38",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12439",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE BURU",
+   "sf": "\ud809\udc39",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1243A",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE VARIANT FORM ESH16",
+   "sf": "\ud809\udc3a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1243B",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE VARIANT FORM ESH21",
+   "sf": "\ud809\udc3b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1243C",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR VARIANT FORM LIMMU",
+   "sf": "\ud809\udc3c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1243D",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR VARIANT FORM LIMMU4",
+   "sf": "\ud809\udc3d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1243E",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR VARIANT FORM LIMMU A",
+   "sf": "\ud809\udc3e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1243F",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR VARIANT FORM LIMMU B",
+   "sf": "\ud809\udc3f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12440",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX VARIANT FORM ASH9",
+   "sf": "\ud809\udc40",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12441",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN VARIANT FORM IMIN3",
+   "sf": "\ud809\udc41",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12442",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN VARIANT FORM IMIN A",
+   "sf": "\ud809\udc42",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12443",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN VARIANT FORM IMIN B",
+   "sf": "\ud809\udc43",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12444",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT VARIANT FORM USSU",
+   "sf": "\ud809\udc44",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12445",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT VARIANT FORM USSU3",
+   "sf": "\ud809\udc45",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12446",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE VARIANT FORM ILIMMU",
+   "sf": "\ud809\udc46",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12447",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE VARIANT FORM ILIMMU3",
+   "sf": "\ud809\udc47",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12448",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE VARIANT FORM ILIMMU4",
+   "sf": "\ud809\udc48",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12449",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE VARIANT FORM ILIMMU A",
+   "sf": "\ud809\udc49",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1244A",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO ASH TENU",
+   "sf": "\ud809\udc4a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1244B",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE ASH TENU",
+   "sf": "\ud809\udc4b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1244C",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR ASH TENU",
+   "sf": "\ud809\udc4c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1244D",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE ASH TENU",
+   "sf": "\ud809\udc4d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1244E",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX ASH TENU",
+   "sf": "\ud809\udc4e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1244F",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN ONE BAN2",
+   "sf": "\ud809\udc4f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12450",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO BAN2",
+   "sf": "\ud809\udc50",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12451",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN THREE BAN2",
+   "sf": "\ud809\udc51",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12452",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR BAN2",
+   "sf": "\ud809\udc52",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12453",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR BAN2 VARIANT FORM",
+   "sf": "\ud809\udc53",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12454",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE BAN2",
+   "sf": "\ud809\udc54",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12455",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE BAN2 VARIANT FORM",
+   "sf": "\ud809\udc55",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12456",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NIGIDAMIN",
+   "sf": "\ud809\udc56",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12457",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NIGIDAESH",
+   "sf": "\ud809\udc57",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12458",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN ONE ESHE3",
+   "sf": "\ud809\udc58",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12459",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN TWO ESHE3",
+   "sf": "\ud809\udc59",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+12469",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FOUR U VARIANT FORM",
+   "sf": "\ud809\udc69",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1246A",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN FIVE U VARIANT FORM",
+   "sf": "\ud809\udc6a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1246B",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SIX U VARIANT FORM",
+   "sf": "\ud809\udc6b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1246C",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN SEVEN U VARIANT FORM",
+   "sf": "\ud809\udc6c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1246D",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN EIGHT U VARIANT FORM",
+   "sf": "\ud809\udc6d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1246E",
+   "cat": "Nl",
+   "name": "CUNEIFORM NUMERIC SIGN NINE U VARIANT FORM",
+   "sf": "\ud809\udc6e",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16A60",
+   "cat": "Nd",
+   "name": "MRO DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A61",
+   "cat": "Nd",
+   "name": "MRO DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A62",
+   "cat": "Nd",
+   "name": "MRO DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A63",
+   "cat": "Nd",
+   "name": "MRO DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A64",
+   "cat": "Nd",
+   "name": "MRO DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A65",
+   "cat": "Nd",
+   "name": "MRO DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A66",
+   "cat": "Nd",
+   "name": "MRO DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A67",
+   "cat": "Nd",
+   "name": "MRO DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A68",
+   "cat": "Nd",
+   "name": "MRO DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16A69",
+   "cat": "Nd",
+   "name": "MRO DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC0",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC1",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC2",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC3",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC4",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC5",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC6",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC7",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC8",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16AC9",
+   "cat": "Nd",
+   "name": "TANGSA DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B50",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B51",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B52",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B53",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B54",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B55",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B56",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B57",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B58",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16B59",
+   "cat": "Nd",
+   "name": "PAHAWH HMONG DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+16E80",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT ZERO",
+   "sf": "\ud81b\ude80",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E81",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT ONE",
+   "sf": "\ud81b\ude81",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E82",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT TWO",
+   "sf": "\ud81b\ude82",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E83",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT THREE",
+   "sf": "\ud81b\ude83",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E84",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT FOUR",
+   "sf": "\ud81b\ude84",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E85",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT FIVE",
+   "sf": "\ud81b\ude85",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E86",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT SIX",
+   "sf": "\ud81b\ude86",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E87",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT SEVEN",
+   "sf": "\ud81b\ude87",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E88",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT EIGHT",
+   "sf": "\ud81b\ude88",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E89",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT NINE",
+   "sf": "\ud81b\ude89",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E94",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT ONE ALTERNATE FORM",
+   "sf": "\ud81b\ude94",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E95",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT TWO ALTERNATE FORM",
+   "sf": "\ud81b\ude95",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+16E96",
+   "cat": "No",
+   "name": "MEDEFAIDRIN DIGIT THREE ALTERNATE FORM",
+   "sf": "\ud81b\ude96",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C0",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL ZERO",
+   "sf": "\ud834\udec0",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C1",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL ONE",
+   "sf": "\ud834\udec1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C2",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL TWO",
+   "sf": "\ud834\udec2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C3",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL THREE",
+   "sf": "\ud834\udec3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C4",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL FOUR",
+   "sf": "\ud834\udec4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C5",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL FIVE",
+   "sf": "\ud834\udec5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C6",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL SIX",
+   "sf": "\ud834\udec6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C7",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL SEVEN",
+   "sf": "\ud834\udec7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C8",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL EIGHT",
+   "sf": "\ud834\udec8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2C9",
+   "cat": "No",
+   "name": "KAKTOVIK NUMERAL NINE",
+   "sf": "\ud834\udec9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E0",
+   "cat": "No",
+   "name": "MAYAN NUMERAL ZERO",
+   "sf": "\ud834\udee0",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E1",
+   "cat": "No",
+   "name": "MAYAN NUMERAL ONE",
+   "sf": "\ud834\udee1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E2",
+   "cat": "No",
+   "name": "MAYAN NUMERAL TWO",
+   "sf": "\ud834\udee2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E3",
+   "cat": "No",
+   "name": "MAYAN NUMERAL THREE",
+   "sf": "\ud834\udee3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E4",
+   "cat": "No",
+   "name": "MAYAN NUMERAL FOUR",
+   "sf": "\ud834\udee4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E5",
+   "cat": "No",
+   "name": "MAYAN NUMERAL FIVE",
+   "sf": "\ud834\udee5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E6",
+   "cat": "No",
+   "name": "MAYAN NUMERAL SIX",
+   "sf": "\ud834\udee6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E7",
+   "cat": "No",
+   "name": "MAYAN NUMERAL SEVEN",
+   "sf": "\ud834\udee7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E8",
+   "cat": "No",
+   "name": "MAYAN NUMERAL EIGHT",
+   "sf": "\ud834\udee8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D2E9",
+   "cat": "No",
+   "name": "MAYAN NUMERAL NINE",
+   "sf": "\ud834\udee9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D360",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT ONE",
+   "sf": "\ud834\udf60",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D361",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT TWO",
+   "sf": "\ud834\udf61",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D362",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT THREE",
+   "sf": "\ud834\udf62",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D363",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT FOUR",
+   "sf": "\ud834\udf63",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D364",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT FIVE",
+   "sf": "\ud834\udf64",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D365",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT SIX",
+   "sf": "\ud834\udf65",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D366",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT SEVEN",
+   "sf": "\ud834\udf66",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D367",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT EIGHT",
+   "sf": "\ud834\udf67",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D368",
+   "cat": "No",
+   "name": "COUNTING ROD UNIT DIGIT NINE",
+   "sf": "\ud834\udf68",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D372",
+   "cat": "No",
+   "name": "IDEOGRAPHIC TALLY MARK ONE",
+   "sf": "\ud834\udf72",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D373",
+   "cat": "No",
+   "name": "IDEOGRAPHIC TALLY MARK TWO",
+   "sf": "\ud834\udf73",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D374",
+   "cat": "No",
+   "name": "IDEOGRAPHIC TALLY MARK THREE",
+   "sf": "\ud834\udf74",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D375",
+   "cat": "No",
+   "name": "IDEOGRAPHIC TALLY MARK FOUR",
+   "sf": "\ud834\udf75",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D376",
+   "cat": "No",
+   "name": "IDEOGRAPHIC TALLY MARK FIVE",
+   "sf": "\ud834\udf76",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D377",
+   "cat": "No",
+   "name": "TALLY MARK ONE",
+   "sf": "\ud834\udf77",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D378",
+   "cat": "No",
+   "name": "TALLY MARK FIVE",
+   "sf": "\ud834\udf78",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1D7CE",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7CF",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D0",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D1",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D2",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D3",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D4",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D5",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D6",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D7",
+   "cat": "Nd",
+   "name": "MATHEMATICAL BOLD DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D8",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7D9",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7DA",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7DB",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7DC",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7DD",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7DE",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7DF",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E0",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E1",
+   "cat": "Nd",
+   "name": "MATHEMATICAL DOUBLE-STRUCK DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E2",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E3",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E4",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E5",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E6",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E7",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E8",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7E9",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7EA",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7EB",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7EC",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7ED",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7EE",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7EF",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F0",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F1",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F2",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F3",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F4",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F5",
+   "cat": "Nd",
+   "name": "MATHEMATICAL SANS-SERIF BOLD DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F6",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F7",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F8",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7F9",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7FA",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7FB",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7FC",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7FD",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7FE",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1D7FF",
+   "cat": "Nd",
+   "name": "MATHEMATICAL MONOSPACE DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E140",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E141",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E142",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E143",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E144",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E145",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E146",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E147",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E148",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E149",
+   "cat": "Nd",
+   "name": "NYIAKENG PUACHUE HMONG DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F0",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F1",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F2",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F3",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F4",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F5",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F6",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F7",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F8",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E2F9",
+   "cat": "Nd",
+   "name": "WANCHO DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F0",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F1",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F2",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F3",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F4",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F5",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F6",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F7",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F8",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E4F9",
+   "cat": "Nd",
+   "name": "NAG MUNDARI DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E8C7",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT ONE",
+   "sf": "\ud83a\udcc7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8C8",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT TWO",
+   "sf": "\ud83a\udcc8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8C9",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT THREE",
+   "sf": "\ud83a\udcc9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8CA",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT FOUR",
+   "sf": "\ud83a\udcca",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8CB",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT FIVE",
+   "sf": "\ud83a\udccb",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8CC",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT SIX",
+   "sf": "\ud83a\udccc",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8CD",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT SEVEN",
+   "sf": "\ud83a\udccd",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8CE",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT EIGHT",
+   "sf": "\ud83a\udcce",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E8CF",
+   "cat": "No",
+   "name": "MENDE KIKAKUI DIGIT NINE",
+   "sf": "\ud83a\udccf",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1E950",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E951",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E952",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E953",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E954",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E955",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E956",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E957",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E958",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1E959",
+   "cat": "Nd",
+   "name": "ADLAM DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1EC71",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER ONE",
+   "sf": "\ud83b\udc71",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC72",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER TWO",
+   "sf": "\ud83b\udc72",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC73",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER THREE",
+   "sf": "\ud83b\udc73",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC74",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER FOUR",
+   "sf": "\ud83b\udc74",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC75",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER FIVE",
+   "sf": "\ud83b\udc75",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC76",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER SIX",
+   "sf": "\ud83b\udc76",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC77",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER SEVEN",
+   "sf": "\ud83b\udc77",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC78",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER EIGHT",
+   "sf": "\ud83b\udc78",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1EC79",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER NINE",
+   "sf": "\ud83b\udc79",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECA3",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED ONE",
+   "sf": "\ud83b\udca3",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECA4",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED TWO",
+   "sf": "\ud83b\udca4",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECA5",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED THREE",
+   "sf": "\ud83b\udca5",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECA6",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED FOUR",
+   "sf": "\ud83b\udca6",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECA7",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED FIVE",
+   "sf": "\ud83b\udca7",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECA8",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED SIX",
+   "sf": "\ud83b\udca8",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECA9",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED SEVEN",
+   "sf": "\ud83b\udca9",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECAA",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED EIGHT",
+   "sf": "\ud83b\udcaa",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECAB",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER PREFIXED NINE",
+   "sf": "\ud83b\udcab",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECB1",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER ALTERNATE ONE",
+   "sf": "\ud83b\udcb1",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ECB2",
+   "cat": "No",
+   "name": "INDIC SIYAQ NUMBER ALTERNATE TWO",
+   "sf": "\ud83b\udcb2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED01",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER ONE",
+   "sf": "\ud83b\udd01",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED02",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER TWO",
+   "sf": "\ud83b\udd02",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED03",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER THREE",
+   "sf": "\ud83b\udd03",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED04",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER FOUR",
+   "sf": "\ud83b\udd04",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED05",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER FIVE",
+   "sf": "\ud83b\udd05",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED06",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER SIX",
+   "sf": "\ud83b\udd06",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED07",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER SEVEN",
+   "sf": "\ud83b\udd07",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED08",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER EIGHT",
+   "sf": "\ud83b\udd08",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED09",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ NUMBER NINE",
+   "sf": "\ud83b\udd09",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED2F",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER TWO",
+   "sf": "\ud83b\udd2f",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED30",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER THREE",
+   "sf": "\ud83b\udd30",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED31",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER FOUR",
+   "sf": "\ud83b\udd31",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED32",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER FIVE",
+   "sf": "\ud83b\udd32",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED33",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER SIX",
+   "sf": "\ud83b\udd33",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED34",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER SEVEN",
+   "sf": "\ud83b\udd34",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED35",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER EIGHT",
+   "sf": "\ud83b\udd35",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1ED36",
+   "cat": "No",
+   "name": "OTTOMAN SIYAQ ALTERNATE NUMBER NINE",
+   "sf": "\ud83b\udd36",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1F100",
+   "cat": "No",
+   "name": "DIGIT ZERO FULL STOP",
+   "sf": "0.",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F101",
+   "cat": "No",
+   "name": "DIGIT ZERO COMMA",
+   "sf": "0,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F102",
+   "cat": "No",
+   "name": "DIGIT ONE COMMA",
+   "sf": "1,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F103",
+   "cat": "No",
+   "name": "DIGIT TWO COMMA",
+   "sf": "2,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F104",
+   "cat": "No",
+   "name": "DIGIT THREE COMMA",
+   "sf": "3,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F105",
+   "cat": "No",
+   "name": "DIGIT FOUR COMMA",
+   "sf": "4,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F106",
+   "cat": "No",
+   "name": "DIGIT FIVE COMMA",
+   "sf": "5,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F107",
+   "cat": "No",
+   "name": "DIGIT SIX COMMA",
+   "sf": "6,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F108",
+   "cat": "No",
+   "name": "DIGIT SEVEN COMMA",
+   "sf": "7,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F109",
+   "cat": "No",
+   "name": "DIGIT EIGHT COMMA",
+   "sf": "8,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F10A",
+   "cat": "No",
+   "name": "DIGIT NINE COMMA",
+   "sf": "9,",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1F10B",
+   "cat": "No",
+   "name": "DINGBAT CIRCLED SANS-SERIF DIGIT ZERO",
+   "sf": "\ud83c\udd0b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1F10C",
+   "cat": "No",
+   "name": "DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT ZERO",
+   "sf": "\ud83c\udd0c",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+1FBF0",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT ZERO",
+   "sf": "0",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF1",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT ONE",
+   "sf": "1",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF2",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT TWO",
+   "sf": "2",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF3",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT THREE",
+   "sf": "3",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF4",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT FOUR",
+   "sf": "4",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF5",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT FIVE",
+   "sf": "5",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF6",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT SIX",
+   "sf": "6",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF7",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT SEVEN",
+   "sf": "7",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF8",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT EIGHT",
+   "sf": "8",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+1FBF9",
+   "cat": "Nd",
+   "name": "SEGMENTED DIGIT NINE",
+   "sf": "9",
+   "run9": true,
+   "sp9": true,
+   "tail": true
+  },
+  {
+   "cp": "U+20001",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-20001",
+   "sf": "\ud840\udc01",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+20064",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-20064",
+   "sf": "\ud840\udc64",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+200E2",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-200E2",
+   "sf": "\ud840\udce2",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+20121",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-20121",
+   "sf": "\ud840\udd21",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2092A",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-2092A",
+   "sf": "\ud842\udd2a",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+20AEA",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-20AEA",
+   "sf": "\ud842\udeea",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+20AFD",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-20AFD",
+   "sf": "\ud842\udefd",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+20B19",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-20B19",
+   "sf": "\ud842\udf19",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+22390",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-22390",
+   "sf": "\ud848\udf90",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+22998",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-22998",
+   "sf": "\ud84a\udd98",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+23B1B",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-23B1B",
+   "sf": "\ud84e\udf1b",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2626D",
+   "cat": "Lo",
+   "name": "CJK UNIFIED IDEOGRAPH-2626D",
+   "sf": "\ud858\ude6d",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  },
+  {
+   "cp": "U+2F890",
+   "cat": "Lo",
+   "name": "CJK COMPATIBILITY IDEOGRAPH-2F890",
+   "sf": "\u5efe",
+   "run9": false,
+   "sp9": false,
+   "tail": false
+  }
+ ]
+}

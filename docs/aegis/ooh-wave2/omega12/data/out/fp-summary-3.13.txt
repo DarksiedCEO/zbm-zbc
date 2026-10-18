@@ -1,0 +1,406 @@
+| class | n | vendor_text redacted new (old) | face refused PD new (old) | approval ref refused PD new (old) |
+| address | 6 | 1 (1) | 1 (1) | 0 (0) |
+| zip+4 | 5 | 5 (5) | 5 (5) | 4 (4) |
+| flight/date | 11 | 6 (6) | 6 (6) | 3 (3) |
+| gps | 6 | 4 (4) | 4 (4) | 2 (2) |
+| price | 7 | 3 (3) | 3 (3) | 0 (0) |
+| impressions | 5 | 2 (2) | 2 (2) | 0 (0) |
+| permit | 6 | 6 (6) | 6 (6) | 5 (5) |
+| ref | 12 | 7 (7) | 7 (7) | 6 (6) |
+| spec/time | 6 | 0 (0) | 0 (0) | 0 (0) |
+| phone/contact (true positives for comparison) | 3 | 3 (3) | 3 (3) | 2 (2) |
+| non-Latin script (r12) | 10 | 7 (2) | 7 (2) | 0 (0) |
+| HTML entity (r12) | 6 | 1 (1) | 1 (1) | 0 (0) |
+| mixed realistic | 3 | 3 (3) | 3 (3) | 0 (0) |
+| total | 86 | 48 (43) | 48 (43) | 22 (22) |
+CHANGED [
+{
+"text": "ops (310) 555-0142 ext 12",
+"new": [
+[
+201,
+true,
+[
+"phone"
+],
+"ops ([redacted] ext 12"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+],
+"old": [
+[
+201,
+true,
+[
+"phone"
+],
+"ops [redacted] ext 12"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+]
+},
+{
+"text": "掲出期間 2026年11月1日〜2026年11月30日",
+"new": [
+[
+201,
+true,
+[
+"number"
+],
+"掲出期間 [redacted]日"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+],
+"old": [
+[
+201,
+false,
+[],
+"掲出期間 2026年11月1日〜2026年11月30日"
+],
+[
+200,
+null
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+]
+},
+{
+"text": "東京都渋谷区 1丁目2番3号 150-0002",
+"new": [
+[
+201,
+true,
+[
+"phone"
+],
+"東京都渋谷区 [redacted]"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+],
+"old": [
+[
+201,
+true,
+[
+"phone"
+],
+"東京都渋谷区 1丁目2番3号 [redacted]"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+]
+},
+{
+"text": "ул. Тверская 12, стр. 3, 125009",
+"new": [
+[
+201,
+true,
+[
+"number"
+],
+"ул. Тверская [redacted]"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+],
+"old": [
+[
+201,
+false,
+[],
+"ул. Тверская 12, стр. 3, 125009"
+],
+[
+200,
+null
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+]
+},
+{
+"text": "περίοδος 1/11/2026 έως 30/11/2026",
+"new": [
+[
+201,
+true,
+[
+"number"
+],
+"περίοδος [redacted]"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+],
+"old": [
+[
+201,
+false,
+[],
+"περίοδος 1/11/2026 έως 30/11/2026"
+],
+[
+200,
+null
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+]
+},
+{
+"text": "パネル 14×48 第0451号 点灯 10時〜22時",
+"new": [
+[
+201,
+true,
+[
+"number"
+],
+"パネル [redacted]時"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+],
+"old": [
+[
+201,
+false,
+[],
+"パネル 14×48 第0451号 点灯 10時〜22時"
+],
+[
+200,
+null
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+]
+},
+{
+"text": "الفترة 2026/11/01 إلى 2026/11/30",
+"new": [
+[
+201,
+true,
+[
+"number"
+],
+"الفترة [redacted]"
+],
+[
+422,
+"ATTRIBUTE_VALUE_PERSONAL_DATA"
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+],
+"old": [
+[
+201,
+false,
+[],
+"الفترة 2026/11/01 إلى 2026/11/30"
+],
+[
+200,
+null
+],
+[
+422,
+[
+{
+"loc": [
+"body",
+"client_approval_doc_ref"
+],
+"msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+"type": "string_pattern_mismatch"
+}
+]
+]
+]
+}
+]
