@@ -1,0 +1,56 @@
+## unit vendor_text (POST inventory)
+control ASCII x card     HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-1 &#xFF06;#x34; digits HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-1 &#xFF06;nbsp; sep  HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-1 &#xFE60;nbsp; sep  HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-1 &nb&zwj;sp; sep    HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-1 ssn &#xFF06;ndash; HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-2 Garay card (U16, Cn) HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-2 Outlined ssn (U16, Cn) HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-3 email .рф          HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S13-3 email 例え.テスト       HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+nest &amp;x14 nbsp card  HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+nest &amp;x15 nbsp card  HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+nest &amp;x20 nbsp card  HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+FP benign &amp;x15       HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+fullwidth & #x34; digits HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+dingbat card (S12-1)     HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+ethiopic ssn (S12-1)     HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+entity->dingbat card     HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S12-2 url %2D card       HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S12-2 css \2d ssn        HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+## face text attribute location_description (POST /faces/{id}/attributes)
+control ASCII x card     HTTP 200 reached=log/pending,export
+S13-1 &#xFF06;#x34; digits HTTP 200 reached=log/pending,export
+S13-1 &#xFF06;nbsp; sep  HTTP 200 reached=log/pending,export
+S13-1 &#xFE60;nbsp; sep  HTTP 200 reached=log/pending,export
+S13-1 &nb&zwj;sp; sep    HTTP 200 reached=log/pending,export
+S13-1 ssn &#xFF06;ndash; HTTP 200 reached=log/pending,export
+S13-2 Garay card (U16, Cn) HTTP 200 reached=log/pending,export
+S13-2 Outlined ssn (U16, Cn) HTTP 200 reached=log/pending,export
+S13-3 email .рф          HTTP 200 reached=log/pending,export
+S13-3 email 例え.テスト       HTTP 200 reached=log/pending,export
+nest &amp;x14 nbsp card  HTTP 422 reached=-
+nest &amp;x15 nbsp card  HTTP 422 reached=-
+nest &amp;x20 nbsp card  HTTP 422 reached=-
+FP benign &amp;x15       HTTP 422 reached=-
+fullwidth & #x34; digits HTTP 422 reached=-
+dingbat card (S12-1)     HTTP 422 reached=-
+ethiopic ssn (S12-1)     HTTP 422 reached=-
+entity->dingbat card     HTTP 422 reached=-
+S12-2 url %2D card       HTTP 200 reached=log/pending,export
+S12-2 css \2d ssn        HTTP 200 reached=log/pending,export
+## client_approval_doc_ref (Ref pattern [A-Za-z0-9._:-]{1,100})
+card ASCII letter x      HTTP 200                                  reached=log/pending,ledger,export
+ssn ASCII letter x       HTTP 200                                  reached=log/pending,ledger,export
+card letters+dots        HTTP 200                                  reached=log/pending,ledger,export
+url %2D card             HTTP 422 [{'loc': ['body', 'client_approval_doc_ref'], 'msg': "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'", 'type': 'string_pattern_mismatch'}] reached=-
+ssn hex-letter D sep     HTTP 200                                  reached=log/pending,ledger,export
+ssn 4-5 with letter      HTTP 200                                  reached=log/pending,ledger,export
+ssn standard             HTTP 422 ATTRIBUTE_VALUE_PERSONAL_DATA    reached=-
+card hyphen              HTTP 422 ATTRIBUTE_VALUE_PERSONAL_DATA    reached=-
+## split across two fields of one face (location_description + route_description, MOBILE_BILLBOARD)
+  location_description 'ssn part 12345' HTTP 200 reached=log/pending,export
+  route_description 'ssn part 6789' HTTP 200 reached=log/pending,export
+## vendor_text_sha256 in ledger events equals sha256(kept text)
+  HTTP 201 kept='contact [redacted] please' ledger has sha(kept) True ledger has sha(raw) False ledger has raw digits False

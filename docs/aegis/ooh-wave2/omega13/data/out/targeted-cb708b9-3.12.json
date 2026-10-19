@@ -1,0 +1,113 @@
+{
+ "E_same_transfer_two_tenants": [
+  200,
+  [
+   409,
+   "FUNDS_EVIDENCE_REUSED"
+  ],
+  [
+   200,
+   null
+  ]
+ ],
+ "E_state_after": "FUNDS_VERIFIED",
+ "E_finance_ref_two_tenants": [
+  409,
+  "FUNDS_EVIDENCE_REUSED"
+ ],
+ "F_finance_verified_below_approval": [
+  409,
+  "FUNDS_NOT_FINANCE_VERIFIED"
+ ],
+ "F_finance_lowered_after_authorization_submit": [
+  409,
+  "FUNDS_NOT_FINANCE_VERIFIED"
+ ],
+ "C_second_tenant_authorized_while_first_unsubmitted": 201,
+ "C_concurrent_submits": {
+  "threads": 30,
+  "results": {
+   "acme:200:SUBMISSION_UNKNOWN": 1,
+   "acme:409:DUPLICATE_ORDER_BLOCKED": 19,
+   "globex:409:FACE_ALREADY_ORDERED": 10
+  },
+  "open_orders_after": 1,
+  "order_submitted_lines": 1
+ },
+ "D_same_submit_after_restart": [
+  409,
+  "DUPLICATE_BLOCKED",
+  1
+ ],
+ "G_env_raises_ceiling": "REFUSED",
+ "G_env_authority_8d": "REFUSED RuntimeError",
+ "G_authorize_10000.01": [
+  409,
+  "SPEND_LIMIT_EXCEEDED"
+ ],
+ "G_authority_7d_plus_1s": [
+  409,
+  "AUTHORITY_TOO_LONG"
+ ],
+ "G_authorize_10000.00_7d": 201,
+ "H_phone_in_ref_fields": {
+  "brief": 200,
+  "markup_evidence": 422,
+  "in_local_log": [
+   true,
+   false
+  ],
+  "in_ledger": false
+ },
+ "A_fmt3": "REFUSED: log line 1 is in log format 3; this build reads log format 4 only and has no migration (th",
+ "A_fmt2": "REFUSED: log line 1 is in log format 2; this build reads log format 4 only and has no migration (th",
+ "A_nofmt": "REFUSED: log line 1 has no log format (written before format 2); this build reads log format 4 only",
+ "A_fmt5": "REFUSED: log line 1 is in log format 5; this build reads log format 4 only and has no migration (th",
+ "B_truncate_last_line": {
+  "start": "STARTED",
+  "integrity": "the ledger holds anchors beyond the local log: the log was truncated or rolled back",
+  "health": "degraded",
+  "write": 503,
+  "dashboard_read": 200,
+  "hub_read": 200,
+  "hub_funds_received": "6000.00"
+ },
+ "B_torn_tail": {
+  "start": "REFUSED StoreCorrupt: log ends with a torn line; refusing to start (inspect the file)"
+ },
+ "B_delete_log": {
+  "start": "STARTED",
+  "integrity": "the ledger holds anchors of another ooh log: this log was deleted or replaced",
+  "health": "degraded",
+  "write": 503,
+  "dashboard_read": 404,
+  "hub_read": 404,
+  "hub_funds_received": null
+ },
+ "B_consistent_rewrite_inflated_funds": {
+  "start": "STARTED",
+  "integrity": "local log line 38 has no matching anchor on the ledger",
+  "health": "degraded",
+  "write": 503,
+  "dashboard_read": 200,
+  "hub_read": 200,
+  "hub_funds_received": "99999.00"
+ },
+ "B_reference_untampered": {
+  "start": "STARTED",
+  "integrity": null,
+  "health": "ok",
+  "write": 200,
+  "dashboard_read": 200,
+  "hub_read": 200,
+  "hub_funds_received": "6000.00"
+ },
+ "B_runtime_same_size_disk_edit": {
+  "integrity_after_disk_edit": false,
+  "write_after_edit": 200,
+  "log_file_problem_says": "the local log file differs from the lines this service holds: an operator must inspect it",
+  "switch_recorded": false,
+  "disk_unchanged_by_write": true,
+  "restart": "REFUSED StoreCorrupt: log line 25 does not match its own hash"
+ }
+}

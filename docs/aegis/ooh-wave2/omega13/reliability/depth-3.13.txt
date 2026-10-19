@@ -1,0 +1,24 @@
+amps=0 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=0 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=1 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=1 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=2 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=2 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=3 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=3 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=4 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=4 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=5 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=5 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=6 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=6 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=7 card: kinds=['card'] kept='[redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+amps=7 ssn: kinds=['ssn'] kept='SSN [redacted]' fixedpoint-passes-of-kept=0 cluster-in-decoded-kept=False fte=False
+num amps 0 ['card', 'number'] '[redacted]'
+num amps 1 ['card'] '[redacted]'
+num amps 2 ['card'] '[redacted]'
+num amps 3 ['card'] '[redacted]'
+num amps 4 ['card'] '[redacted]'
+num amps 5 ['card'] '[redacted]'
+num amps 6 ['card'] '[redacted]'
+num amps 7 ['card'] '[redacted]'

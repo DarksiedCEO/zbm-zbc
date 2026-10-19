@@ -1,0 +1,120 @@
+{
+ "python": "3.12.14",
+ "unidata": "15.0.0",
+ "range_end": "0x110000",
+ "tested_per_shape": {
+  "ssn": 1111224,
+  "card": 1111224,
+  "nine": 1111224,
+  "nine_hexent": 1111224,
+  "nine_decent": 1111224,
+  "nine_url": 1111224
+ },
+ "missed_per_shape": {
+  "ssn": 1182,
+  "card": 1182,
+  "nine": 1182,
+  "nine_hexent": 52,
+  "nine_decent": 0,
+  "nine_url": 1079256
+ },
+ "missed_by_reason": {
+  "ssn": {
+   "ascii_letter": 52,
+   "nfkc_ascii_letter": 1130
+  },
+  "card": {
+   "ascii_letter": 52,
+   "nfkc_ascii_letter": 1130
+  },
+  "nine": {
+   "ascii_letter": 52,
+   "nfkc_ascii_letter": 1130
+  },
+  "nine_hexent": {
+   "ascii_letter": 52
+  },
+  "nine_decent": {},
+  "nine_url": {
+   "url_escape_limit": 1079204,
+   "ascii_letter": 52
+  }
+ },
+ "missed_by_cat": {
+  "ssn": {
+   "Lu": 398,
+   "Ll": 412,
+   "Lo": 2,
+   "Lt": 4,
+   "Lm": 65,
+   "Sc": 1,
+   "So": 268,
+   "Nl": 32
+  },
+  "card": {
+   "Lu": 398,
+   "Ll": 412,
+   "Lo": 2,
+   "Lt": 4,
+   "Lm": 65,
+   "Sc": 1,
+   "So": 268,
+   "Nl": 32
+  },
+  "nine": {
+   "Lu": 398,
+   "Ll": 412,
+   "Lo": 2,
+   "Lt": 4,
+   "Lm": 65,
+   "Sc": 1,
+   "So": 268,
+   "Nl": 32
+  },
+  "nine_hexent": {
+   "Lu": 26,
+   "Ll": 26
+  },
+  "nine_decent": {},
+  "nine_url": {
+   "Po": 583,
+   "Sm": 947,
+   "Lu": 1782,
+   "Ps": 78,
+   "Pe": 76,
+   "Sk": 124,
+   "Ll": 2218,
+   "Cc": 33,
+   "Zs": 16,
+   "Sc": 62,
+   "So": 6604,
+   "Lo": 129742,
+   "Pi": 12,
+   "Cf": 170,
+   "Pf": 10,
+   "No": 774,
+   "Lt": 31,
+   "Lm": 397,
+   "Mn": 1948,
+   "Cn": 799515,
+   "Me": 13,
+   "Pd": 25,
+   "Mc": 441,
+   "Nl": 176,
+   "Zl": 1,
+   "Zp": 1,
+   "Pc": 9,
+   "Co": 133468
+  }
+ },
+ "missed_OTHER": {
+  "ssn": [],
+  "card": [],
+  "nine": [],
+  "nine_hexent": [],
+  "nine_decent": [],
+  "nine_url": []
+ },
+ "hits_whose_kept_text_still_holds_a_cluster": [],
+ "n_kept_bad": 0
+}

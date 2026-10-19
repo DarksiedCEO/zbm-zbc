@@ -1,0 +1,203 @@
+{
+ "treeA": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data13run/trees/t-f5ee168",
+ "treeB": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data13run/trees/t-cb708b9",
+ "write": {
+  "unit0": 201,
+  "unit1": 201,
+  "unit2": 201,
+  "unit3": 201,
+  "unit4": 201,
+  "unit5": 201,
+  "unit6": 201,
+  "unit7": 201,
+  "unit8": 201,
+  "unit9": 201,
+  "unit10": 201,
+  "unit11": 201,
+  "unit12": 201,
+  "unit13": 201,
+  "unit14": 201,
+  "unit15": 201,
+  "unit16": 201,
+  "unit17": 201,
+  "face_attr": 200,
+  "submit": 200,
+  "integrity_ok": true,
+  "log_lines": 105,
+  "recorded_requests": 105
+ },
+ "read": {
+  "start_integrity_ok": true,
+  "state_diff_vs_writer": [],
+  "request_sha_vs_line_by_rid": {
+   "equal": 66,
+   "differ": 39,
+   "no_line": 0
+  },
+  "request_sha_writer_fn_vs_reader_fn": {
+   "bodies": 105,
+   "equal": 100,
+   "differ": [
+    [
+     "inventory",
+     "faces west \u0378 lit"
+    ],
+    [
+     "inventory",
+     "contact 12\u30fc34\u30fc56\u30fc789 for access"
+    ],
+    [
+     "inventory",
+     "contact 4111&nbsp;1111&nbsp;1111&nbsp;1111 for access"
+    ],
+    [
+     "inventory",
+     "panel \u2776 lit, bay \u2777"
+    ],
+    [
+     "inventory",
+     "contact 4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111 for access"
+    ]
+   ]
+  },
+  "replays": {
+   "count": 105,
+   "statuses": {
+    "201": 71,
+    "200": 29,
+    "409": 5
+   },
+   "lines_added": 0,
+   "status_differs_from_original": [
+    [
+     "inventory",
+     "faces west \u0378 lit",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 12\u30fc34\u30fc56\u30fc789 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 4111&nbsp;1111&nbsp;1111&nbsp;1111 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "panel \u2776 lit, bay \u2777",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ]
+   ]
+  },
+  "mutated_retries": {
+   "results": [
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "funds-verifications",
+     409
+    ]
+   ],
+   "lines_added": 0
+  },
+  "write": 201,
+  "second_restart_integrity_ok": true,
+  "log_lines": 106
+ },
+ "readback": {
+  "log_lines": 106,
+  "anchors": 106,
+  "problems": []
+ }
+}

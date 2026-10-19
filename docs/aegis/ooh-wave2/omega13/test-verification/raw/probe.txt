@@ -1,0 +1,40 @@
+== pristine
+fw-ssn-entities kinds ['number'] kept_len 10 decoded_has_ssn False decoded_has_card False | [redacted]
+fw-card-entities kinds ['number'] kept_len 10 decoded_has_ssn False decoded_has_card False | [redacted]
+fw-amp16-card kinds ['card'] kept_len 99 decoded_has_ssn False decoded_has_card False | note &amp;&amp;&amp;&amp;&amp;&amp;&amp;
+deep17 []
+== H040
+fw-ssn-entities kinds ['number'] kept_len 10 decoded_has_ssn False decoded_has_card False | [redacted]
+fw-card-entities kinds ['number'] kept_len 10 decoded_has_ssn False decoded_has_card False | [redacted]
+fw-amp16-card kinds ['card'] kept_len 99 decoded_has_ssn False decoded_has_card False | note &amp;&amp;&amp;&amp;&amp;&amp;&amp;
+deep17 []
+== H041
+fw-ssn-entities kinds [] kept_len 75 decoded_has_ssn True decoded_has_card False | note &#x31;&#x32;&#x33;&#x2d;&#x34;&#x35
+fw-card-entities kinds [] kept_len 105 decoded_has_ssn False decoded_has_card True | note &#x34;&#x31;&#x31;&#x31;&#x31;&#x31
+fw-amp16-card kinds ['card'] kept_len 99 decoded_has_ssn False decoded_has_card False | note &amp;&amp;&amp;&amp;&amp;&amp;&amp;
+deep17 []
+== H050
+fw-ssn-entities kinds ['number'] kept_len 10 decoded_has_ssn False decoded_has_card False | [redacted]
+fw-card-entities kinds ['number'] kept_len 10 decoded_has_ssn False decoded_has_card False | [redacted]
+fw-amp16-card kinds ['card'] kept_len 99 decoded_has_ssn False decoded_has_card False | note &amp;&amp;&amp;&amp;&amp;&amp;&amp;
+deep17 []
+== H064
+fw-ssn-entities kinds ['number'] kept_len 75 decoded_has_ssn True decoded_has_card False | note &#x31;&#x32;&#x33;&#x2d;&#x34;&#x35
+fw-card-entities kinds ['number'] kept_len 105 decoded_has_ssn False decoded_has_card True | note &#x34;&#x31;&#x31;&#x31;&#x31;&#x31
+fw-amp16-card kinds ['card'] kept_len 99 decoded_has_ssn False decoded_has_card False | note &amp;&amp;&amp;&amp;&amp;&amp;&amp;
+deep17 []
+== pristine
+4111111111111111 17 len_in 1120 kept_len 10 ['number'] decoded_has_secret False
+4111111111111111 20 len_in 1312 kept_len 10 ['number'] decoded_has_secret False
+123-45-6789 17 len_in 632 kept_len 10 ['number'] decoded_has_secret False
+123-45-6789 20 len_in 740 kept_len 10 ['number'] decoded_has_secret False
+== H040
+4111111111111111 17 len_in 1120 kept_len 1120 [] decoded_has_secret True
+4111111111111111 20 len_in 1312 kept_len 1312 [] decoded_has_secret True
+123-45-6789 17 len_in 632 kept_len 632 [] decoded_has_secret True
+123-45-6789 20 len_in 740 kept_len 740 [] decoded_has_secret True
+== H050
+4111111111111111 17 EXC TypeError 'NoneType' object is not iterable
+4111111111111111 20 EXC TypeError 'NoneType' object is not iterable
+123-45-6789 17 EXC TypeError 'NoneType' object is not iterable
+123-45-6789 20 EXC TypeError 'NoneType' object is not iterable

@@ -1,0 +1,194 @@
+{
+ "base": [
+  "3.12.14",
+  "15.0.0"
+ ],
+ "3.12.14 (15.0.0)": {
+  "cn_in_base": 825345,
+  "assigned_in_other": 0,
+  "assigned_in_other_by_cat": {},
+  "faces_template_hash_differs": 69,
+  "cluster_template_hash_differs": 0,
+  "kinds_differ": 69,
+  "faces_hash_differs_by_cat_change": {
+   "No->No": 69
+  },
+  "cluster_hash_differs_by_cat_change": {},
+  "examples": {
+   "faces_hash": [
+    [
+     "U+1369",
+     "No",
+     "No",
+     "38225c35e1fce118",
+     "1ab176ef386f5cf8"
+    ],
+    [
+     "U+136A",
+     "No",
+     "No",
+     "c58a7eefb21bd8f3",
+     "225d24442b8bdacb"
+    ],
+    [
+     "U+136B",
+     "No",
+     "No",
+     "04edcc0ff092f591",
+     "3e2f867af14ee522"
+    ],
+    [
+     "U+136C",
+     "No",
+     "No",
+     "f25707ae715056e9",
+     "3c4bf9fd309a1026"
+    ],
+    [
+     "U+136D",
+     "No",
+     "No",
+     "f880cf5b4288323c",
+     "99b95f79f628085c"
+    ],
+    [
+     "U+136E",
+     "No",
+     "No",
+     "3d3f5ae0bf20d0d6",
+     "c9372f18b1c8c8f8"
+    ],
+    [
+     "U+136F",
+     "No",
+     "No",
+     "e9b3fc7b7046d54c",
+     "f17a76f7943b2d41"
+    ],
+    [
+     "U+1370",
+     "No",
+     "No",
+     "11626cc28bbfed3c",
+     "408f87e80e05c1ab"
+    ],
+    [
+     "U+1371",
+     "No",
+     "No",
+     "13d8f43c63a3ecf8",
+     "fad6cedd6f5e5de5"
+    ],
+    [
+     "U+19DA",
+     "No",
+     "No",
+     "43aa81fc6097f493",
+     "1ab176ef386f5cf8"
+    ],
+    [
+     "U+24F5",
+     "No",
+     "No",
+     "460c8be670395dde",
+     "1ab176ef386f5cf8"
+    ],
+    [
+     "U+24F6",
+     "No",
+     "No",
+     "7a8e75a91da236ac",
+     "225d24442b8bdacb"
+    ]
+   ],
+   "faces_kinds": [],
+   "cluster_hash": [],
+   "cluster_kinds": [
+    [
+     "U+1369",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+136A",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+136B",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+136C",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+136D",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+136E",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+136F",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+1370",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+1371",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+19DA",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+24F5",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ],
+    [
+     "U+24F6",
+     "No",
+     "No",
+     "number",
+     "phone"
+    ]
+   ]
+  }
+ }
+}

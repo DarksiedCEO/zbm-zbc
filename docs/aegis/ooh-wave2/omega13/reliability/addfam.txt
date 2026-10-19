@@ -1,0 +1,15 @@
+fam.update({
+ "em-long-dom": "a@"+"b"*(N-2), "em-long-dom-nonascii": "a@"+"é"*(N-2), "em-64local-long-dom": "a"*64+"@"+"b"*(N-65),
+ "em-long-dom-dash": "a@"+"-"*(N-2), "em-long-dom-dot-end": "a@"+"b"*(N-4)+".c", "em-at-rep": "a@"*(N//2), "em-atb-rep": rep("a@b "),
+ "em-dom-dotted": "a@"+"b."*((N-2)//2), "em-dom-dotted-1": "a@"+"b.c"*((N-2)//3), "em-dom-spacedots": "a@b"+" . b"*((N-3)//4),
+ "em-word-run": "a"*(N-20)+" at b.co", "em-word-nonascii": "é"*(N-12)+" at b.co", "em-word-at-rep": rep("a at "), "em-word-at-rep2": rep("a at b "),
+ "em-word-64": rep("a"*64+" at "), "em-word-dom-long": "a at "+"b"*(N-5), "em-word-dom-long-na": "a at "+"é"*(N-5),
+ "em-strong-rep": rep("a @ b "), "em-strong-dom": "a @ "+"b"*(N-4), "em-strong-spaces": "a"+" "*(N-6)+"@ b.co", "sp-then-at": " "*(N-5)+"a at b",
+ "nonascii-run": "é"*N, "nonascii-cjk": "中"*N, "ext-I": "\U0002ebf0"*N, "intl-rep": rep("+4 "), "intl-long": "+44"+" 1"*((N-3)//2), "intl-nonascii": "é+"*(N//2),
+ "ent-depth15-rep": rep("4&"+"amp;"*14+"nbsp;1 "), "ent-depth15-seg": rep("&"+"amp;"*15+"x"), "ent-depth16-rep": rep("&"+"amp;"*16+"x"), "ent-depth15-single": "&"+"amp;"*((N-8)//4)+"x",
+ "ent-depth-mixed": rep("&amp;amp;amp;#x26;amp;#x26;amp;nbsp;"), "ent-hex-nest": rep("&#x26;"*3+"#x34;"), "ent-nfkc-nest": rep("&amp;#xFDFA;"), "ent-fdfa-d3": rep("&amp;amp;amp;#xFDFA;"),
+ "ent-chg16": "".join("&"+"amp;"*k+"#x41;" for k in range(15))*20,
+ "ent-entity-in-entity": rep("&#x26;#x26;#x26;#x26;#x35;"), "digits-then-fdfa-ent": rep("1&#xFDFA;"),
+ "fdfa-ent-nested-digits": rep("&amp;amp;#xFDFA;4"), "u2460-digits": rep("①②"), "u2468": "⑨"*N, "ethiopic": rep("፩ "),
+ "w-nonascii-mix": rep("aé-_"), "hyphen-run-at": rep("a@b-"),
+})

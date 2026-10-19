@@ -1,0 +1,38 @@
+== old1a
+'Call “+44 20 7946 0958” now' has_personal_data: True free_text: True
+'Call “+52 55 1234 5678' has_personal_data: True free_text: True
+'Q4 –+44 20 7946 0958' has_personal_data: True free_text: True
+'Call +44 20 7946 0958' has_personal_data: True free_text: True
+'Call (+44 20 7946 0958)' has_personal_data: True free_text: True
+'Call «+44 20 7946 0958»' has_personal_data: True free_text: True
+'Call ¿+44 20 7946 0958' has_personal_data: True free_text: True
+'Call ‘+44 20 7946 0958' has_personal_data: True free_text: True
+'“+44 20 7946' True True ['phone']
+'–+44 20 7946' True True ['phone']
+'€+52 55 1234' True True ['phone']
+'tel：+44 20 7946' True True ['phone']
+'。+1 234 5678' True True ['phone']
+'x+44 20 7946' False False []
+'é+44 20 7946' False False []
+'a@b–c.com' False False []
+'a@b。com' True True ['email']
+'+44 20 7946 0958' True True ['number']
+== /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/review-cb708b9/services/ooh-py/src
+'Call “+44 20 7946 0958” now' has_personal_data: False free_text: True
+'Call “+52 55 1234 5678' has_personal_data: False free_text: True
+'Q4 –+44 20 7946 0958' has_personal_data: False free_text: True
+'Call +44 20 7946 0958' has_personal_data: True free_text: True
+'Call (+44 20 7946 0958)' has_personal_data: True free_text: True
+'Call «+44 20 7946 0958»' has_personal_data: False free_text: True
+'Call ¿+44 20 7946 0958' has_personal_data: False free_text: True
+'Call ‘+44 20 7946 0958' has_personal_data: False free_text: True
+'“+44 20 7946' False False []
+'–+44 20 7946' False False []
+'€+52 55 1234' False False []
+'tel：+44 20 7946' True True ['phone']
+'。+1 234 5678' True True ['phone']
+'x+44 20 7946' False False []
+'é+44 20 7946' False False []
+'a@b–c.com' True True ['email']
+'a@b。com' True True ['email']
+'+44 20 7946 0958' True True ['number']

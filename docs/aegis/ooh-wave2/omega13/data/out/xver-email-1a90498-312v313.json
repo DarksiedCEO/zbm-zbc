@@ -1,0 +1,160 @@
+{
+ "a": [
+  "3.12.14",
+  "15.0.0"
+ ],
+ "b": [
+  "3.13.9",
+  "15.1.0"
+ ],
+ "email_tight": {
+  "differ": 622,
+  "by_cat": {
+   "Cn->Lo": 622
+  },
+  "examples": [
+   [
+    "U+2EBF0",
+    "Cn",
+    "Lo",
+    "",
+    "email"
+   ],
+   [
+    "U+2EBF1",
+    "Cn",
+    "Lo",
+    "",
+    "email"
+   ],
+   [
+    "U+2EBF2",
+    "Cn",
+    "Lo",
+    "",
+    "email"
+   ],
+   [
+    "U+2EBF3",
+    "Cn",
+    "Lo",
+    "",
+    "email"
+   ],
+   [
+    "U+2EBF4",
+    "Cn",
+    "Lo",
+    "",
+    "email"
+   ],
+   [
+    "U+2EBF5",
+    "Cn",
+    "Lo",
+    "",
+    "email"
+   ]
+  ]
+ },
+ "email_word": {
+  "differ": 622,
+  "by_cat": {
+   "Cn->Lo": 622
+  },
+  "examples": [
+   [
+    "U+2EBF0",
+    "Cn",
+    "Lo",
+    "email",
+    "email"
+   ],
+   [
+    "U+2EBF1",
+    "Cn",
+    "Lo",
+    "email",
+    "email"
+   ],
+   [
+    "U+2EBF2",
+    "Cn",
+    "Lo",
+    "email",
+    "email"
+   ],
+   [
+    "U+2EBF3",
+    "Cn",
+    "Lo",
+    "email",
+    "email"
+   ],
+   [
+    "U+2EBF4",
+    "Cn",
+    "Lo",
+    "email",
+    "email"
+   ],
+   [
+    "U+2EBF5",
+    "Cn",
+    "Lo",
+    "email",
+    "email"
+   ]
+  ]
+ },
+ "intl_8digit": {
+  "differ": 622,
+  "by_cat": {
+   "Cn->Lo": 622
+  },
+  "examples": [
+   [
+    "U+2EBF0",
+    "Cn",
+    "Lo",
+    "phone",
+    ""
+   ],
+   [
+    "U+2EBF1",
+    "Cn",
+    "Lo",
+    "phone",
+    ""
+   ],
+   [
+    "U+2EBF2",
+    "Cn",
+    "Lo",
+    "phone",
+    ""
+   ],
+   [
+    "U+2EBF3",
+    "Cn",
+    "Lo",
+    "phone",
+    ""
+   ],
+   [
+    "U+2EBF4",
+    "Cn",
+    "Lo",
+    "phone",
+    ""
+   ],
+   [
+    "U+2EBF5",
+    "Cn",
+    "Lo",
+    "phone",
+    ""
+   ]
+  ]
+ }
+}

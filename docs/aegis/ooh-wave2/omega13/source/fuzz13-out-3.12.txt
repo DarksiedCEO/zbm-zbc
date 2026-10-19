@@ -1,0 +1,5 @@
+N 600000 seed 20261019 violating strings 5 classes 1
+('k.norm.d',) 5
+    ('6²&zwj;\U0002ebf082%&amp;#x34;0&#x2060;-2⓵&#x200b;[at]|48&#x200b;X', '62&zwj;\U0002ebf082%&amp;#x34;0&#x2060;-21&#x200b;[at]|48&#x200b;X')
+    ('&#x301;&amp;#32;&#x200b;0240&lt;&amp;#32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#52;&amp;amp;lt;3&deg;&#150;\xad6[at]⓵&#x2173<at>5１𝟘&#x20;', '&#x301;&amp;#32;&#x200b;0240&lt;&amp;#32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#52;&amp;amp;lt;3&deg;&#150;6[at]1&#x2173<at>510&#x20;')
+    ('27\ue000&#x2106;①&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#52;17+1፩󠄁ǀ<at>&sect;2', '27&#x2106;1&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#52;17+11ǀ<at>&sect;2')

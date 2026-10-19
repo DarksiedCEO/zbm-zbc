@@ -1,0 +1,8 @@
+old 201 total 161 ms {'strip_format': (6, 63), 'screen_form': (6, 82), 'number_cluster_spans': (4, 18), '_norm': (2, 27), '_spans': (2, 55), 'screen_free_text': (2, 157)}
+copy313 201 total 1128 ms {'strip_format': (30, 327), 'screen_form': (26, 433), 'number_cluster_spans': (28, 135), '_norm': (18, 281), '_spans': (14, 531), 'screen_free_text': (2, 1124)}
+old 201 total 9 ms {'strip_format': (6, 3), 'screen_form': (6, 4), 'number_cluster_spans': (4, 1), '_norm': (2, 1), '_spans': (2, 2), 'screen_free_text': (2, 7)}
+copy313 201 total 45 ms {'strip_format': (30, 13), 'screen_form': (26, 17), 'number_cluster_spans': (28, 4), '_norm': (18, 11), '_spans': (14, 21), 'screen_free_text': (2, 43)}
+old 201 total 14 ms {'strip_format': (8, 2), 'screen_form': (8, 3), 'number_cluster_spans': (10, 1), '_norm': (6, 2), '_spans': (8, 7), 'screen_free_text': (2, 12)}
+copy313 201 total 17 ms {'strip_format': (32, 3), 'screen_form': (28, 4), 'number_cluster_spans': (34, 1), '_norm': (20, 1), '_spans': (16, 5), 'screen_free_text': (2, 11)}
+old 201 total 29 ms {'strip_format': (6, 3), 'screen_form': (6, 3), 'number_cluster_spans': (4, 1), '_norm': (2, 1), '_spans': (2, 22), 'screen_free_text': (2, 27)}
+copy313 201 total 269 ms {'strip_format': (26, 13), 'screen_form': (26, 17), 'number_cluster_spans': (28, 6), '_norm': (18, 13), '_spans': (14, 242), 'screen_free_text': (2, 267)}

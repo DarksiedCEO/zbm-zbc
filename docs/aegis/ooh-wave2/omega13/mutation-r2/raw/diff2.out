@@ -1,0 +1,58 @@
+pristine backstop firings (kept still holds): 2 of 40000 ex ('  5;%40.(7%40\u2060  ]&zwj;&#%40\u20283\u2028com&#64;123-45-6789)(at)3&#\u24601 dot nbsp;\n5;', '[redacted] com@[redacted])@3&#11 dot nbsp; 5;')
+unsettled inputs 0
+H040 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L343 _forms: unsettled decoding gives only the t
+H041 screen_free_text diffs 2 leaks(mutant output still holds PII) 2 helper-level diffs 40000 pii.py:L346 _forms: drops the decoded text
+   e.g. '  5;%40.(7%40\u2060  ]&zwj;&#%40\u20283\u2028com&#64;123-45-6789)(at)3&#\u24601 dot nbsp; 
+   pristine ('[redacted]', ['number', 'ssn']) 
+   mutant   ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn'])
+   helper e.g. '  \u200b3/&apos;'
+H042 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 40000 pii.py:L346 _forms: drops the as-kept text
+   helper e.g. '  \u200b3/&apos;'
+H043 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 40000 pii.py:L347 _forms: no screen_form form
+   helper e.g. '  \u200b3/&apos;'
+H044 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 40000 pii.py:L347 _forms: no _norm form
+   helper e.g. '  \u200b3/&apos;'
+H045 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 40000 pii.py:L347 _forms: no plain form
+   helper e.g. '  \u200b3/&apos;'
+H046 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 107 pii.py:L353 _still_holds: cluster test on first form on
+   helper e.g. 'com-\n&amp;1%40&#32;9&gt;23&#64;&00\u2460@@&apos;\xad@@'
+H047 screen_free_text diffs 17 leaks(mutant output still holds PII) 0 helper-level diffs 28 pii.py:L353 _still_holds: free-text test without _norm
+   e.g. '0.\u0661[a\u200b&quot;)5;\x85nbsp; at b41(at)+[at]@9.com\u0661&gt;/' 
+   pristine ('0.1[a&quot;)5; nbsp; at b41(at)+[at]@9.com1&gt;/', []) 
+   mutant   ('[redacted]', ['number'])
+   helper e.g. '\u200b\x85\uff11\u2460\x85&amp;amp;com(\x85@@/1 at \u0661 at nbsp;\u0661\x850&#64;\u2060.
+H048 screen_free_text diffs 2 leaks(mutant output still holds PII) 2 helper-level diffs 220 pii.py:L353 _still_holds: free-text test dropped
+   e.g. '  5;%40.(7%40\u2060  ]&zwj;&#%40\u20283\u2028com&#64;123-45-6789)(at)3&#\u24601 dot nbsp; 
+   pristine ('[redacted]', ['number', 'ssn']) 
+   mutant   ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn'])
+   helper e.g. '[redacted]\uff11[redacted]amp;\u2028\uff11]@\uff11.com]b.com[at][redacted][redacted]]\n1'
+H049 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 157 pii.py:L353 _still_holds: cluster test dropped
+   helper e.g. 'com-\n&amp;1%40&#32;9&gt;23&#64;&00\u2460@@&apos;\xad@@'
+H050 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L353 _still_holds: unsettled decoding not a hit
+H051 screen_free_text diffs 2 leaks(mutant output still holds PII) 2 helper-level diffs 53 pii.py:L353 _still_holds: free-text test on first form 
+   e.g. '  5;%40.(7%40\u2060  ]&zwj;&#%40\u20283\u2028com&#64;123-45-6789)(at)3&#\u24601 dot nbsp; 
+   pristine ('[redacted]', ['number', 'ssn']) 
+   mutant   ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn'])
+   helper e.g. '5;&amp;- dot @a&#52;a.com.com\u0301'
+H060 screen_free_text diffs 300 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L373 screen_free_text: decoded form kept even wh
+   e.g. '&#52;(at) at \u2028&#32;&amp;\u2460 0(at)&#52;(at)5;&#32;0[&#32;' 
+   pristine ('&#52;@ at &#32;&amp;[redacted];', ['email']) 
+   mutant   ('4@ at &1 0@4@5; 0[', ['email'])
+H063 screen_free_text diffs 1 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L377 screen_free_text: backstop reports kinds wi
+   e.g. '\u31642\u1369&#64;2&#\uff11.com -&amp;amp;&apos;4&#32;&lt;\u3164&\x85\xad&#x34;' 
+   pristine ('[redacted]', ['number']) 
+   mutant   ('[redacted]', [])
+H064 screen_free_text diffs 2 leaks(mutant output still holds PII) 2 helper-level diffs 0 pii.py:L377 screen_free_text: backstop returns kept tex
+   e.g. '  5;%40.(7%40\u2060  ]&zwj;&#%40\u20283\u2028com&#64;123-45-6789)(at)3&#\u24601 dot nbsp; 
+   pristine ('[redacted]', ['number', 'ssn']) 
+   mutant   ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn'])
+H066 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L376 screen_free_text: kept text not whitespace-
+H067 screen_free_text diffs 21055 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L376 screen_free_text: nothing found keeps the r
+   e.g. '  \u200b3/&apos;' 
+   pristine ('3/&apos;', []) 
+   mutant   ('  \u200b3/&apos;', [])
+H068 screen_free_text diffs 12754 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L376 screen_free_text: nothing found keeps the s
+   e.g. '2)[at]&lt;7a&quot;/b\u1369ba&#32;\u31644&amp;amp;nbsp;&#64;\u31643\u0661' 
+   pristine ('2)[at]&lt;7a&quot;/b1ba&#32;4&amp;amp;nbsp;&#64;31', []) 
+   mutant   ('2)@&lt;7a&quot;/b1ba&#32;4&amp;amp;nbsp;@31', [])
+H069 screen_free_text diffs 0 leaks(mutant output still holds PII) 0 helper-level diffs 0 pii.py:L366 screen_free_text: first stage on screen_for

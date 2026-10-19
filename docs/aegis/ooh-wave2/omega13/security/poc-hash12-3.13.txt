@@ -1,0 +1,26 @@
+card sp               secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card &nbsp;           secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card &amp;nbsp;       secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card U+02BC 2-digit   secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card U+30FC           secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card Cn U+0378        secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card hex ent          secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card &zwnj;           secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card %20              secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+card Hebrew letter    secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+ssn  -                secrets=3 distinct hashes=1 kept=['contact [redacted] now']
+ssn  4-5 U+02BC       secrets=3 distinct hashes=1 kept=['contact [redacted] now']
+ssn  &ndash;          secrets=3 distinct hashes=1 kept=['contact [redacted] now']
+ssn  U+0640           secrets=3 distinct hashes=1 kept=['contact [redacted] now']
+ssn  U+2FFC           secrets=3 distinct hashes=1 kept=['contact [redacted] now']
+ssn  &#45;            secrets=3 distinct hashes=1 kept=['contact [redacted] now']
+bodies where hash != sha(kept body) or == sha(raw body) or a digit kept: 0
+same body twice                                -> 201:ooh-inv-2f44908198fde6de9c9d371a0d590f54 | 201:ooh-inv-2f44908198fde6de9c9d371a0d590f54
+card A then card B (both redacted)             -> 201:ooh-inv-422017088687b6f93d9b6029208af5a2 | 201:ooh-inv-422017088687b6f93d9b6029208af5a2
+kept text differs (faces west / faces east)    -> 201:ooh-inv-a2d5d5319617e610884947e3062ff665 | 409:REQUEST_ID_REUSED
+U+02BC SSN vs literal [redacted]               -> 201:ooh-inv-cb19f4c046d0b1b9b28cb343bbb313fe | 201:ooh-inv-cb19f4c046d0b1b9b28cb343bbb313fe
+Cn U+0378 kept vs removed                      -> 201:ooh-inv-960a7b91bf835c89a72396abdd34489e | 409:REQUEST_ID_REUSED
+&amp; kept vs &                                -> 201:ooh-inv-ecb7c1eac9d158164216ca1455027551 | 409:REQUEST_ID_REUSED
+dingbat card vs ascii-redacted card (R1)       -> 201:ooh-inv-be85b97b90333e7ebbfdb91e6f3b3be4 | 409:REQUEST_ID_REUSED
+redacted text, other field differs             -> 201 | 409:REQUEST_ID_REUSED
+replay after restart                           -> 201:True

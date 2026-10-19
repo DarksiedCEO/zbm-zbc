@@ -1,0 +1,374 @@
+run pii_main_c1a90498_3.13 valueset main files 7 ['ledger/ledger.jsonl', 'ledger/ledger.jsonl.head', 'ledger/ledger.jsonl.lock', 'ledger.log', 'ooh/ooh.lock', 'ooh/ooh_log.jsonl', 'service.log'] hashes 1813
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 975
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 983
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 991
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 999
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1007
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1015
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1023
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1031
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1039
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1047
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1079
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view raw line 1191
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view raw line 1231
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1415
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1779
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1783
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1787
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1791
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1795
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view raw line 1799
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1806
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1810
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1814
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1828
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view raw line 1880
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view raw line 1897
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1977
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 975
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 983
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 991
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 999
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1007
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1015
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1023
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1031
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1039
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1047
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1079
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1087 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1095 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1103 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1111 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1119 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1127 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1135 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1143 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1159 ['4111111111111111']
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view u line 1191
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view u line 1231
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1415
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1779
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1783
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1787
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1791
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1795
+  DIGITS(line-concat only) 4111111111111111 in ooh/ooh_log.jsonl view u line 1799
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1806
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1810
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1814
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1828
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1832 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1836 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1840 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1844 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1848 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1852 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1856 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u line 1860 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u line 1867 ['4111111111111111']
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view u line 1880
+  DIGITS(line-concat only) 123456740 in ooh/ooh_log.jsonl view u line 1897
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1977
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 975 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 983 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 991 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 999 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1007 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1015 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1023 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1031 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1039 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1047 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1063 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1079 ['123456789']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view ent line 1191 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view ent line 1231 ['123456740']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1239
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1255
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1263
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1415
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1779 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1783 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1787 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1791 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1795 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1799 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1806 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1810 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1814 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view ent line 1821 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view ent line 1828 ['123456789']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view ent line 1880 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view ent line 1897 ['123456740']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1901
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1908
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1912
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1977
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 975 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 983 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 991 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 999 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1007 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1015 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1023 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1031 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1039 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1047 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1063 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1079 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1087 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1095 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1103 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1111 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1119 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1127 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1135 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1143 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1159 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view u+ent line 1191 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view u+ent line 1231 ['123456740']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1239
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1255
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1263
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1415
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1779 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1783 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1787 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1791 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1795 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1799 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1806 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1810 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1814 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1821 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1828 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1832 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1836 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1840 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1844 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1848 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1852 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1856 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view u+ent line 1860 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view u+ent line 1867 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view u+ent line 1880 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view u+ent line 1897 ['123456740']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1901
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1908
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1912
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1977
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 975 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 983 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 991 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 999 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1007 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1015 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1023 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1031 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1039 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1047 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1063 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1079 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1087 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1095 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1103 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1111 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1119 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1127 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1135 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1143 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1159 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip1 line 1191 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip1 line 1231 ['123456740']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1239 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1255 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1263 ['123456789']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip1 line 1415
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1779 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1783 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1787 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1791 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1795 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1799 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1806 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1810 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1814 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1821 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1828 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1832 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1836 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1840 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1844 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1848 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1852 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1856 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1860 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip1 line 1867 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip1 line 1880 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip1 line 1897 ['123456740']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1901 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1908 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip1 line 1912 ['123456789']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip1 line 1977
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 975 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 983 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 991 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 999 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1007 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1015 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1023 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1031 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1039 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1047 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1063 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1079 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1087 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1095 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1103 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1111 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1119 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1127 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1135 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1143 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1159 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip2 line 1191 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip2 line 1231 ['123456740']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1239
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1255
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1263
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1415
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1779 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1783 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1787 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1791 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1795 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1799 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1806 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1810 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1814 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1821 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1828 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1832 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1836 ['123456789']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1840 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1844 ['4111111111111111']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1848 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1852 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1856 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456789 in ooh/ooh_log.jsonl view strip2 line 1860 ['123456789']
+  DIGITS(ascii-cluster) 4111111111111111 in ooh/ooh_log.jsonl view strip2 line 1867 ['4111111111111111']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip2 line 1880 ['123456740']
+  DIGITS(ascii-cluster) 123456740 in ooh/ooh_log.jsonl view strip2 line 1897 ['123456740']
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1901
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1908
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1912
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1977
+  HASH b39d01a4f43e1c91 unit.vendor_text '4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 1acae29b82cb6212 unit.vendor_text '4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 1b30af1901a046a0 unit.vendor_text '4111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 9599b9c6eea4ecc2 unit.vendor_text '4111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH e55b766d462910f0 unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH b4fcc12a5d29e3b1 unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH d7a9906e54deea9f unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 1f3f22695322ec26 unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 71915e5b6267c690 unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH c67037c42a4a0188 unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 406735f768b4017a unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH c6ef81128955f752 unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 6b91351d0e2a3ddd unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 506c6a9118218ece unit.vendor_text '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH eb8ebfa89ebf0076 unit.vendor_text '123&amp;amp;amp;ndash;45&amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH b44f3c5f1006ea0e unit.vendor_text '123&amp;amp;amp;ndash;45&amp;amp;amp;ndash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH ba597b57feacb7cf unit.vendor_text '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH d8a891cb317980d1 unit.vendor_text '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 62c43bc88201d8f6 unit.vendor_text '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH dbcf9bd23986ee37 unit.vendor_text '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 361dcdf7194f5413 unit.vendor_text '4111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH e133097632cedf9f unit.vendor_text '4111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 36c899ad7af81c13 unit.vendor_text '123&amp;amp;amp;nbsp;45&amp;amp;amp;amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 4caad444e86a07f7 unit.vendor_text '123&amp;amp;amp;nbsp;45&amp;amp;amp;amp;amp;amp;ndash;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH c81f3593780c3654 unit.vendor_text '\u2779\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 81fe4e0d022183b6 unit.vendor_text '\u2779\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 6078fc0988f8b15b unit.vendor_text '\u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 2ddba8de21b11629 unit.vendor_text '\u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 2cbb2d16b792b81a unit.vendor_text '\u1369\u136a\u136b-\u136c\u136d-\u136e\u136f\u1370\u1371' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 63a97c8f372fe279 unit.vendor_text '\u1369\u136a\u136b-\u136c\u136d-\u136e\u136f\u1370\u1371' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 1cc08e30cbdf0ca4 unit.vendor_text '\u136c\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 900bbf8dd2b0c13f unit.vendor_text '\u136c\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 18c4043071f21eff unit.vendor_text '\u278d\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH ef8243fd4cd1d9b8 unit.vendor_text '\u278d\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 36d767f139a714c8 unit.vendor_text '\u2776\u2777\u2778\u2779\u277a\u277b\u277c\u277d\u277e' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 00440b162d345488 unit.vendor_text '\u2776\u2777\u2778\u2779\u277a\u277b\u277c\u277d\u277e' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH f08853d0ea4f7345 unit.vendor_text '\U00010a43\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 6b0443d8e776203c unit.vendor_text '\U00010a43\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 45a4f11735705cc4 unit.vendor_text '\U00011052\U00011053\U00011054-\U00011055\U00011056-\U00011057\U00011058\U00011059\U0001105a' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 821e5f244f1536dc unit.vendor_text '\U00011052\U00011053\U00011054-\U00011055\U00011056-\U00011057\U00011058\U00011059\U0001105a' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 55dc600b95a6f6d9 unit.vendor_text '4111 \u2776\u2776\u2776\u2776 \u1369\u1369\u1369\u1369 \u24f5\u24f5\u24f5\u24f5' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH ac103a19e4a4079c unit.vendor_text '4111 \u2776\u2776\u2776\u2776 \u1369\u1369\u1369\u1369 \u24f5\u24f5\u24f5\u24f5' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 537ca03a79dd2436 unit.vendor_text '1234567&nbsp;%40' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH d105a6ada8eb086d unit.vendor_text '1234567&nbsp;%40' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH ee55aa641ddab90d unit.vendor_text '1234567&nbsp;&#64;' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 74081c908cee5df9 unit.vendor_text '1234567&nbsp;&#64;' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 72f55b6ddf8aae9d unit.vendor_text '1234567&amp;nbsp;%40' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 93f8b50eac3bc572 unit.vendor_text '1234567&amp;nbsp;%40' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH ef0c9e71adbe8678 unit.vendor_text '12345a&zwj;&#769;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 9b1b29807d4c1323 unit.vendor_text '12345a&zwj;&#769;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 64eb7e069ed28f6f unit.vendor_text '12345e&zwj;&#769;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 22a8353d7aaa94f7 unit.vendor_text '12345e&zwj;&#769;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 6f0aa0343e8ce308 unit.vendor_text '12345a&#8205;&#x301;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH ea7e066438adacd9 unit.vendor_text '12345a&#8205;&#x301;6789' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH abd53b665f3df4c6 face.location_description '4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH de84f05f270f1e7a face.location_description '4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 5a633d00ab3cbbe6 face.location_description '4111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 56dd40c464467eec face.location_description '4111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 91ffa4b39379fc4a face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 42cac5dbe4281507 face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH d8f8df3870d2f306 face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH e8124f181e536425 face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 48e345ae3d8f414d face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH ea9b68e87d6d001a face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 07a4863f79cbe4f5 face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 92b096fc0446d120 face.location_description '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbsp;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH a1b00dfd8c7f5600 face.location_description '123&amp;amp;amp;ndash;45&amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH cf079b38c81cc9fc face.location_description '123&amp;amp;amp;ndash;45&amp;amp;amp;ndash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH e43b2c1f723a2bcc face.location_description '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 2f6b0a8115236a59 face.location_description '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH c3504ebf1f281acb face.location_description '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 39c06222ea252ee1 face.location_description '123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 8bdd04021c61777e face.location_description '4111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH a2945eddb17323ce face.location_description '4111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111&amp;amp;amp;amp;amp;#x20;1111' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 1d153034fd15a105 face.location_description '123&amp;amp;amp;nbsp;45&amp;amp;amp;amp;amp;amp;ndash;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 8f4777eb7d841337 face.location_description '123&amp;amp;amp;nbsp;45&amp;amp;amp;amp;amp;amp;ndash;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH adf7253439fc8ca5 face.location_description '\u2779\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 0578494c91e2eee3 face.location_description '\u2779\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776 \u2776\u2776\u2776\u2776' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH b9d9580b7cbcc14c face.location_description '\u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 6612fcc32b8125da face.location_description '\u24f5\u24f6\u24f7-\u24f8\u24f9-\u24fa\u24fb\u24fc\u24fd' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH d9dc09e37bd8a3d8 face.location_description '\u1369\u136a\u136b-\u136c\u136d-\u136e\u136f\u1370\u1371' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 7cf68d304759d711 face.location_description '\u1369\u136a\u136b-\u136c\u136d-\u136e\u136f\u1370\u1371' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 5b06ea4c095bde43 face.location_description '\u136c\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 85c0233d97b3fd23 face.location_description '\u136c\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369 \u1369\u1369\u1369\u1369' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 9b635020d871fda0 face.location_description '\u278d\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH dc075327b5f72a31 face.location_description '\u278d\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a-\u278a\u278a\u278a\u278a' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 6aff48129a229cba face.location_description '\u2776\u2777\u2778\u2779\u277a\u277b\u277c\u277d\u277e' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 2dbb35737563bb94 face.location_description '\u2776\u2777\u2778\u2779\u277a\u277b\u277c\u277d\u277e' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH dcceac1d0c63228a face.location_description '\U00010a43\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH ed5b3fa3e9db04f0 face.location_description '\U00010a43\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40 \U00010a40\U00010a40\U00010a40\U00010a40' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 6b4f83eb49614b9d face.location_description '\U00011052\U00011053\U00011054-\U00011055\U00011056-\U00011057\U00011058\U00011059\U0001105a' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH 58dcba58d24f59e1 face.location_description '\U00011052\U00011053\U00011054-\U00011055\U00011056-\U00011057\U00011058\U00011059\U0001105a' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH fe0ec9b2d15e423c face.location_description '4111 \u2776\u2776\u2776\u2776 \u1369\u1369\u1369\u1369 \u24f5\u24f5\u24f5\u24f5' sha256(entity-decoded NFKC text) in ooh/ooh_log.jsonl
+  HASH a2b7429982faa9cc face.location_description '4111 \u2776\u2776\u2776\u2776 \u1369\u1369\u1369\u1369 \u24f5\u24f5\u24f5\u24f5' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH f6eb00671e35b04f face.location_description '1234567&nbsp;%40' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 09652a4ff2166645 face.location_description '1234567&nbsp;%40' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 747e0e876254e427 face.location_description '1234567&nbsp;&#64;' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH af78539d64ed6b92 face.location_description '1234567&nbsp;&#64;' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 9d42a582d7c362a4 face.location_description '1234567&amp;nbsp;%40' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH eedf499a5ea796fb face.location_description '1234567&amp;nbsp;%40' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 3cc550c3be844e1f face.location_description '12345a&zwj;&#769;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 9f313b4042b0a35e face.location_description '12345a&zwj;&#769;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 85249006ac52760b face.location_description '12345e&zwj;&#769;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 9dac050c1f9e2c4e face.location_description '12345e&zwj;&#769;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+  HASH 5d3692097f513104 face.location_description '12345a&#8205;&#x301;6789' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 8327ff44f02e1cf7 face.location_description '12345a&#8205;&#x301;6789' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+sweep done

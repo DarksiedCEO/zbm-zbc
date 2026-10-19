@@ -1,0 +1,620 @@
+{
+ "H040": {
+  "shortest_diff": [
+   "\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff11\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff12\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff14\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff16\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff17\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff18\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff19\uff1b",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x33;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x35;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x36;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x37;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x38;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x39;",
+    []
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff11\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff12\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff14\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff16\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff17\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff18\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff19\uff1b",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x33;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x35;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x36;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x37;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x38;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x39;",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H041": {
+  "shortest_diff": [
+   "112345%40&fflig;1111",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "112345%40&fflig;1111",
+    []
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff03\uff58\uff13\uff11\uff1b\uff06\uff03\uff58\uff13\uff12\uff1b\uff06\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff03\uff58\uff13\uff14\uff1b\uff06\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff03\uff58\uff13\uff16\uff1b\uff06\uff03\uff58\uff13\uff17\uff1b\uff06\uff03\uff58\uff13\uff18\uff1b\uff06\uff03\uff58\uff13\uff19\uff1b",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&#x31;&#x32;&#x33;-&#x34;&#x35;-&#x36;&#x37;&#x38;&#x39;",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H042": {
+  "shortest_diff": null,
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H043": {
+  "shortest_diff": [
+   "\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff50\uff45\uff52\uff43\uff4e\uff54\uff1b\uff14\uff10",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&percnt;40",
+    []
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff50\uff45\uff52\uff43\uff4e\uff54\uff1b\uff14\uff10",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&percnt;40",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H044": {
+  "shortest_diff": null,
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H045": {
+  "shortest_diff": [
+   "112345%40&fflig;1111",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "112345%40&fflig;1111",
+    []
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H046": {
+  "shortest_diff": [
+   "112345%40&fflig;1111",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "112345%40&fflig;1111",
+    []
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff50\uff45\uff52\uff43\uff4e\uff54\uff1b\uff14\uff10",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&percnt;40",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H047": {
+  "shortest_diff": [
+   "\uff41#x31; at [at]&#64;\ufb00.com#x34;",
+   [
+    "a#x31; at [at]&#64;ff.com#x34;",
+    []
+   ],
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H048": {
+  "shortest_diff": [
+   "  5;%40.(7%40\u2060  ]&zwj;&#%40\u20283\u2028com&#64;123-45-6789)(at)3&#\u24601 dot nbsp;\n5;",
+   [
+    "[redacted]",
+    [
+     "number",
+     "ssn"
+    ]
+   ],
+   [
+    "[redacted] com@[redacted])@3&#11 dot nbsp; 5;",
+    [
+     "number",
+     "ssn"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H049": {
+  "shortest_diff": [
+   "112345%40&fflig;1111",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "112345%40&fflig;1111",
+    []
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff03\uff58\uff12\uff14\uff16\uff10\uff1b\uff06\uff50\uff45\uff52\uff43\uff4e\uff54\uff1b\uff14\uff10",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&#x2460;&percnt;40",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H050": {
+  "shortest_diff": null,
+  "shortest_leak": null,
+  "exception": [
+   "\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff11\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff12\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff14\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff16\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff17\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff18\uff1b\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff19\uff1b",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "EXC",
+    "TypeError(\"'NoneType' object is not iterable\")"
+   ]
+  ]
+ },
+ "H051": {
+  "shortest_diff": [
+   "  5;%40.(7%40\u2060  ]&zwj;&#%40\u20283\u2028com&#64;123-45-6789)(at)3&#\u24601 dot nbsp;\n5;",
+   [
+    "[redacted]",
+    [
+     "number",
+     "ssn"
+    ]
+   ],
+   [
+    "[redacted] com@[redacted])@3&#11 dot nbsp; 5;",
+    [
+     "number",
+     "ssn"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H052": {
+  "shortest_diff": [
+   "12345%404111",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "[redacted]",
+    [
+     "email"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H053": {
+  "shortest_diff": [
+   "x (at) y.com",
+   [
+    "[redacted]",
+    [
+     "email"
+    ]
+   ],
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H054": {
+  "shortest_diff": [
+   "111112345\u0301",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "[redacted]\u0301",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H055": {
+  "shortest_diff": [
+   "a@b.com",
+   [
+    "[redacted]",
+    [
+     "email"
+    ]
+   ],
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H056": {
+  "shortest_diff": [
+   "&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x33;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x35;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x36;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x37;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x38;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x39;",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x33;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x35;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x36;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x37;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x38;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x39;",
+    []
+   ]
+  ],
+  "shortest_leak": [
+   "&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x33;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x35;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x36;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x37;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x38;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x39;",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x33;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x35;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x36;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x37;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x38;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x39;",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H057": {
+  "shortest_diff": [
+   "&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x32;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x33;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x35;-&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x36;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x37;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x38;&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x39;",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "[redacted]",
+    []
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H058": {
+  "shortest_diff": [
+   "&#64;1411112345",
+   [
+    "@[redacted]",
+    [
+     "phone"
+    ]
+   ],
+   [
+    "&#[redacted]",
+    [
+     "phone"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H059": {
+  "shortest_diff": [
+   "12345&shy;12345",
+   [
+    "[redacted]",
+    [
+     "phone"
+    ]
+   ],
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H060": {
+  "shortest_diff": [
+   "2%4091111&#64;\u0301",
+   [
+    "[redacted];\u0301",
+    [
+     "number"
+    ]
+   ],
+   [
+    "2@91111@\u0301",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H061": {
+  "shortest_diff": [
+   "&#64;1411112345",
+   [
+    "@[redacted]",
+    [
+     "phone"
+    ]
+   ],
+   [
+    "&#[redacted]",
+    [
+     "phone"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H062": {
+  "shortest_diff": [
+   "&#64;1411112345",
+   [
+    "@[redacted]",
+    [
+     "phone"
+    ]
+   ],
+   [
+    "&#[redacted]",
+    [
+     "phone"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H063": {
+  "shortest_diff": [
+   "112345%40&fflig;1111",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "[redacted]",
+    []
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H064": {
+  "shortest_diff": [
+   "112345%40&fflig;1111",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "112345%40&fflig;1111",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff03\uff58\uff13\uff11\uff1b\uff06\uff03\uff58\uff13\uff12\uff1b\uff06\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff03\uff58\uff13\uff14\uff1b\uff06\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff03\uff58\uff13\uff16\uff1b\uff06\uff03\uff58\uff13\uff17\uff1b\uff06\uff03\uff58\uff13\uff18\uff1b\uff06\uff03\uff58\uff13\uff19\uff1b",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&#x31;&#x32;&#x33;-&#x34;&#x35;-&#x36;&#x37;&#x38;&#x39;",
+    [
+     "number"
+    ]
+   ]
+  ],
+  "exception": null
+ },
+ "H065": {
+  "shortest_diff": [
+   "a@b.com",
+   [
+    "[redacted]",
+    [
+     "email"
+    ]
+   ],
+   [
+    "[redacted]",
+    [
+     "email",
+     "number"
+    ]
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff03\uff58\uff13\uff11\uff1b\uff06\uff03\uff58\uff13\uff12\uff1b\uff06\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff03\uff58\uff13\uff14\uff1b\uff06\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff03\uff58\uff13\uff16\uff1b\uff06\uff03\uff58\uff13\uff17\uff1b\uff06\uff03\uff58\uff13\uff18\uff1b\uff06\uff03\uff58\uff13\uff19\uff1b",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "&#x31;&#x32;&#x33;-&#x34;&#x35;-&#x36;&#x37;&#x38;&#x39;",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H066": {
+  "shortest_diff": null,
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H067": {
+  "shortest_diff": [
+   "\u0301\ufb00",
+   [
+    "\u0301ff",
+    []
+   ],
+   [
+    "\u0301\ufb00",
+    []
+   ]
+  ],
+  "shortest_leak": [
+   "\uff06\uff03\uff58\uff13\uff11\uff1b\uff06\uff03\uff58\uff13\uff12\uff1b\uff06\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff03\uff58\uff13\uff14\uff1b\uff06\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff03\uff58\uff13\uff16\uff1b\uff06\uff03\uff58\uff13\uff17\uff1b\uff06\uff03\uff58\uff13\uff18\uff1b\uff06\uff03\uff58\uff13\uff19\uff1b",
+   [
+    "[redacted]",
+    [
+     "number"
+    ]
+   ],
+   [
+    "\uff06\uff03\uff58\uff13\uff11\uff1b\uff06\uff03\uff58\uff13\uff12\uff1b\uff06\uff03\uff58\uff13\uff13\uff1b\uff0d\uff06\uff03\uff58\uff13\uff14\uff1b\uff06\uff03\uff58\uff13\uff15\uff1b\uff0d\uff06\uff03\uff58\uff13\uff16\uff1b\uff06\uff03\uff58\uff13\uff17\uff1b\uff06\uff03\uff58\uff13\uff18\uff1b\uff06\uff03\uff58\uff13\uff19\uff1b",
+    []
+   ]
+  ],
+  "exception": null
+ },
+ "H068": {
+  "shortest_diff": [
+   "%409",
+   [
+    "%409",
+    []
+   ],
+   [
+    "@9",
+    []
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H069": {
+  "shortest_diff": null,
+  "shortest_leak": null,
+  "exception": null
+ },
+ "H070": {
+  "shortest_diff": [
+   "&#64;1411112345",
+   [
+    "@[redacted]",
+    [
+     "phone"
+    ]
+   ],
+   [
+    "&#[redacted]",
+    [
+     "phone"
+    ]
+   ]
+  ],
+  "shortest_leak": null,
+  "exception": null
+ }
+}

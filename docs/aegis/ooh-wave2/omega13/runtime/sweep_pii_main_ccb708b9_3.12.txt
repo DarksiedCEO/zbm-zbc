@@ -1,0 +1,18 @@
+run pii_main_ccb708b9_3.12 valueset main files 7 ['ledger/ledger.jsonl', 'ledger/ledger.jsonl.head', 'ledger/ledger.jsonl.lock', 'ledger.log', 'ooh/ooh.lock', 'ooh/ooh_log.jsonl', 'service.log'] hashes 1813
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1415
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view raw line 1951
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1415
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u line 1951
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1415
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view ent line 1951
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1415
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view u+ent line 1951
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip1 line 1415
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip1 line 1951
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1415
+  DIGITS(line-concat only) 123456789 in ooh/ooh_log.jsonl view strip2 line 1951
+  HASH ee55aa641ddab90d unit.vendor_text '1234567&nbsp;&#64;' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH e2477f3cb85f7225 unit.vendor_text '1234567&nbsp;&#64;' sha256(canonical body, vendor_text spaces-collapsed NFKC) in ooh/ooh_log.jsonl
+  HASH 747e0e876254e427 face.location_description '1234567&nbsp;&#64;' sha256(spaces-collapsed text) in ooh/ooh_log.jsonl
+  HASH 6da408dac4e4ffb1 face.location_description '1234567&nbsp;&#64;' sha256(canonical unredacted body) in ooh/ooh_log.jsonl
+sweep done

@@ -1,0 +1,422 @@
+[
+ {
+  "field": "unit.vendor_text",
+  "secret": "\ud83d\udcde+500 21234",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": false,
+   "personal_data_kinds": [],
+   "text": "faces west, contact \ud83d\udcde+500 21234 for access",
+   "truncated": false,
+   "sha256": "8e77cd7218c5b6386ee21d81f837ab0af06ca518c98b2a081cd0f1e48d0e7ebe"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": true,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": false,
+  "stored_kinds": [],
+  "stored_text": "faces west, contact \ud83d\udcde+500 21234 for access",
+  "log_request_sha_eq_hash_of_kept_body": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": [
+   "ooh/ooh_log.jsonl:clear",
+   "view0:clear",
+   "view3:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "\ud83d\udcde+500 21234",
+  "status": [
+   200,
+   null
+  ],
+  "nothing_written": false,
+  "delta": {
+   "log": 1,
+   "ledger": 2,
+   "files_changed": [
+    "ledger/ledger.jsonl",
+    "ledger/ledger.jsonl.head",
+    "ooh/ooh_log.jsonl"
+   ]
+  },
+  "control_status": 409,
+  "line_data": "{\"_obj\": \"ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c\", \"actor\": \"ooh_agent\", \"attribute\": \"location_description\", \"evidence\": [{\"event_id\": \"ooh-evd-7a910a67f4c7d21dc3e44453dedb2801259dbff5\", \"event_type\": \"inventory_face_attribute_sourced\", \"payload\": {\"attribute\": \"location_description\", \"face_id\": \"ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c\", \"rk\": \"face_attr|ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c|ec8d17bf-0e52-42ae-b475-cc2493bd1998\", \"seq\": 17, \"source_id\": \"ooh-src-a0b590b6c6d47abcc4753ac81b9b4062d5635ed3\", \"value\": \"5e048b622112ff6a47535c8cb90ec1a308d30b2c5f4fd6f97",
+  "line_request_sha_eq_raw_body_hash": true,
+  "leaks": [
+   "ooh/ooh_log.jsonl:clear",
+   "view0:clear",
+   "face_view:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "\ud83d\udcde+500 21234",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": [],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "\ud83d\udcde+500 21234",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": [
+   "ooh/pending.line:clear",
+   "after-ooh/ooh_log.jsonl:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "\ud83d\udcde+500 21234",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": [
+   "ooh/pending.discarded:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "\u2014+500 21234",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": false,
+   "personal_data_kinds": [],
+   "text": "faces west, contact \u2014+500 21234 for access",
+   "truncated": false,
+   "sha256": "4c1e2281fa67b9987501ec89248776da11204a0b039f39650685a3dbd6ac2d3a"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": true,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": false,
+  "stored_kinds": [],
+  "stored_text": "faces west, contact \u2014+500 21234 for access",
+  "log_request_sha_eq_hash_of_kept_body": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": [
+   "ooh/ooh_log.jsonl:clear",
+   "view0:clear",
+   "view3:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "\u2014+500 21234",
+  "status": [
+   200,
+   null
+  ],
+  "nothing_written": false,
+  "delta": {
+   "log": 1,
+   "ledger": 2,
+   "files_changed": [
+    "ledger/ledger.jsonl",
+    "ledger/ledger.jsonl.head",
+    "ooh/ooh_log.jsonl"
+   ]
+  },
+  "control_status": 409,
+  "line_data": "{\"_obj\": \"ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c\", \"actor\": \"ooh_agent\", \"attribute\": \"location_description\", \"evidence\": [{\"event_id\": \"ooh-evd-6f94387dca1fd57b076205e5f631204e77cec74d\", \"event_type\": \"inventory_face_attribute_sourced\", \"payload\": {\"attribute\": \"location_description\", \"face_id\": \"ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c\", \"rk\": \"face_attr|ooh-fce-d6f9e92c113719cf8d173b39b7799548bc405b1c|03843604-60fd-44b4-a027-a2bbae703a0f\", \"seq\": 17, \"source_id\": \"ooh-src-5c2f6049cdb29d1e07ce4b1d0c6f34afa980bf0d\", \"value\": \"0fd451e67adcd59870db386826334321088dcf24837a337b8",
+  "line_request_sha_eq_raw_body_hash": true,
+  "leaks": [
+   "ooh/ooh_log.jsonl:clear",
+   "view0:clear",
+   "face_view:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "\u2014+500 21234",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": [],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "\u2014+500 21234",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": [
+   "ooh/pending.line:clear",
+   "after-ooh/ooh_log.jsonl:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "\u2014+500 21234",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": [
+   "ooh/pending.discarded:clear"
+  ],
+  "class": "d13-l1-intl8",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text",
+  "secret": "+500 21234",
+  "status": 201,
+  "vendor_text_view": {
+   "untrusted": true,
+   "personal_data_redacted": true,
+   "personal_data_kinds": [
+    "phone"
+   ],
+   "text": "faces west, contact [redacted] for access",
+   "truncated": false,
+   "sha256": "3976b552e255d53065910455d91528d04c646517916aa946ceaf212c99b25c1f"
+  },
+  "lines_added": 1,
+  "ledger_events_added": 2,
+  "replays": {
+   "count": 3,
+   "statuses": [
+    201,
+    201,
+    201
+   ],
+   "lines_added_by_replays": 0,
+   "ledger_events_added_by_replays": 0,
+   "units": 1
+  },
+  "same_rid_other_body": 409,
+  "log_request_sha_eq_unkeyed_hash_of_raw_body": false,
+  "log_request_sha_eq_request_sha_fn": true,
+  "stored_redacted_flag": true,
+  "stored_kinds": [
+   "phone"
+  ],
+  "stored_text": "faces west, contact [redacted] for access",
+  "log_request_sha_eq_hash_of_kept_body": true,
+  "recoverable_by_search": false,
+  "log_line_fields_for_body_reconstruction": {
+   "request_id_in_line": true,
+   "face_id": true,
+   "flight": [
+    "2026-11-01",
+    "2026-11-30"
+   ]
+  },
+  "leaks": [],
+  "class": "d13-l1-intl8-ctl",
+  "expect": "detect"
+ },
+ {
+  "field": "face.text_attribute",
+  "secret": "+500 21234",
+  "status": [
+   422,
+   "ATTRIBUTE_VALUE_PERSONAL_DATA"
+  ],
+  "nothing_written": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": [],
+  "class": "d13-l1-intl8-ctl",
+  "expect": "detect"
+ },
+ {
+  "field": "client_approval_doc_ref",
+  "secret": "+500 21234",
+  "status": [
+   422,
+   [
+    {
+     "loc": [
+      "body",
+      "client_approval_doc_ref"
+     ],
+     "msg": "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'",
+     "type": "string_pattern_mismatch"
+    }
+   ]
+  ],
+  "nothing_written": true,
+  "campaign_unchanged": true,
+  "delta": {
+   "log": 0,
+   "ledger": 0,
+   "files_changed": []
+  },
+  "control_status": 200,
+  "leaks": [],
+  "class": "d13-l1-intl8-ctl",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text/pending.line",
+  "secret": "+500 21234",
+  "status": [
+   503,
+   {
+    "detail": "STORE_UNAVAILABLE",
+    "maybe": true
+   }
+  ],
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.line"
+  ],
+  "has_target_file": true,
+  "rolled_forward": true,
+  "leaks": [],
+  "class": "d13-l1-intl8-ctl",
+  "expect": "detect"
+ },
+ {
+  "field": "unit.vendor_text/pending.discarded",
+  "secret": "+500 21234",
+  "pending_at_kill": true,
+  "files": [
+   "ooh.lock",
+   "ooh_log.jsonl",
+   "pending.discarded"
+  ],
+  "has_target_file": true,
+  "leaks": [],
+  "class": "d13-l1-intl8-ctl",
+  "expect": "detect"
+ }
+]

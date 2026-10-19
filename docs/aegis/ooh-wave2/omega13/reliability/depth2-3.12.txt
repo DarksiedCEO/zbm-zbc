@@ -1,0 +1,61 @@
+14 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['card'] '[redacted]' OK
+14 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['ssn'] 'SSN [redacted]' OK
+14 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['email'] '[redacted]' OK
+14 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['card'] '[redacted]' OK
+14 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['ssn'] 'SSN [redacted]' OK
+14 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['email'] '[redacted]' OK
+14 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['card'] '[redacted]' OK
+14 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['ssn'] 'SSN [redacted]' OK
+14 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['email'] '[redacted]' OK
+14 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['card'] '[redacted]' OK
+14 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['ssn'] 'SSN [redacted]' OK
+14 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['email'] '[redacted]' OK
+15 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+15 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+15 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+15 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+15 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+15 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+15 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+15 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+15 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+15 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+15 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+15 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+16 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+16 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+16 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+16 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+16 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+17 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+17 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+17 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+17 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+17 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+18 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+18 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+18 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 '4111&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+18 'SSN 123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;a ['number'] '[redacted]' OK
+18 'jane&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp; ['number'] '[redacted]' OK
+leaks 0

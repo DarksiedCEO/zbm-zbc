@@ -1,0 +1,138 @@
+== cb708b9
+{
+ "fullwidth_entity_name": {
+  "text": "123\\uff06\\uff4e\\uff42\\uff53\\uff50\\uff1b45\\uff06\\uff4e\\uff42\\uff53\\uff50\\uff1b6789",
+  "kinds": [
+   "number"
+  ],
+  "kept": "[redacted]"
+ },
+ "fullwidth_amp_numeric": {
+  "text": "4111\\uff06#160;1111\\uff06#160;1111\\uff06#160;1111",
+  "kinds": [
+   "card"
+  ],
+  "kept": "[redacted]"
+ },
+ "entity_of_fullwidth_amp": {
+  "text": "123&#xFF06;nbsp;45&#xFF06;nbsp;6789",
+  "kinds": [],
+  "kept": "123&#xFF06;nbsp;45&#xFF06;nbsp;6789"
+ },
+ "entity_of_fullwidth_amp_num": {
+  "text": "4111&#xFF06;#160;1111&#xFF06;#160;1111&#xFF06;#160;1111",
+  "kinds": [
+   "card",
+   "number"
+  ],
+  "kept": "[redacted]"
+ },
+ "entity_of_small_amp": {
+  "text": "123&#xFE60;nbsp;45&#xFE60;nbsp;6789",
+  "kinds": [],
+  "kept": "123&#xFE60;nbsp;45&#xFE60;nbsp;6789"
+ },
+ "hidden_inside_entity": {
+  "text": "123&\\u200bnbsp;45&\\u200bnbsp;6789",
+  "kinds": [
+   "number"
+  ],
+  "kept": "[redacted]"
+ },
+ "softhyphen_inside_entity": {
+  "text": "4111&n\\xadbsp;1111&n\\xadbsp;1111&n\\xadbsp;1111",
+  "kinds": [
+   "number"
+  ],
+  "kept": "[redacted]"
+ },
+ "entity_spelled_zwsp_inside_entity": {
+  "text": "123&&#x200B;nbsp;45&&#x200B;nbsp;6789",
+  "kinds": [],
+  "kept": "123&&#x200B;nbsp;45&&#x200B;nbsp;6789"
+ },
+ "entity_spelled_digits_fullwidth": {
+  "text": "&#xFF14;&#xFF11;&#xFF11;&#xFF11; 1111 1111 1111",
+  "kinds": [
+   "card",
+   "number"
+  ],
+  "kept": "[redacted]"
+ },
+ "pct40_then_cluster": {
+  "text": "1234567&#37;40",
+  "kinds": [
+   "number"
+  ],
+  "kept": "[redacted]"
+ },
+ "screen_form_extra_calls_to_stable_max": 1
+}
+== 1a90498
+{
+ "fullwidth_entity_name": {
+  "text": "123\\uff06\\uff4e\\uff42\\uff53\\uff50\\uff1b45\\uff06\\uff4e\\uff42\\uff53\\uff50\\uff1b6789",
+  "kinds": [
+   "ssn"
+  ],
+  "kept": "[redacted]"
+ },
+ "fullwidth_amp_numeric": {
+  "text": "4111\\uff06#160;1111\\uff06#160;1111\\uff06#160;1111",
+  "kinds": [
+   "card"
+  ],
+  "kept": "[redacted]"
+ },
+ "entity_of_fullwidth_amp": {
+  "text": "123&#xFF06;nbsp;45&#xFF06;nbsp;6789",
+  "kinds": [],
+  "kept": "123&#xFF06;nbsp;45&#xFF06;nbsp;6789"
+ },
+ "entity_of_fullwidth_amp_num": {
+  "text": "4111&#xFF06;#160;1111&#xFF06;#160;1111&#xFF06;#160;1111",
+  "kinds": [
+   "number"
+  ],
+  "kept": "4111&#xFF[redacted]&#xFF[redacted]&#xFF[redacted]"
+ },
+ "entity_of_small_amp": {
+  "text": "123&#xFE60;nbsp;45&#xFE60;nbsp;6789",
+  "kinds": [],
+  "kept": "123&#xFE60;nbsp;45&#xFE60;nbsp;6789"
+ },
+ "hidden_inside_entity": {
+  "text": "123&\\u200bnbsp;45&\\u200bnbsp;6789",
+  "kinds": [
+   "ssn"
+  ],
+  "kept": "[redacted]"
+ },
+ "softhyphen_inside_entity": {
+  "text": "4111&n\\xadbsp;1111&n\\xadbsp;1111&n\\xadbsp;1111",
+  "kinds": [
+   "card"
+  ],
+  "kept": "[redacted]"
+ },
+ "entity_spelled_zwsp_inside_entity": {
+  "text": "123&&#x200B;nbsp;45&&#x200B;nbsp;6789",
+  "kinds": [],
+  "kept": "123&&#x200B;nbsp;45&&#x200B;nbsp;6789"
+ },
+ "entity_spelled_digits_fullwidth": {
+  "text": "&#xFF14;&#xFF11;&#xFF11;&#xFF11; 1111 1111 1111",
+  "kinds": [
+   "number"
+  ],
+  "kept": "&#xFF14;&#xFF11;&#xFF11;&#xFF[redacted]"
+ },
+ "pct40_then_cluster": {
+  "text": "1234567&#37;40",
+  "kinds": [
+   "number"
+  ],
+  "kept": "[redacted]"
+ },
+ "screen_form_extra_calls_to_stable_max": 2
+}

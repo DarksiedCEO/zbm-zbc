@@ -1,0 +1,32 @@
+'12345a&zwj;&#769;6789' -> '[redacted]' ['number'] | sf idem: True
+'12345a&#8205;&#x301;6789' -> '[redacted]' ['number'] | sf idem: True
+'12345a&shy;&#769;6789' -> '[redacted]' ['number'] | sf idem: True
+'12345a&#x200b;&#769;6789' -> '[redacted]' ['number'] | sf idem: True
+'4111e&#8203;&#769;1111e&#8203;&#769;1111e&#8203;&#769;1111' -> '[redacted]' ['card', 'number'] | sf idem: True
+'12345a\u200b́6789' -> '[redacted]' ['number'] | sf idem: True
+'123456789' -> '[redacted]' ['number'] | sf idem: True
+'1234&#8203;56789' -> '[redacted]' ['number'] | sf idem: True
+'123456&amp;amp;amp;amp;nbsp;789' -> '[redacted]' ['number'] | sf idem: True
+'123&amp;amp;amp;amp;ndash;45&amp;amp;amp;amp;ndash;6789' -> '[redacted]' ['ssn'] | sf idem: True
+'1234567&nbsp;%40' -> '[redacted]' ['number'] | sf idem: True
+'123456&nbsp;%4089' -> '[redacted]' ['number'] | sf idem: True
+'1234567&amp;%40' -> '[redacted]' ['number'] | sf idem: True
+'1234567&#x25;40' -> '[redacted]' ['number'] | sf idem: True
+'1234567%40' -> '[redacted]' ['number'] | sf idem: True
+'1234567&#64;' -> '[redacted];' ['number'] | sf idem: True
+'123456&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;nbs' -> '[redacted]' ['number'] | sf idem: True
+'123456&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp' -> '[redacted]' ['number'] | sf idem: True
+'123456&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp' -> '[redacted]' ['number'] | sf idem: True
+'123456&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp' -> '[redacted]' ['number'] | sf idem: True
+'123&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;ndash;' -> '[redacted]' ['number'] | sf idem: True
+'❶❷❸❹❺❻❼❽❾' -> '[redacted]' ['number'] | sf idem: True
+'፩፪፫፬፭፮፯፰፱' -> '[redacted]' ['number'] | sf idem: True
+'⓵⓶⓷⓸⓹⓺⓻⓼⓽' -> '[redacted]' ['number'] | sf idem: True
+'123 45 6789' -> '[redacted]' ['ssn'] | sf idem: True
+'4111 1111 1111 1111' -> '[redacted]' ['card'] | sf idem: True
+'jane@example.com' -> '[redacted]' ['email'] | sf idem: True
+'a@b⿼d.com' -> '[redacted]' ['email'] | sf idem: True
+'note 4111-1111-1111-1111 end' -> 'note [redacted] end' ['card'] | sf idem: True
+'4111%2D1111%2D1111%2D1111' -> '4111%2D1111%2D1111%2D1111' [] | sf idem: True
+'ok text' -> 'ok text' [] | sf idem: True
+'[redacted] 12345678' -> '[redacted] 12345678' [] | sf idem: True

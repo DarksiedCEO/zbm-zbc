@@ -1,0 +1,2 @@
+digit-valued chars 798 missed 0 []
+screen_form non-idempotent 0 

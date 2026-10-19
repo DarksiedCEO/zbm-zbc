@@ -1,0 +1,67 @@
+H040 diffs 0 leaks 0   pii.py:L343 _forms: unsettled decoding gives only the text
+H041 diffs 0 leaks 0   pii.py:L346 _forms: drops the decoded text
+H042 diffs 0 leaks 0   pii.py:L346 _forms: drops the as-kept text
+H043 diffs 0 leaks 0   pii.py:L347 _forms: no screen_form form
+H044 diffs 0 leaks 0   pii.py:L347 _forms: no _norm form
+H045 diffs 0 leaks 0   pii.py:L347 _forms: no plain form
+H046 diffs 0 leaks 0   pii.py:L353 _still_holds: cluster test on first form only
+H047 diffs 0 leaks 0   pii.py:L353 _still_holds: free-text test without _norm
+H048 diffs 0 leaks 0   pii.py:L353 _still_holds: free-text test dropped
+H049 diffs 0 leaks 0   pii.py:L353 _still_holds: cluster test dropped
+H050 diffs 0 leaks 0   pii.py:L353 _still_holds: unsettled decoding not a hit
+H051 diffs 0 leaks 0   pii.py:L353 _still_holds: free-text test on first form only
+H052 diffs 994 leaks 0   pii.py:L335 _screen_stages: first stage skipped
+   e.g. '5555555555554444\n5555555555554444' 
+   pristine ('[redacted]', ['card']) 
+   mutant   ('[redacted][redacted]', ['card'])
+H053 diffs 255 leaks 0   pii.py:L336 _screen_stages: second stage reads t without _no
+   e.g. 'x123.45.6789y x (at) y.com' 
+   pristine ('x[redacted]y [redacted]', ['email', 'ssn']) 
+   mutant   ('[redacted]', ['number', 'ssn'])
+H054 diffs 1063 leaks 0   pii.py:L335 _screen_stages: first stage reads t without scre
+   e.g. '55\u03015&amp;#32;5555555554444\u200b\n55\u03015&amp;#32;5555555554444\u200b' 
+   pristine ('[redacted]', ['card', 'phone']) 
+   mutant   ('[redacted]', ['phone'])
+H055 diffs 775 leaks 0   pii.py:L336 _screen_stages: second stage uses the cluster fi
+   e.g. '1234\ufe0f5&nbsp;678&amp;nbsp;9\n1234\ufe0f5&nbsp;678&amp;nbsp;9 a@b.com' 
+   pristine ('[redacted] [redacted]', ['email', 'number']) 
+   mutant   ('[redacted]', ['number'])
+H056 diffs 243 leaks 102   pii.py:L369 screen_free_text: unsettled decoding keeps the t
+   e.g. '123\ufe0f-45\ufe0f-\ufe0f6&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#32;789\n123 
+   pristine ('[redacted]', ['number']) 
+   mutant   ('123-45-6&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#32;789 123-45-6&amp;amp;amp;
+H057 diffs 173 leaks 0   pii.py:L369 screen_free_text: unsettled decoding reports no 
+   e.g. 'pay 12&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;shy;3.4&amp;amp;amp;amp;amp; 
+   pristine ('[redacted]', ['number']) 
+   mutant   ('[redacted]', [])
+H058 diffs 2739 leaks 0   pii.py:L374 screen_free_text: decoded form never kept
+   e.g. 'pay 123.4&zwj;5.6\x857\u030189&#32; now hello world' 
+   pristine ('pay [redacted] now hello world', ['number']) 
+   mutant   ('[redacted]', ['number'])
+H059 diffs 1786 leaks 0   pii.py:L374 screen_free_text: decoded form kinds not recorde
+   e.g. 'pay 123.4&zwj;5.6\x857\u030189&#32; now hello world' 
+   pristine ('pay [redacted] now hello world', ['number']) 
+   mutant   ('[redacted]', ['number'])
+H060 diffs 0 leaks 0   pii.py:L373 screen_free_text: decoded form kept even when no
+H061 diffs 2834 leaks 0   pii.py:L370 screen_free_text: decoded form screened only whe
+   e.g. 'pay 123.4&zwj;5.6\x857\u030189&#32; now hello world' 
+   pristine ('pay [redacted] now hello world', ['number']) 
+   mutant   ('[redacted]', ['number'])
+H062 diffs 2834 leaks 0   pii.py:L372 screen_free_text: decoded screened from the kept
+   e.g. 'pay 123.4&zwj;5.6\x857\u030189&#32; now hello world' 
+   pristine ('pay [redacted] now hello world', ['number']) 
+   mutant   ('[redacted]', ['number'])
+H063 diffs 0 leaks 0   pii.py:L377 screen_free_text: backstop reports kinds without
+H064 diffs 0 leaks 0   pii.py:L377 screen_free_text: backstop returns kept text
+H065 diffs 4606 leaks 0   pii.py:L377 screen_free_text: backstop reads the raw text
+   e.g. '5555555555554444\n5555555555554444' 
+   pristine ('[redacted]', ['card']) 
+   mutant   ('[redacted]', ['card', 'number'])
+H066 diffs 0 leaks 0   pii.py:L376 screen_free_text: kept text not whitespace-colla
+H067 diffs 0 leaks 0   pii.py:L376 screen_free_text: nothing found keeps the raw te
+H068 diffs 0 leaks 0   pii.py:L376 screen_free_text: nothing found keeps the staged
+H069 diffs 0 leaks 0   pii.py:L366 screen_free_text: first stage on screen_form(tex
+H070 diffs 1803 leaks 0   pii.py:L367 screen_free_text: decoding reads the staged text
+   e.g. '4\u3164111 &zwj;1\u20601&#32;1&amp;nbsp;1 11\u206011\u0301 \ufe0f111&amp;#32;1 +1 415 555 0100' 
+   pristine ('[redacted]', ['phone']) 
+   mutant   ('[redacted]&#[redacted]', ['number', 'phone'])

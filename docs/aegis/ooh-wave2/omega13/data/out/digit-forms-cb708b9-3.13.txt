@@ -1,0 +1,2 @@
+{"python": "3.13.9", "unidata": "15.1.0", "n_digit_valued": 798, "by_cat": {"No": 128, "Nd": 670}, "detected_all_shapes": 798, "n_not_detected": 0, "per_shape_detected": {"run9": 798, "sp9": 798, "dash9": 798, "tail": 798, "card": 798, "ssn": 798}, "numeric_only_n": 446, "numeric_only_by_cat": {"No": 233, "Nl": 148, "Lo": 65}, "numeric_only_run9_detected": 2}
+[]

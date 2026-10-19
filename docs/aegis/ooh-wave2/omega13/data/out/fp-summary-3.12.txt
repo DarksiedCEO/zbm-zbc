@@ -1,0 +1,16 @@
+| class | n | vendor_text redacted new (old) | face refused PD new (old) | approval ref refused PD new (old) |
+| address | 6 | 1 (1) | 1 (1) | 0 (0) |
+| zip+4 | 5 | 5 (5) | 5 (5) | 4 (4) |
+| flight/date | 11 | 6 (6) | 6 (6) | 3 (3) |
+| gps | 6 | 4 (4) | 4 (4) | 2 (2) |
+| price | 7 | 3 (3) | 3 (3) | 0 (0) |
+| impressions | 5 | 2 (2) | 2 (2) | 0 (0) |
+| permit | 6 | 6 (6) | 6 (6) | 5 (5) |
+| ref | 12 | 7 (7) | 7 (7) | 6 (6) |
+| spec/time | 6 | 0 (0) | 0 (0) | 0 (0) |
+| phone/contact (true positives for comparison) | 3 | 3 (3) | 3 (3) | 2 (2) |
+| non-Latin script (r12) | 10 | 7 (7) | 7 (7) | 0 (0) |
+| HTML entity (r12) | 6 | 1 (1) | 1 (1) | 0 (0) |
+| mixed realistic | 3 | 3 (3) | 3 (3) | 0 (0) |
+| total | 86 | 48 (48) | 48 (48) | 22 (22) |
+CHANGED []

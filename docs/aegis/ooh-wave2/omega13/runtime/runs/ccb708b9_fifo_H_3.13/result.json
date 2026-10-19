@@ -1,0 +1,331 @@
+{
+ "scen": "fifo",
+ "mode": "H",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega13/runtime/src_cb708b9",
+ "python": "3.13.9",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt13-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 70256,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-19T01:06:36Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.045,
+  "file_before": "missing",
+  "file_after": "e119c766d9cb1879077d5873e2c684d0b2d21077a00338600454d508d059db63",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 71280
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-19T01:06:36Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.047,
+  "file_before": "e119c766d9cb1879077d5873e2c684d0b2d21077a00338600454d508d059db63",
+  "file_after": "ed6e277856ce03b847877d6740e5c159e9d5bf458d2e3e123c03f2ff6c106e5a",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72752
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "ed6e277856ce03b847877d6740e5c159e9d5bf458d2e3e123c03f2ff6c106e5a",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 72736
+ },
+ "fault": {
+  "orig_sha": "ed6e277856ce03b847877d6740e5c159e9d5bf458d2e3e123c03f2ff6c106e5a",
+  "disk": {
+   "kind": "fifo",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "A1": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-19T01:06:47Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.02,
+  "file": "fifo",
+  "rss_kb": 72768
+ },
+ "A2": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-19T01:06:47Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.01,
+  "file": "fifo",
+  "rss_kb": 72768
+ },
+ "J1": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-19T01:06:47Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.016,
+  "file": "fifo",
+  "rss_kb": 74192
+ },
+ "ST": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-19T01:06:47Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   }
+  },
+  "elapsed_s": 0.006
+ },
+ "W3": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.006,
+  "file_before": "fifo",
+  "file_after": "fifo",
+  "file_unchanged": true,
+  "kind_after": "fifo",
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 74224
+ },
+ "J2": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": false,
+    "checked_at": "2026-10-19T01:06:47Z",
+    "problem": "the local log file differs from the lines this service holds: an operator must inspect it"
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.016,
+  "file": "fifo",
+  "rss_kb": 75664
+ },
+ "W4": {
+  "status": 503,
+  "body": {
+   "detail": "INTEGRITY_UNVERIFIED",
+   "maybe": false
+  },
+  "elapsed_s": 0.006,
+  "file_before": "fifo",
+  "file_after": "fifo",
+  "file_unchanged": true,
+  "kind_after": "fifo",
+  "anchors_before": 2,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 75664
+ },
+ "after_writes": {
+  "disk": {
+   "kind": "fifo",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_unchanged": null,
+  "rss_kb": 75664
+ },
+ "J3": {
+  "status": 200,
+  "body": {
+   "job": "integrity",
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-19T01:06:47Z",
+    "problem": null
+   },
+   "ledger_valid": true
+  },
+  "elapsed_s": 0.014,
+  "file": "ed6e277856ce03b847877d6740e5c159e9d5bf458d2e3e123c03f2ff6c106e5a",
+  "rss_kb": 77120
+ },
+ "A3": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-19T01:06:47Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 2
+  },
+  "elapsed_s": 0.011,
+  "file": "ed6e277856ce03b847877d6740e5c159e9d5bf458d2e3e123c03f2ff6c106e5a",
+  "rss_kb": 77856
+ },
+ "after_putback": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "ed6e277856ce03b847877d6740e5c159e9d5bf458d2e3e123c03f2ff6c106e5a",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2
+ },
+ "W3_retry": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-x",
+   "killed": false,
+   "created_at": "2026-10-19T01:06:47Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.069,
+  "file_before": "ed6e277856ce03b847877d6740e5c159e9d5bf458d2e3e123c03f2ff6c106e5a",
+  "file_after": "51863db13b9a5649cd27f0fada8b0298b335a9dbba6e5e369add6a7b63309eac",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 2,
+  "anchors_after": 3,
+  "pending_present": false,
+  "rss_kb": 79392
+ },
+ "W5": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-z",
+   "killed": false,
+   "created_at": "2026-10-19T01:06:47Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.044,
+  "file_before": "51863db13b9a5649cd27f0fada8b0298b335a9dbba6e5e369add6a7b63309eac",
+  "file_after": "0fc5286788bbfe4f5d293ce60782f0c07ce8735844764e1add3bd389691cbc63",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 3,
+  "anchors_after": 4,
+  "pending_present": false,
+  "rss_kb": 80800
+ },
+ "restart": {
+  "status": "ok"
+ },
+ "A_restart": {
+  "status": 200,
+  "body": {
+   "integrity": {
+    "ok": true,
+    "checked_at": "2026-10-19T01:06:48Z",
+    "problem": null
+   },
+   "ledger_valid": true,
+   "log_length": 4
+  },
+  "elapsed_s": 0.012,
+  "file": "0fc5286788bbfe4f5d293ce60782f0c07ce8735844764e1add3bd389691cbc63",
+  "rss_kb": 70800
+ },
+ "W_restart": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-after",
+   "killed": false,
+   "created_at": "2026-10-19T01:06:48Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.059,
+  "file_before": "0fc5286788bbfe4f5d293ce60782f0c07ce8735844764e1add3bd389691cbc63",
+  "file_after": "40d2f080c0f823633d7ab4ce86765ba1dd63124df5df271253324af6586e44b5",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 4,
+  "anchors_after": 5,
+  "pending_present": false,
+  "rss_kb": 72400
+ },
+ "final": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "40d2f080c0f823633d7ab4ce86765ba1dd63124df5df271253324af6586e44b5",
+   "size": 3391,
+   "lines": 5,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 5,
+  "ledger_verify": {
+   "entries": 10,
+   "valid": true
+  },
+  "log_tenants": [
+   "t-before",
+   "t-mid",
+   "t-x",
+   "t-z",
+   "t-after"
+  ]
+ }
+}

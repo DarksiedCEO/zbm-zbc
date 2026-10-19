@@ -1,0 +1,4 @@
+3.12
+inputs 20000 output-differs 0 mutant-output-still-holds-a-span 0
+3.13
+inputs 20000 output-differs 0 mutant-output-still-holds-a-span 0

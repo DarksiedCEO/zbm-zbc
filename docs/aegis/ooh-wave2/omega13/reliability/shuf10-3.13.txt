@@ -1,0 +1,20 @@
+shuf1: FDCOUNT-AT-END 12
+shuf1: 406 passed, 1 warning in 40.49s
+shuf2: FDCOUNT-AT-END 12
+shuf2: 406 passed, 1 warning in 38.48s
+shuf3: FDCOUNT-AT-END 12
+shuf3: 406 passed, 1 warning in 38.83s
+shuf4: FDCOUNT-AT-END 12
+shuf4: 406 passed, 1 warning in 41.05s
+shuf5: FDCOUNT-AT-END 12
+shuf5: 406 passed, 1 warning in 39.52s
+shuf6: FDCOUNT-AT-END 12
+shuf6: 406 passed, 1 warning in 39.65s
+shuf7: FDCOUNT-AT-END 12
+shuf7: 406 passed, 1 warning in 46.49s
+shuf8: FDCOUNT-AT-END 12
+shuf8: 406 passed, 1 warning in 51.36s
+shuf9: FDCOUNT-AT-END 12
+shuf9: 406 passed, 1 warning in 49.18s
+shuf10: FDCOUNT-AT-END 12
+shuf10: 406 passed, 1 warning in 46.88s

@@ -1,0 +1,19 @@
+KEPT | card dingbat negative circled ➊
+KEPT | card dingbat sans circled ➀
+KEPT | card double circled ⓵
+KEPT | card ethiopic ፩
+KEPT | card kharoshthi 𐩀
+KEPT | card mixed 8 ascii+8 dingbat negative circled ➊
+KEPT | card mixed 8 ascii+8 dingbat sans circled ➀
+KEPT | card mixed 8 ascii+8 double circled ⓵
+KEPT | card mixed 8 ascii+8 ethiopic ፩
+KEPT | card mixed 8 ascii+8 kharoshthi 𐩀
+KEPT | card sep &amp;amp;amp;amp;nbsp;
+KEPT | card sep &amp;amp;amp;nbsp;
+KEPT | ssn  dingbat negative circled ➊
+KEPT | ssn  dingbat sans circled ➀
+KEPT | ssn  double circled ⓵
+KEPT | ssn  ethiopic ፩
+KEPT | ssn  kharoshthi 𐩀
+KEPT | ssn sep &amp;amp;amp;amp;nbsp;
+KEPT | ssn sep &amp;amp;amp;nbsp;

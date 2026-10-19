@@ -1,0 +1,2 @@
+python 3.12.14 unicode 15.0.0
+python 3.13.9 unicode 15.1.0

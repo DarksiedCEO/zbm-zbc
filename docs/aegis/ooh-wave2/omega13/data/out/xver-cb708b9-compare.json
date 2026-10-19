@@ -1,0 +1,25 @@
+{
+ "base": [
+  "3.12.14",
+  "15.0.0"
+ ],
+ "3.13.9 (15.1.0)": {
+  "cn_in_base": 825345,
+  "assigned_in_other": 627,
+  "assigned_in_other_by_cat": {
+   "So": 5,
+   "Lo": 622
+  },
+  "faces_template_hash_differs": 0,
+  "cluster_template_hash_differs": 0,
+  "kinds_differ": 0,
+  "faces_hash_differs_by_cat_change": {},
+  "cluster_hash_differs_by_cat_change": {},
+  "examples": {
+   "faces_hash": [],
+   "faces_kinds": [],
+   "cluster_hash": [],
+   "cluster_kinds": []
+  }
+ }
+}

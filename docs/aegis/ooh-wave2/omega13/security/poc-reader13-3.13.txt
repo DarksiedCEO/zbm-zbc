@@ -1,0 +1,9 @@
+KEPT     &#xFF06;#x34; digits         | html:none | html,NFKC,html:CLUSTER '4111111111111111 end' | html,screen_form,html:CLUSTER '4111111111111111 end'
+KEPT     &#xFF06;nbsp; sep            | html:none | html,NFKC,html:CLUSTER '4111\xa01111\xa01111\xa01111 end' | html,screen_form,html:CLUSTER '4111\xa01111\xa01111\xa01111 end'
+KEPT     &#xFF06;#x2d; sep            | html:none | html,NFKC,html:CLUSTER '4111-1111-1111-1111 end' | html,screen_form,html:CLUSTER '4111-1111-1111-1111 end'
+KEPT     &amp;#xFF06;#x34; digits     | html:none | html,NFKC,html:CLUSTER '4111111111111111 end' | html,screen_form,html:CLUSTER '4111111111111111 end'
+KEPT     &#xFE60;nbsp; sep            | html:none | html,NFKC,html:CLUSTER '4111\xa01111\xa01111\xa01111 end' | html,screen_form,html:CLUSTER '4111\xa01111\xa01111\xa01111 end'
+KEPT     &nb&zwj;sp; sep              | html:none | html,NFKC,html:none | html,screen_form,html:CLUSTER '4111\xa01111\xa01111\xa01111 end'
+KEPT     &n&shy;bsp; sep              | html:none | html,NFKC,html:none | html,screen_form,html:CLUSTER '4111\xa01111\xa01111\xa01111 end'
+KEPT     ssn &#xFF06;ndash;           | html:none | html,NFKC,html:CLUSTER '45–6789 end' | html,screen_form,html:CLUSTER '45–6789 end'
+KEPT     email jane@example.рф        | html:none | html,NFKC,html:none | html,screen_form,html:none

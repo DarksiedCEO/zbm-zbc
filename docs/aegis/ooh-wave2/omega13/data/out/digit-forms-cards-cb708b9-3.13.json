@@ -1,0 +1,287 @@
+{
+ "python": "3.13.9",
+ "detected": 35,
+ "n": 35,
+ "rows": {
+  "double_circled|4111 1111 1111 1111": {
+   "text": "\\u24f8\\u24f5\\u24f5\\u24f5 \\u24f5\\u24f5\\u24f5\\u24f5 \\u24f5\\u24f5\\u24f5\\u24f5 \\u24f5\\u24f5\\u24f5\\u24f5",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "double_circled|4111-1111-1111-1111": {
+   "text": "\\u24f8\\u24f5\\u24f5\\u24f5-\\u24f5\\u24f5\\u24f5\\u24f5-\\u24f5\\u24f5\\u24f5\\u24f5-\\u24f5\\u24f5\\u24f5\\u24f5",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "double_circled|123-45-6789": {
+   "text": "\\u24f5\\u24f6\\u24f7-\\u24f8\\u24f9-\\u24fa\\u24fb\\u24fc\\u24fd",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "double_circled|SSN 123 45 6789": {
+   "text": "SSN \\u24f5\\u24f6\\u24f7 \\u24f8\\u24f9 \\u24fa\\u24fb\\u24fc\\u24fd",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact SSN [redacted] for access",
+   "has_pd": true
+  },
+  "double_circled|4111111111111111": {
+   "text": "\\u24f8\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5\\u24f5",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled|4111 1111 1111 1111": {
+   "text": "\\u2779\\u2776\\u2776\\u2776 \\u2776\\u2776\\u2776\\u2776 \\u2776\\u2776\\u2776\\u2776 \\u2776\\u2776\\u2776\\u2776",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled|4111-1111-1111-1111": {
+   "text": "\\u2779\\u2776\\u2776\\u2776-\\u2776\\u2776\\u2776\\u2776-\\u2776\\u2776\\u2776\\u2776-\\u2776\\u2776\\u2776\\u2776",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled|123-45-6789": {
+   "text": "\\u2776\\u2777\\u2778-\\u2779\\u277a-\\u277b\\u277c\\u277d\\u277e",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled|SSN 123 45 6789": {
+   "text": "SSN \\u2776\\u2777\\u2778 \\u2779\\u277a \\u277b\\u277c\\u277d\\u277e",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact SSN [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled|4111111111111111": {
+   "text": "\\u2779\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776\\u2776",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_circled_sans|4111 1111 1111 1111": {
+   "text": "\\u2783\\u2780\\u2780\\u2780 \\u2780\\u2780\\u2780\\u2780 \\u2780\\u2780\\u2780\\u2780 \\u2780\\u2780\\u2780\\u2780",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_circled_sans|4111-1111-1111-1111": {
+   "text": "\\u2783\\u2780\\u2780\\u2780-\\u2780\\u2780\\u2780\\u2780-\\u2780\\u2780\\u2780\\u2780-\\u2780\\u2780\\u2780\\u2780",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_circled_sans|123-45-6789": {
+   "text": "\\u2780\\u2781\\u2782-\\u2783\\u2784-\\u2785\\u2786\\u2787\\u2788",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_circled_sans|SSN 123 45 6789": {
+   "text": "SSN \\u2780\\u2781\\u2782 \\u2783\\u2784 \\u2785\\u2786\\u2787\\u2788",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact SSN [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_circled_sans|4111111111111111": {
+   "text": "\\u2783\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780\\u2780",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled_sans|4111 1111 1111 1111": {
+   "text": "\\u278d\\u278a\\u278a\\u278a \\u278a\\u278a\\u278a\\u278a \\u278a\\u278a\\u278a\\u278a \\u278a\\u278a\\u278a\\u278a",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled_sans|4111-1111-1111-1111": {
+   "text": "\\u278d\\u278a\\u278a\\u278a-\\u278a\\u278a\\u278a\\u278a-\\u278a\\u278a\\u278a\\u278a-\\u278a\\u278a\\u278a\\u278a",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled_sans|123-45-6789": {
+   "text": "\\u278a\\u278b\\u278c-\\u278d\\u278e-\\u278f\\u2790\\u2791\\u2792",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled_sans|SSN 123 45 6789": {
+   "text": "SSN \\u278a\\u278b\\u278c \\u278d\\u278e \\u278f\\u2790\\u2791\\u2792",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact SSN [redacted] for access",
+   "has_pd": true
+  },
+  "dingbat_neg_circled_sans|4111111111111111": {
+   "text": "\\u278d\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a\\u278a",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "ethiopic|4111 1111 1111 1111": {
+   "text": "\\u136c\\u1369\\u1369\\u1369 \\u1369\\u1369\\u1369\\u1369 \\u1369\\u1369\\u1369\\u1369 \\u1369\\u1369\\u1369\\u1369",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "ethiopic|4111-1111-1111-1111": {
+   "text": "\\u136c\\u1369\\u1369\\u1369-\\u1369\\u1369\\u1369\\u1369-\\u1369\\u1369\\u1369\\u1369-\\u1369\\u1369\\u1369\\u1369",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "ethiopic|123-45-6789": {
+   "text": "\\u1369\\u136a\\u136b-\\u136c\\u136d-\\u136e\\u136f\\u1370\\u1371",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "ethiopic|SSN 123 45 6789": {
+   "text": "SSN \\u1369\\u136a\\u136b \\u136c\\u136d \\u136e\\u136f\\u1370\\u1371",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact SSN [redacted] for access",
+   "has_pd": true
+  },
+  "ethiopic|4111111111111111": {
+   "text": "\\u136c\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369\\u1369",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "brahmi_number|4111 1111 1111 1111": {
+   "text": "\\U00011055\\U00011052\\U00011052\\U00011052 \\U00011052\\U00011052\\U00011052\\U00011052 \\U00011052\\U00011052\\U00011052\\U00011052 \\U00011052\\U00011052\\U00011052\\U00011052",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "brahmi_number|4111-1111-1111-1111": {
+   "text": "\\U00011055\\U00011052\\U00011052\\U00011052-\\U00011052\\U00011052\\U00011052\\U00011052-\\U00011052\\U00011052\\U00011052\\U00011052-\\U00011052\\U00011052\\U00011052\\U00011052",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "brahmi_number|123-45-6789": {
+   "text": "\\U00011052\\U00011053\\U00011054-\\U00011055\\U00011056-\\U00011057\\U00011058\\U00011059\\U0001105a",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "brahmi_number|SSN 123 45 6789": {
+   "text": "SSN \\U00011052\\U00011053\\U00011054 \\U00011055\\U00011056 \\U00011057\\U00011058\\U00011059\\U0001105a",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact SSN [redacted] for access",
+   "has_pd": true
+  },
+  "brahmi_number|4111111111111111": {
+   "text": "\\U00011055\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052\\U00011052",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "rumi|4111 1111 1111 1111": {
+   "text": "\\U00010e63\\U00010e60\\U00010e60\\U00010e60 \\U00010e60\\U00010e60\\U00010e60\\U00010e60 \\U00010e60\\U00010e60\\U00010e60\\U00010e60 \\U00010e60\\U00010e60\\U00010e60\\U00010e60",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "rumi|4111-1111-1111-1111": {
+   "text": "\\U00010e63\\U00010e60\\U00010e60\\U00010e60-\\U00010e60\\U00010e60\\U00010e60\\U00010e60-\\U00010e60\\U00010e60\\U00010e60\\U00010e60-\\U00010e60\\U00010e60\\U00010e60\\U00010e60",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "rumi|123-45-6789": {
+   "text": "\\U00010e60\\U00010e61\\U00010e62-\\U00010e63\\U00010e64-\\U00010e65\\U00010e66\\U00010e67\\U00010e68",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  },
+  "rumi|SSN 123 45 6789": {
+   "text": "SSN \\U00010e60\\U00010e61\\U00010e62 \\U00010e63\\U00010e64 \\U00010e65\\U00010e66\\U00010e67\\U00010e68",
+   "kinds": [
+    "ssn"
+   ],
+   "kept": "contact SSN [redacted] for access",
+   "has_pd": true
+  },
+  "rumi|4111111111111111": {
+   "text": "\\U00010e63\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60\\U00010e60",
+   "kinds": [
+    "card"
+   ],
+   "kept": "contact [redacted] for access",
+   "has_pd": true
+  }
+ }
+}

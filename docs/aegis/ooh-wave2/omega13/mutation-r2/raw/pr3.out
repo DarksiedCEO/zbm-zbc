@@ -1,0 +1,61 @@
+H040 fw_hex_entity[4111111111111111,depth17] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp | decoded-holds-card/ssn/cluster: True
+H040 fw_hex_entity[4111111111111111,depth20] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;# | decoded-holds-card/ssn/cluster: True
+H040 fw_hex_entity[123-45-6789,depth17] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp | decoded-holds-card/ssn/cluster: True
+H040 fw_hex_entity[123-45-6789,depth20] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;# | decoded-holds-card/ssn/cluster: True
+H041 fw_hex_entity[4111111111111111,depth1] DIFF mutant: ('&#x34;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31; | decoded-holds-card/ssn/cluster: True
+H041 fw_hex_entity[4111111111111111,depth2] DIFF mutant: ('&amp;#x34;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x3 | decoded-holds-card/ssn/cluster: True
+H041 fw_hex_entity[123-45-6789,depth1] DIFF mutant: ('&#x31;&#x32;&#x33;-&#x34;&#x35;-&#x36;&#x37;&#x38;&#x39;', []) | decoded-holds-card/ssn/cluster: True
+H041 fw_hex_entity[123-45-6789,depth2] DIFF mutant: ('&amp;#x31;&amp;#x32;&amp;#x33;-&amp;#x34;&amp;#x35;-&amp;#x36;&amp;#x37;&amp;# | decoded-holds-card/ssn/cluster: True
+H041 email_residue DIFF mutant: ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn']) | decoded-holds-card/ssn/cluster: False
+H048 email_residue DIFF mutant: ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn']) | decoded-holds-card/ssn/cluster: False
+H050 fw_hex_entity[4111111111111111,depth17] EXCEPTION TypeError("'NoneType' object is not iterable")
+H050 fw_hex_entity[4111111111111111,depth20] EXCEPTION TypeError("'NoneType' object is not iterable")
+H050 fw_hex_entity[123-45-6789,depth17] EXCEPTION TypeError("'NoneType' object is not iterable")
+H050 fw_hex_entity[123-45-6789,depth20] EXCEPTION TypeError("'NoneType' object is not iterable")
+H051 email_residue DIFF mutant: ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn']) | decoded-holds-card/ssn/cluster: False
+H052 email_residue DIFF mutant: ('5;@.(7@ ]&#@ 3 com@[redacted][redacted] dot nbsp; 5;', ['email', 'ssn']) | decoded-holds-card/ssn/cluster: False
+H056 ascii_hex_entity_depth20[card] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;# | decoded-holds-card/ssn/cluster: True
+H057 ascii_hex_entity_depth20[card] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H058 ascii_hex_entity[card] DIFF mutant: ('[redacted]', ['card', 'number']) | decoded-holds-card/ssn/cluster: False
+H059 ascii_hex_entity[card] DIFF mutant: ('[redacted]', ['number']) | decoded-holds-card/ssn/cluster: False
+H061 ascii_hex_entity[card] DIFF mutant: ('[redacted]', ['number']) | decoded-holds-card/ssn/cluster: False
+H062 ascii_hex_entity[card] DIFF mutant: ('[redacted]', ['number']) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[4111111111111111,depth1] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[4111111111111111,depth2] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[4111111111111111,depth17] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[4111111111111111,depth20] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[123-45-6789,depth1] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[123-45-6789,depth2] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[123-45-6789,depth17] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H063 fw_hex_entity[123-45-6789,depth20] DIFF mutant: ('[redacted]', []) | decoded-holds-card/ssn/cluster: False
+H064 fw_hex_entity[4111111111111111,depth1] DIFF mutant: ('&#x34;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31; | decoded-holds-card/ssn/cluster: True
+H064 fw_hex_entity[4111111111111111,depth2] DIFF mutant: ('&amp;#x34;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x3 | decoded-holds-card/ssn/cluster: True
+H064 fw_hex_entity[4111111111111111,depth17] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp | decoded-holds-card/ssn/cluster: True
+H064 fw_hex_entity[4111111111111111,depth20] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;# | decoded-holds-card/ssn/cluster: True
+H064 fw_hex_entity[123-45-6789,depth1] DIFF mutant: ('&#x31;&#x32;&#x33;-&#x34;&#x35;-&#x36;&#x37;&#x38;&#x39;', ['number']) | decoded-holds-card/ssn/cluster: True
+H064 fw_hex_entity[123-45-6789,depth2] DIFF mutant: ('&amp;#x31;&amp;#x32;&amp;#x33;-&amp;#x34;&amp;#x35;-&amp;#x36;&amp;#x37;&amp;# | decoded-holds-card/ssn/cluster: True
+H064 fw_hex_entity[123-45-6789,depth17] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp | decoded-holds-card/ssn/cluster: True
+H064 fw_hex_entity[123-45-6789,depth20] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;# | decoded-holds-card/ssn/cluster: True
+H064 email_residue DIFF mutant: ('[redacted] com@[redacted])@3&#11 dot nbsp; 5;', ['number', 'ssn']) | decoded-holds-card/ssn/cluster: False
+H065 fw_hex_entity[4111111111111111,depth1] DIFF mutant: ('&#x34;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31;&#x31; | decoded-holds-card/ssn/cluster: True
+H065 fw_hex_entity[4111111111111111,depth2] DIFF mutant: ('&amp;#x34;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x31;&amp;#x3 | decoded-holds-card/ssn/cluster: True
+H065 fw_hex_entity[4111111111111111,depth17] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x34;&amp;amp | decoded-holds-card/ssn/cluster: True
+H065 fw_hex_entity[4111111111111111,depth20] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;# | decoded-holds-card/ssn/cluster: True
+H065 fw_hex_entity[123-45-6789,depth1] DIFF mutant: ('&#x31;&#x32;&#x33;-&#x34;&#x35;-&#x36;&#x37;&#x38;&#x39;', []) | decoded-holds-card/ssn/cluster: True
+H065 fw_hex_entity[123-45-6789,depth2] DIFF mutant: ('&amp;#x31;&amp;#x32;&amp;#x33;-&amp;#x34;&amp;#x35;-&amp;#x36;&amp;#x37;&amp;# | decoded-holds-card/ssn/cluster: True
+H065 fw_hex_entity[123-45-6789,depth17] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;#x31;&amp;amp | decoded-holds-card/ssn/cluster: True
+H065 fw_hex_entity[123-45-6789,depth20] DIFF mutant: ('&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;# | decoded-holds-card/ssn/cluster: True
+H065 ascii_hex_entity[card] DIFF mutant: ('[redacted]', ['card', 'number']) | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[4111111111111111,depth1] DIFF mutant: ('\uff06\uff03\uff58\uff13\uff14\uff1b\uff06\uff03\uff58\uff13\uff11\uff1b\uff06 | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[4111111111111111,depth2] DIFF mutant: ('\uff06\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff14\uff1b\uff06\uff41\uff4d | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[4111111111111111,depth17] DIFF mutant: ('\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[4111111111111111,depth20] DIFF mutant: ('\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[123-45-6789,depth1] DIFF mutant: ('\uff06\uff03\uff58\uff13\uff11\uff1b\uff06\uff03\uff58\uff13\uff12\uff1b\uff06 | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[123-45-6789,depth2] DIFF mutant: ('\uff06\uff41\uff4d\uff50\uff1b\uff03\uff58\uff13\uff11\uff1b\uff06\uff41\uff4d | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[123-45-6789,depth17] DIFF mutant: ('\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b | decoded-holds-card/ssn/cluster: False
+H067 fw_hex_entity[123-45-6789,depth20] DIFF mutant: ('\uff06\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b\uff41\uff4d\uff50\uff1b | decoded-holds-card/ssn/cluster: False
+H070 fw_hex_entity[4111111111111111,depth1] DIFF mutant: ('[redacted]', ['card']) | decoded-holds-card/ssn/cluster: False
+H070 fw_hex_entity[4111111111111111,depth2] DIFF mutant: ('[redacted]', ['card']) | decoded-holds-card/ssn/cluster: False
+H070 fw_hex_entity[123-45-6789,depth1] DIFF mutant: ('[redacted]', ['ssn']) | decoded-holds-card/ssn/cluster: False
+H070 fw_hex_entity[123-45-6789,depth2] DIFF mutant: ('[redacted]', ['ssn']) | decoded-holds-card/ssn/cluster: False
+H070 email_residue DIFF mutant: ('5;@.(7@ ]&#@ 3 [redacted]; 5;', ['email', 'ssn']) | decoded-holds-card/ssn/cluster: False

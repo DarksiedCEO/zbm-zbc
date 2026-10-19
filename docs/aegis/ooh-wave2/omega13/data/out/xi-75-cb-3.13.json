@@ -1,0 +1,280 @@
+{
+ "treeA": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data13run/trees/t-75b0662",
+ "treeB": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/data13run/trees/t-cb708b9",
+ "write": {
+  "unit0": 201,
+  "unit1": 201,
+  "unit2": 201,
+  "unit3": 201,
+  "unit4": 201,
+  "unit5": 201,
+  "unit6": 201,
+  "unit7": 201,
+  "unit8": 201,
+  "unit9": 201,
+  "unit10": 201,
+  "unit11": 201,
+  "unit12": 201,
+  "unit13": 201,
+  "unit14": 201,
+  "unit15": 201,
+  "unit16": 201,
+  "unit17": 201,
+  "face_attr": 200,
+  "submit": 200,
+  "integrity_ok": true,
+  "log_lines": 105,
+  "recorded_requests": 105
+ },
+ "read": {
+  "start_integrity_ok": true,
+  "state_diff_vs_writer": [],
+  "request_sha_vs_line_by_rid": {
+   "equal": 59,
+   "differ": 46,
+   "no_line": 0
+  },
+  "request_sha_writer_fn_vs_reader_fn": {
+   "bodies": 105,
+   "equal": 93,
+   "differ": [
+    [
+     "inventory",
+     "contact 4111 1111 1111 1111 for access"
+    ],
+    [
+     "inventory",
+     "contact 123.45.6789 for access"
+    ],
+    [
+     "inventory",
+     "faces  west,\nlit 24h "
+    ],
+    [
+     "inventory",
+     "\ufb01rst \ufb02oor, \uff2eorth side"
+    ],
+    [
+     "inventory",
+     "flight 2026-11-01 - 2026-11-30"
+    ],
+    [
+     "inventory",
+     "ref io-2026-1018-0001, 14x48"
+    ],
+    [
+     "inventory",
+     "contact 12\u30fc34\u30fc56\u30fc789 for access"
+    ],
+    [
+     "inventory",
+     "contact 4111&nbsp;1111&nbsp;1111&nbsp;1111 for access"
+    ],
+    [
+     "inventory",
+     "panel \u2776 lit, bay \u2777"
+    ],
+    [
+     "inventory",
+     "contact \u24f8\u24f5\u24f5\u24f5 \u24f5\u24f5\u24f5\u24f5 \u24f5\u24f5\u24f5\u24f5 \u24f5\u24f5\u24f5\u24f5 for access"
+    ],
+    [
+     "inventory",
+     "contact 4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111 for access"
+    ],
+    [
+     "inventory",
+     "write a@b\ud87a\udff0d.com"
+    ]
+   ]
+  },
+  "replays": {
+   "count": 105,
+   "statuses": {
+    "201": 64,
+    "200": 29,
+    "409": 12
+   },
+   "lines_added": 0,
+   "status_differs_from_original": [
+    [
+     "inventory",
+     "contact 4111 1111 1111 1111 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 123.45.6789 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "faces  west,\nlit 24h ",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "\ufb01rst \ufb02oor, \uff2eorth side",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "flight 2026-11-01 - 2026-11-30",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "ref io-2026-1018-0001, 14x48",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 12\u30fc34\u30fc56\u30fc789 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 4111&nbsp;1111&nbsp;1111&nbsp;1111 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "panel \u2776 lit, bay \u2777",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact \u24f8\u24f5\u24f5\u24f5 \u24f5\u24f5\u24f5\u24f5 \u24f5\u24f5\u24f5\u24f5 \u24f5\u24f5\u24f5\u24f5 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "contact 4111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111&amp;amp;amp;nbsp;1111 for access",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ],
+    [
+     "inventory",
+     "write a@b\ud87a\udff0d.com",
+     201,
+     409,
+     "REQUEST_ID_REUSED"
+    ]
+   ]
+  },
+  "mutated_retries": {
+   "results": [
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "inventory",
+     409
+    ],
+    [
+     "funds-verifications",
+     409
+    ]
+   ],
+   "lines_added": 0
+  },
+  "write": 201,
+  "second_restart_integrity_ok": true,
+  "log_lines": 106
+ },
+ "readback": {
+  "log_lines": 106,
+  "anchors": 106,
+  "problems": []
+ }
+}

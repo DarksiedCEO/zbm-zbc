@@ -1,0 +1,15 @@
+pristine True fraction 0.24606666666666666
+H042 helper diffs 416 public-API diffs among them 0 pii.py:L346 _forms: drops the as-kept text
+   helper e.g. '4111049\uff41&#64;\uff41 dot \u2460[redacted]a' True False
+H043 helper diffs 149 public-API diffs among them 0 pii.py:L347 _forms: no screen_form form
+   helper e.g. '\u1369 %40 \u136911111' True False
+H044 helper diffs 0 public-API diffs among them 0 pii.py:L347 _forms: no _norm form
+H045 helper diffs 737 public-API diffs among them 112 pii.py:L347 _forms: no plain form
+   reach e.g. 'amp;4111%4011&fflig;9&amp;#x34;@&fflig;19a' -> ('[redacted]', ['number']) vs ('amp;4111%4011&fflig;9&amp;#x34;@&fflig;19a', [])
+   reach e.g. '1111&fflig;11111fflig;xb&amp;#x34;- \u0301\u200b&fflig;' -> ('[redacted]', ['number']) vs ('1111&fflig;11111fflig;xb&amp;#x34;- \u0301&fflig;', [])
+H046 helper diffs 573 public-API diffs among them 106 pii.py:L353 _still_holds: cluster test on first fo
+   reach e.g. 'amp;4111%4011&fflig;9&amp;#x34;@&fflig;19a' -> ('[redacted]', ['number']) vs ('amp;4111%4011&fflig;9&amp;#x34;@&fflig;19a', [])
+   reach e.g. '1111&fflig;11111fflig;xb&amp;#x34;- \u0301\u200b&fflig;' -> ('[redacted]', ['number']) vs ('1111&fflig;11111fflig;xb&amp;#x34;- \u0301&fflig;', [])
+H049 helper diffs 1482 public-API diffs among them 112 pii.py:L353 _still_holds: cluster test dropped
+   reach e.g. 'amp;4111%4011&fflig;9&amp;#x34;@&fflig;19a' -> ('[redacted]', ['number']) vs ('amp;4111%4011&fflig;9&amp;#x34;@&fflig;19a', [])
+   reach e.g. '1111&fflig;11111fflig;xb&amp;#x34;- \u0301\u200b&fflig;' -> ('[redacted]', ['number']) vs ('1111&fflig;11111fflig;xb&amp;#x34;- \u0301&fflig;', [])

@@ -1,0 +1,14 @@
+circled ok ['phone'] 13
+arabic ok ['phone'] 13
+nine ok ['phone'] 13
+hex ok [] 3994
+ent-built ok ['number'] 14
+ent-built-hex ok [] 3608
+ent-built-nested ok ['number'] 18
+ent-built-letters-split ok [] 3307
+ent-built-sep ok ['number', 'phone'] 10
+nfkc-split ok ['phone'] 10
+dig-zw ok ['phone'] 10
+expand ok ['phone'] 13
+lone ok [] 4000
+ent-bigcode ok [] 2400

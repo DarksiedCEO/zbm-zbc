@@ -1,0 +1,7 @@
+PROBE amps=2 status=201 redacted=True kinds=['card'] text='contact [redacted] now' fully-decoded='contact [redacted] now' logline-has-text=True
+PROBE amps=4 status=201 redacted=True kinds=['card'] text='contact [redacted] now' fully-decoded='contact [redacted] now' logline-has-text=True
+PROBE amps=8 status=201 redacted=True kinds=['card'] text='contact [redacted] now' fully-decoded='contact [redacted] now' logline-has-text=True
+PROBE amps=15 status=201 redacted=True kinds=['number'] text='[redacted]' fully-decoded='[redacted]' logline-has-text=True
+PROBE amps=16 status=201 redacted=True kinds=['number'] text='[redacted]' fully-decoded='[redacted]' logline-has-text=True
+PROBE amps=17 status=201 redacted=True kinds=['number'] text='[redacted]' fully-decoded='[redacted]' logline-has-text=True
+6 passed, 1 warning in 0.98s

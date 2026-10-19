@@ -1,0 +1,100 @@
+{
+ "scen": "rperm",
+ "mode": "X",
+ "tree": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega13/runtime/src_cb708b9",
+ "python": "3.13.9",
+ "ledger_bin": "/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/rt13-target/release/server",
+ "start": {
+  "status": "ok"
+ },
+ "rss_start_kb": 69952,
+ "W1": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-before",
+   "killed": false,
+   "created_at": "2026-10-19T01:05:36Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.051,
+  "file_before": "missing",
+  "file_after": "f0d137b43998d1f8de2078a08ce3fc687c183988260cef9556f72c9963ebe406",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 0,
+  "anchors_after": 1,
+  "pending_present": false,
+  "rss_kb": 70896
+ },
+ "W2": {
+  "status": 201,
+  "body": {
+   "tenant_id": "t-mid",
+   "killed": false,
+   "created_at": "2026-10-19T01:05:36Z",
+   "campaigns": 0
+  },
+  "elapsed_s": 0.044,
+  "file_before": "f0d137b43998d1f8de2078a08ce3fc687c183988260cef9556f72c9963ebe406",
+  "file_after": "abff0e1f799c62a8db1b218816ed380a09ea6a0997a2ad4ba1561f998a74731d",
+  "file_unchanged": false,
+  "kind_after": "regular",
+  "anchors_before": 1,
+  "anchors_after": 2,
+  "pending_present": false,
+  "rss_kb": 72416
+ },
+ "pre": {
+  "disk": {
+   "kind": "regular",
+   "sha256": "abff0e1f799c62a8db1b218816ed380a09ea6a0997a2ad4ba1561f998a74731d",
+   "size": 1372,
+   "lines": 2,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "anchors": 2,
+  "rss_kb": 72400
+ },
+ "fault": {
+  "orig_sha": "abff0e1f799c62a8db1b218816ed380a09ea6a0997a2ad4ba1561f998a74731d",
+  "disk": {
+   "kind": "regular",
+   "sha256": null,
+   "size": null,
+   "lines": null,
+   "dir": [
+    "ooh.lock",
+    "ooh_log.jsonl"
+   ]
+  },
+  "target_sha": null
+ },
+ "stop": "SIGTERM",
+ "restart_on_fault": {
+  "exited": 1,
+  "after_s": 0.256,
+  "peak_rss_kb": 60080,
+  "log_tail": [
+   "  File \"/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega13/runtime/src_cb708b9/services/ooh-py/src/store.py\", line 147, in _read_at_start",
+   "    raise StoreCorrupt(f\"the log cannot be opened ({type(exc).__name__}); refusing to start: {why}\") from exc",
+   "store.StoreCorrupt: the log cannot be opened (PermissionError); refusing to start: inspect the data directory"
+  ]
+ },
+ "restart_rss_kb": null,
+ "restart_alive": false,
+ "kill_after_restart": "already exited rc 1",
+ "disk_after": {
+  "kind": "regular",
+  "sha256": null,
+  "size": null,
+  "lines": null,
+  "dir": [
+   "ooh.lock",
+   "ooh_log.jsonl"
+  ]
+ },
+ "target_unchanged": null
+}

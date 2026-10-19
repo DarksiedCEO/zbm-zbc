@@ -1,0 +1,632 @@
+[
+{
+"id": "H001",
+"file": "pii.py",
+"desc": "pii.py:L55 _W drops underscore",
+"orig": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"new": "_W = r\"(?:[A-Za-z0-9]|[^\\x00-\\x7f\\s])\"",
+"pos": 4704,
+"line": 55
+},
+{
+"id": "H002",
+"file": "pii.py",
+"desc": "pii.py:L55 _W drops digits",
+"orig": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"new": "_W = r\"(?:[A-Za-z_]|[^\\x00-\\x7f\\s])\"",
+"pos": 4704,
+"line": 55
+},
+{
+"id": "H003",
+"file": "pii.py",
+"desc": "pii.py:L55 _W drops the non-ASCII branch",
+"orig": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"new": "_W = r\"(?:[A-Za-z0-9_])\"",
+"pos": 4704,
+"line": 55
+},
+{
+"id": "H004",
+"file": "pii.py",
+"desc": "pii.py:L55 _W non-ASCII branch no longer excludes spaces",
+"orig": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"new": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f])\"",
+"pos": 4704,
+"line": 55
+},
+{
+"id": "H005",
+"file": "pii.py",
+"desc": "pii.py:L55 _W ASCII letters lower-case only",
+"orig": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"new": "_W = r\"(?:[a-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"pos": 4704,
+"line": 55
+},
+{
+"id": "H006",
+"file": "pii.py",
+"desc": "pii.py:L55 _W non-ASCII branch -> only Latin-1 supplement",
+"orig": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"new": "_W = r\"(?:[A-Za-z0-9_]|[\\x80-\\xff])\"",
+"pos": 4704,
+"line": 55
+},
+{
+"id": "H007",
+"file": "pii.py",
+"desc": "pii.py:L55 _W ASCII range bound \\x7f -> \\x7e (DEL joins)",
+"orig": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7f\\s])\"",
+"new": "_W = r\"(?:[A-Za-z0-9_]|[^\\x00-\\x7e\\s])\"",
+"pos": 4704,
+"line": 55
+},
+{
+"id": "H008",
+"file": "pii.py",
+"desc": "pii.py:L56 _DOM drops hyphen",
+"orig": "_DOM = rf\"(?:{_W}|-)+\"",
+"new": "_DOM = rf\"(?:{_W})+\"",
+"pos": 4744,
+"line": 56
+},
+{
+"id": "H009",
+"file": "pii.py",
+"desc": "pii.py:L56 _DOM + -> *",
+"orig": "_DOM = rf\"(?:{_W}|-)+\"",
+"new": "_DOM = rf\"(?:{_W}|-)*\"",
+"pos": 4744,
+"line": 56
+},
+{
+"id": "H010",
+"file": "pii.py",
+"desc": "pii.py:L57 _WORD_DOM drops hyphen",
+"orig": "_WORD_DOM = rf\"[a-z](?:{_W}|-)*\"",
+"new": "_WORD_DOM = rf\"[a-z](?:{_W})*\"",
+"pos": 4767,
+"line": 57
+},
+{
+"id": "H011",
+"file": "pii.py",
+"desc": "pii.py:L57 _WORD_DOM * -> +",
+"orig": "_WORD_DOM = rf\"[a-z](?:{_W}|-)*\"",
+"new": "_WORD_DOM = rf\"[a-z](?:{_W}|-)+\"",
+"pos": 4767,
+"line": 57
+},
+{
+"id": "H012",
+"file": "pii.py",
+"desc": "pii.py:L67 _EMAIL_WORD local bound 64 -> 63",
+"orig": "(?:{_W}|[.+-]){{1,64}}",
+"new": "(?:{_W}|[.+-]){{1,63}}",
+"pos": 5479,
+"line": 67
+},
+{
+"id": "H013",
+"file": "pii.py",
+"desc": "pii.py:L67 _EMAIL_WORD local bound 64 -> 65",
+"orig": "(?:{_W}|[.+-]){{1,64}}",
+"new": "(?:{_W}|[.+-]){{1,65}}",
+"pos": 5479,
+"line": 67
+},
+{
+"id": "H014",
+"file": "pii.py",
+"desc": "pii.py:L67 _EMAIL_WORD local part drops _W",
+"orig": "(?:{_W}|[.+-]){{1,64}}",
+"new": "(?:[.+-]){{1,64}}",
+"pos": 5479,
+"line": 67
+},
+{
+"id": "H015",
+"file": "pii.py",
+"desc": "pii.py:L67 _EMAIL_WORD local part drops '.'",
+"orig": "(?:{_W}|[.+-]){{1,64}}",
+"new": "(?:{_W}|[+-]){{1,64}}",
+"pos": 5479,
+"line": 67
+},
+{
+"id": "H016",
+"file": "pii.py",
+"desc": "pii.py:L67 _EMAIL_WORD local part drops '+'",
+"orig": "(?:{_W}|[.+-]){{1,64}}",
+"new": "(?:{_W}|[.-]){{1,64}}",
+"pos": 5479,
+"line": 67
+},
+{
+"id": "H017",
+"file": "pii.py",
+"desc": "pii.py:L67 _EMAIL_WORD local part drops '-'",
+"orig": "(?:{_W}|[.+-]){{1,64}}",
+"new": "(?:{_W}|[.+]){{1,64}}",
+"pos": 5479,
+"line": 67
+},
+{
+"id": "H018",
+"file": "pii.py",
+"desc": "pii.py:L80 _INTL drops the ASCII lookbehind",
+"orig": "(?<![A-Za-z0-9_+])(?<![^\\x00-\\x7f\\s])",
+"new": "(?<![^\\x00-\\x7f\\s])",
+"pos": 6597,
+"line": 80
+},
+{
+"id": "H019",
+"file": "pii.py",
+"desc": "pii.py:L80 _INTL drops the non-ASCII lookbehind",
+"orig": "(?<![A-Za-z0-9_+])(?<![^\\x00-\\x7f\\s])",
+"new": "(?<![A-Za-z0-9_+])",
+"pos": 6597,
+"line": 80
+},
+{
+"id": "H020",
+"file": "pii.py",
+"desc": "pii.py:L80 _INTL lookbehind drops '_'",
+"orig": "(?<![A-Za-z0-9_+])",
+"new": "(?<![A-Za-z0-9+])",
+"pos": 6597,
+"line": 80
+},
+{
+"id": "H021",
+"file": "pii.py",
+"desc": "pii.py:L80 _INTL lookbehind drops digits",
+"orig": "(?<![A-Za-z0-9_+])",
+"new": "(?<![A-Za-z_+])",
+"pos": 6597,
+"line": 80
+},
+{
+"id": "H022",
+"file": "pii.py",
+"desc": "pii.py:L80 _INTL lookbehind drops letters",
+"orig": "(?<![A-Za-z0-9_+])",
+"new": "(?<![0-9_+])",
+"pos": 6597,
+"line": 80
+},
+{
+"id": "H023",
+"file": "pii.py",
+"desc": "pii.py:L80 _INTL lookbehind drops '+'",
+"orig": "(?<![A-Za-z0-9_+])",
+"new": "(?<![A-Za-z0-9_])",
+"pos": 6597,
+"line": 80
+},
+{
+"id": "H024",
+"file": "pii.py",
+"desc": "pii.py:L80 _INTL second lookbehind admits non-ASCII spaces as blockers",
+"orig": "(?<![^\\x00-\\x7f\\s])",
+"new": "(?<![^\\x00-\\x7f])",
+"pos": 6615,
+"line": 80
+},
+{
+"id": "H025",
+"file": "pii.py",
+"desc": "pii.py:L113 strip_format: decimal() instead of digit()",
+"orig": "unicodedata.digit(ch, None) if",
+"new": "unicodedata.decimal(ch, None) if",
+"pos": 8531,
+"line": 113
+},
+{
+"id": "H026",
+"file": "pii.py",
+"desc": "pii.py:L113 strip_format: non-ASCII bound > \\x7f -> > \\xff",
+"orig": "if ch > \"\\x7f\" else None",
+"new": "if ch > \"\\xff\" else None",
+"pos": 8559,
+"line": 113
+},
+{
+"id": "H027",
+"file": "pii.py",
+"desc": "pii.py:L113 strip_format: digit applied to every character",
+"orig": "unicodedata.digit(ch, None) if ch > \"\\x7f\" else None",
+"new": "unicodedata.digit(ch, None)",
+"pos": 8531,
+"line": 113
+},
+{
+"id": "H028",
+"file": "pii.py",
+"desc": "pii.py:L113 strip_format: default 0 for non-digits",
+"orig": "unicodedata.digit(ch, None)",
+"new": "unicodedata.digit(ch, 0)",
+"pos": 8531,
+"line": 113
+},
+{
+"id": "H029",
+"file": "pii.py",
+"desc": "pii.py:L113 strip_format: ch >= \\x7f",
+"orig": "if ch > \"\\x7f\" else None",
+"new": "if ch >= \"\\x7f\" else None",
+"pos": 8559,
+"line": 113
+},
+{
+"id": "H030",
+"file": "pii.py",
+"desc": "pii.py:L124 screen_form: one pass only",
+"orig": "for _ in range(5):                    # to a fixed",
+"new": "for _ in range(1):                    # to a fixed",
+"pos": 9247,
+"line": 124
+},
+{
+"id": "H031",
+"file": "pii.py",
+"desc": "pii.py:L124 screen_form: two passes only",
+"orig": "for _ in range(5):                    # to a fixed",
+"new": "for _ in range(2):                    # to a fixed",
+"pos": 9247,
+"line": 124
+},
+{
+"id": "H032",
+"file": "pii.py",
+"desc": "pii.py:L128 screen_form: returns once",
+"orig": "            break\n        t = once\n    return t",
+"new": "            break\n        t = once\n    return once",
+"pos": 9714,
+"line": 128
+},
+{
+"id": "H033",
+"file": "pii.py",
+"desc": "pii.py:L127 screen_form: no fixed-point break",
+"orig": "        if once == t:",
+"new": "        if False:",
+"pos": 9595,
+"line": 127
+},
+{
+"id": "H034",
+"file": "pii.py",
+"desc": "pii.py:L126 screen_form: reads strip_format of the original every pass",
+"orig": "for ch in strip_format(t, hidden)",
+"new": "for ch in strip_format(text, hidden)",
+"pos": 9512,
+"line": 126
+},
+{
+"id": "H035",
+"file": "pii.py",
+"desc": "pii.py:L318 _MAX_DECODE 16 -> 3 (previous bound)",
+"orig": "_MAX_DECODE = 16",
+"new": "_MAX_DECODE = 3",
+"pos": 17763,
+"line": 318
+},
+{
+"id": "H036",
+"file": "pii.py",
+"desc": "pii.py:L318 _MAX_DECODE 16 -> 4",
+"orig": "_MAX_DECODE = 16",
+"new": "_MAX_DECODE = 4",
+"pos": 17763,
+"line": 318
+},
+{
+"id": "H037",
+"file": "pii.py",
+"desc": "pii.py:L318 _MAX_DECODE 16 -> 8",
+"orig": "_MAX_DECODE = 16",
+"new": "_MAX_DECODE = 8",
+"pos": 17763,
+"line": 318
+},
+{
+"id": "H038",
+"file": "pii.py",
+"desc": "pii.py:L327 _fully_decoded: unsettled returns the text",
+"orig": "            return t\n        t = once\n    return None",
+"new": "            return t\n        t = once\n    return t",
+"pos": 18222,
+"line": 327
+},
+{
+"id": "H039",
+"file": "pii.py",
+"desc": "pii.py:L325 _fully_decoded: unescape once only",
+"orig": "        once = html.unescape(t)\n        if once == t:\n            return t\n        t = once",
+"new": "        once = html.unescape(t)\n        return once",
+"pos": 18168,
+"line": 325
+},
+{
+"id": "H040",
+"file": "pii.py",
+"desc": "pii.py:L343 _forms: unsettled decoding gives only the text",
+"orig": "    if d is None:\n        return None\n    out = []",
+"new": "    if d is None:\n        return [t]\n    out = []",
+"pos": 18870,
+"line": 343
+},
+{
+"id": "H041",
+"file": "pii.py",
+"desc": "pii.py:L346 _forms: drops the decoded text",
+"orig": "for f in (t, d):",
+"new": "for f in (t,):",
+"pos": 18925,
+"line": 346
+},
+{
+"id": "H042",
+"file": "pii.py",
+"desc": "pii.py:L346 _forms: drops the as-kept text",
+"orig": "for f in (t, d):",
+"new": "for f in (d,):",
+"pos": 18925,
+"line": 346
+},
+{
+"id": "H043",
+"file": "pii.py",
+"desc": "pii.py:L347 _forms: no screen_form form",
+"orig": "out += [f, screen_form(f), _norm(f)]",
+"new": "out += [f, _norm(f)]",
+"pos": 18950,
+"line": 347
+},
+{
+"id": "H044",
+"file": "pii.py",
+"desc": "pii.py:L347 _forms: no _norm form",
+"orig": "out += [f, screen_form(f), _norm(f)]",
+"new": "out += [f, screen_form(f)]",
+"pos": 18950,
+"line": 347
+},
+{
+"id": "H045",
+"file": "pii.py",
+"desc": "pii.py:L347 _forms: no plain form",
+"orig": "out += [f, screen_form(f), _norm(f)]",
+"new": "out += [screen_form(f), _norm(f)]",
+"pos": 18950,
+"line": 347
+},
+{
+"id": "H046",
+"file": "pii.py",
+"desc": "pii.py:L353 _still_holds: cluster test on first form only",
+"orig": "any(number_cluster_spans(f) for f in forms)",
+"new": "any(number_cluster_spans(f) for f in forms[:1])",
+"pos": 19102,
+"line": 353
+},
+{
+"id": "H047",
+"file": "pii.py",
+"desc": "pii.py:L353 _still_holds: free-text test without _norm",
+"orig": "any(_free_text_spans(_norm(f)) for f in forms)",
+"new": "any(_free_text_spans(f) for f in forms)",
+"pos": 19149,
+"line": 353
+},
+{
+"id": "H048",
+"file": "pii.py",
+"desc": "pii.py:L353 _still_holds: free-text test dropped",
+"orig": "or any(_free_text_spans(_norm(f)) for f in forms)",
+"new": "",
+"pos": 19146,
+"line": 353
+},
+{
+"id": "H049",
+"file": "pii.py",
+"desc": "pii.py:L353 _still_holds: cluster test dropped",
+"orig": "or any(number_cluster_spans(f) for f in forms) ",
+"new": "",
+"pos": 19099,
+"line": 353
+},
+{
+"id": "H050",
+"file": "pii.py",
+"desc": "pii.py:L353 _still_holds: unsettled decoding not a hit",
+"orig": "return forms is None or any(",
+"new": "return forms is not None and any(",
+"pos": 19078,
+"line": 353
+},
+{
+"id": "H051",
+"file": "pii.py",
+"desc": "pii.py:L353 _still_holds: free-text test on first form only",
+"orig": "any(_free_text_spans(_norm(f)) for f in forms)",
+"new": "any(_free_text_spans(_norm(f)) for f in forms[:1])",
+"pos": 19149,
+"line": 353
+},
+{
+"id": "H052",
+"file": "pii.py",
+"desc": "pii.py:L335 _screen_stages: first stage skipped",
+"orig": "t = _redact_all(screen_form(t), number_cluster_spans, kinds)",
+"new": "t = screen_form(t)",
+"pos": 18522,
+"line": 335
+},
+{
+"id": "H053",
+"file": "pii.py",
+"desc": "pii.py:L336 _screen_stages: second stage reads t without _norm",
+"orig": "return _redact_all(_norm(t), _free_text_spans, kinds)",
+"new": "return _redact_all(t, _free_text_spans, kinds)",
+"pos": 18587,
+"line": 336
+},
+{
+"id": "H054",
+"file": "pii.py",
+"desc": "pii.py:L335 _screen_stages: first stage reads t without screen_form",
+"orig": "t = _redact_all(screen_form(t), number_cluster_spans, kinds)",
+"new": "t = _redact_all(t, number_cluster_spans, kinds)",
+"pos": 18522,
+"line": 335
+},
+{
+"id": "H055",
+"file": "pii.py",
+"desc": "pii.py:L336 _screen_stages: second stage uses the cluster finder",
+"orig": "return _redact_all(_norm(t), _free_text_spans, kinds)",
+"new": "return _redact_all(_norm(t), number_cluster_spans, kinds)",
+"pos": 18587,
+"line": 336
+},
+{
+"id": "H056",
+"file": "pii.py",
+"desc": "pii.py:L369 screen_free_text: unsettled decoding keeps the text",
+"orig": "        return \"[redacted]\", sorted(kinds | {\"number\"})\n    if d != text:",
+"new": "        return screen_form(text), []\n    if d != text:",
+"pos": 20145,
+"line": 369
+},
+{
+"id": "H057",
+"file": "pii.py",
+"desc": "pii.py:L369 screen_free_text: unsettled decoding reports no kind",
+"orig": "        return \"[redacted]\", sorted(kinds | {\"number\"})\n    if d != text:",
+"new": "        return \"[redacted]\", sorted(kinds)\n    if d != text:",
+"pos": 20145,
+"line": 369
+},
+{
+"id": "H058",
+"file": "pii.py",
+"desc": "pii.py:L374 screen_free_text: decoded form never kept",
+"orig": "            kinds |= found\n            t = t2",
+"new": "            kinds |= found",
+"pos": 20297,
+"line": 374
+},
+{
+"id": "H059",
+"file": "pii.py",
+"desc": "pii.py:L374 screen_free_text: decoded form kinds not recorded",
+"orig": "            kinds |= found\n            t = t2",
+"new": "            t = t2",
+"pos": 20297,
+"line": 374
+},
+{
+"id": "H060",
+"file": "pii.py",
+"desc": "pii.py:L373 screen_free_text: decoded form kept even when nothing found",
+"orig": "        if found:\n            kinds |= found",
+"new": "        if True:\n            kinds |= found",
+"pos": 20279,
+"line": 373
+},
+{
+"id": "H061",
+"file": "pii.py",
+"desc": "pii.py:L370 screen_free_text: decoded form screened only when it equals text",
+"orig": "    if d != text:\n        found",
+"new": "    if d == text:\n        found",
+"pos": 20201,
+"line": 370
+},
+{
+"id": "H062",
+"file": "pii.py",
+"desc": "pii.py:L372 screen_free_text: decoded screened from the kept text",
+"orig": "t2 = _screen_stages(d, found)",
+"new": "t2 = _screen_stages(t, found)",
+"pos": 20249,
+"line": 372
+},
+{
+"id": "H063",
+"file": "pii.py",
+"desc": "pii.py:L377 screen_free_text: backstop reports kinds without number",
+"orig": "    if _still_holds_personal_data(kept):\n        return \"[redacted]\", sorted(kinds | {\"number\"})",
+"new": "    if _still_holds_personal_data(kept):\n        return \"[redacted]\", sorted(kinds)",
+"pos": 20406,
+"line": 377
+},
+{
+"id": "H064",
+"file": "pii.py",
+"desc": "pii.py:L377 screen_free_text: backstop returns kept text",
+"orig": "    if _still_holds_personal_data(kept):\n        return \"[redacted]\", sorted(kinds | {\"number\"})",
+"new": "    if _still_holds_personal_data(kept):\n        return kept, sorted(kinds | {\"number\"})",
+"pos": 20406,
+"line": 377
+},
+{
+"id": "H065",
+"file": "pii.py",
+"desc": "pii.py:L377 screen_free_text: backstop reads the raw text",
+"orig": "if _still_holds_personal_data(kept):",
+"new": "if _still_holds_personal_data(text):",
+"pos": 20410,
+"line": 377
+},
+{
+"id": "H066",
+"file": "pii.py",
+"desc": "pii.py:L376 screen_free_text: kept text not whitespace-collapsed",
+"orig": "kept = \" \".join(t.split()) if kinds else screen_form(text)",
+"new": "kept = t if kinds else screen_form(text)",
+"pos": 20347,
+"line": 376
+},
+{
+"id": "H067",
+"file": "pii.py",
+"desc": "pii.py:L376 screen_free_text: nothing found keeps the raw text",
+"orig": "kept = \" \".join(t.split()) if kinds else screen_form(text)",
+"new": "kept = \" \".join(t.split()) if kinds else text",
+"pos": 20347,
+"line": 376
+},
+{
+"id": "H068",
+"file": "pii.py",
+"desc": "pii.py:L376 screen_free_text: nothing found keeps the staged text",
+"orig": "kept = \" \".join(t.split()) if kinds else screen_form(text)",
+"new": "kept = \" \".join(t.split())",
+"pos": 20347,
+"line": 376
+},
+{
+"id": "H069",
+"file": "pii.py",
+"desc": "pii.py:L366 screen_free_text: first stage on screen_form(text)",
+"orig": "    t = _screen_stages(text, kinds)\n    d = _fully_decoded(text)",
+"new": "    t = _screen_stages(screen_form(text), kinds)\n    d = _fully_decoded(text)",
+"pos": 20062,
+"line": 366
+},
+{
+"id": "H070",
+"file": "pii.py",
+"desc": "pii.py:L367 screen_free_text: decoding reads the staged text",
+"orig": "    d = _fully_decoded(text)\n    if d is None:",
+"new": "    d = _fully_decoded(t)\n    if d is None:",
+"pos": 20098,
+"line": 367
+}
+]

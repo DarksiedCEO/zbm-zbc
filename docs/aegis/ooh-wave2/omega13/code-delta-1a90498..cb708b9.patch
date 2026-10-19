@@ -1,0 +1,371 @@
+diff --git a/services/ooh-py/src/pii.py b/services/ooh-py/src/pii.py
+index 7ac2003..b0f8530 100644
+--- a/services/ooh-py/src/pii.py
++++ b/services/ooh-py/src/pii.py
+@@ -4,7 +4,8 @@ number in a free-text value is refused (attributes, campaign names, the client a
+ redacted (vendor text), before anything is written to the log or the ledger.
+ 
+ Every screen reads ``screen_form`` (vendor text is stored in it too): NFKC; zero-width, format, private-use,
+-unassigned and invisible filler characters removed, and a combining mark on a digit dropped; every script's decimal
++and invisible filler characters removed (unassigned characters kept as typed), and a combining mark on a digit
++dropped, to a fixed point; every script's decimal
+ digits read as ASCII; any other non-printable character read as a space and runs of spaces collapsed. Then %40, HTML entities (&#64; &commat; &#46;) and bracket
+ spellings ([at] (at) {at} <at>, [dot] (dot) <dot> [.] (.)) and full-width or ideographic dots are read as the
+ character. Then, case-insensitively:
+@@ -27,7 +28,10 @@ character. Then, case-insensitively:
+   word; "123 - 45 - 6789" (a separator with spaces around it); digit groups split by letters, %20 or entities.
+ In the three screened free-text fields of OOH2-PII-1 (unit vendor text, face text attributes, the client approval
+ document reference) one more rule decides, before any of the shapes below matter: any cluster of nine or more digits
+-joined by characters that are not letters is personal data (``screen_free_text``; founder design change, ADR 0022).
++joined by characters that are not ASCII letters is personal data, in the raw and in the HTML-decoded text
++(``screen_free_text``; founder design change and decisions, ADR 0022).
++Known limit (founder decision): URL escapes other than %40 and JS/CSS escapes are not decoded; their hex letters
++end a cluster ("4111%2D1111%2D1111%2D1111" is kept).
+ Known false positives (refused, never stored): a ten-digit reference ("io-0000012345"), "<word> at <word>.<word>"
+ ("14x48 at Wilshire.Blvd"), a three-and-four-digit pair with a dash ("Route 101-2025").
+ Names, spelled-out digits and letters used as separators cannot be detected reliably: preparers must not type them."""
+@@ -44,8 +48,13 @@ _AT_SPELLINGS = re.compile(r"&#0*64;|&#x0*40;|&commat;|<at>|\[at\]|\(at\)|\{at\}
+ _DOT_SPELLINGS = re.compile(r"&#0*46;|&#x0*2e;|&period;|<dot>|\[dot\]|\(dot\)|\{dot\}|\[\.\]|\(\.\)|\{\.\}|[\u3002\uff0e\uff61]",
+                             re.I)
+ _LOCAL = r"[^\s@]{1,64}"                 # an address's local part (bounded: delta red team DF-6, regex cost)
+-_DOM = r"[\w-]+"
+-_WORD_DOM = r"[a-z][\w-]*"
++# A word character for the e-mail and phone shapes, the same on every Unicode version (AEGIS r12 reliability R12-2:
++# `\w` follows the Python build's Unicode database, so a CJK Extension I letter, unassigned in Python 3.12 and a
++# letter in 3.13, made "a@b<it>d.com" an address on one and not the other): ASCII letters, digits and "_", and every
++# non-ASCII character that is not a space (wider than `\w`: fails closed).
++_W = r"(?:[A-Za-z0-9_]|[^\x00-\x7f\s])"
++_DOM = rf"(?:{_W}|-)+"
++_WORD_DOM = rf"[a-z](?:{_W}|-)*"
+ # e-mail, three shapes:
+ # * tight "@" (no space on either side): any domain, dots with or without spaces ("jane@163.com", "jane@example .com",
+ #   delta red team DF-2);
+@@ -55,7 +64,7 @@ _DOTSEP = r"(?:\.|\s+\.\s+|\s+dot\s+)"
+ _EMAIL_TIGHT = re.compile(_LOCAL + r"@" + _DOM + r"(?:\s*\.\s*[a-z]{2,}|\s+dot\s+[a-z]{2,})+",
+                           re.I)
+ _EMAIL_STRONG = re.compile(_LOCAL + r"(?:\s+@\s*|\s*@\s+)" + _DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
+-_EMAIL_WORD = re.compile(r"[\w.+-]{1,64}\s+at\s+" + _WORD_DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
++_EMAIL_WORD = re.compile(rf"(?:{_W}|[.+-]){{1,64}}\s+at\s+" + _WORD_DOM + r"(?:" + _DOTSEP + r"[a-z]{2,})+", re.I)
+ # Phone separators: spaces, dots, slashes, underscores, dashes (U+2010-2015, U+2212 minus), commas, colons, bars,
+ # middle dots, apostrophes and ampersands, in any mix (final red team NF-3; delta red team 2 E3: "310-5551234",
+ # "310, 555, 1234"). The screen errs toward refusing: a false positive is refused and never stored, a miss is kept.
+@@ -68,7 +77,7 @@ _PHONE = re.compile(
+     + r"|" + _START + r"\d{3}[‐-―−-]\d{4}(?![\d.,]\d|\d)"                          # local 555-1234
+     + r"|(?<!\d)\d{10,}(?!\d)")                                                                   # ten digits or more
+ # An international number: "+", a country code, and at least eight digits in all (+52 55 1234 5678, +44 20 7946 0958)
+-_INTL = re.compile(r"(?<![\w+])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
++_INTL = re.compile(r"(?<![A-Za-z0-9_+])(?<![^\x00-\x7f\s])\+\d{1,3}(?:[" + _SEPCH + r"()]*\d+)+")
+ _INTL_MIN_DIGITS = 8
+ 
+ 
+@@ -87,7 +96,8 @@ _REMOVED = ("Cf", "Co")
+ def strip_format(text: str, hidden: str = "") -> str:
+     """NFKC; zero-width, format, private-use and the invisible characters above replaced by ``hidden``
+     (removed by default), and a combining mark on a digit dropped (AEGIS r9 security F2, r10 source M-1); every decimal
+-    digit of any script read as its ASCII digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card). Removing a hidden character
++    digit of any script and every other character with a digit value (circled, dingbat, Ethiopic) read as its ASCII
++    digit (r9 source S-1: "٤٢٤٢ ٤٢٤٢ …" is a card; r12 security S12-1). Removing a hidden character
+     rejoins a digit group it split (a card); reading it as a space keeps it as a separator (an SSN): the screen reads
+     both forms."""
+     t = _INVISIBLE.sub(hidden, _ZW.sub(hidden, unicodedata.normalize("NFKC", text)))
+@@ -100,7 +110,8 @@ def strip_format(text: str, hidden: str = "") -> str:
+             if hidden:
+                 out.append(hidden)
+             continue
+-        out.append(str(unicodedata.decimal(ch)) if ch > "\x7f" and cat == "Nd" else ch)
++        d = unicodedata.digit(ch, None) if ch > "\x7f" else None      # every digit, not only decimal ones (AEGIS
++        out.append(str(d) if d is not None else ch)                    # r12 security S12-1: "❶", "⓵", Ethiopic "፩")
+     return "".join(out)
+ 
+ 
+@@ -109,8 +120,14 @@ def screen_form(text: str, hidden: str = "") -> str:
+     text while storage read a cleaned copy, so "123  45  6789" was redacted in the line but hashed in clear):
+     ``strip_format``, every other non-printable character (controls, line and paragraph separators, other spaces)
+     read as a space, and runs of spaces collapsed to one."""
+-    return " ".join("".join(ch if ch.isprintable() or unicodedata.category(ch) == "Cn" else " "
+-                            for ch in strip_format(text, hidden)).split())
++    t = text
++    for _ in range(5):                    # to a fixed point (AEGIS r12 source S-2b: NFKC ran before a hidden character
++        once = " ".join("".join(ch if ch.isprintable() or unicodedata.category(ch) == "Cn" else " "   # was removed,
++                                for ch in strip_format(t, hidden)).split())                          # so one pass
++        if once == t:                                                                                # was not enough)
++            break
++        t = once
++    return t
+ 
+ 
+ def _norm(text: str, hidden: str = "") -> str:
+@@ -238,7 +255,7 @@ def _redact_once(t: str) -> str:
+ 
+ # The three screened free-text fields of OOH2-PII-1 (unit vendor text, a face text attribute, the client approval
+ # document reference): founder design change, Oct 18 2026, to end the spelling-by-spelling loop. After ``_norm``, any
+-# cluster of CLUSTER_MIN_DIGITS or more digits joined by characters that are not letters — whatever those characters
++# cluster of CLUSTER_MIN_DIGITS or more digits joined by characters that are not ASCII letters — whatever those characters
+ # are — is personal data. The card and SSN rules no longer decide; they only label what was redacted. Trade-off
+ # (accepted): a date range, a price list or a reference with nine or more digits and no letter between them is
+ # redacted or refused too ("2026-11-01 - 2026-11-30", "io-2026-1018-0001").
+@@ -298,29 +315,68 @@ def _redact_all(t: str, find, kinds: set) -> str:
+     return "[redacted]" if find(t) else t
+ 
+ 
++_MAX_DECODE = 16          # HTML-entity decoding passes; text still changing after that is redacted whole
++
++
++def _fully_decoded(t: str):
++    """``t`` with HTML entities decoded until nothing changes (entities that spell entities: "&amp;amp;nbsp;"), or None
++    when it still changes after _MAX_DECODE passes (AEGIS r12 source S-1: three passes let four levels through)."""
++    for _ in range(_MAX_DECODE):
++        once = html.unescape(t)
++        if once == t:
++            return t
++        t = once
++    return None
++
++
++def _screen_stages(t: str, kinds: set) -> str:
++    """The two stages every form of the text goes through (AEGIS r11 source S-1): the cluster rule on the text as it
++    would be kept, then every rule after the @ and . spellings are read."""
++    t = _redact_all(screen_form(t), number_cluster_spans, kinds)
++    return _redact_all(_norm(t), _free_text_spans, kinds)
++
++
++def _forms(t: str):
++    """Every form a reader could make of ``t``: as kept, ``screen_form``, ``_norm``, and the same three of the fully
++    HTML-decoded text; None when the decoding never settles."""
++    d = _fully_decoded(t)
++    if d is None:
++        return None
++    out = []
++    for f in (t, d):
++        out += [f, screen_form(f), _norm(f)]
++    return out
++
++
++def _still_holds_personal_data(t: str) -> bool:
++    forms = _forms(t)
++    return forms is None or any(number_cluster_spans(f) for f in forms) or any(_free_text_spans(_norm(f)) for f in forms)
++
++
+ def screen_free_text(text: str) -> tuple:
+-    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields. The cluster
+-    rule runs first on the text as it would be kept (``screen_form``), then once more with the e-mail, phone, card and
+-    SSN rules after the @ and . spellings are read (``_norm``): a cluster either form shows is redacted (AEGIS r11
+-    source S-1: "1234567%40" lost two digits to the "@" spelling and kept nine). With nothing found, the text as kept
+-    is ``screen_form(text)``."""
++    """(the text as kept, the sorted kinds of what was redacted) for the three screened free-text fields.
++    - The raw text goes through both stages (``_screen_stages``). The raw text decoded to a fixed point (founder
++      decision after r11) goes through the same two stages (AEGIS r12 source S-2a: one stage, after the @ spellings
++      were read, let "1234567&nbsp;%40" through), and that result is kept when the decoded form held personal data.
++    - Backstop, on whatever is returned: if any form of it (``_forms``) still shows a cluster or another span, or the
++      decoding never settles (r12 source S-1: four levels of nesting), the whole value is "[redacted]" — an edge case
++      not yet found redacts rather than keeps.
++    With nothing found, the text as kept is ``screen_form(text)``."""
+     kinds = set()
+-    t = _redact_all(screen_form(text), number_cluster_spans, kinds)
+-    t = _redact_all(_norm(t), _free_text_spans, kinds)
+-    # HTML entities (founder decision, AEGIS r11 security S11-2: "4111&nbsp;1111&nbsp;…", "123&ndash;45&ndash;6789"):
+-    # the decoded text is screened too, and kept decoded when it holds personal data; decoding is repeated for
+-    # entities that spell entities ("&amp;nbsp;")
+-    decoded = t
+-    for _ in range(3):
+-        once = html.unescape(decoded)
+-        if once == decoded:
+-            break
+-        decoded = once
+-    if decoded != t and _free_text_spans(_norm(decoded)):
+-        t = _redact_all(_norm(decoded), _free_text_spans, kinds)
+-    if not kinds:
+-        return screen_form(text), []
+-    return " ".join(t.split()), sorted(kinds)
++    t = _screen_stages(text, kinds)
++    d = _fully_decoded(text)
++    if d is None:
++        return "[redacted]", sorted(kinds | {"number"})
++    if d != text:
++        found = set()
++        t2 = _screen_stages(d, found)
++        if found:
++            kinds |= found
++            t = t2
++    kept = " ".join(t.split()) if kinds else screen_form(text)
++    if _still_holds_personal_data(kept):
++        return "[redacted]", sorted(kinds | {"number"})
++    return kept, sorted(kinds)
+ 
+ 
+ def free_text_has_personal_data(text: str) -> bool:
+diff --git a/services/ooh-py/tests/test_aegis_r12_mutation_gaps.py b/services/ooh-py/tests/test_aegis_r12_mutation_gaps.py
+new file mode 100644
+index 0000000..f3e162a
+--- /dev/null
++++ b/services/ooh-py/tests/test_aegis_r12_mutation_gaps.py
+@@ -0,0 +1,76 @@
++"""AEGIS round 12 mutation gate at 1a90498 (BLOCK): survivors that no test pinned. The shipped code was right.
++- N146: the stored vendor text's sha256 is the hash of the text as kept (redacted), never of the raw text;
++- N156: names_a_card reads full-width digits (NFKC) for the client funds reference;
++- F001/F002: the integrity check alone (no write first) sees a same-size edit of the file's first or last byte;
++- F015: an unreadable log is a problem for the integrity check, never healthy;
++- F008: a FIFO at the path of an empty log is a problem, not "no file yet";
++- N178/N179: the request-hash cache keeps at most 64 entries and evicts the oldest."""
++from __future__ import annotations
++
++import hashlib
++import os
++
++import pytest
++
++import service as SV
++import svc_campaigns as sc
++from store import RecordLog
++from test_aegis_h1_file_content import DIFFERS, _disk, _three_lines
++from test_aegis_integrity_path import _check, env  # noqa: F401  (env is a fixture)
++from test_aegis_store_write_path import _fake_os
++
++
++def test_n146_vendor_text_sha256_is_of_the_kept_text():
++    raw = "my ssn is 123-45-6789"
++    o = sc.observed(raw)
++    assert o["personal_data_redacted"] is True and "6789" not in o["text"]
++    assert o["sha256"] == hashlib.sha256(o["text"].encode("utf-8")).hexdigest()
++    assert o["sha256"] != hashlib.sha256(raw.encode("utf-8")).hexdigest()
++
++
++def test_n156_names_a_card_reads_full_width_digits():
++    fw = "".join(chr(0xFF10 + int(c)) if c.isdigit() else c for c in "4242 4242 4242 4242")
++    assert sc.names_a_card(fw) and sc.names_a_card("4242 4242 4242 4242")
++
++
++@pytest.mark.parametrize("where", ["first", "last"])
++def test_f001_f002_integrity_check_alone_sees_an_edge_byte_edit(env, where):
++    led, h = env
++    _three_lines(h)
++    raw = _disk(h)
++    i = 0 if where == "first" else len(raw) - 1
++    with open(h.svc.log.path, "wb") as fh:
++        fh.write(raw[:i] + (b"[" if where == "first" else b" ") + raw[i + 1:])
++    assert _check(h)["problem"] == DIFFERS                         # no write attempted before the check
++
++
++def test_f015_an_unreadable_log_is_a_problem(env, monkeypatch):
++    led, h = env
++    _three_lines(h)
++
++    def boom(fd, n, off):
++        raise OSError(5, "EIO")
++
++    _fake_os(monkeypatch, pread=boom)
++    p = h.svc.log.file_problem()
++    assert p == "the local log file cannot be read (OSError)", p
++
++
++def test_f008_a_fifo_at_the_path_of_an_empty_log_is_a_problem(tmp_path):
++    log = RecordLog(str(tmp_path / "d"))
++    assert len(log) == 0 and log.file_problem() is None
++    os.mkfifo(log.path, 0o600)
++    try:
++        assert log.file_problem() == DIFFERS
++    finally:
++        os.unlink(log.path)
++
++
++def test_n178_n179_the_request_hash_cache_is_bounded_to_64(monkeypatch):
++    monkeypatch.setattr(SV, "_SHA_CACHE", type(SV._SHA_CACHE)())
++    for i in range(70):
++        SV.request_sha({"request_id": f"r-{i}", "vendor_text": "ok"})
++    assert len(SV._SHA_CACHE) == 64
++    first = hashlib.sha256(SV.canonical({"request_id": "r-0", "vendor_text": "ok"}).encode("utf-8")).hexdigest()
++    last = hashlib.sha256(SV.canonical({"request_id": "r-69", "vendor_text": "ok"}).encode("utf-8")).hexdigest()
++    assert first not in SV._SHA_CACHE and last in SV._SHA_CACHE      # the oldest is evicted
+diff --git a/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py b/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
+index c87fb62..7cb0c99 100644
+--- a/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
++++ b/services/ooh-py/tests/test_ooh2_pii1_cluster_rule.py
+@@ -152,8 +152,11 @@ def test_decisions_screen_finds_it(text):
+ 
+ def _unescape(t):
+     import html
+-    for _ in range(3):
+-        t = html.unescape(t)
++    for _ in range(64):                  # to a fixed point (AEGIS r12 source S-4: three passes hid deeper nesting)
++        once = html.unescape(t)
++        if once == t:
++            return t
++        t = once
+     return t
+ 
+ 
+@@ -190,3 +193,74 @@ def test_decisions_unassigned_characters_are_kept_so_the_hash_is_stable(cp):
+     import service as SV
+     from ledger import payload_sha256 as p
+     assert SV.request_sha({"request_id": "r", "vendor_text": text}) == p({"request_id": "r", "vendor_text": text})
++
++
++# ---------------------------------------------------------------- AEGIS r12 (1a90498) source S-1, S-2, S-4
++
++def _nested(entity, depth):
++    return "&" + "amp;" * depth + entity
++
++
++NESTED = ["123456" + _nested("nbsp;", d) + "789" for d in (1, 3, 4, 8, 15)] + \
++         ["123" + _nested("ndash;", 4) + "45" + _nested("ndash;", 4) + "6789"]
++DECODED_TWICE = ["1234567&nbsp;%40", "1234567&amp;%40", "1234567&#x25;40", "12345a&zwj;&#769;6789",
++                 "12345a&#8205;&#x301;6789", "12345a&shy;&#769;6789", "12345a&#x200b;&#769;6789"]
++
++
++@pytest.mark.parametrize("text", NESTED + DECODED_TWICE)
++def test_r12_nested_entities_and_decoded_forms_are_redacted(text):
++    kept, kinds = pii.screen_free_text(f"note {text} end")
++    assert kinds and not pii._still_holds_personal_data(kept), (text, kept)
++
++
++def test_r12_decoding_that_never_settles_redacts_the_whole_value():
++    text = "123" + _nested("nbsp;", pii._MAX_DECODE + 2) + " ok"
++    assert pii.screen_free_text(text) == ("[redacted]", ["number"])
++
++
++def test_r12_screen_form_is_idempotent_with_hidden_characters_and_marks():
++    for t in ["12345a\u200d\u03016789", "a\u00ad\u0301b", "4\u0303 1", "x\u200b\u0301\u200by"]:
++        once = pii.screen_form(t)
++        assert pii.screen_form(once) == once, (t, once)
++
++
++@pytest.mark.parametrize("text", NESTED[:3] + DECODED_TWICE[:4])
++def test_r12_the_fields_redact_or_refuse(h, text):
++    test_cluster_vendor_text_is_redacted_and_hashed_redacted(h, text)
++    test_cluster_face_text_attribute_is_refused(h, text)
++
++
++def test_r12_backstop_property_on_every_form():
++    import random
++    rnd = random.Random(1904)
++    alphabet = list("0123456789 -._:/,|+%@#&;xa") + ["%40", "&#64;", "&nbsp;", "&ndash;", "&amp;", "&#52;", "&#x34;",
++                                                       "&zwj;", "&#769;", "&#x301;", "&shy;", "&#x200b;", "\u200b",
++                                                       "\u0301", "\u3164", "\ue000", "\u0664", "\u30fc", "\u02bc",
++                                                       "\u2ffc", "\u0378", "&amp;amp;"]
++    for _ in range(20000):
++        t = "".join(rnd.choice(alphabet) for _ in range(rnd.randint(1, 30)))
++        kept, _kinds = pii.screen_free_text(t)
++        assert not pii._still_holds_personal_data(kept), (t, kept)
++        decoded = _unescape(kept)
++        for form in (kept, pii.screen_form(kept), pii._norm(kept), decoded, pii.screen_form(decoded), pii._norm(decoded)):
++            assert not pii.number_cluster_spans(form), (t, kept, form)
++
++
++# ---------------------------------------------------------------- AEGIS r12 security S12-1, reliability R12-2
++
++def test_r12_s12_1_every_digit_valued_character_counts():
++    # dingbat and circled digits, Ethiopic: not decimal (Nd) but digits all the same; 1a90498 kept 69 such kinds
++    import unicodedata
++    kept = [cp for cp in range(0x80, 0x110000) if chr(cp).isdigit()
++            and not pii.screen_free_text("note " + chr(cp) * 9 + " end")[1]]
++    assert kept == [], [hex(c) for c in kept[:20]]
++    assert pii.screen_free_text("❹❶❶❶ ❶❶❶❶ ❶❶❶❶ ❶❶❶❶")[1]
++    assert unicodedata.digit("❶") == 1
++
++
++@pytest.mark.parametrize("cp", [0x2FFC, 0x2FFF, 0x31EF, 0x2EBF0, 0x2EE5D])
++def test_r12_r12_2_shapes_do_not_depend_on_the_unicode_version(cp):
++    # unassigned in Unicode 15.0 (Python 3.12), assigned in 15.1 (3.13): a domain with it is an address on both
++    c = chr(cp)
++    assert pii.has_personal_data("a@b" + c + "d.com") and pii.free_text_has_personal_data("a@b" + c + "d.com")
++    assert pii.screen_free_text("faces west " + c + " lit") == ("faces west " + c + " lit", [])

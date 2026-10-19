@@ -1,0 +1,10 @@
+== /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega13/security/wt/services/ooh-py
+short            HTTP 201 wall min 0.002s max 0.003s
+4000 U+FDFA      HTTP 201 wall min 1.153s max 1.168s
+4000 Cn U+0378   HTTP 201 wall min 0.350s max 0.354s
+1a x2000         HTTP 201 wall min 0.267s max 0.270s
+== /private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/aegis/omega12/security/wt/services/ooh-py
+short            HTTP 201 wall min 0.002s max 0.003s
+4000 U+FDFA      HTTP 201 wall min 0.174s max 0.176s
+4000 Cn U+0378   HTTP 201 wall min 0.029s max 0.030s
+1a x2000         HTTP 201 wall min 0.031s max 0.031s

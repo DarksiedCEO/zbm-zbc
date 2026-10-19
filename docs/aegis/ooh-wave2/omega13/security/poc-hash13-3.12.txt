@@ -1,0 +1,10 @@
+nest16 &amp; nbsp;                     secrets=4 distinct hashes=1 kept=['[redacted]']
+nest15                                 secrets=4 distinct hashes=1 kept=['[redacted]']
+fullwidth & #x hex digits (backstop)   secrets=4 distinct hashes=1 kept=['[redacted]']
+dingbat                                secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+a ZWJ U+0301 4-5 (fixed point)         secrets=4 distinct hashes=1 kept=['contact [redacted] now']
+bodies where hash != sha(kept body) or == sha(raw body) or a digit kept: 0
+nest16 card A vs nest16 card B                       -> 201:ooh-inv-86f15834eea7365ad26a1faf42108a61 | 201:ooh-inv-86f15834eea7365ad26a1faf42108a61
+nest16 card vs benign nest16 (whole [redacted] both) -> 201:ooh-inv-3840e19c4ef9786ab2c70cbf763858fc | 201:ooh-inv-3840e19c4ef9786ab2c70cbf763858fc
+nest16 card vs plain card (whole vs partial)         -> 201:ooh-inv-fefb97b6ed1b7cff80847b96c2224190 | 409:REQUEST_ID_REUSED
+dingbat card vs ASCII card                           -> 201:ooh-inv-36e3ce85f5b6417a76471e7c275fd57f | 201:ooh-inv-36e3ce85f5b6417a76471e7c275fd57f

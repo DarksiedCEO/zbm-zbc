@@ -1,0 +1,25 @@
+{
+ "a": [
+  "3.12.14",
+  "15.0.0"
+ ],
+ "b": [
+  "3.13.9",
+  "15.1.0"
+ ],
+ "email_tight": {
+  "differ": 0,
+  "by_cat": {},
+  "examples": []
+ },
+ "email_word": {
+  "differ": 0,
+  "by_cat": {},
+  "examples": []
+ },
+ "intl_8digit": {
+  "differ": 0,
+  "by_cat": {},
+  "examples": []
+ }
+}

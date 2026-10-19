@@ -1,0 +1,64 @@
+/private/tmp/claude-501/-<HOME>-PycharmProjects-zbm-zbc/f0fc1212-c099-4834-8985-8a68230f83b3/scratchpad/venv3.13/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+## unit vendor_text (POST inventory)
+control ASCII x card     HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+R1 dingbat card          HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+R1 dingbat ssn           HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+R1 ethiopic ssn          HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+R1 mixed 8 ascii + 8 dingbat HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+E1 url %2D card          HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+E1 url %2D ssn           HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+E1 url %C2%A0 ssn        HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+E1 js \u002D card        HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+E1 css \2d ssn           HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+E1 &#x2d no ; card       HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+E1 &amp;x3 nbsp card     HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+E1 &NBSP; ssn            HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+E1 &ndash no ; ssn       HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+N1 roman numeral one U+2160 ssn (stored NFKC) HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-1 ssn 4-5 U+02BC     HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-1 ssn 2-3-4 U+30FC   HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-1 ssn U+0640         HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-1 card 2-digit U+02BC HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-2 card &nbsp;        HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-2 ssn &ndash;        HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-2 card hex entities  HTTP 201 reached=-                                        sha==sha(kept-text body) True  sha==sha(raw body) False
+S11-3 ideographic zero card HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+S11-3 suzhou card        HTTP 201 reached=log/pending,export,unit-view             sha==sha(kept-text body) True  sha==sha(raw body) True
+## face text attribute location_description (POST /faces/{id}/attributes)
+control ASCII x card     HTTP 200 reached=log/pending,export
+R1 dingbat card          HTTP 422 reached=-
+R1 dingbat ssn           HTTP 422 reached=-
+R1 ethiopic ssn          HTTP 422 reached=-
+R1 mixed 8 ascii + 8 dingbat HTTP 422 reached=-
+E1 url %2D card          HTTP 200 reached=log/pending,export
+E1 url %2D ssn           HTTP 200 reached=log/pending,export
+E1 url %C2%A0 ssn        HTTP 200 reached=log/pending,export
+E1 js \u002D card        HTTP 200 reached=log/pending,export
+E1 css \2d ssn           HTTP 200 reached=log/pending,export
+E1 &#x2d no ; card       HTTP 200 reached=log/pending,export
+E1 &amp;x3 nbsp card     HTTP 422 reached=-
+E1 &NBSP; ssn            HTTP 200 reached=log/pending,export
+E1 &ndash no ; ssn       HTTP 200 reached=log/pending,export
+N1 roman numeral one U+2160 ssn (stored NFKC) HTTP 200 reached=log/pending,export
+S11-1 ssn 4-5 U+02BC     HTTP 422 reached=-
+S11-1 ssn 2-3-4 U+30FC   HTTP 422 reached=-
+S11-1 ssn U+0640         HTTP 422 reached=-
+S11-1 card 2-digit U+02BC HTTP 422 reached=-
+S11-2 card &nbsp;        HTTP 422 reached=-
+S11-2 ssn &ndash;        HTTP 422 reached=-
+S11-2 card hex entities  HTTP 422 reached=-
+S11-3 ideographic zero card HTTP 200 reached=log/pending,export
+S11-3 suzhou card        HTTP 200 reached=log/pending,export
+## client_approval_doc_ref (Ref pattern [A-Za-z0-9._:-]{1,100})
+card ASCII letter x      HTTP 200                                  reached=log/pending,ledger,export
+ssn ASCII letter x       HTTP 200                                  reached=log/pending,ledger,export
+card letters+dots        HTTP 200                                  reached=log/pending,ledger,export
+url %2D card             HTTP 422 [{'loc': ['body', 'client_approval_doc_ref'], 'msg': "String should match pattern '^[A-Za-z0-9._:-]{1,100}$'", 'type': 'string_pattern_mismatch'}] reached=-
+ssn hex-letter D sep     HTTP 200                                  reached=log/pending,ledger,export
+ssn 4-5 with letter      HTTP 200                                  reached=log/pending,ledger,export
+ssn standard             HTTP 422 ATTRIBUTE_VALUE_PERSONAL_DATA    reached=-
+card hyphen              HTTP 422 ATTRIBUTE_VALUE_PERSONAL_DATA    reached=-
+## split across two requests (two units, one face each): ssn 12345 + 6789
+  'ssn part 12345' HTTP 201 reached=log/pending,export
+  'ssn part 6789' HTTP 201 reached=log/pending,export
