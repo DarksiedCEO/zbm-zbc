@@ -269,9 +269,13 @@ class StoreService:
             self._record_failed(sync_id, conn, "LEDGER_COMPLETION_UNRECORDED", session)
             raise StoreError("LEDGER_COMPLETION_UNRECORDED") from None
         with self._state:
-            if not self._registration_unchanged(conn):
-                raise StoreError("STORE_REGISTRATION_CHANGED")
-            self._snapshots[conn.client_id] = snap
+            stored = self._registration_unchanged(conn)
+            if stored:
+                self._snapshots[conn.client_id] = snap
+        if not stored:
+            # the completion is on the ledger but the snapshot was discarded: say so (best effort, outside the lock)
+            self._record_failed(sync_id, conn, "STORE_REGISTRATION_CHANGED", session)
+            raise StoreError("STORE_REGISTRATION_CHANGED")
         return {"client_id": conn.client_id, "sync_id": sync_id, "snapshot_id": snap.snapshot_id,
                 "orders_read": counts["orders_read"], "orders_analysed": counts["orders_analysed"],
                 "orders_excluded": counts["orders_excluded"], "truncated_by": read.truncated_by,

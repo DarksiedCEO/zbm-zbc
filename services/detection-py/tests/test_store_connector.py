@@ -943,9 +943,28 @@ def test_re_registration_after_the_completion_record_is_not_stored(tmp_path):
             super().record(event_id, event_type, subject_id, payload, summary)
             if event_type == "rr_store_read_completed":
                 write_connections(tmp_path, [conn("client-a", "shop-b", tb), conn("client-b", "shop-a", ta)])
-    svc = _service(tmp_path, fake, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)],
-                   ledger=SwapOnCompletion())
+    ledger = SwapOnCompletion()
+    svc = _service(tmp_path, fake, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)], ledger=ledger)
     assert _err(svc.sync, "client-b") == "STORE_REGISTRATION_CHANGED"
+    assert svc._snapshots == {}
+    # the completion record stands, so a failure record must follow it saying the snapshot was discarded
+    assert [e["event_type"] for e in ledger.events] == ["rr_store_read_requested", "rr_store_read_completed",
+                                                        "rr_store_read_failed"]
+    assert ledger.events[2]["payload"]["reason"] == "STORE_REGISTRATION_CHANGED"
+    assert ledger.events[2]["event_id"] == ledger.events[1]["event_id"].replace(".completed", ".failed")
+
+
+def test_re_registration_after_completion_with_failed_record_down(tmp_path):
+    fake, ta, tb = _two_shops(tmp_path)
+
+    class SwapOnCompletion(MemoryLedger):
+        def record(self, event_id, event_type, subject_id, payload, summary):
+            super().record(event_id, event_type, subject_id, payload, summary)
+            if event_type == "rr_store_read_completed":
+                write_connections(tmp_path, [conn("client-a", "shop-b", tb), conn("client-b", "shop-a", ta)])
+    ledger = SwapOnCompletion(fail_types=("rr_store_read_failed",))
+    svc = _service(tmp_path, fake, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)], ledger=ledger)
+    assert _err(svc.sync, "client-b") == "STORE_REGISTRATION_CHANGED"      # best effort: still the same answer
     assert svc._snapshots == {}
 
 
