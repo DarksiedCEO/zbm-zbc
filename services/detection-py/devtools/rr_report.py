@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     try:
         rep, md = report_from_file(a.scan)
-    except (ReportInputError, KeyError, ValueError) as e:
+    except (ReportInputError, KeyError, ValueError, TypeError, AttributeError) as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2
     Path(a.md).write_text(md, encoding="utf-8")

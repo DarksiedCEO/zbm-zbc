@@ -264,8 +264,52 @@ def test_discount_codes_are_escaped_in_the_markdown():
     md = rr_report.render_markdown(rr_report.build_report(
         _projection_scan(window, code="[click](https://evil.example)<img src=x>|*x*")))
     (line,) = [x for x in md.splitlines() if "discount codes stacked" in x]
-    assert re.search(r"(?<!\\)[\[\]<>|*`_]", line) is None, line          # nothing unescaped
-    assert "\\[click\\](https://evil.example)\\<img src=x\\>\\|\\*x\\*" in md
+    outside = _CODE_SPAN.sub("", line)
+    assert re.search(r"(?<!\\)[\[\]<>|*`_]", outside) is None, line       # nothing unescaped outside code spans
+    assert "\\|" in outside                                                # the pipe stays escaped, outside
+    assert "` ([click](https://evil.example)<img `" in line                # literal inside a code span
+
+
+_CODE_SPAN = re.compile(r"(`+) .*? \1")
+
+
+@pytest.mark.parametrize("code", ["https://evil.example/x", "HTTP://EVIL.EXAMPLE", "www.evil.example",
+                                  "win@evil.example", "ftp://a`b`c", "x`https://evil.example"])
+def test_bare_urls_in_discount_codes_are_not_autolinked(code):
+    """AEGIS golive-rr info: GFM turns a bare URL, www. name or e-mail into a link even when escaped; in a code span
+    it is literal."""
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": None}
+    md = rr_report.render_markdown(rr_report.build_report(_projection_scan(window, code=code)))
+    (line,) = [x for x in md.splitlines() if "discount codes stacked" in x]
+    spans = [m_.group(0) for m_ in _CODE_SPAN.finditer(line)]
+    assert any(code in sp for sp in spans), line
+    outside = _CODE_SPAN.sub("", line).lower()
+    assert "://" not in outside and "www." not in outside and "@" not in outside, line
+
+
+@pytest.mark.parametrize("field,value", [("requested_start", "2026-08-25T12:00:00"),
+                                         ("requested_start", "not a time"), ("requested_start", 5),
+                                         ("taken_at", "2026-10-24T12:00:00")])
+def test_naive_or_bad_timestamps_are_refused(field, value):
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": None}
+    scan = _projection_scan(window)
+    if field == "taken_at":
+        scan["store_coverage"]["taken_at"] = value
+    else:
+        scan["store_coverage"]["window"][field] = value
+    with pytest.raises(rr_report.ReportInputError):
+        rr_report.build_report(scan)
+
+
+def test_report_cli_refuses_a_naive_timestamp(tmp_path):
+    window = {"requested_start": "2026-08-25T12:00:00", "lookback_days": 60, "truncated_by": None}
+    scan_file = tmp_path / "scan.json"
+    scan_file.write_text(json.dumps(_projection_scan(window)))
+    cli = Path(__file__).resolve().parents[1] / "devtools" / "rr_report.py"
+    out = subprocess.run([sys.executable, str(cli), str(scan_file), "--md", str(tmp_path / "r.md")],
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 2 and "refused:" in out.stderr and "Traceback" not in out.stderr
+    assert not (tmp_path / "r.md").exists()
 
 
 def test_report_cli(tmp_path, client, store):

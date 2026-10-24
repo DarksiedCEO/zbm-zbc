@@ -18,6 +18,7 @@ are not findings and are not on the ledger.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -51,17 +52,47 @@ def _fmt(d: Decimal) -> str:
     return f"${d.quantize(CENT, ROUND_HALF_UP):,.2f}"
 
 
-def _dt(s: str | None) -> datetime | None:
-    return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
+def _dt(s: object) -> datetime | None:
+    """An ISO timestamp WITH a UTC offset, or None. Anything else is ReportInputError: a naive or malformed time
+    cannot be compared with the snapshot time and must not reach the window arithmetic as a TypeError."""
+    if s is None or s == "":
+        return None
+    if not isinstance(s, str):
+        raise ReportInputError("a timestamp is not a string")
+    try:
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        raise ReportInputError("a timestamp is not ISO 8601") from None
+    if d.tzinfo is None or d.utcoffset() is None:
+        raise ReportInputError("a timestamp has no UTC offset")
+    return d
 
 
 _MD_SPECIAL = set("\\`*_[]<>|~&")
+# A token GitHub-flavoured Markdown would turn into a link by itself (extended autolinks: scheme://, www., e-mail).
+# Escapes do not stop those (they are matched after escapes are resolved), so such a token goes in a code span.
+_LINKISH = re.compile(r"[^\s|]*(?:://|www\.|@)[^\s|]*", re.IGNORECASE)
+
+
+def _code_span(tok: str) -> str:
+    fence = "`" * (max((len(r) for r in re.findall(r"`+", tok)), default=0) + 1)
+    return f"{fence} {tok} {fence}"
+
+
+def _escape(text: str) -> str:
+    return "".join("\\" + ch if ch in _MD_SPECIAL else ch for ch in text)
 
 
 def _md(text: str) -> str:
-    """Text from the store (a discount code inside a finding's cause) as literal Markdown: no link, image, HTML,
-    emphasis or table cell can be smuggled into the client's report."""
-    return "".join("\\" + ch if ch in _MD_SPECIAL else ch for ch in str(text)).replace("\n", " ").replace("\r", " ")
+    """Text from the store (a discount code inside a finding's cause) as literal Markdown: no link, autolink, image,
+    HTML, emphasis or table cell can be smuggled into the client's report."""
+    text = str(text).replace("\n", " ").replace("\r", " ")
+    out, pos = [], 0
+    for m_ in _LINKISH.finditer(text):
+        out += [_escape(text[pos:m_.start()]), _code_span(m_.group(0))]
+        pos = m_.end()
+    out.append(_escape(text[pos:]))
+    return "".join(out)
 
 
 def _window_days(window: dict, taken: datetime | None) -> tuple[int | None, str | None]:
