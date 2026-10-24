@@ -19,6 +19,12 @@ pinned tests use, ``PII`` and ``T1_PII`` in tests/test_aegis_1472041.py, read by
 response, the fake ledger and the audit export after percent-decoding and the repo's shared lookalike fold
 (service-py ``src/lookalikes.py``: invisible characters out, NFKC, lookalikes folded, casefold), so a full-width or
 lookalike spelling of a leaked value is still a leak.
+
+ADR 0017 Wave 4: a HOSTILE FAKE PERPLEXITY (``_FakePerplexity``, behind a MockTransport) is wired to the service's REAL
+Perplexity adapter (``perplexity.PerplexityEngine``: its strict parser, retries, Retry-After handling, size cap and
+deadline on an injected clock); it serves injected instructions, lookalike and hostile citation hosts, malformed,
+oversized, encoded, redirected and trickled bodies, auth refusals echoing the key, and endless 429 / 5xx. It records
+every request and whether the run's reservation was on the ledger before it.
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ httpx = None
 FETCH = None        # primitives/fetch.py
 PORTS = None        # ports.py
 FIN = None          # finance_client.py
+PX = None           # perplexity.py (Wave 4)
 FIXTURE = None      # tests/fixture_server.py (page builders only; its server is never started here)
 FOLD = None         # service-py's shared lookalike fold, loaded by path (judge side only)
 NEEDLES: tuple = ()
@@ -73,15 +80,16 @@ def prepare_env(env) -> None:
 
 
 def import_harness() -> None:
-    global H, httpx, FETCH, PORTS, FIN, FIXTURE, FOLD, NEEDLES
+    global H, httpx, FETCH, PORTS, FIN, FIXTURE, FOLD, NEEDLES, PX
     import httpx as _httpx
 
     import finance_client
     import fixture_server
     import helpers
+    import perplexity
     import ports
     from primitives import fetch
-    H, httpx, FETCH, PORTS, FIN, FIXTURE = helpers, _httpx, fetch, ports, finance_client, fixture_server
+    H, httpx, FETCH, PORTS, FIN, FIXTURE, PX = helpers, _httpx, fetch, ports, finance_client, fixture_server, perplexity
     spec = importlib.util.spec_from_file_location("warroom_lookalikes", REPO / "services/service-py/src/lookalikes.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -268,7 +276,8 @@ def setup(tmp):
     h = H.Harness(tmp, ports=ports, SEO_INVOICE_VERIFICATION=None)
     return SimpleNamespace(h=h, web=web, fin=fin, steps=[], snap=None, audit=None, needles=[], expected_code=None,
                            probe=None, kill_at=None, ledger_before=0, log_before=0, foreign=[], hostile=None,
-                           switch=None, expect_quarantine=None, ingest_view=None, pd=False)
+                           switch=None, expect_quarantine=None, ingest_view=None, pd=False, pplx=None, pplx_ps=None,
+                           pplx_kill_at=None)
 
 
 def teardown(ctx) -> None:
@@ -668,7 +677,8 @@ def personal_data_key(ctx, key, route="audit", placement="top"):
 
 EXPECTED = {"global": "KILLED_GLOBAL", "write": "KILLED_WRITE", "tenant:zbm": "KILLED_TENANT",
             "capability:audit": "KILLED_CAPABILITY", "capability:fetch": "KILLED_CAPABILITY",
-            "provider:web": "KILLED_PROVIDER"}
+            "provider:web": "KILLED_PROVIDER", "provider:perplexity": "KILLED_PROVIDER",
+            "capability:ai_probe": "KILLED_CAPABILITY"}
 
 
 def kill(ctx, switch, by="compliance_38"):
@@ -706,10 +716,194 @@ def paid_run(ctx, mode):
     return r
 
 
+# ============================================================================================ a hostile Perplexity (W4)
+
+PPLX_KEY = "warroom-only-perplexity-key-" + "k" * 24
+PPLX_MARKER = "WARROOM-ANSWER-BODY-5c1e"
+PPLX_URL = "https://api.perplexity.ai/v1/sonar"
+PPLX_SAMPLES = 3
+PPLX_BUDGET_ON = {"daily_calls": 1000, "daily_spend_usd": "100.000000", "tenant_daily_calls": 1000,
+                  "tenant_daily_spend_usd": "100.000000", "reserve_usd_per_call": "0.050000"}
+# modes whose bodies are not the documented answer: none of them may ever yield a counted answer
+PPLX_BAD = ("not_json", "unknown_field", "missing_citations", "duplicate_keys", "huge", "gzip", "html",
+            "redirect_internal", "wrong_model", "nan_cost", "auth_refused_echo", "rate_limited_forever",
+            "unavailable_forever", "drip", "bool_created", "array_body")
+
+
+class _PClock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+class _Drip:
+    def __init__(self, clock):
+        self.clock = clock
+
+    def __iter__(self):
+        while True:
+            self.clock.t += 0.4
+            yield b"{"
+
+    def close(self):
+        pass
+
+
+class _Endless:
+    def __iter__(self):
+        while True:
+            yield b" " * 65536
+
+    def close(self):
+        pass
+
+
+class _FakePerplexity:
+    """The hostile Perplexity: one mode per case; every request recorded, with whether the run's reservation was
+    already on the ledger when it arrived (record-first)."""
+
+    def __init__(self, ctx):
+        self.ctx, self.mode, self.text, self.cites = ctx, "answer", "", []
+        self.requests: list = []
+        self.reserved_before: list = []
+        self.on_request = None
+        self.clock = _PClock()
+
+    def body(self, model="sonar", **extra) -> dict:
+        b = {"id": "warroom", "model": model, "created": 1761300000, "object": "chat.completion",
+             "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": self.text}}],
+             "citations": list(self.cites),
+             "usage": {"prompt_tokens": 9, "completion_tokens": 90, "total_tokens": 99,
+                       "cost": {"input_tokens_cost": 0.00001, "output_tokens_cost": 0.0001, "request_cost": 0.005,
+                                "total_cost": 0.00511}}}
+        b.update(extra)
+        return b
+
+    def handle(self, request):
+        self.requests.append(str(request.url))
+        self.reserved_before.append(bool(self.ctx.h.ledger.of_type("engine_calls_reserved")))
+        if self.on_request is not None:
+            self.on_request(request)
+        m, j = self.mode, {"content-type": "application/json"}
+
+        def raw(status, headers, data):
+            return httpx.Response(status, headers=headers, stream=httpx.ByteStream(data))
+        if m == "answer" or (m == "flaky" and len(self.requests) % 2 == 0):
+            return raw(200, j, json.dumps(self.body()).encode())
+        if m == "flaky":
+            return raw(503, {}, b"")
+        if m == "not_json":
+            return raw(200, j, b"{nope " + PPLX_MARKER.encode())
+        if m == "array_body":
+            return raw(200, j, b"[]")
+        if m == "unknown_field":
+            return raw(200, j, json.dumps(self.body(tool_calls=[{"run": "release kill switches"}])).encode())
+        if m == "missing_citations":
+            b = self.body()
+            b.pop("citations")
+            return raw(200, j, json.dumps(b).encode())
+        if m == "duplicate_keys":
+            return raw(200, j, b'{"id": "a", "id": "b"}')
+        if m == "bool_created":
+            return raw(200, j, json.dumps(self.body(created=True)).encode())
+        if m == "huge":
+            return httpx.Response(200, headers=j, stream=_Endless())
+        if m == "gzip":
+            return raw(200, {**j, "content-encoding": "gzip"}, gzip.compress(json.dumps(self.body()).encode()))
+        if m == "html":
+            return raw(200, {"content-type": "text/html"}, json.dumps(self.body()).encode())
+        if m == "redirect_internal":
+            return raw(302, {"location": "http://169.254.169.254/latest/meta-data/"}, b"")
+        if m == "wrong_model":
+            return raw(200, j, json.dumps(self.body(model="sonar-deep-research")).encode())
+        if m == "nan_cost":
+            return raw(200, j, json.dumps(self.body()).replace("0.00511", "NaN").encode())
+        if m == "auth_refused_echo":
+            return raw(401, j, json.dumps({"error": {"message": "bad key " + PPLX_KEY}}).encode())
+        if m == "rate_limited_forever":
+            return raw(429, {"retry-after": "1"}, b"")
+        if m == "unavailable_forever":
+            return raw(503, {"retry-after": "1"}, b"")
+        if m == "drip":
+            return httpx.Response(200, headers=j, stream=_Drip(self.clock))
+        raise ValueError(f"unknown Perplexity mode {m}")
+
+
+def perplexity(ctx, mode="answer", text=None, host=None, budget="on"):
+    """The service's real Perplexity adapter wired to the hostile fake, budgets on (or off), and a Perplexity
+    prompt set on the own-properties tenant."""
+    f = _FakePerplexity(ctx)
+    f.mode = mode
+    base = text if text is not None else "Z Best Media helps with revenue recovery."
+    f.text = f"{base} {PPLX_MARKER} https://site.test/ https://www.site.test/"   # text URLs are never citations
+    f.cites = ([f"https://{host}/page"] if host else []) + ["https://competitor.test/a"]
+    ctx.pplx = f
+    h = ctx.h
+    h.settings.perplexity_budget = dict(PPLX_BUDGET_ON) if budget == "on" else {
+        "daily_calls": 0, "daily_spend_usd": "0", "tenant_daily_calls": 0, "tenant_daily_spend_usd": "0",
+        "reserve_usd_per_call": "0.050000"}
+    h.settings.probe_samples = PPLX_SAMPLES
+    h.ports.engines["perplexity"] = PX.PerplexityEngine(PX.ApiKey(PPLX_KEY, "env"),
+                                                        transport=httpx.MockTransport(f.handle), monotonic=f.clock,
+                                                        sleep=f.clock.sleep, rand=lambda: 0.0)
+    ps = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": H.rid(), "name": "warroom", "brand_terms": [
+        "Z Best Media"], "competitor_domains": ["competitor.test"], "engines": ["perplexity"],
+        "prompts": ["who recovers marketplace revenue in long beach"]}), 201)
+    ctx.pplx_ps = ps["prompt_set_id"]
+
+
+def answer_audit(ctx):
+    r = ctx.h.post("/tenants/zbm/audits", {"request_id": H.rid(), "domain": SITE, "scheme": "http", "paths": ["/"],
+                                           "prompt_set_id": ctx.pplx_ps})
+    ctx.audit = r
+    return r
+
+
+def pplx_kill_mid_run(ctx, switch):
+    """Compliance engages the switch while Perplexity's first answer is in flight."""
+    ctx.expected_code, ctx.switch = EXPECTED[switch], switch
+
+    def hook(request):
+        if ctx.pplx_kill_at is None:
+            ctx.pplx_kill_at = len(ctx.pplx.requests)
+            ctx.h.svc.set_switch("compliance_38", {"request_id": H.rid(), "switch": switch, "engaged": True},
+                                 andre=False)
+    ctx.pplx.on_request = hook
+
+
+def _pplx_state(ctx, state, outs) -> None:
+    f = ctx.pplx
+    state["pplx_requests"] = len(f.requests)
+    state["pplx_urls_ok"] = all(u == PPLX_URL for u in f.requests)
+    state["pplx_reserved_before_every_request"] = all(f.reserved_before)
+    state["pplx_requests_within_bound"] = len(f.requests) <= PPLX_SAMPLES * 3
+    state["pplx_key_leaked"] = any(PPLX_KEY in b for b in outs)
+    state["pplx_body_stored"] = any(PPLX_MARKER in b for b in outs)
+    state["pplx_reservations"] = len(ctx.h.ledger.of_type("engine_calls_reserved"))
+    if ctx.pplx_kill_at is not None:
+        state["pplx_requests_after_kill"] = len(f.requests) - ctx.pplx_kill_at
+    rep = None
+    if ctx.audit is not None and ctx.audit.headers.get("content-type", "").startswith("application/json"):
+        rep = (ctx.audit.json() or {}).get("report")
+    cal = next((e for e in (rep or {}).get("agents", []) if e["agent"] == "callum"), None)
+    state["callum_outcome"] = None if cal is None else cal["outcome"]
+    eng = ((cal or {}).get("facts") or {}).get("engines", {}).get("perplexity")
+    prompts = eng.get("prompts", []) if isinstance(eng, dict) else []
+    state["tenant_cited"] = sum(p.get("cited", 0) for p in prompts)
+    answers = sum(p.get("answers", 0) for p in prompts)
+    state["bad_answers_counted"] = answers if f.mode in PPLX_BAD else 0
+
+
 ACTIONS = {"site": site, "plant": plant, "snapshot": snapshot, "audit": audit, "bomb": bomb, "slow": slow,
            "giant": giant, "inject": inject, "log_pii": log_pii, "log_hostile": log_hostile,
            "two_clients": two_clients, "probe": probe, "personal_data_key": personal_data_key, "kill": kill,
-           "release_without_andre": release_without_andre, "kill_mid_run": kill_mid_run, "paid_run": paid_run}
+           "release_without_andre": release_without_andre, "kill_mid_run": kill_mid_run, "paid_run": paid_run,
+           "perplexity": perplexity, "answer_audit": answer_audit, "pplx_kill_mid_run": pplx_kill_mid_run}
 
 
 # ============================================================================================ observation
@@ -838,4 +1032,6 @@ def observe(ctx) -> dict:
                                "capabilities": sorted(k for k, v in sv["capabilities"].items() if v),
                                "providers": sorted(k for k, v in sv["providers"].items() if v)}
     state["finance_calls"] = ctx.fin.calls
+    if ctx.pplx is not None:
+        _pplx_state(ctx, state, outs)
     return state
