@@ -15,9 +15,10 @@
 //     idempotently; only completed scans count (ledger_record.go,
 //     recorded.go). One scan runs at a time: a concurrent request gets
 //     ErrScanInProgress (409).
-//   - E-3: every scan has a tenant (client_id). Only the fixture tenant has a
-//     data source today; a scan with no client_id defaults to it and records
-//     that it did. Every finding is checked to belong to the tenant, to come
+//   - E-3: every scan has a tenant (client_id). The fixture tenant reads the
+//     fixture pool, any other tenant its connected store's snapshot (ADR
+//     0020); a scan with no client_id defaults to the fixture tenant and
+//     records that it did. Every finding is checked to belong to the tenant, to come
 //     from the agent that was called, and to carry its derived id.
 //   - E-6: detect calls are batched under detection-py's 1,000-item cap, and
 //     correlation is batched by correlation key so no entity's findings are
@@ -42,8 +43,37 @@ import (
 // a data source until a real store connector exists.
 const FixtureClientID = "fixture-pool"
 
-// DataSourceFixtures names the only data source that exists.
+// DataSourceFixtures names the shared fixture pool.
 const DataSourceFixtures = "fixtures"
+
+// DataSourceShopifyPrefix + a detection-py snapshot id ("snap-" + 24 hex)
+// is the data source of a scan of a connected Shopify store (ADR 0020). It
+// is written into the scan's started record, so the ledger ties the scan to
+// the store read detection-py recorded (rr_store_read_completed carries the
+// same snapshot id).
+const DataSourceShopifyPrefix = "shopify:"
+
+// scanSource is where a scan's data came from.
+type scanSource struct {
+	name       string
+	fixture    bool
+	snapshotID string
+	coverage   json.RawMessage
+	covered    map[string]bool // store scans: the agents the source feeds (nil for fixtures)
+}
+
+// storeRefusalStatus maps detection-py's refusal to this API's status:
+// 503 when store reads are switched off or misconfigured, 429 when the
+// client's budget is spent, otherwise 409 (the store is not in a state that
+// can be scanned: not connected, not synced, snapshot stale).
+func storeRefusalStatus(upstream int) int {
+	switch upstream {
+	case 503, 429:
+		return upstream
+	default:
+		return 409
+	}
+}
 
 // Batch sizes (E-6). detection-py refuses more than 1,000 items per request
 // (api.MAX_BATCH_ITEMS). Detect batches are half that, so one batch's
@@ -65,6 +95,9 @@ var ErrScanInProgress = errors.New("a Revenue Recovery scan is already running; 
 type RequestError struct {
 	Status int
 	Msg    string
+	// Reason is a closed reason code when the refusal came from the store
+	// connector (ADR 0020), e.g. NOT_CONNECTED; empty otherwise.
+	Reason string
 }
 
 func (e *RequestError) Error() string { return e.Msg }
@@ -72,8 +105,9 @@ func (e *RequestError) Error() string { return e.Msg }
 // ScanRequest is what a caller may choose about a scan.
 type ScanRequest struct {
 	// ClientID is the tenant. Empty means the fixture tenant (recorded as
-	// tenant_defaulted). Any other tenant is refused until a live data source
-	// exists — fixture data is never attributed to a real client.
+	// tenant_defaulted). Any other tenant is scanned from its connected
+	// store's snapshot (ADR 0020), or refused — fixture data is never
+	// attributed to a real client.
 	ClientID string
 	// AsOf is the scan's instant (renewals due at or before it are missed).
 	// Zero means now.
@@ -93,6 +127,12 @@ type ScanResult struct {
 	OverlappingClaims map[string][]client.Finding `json:"overlapping_claims"`
 	AgentsRun         []string                    `json:"agents_run"`
 	NonLiveDataSource bool                        `json:"non_live_data_source"`
+	// StoreSnapshotID / StoreCoverage (ADR 0020): set for a scan of a
+	// connected store — the snapshot scanned and its coverage note (window,
+	// counts, agents this source does and does not feed). Absent for the
+	// fixture pool.
+	StoreSnapshotID string          `json:"store_snapshot_id,omitempty"`
+	StoreCoverage   json.RawMessage `json:"store_coverage,omitempty"`
 	// LedgerEntriesWritten: finding events recorded for this scan (one per
 	// finding; value-basis events are not counted here). LedgerEventsCreated / LedgerEventsAlreadyPresent split every
 	// event of the scan (started, findings, completed) by what the ledger
@@ -226,10 +266,10 @@ func touchpointBatches(tps []client.ChannelTouchpoint, size int) ([][]client.Cha
 	return batches, nil
 }
 
-// RunFullScan pulls the shared fixture pool and runs every Tier 1 and Tier 2
-// detection agent against it, correlates the combined findings and records
-// the scan in the ledger. Explicitly non-live: it only ever reads from
-// detection-py's /fixtures/* endpoints (no real-store data source exists).
+// RunFullScan pulls the scan's data — the shared fixture pool for the
+// fixture tenant, or the tenant's store snapshot from detection-py (ADR
+// 0020) — runs every Tier 1 and Tier 2 detection agent against it,
+// correlates the combined findings and records the scan in the ledger.
 //
 // Fail fast (fix wave 3): the ledger is checked FIRST (GET /ledger/verify).
 // If it is unreachable, refuses the token, or its chain does not verify, the
@@ -249,10 +289,6 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 	if !ValidClientID(tenant) {
 		return nil, &RequestError{Status: 400, Msg: "client_id must be 1-64 characters of [A-Za-z0-9._:-], starting with a letter or digit"}
 	}
-	if tenant != FixtureClientID {
-		return nil, &RequestError{Status: 422, Msg: fmt.Sprintf(
-			"no live data source exists yet: only the fixture tenant (client_id=%s, the default) can be scanned", FixtureClientID)}
-	}
 	now := o.now()
 	asOf := req.AsOf
 	if asOf.IsZero() {
@@ -267,6 +303,25 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 	}
 	asOfWire := asOf.UTC().Format(time.RFC3339Nano)
 
+	// ADR 0020: any tenant but the fixture pool is scanned from its store
+	// snapshot, held by detection-py. Asked for BEFORE anything else is
+	// touched, so a client with no connected store (NOT_CONNECTED) or no
+	// fresh snapshot is refused with nothing read and nothing written. The
+	// orchestrator itself never calls a store.
+	var snap *client.StoreSnapshot
+	if tenant != FixtureClientID {
+		s, err := o.detection.StoreSnapshot(ctx, tenant)
+		var ref *client.StoreRefusal
+		if errors.As(err, &ref) {
+			return nil, &RequestError{Status: storeRefusalStatus(ref.Status), Reason: ref.Reason, Msg: fmt.Sprintf(
+				"no store data to scan for client_id=%s: %s (%s); nothing was run or written", tenant, ref.Reason, ref.Message)}
+		}
+		if err != nil {
+			return nil, stepErr("fetch store snapshot", err)
+		}
+		snap = s
+	}
+
 	pre, err := o.ledger.Verify(ctx)
 	if err != nil {
 		return nil, stepErr("ledger check before scan", err)
@@ -277,29 +332,55 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 		return nil, &IntegrityError{When: "before scan (nothing was run or written)", Verdict: pre.Error}
 	}
 
-	orders, err := o.detection.FixtureOrders(ctx)
-	if err != nil {
-		return nil, stepErr("fetch fixture orders", err)
-	}
-	subs, err := o.detection.FixtureSubscriptions(ctx)
-	if err != nil {
-		return nil, stepErr("fetch fixture subscriptions", err)
-	}
-	ssEvents, err := o.detection.FixtureServerSideEvents(ctx)
-	if err != nil {
-		return nil, stepErr("fetch server-side event fixtures", err)
-	}
-	touchpoints, err := o.detection.FixtureChannelTouchpoints(ctx)
-	if err != nil {
-		return nil, stepErr("fetch channel touchpoint fixtures", err)
-	}
-	platforms, err := o.detection.FixturePlatformConnections(ctx)
-	if err != nil {
-		return nil, stepErr("fetch platform connection fixtures", err)
-	}
-	terms, err := o.detection.FixtureContractTerms(ctx)
-	if err != nil {
-		return nil, stepErr("fetch contract term fixtures", err)
+	src := scanSource{name: DataSourceFixtures, fixture: true}
+	var (
+		orders      []client.Order
+		subs        []client.Subscription
+		ssEvents    []client.ServerSideEvent
+		touchpoints []client.ChannelTouchpoint
+		platforms   []client.PlatformConnectionStatus
+		terms       []client.ContractTerm
+	)
+	if snap != nil {
+		// A store snapshot feeds the order agents only; every other agent
+		// still runs, on an empty batch, and the snapshot's coverage note
+		// says which agents this source does not feed (a report must not
+		// read their silence as a clean result).
+		src = scanSource{name: DataSourceShopifyPrefix + snap.SnapshotID, snapshotID: snap.SnapshotID, coverage: snap.Coverage,
+			covered: snap.CoveredAgents}
+		orders = snap.Orders
+		subs, ssEvents = []client.Subscription{}, []client.ServerSideEvent{}
+		touchpoints, platforms, terms = []client.ChannelTouchpoint{}, []client.PlatformConnectionStatus{}, []client.ContractTerm{}
+	} else {
+		if tenant != FixtureClientID {
+			// Defensive (AEGIS golive-rr info): only the fixture tenant may
+			// ever be scanned from the shared fixture pool.
+			return nil, stepErr("choose scan source", fmt.Errorf("tenant %q has no store snapshot and is not the fixture pool", tenant))
+		}
+		orders, err = o.detection.FixtureOrders(ctx)
+		if err != nil {
+			return nil, stepErr("fetch fixture orders", err)
+		}
+		subs, err = o.detection.FixtureSubscriptions(ctx)
+		if err != nil {
+			return nil, stepErr("fetch fixture subscriptions", err)
+		}
+		ssEvents, err = o.detection.FixtureServerSideEvents(ctx)
+		if err != nil {
+			return nil, stepErr("fetch server-side event fixtures", err)
+		}
+		touchpoints, err = o.detection.FixtureChannelTouchpoints(ctx)
+		if err != nil {
+			return nil, stepErr("fetch channel touchpoint fixtures", err)
+		}
+		platforms, err = o.detection.FixturePlatformConnections(ctx)
+		if err != nil {
+			return nil, stepErr("fetch platform connection fixtures", err)
+		}
+		terms, err = o.detection.FixtureContractTerms(ctx)
+		if err != nil {
+			return nil, stepErr("fetch contract term fixtures", err)
+		}
 	}
 	tpBatches, err := touchpointBatches(touchpoints, detectBatchSize)
 	if err != nil {
@@ -354,6 +435,12 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 
 	all := []client.Finding{} // never nil: a clean store is [] on the wire (E-1)
 	agentsRun := []string{}
+	// agentsRecorded (AEGIS golive-rr L5): the agents the started event
+	// names. A fixture scan: every agent run. A store scan: only the agents
+	// its coverage note marks covered (the others ran on no data from this
+	// source), plus any agent that nonetheless returned a finding, so the
+	// ledger never omits an agent whose findings it records. ADR 0020.
+	agentsRecorded := []string{}
 	seen := map[string]string{} // finding_id -> its content (detected_at aside)
 	for _, a := range agents {
 		fs, err := a.run(ctx)
@@ -378,6 +465,9 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 			all = append(all, f)
 		}
 		agentsRun = append(agentsRun, a.id)
+		if src.covered == nil || src.covered[a.id] || len(fs) > 0 {
+			agentsRecorded = append(agentsRecorded, a.id)
+		}
 	}
 
 	overlaps, err := o.correlate(ctx, all)
@@ -392,8 +482,8 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 		return nil, stepErr("scan id", err)
 	}
 	started := startedEvent(startedPayload{
-		ScanID: scanID, ClientID: tenant, AsOf: asOfWire, DataSource: DataSourceFixtures,
-		Fixture: true, TenantDefaulted: defaulted, Agents: agentsRun,
+		ScanID: scanID, ClientID: tenant, AsOf: asOfWire, DataSource: src.name,
+		Fixture: src.fixture, TenantDefaulted: defaulted, Agents: agentsRecorded,
 	})
 	// Each finding's event, followed (L1) by its value-basis event when its
 	// figure is rate-derived. findingOf[i] is the finding events[i] records.
@@ -422,8 +512,9 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 	completed := completedEvent(scanID, tenant, len(all), manifest)
 
 	res := &ScanResult{
-		ScanID: scanID, ClientID: tenant, TenantDefaulted: defaulted, DataSource: DataSourceFixtures,
-		AsOf: asOfWire, Findings: all, OverlappingClaims: overlaps, AgentsRun: agentsRun, NonLiveDataSource: true,
+		ScanID: scanID, ClientID: tenant, TenantDefaulted: defaulted, DataSource: src.name,
+		AsOf: asOfWire, Findings: all, OverlappingClaims: overlaps, AgentsRun: agentsRun, NonLiveDataSource: src.fixture,
+		StoreSnapshotID: src.snapshotID, StoreCoverage: src.coverage,
 	}
 	write := func(ev client.EventInput) error {
 		r, err := o.ledger.AppendEvent(ctx, ev)

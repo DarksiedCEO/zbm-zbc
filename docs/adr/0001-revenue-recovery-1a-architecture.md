@@ -27,6 +27,9 @@ concrete engineering choices made to implement them.
    converting a real store's native data into this generic shape, is not
    yet built — it's the boundary where real-store integration attaches
    later without touching agent logic.
+   **Amended by ADR 0020 (Oct 24 2026):** the Shopify translation layer is
+   built (`services/detection-py/src/store_connector/translate.py`), ships
+   NOT_CONNECTED, and no agent changed.
 6. **Confidence labeling and double-count correlation are architecturally
    enforced, not conventions.** `LabeledValue` cannot be constructed
    without both a `ValueClassification` and a `DecisionConfidence`
@@ -322,7 +325,10 @@ scan is written to the ledger is ADR 0003 section 13.
   client id. orchestrator-go defaults a scan with no `client_id` to it, and
   only to it, and records `tenant_defaulted`. Any other tenant is refused
   (422) until a live data source exists: fixture data is never attributed to
-  a real client.
+  a real client. **Amended by ADR 0020 (Oct 24 2026):** any other tenant is now
+  scanned from its connected store's snapshot, or refused with the store
+  connector's reason code (409 `NOT_CONNECTED` / `NOT_SYNCED` /
+  `SNAPSHOT_STALE`, 429, 503) with nothing run or written.
 
 ### Evidence class and methodology (E-4)
 

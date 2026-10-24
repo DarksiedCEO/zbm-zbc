@@ -77,6 +77,10 @@ type fakeDetection struct {
 	mu       sync.Mutex
 	reqs     []string
 	fixtures map[string]string // "/fixtures/..." -> JSON list; default []
+	// stores: client_id -> (status, body) for POST /stores/snapshot (ADR
+	// 0020). Default: 409 NOT_CONNECTED, as detection-py answers with no
+	// connections file.
+	stores map[string][2]string
 	// rules: agent id -> findings for one batch of items (the request's
 	// list, decoded) for the given client. Default: no findings.
 	rules map[string]func(client string, items []map[string]any) []map[string]any
@@ -90,7 +94,7 @@ type fakeDetection struct {
 }
 
 func newFakeDetection() *fakeDetection {
-	return &fakeDetection{fixtures: map[string]string{}, rules: map[string]func(string, []map[string]any) []map[string]any{},
+	return &fakeDetection{fixtures: map[string]string{}, stores: map[string][2]string{}, rules: map[string]func(string, []map[string]any) []map[string]any{},
 		sizes: map[string][]int{}}
 }
 
@@ -134,6 +138,21 @@ func (d *fakeDetection) server(t *testing.T) *httptest.Server {
 		}
 		if r.URL.Path == "/correlation/overlaps" {
 			d.correlate(w, req)
+			return
+		}
+		if r.URL.Path == "/stores/snapshot" {
+			var client string
+			_ = json.Unmarshal(req["client_id"], &client)
+			d.mu.Lock()
+			ans, ok := d.stores[client]
+			d.mu.Unlock()
+			if !ok {
+				ans = [2]string{"409", `{"detail":{"reason":"NOT_CONNECTED","message":"no store connection is registered for this client"}}`}
+			}
+			code := 0
+			_, _ = fmt.Sscan(ans[0], &code)
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(ans[1]))
 			return
 		}
 		agent, ok := pathAgent[r.URL.Path]

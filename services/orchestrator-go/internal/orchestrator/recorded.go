@@ -538,7 +538,7 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 		LegacyFindingEntriesIgnored: fold.legacy,
 		LegacyFindings:              fold.legacyRows,
 		LedgerVerify:                verify,
-		NonLiveDataSource:           true,
+		NonLiveDataSource:           nonLive(summaries),
 		LatestScanUncounted:         supersededBy,
 	}, nil
 }
@@ -559,4 +559,18 @@ func unfinishedStatus(id, startedAt, running string, now time.Time) string {
 		return ScanStatusAbandoned
 	}
 	return ScanStatusIncomplete
+}
+
+// nonLive (ADR 0020): true unless every counted scan read a connected store.
+// No counted scan at all is reported non-live too: nothing live is shown.
+func nonLive(scans []ScanSummary) bool {
+	if len(scans) == 0 {
+		return true
+	}
+	for _, s := range scans {
+		if s.Fixture {
+			return true
+		}
+	}
+	return false
 }

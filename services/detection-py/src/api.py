@@ -49,6 +49,8 @@ from fixtures_loader import (
 from zbm_schema import Finding, Order, Subscription
 from zbm_schema.limits import ClientId
 from zbm_schema.correlation import find_overlapping_entities
+from store_connector.reasons import StoreError
+from store_connector.service import StoreService
 from zbm_schema.tier2 import (
     ChannelTouchpoint,
     ContractTerm,
@@ -412,6 +414,11 @@ class FindingsResponse(BaseModel):
     findings: list[Finding]
 
 
+# ADR 0020: a store sync or snapshot read names only the tenant.
+class StoreRequest(BaseModel):
+    client_id: ClientId
+
+
 # Every route that takes a body, and its request model. The body limit of
 # each is computed from the model (request_limits.body_limit_for); a route
 # missing here would get DEFAULT_BODY_BYTES (64 KiB).
@@ -426,6 +433,9 @@ ROUTE_REQUEST_MODELS: dict[str, type[BaseModel]] = {
     "/agents/contract-pricing-term-drift/detect": ContractTermsRequest,
     "/correlation/overlaps": FindingsRequest,
 }
+# Body routes deliberately NOT in the table: they take only {"client_id"} (ADR 0020 /stores routes), so the
+# 64 KiB DEFAULT_BODY_BYTES is their limit (tests/test_body_limits.py checks the two sets cover every POST route).
+SMALL_BODY_ROUTES = frozenset({"/stores/sync", "/stores/snapshot"})
 ROUTE_BODY_LIMITS: dict[str, int] = {path: body_limit_for(model) for path, model in ROUTE_REQUEST_MODELS.items()}
 MAX_BODY_BYTES = max(ROUTE_BODY_LIMITS.values())  # the largest limit of any route
 
@@ -626,3 +636,41 @@ def detect_contract_pricing_term_drift(req: ContractTermsRequest = Depends(wire_
 @app.post("/correlation/overlaps", dependencies=[Depends(require_auth)])
 def correlation_overlaps(req: FindingsRequest = Depends(wire_body(FindingsRequest))) -> Response:
     return Response(_OVERLAPS.dump_json(find_overlapping_entities(req.findings)), media_type="application/json")
+
+
+# --- store connections (ADR 0020) -------------------------------------------
+#
+# The only routes that can lead to an outbound call, and only /stores/sync can: status and snapshot never leave the
+# process. With no RR_STORE_CONNECTIONS_FILE every client is NOT_CONNECTED. Errors carry a closed reason code and a
+# fixed message (store_connector/reasons.py), never upstream text.
+
+STORE = StoreService.from_env(os.environ)
+
+
+def _store_error(e: StoreError) -> JSONResponse:
+    return JSONResponse(status_code=e.http_status, content={"detail": e.detail()})
+
+
+@app.get("/stores/{client_id}/status", dependencies=[Depends(require_auth)])
+def store_status(client_id: str) -> Response:
+    try:
+        TypeAdapter(ClientId).validate_python(client_id)
+    except ValidationError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid client_id") from None
+    return JSONResponse(STORE.status(client_id))
+
+
+@app.post("/stores/sync", dependencies=[Depends(require_auth)])
+def store_sync(req: StoreRequest = Depends(wire_body(StoreRequest))) -> Response:
+    try:
+        return JSONResponse(STORE.sync(req.client_id))
+    except StoreError as e:
+        return _store_error(e)
+
+
+@app.post("/stores/snapshot", dependencies=[Depends(require_auth)])
+def store_snapshot(req: StoreRequest = Depends(wire_body(StoreRequest))) -> Response:
+    try:
+        return Response(STORE.snapshot(req.client_id), media_type="application/json")
+    except StoreError as e:
+        return _store_error(e)

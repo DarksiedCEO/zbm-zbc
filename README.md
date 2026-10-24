@@ -210,7 +210,8 @@ Details and the full before/after money table: ADR 0001 "Revenue Recovery fix wa
   events with deterministic ids on the idempotent `POST /ledger/events`; retries never duplicate; only completed
   scans count in `GET /revenue-recovery/findings`; one scan at a time (409 + `Retry-After`).
 - **Tenant and identity:** `?client_id=` on the scan route (default: the fixture tenant `fixture-pool`, recorded as
-  defaulted; other tenants are 422 until a live data source exists). `finding_id` is a hash of (client, agent,
+  defaulted; any other tenant is scanned from its connected store's snapshot or refused with the store connector's
+  reason code, e.g. 409 `NOT_CONNECTED` — ADR 0020). `finding_id` is a hash of (client, agent,
   entity type, entity, period); overlaps need two distinct agents on (client, entity type, entity).
 - **Quote-affecting amounts:** discount stacking claims only the excess over the best single code; affiliate claims
   commission (subtotal x known rate) or nothing; server-side attribution and abandoned cart claim no figure; every

@@ -77,7 +77,7 @@ func TestL2_FailedScanReleasesTheScanLock(t *testing.T) {
 	t.Run("refused request", func(t *testing.T) {
 		det, led := twoLeakDetection(), newMemLedger()
 		srv := fixWaveServer(t, det, led)
-		if code, _, _ := scan(t, srv, "?client_id=someone-else"); code != http.StatusUnprocessableEntity {
+		if code, _, _ := scan(t, srv, "?client_id=someone-else"); code != http.StatusConflict { // NOT_CONNECTED (ADR 0020)
 			t.Fatalf("foreign tenant = %d", code)
 		}
 		if code, _, body := scan(t, srv, ""); code != http.StatusOK {
