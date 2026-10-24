@@ -215,13 +215,16 @@ def _b64url(data: bytes) -> bytes:
     return base64.urlsafe_b64encode(data).rstrip(b"=")
 
 
+def _b64json(o) -> bytes:
+    return _b64url(json.dumps(o, separators=(",", ":"), sort_keys=True).encode("ascii"))
+
+
 def build_assertion(key: ServiceAccountKey, now: int, scope: str = SCOPE) -> bytes:
     """The signed JWT for the token request (Google's service-account flow; RS256)."""
     header = {"alg": "RS256", "typ": "JWT", "kid": key.key_id}
     claims = {"iss": key.client_email, "scope": scope, "aud": TOKEN_URL, "iat": int(now),
               "exp": int(now) + JWT_LIFETIME_S}
-    enc = lambda o: _b64url(json.dumps(o, separators=(",", ":"), sort_keys=True).encode("ascii"))
-    signing_input = enc(header) + b"." + enc(claims)
+    signing_input = _b64json(header) + b"." + _b64json(claims)
     return signing_input + b"." + _b64url(key.sign(signing_input))
 
 
@@ -233,8 +236,20 @@ def property_host(prop: str) -> str | None:
     return m.group("d") or m.group("h")
 
 
+_INT_MAX = 10 ** 15                             # whole metrics past this are refused before any float conversion
+
+
 def _finite(v, lo: float = 0.0, hi: float = 1e15) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and lo <= v <= hi
+    """A JSON number within [lo, hi]. A huge integer (json parses a 400-digit literal into an int) is refused before
+    ``math.isfinite`` would convert it to a float and raise OverflowError (AEGIS gl-gsc M1)."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return False
+    if isinstance(v, int) and abs(v) > _INT_MAX:
+        return False
+    try:
+        return math.isfinite(v) and lo <= v <= hi
+    except (OverflowError, ValueError):
+        return False
 
 
 def parse_token(obj) -> tuple[str, int]:
@@ -263,7 +278,8 @@ def parse_sites(obj, prop: str) -> str:
     level = None
     for e in entries:
         if not isinstance(e, dict) or set(e) != {"siteUrl", "permissionLevel"} \
-                or not isinstance(e["siteUrl"], str) or e["permissionLevel"] not in PERMISSION_LEVELS:
+                or not isinstance(e["siteUrl"], str) or not isinstance(e["permissionLevel"], str) \
+                or e["permissionLevel"] not in PERMISSION_LEVELS:
             raise GscError("GSC_PROTOCOL_ERROR", "site_entry")
         if e["siteUrl"] == prop:
             level = e["permissionLevel"]
@@ -280,7 +296,7 @@ def parse_rows(obj, dims: tuple, row_limit: int, aggregation: str, start: str, e
     if not isinstance(obj, dict) or not set(obj) <= {"rows", "responseAggregationType", "metadata"}:
         raise GscError("GSC_PROTOCOL_ERROR", "query_shape")
     agg = obj.get("responseAggregationType")
-    if agg is not None and (agg not in AGGREGATIONS or (aggregation != "auto" and agg != aggregation)):
+    if agg is not None and (not isinstance(agg, str) or agg not in AGGREGATIONS or (aggregation != "auto" and agg != aggregation)):
         raise GscError("GSC_PROTOCOL_ERROR", "aggregation")
     meta = obj.get("metadata")
     if meta is not None and (not isinstance(meta, dict)
@@ -598,7 +614,11 @@ class _Read:
             if status in (400, 401, 403):
                 err = _json(raw, strict=False)
                 e = err.get("error") if isinstance(err, dict) else None
-                raise GscError("GSC_AUTH_REFUSED", e if e in TOKEN_ERRORS else "token_refused")
+                if e is not None and not isinstance(e, str):
+                    # Google documents ``error`` as a string here; anything else is not Google's token endpoint
+                    # answering as documented (AEGIS gl-gsc M1: a dict used to raise TypeError in the set lookup)
+                    raise GscError("GSC_PROTOCOL_ERROR", "token_error_shape")
+                raise GscError("GSC_AUTH_REFUSED", e if isinstance(e, str) and e in TOKEN_ERRORS else "token_refused")
             if status == 429:
                 raise _Retry("GSC_RATE_LIMITED", "http_429", ra)
             if status in RETRY_STATUSES:

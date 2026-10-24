@@ -451,7 +451,8 @@ GSC-4. **The connector** (`gsc_client.py`, standard library + httpx + `cryptogra
    - Token: a JWT signed per request of a token (`iat` = now, `exp` = now + 3600), cached as `_Secret` (redacted repr,
      never pickled) until `expires_in` minus min(300 s, half its life). A 401 from the API with a cached token drops it
      and retries once with a fresh one; a second 401 is `GSC_AUTH_REFUSED`. Token-endpoint 400 / 401 / 403 is
-     `GSC_AUTH_REFUSED` with Google's `error` from the documented closed set (never `error_description`).
+     `GSC_AUTH_REFUSED` with Google's `error` from the documented closed set (never `error_description`); an `error`
+     that is not a string (Google documents a string) is `GSC_PROTOCOL_ERROR` `token_error_shape`.
    - Hard deadline: ONE deadline per read (`SEO_GSC_DEADLINE_SECONDS`, default 60) over the token, the site check and
      every page. Production requests go through Finance's `_DeadlineBackend` (finance_client.py; AEGIS SEO Wave 3 M1
      and round 2): the Google host is resolved on a gated daemon thread inside the deadline (this module's own gate of
@@ -472,7 +473,8 @@ GSC-4. **The connector** (`gsc_client.py`, standard library + httpx + `cryptogra
      that stops it after a full page sets `truncated: true`. A key repeated within or across pages (the data moved
      between requests) is `GSC_PROTOCOL_ERROR`. The date query is one page (at most window-days rows).
    - Strict parsing: documented top-level fields only; `rows` a list no longer than the rowLimit asked; each row
-     `keys` (exactly one string per dimension), `clicks` and `impressions` whole, finite, 0..1e15 and clicks <=
+     `keys` (exactly one string per dimension), `clicks` and `impressions` whole, finite, 0..1e15 (a larger integer
+     is refused before any float conversion) and clicks <=
      impressions, `ctr` 0..1, `position` >= 0; dates inside the window; `responseAggregationType` equal to what was
      asked; `metadata` only its two documented keys; identity encoding only (gzip refused), bodies capped (16 KiB
      token, 512 KiB sites, 8 MiB per query page, by Content-Length and on the bytes read). JSON `NaN` is refused.
@@ -480,7 +482,11 @@ GSC-4. **The connector** (`gsc_client.py`, standard library + httpx + `cryptogra
      no binding), `GSC_KILLED` (KILLED), `GSC_AUTH_REFUSED` / `GSC_PROPERTY_NOT_GRANTED` / `GSC_BUDGET_EXHAUSTED`
      (BLOCKED), `GSC_RATE_LIMITED` / `GSC_UNAVAILABLE` / `GSC_PROTOCOL_ERROR` (FAILED); plus `GSC_PROPERTY_INVALID`
      and `GSC_PROPERTY_TAKEN` for bindings. A failed read never fails the audit (no 500; the audit completes with the
-     section's outcome and reason).
+     section's outcome and reason). Every membership test on a value from Google checks that it is a string first;
+     and if a malformed answer still raises something other than `GscError` (a parser gap), the section is FAILED
+     `GSC_PROTOCOL_ERROR` with `error_type` in its facts and only the exception's type logged (AEGIS gl-gsc M1: a
+     list `permissionLevel`, an object `error` from the token endpoint and a 400-digit metric used to end the whole
+     audit `RUN_FAILED`).
 
 GSC-5. **Tenant binding.** `POST /seo/v1/tenants/{tid}/gsc-property` (Andre's gate: dashboard caller plus his approval
 token) binds a tenant to `sc-domain:<domain>` or `http(s)://<domain>/…` where the domain is one of the tenant's own
@@ -567,7 +573,7 @@ deadline backend over a fake socket layer (TLS SNI is Google's name, the connect
 read bounded); DNS inside the deadline and non-global answers; the allowlist; a key that never leaks (errors, reprs,
 pickling, the log, the ledger, /status, the export); Andre-only binding; cross-tenant refusal; PII queries dropped;
 the kill switch before and mid-read; the budget including scheduled re-audits; no record, no request; retention;
-the SP rules. Live run (W3-1): see GSC-1 and the README. War room (W3-3): five `gsc-*` scenarios, 30 cases, against a
+the SP rules. Live run (W3-1): see GSC-1 and the README. War room (W3-3): five `gsc-*` scenarios, 33 cases, against a
 hostile fake Google; seeds 1-3 pass.
 
 GSC-12. **Limitations (honest).**

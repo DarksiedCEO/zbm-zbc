@@ -23,6 +23,7 @@ Rules:
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from agents import search_performance as sp
@@ -33,6 +34,7 @@ from gsc_client import ALLOWED_HOSTS, SCOPE, GscError, property_host
 from primitives import Killed
 from reasons import R
 
+log = logging.getLogger("seo.gsc")
 AGENT, TASK = sp.AGENT, sp.TASK
 METHOD = ("Search Analytics (Google Search Console API, read-only scope) for the tenant's bound property: property "
           "totals by date, then page and query rows paged within caps, reduced at once to aggregates by date, page "
@@ -169,6 +171,17 @@ class GscMixin:
             outcome = "KILLED" if e.code == "GSC_KILLED" else "BLOCKED" if e.code in BLOCKED else "FAILED"
             return env(outcome, e.code, {"state": e.code, "detail": e.detail, "requests": rd.requests,
                                          "window": {"start": start, "end": end}})
+        except Killed as k:                                # the read's guard converts these; belt and braces
+            return env("KILLED", "GSC_KILLED", {"state": "KILLED", "switch": k.code, "requests": rd.requests})
+        except Exception as exc:  # noqa: BLE001 - AEGIS gl-gsc M1: whatever Google sent, the section fails, not the audit
+            # a parser gap that let a malformed answer raise something other than GscError: the section is FAILED
+            # GSC_PROTOCOL_ERROR and the audit completes. Only the exception's type is logged (its text could quote
+            # Google's answer).
+            log.error("search_performance read failed: %s", type(exc).__name__)
+            return env("FAILED", "GSC_PROTOCOL_ERROR", {"state": "GSC_PROTOCOL_ERROR", "detail": "unexpected_answer",
+                                                         "error_type": type(exc).__name__[:60],
+                                                         "requests": rd.requests,
+                                                         "window": {"start": start, "end": end}})
         box["section"] = section
         return env("OK", None, {"state": "OK", "requests": rd.requests, "window": section["window"],
                                 "totals": section["totals"], "section_in": "report.search_performance"})

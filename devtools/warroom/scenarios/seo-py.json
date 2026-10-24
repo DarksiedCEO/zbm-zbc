@@ -1552,7 +1552,10 @@
       "rows_over_limit",
       "clicks_over_impressions",
       "wrong_aggregation",
-      "extra_top_level"
+      "extra_top_level",
+      "token_error_dict",
+      "sites_level_list",
+      "bigint_metric"
      ],
      "basis": "driver _HostileGoogle modes"
     }

@@ -750,6 +750,8 @@ class _HostileGoogle:
                                                  "error_description": "bad " + self.assertions[-1]})
             if m == "token_huge":
                 return httpx.Response(200, stream=_GSC_STREAM([b"{" * 65536], forever=True))
+            if m == "token_error_dict":          # AEGIS gl-gsc M1: ``error`` as an object, not Google's string
+                return httpx.Response(400, json={"error": {"code": 400, "message": "bad"}})
             if m == "token_drip":
                 return httpx.Response(200, stream=_GSC_STREAM([b" "], clock=self.clock, step=0.5, forever=True))
             tok = f"warroom-access-token-{len(self.tokens) + 1:03d}-" + "q" * 20
@@ -781,6 +783,8 @@ class _HostileGoogle:
                 entries = [{"siteUrl": GSC_PROP, "permissionLevel": "siteUnverifiedUser"}]
             if m == "sites_extra":
                 entries[0]["owner_email"] = "someone@example.com"
+            if m == "sites_level_list":          # AEGIS gl-gsc M1: an unhashable permissionLevel
+                entries[0]["permissionLevel"] = ["siteOwner"]
             return httpx.Response(200, json={"siteEntry": entries})
         q = json.loads(body)
         dims, lim, start = q["dimensions"], q["rowLimit"], q.get("startRow", 0)
@@ -788,6 +792,9 @@ class _HostileGoogle:
             rows = [{"keys": [q["endDate"]], "clicks": 10, "impressions": 100, "ctr": 0.1, "position": 4.0}]
             if m == "dates_outside":
                 rows[0]["keys"] = ["1999-01-01"]
+            if m == "bigint_metric":             # AEGIS gl-gsc M1: a 400-digit integer (OverflowError in isfinite)
+                return httpx.Response(200, content=b'{"rows": [{"keys": ["%s"], "clicks": 1%s, "impressions": 2}]}'
+                                      % (q["endDate"].encode(), b"0" * 400))
             if m == "nan_rows":
                 return httpx.Response(200, content=b'{"rows": [{"keys": ["%s"], "clicks": NaN, "impressions": 1}]}'
                                       % q["endDate"].encode())
