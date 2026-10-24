@@ -546,10 +546,14 @@ W4-3. **What is stored, and what is sent.**
      The cost: a tenant domain that needs `ß` or a final sigma matches nothing.
    - Public suffixes (AEGIS L3): a tenant may not register a public suffix (`github.io`, `co.uk`, `vercel.app`, ...:
      422 `DOMAIN_INVALID`), and a public-suffix tenant domain from an older log matches nothing, so one customer can
-     never claim every `*.github.io` site. The simpler correct option was chosen: refuse at registration, from a
-     vendored subset of the Public Suffix List in `agents/domain_match.py` (multi-label ICANN suffixes and the common
-     hosting platforms), not the whole list. A suffix missing from the subset relies on Andre, who registers every
-     domain by hand.
+     never claim every `*.github.io` site. Refusal at registration was chosen. Since AEGIS round 2 the WHOLE
+     Public Suffix List is vendored (`agents/public_suffix_list.dat`, unchanged, MPL-2.0 header kept; source
+     <https://publicsuffix.org/list/public_suffix_list.dat> as packaged by nixpkgs, snapshot of Dec 28 2025, sha256
+     `25d100199dd39263ee00b2b8a125a6a121905cefc814a7679ed3bbe135748ade`), implemented with its wildcard and exception
+     rules and the implicit `*` rule, ICANN and PRIVATE sections both, no new dependency. Thirteen platform domains the
+     PSL does not list (`amazonaws.com`, `wordpress.com`, `railway.app`, ...) stay refused as a documented local deny
+     list. Refresh: replace the file whole from that URL, update the date and hash in `domain_match.py` and here, run
+     `tests/test_perplexity.py`.
    - A citation URL holding a backslash, an ASCII control character or whitespace is refused before parsing
      (AEGIS M2: `https://evil.com\@acme.com/` parses as host `acme.com` but a browser goes to `evil.com`).
    - Prompts carry no personal data (`agents/prompt_guard.py`). A prompt set holding an e-mail address (any at-sign

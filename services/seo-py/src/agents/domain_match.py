@@ -21,8 +21,10 @@ another form.
 
 from __future__ import annotations
 
+import functools
 import unicodedata
 from encodings import idna as _idna
+from pathlib import Path
 from typing import Optional
 
 import lookalikes
@@ -30,28 +32,61 @@ import lookalikes
 _TABLE = lookalikes.Table()
 EXACT, SUBDOMAIN, LOOKALIKE = "exact", "subdomain", "lookalike"
 
-# AEGIS L3: a vendored SUBSET of the Public Suffix List (https://publicsuffix.org/list/, checked Oct 2026): the
-# multi-label ICANN suffixes and the PRIVATE-section hosting platforms where customers' sites are subdomains. A tenant
-# may not register one of these (svc_tenants: DOMAIN_INVALID), and if one is ever a tenant's domain (an old log) it
-# matches nothing, so "github.io" can never claim every customer's "x.github.io" as its subdomain. Single-label TLDs
-# are refused by the domain syntax already. The list is a subset, not the PSL: a suffix missing here is caught only by
-# Andre registering the domain by hand (he registers every domain).
-PUBLIC_SUFFIXES = frozenset("""
-co.uk org.uk me.uk ltd.uk plc.uk net.uk ac.uk gov.uk sch.uk nhs.uk police.uk
-com.au net.au org.au edu.au gov.au id.au asn.au co.nz net.nz org.nz govt.nz ac.nz
-co.jp ne.jp or.jp ac.jp go.jp com.br net.br org.br gov.br com.cn net.cn org.cn gov.cn com.mx org.mx gob.mx
-co.za org.za gov.za co.in net.in org.in gov.in firm.in com.sg edu.sg gov.sg com.hk org.hk gov.hk
-com.tr org.tr gov.tr co.kr or.kr go.kr com.tw org.tw gov.tw co.il org.il gov.il com.ar com.co com.pe com.ph
-com.my com.vn com.pk com.ng com.eg com.sa com.ua co.id or.id ac.id go.id co.th in.th go.th
-github.io githubusercontent.com gitlab.io netlify.app netlify.com vercel.app now.sh pages.dev workers.dev
-herokuapp.com herokussl.com azurewebsites.net azurestaticapps.net cloudapp.net trafficmanager.net
-cloudfront.net amazonaws.com s3.amazonaws.com elasticbeanstalk.com awsapprunner.com amplifyapp.com
-appspot.com web.app firebaseapp.com run.app cloudfunctions.net blogspot.com
-wordpress.com wpengine.com wixsite.com squarespace.com myshopify.com webflow.io weebly.com
-onrender.com fly.dev railway.app up.railway.app glitch.me repl.co replit.app replit.dev ngrok.io ngrok-free.app
-ngrok.app surge.sh readthedocs.io gitbook.io notion.site carrd.co framer.website framer.app bubbleapps.io
-dyndns.org no-ip.org duckdns.org ddns.net
+# AEGIS L3 / round 2: the Public Suffix List, vendored WHOLE (``public_suffix_list.dat`` next to this file, unchanged,
+# MPL-2.0 header kept), with its wildcard ("*.ck") and exception ("!www.ck") rules and the implicit "*" rule for a
+# single label. Source: https://publicsuffix.org/list/public_suffix_list.dat, as packaged by nixpkgs
+# ("publicsuffix-list-0-unstable-2025-12-28": snapshot of Dec 28 2025; sha256 25d10019...8ade). Both the ICANN and
+# the PRIVATE sections count: a hosting platform such as github.io is exactly where one customer must not claim every
+# other customer's site.
+# Refresh: download the current list from that URL (and only that URL), replace the file whole, update the date and
+# hash here and in ADR 0017 W4-3, and run tests/test_perplexity.py (the PSL tests pin a few known rules).
+# A tenant may not register a public suffix (svc_tenants: DOMAIN_INVALID), and one that is a tenant's domain anyway
+# (an old log) matches nothing.
+_PSL_FILE = Path(__file__).with_name("public_suffix_list.dat")
+# a LOCAL deny list on top of the PSL: platform domains this service also refuses as tenant domains although the PSL
+# does not list them (their customer sites are subdomains too, or the PSL lists only a wildcard under them)
+LOCAL_DENY = frozenset("""
+amazonaws.com awsapprunner.com glitch.me herokussl.com netlify.com railway.app run.app sch.uk squarespace.com surge.sh
+weebly.com wordpress.com wpengine.com
 """.split())
+
+
+def _a_label(label: str) -> str:
+    label = unicodedata.normalize("NFC", label).lower()
+    return label if label.isascii() else "xn--" + label.encode("punycode").decode("ascii")
+
+
+@functools.lru_cache(maxsize=1)
+def _psl() -> tuple:
+    """(rules, wildcard parents, exceptions) as A-label sets, parsed once from the vendored file."""
+    rules, wild, exc = set(), set(), set()
+    with open(_PSL_FILE, encoding="utf-8") as fh:
+        for line in fh:
+            rule = line.strip().split()[0] if line.strip() else ""
+            if not rule or rule.startswith("//"):
+                continue
+            kind = rules
+            if rule.startswith("!"):
+                kind, rule = exc, rule[1:]
+            elif rule.startswith("*."):
+                kind, rule = wild, rule[2:]
+            try:
+                kind.add(".".join(_a_label(lb) for lb in rule.split(".")))
+            except UnicodeError:
+                continue
+    return frozenset(rules), frozenset(wild), frozenset(exc)
+
+
+def _suffix(d: str) -> bool:
+    """``d`` (A-labels) is itself a public suffix by the PSL algorithm, or on the local deny list."""
+    if d in LOCAL_DENY:
+        return True
+    rules, wild, exc = _psl()
+    if d in exc:
+        return False
+    if d in rules or "." not in d:
+        return True
+    return d.split(".", 1)[1] in wild
 
 
 _DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
@@ -140,16 +175,16 @@ def _site(d: str) -> str:
 
 
 def is_public_suffix(domain: str) -> bool:
-    """The domain (or its www. twin) is on the vendored public-suffix subset (AEGIS L3)."""
+    """The domain (or its www. twin) is a public suffix (the vendored PSL, or the local deny list)."""
     d = _ascii(domain)
-    return d is not None and (d in PUBLIC_SUFFIXES or _site(d) in PUBLIC_SUFFIXES)
+    return d is not None and (_suffix(d) or _suffix(_site(d)))
 
 
 def match(host: str, domain: str) -> Optional[str]:
     """``exact`` (the domain or its www. twin), ``subdomain``, ``lookalike`` or None. A public-suffix tenant domain
     matches nothing."""
     h, d = _ascii(host), _ascii(domain)
-    if d is None or d in PUBLIC_SUFFIXES or _site(d) in PUBLIC_SUFFIXES:
+    if d is None or _suffix(d) or _suffix(_site(d)):
         return None
     if h is None:
         loose = _loose(host)

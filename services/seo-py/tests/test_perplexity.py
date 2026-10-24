@@ -1224,3 +1224,27 @@ def test_r2_an_answer_between_protocol_errors_resets_the_count():
     r = probes.probe_engine("perplexity", e, {"prompts": ["q0", "q1", "q2"], "brand_terms": ["x"]}, "site.test", 5,
                             lambda **k: None, osei.Osei(FixedClock(T0)), _UnlimitedBudget())
     assert len(sent) == 15 and r["outcome"] == "OK" and sum(p["answers"] for p in r["prompts"]) == 7
+
+
+@pytest.mark.parametrize("d,want", [
+    ("github.io", True), ("co.uk", True), ("com.es", True), ("qc.ca", True), ("ny.us", True), ("hf.space", True),
+    ("pythonanywhere.com", True), ("bitbucket.io", True), ("ondigitalocean.app", True), ("deno.dev", True),
+    ("x.compute.amazonaws.com", True),                                  # PSL wildcard rule *.compute.amazonaws.com
+    ("foo.ck", True), ("www.ck", True),           # *.ck; !www.ck is an exception, but its site twin is the TLD
+    ("公司.cn", True), ("xn--55qx5d.cn", True),                          # a Unicode rule, both forms
+    ("wordpress.com", True), ("railway.app", True), ("sch.uk", True),  # the local deny list
+    ("acme.github.io", False), ("acme.co.uk", False), ("example.com", False), ("shop.example.de", False),
+])
+def test_r2_the_full_public_suffix_list_with_wildcards_and_exceptions(d, want):
+    import svc_tenants
+    assert domain_match.is_public_suffix(d) is want
+    assert svc_tenants.valid_domain(d) is (not want) or not svc_tenants.DOMAIN.fullmatch(d)
+
+
+def test_r2_psl_exception_rule_and_vendored_file_header():
+    rules, wild, exc = domain_match._psl()
+    assert "www.ck" in exc and "ck" in wild and len(rules) > 9000
+    assert domain_match._suffix("www.ck") is False and domain_match._suffix("other.ck") is True
+    head = domain_match._PSL_FILE.read_text(encoding="utf-8")[:400]
+    assert "Mozilla Public" in head and "https://mozilla.org/MPL/2.0/" in head
+    assert domain_match.match("customer.pythonanywhere.com", "pythonanywhere.com") is None
