@@ -1248,3 +1248,17 @@ def test_r2_psl_exception_rule_and_vendored_file_header():
     head = domain_match._PSL_FILE.read_text(encoding="utf-8")[:400]
     assert "Mozilla Public" in head and "https://mozilla.org/MPL/2.0/" in head
     assert domain_match.match("customer.pythonanywhere.com", "pythonanywhere.com") is None
+
+
+def test_r2_smoke_helper_never_echoes_a_mistyped_value(tmp_path):
+    import io
+    m = _smoke_module()
+    for env in ({"SEO_PERPLEXITY_API_KEY": KEY, "SEO_PERPLEXITY_TIMEOUT_SECONDS": KEY},
+                {"SEO_PERPLEXITY_API_KEY": KEY, "SEO_PERPLEXITY_TIMEOUT_SECONDS": "9" * 12},
+                {"SEO_PERPLEXITY_API_KEY": KEY, "SEO_PERPLEXITY_MODEL": KEY},
+                {"SEO_PERPLEXITY_API_KEY": KEY + " " + KEY},
+                {"SEO_PERPLEXITY_API_KEY_FILE": _key_file(tmp_path, text="é" + KEY)}):
+        out = io.StringIO()
+        assert m.main([m.FLAG], env, out=out) == 2
+        text = out.getvalue()
+        assert KEY not in text and "configuration error" in text and len(text) < 300

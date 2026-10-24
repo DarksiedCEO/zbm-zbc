@@ -44,7 +44,10 @@ def _key(env: dict):
     if bool(path) == bool(plain):
         raise RuntimeError("set exactly one of SEO_PERPLEXITY_API_KEY_FILE or SEO_PERPLEXITY_API_KEY")
     if path:
-        value, source = _secret_file_bytes(env, "SEO_PERPLEXITY_API_KEY_FILE").decode("ascii", "strict"), "file"
+        try:
+            value, source = _secret_file_bytes(env, "SEO_PERPLEXITY_API_KEY_FILE").decode("ascii", "strict"), "file"
+        except UnicodeDecodeError:                        # its message would quote a byte of the file
+            raise RuntimeError("SEO_PERPLEXITY_API_KEY_FILE must hold the key as printable ASCII") from None
     else:
         value, source = plain, "env"
     try:
@@ -54,9 +57,14 @@ def _key(env: dict):
 
 
 def _engine(env: dict):
+    """The production adapter from the service's own settings rules: ``config._int`` and the closed model list, whose
+    errors name the variable and never echo its value (a mistyped value could be the key: AEGIS round 2)."""
     import perplexity
-    timeout = int((env.get("SEO_PERPLEXITY_TIMEOUT_SECONDS") or "30").strip())
+    from config import _int
+    timeout = _int(env, "SEO_PERPLEXITY_TIMEOUT_SECONDS", 30, 5, 120)
     model = (env.get("SEO_PERPLEXITY_MODEL") or perplexity.DEFAULT_MODEL).strip()
+    if model not in perplexity.MODELS:
+        raise RuntimeError(f"SEO_PERPLEXITY_MODEL must be one of {', '.join(perplexity.MODELS)}")
     return perplexity.PerplexityEngine(_key(env), model=model, timeout_s=timeout, attempts=1)
 
 
@@ -73,8 +81,11 @@ def main(argv=None, env=None, engine_factory=None, out=None) -> int:
     assert personal_data(PROMPT) is None
     try:
         eng = (engine_factory or _engine)(env)
-    except (RuntimeError, ValueError, UnicodeDecodeError) as exc:
-        print(f"configuration error: {type(exc).__name__}: {exc}"[:300], file=out)
+    except RuntimeError as exc:                           # our own messages: a variable name, never its value
+        print(f"configuration error: {exc}"[:300], file=out)
+        return 2
+    except (ValueError, TypeError, UnicodeError) as exc:  # anything else: its type only, never its text
+        print(f"configuration error: {type(exc).__name__}", file=out)
         return 2
     eng.attempts = 1                                      # one attempt, whatever the factory set
     meter = _Meter(1, Decimal("5"))                       # and the meter refuses a second request regardless
