@@ -283,7 +283,8 @@ class AuditsMixin:
         return {
             "report_version": REPORT_VERSION, "audit_id": aid, "tenant_id": tid, "domain": body["domain"],
             "scheme": body["scheme"], "paths": list(body["paths"]), "started_at": started,
-            "finished_at": iso(self.now()), "outcome": worst_outcome(e["outcome"] for e in envs),
+            "finished_at": iso(self.now()), "outcome": overall_outcome(envs),
+            "outcome_rule": OUTCOME_RULE,
             "agents": envs,
             "summary": {"findings": len(all_findings), **by, "agent_outcomes": {e["agent"]: e["outcome"] for e in envs}},
             "pages": {p: {"fetch": v["fetch"].summary(), "render_state": v["render"]["state"],
@@ -350,6 +351,18 @@ class AuditsMixin:
                              evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid}, ("interrupted", aid)))
                 n += 1
         return {"interrupted": n}
+
+
+# AEGIS gl-gsc M2 (ADR 0017 GSC-7): the Search Console section keeps its own outcome inside its section and is left
+# out of the audit's overall outcome. A kill switch on provider:gsc, a spent read budget or a Google outage is about
+# Google, not about the audited site, and must not relabel the whole audit KILLED / BLOCKED / FAILED.
+OUTSIDE_OVERALL = frozenset({("osei", "search_performance")})
+OUTCOME_RULE = ("the worst outcome over every agent's envelope except Osei's search_performance (Search Console), "
+                "whose outcome stays inside its own section")
+
+
+def overall_outcome(envs: list) -> str:
+    return worst_outcome(e["outcome"] for e in envs if (e["agent"], e["task"]) not in OUTSIDE_OVERALL)
 
 
 def _step(ctx, agent: str, task: str, fn):

@@ -110,3 +110,55 @@ def test_m1_any_other_exception_in_the_read_is_a_failed_section_and_only_its_typ
     assert "GOOGLE-SAID" not in caplog.text and "ValueError" in caplog.text
     assert "GOOGLE-SAID" not in json.dumps(view) + json.dumps([ev["_payload"] for ev in h.ledger.events])
     assert h.ledger.of_type("gsc_read_recorded")[0]["_payload"]["reason"] == "GSC_PROTOCOL_ERROR"
+
+
+# ====================================================================== M2: the GSC section never decides the audit
+
+def _without_gsc(tmp_path) -> str:
+    """The overall outcome of the same audit on a service with no Search Console configured."""
+    from helpers import Harness
+    d = tmp_path / "no-gsc"
+    d.mkdir()
+    h0 = Harness(d)
+    h0.ports.fetcher = None
+    h0.tenant("acme", "own", ("acme.test",))
+    return audit(h0, "acme", "acme.test")["report"]["outcome"]
+
+
+def _ok(h):
+    return audit(h, "acme", "acme.test")
+
+
+def _killed(h):
+    h.ok(h.switch("provider:gsc"))
+    return audit(h, "acme", "acme.test")
+
+
+def _budget(h):
+    audit(h, "acme", "acme.test")
+    return audit(h, "acme", "acme.test")
+
+
+def _outage(h):
+    return audit(h, "acme", "acme.test")
+
+
+@pytest.mark.parametrize("run,env,script,want", [
+    (_ok, {}, [], ("OK", None)),
+    (_killed, {}, [], ("KILLED", "GSC_KILLED")),
+    (_budget, {"SEO_GSC_READS_PER_DAY": "1"}, [], ("BLOCKED", "GSC_BUDGET_EXHAUSTED")),
+    (_outage, {}, [(503, {})] * 3, ("FAILED", "GSC_UNAVAILABLE")),
+], ids=["ok", "killed", "budget_spent", "503x3"])
+def test_m2_the_overall_outcome_is_what_it_would_be_without_search_console(tmp_path, run, env, script, want):
+    baseline = _without_gsc(tmp_path)
+    fake = FakeGoogle()
+    fake.script = list(script)
+    d = tmp_path / "gsc"
+    d.mkdir()
+    h = _setup(d, fake, **env)
+    view = run(h)
+    e = section(view)
+    assert (e["outcome"], e["reason"]) == want
+    assert view["report"]["search_performance"]["outcome"] == want[0]       # kept inside its own section
+    assert view["report"]["outcome"] == baseline, (view["report"]["outcome"], baseline)
+    assert "search_performance" in view["report"]["outcome_rule"]

@@ -516,7 +516,11 @@ live in the audit report (append-only log; nothing identifying, so nothing to sh
 `SEO_GSC_RETENTION_DAYS` (90) a report's search-performance section is served as window totals only.
 
 GSC-7. **Wiring.** Audit: Osei's `search_performance` step runs after Naomi (the run guard first: a restricted Osei is
-RESTRICTED); the report gets `search_performance` = {outcome, reason, read_started, section}. Record-first:
+RESTRICTED); the report gets `search_performance` = {outcome, reason, read_started, section}. **The section's outcome
+is not part of the audit's overall outcome** (AEGIS gl-gsc M2): `report.outcome` is the worst outcome over every
+other envelope (`svc_audits.overall_outcome`, stated in `report.outcome_rule`), so OK, `provider:gsc` engaged, a spent
+read budget or a Google outage leave the overall outcome exactly what it would be without Search Console; the
+section keeps its own outcome and reason in its envelope and in `report.search_performance`. Record-first:
 `gsc_read_started` (tenant, audit, property SHA-256, window) is committed to the ledger and the log BEFORE any request
 leaves (tested: the fake Google sees the event already recorded on its first request); a read that cannot be recorded
 is not made (BLOCKED with the ledger's reason); the result's SHA-256 is recorded beside the report as
