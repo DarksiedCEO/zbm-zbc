@@ -420,6 +420,11 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
                               who: str = Depends(andre)) -> dict:
         return svc.set_finance_client(_id(tid, TENANT_RX), req)
 
+    @app.post(P + "/tenants/{tid}/gsc-property", dependencies=auth)
+    def tenant_gsc_property(tid: str, req: dict = Depends(body(m.GscPropertySet)), who: str = Depends(andre)) -> dict:
+        """Andre binds the tenant to its own Search Console property (ADR 0017, Search Console section)."""
+        return svc.set_gsc_property(_id(tid, TENANT_RX), req)
+
     @app.get(P + "/kill-switches", dependencies=auth)
     def switches(who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
         with svc.lock:

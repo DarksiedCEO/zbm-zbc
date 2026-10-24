@@ -80,16 +80,28 @@ worker. Exit 1 on any new MUST failure or ERROR.
 | `SEO_INVOICE_VERIFICATION` | `finance` | `finance`: a paying client's audit or schedule runs only when Finance (31) confirms its invoice is paid, Z Best Media's, this tenant's Finance client's, not refunded and not used before (ADR 0017 W3-2); `trust`: the Wave 1/2 behaviour (the id is not checked), shown in `/status` |
 | `SEO_FINANCE_URL`, `SEO_FINANCE_TOKEN`, `SEO_FINANCE_CALLER_TOKEN` | unset | Finance (31)'s base URL, its service token and this service's `seo_02` caller token there (all three or none). Unset with `finance`: every paid run is refused `FINANCE_NOT_CONFIGURED` unless Andre overrides |
 | `SEO_FINANCE_TIMEOUT_SECONDS` | `5` | per-attempt timeout of the invoice lookup (1..30); at most three attempts within one overall deadline |
+| `SEO_GSC_SERVICE_ACCOUNT_FILE` | unset | Google Search Console: absolute path to the Google service-account JSON key (regular file owned by the service user, mode 0600/0400, no symlink, ≤ 16 KiB). Unset = `NOT_CONNECTED` (no outbound call ever); a key that cannot be parsed refuses start. ADR 0017, "Search Console" |
+| `SEO_GSC_WINDOW_DAYS` | `28` | days of final Search Analytics data per read (1..90), ending three Pacific-Time days ago |
+| `SEO_GSC_PAGE_ROWS`, `SEO_GSC_MAX_PAGES`, `SEO_GSC_MAX_ROWS` | `5000` / `10` / `50000` | pagination caps per breakdown (rows per page 100..25,000; pages 1..40; rows 1,000..250,000); a capped breakdown says `truncated` |
+| `SEO_GSC_MAX_REQUESTS` | `30` | HTTP requests per read, retries included (6..200); past it `GSC_BUDGET_EXHAUSTED` |
+| `SEO_GSC_TIMEOUT_SECONDS`, `SEO_GSC_DEADLINE_SECONDS` | `10` / `60` | per-attempt timeout (1..60) and the hard deadline over a whole read (5..300): DNS, connect, TLS and body |
+| `SEO_GSC_READS_PER_DAY` | `4` | Search Console reads per tenant in any 24 hours, scheduled re-audits included (1..48) |
+| `SEO_GSC_RETENTION_DAYS` | `90` | after this a report's search-performance breakdowns are served as window totals only (1..480) |
 | `SEO_BIND_ADDR` / `SEO_PORT` | `127.0.0.1` / `8500` | where the API listens |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | the evidence ledger; unset = every write refused (fail closed) |
+
+**Search Console** (`src/gsc_client.py`, `src/svc_gsc.py`, `src/agents/search_performance.py`): read-only scope,
+two allowlisted Google hosts, a hard deadline, bounded retries and pagination, aggregates only (no query text, no
+URL), a `search_performance` section in every audit report (`NOT_CONNECTED` until a key is configured and Andre binds
+the tenant's property), kill switch `provider:gsc`. Setup steps for Andre: ADR 0017, "Search Console".
 
 The fetcher only ever connects to ports 80 and 443, accepts at most one content coding (gzip or deflate), decoded
 within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SECONDS`) over the whole fetch.
 
 **Not built — setting any of these refuses start:** `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`,
 `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_PERPLEXITY_API_KEY_FILE`,
-`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,
+`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed: use `SEO_GSC_SERVICE_ACCOUNT_FILE`), `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,
 `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL`.
 
 ## Routes (`/seo/v1`)
@@ -102,6 +114,7 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `GET /tenants`, `POST /tenants` | dashboard / Andre | list; create (`own` or `client`) |
 | `GET /tenants/{tid}` | scoped | one tenant (hub: its own only; anything else 404) |
 | `POST /tenants/{tid}/domains` | Andre | the domains this tenant may be audited on |
+| `POST /tenants/{tid}/gsc-property` | Andre | bind the tenant to its own Search Console property (`sc-domain:<domain>` or `https://<domain>/`, one of its registered domains; `null` unbinds) |
 | `POST /tenants/{tid}/finance-client` | Andre | bind a client tenant to its Finance (31) client id, against which paid runs' invoices are checked (W3-2) |
 | `GET`, `POST /kill-switches` | dashboard, compliance_38 | engage any switch; releasing needs Andre |
 | `GET /tenants/{tid}/entity` | scoped | the canonical entity record with source, provenance, authority, freshness, history |

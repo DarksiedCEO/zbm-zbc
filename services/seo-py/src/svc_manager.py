@@ -83,10 +83,17 @@ class ManagerMixin:
 
     def _scorecard(self, agent: str) -> dict:
         runs, outcomes, produced = 0, {}, 0
+        sp_runs, sp_outcomes = 0, {}
         for a in self.audits.values():
             if a["status"] != "completed":
                 continue
             for e in a["report"]["agents"]:
+                if e["agent"] == agent and e.get("task") == "search_performance":
+                    # Osei's first-party Search Console step is scored on its own (sub-card below), so the main card
+                    # keeps meaning what it always did: Osei's data-hygiene runs
+                    sp_runs += 1
+                    sp_outcomes[e["outcome"]] = sp_outcomes.get(e["outcome"], 0) + 1
+                    continue
                 if e["agent"] == agent:
                     runs += 1
                     outcomes[e["outcome"]] = outcomes.get(e["outcome"], 0) + 1
@@ -115,6 +122,10 @@ class ManagerMixin:
                 "failure_rate": rate(outcomes.get("FAILED", 0)),
                 "restricted_runs": outcomes.get("RESTRICTED", 0),
                 "drift_reports_recorded": drifts if agent == "osei" else None,
+                "search_performance": {"runs": sp_runs, "outcomes": dict(sorted(sp_outcomes.items())),
+                                       "not_connected_rate": None if sp_runs == 0 else
+                                       round(sp_outcomes.get("NOT_CONNECTED", 0) / sp_runs, 4)}
+                if agent == "osei" else None,
                 "basis": "completed audit reports, finished log ingests and recorded drift reports"}
 
     def _queues(self, agent: str) -> dict:
