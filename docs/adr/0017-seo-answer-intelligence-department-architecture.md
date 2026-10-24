@@ -684,7 +684,12 @@ W4-7. **Proof.**
        fields, no `index`), two protocol errors stopping a run, a no-answer run FAILED, the one-call smoke helper,
        IDNA2003 mappings and invisible characters, backslash and whitespace citation URLs, the widened prompt guard,
        read slices and the post-response guard, zero cost charged at the reserve, public-suffix tenant domains, and
-       one test per AEGIS mutant (all 24 of AEGIS's `mutate.py` mutants are killed).
+       one test per AEGIS mutant (all 24 of AEGIS's `mutate.py` mutants are killed);
+     - AEGIS round 2 (after certification at 7942b3a): only round counts allowed and no version-masked dotted quad,
+       prose "at ... dot" not taken for an address, protocol errors between 503s stopping the run, the whole Public
+       Suffix List (wildcards, exceptions, both sections) plus the local deny list, the smoke helper never echoing a
+       setting and holding to one request, the 4x-reserve cost guard and its finding, and drift visibility (unmodelled
+       key names, zero-source answers, the finding).
    - The live run (W3-1) now runs the service under a socket guard that refuses and records any non-loopback DNS
      lookup or connection, and it ends with that record empty. It proves:
      - a key file open to group or others, or a key set two ways, refuses start;
