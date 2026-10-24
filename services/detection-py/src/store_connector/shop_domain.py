@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 SHOPIFY_SUFFIX = ".myshopify.com"
-_HANDLE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?")
+_HANDLE = re.compile(r"[a-z0-9][a-z0-9-]{1,58}[a-z0-9]")
 
 
 class ShopDomainError(ValueError):
