@@ -219,14 +219,28 @@ func TestE2_RepeatedScansShowEachFindingOnce(t *testing.T) {
 	}
 }
 
-// E-3: scans have a tenant. Only the fixture tenant has a data source, and a
-// defaulted tenant is recorded as defaulted.
+// E-3: scans have a tenant. The fixture tenant reads the fixture pool, any
+// other tenant its connected store (ADR 0020), and a defaulted tenant is
+// recorded as defaulted.
 func TestE3_ScanTenantParameter(t *testing.T) {
 	det, led := twoLeakDetection(), newMemLedger()
 	srv := fixWaveServer(t, det, led)
-	if code, _, body := scan(t, srv, "?client_id=acme-store"); code != http.StatusUnprocessableEntity {
-		t.Errorf("a tenant with no data source = %d, want 422: %s", code, body)
+	// ADR 0020: a tenant without a connected store is refused with the
+	// connector's reason code, after one snapshot request to detection-py
+	// (which makes no outbound call for it) and nothing else.
+	if code, _, body := scan(t, srv, "?client_id=acme-store"); code != http.StatusConflict ||
+		!strings.Contains(body, `"reason":"NOT_CONNECTED"`) {
+		t.Errorf("a tenant with no connected store = %d, want 409 NOT_CONNECTED: %s", code, body)
 	}
+	if got := det.requests(); len(got) != 1 || got[0] != "POST /stores/snapshot" {
+		t.Errorf("a refused tenant reached detection-py beyond the snapshot request: %v", got)
+	}
+	if n := len(led.snapshot()); n != 0 {
+		t.Errorf("a refused tenant wrote %d ledger entries", n)
+	}
+	det.mu.Lock()
+	det.reqs = nil
+	det.mu.Unlock()
 	if code, _, body := scan(t, srv, "?client_id=bad%20id"); code != http.StatusBadRequest {
 		t.Errorf("an invalid client_id = %d, want 400: %s", code, body)
 	}

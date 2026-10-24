@@ -207,7 +207,11 @@ func newMux(orch *orchestrator.Orchestrator, orchestratorToken string) *http.Ser
 			w.Header().Set("Retry-After", "5")
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		case errors.As(err, &reqErr):
-			writeJSON(w, reqErr.Status, map[string]string{"error": reqErr.Msg})
+			body := map[string]string{"error": reqErr.Msg}
+			if reqErr.Reason != "" {
+				body["reason"] = reqErr.Reason // ADR 0020: the store connector's closed reason code
+			}
+			writeJSON(w, reqErr.Status, body)
 		case err != nil:
 			writeUpstreamError(w, "POST /revenue-recovery/scan", err)
 		default:
