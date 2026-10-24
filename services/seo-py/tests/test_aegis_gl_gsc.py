@@ -8,6 +8,7 @@ import logging
 
 import pytest
 from gsc_fakes import FakeGoogle
+from helpers import rid
 from test_gsc import PROP, W, audit, bind, client, code_of, gsc_harness, section
 
 import gsc_client as g
@@ -222,3 +223,77 @@ def test_l2_export_serves_expired_sections_as_totals_only(tmp_path):
     assert old["expired"] is True and "by_query_class" not in old and "by_page_template" not in old
     assert "by_date" not in old and old["totals"]["clicks"] == fresh[0]["totals"]["clicks"]
     assert "/blog/{slug}" not in json.dumps(h.ok(h.get("/audit/export", params={"limit": 1000})))
+
+
+# ====================================================================== L3: drift
+
+def _rep(outcome="OK", reason=None, clicks=100, impr=1000, start="2026-09-01", end="2026-09-28", days=28):
+    sec = {"property": PROP, "window": {"start": start, "end": end, "days": days, "data_state": "final",
+                                        "search_type": "web"},
+           "totals": {"clicks": clicks, "impressions": impr, "ctr": None, "position": None},
+           "versions": {"search_performance": sp.VERSION}, "by_date": [], "by_query_class": {}}
+    return {"search_performance": {"outcome": outcome, "reason": reason, "section": sec if outcome == "OK" else None}}
+
+
+def test_l3_not_connected_is_not_a_tool_failure():
+    from agents import drift
+    c = drift.compare_search_performance
+    for nc in (_rep("NOT_CONNECTED", "GSC_NOT_CONNECTED"), _rep("NOT_CONNECTED", "GSC_PROPERTY_UNBOUND"), {}):
+        r = c(_rep(), nc) if nc else c(nc, _rep())
+        assert r["metrics"]["clicks"]["class"] == "NOT_CONNECTED" and r["metrics"]["clicks"]["evidence"]["rule"] == "SP0"
+    for bad in (_rep("FAILED", "GSC_UNAVAILABLE"), _rep("KILLED", "GSC_KILLED"), _rep("BLOCKED", "GSC_BUDGET_EXHAUSTED")):
+        r = c(_rep(), bad)
+        assert r["metrics"]["clicks"]["class"] == "TOOL_FAILURE" and r["metrics"]["clicks"]["evidence"]["rule"] == "SP1"
+
+
+def test_l3_overlapping_windows_compare_only_the_fresh_days():
+    from agents import drift
+    c = drift.compare_search_performance
+    # 28-day windows a week apart: 21 shared days, 7 fresh. 100 -> 120 clicks is inside the naive band
+    # 2*sqrt(220) = 29.7, but the difference comes from 7 fresh days only: the band 2*sqrt(220 * 7/28) = 14.8 calls it
+    # REAL_CHANGE. 100 -> 110 stays SAMPLING_NOISE.
+    wk = {"start": "2026-09-08", "end": "2026-10-05"}
+    r = c(_rep(clicks=100), _rep(clicks=120, **wk))
+    m = r["metrics"]["clicks"]
+    assert r["windows_overlap_days"] == 21 and m["evidence"]["fresh_days"] == 7
+    assert m["class"] == "REAL_CHANGE" and m["evidence"]["band"] == round(2 * (220 * 7 / 28) ** 0.5, 2)
+    assert c(_rep(clicks=100), _rep(clicks=110, **wk))["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"
+    # a daily schedule: one fresh day is not compared at all
+    d1 = c(_rep(), _rep(clicks=500, start="2026-09-02", end="2026-09-29"))["metrics"]["clicks"]
+    assert d1["class"] == "UNKNOWN" and d1["evidence"]["fresh_days"] == 1
+    # disjoint windows: the plain band
+    far = c(_rep(clicks=100), _rep(clicks=120, start="2026-09-29", end="2026-10-26"))["metrics"]["clicks"]
+    assert far["class"] == "SAMPLING_NOISE" and far["evidence"]["band"] == round(2 * 220 ** 0.5, 2)
+
+
+def test_l3_api_and_scheduler_classify_the_same_pair_the_same_way_after_expiry(tmp_path):
+    from agents import drift
+    fake = FakeGoogle()
+    h = _setup(tmp_path, fake, SEO_GSC_RETENTION_DAYS="1")
+    a1 = audit(h, "acme", "acme.test")["audit_id"]
+    h.clock.advance(days=8)
+    a2 = audit(h, "acme", "acme.test")["audit_id"]
+    with h.svc.lock:                                    # what the scheduler compares (raw records, retention applied)
+        raw = [h.svc.gsc_retained(h.svc.audits[x]["report"], h.svc.audits[x]["completed_at"]) for x in (a1, a2)]
+    sched = drift.compare(*raw)["search_performance"]
+    api = h.ok(h.get(f"/tenants/acme/audits/{a2}/drift", params={"against": a1}))["search_performance"]
+    assert raw[0]["search_performance"]["section"]["expired"] is True       # the older one has expired
+    assert api == sched
+    assert api["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"            # totals still compared after expiry
+    assert api["windows_overlap_days"] == 20
+
+
+def test_l3_scheduler_drift_uses_the_retained_view(tmp_path):
+    fake = FakeGoogle()
+    h = _setup(tmp_path, fake, SEO_GSC_RETENTION_DAYS="1")
+    sch = h.ok(h.post("/tenants/acme/schedules", {"request_id": rid(), "domain": "acme.test", "paths": ["/"],
+                                                   "every_days": 7}), 201)
+    h.ok(h.post("/jobs/schedule-tick/run", {"request_id": rid()}, caller="scheduler"))
+    h.clock.advance(days=7, minutes=1)
+    tick = h.ok(h.post("/jobs/schedule-tick/run", {"request_id": rid()}, caller="scheduler"))
+    assert tick["drift_recorded"] == 1
+    sv = h.ok(h.get(f"/tenants/acme/schedules/{sch['schedule_id']}"))
+    d = sv["drifts"][-1]
+    sched = d["drift"]["search_performance"]
+    api = h.ok(h.get(f"/tenants/acme/audits/{d['newer']}/drift", params={"against": d["older"]}))
+    assert api["search_performance"] == sched and sched["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"

@@ -532,10 +532,20 @@ section keeps its own outcome and reason in its envelope and in `report.search_p
 `gsc_read_started` (tenant, audit, property SHA-256, window) is committed to the ledger and the log BEFORE any request
 leaves (tested: the fake Google sees the event already recorded on its first request); a read that cannot be recorded
 is not made (BLOCKED with the ledger's reason); the result's SHA-256 is recorded beside the report as
-`gsc_read_recorded`. Osei's drift: `drift.compare` adds `search_performance` with rules `2026-10-24.1` — SP1
-TOOL_FAILURE (either run not OK or expired), SP2 MEASUREMENT_ERROR (property, window length, data state, type or rules
-version moved), SP3 SAMPLING_NOISE (|after - before| <= 2·sqrt(before + after), a Poisson band), SP4 REAL_CHANGE
-(observed; no cause claimed); the decision stays INSUFFICIENT_EVIDENCE whatever the class. The department scorecard
+`gsc_read_recorded`. Osei's drift: `drift.compare` adds `search_performance` with rules `2026-10-24.2` (AEGIS
+gl-gsc L3) — SP0 NOT_CONNECTED (either run had no key, no binding, or predates the section: nothing was measured),
+SP1 TOOL_FAILURE (either run tried and did not read: KILLED, BLOCKED, FAILED, RESTRICTED), SP2 MEASUREMENT_ERROR
+(property, window length, data state, type or rules version moved), SP3 overlapping windows: with `o` of `d` days
+shared (`windows_overlap_days`), final data for a shared day is the same in both reads, so the difference of the
+totals is exactly new-only days minus old-only days — two Poisson counts over `d - o` days; under "no change" its
+variance is estimated as (before + after)·(d - o)/d and the band is 2·sqrt of that (o = 0 gives the plain
+2·sqrt(before + after)); with fewer than 7 fresh days (`SP_MIN_FRESH_DAYS`; a daily schedule over a 28-day window has
+one) the metric is UNKNOWN, not compared, since a day or two is dominated by day-of-week effects; inside the band
+SAMPLING_NOISE, SP4 outside it REAL_CHANGE (observed; no cause claimed). Real counts are over-dispersed relative to
+Poisson, so REAL_CHANGE means "outside Poisson noise", not "significant"; and if Google revised a shared day the
+revision shows as a difference. Drift uses only what survives retention (property, window, totals, versions), and the
+API and the scheduler both compare the retained view, so one pair gets one classification whichever path asks and
+whether or not the breakdowns have expired. The decision stays INSUFFICIENT_EVIDENCE whatever the class. The department scorecard
 keeps Osei's main card for data hygiene and adds a `search_performance` sub-card. `/status` shows `search_console`
 (state, service-account e-mail, scope, hosts, switch, caps, budget, tenants bound, requests made). Kill switch
 `provider:gsc` (also `SEO_KILLED_PROVIDERS=gsc`), with global / write / tenant / `capability:audit` as for every step,
@@ -585,7 +595,7 @@ deadline backend over a fake socket layer (TLS SNI is Google's name, the connect
 read bounded); DNS inside the deadline and non-global answers; the allowlist; a key that never leaks (errors, reprs,
 pickling, the log, the ledger, /status, the export); Andre-only binding; cross-tenant refusal; PII queries dropped;
 the kill switch before and mid-read; the budget including scheduled re-audits; no record, no request; retention;
-the SP rules. Live run (W3-1): see GSC-1 and the README. War room (W3-3): five `gsc-*` scenarios, 33 cases, against a
+the SP rules. `tests/test_aegis_gl_gsc.py`: the AEGIS gl-gsc findings (M1, M2, L1-L6), each failing on 0c9a96a. Live run (W3-1): see GSC-1 and the README. War room (W3-3): five `gsc-*` scenarios, 33 cases, against a
 hostile fake Google; seeds 1-3 pass.
 
 GSC-12. **Limitations (honest).**

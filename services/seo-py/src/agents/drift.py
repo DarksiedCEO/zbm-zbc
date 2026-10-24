@@ -195,20 +195,47 @@ def compare(a: dict, b: dict) -> dict:
 
 # Search performance (first-party, Search Console; agents/search_performance.py). Window totals of clicks and
 # impressions are compared metric by metric; each change gets one class by the first rule whose evidence holds:
-#   SP1 TOOL_FAILURE       either run did not read Search Console (outcome not OK, or the section expired)
+#   SP0 NOT_CONNECTED      either run had no Search Console to read (no key, no binding, or a report from before the
+#                          section existed): nothing was measured, which is not a failure of the tool
+#   SP1 TOOL_FAILURE       either run tried and did not read (KILLED, BLOCKED, FAILED, RESTRICTED, or no totals)
 #   SP2 MEASUREMENT_ERROR  the ruler moved: another property, window length, data state, search type or rules version
-#   SP3 SAMPLING_NOISE     the difference is within 2 * sqrt(before + after) (a Poisson band for two counts)
+#   SP3 overlapping windows (``windows_overlap_days`` o of d days). Search Analytics final data for a shared day is
+#       the same in both reads, so the difference of the totals is exactly (new-only days) - (old-only days): two
+#       Poisson counts over d - o days each. Under "no change" (one daily rate for both windows) its variance is
+#       estimated by (before + after) * (d - o) / d, and the band is twice its square root (o = 0 gives the plain
+#       2 * sqrt(before + after)). With fewer than SP_MIN_FRESH_DAYS non-overlapping days the comparison is skipped
+#       (class UNKNOWN): a day or two of fresh data is dominated by day-of-week effects and the band says nothing.
+#       Inside the band: SAMPLING_NOISE.
 #   SP4 REAL_CHANGE        outside that band: an observed change in first-party totals (no cause is claimed)
-# CTR and position are derived and shown before / after only. Whatever the class, the decision stays
-# INSUFFICIENT_EVIDENCE until revenue is connected (the Goodhart pairing): a search metric alone never justifies ACT.
-SP_RULES_VERSION = "2026-10-24.1"
+# Only what survives retention is used (property, window, totals, versions), so the API and the scheduler classify a
+# pair the same way before and after the breakdowns expire. CTR and position are derived and shown before / after
+# only. Whatever the class, the decision stays INSUFFICIENT_EVIDENCE until revenue is connected (the Goodhart pairing):
+# a search metric alone never justifies ACT. Caveat: real counts are over-dispersed relative to Poisson, so the band
+# is narrow and REAL_CHANGE means "outside Poisson noise", not "significant".
+SP_RULES_VERSION = "2026-10-24.2"            # .2 (AEGIS gl-gsc L3): SP0, the overlap rule, expired sections compared
+SP_MIN_FRESH_DAYS = 7
+SP_CLASSES = ("NOT_CONNECTED", "TOOL_FAILURE", "MEASUREMENT_ERROR", "SAMPLING_NOISE", "REAL_CHANGE", "UNKNOWN")
 _SP_RULER = ("property", "days", "data_state", "search_type", "version")
+_SP_NOT_CONNECTED = frozenset({"GSC_NOT_CONNECTED", "GSC_PROPERTY_UNBOUND"})
 
 
 def _sp_ruler(sec: dict) -> dict:
     w = sec.get("window") or {}
     return {"property": sec.get("property"), "days": w.get("days"), "data_state": w.get("data_state"),
             "search_type": w.get("search_type"), "version": (sec.get("versions") or {}).get("search_performance")}
+
+
+def _sp_not_connected(block: Optional[dict]) -> bool:
+    return block is None or block.get("outcome") == "NOT_CONNECTED" or block.get("reason") in _SP_NOT_CONNECTED
+
+
+def _sp_overlap(wa: dict, wb: dict) -> Optional[int]:
+    try:
+        o = (min(date.fromisoformat(wa["end"]), date.fromisoformat(wb["end"]))
+             - max(date.fromisoformat(wa["start"]), date.fromisoformat(wb["start"]))).days + 1
+    except (KeyError, TypeError, ValueError):
+        return None
+    return max(0, o)
 
 
 def compare_search_performance(a: dict, b: dict) -> dict | None:
@@ -218,33 +245,46 @@ def compare_search_performance(a: dict, b: dict) -> dict | None:
     sa, sb = (ba or {}).get("section"), (bb or {}).get("section")
     base = {"rules_version": SP_RULES_VERSION, "decision": "INSUFFICIENT_EVIDENCE",
             "pairing": "revenue NOT_CONNECTED: no decision is drawn from search metrics alone", "metrics": {}}
-    if (ba or {}).get("outcome") != "OK" or (bb or {}).get("outcome") != "OK" or not sa or not sb \
-            or sa.get("expired") or sb.get("expired"):
-        ev = {"rule": "SP1", "before": {k: (ba or {}).get(k) for k in ("outcome", "reason")},
-              "after": {k: (bb or {}).get(k) for k in ("outcome", "reason")}}
-        base["metrics"] = {m: {"class": "TOOL_FAILURE", "evidence": ev} for m in ("clicks", "impressions")}
+    ev = {"before": {k: (ba or {}).get(k) for k in ("outcome", "reason")},
+          "after": {k: (bb or {}).get(k) for k in ("outcome", "reason")}}
+    if _sp_not_connected(ba) or _sp_not_connected(bb):
+        base["metrics"] = {m: {"class": "NOT_CONNECTED", "evidence": {"rule": "SP0", **ev}}
+                           for m in ("clicks", "impressions")}
+        return base
+    if ba.get("outcome") != "OK" or bb.get("outcome") != "OK" or not sa or not sb \
+            or not isinstance(sa.get("totals"), dict) or not isinstance(sb.get("totals"), dict):
+        base["metrics"] = {m: {"class": "TOOL_FAILURE", "evidence": {"rule": "SP1", **ev}}
+                           for m in ("clicks", "impressions")}
         return base
     ra, rb = _sp_ruler(sa), _sp_ruler(sb)
     moved = {k: [ra[k], rb[k]] for k in _SP_RULER if ra[k] != rb[k]}
     ta, tb = sa["totals"], sb["totals"]
-    try:
-        wa, wb = sa["window"], sb["window"]
-        overlap = (min(date.fromisoformat(wa["end"]), date.fromisoformat(wb["end"]))
-                   - max(date.fromisoformat(wa["start"]), date.fromisoformat(wb["start"]))).days + 1
-    except (KeyError, TypeError, ValueError):
-        overlap = None
-    base["windows_overlap_days"] = max(0, overlap) if overlap is not None else None
+    overlap = _sp_overlap(sa.get("window") or {}, sb.get("window") or {})
+    base["windows_overlap_days"] = overlap
     base["derived"] = {k: [ta.get(k), tb.get(k)] for k in ("ctr", "position")}
+    days = ra["days"]
     for m in ("clicks", "impressions"):
         x, y = ta[m], tb[m]
         if moved:
             base["metrics"][m] = {"class": "MEASUREMENT_ERROR", "before": x, "after": y,
                                   "evidence": {"rule": "SP2", "changed": moved}}
             continue
-        band = 2 * math.sqrt(x + y)
+        if overlap is None or not isinstance(days, int) or days < 1:
+            base["metrics"][m] = {"class": "UNKNOWN", "before": x, "after": y,
+                                  "evidence": {"rule": "SP3", "why": "the windows cannot be compared"}}
+            continue
+        fresh = days - overlap
+        if fresh < SP_MIN_FRESH_DAYS:
+            base["metrics"][m] = {"class": "UNKNOWN", "before": x, "after": y,
+                                  "evidence": {"rule": "SP3", "windows_overlap_days": overlap, "fresh_days": fresh,
+                                               "why": f"fewer than {SP_MIN_FRESH_DAYS} non-overlapping days: "
+                                                      "not compared"}}
+            continue
+        band = 2 * math.sqrt((x + y) * fresh / days)
         cls, rule = ("SAMPLING_NOISE", "SP3") if abs(y - x) <= band else ("REAL_CHANGE", "SP4")
         base["metrics"][m] = {"class": cls, "before": x, "after": y,
-                              "evidence": {"rule": rule, "difference": y - x, "band": round(band, 2)}}
+                              "evidence": {"rule": rule, "difference": y - x, "band": round(band, 2),
+                                           "windows_overlap_days": overlap, "fresh_days": fresh}}
     return base
 
 

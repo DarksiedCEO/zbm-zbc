@@ -267,5 +267,5 @@ def _collapse(templates: dict, urls: dict) -> tuple[dict, int]:
 def totals_only(section: dict) -> dict:
     """What an expired section is served as (retention): the window and its totals; breakdowns removed."""
     return {"property": section.get("property"), "window": section.get("window"), "totals": section.get("totals"),
-            "evidence": section.get("evidence"), "pairing": section.get("pairing"), "headline_score": None,
+            "versions": section.get("versions"), "evidence": section.get("evidence"), "pairing": section.get("pairing"), "headline_score": None,
             "expired": True}

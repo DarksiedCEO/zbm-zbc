@@ -696,7 +696,9 @@ def test_env_kill_switch_and_budget_including_scheduled_runs(tmp_path):
     assert tick["ran"] == 1 and tick["drift_recorded"] == 1
     sv = h.ok(h.get(f"/tenants/acme/schedules/{sch['schedule_id']}"))
     sp_drift = sv["drifts"][-1]["drift"]["search_performance"]
-    assert sp_drift["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"            # same totals: inside the band
+    # a daily schedule over a 28-day window: 27 shared days, one fresh day: not compared (AEGIS gl-gsc L3)
+    assert sp_drift["metrics"]["clicks"]["class"] == "UNKNOWN" and sp_drift["windows_overlap_days"] == 27
+    assert sp_drift["metrics"]["clicks"]["evidence"]["fresh_days"] == 1
     assert sp_drift["decision"] == "INSUFFICIENT_EVIDENCE"
     d = tmp_path / "env-kill"
     d.mkdir()
@@ -759,8 +761,9 @@ def test_retention_serves_totals_only_after_the_window(tmp_path):
 
 
 def test_drift_rules_for_search_performance():
-    def rep(outcome="OK", clicks=100, impr=1000, days=28, prop=PROP, expired=False):
-        sec = {"property": prop, "window": {"start": "2026-09-01", "end": "2026-09-28", "days": days,
+    def rep(outcome="OK", clicks=100, impr=1000, days=28, prop=PROP, expired=False, start="2026-09-01",
+            end="2026-09-28"):
+        sec = {"property": prop, "window": {"start": start, "end": end, "days": days,
                                             "data_state": "final", "search_type": "web"},
                "totals": {"clicks": clicks, "impressions": impr, "ctr": None, "position": None},
                "versions": {"search_performance": sp.VERSION}}
@@ -768,12 +771,13 @@ def test_drift_rules_for_search_performance():
             sec["expired"] = True
         return {"search_performance": {"outcome": outcome, "reason": None, "section": sec}}
     c = drift.compare_search_performance
+    later = {"start": "2026-09-29", "end": "2026-10-26"}                 # the next 28 days: no overlap
     assert c(rep(), rep(outcome="FAILED"))["metrics"]["clicks"]["class"] == "TOOL_FAILURE"
-    assert c(rep(), rep(expired=True))["metrics"]["clicks"]["class"] == "TOOL_FAILURE"
+    assert c(rep(), rep(expired=True, **later))["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"
     assert c(rep(), rep(days=7))["metrics"]["clicks"]["class"] == "MEASUREMENT_ERROR"
     assert c(rep(), rep(prop="sc-domain:b.test"))["metrics"]["impressions"]["class"] == "MEASUREMENT_ERROR"
-    assert c(rep(), rep(clicks=110))["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"
-    r = c(rep(), rep(clicks=200))
+    assert c(rep(), rep(clicks=110, **later))["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"
+    r = c(rep(), rep(clicks=200, **later))
     assert r["metrics"]["clicks"]["class"] == "REAL_CHANGE" and r["decision"] == "INSUFFICIENT_EVIDENCE"
     assert c({}, {}) is None
 

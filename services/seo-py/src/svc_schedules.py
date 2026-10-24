@@ -235,7 +235,9 @@ class SchedulesMixin:
             if aid not in done or done.index(aid) == 0:
                 return False
             prev = done[done.index(aid) - 1]
-            older, newer = self.audits[prev]["report"], self.audits[aid]["report"]
+            # the same view of each report as the API's drift (svc_audits.drift_view): retention applied (AEGIS gl-gsc L3)
+            older = self.gsc_retained(self.audits[prev]["report"], self.audits[prev].get("completed_at"))
+            newer = self.gsc_retained(self.audits[aid]["report"], self.audits[aid].get("completed_at"))
         try:
             report = drift_mod.compare(older, newer)
         except drift_mod.NotComparable:
