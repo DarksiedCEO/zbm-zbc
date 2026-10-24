@@ -35,6 +35,7 @@ from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordEr
 from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
+from svc_engines import EnginesMixin
 from svc_entity import EntityMixin
 from svc_gsc import GscMixin
 from svc_invoices import InvoicesMixin
@@ -69,7 +70,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin):
+                 GscMixin, EnginesMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         import ports as ports_mod
@@ -91,6 +92,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.schedules: dict[str, dict] = {}
         self.agent_states: dict[str, dict] = {}
         self.gsc_reads: dict[str, list] = {}             # tenant -> times of recorded Search Console reads (budget)
+        self.engine_runs: dict[str, dict] = {}          # Wave 4: metered answer-engine runs (svc_engines.py)
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now
@@ -467,6 +469,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 "andre_approvals_configured": None,          # filled by the API (the gate lives there)
                 "kill_switches": self.switch_view(),
                 "ports": self.ports.status(),
+                "answer_engines": self.engine_status(),
                 "invoice_verification": self.invoice_verification_status(),
                 "search_console": self.gsc_status(),
                 "tenants": len(self.tenants),

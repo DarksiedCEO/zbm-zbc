@@ -126,7 +126,9 @@ class ManagerMixin:
                                        "not_connected_rate": None if sp_runs == 0 else
                                        round(sp_outcomes.get("NOT_CONNECTED", 0) / sp_runs, 4)}
                 if agent == "osei" else None,
-                "basis": "completed audit reports, finished log ingests and recorded drift reports"}
+                "engine_runs": self.engine_scorecard() if agent == "callum" else None,
+                "basis": "completed audit reports, finished log ingests, recorded drift reports and (Callum) "
+                         "recorded answer-engine reservations and settlements"}
 
     def _queues(self, agent: str) -> dict:
         running = len(self.running_audits)

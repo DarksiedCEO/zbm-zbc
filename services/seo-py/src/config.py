@@ -158,6 +158,11 @@ class Settings:
     gsc_deadline_s: int = 60
     gsc_reads_per_day: int = 4
     gsc_retention_days: int = 90
+    perplexity_key: Optional[object] = field(default=None, repr=False)     # perplexity.ApiKey (masked repr)
+    perplexity_model: str = "sonar"
+    perplexity_timeout_s: int = 30
+    perplexity_attempts: int = 3
+    perplexity_budget: dict = field(default_factory=lambda: dict(PERPLEXITY_BUDGET_OFF))
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -188,7 +193,6 @@ NOT_BUILT = {
     "SEO_OPENAI_API_KEY_FILE": "the OpenAI answer-engine adapter: not built (AI-visibility probes NOT_CONNECTED)",
     "SEO_ANTHROPIC_API_KEY_FILE": "the Anthropic answer-engine adapter: not built (probes NOT_CONNECTED)",
     "SEO_GOOGLE_API_KEY_FILE": "the Google answer-engine adapter: not built (probes NOT_CONNECTED)",
-    "SEO_PERPLEXITY_API_KEY_FILE": "the Perplexity answer-engine adapter: not built (probes NOT_CONNECTED)",
     "SEO_SEARCH_CONSOLE_CREDENTIALS_FILE": "renamed: the Search Console connector reads SEO_GSC_SERVICE_ACCOUNT_FILE "
                                            "(a Google service-account JSON key file)",
     "SEO_BING_WEBMASTER_KEY_FILE": "Bing Webmaster Tools (first-party truth): not built",
@@ -330,6 +334,67 @@ def _gsc(env, s: Settings) -> None:
         raw = None
 
 
+# Wave 4 (ADR 0017 W4): the Perplexity adapter's budgets. Every one fails closed: 0 (the default) means OFF — no
+# call is made — so a key alone never spends anything; Andre sets all four.
+PERPLEXITY_BUDGET_OFF = {"daily_calls": 0, "daily_spend_usd": "0", "tenant_daily_calls": 0,
+                         "tenant_daily_spend_usd": "0", "reserve_usd_per_call": "0.050000"}
+_USD = re.compile(r"[0-9]{1,6}(\.[0-9]{1,6})?")
+
+
+def _usd(env, name: str, default: str, lo: str, hi: str) -> str:
+    from decimal import Decimal
+    raw = (env.get(name) or "").strip() or default
+    if not _USD.fullmatch(raw) or not Decimal(lo) <= Decimal(raw) <= Decimal(hi):
+        raise RuntimeError(f"{name} must be a US-dollar amount from {lo} to {hi} (digits, at most 6 decimals)")
+    return str(Decimal(raw).quantize(Decimal("0.000001")))
+
+
+def _perplexity(env, s: "Settings") -> None:
+    """ADR 0017 W4. The key comes from ``SEO_PERPLEXITY_API_KEY_FILE`` (preferred: the *_FILE rules — regular file,
+    owned by this user, mode 0600/0400, no symlink) or, where the platform has no secret files (Railway service
+    variables), from ``SEO_PERPLEXITY_API_KEY``. Both set refuses start (which one is meant?). Neither set: the
+    engine is NOT_CONNECTED and the service starts as before."""
+    import perplexity
+    path = (env.get("SEO_PERPLEXITY_API_KEY_FILE") or "").strip()
+    plain = (env.get("SEO_PERPLEXITY_API_KEY") or "").strip()
+    if path and plain:
+        raise RuntimeError("SEO_PERPLEXITY_API_KEY_FILE and SEO_PERPLEXITY_API_KEY are both set; set one (the file "
+                           "where the platform has secret files, the variable on Railway)")
+    model = (env.get("SEO_PERPLEXITY_MODEL") or perplexity.DEFAULT_MODEL).strip()
+    if model not in perplexity.MODELS:
+        raise RuntimeError(f"SEO_PERPLEXITY_MODEL must be one of {', '.join(perplexity.MODELS)} (a closed list)")
+    s.perplexity_model = model
+    s.perplexity_timeout_s = _int(env, "SEO_PERPLEXITY_TIMEOUT_SECONDS", 30, 5, 120)
+    s.perplexity_attempts = _int(env, "SEO_PERPLEXITY_MAX_ATTEMPTS", 3, 1, 3)
+    s.perplexity_budget = {
+        "daily_calls": _int(env, "SEO_PERPLEXITY_DAILY_CALLS", 0, 0, 1_000_000),
+        "daily_spend_usd": _usd(env, "SEO_PERPLEXITY_DAILY_SPEND_USD", "0", "0", "100000"),
+        "tenant_daily_calls": _int(env, "SEO_PERPLEXITY_TENANT_DAILY_CALLS", 0, 0, 1_000_000),
+        "tenant_daily_spend_usd": _usd(env, "SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD", "0", "0", "100000"),
+        "reserve_usd_per_call": _usd(env, "SEO_PERPLEXITY_RESERVE_USD_PER_CALL", "0.05", "0.001", "5"),
+    }
+    if not path and not plain:
+        return
+    if path:
+        raw = _secret_file_bytes(env, "SEO_PERPLEXITY_API_KEY_FILE")
+        try:
+            value, source = raw.decode("ascii"), "file"
+        except UnicodeDecodeError:
+            raise RuntimeError("SEO_PERPLEXITY_API_KEY_FILE must hold the key as printable ASCII") from None
+    else:
+        value, source = plain, "env"
+    try:
+        key = perplexity.ApiKey(value, source)
+    except ValueError:
+        raise RuntimeError("the Perplexity API key must be 20..512 printable ASCII characters without spaces") \
+            from None
+    ours = {s.service_token, s.andre_token, s.ledger_token, s.finance_token, s.finance_caller_token,
+            *s.caller_tokens.values(), *s.tenant_tokens.values()}
+    if value in ours:
+        raise RuntimeError("the Perplexity API key must differ from every token this service accepts or sends")
+    s.perplexity_key = key
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ if env is None else env)
     service_token = (env.get("SEO_SERVICE_TOKEN") or "").strip()
@@ -377,6 +442,7 @@ def load(env: Optional[dict] = None) -> Settings:
     s.schedule_period_days = _int(env, "SEO_SCHEDULE_PERIOD_DAYS", 30, 1, 365)
     _finance(env, s)
     _gsc(env, s)
+    _perplexity(env, s)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it
