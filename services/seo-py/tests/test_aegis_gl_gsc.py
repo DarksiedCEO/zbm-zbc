@@ -348,3 +348,89 @@ def test_l5_at_the_largest_accepted_caps_a_read_ends_truncated_not_over_budget()
                 max_requests=s.gsc_max_requests).open_read(lambda: None)
     out = sp.read_aggregates(rd, PROP, *W, {"acme.test"}, ["acme"])
     assert out["by_page_template"]["truncated"] and out["by_query_class"]["truncated"] and rd.requests == 83
+
+
+# ====================================================================== L6: surviving mutants
+
+def test_l6_a_parent_domain_cannot_bind_over_a_bound_subdomain(tmp_path):
+    """GSC_PROPERTY_TAKEN in the direction ``theirs.endswith("." + mine)``: another tenant holds the subdomain's
+    property, this tenant asks for the parent."""
+    h = gsc_harness(tmp_path, FakeGoogle())
+    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("globex", "client", ())
+    h.svc.tenants["globex"]["domains"] = ["shop.acme.test"]         # as if the domain rule had been bypassed
+    h.ok(bind(h, "globex", "sc-domain:shop.acme.test"))
+    h.refused(bind(h, "acme", PROP), 409, "GSC_PROPERTY_TAKEN")
+    h.refused(bind(h, "acme", "https://acme.test/"), 409, "GSC_PROPERTY_TAKEN")
+
+
+def test_l6_the_network_backend_refuses_a_host_off_the_allowlist():
+    import httpcore
+    calls = []
+
+    class Inner(httpcore.NetworkBackend):
+        def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+            calls.append(host)
+            return "stream"
+
+        def connect_unix_socket(self, path, timeout=None, socket_options=None):
+            raise AssertionError
+
+        def sleep(self, seconds):
+            pass
+    guarded = g._GuardedBackend(Inner(), lambda: None)
+    for host in ("evil.test", "142.250.80.42", "oauth2.googleapis.com.evil.test", "googleapis.com"):
+        with pytest.raises(httpcore.ConnectError):
+            guarded.connect_tcp(host, 443)
+    assert calls == []
+    assert isinstance(guarded.connect_tcp("www.googleapis.com", 443), g._GuardedStream)
+    assert calls == ["www.googleapis.com"]
+
+
+def test_l6_the_resolver_refuses_an_address_literal_before_resolving():
+    import httpcore
+    asked = []
+
+    def inner(host, port, timeout):
+        asked.append(host)
+        return ["142.250.80.42"]                    # a global answer: only the literal check can refuse
+    r = g._GlobalResolver(inner)
+    for lit in ("142.250.80.42", "2607:f8b0:4004:800::200e", "::ffff:142.250.80.42"):
+        with pytest.raises(httpcore.ConnectError):
+            r(lit, 443, 5.0)
+    assert asked == []
+    assert r("www.googleapis.com", 443, 5.0) == ["142.250.80.42"]
+
+
+def test_l6_an_e_mail_spelled_with_spaced_at_and_dot_is_pii():
+    # only the whole-query _AT_WORD rule sees this one: no word of it is identifying on its own
+    for q in ("jane doe at gmail dot com", "jane at example dot org"):
+        assert sp.classify_query(q, ["acme"]) == "pii_suspect", q
+
+
+def test_l6_an_rsa_key_under_2048_bits_or_not_rsa_is_refused():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+    from gsc_fakes import key_json
+
+    def pem(k):
+        return k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                               serialization.NoEncryption()).decode("ascii")
+    for k in (rsa.generate_private_key(public_exponent=65537, key_size=1024),
+              rsa.generate_private_key(public_exponent=65537, key_size=2040),
+              ec.generate_private_key(ec.SECP256R1())):
+        with pytest.raises(g.KeyFileInvalid) as ei:
+            g.parse_service_account_key(json.dumps(key_json(private_key=pem(k))).encode())
+        assert "at least 2048 bits" in str(ei.value)
+    assert g.parse_service_account_key(json.dumps(key_json()).encode()).key_id     # the 2048-bit fixture is accepted
+
+
+def test_l6_a_service_account_key_is_never_shallow_copied():
+    import copy
+    k = g.parse_service_account_key(json.dumps(__import__("gsc_fakes").key_json()).encode())
+    with pytest.raises(TypeError) as ei:
+        copy.copy(k)
+    assert "never copied" in str(ei.value)
+    with pytest.raises(TypeError) as ei:
+        copy.copy(g._Secret("t" * 20))
+    assert "never copied" in str(ei.value)
