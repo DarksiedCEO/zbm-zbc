@@ -297,9 +297,12 @@ def test_missing_dates_are_counted_not_invented():
 
 
 def test_page_templates_redact_identifiers_and_offsite():
-    out = read(FakeGoogle())
+    fake = FakeGoogle()
+    fake.pages += [("https://acme.test/blog/post-3", 1, 5, 2.0)]
+    out = read(fake)
     ts = {t["template"] for t in out["by_page_template"]["templates"]}
-    assert "/u/{email}" in ts and "{offsite}" in ts and "/blog/post-1" in ts
+    # three blog slugs share /blog/{slug}; the one e-mail page is a template of one URL and goes to {other}
+    assert ts == {"/blog/{slug}", "{offsite}", "{other}"}
     assert out["by_page_template"]["comparable_with_totals"] is False
 
 

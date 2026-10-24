@@ -38,12 +38,18 @@ log = logging.getLogger("seo.gsc")
 AGENT, TASK = sp.AGENT, sp.TASK
 METHOD = ("Search Analytics (Google Search Console API, read-only scope) for the tenant's bound property: property "
           "totals by date, then page and query rows paged within caps, reduced at once to aggregates by date, page "
-          "template and query class; no query text and no URL is kept")
+          "template and query class. No query text is kept. Page URLs are kept only as path templates: identifiers, "
+          "e-mails, numbers and tokens replaced by placeholders, every segment that is not one plain word becomes "
+          "{slug}, and a template that still has a literal word but came from fewer than 3 distinct URLs is counted "
+          "in {other}")
 LIMITS = [
     ("Google returns top rows only and omits anonymised queries; the query-class breakdown therefore has an "
      "'unattributed' remainder, and the page-template breakdown is aggregated by page (not comparable with property "
      "totals)."),
     "Search Analytics data lags 2-3 days; the window ends three Pacific-Time days ago and covers final data only.",
+    ("A plain one-word path segment is kept as written when 3 or more URLs share its template, so a site whose "
+     "paths name people with single words (/users/jsmith/...) can still show such a word; hyphenated, dotted and "
+     "digit-bearing segments never are."),
     ("Clicks and impressions are first-party observations; nothing here is paired with revenue yet (analytics and "
      "CRM are NOT_CONNECTED), so no decision is drawn from them."),
 ]

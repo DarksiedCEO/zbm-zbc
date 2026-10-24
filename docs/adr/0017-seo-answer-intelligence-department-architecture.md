@@ -502,13 +502,19 @@ GSC-6. **Data, PII, retention, evidence.** Three queries per read, all `type=web
 `SEO_GSC_WINDOW_DAYS` (28) ending three Pacific-Time days ago: (1) `date` aggregated byProperty — the property totals
 by date and, summed, the window totals (CTR recomputed from sums, never averaged; position impression-weighted over
 the dates, labelled an approximation); (2) `page` aggregated byPage — each URL reduced to a template by the log
-templater (`agents.logs.template_path`: e-mails, UUIDs, numbers, ids, tokens, file names replaced), `{offsite}` for a
-host not the property's, at most 200 templates then `{other}`, reported as by-page sums that are NOT comparable with
-property totals; (3) `query` aggregated byProperty — each query classified into `pii_suspect`, `brand`, `question`,
+templater (`agents.logs.template_path`: e-mails, UUIDs, numbers, ids, tokens, file names replaced) and then the slug
+rule (`search_performance.slug_segment`, AEGIS gl-gsc L1): every segment that is not empty, a placeholder, one plain
+word of ASCII letters or such a word with a static extension becomes `{slug}` (`/users/jane-smith/profile` ->
+`/users/{slug}/profile`; hyphenated, dotted, underscored, digit-bearing and non-ASCII segments are never kept);
+`{offsite}` for a host not the property's; a template that still holds a literal word but was produced by fewer than
+3 distinct page URLs (`TEMPLATE_MIN_URLS`) is counted in `{other}`, so no kept template describes one or two pages
+(placeholder-only templates such as `/` or `/{slug}` identify nothing and are kept); at most 200 templates, the rest
+(fewest clicks first) in `{other}`; reported as by-page sums that are NOT comparable with property totals; (3) `query` aggregated byProperty — each query classified into `pii_suspect`, `brand`, `question`,
 `local`, `commercial`, `other` (versioned `2026-10-24.1`) and dropped. `pii_suspect` is judged first, on the shared
 lookalike fold after invisible characters are removed: an e-mail in any spelling, 7+ digits in total, or a word the
-templater would replace. No query text, hash of a query, URL or per-query / per-URL row is stored: dropping beats
-hashing, since a hash of a low-entropy name or e-mail falls to a dictionary. The query remainder (`unattributed`:
+templater would replace. No query text, hash of a query, URL or per-query / per-URL row is stored — a page is
+stored only as the template above, which keeps plain one-word path segments (`/pricing`, `/users`) when 3 or more
+URLs share the template: dropping beats hashing, since a hash of a low-entropy name or e-mail falls to a dictionary. The query remainder (`unattributed`:
 anonymised queries and rows past the caps) is reported, never spread over the classes. Evidence class OBSERVED,
 first-party, data class measured, effect class null; `headline_score` is null; the section carries the Goodhart
 pairing (revenue NOT_CONNECTED -> decision INSUFFICIENT_EVIDENCE) and produces no findings. Retention: the aggregates
@@ -585,8 +591,11 @@ GSC-12. **Limitations (honest).**
      GSC-2; the first real read will be the first contact. U1 is unverified.
    - Strictness has a cost: a new top-level field from Google, or a row Google sends with clicks > impressions, stops
      the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
-   - Names in queries are not detected as such; they are safe only because no query text is kept. Page templates keep
-     path words the templater does not replace (a slug that is a person's name stays, as in W2-2).
+   - Names in queries are not detected as such; they are safe only because no query text is kept. Page templates
+     collapse every multi-word slug to `{slug}` and send templates of fewer than 3 URLs to `{other}`, but a plain
+     one-word segment shared by 3 or more URLs is kept as written: a site whose paths name people with single words
+     (`/users/jsmith/{slug}` across three posts) can still show such a word. The threshold of 3 is this service's
+     choice, unmeasured.
    - The page-template and query-class breakdowns cover the window, not each date; the query-class split is
      heuristic and uncalibrated; brand detection uses the tenant's domains and entity name only.
    - Position over the window is an impression-weighted mean of Google's daily positions, not Google's own

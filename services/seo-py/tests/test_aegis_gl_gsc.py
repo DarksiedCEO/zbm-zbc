@@ -162,3 +162,43 @@ def test_m2_the_overall_outcome_is_what_it_would_be_without_search_console(tmp_p
     assert view["report"]["search_performance"]["outcome"] == want[0]       # kept inside its own section
     assert view["report"]["outcome"] == baseline, (view["report"]["outcome"], baseline)
     assert "search_performance" in view["report"]["outcome_rule"]
+
+
+# ====================================================================== L1: no URL survives as a template
+
+def test_l1_slugs_and_identifiers_are_collapsed():
+    hosts = {"acme.test", "www.acme.test"}
+    cases = {"https://acme.test/users/jane-smith/profile": "/users/{slug}/profile",
+             "https://acme.test/patients/john-q-public-dob-1980-01-02": "/patients/{number}",
+             "https://acme.test/people/john.q.public": "/people/{slug}",
+             "https://acme.test/p/jane_smith/": "/p/{slug}/",
+             "https://acme.test/blog/post-1": "/blog/{slug}",
+             "https://acme.test/w/Zoë": "/w/{slug}",
+             "https://acme.test/u/jane.doe@example.com": "/u/{email}",
+             "https://acme.test/index.html": "/index.html",
+             "https://acme.test/doc/cv.pdf": "/doc/{file}.pdf",
+             "https://acme.test/": "/",
+             "https://acme.test/pricing": "/pricing"}
+    for url, want in cases.items():
+        assert sp.page_template(url, hosts) == want, url
+    assert not sp.has_literal("/{slug}/{id}") and not sp.has_literal("/") and sp.has_literal("/users/{slug}")
+
+
+def test_l1_templates_of_fewer_than_three_urls_with_a_literal_word_go_to_other():
+    fake = FakeGoogle()
+    fake.pages = [("https://acme.test/users/jsmith", 7, 70, 2.0),            # a plain word that may be a name
+                  ("https://acme.test/users/jane-smith/profile", 1, 10, 3.0),
+                  ("https://acme.test/users/john-doe/profile", 1, 10, 3.0),
+                  *[(f"https://acme.test/blog/post-{i}", 2, 20, 4.0) for i in range(3)],
+                  ("https://acme.test/x-y-z", 1, 10, 1.0)]                 # placeholder only: always kept
+    rd = client(fake).open_read(lambda: None)
+    out = sp.read_aggregates(rd, PROP, *W, {"acme.test"}, ["acme"])["by_page_template"]
+    got = {t["template"]: (t["clicks"], t["impressions"]) for t in out["templates"]}
+    assert got == {"/blog/{slug}": (6, 60), "/{slug}": (1, 10), "{other}": (9, 90)}
+    assert out["templates_collapsed_into_other"] == 2 and out["min_urls_per_template"] == 3
+    assert "jsmith" not in json.dumps(out)
+
+
+def test_l1_the_method_text_no_longer_claims_no_url_is_kept():
+    import svc_gsc
+    assert "no URL is kept" not in svc_gsc.METHOD and "{slug}" in svc_gsc.METHOD
