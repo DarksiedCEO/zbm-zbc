@@ -535,8 +535,13 @@ W4-3. **What is stored, and what is sent.**
      to the tenant's domain on the shared lookalike table (`lookalikes.py`, e.g. a Cyrillic `і`) is counted as a
      `lookalike_citation` and never as the tenant.
    - Prompts carry no personal data (`agents/prompt_guard.py`). A prompt set holding an e-mail address (any at-sign
-     spelling, after the shared fold), seven or more digits however separated, or an IPv4 address is refused 422
-     `PROMPT_PERSONAL_DATA`. A stored prompt is checked again before sending and is skipped, unquoted in the report.
+     spelling, after the shared fold, including `[@]`, `&#64;` and "john at example dot com"), seven or more digits
+     however separated (spaces, commas, underscores, every Unicode dash and connector), or an IPv4 address is refused
+     422 `PROMPT_PERSONAL_DATA`. Allowed on purpose (AEGIS M3): a 4-digit year range (`2025-2026`, `2025 2026`), a
+     count grouped in thousands (`1 000 000`) and a version string (`version 1.2.3.4`); a real IP is still refused.
+     **Personal names and street addresses are not detected**: no pattern tells them from a business or a place, so
+     prompt sets stay staff-written generic market questions. A stored prompt is checked again before sending and is
+     skipped, unquoted in the report.
    - The request carries only the prompt and one fixed instruction: no tenant, brand, domain, user identifier or
      safety identifier.
 

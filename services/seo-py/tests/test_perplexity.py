@@ -958,3 +958,26 @@ def test_m2_a_backslash_citation_through_the_service_is_not_the_tenant(tmp_path)
     h = svc_harness(tmp_path, f)
     p = callum(run_audit(h, setup_zbm(h)))["facts"]["engines"]["perplexity"]["prompts"][0]
     assert p["cited"] == 0 and p["other_sources"] == []
+
+
+@pytest.mark.parametrize("text,kind", [
+    ("call 555–123–4567", "number"), ("call 555—123—4567", "number"),
+    ("call 555−123−4567", "number"), ("call 555‐123‐4567", "number"),
+    ("call 555,123,4567", "number"), ("call 555_123_4567", "number"), ("call 555＿123＿4567", "number"),
+    ("call 555 123 4567", "number"), ("acct 12 345 678 9", "number"), ("4111 1111 1111 1111", "number"),
+    ("john[@]example.com", "email"), ("john(@)example.com", "email"), ("john [ @ ] example.com", "email"),
+    ("john&#64;example.com", "email"), ("john&#x40;example.com", "email"), ("john at example dot com", "email"),
+    ("John AT example DOT co dot uk", "email"),
+    ("best SEO agency 2025-2026", None), ("best CRM 2025 2026", None), ("trends 2025–2026", None),
+    ("plans for 2025/2026", None), ("1 000 000 visitors", None), ("1,000,000 visitors", None),
+    ("version 1.2.3.4", None), ("v1.2.3.4 release notes", None), ("release 10.0.0.1 changes", None),
+    ("ip 192.168.0.1", "ip"), ("server 10.20.30.40", "ip"), ("listed at yelp.com", None),
+])
+def test_m3_prompt_guard_separators_obfuscated_at_and_allowed_numbers(text, kind):
+    assert personal_data(text) == kind
+
+
+def test_m3_names_and_street_addresses_are_a_documented_limit():
+    import agents.prompt_guard as pg
+    assert personal_data("what does Jane Smith of 12 Elm Street Long Beach think") is None   # not detected
+    assert "street addresses" in pg.__doc__ and "NOT detected" in pg.__doc__
