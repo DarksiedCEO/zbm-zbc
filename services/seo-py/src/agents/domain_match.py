@@ -3,12 +3,26 @@ Is a cited host the tenant's site? (ADR 0017 W4-3). Exact host or a subdomain of
 as IDNA (A-labels), never by substring: ``evilacme.com``, ``acme.com.evil.com`` and ``acme.co`` are not ``acme.com``.
 
 A host whose Unicode form FOLDS (the repo's shared lookalike table, ``lookalikes.py``) to the tenant's domain but is
-not the same name — ``аcme.com`` with a Cyrillic а, ``xn--cme-8cd.com``, full-width letters NFKC does not reach — is a
+not the same name — ``аcme.com`` with a Cyrillic а, ``xn--cme-5cd.com``, full-width letters NFKC does not reach — is a
 LOOKALIKE: reported as such, never counted as a citation of the tenant.
+
+Python's ``idna`` codec is IDNA2003 (nameprep): it maps ``ß`` to ``ss`` and ``ς`` to ``σ`` and silently DROPS
+zero-width joiners and soft hyphens, so ``faß.de`` would "be" ``fass.de``, which IDNA2008/UTS46 (browsers, registries)
+treat as two different names (AEGIS M1). No new dependency: a host is a host name here only when, after NFKC and lower
+case (the mapping UTS46 also applies: ``ＳＩＴＥ.test`` is ``site.test``), every label survives the IDNA round trip
+unchanged (a U-label encodes to an A-label that decodes back to it; an ``xn--`` A-label decodes to a U-label that
+encodes back to it), and it holds no format character, default-ignorable code point (ZWJ, ZWNJ, soft hyphen, ...),
+control character or space. Any other host is not the tenant: ``faß.de``, ``ς.com``, ``xn--fa-hia.de`` and
+``ac\u200dme.com`` never match ``fass.de`` / ``σ.com`` / ``acme.com`` as exact or subdomain; when such a host,
+loosened (invisibles removed, ``ß``→``ss``, ``ς``→``σ``), folds to the tenant's domain it is a LOOKALIKE. The cost: a
+tenant whose own domain needs one of these characters (a final sigma, ``ß``) matches nothing; register its ASCII or
+another form.
 """
 
 from __future__ import annotations
 
+import unicodedata
+from encodings import idna as _idna
 from typing import Optional
 
 import lookalikes
@@ -17,21 +31,69 @@ _TABLE = lookalikes.Table()
 EXACT, SUBDOMAIN, LOOKALIKE = "exact", "subdomain", "lookalike"
 
 
+_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+
+
+def _bad_char(c: str) -> bool:
+    """Format, default-ignorable, control, surrogate, private-use, unassigned or space characters."""
+    return lookalikes.is_invisible(c) or unicodedata.category(c) in ("Cc", "Cs", "Co", "Cn", "Zs", "Zl", "Zp")
+
+
+def _label(lb: str) -> Optional[str]:
+    """One label as its lower-case A-label, or None when the IDNA round trip changes it (IDNA2003 mappings)."""
+    try:
+        if lb.isascii():
+            if not lb.startswith("xn--"):
+                return lb
+            u = lb[4:].encode("ascii").decode("punycode")
+            if u.isascii() or any(_bad_char(c) for c in u) or unicodedata.normalize("NFKC", u).lower() != u:
+                return None
+            return lb if _idna.ToASCII(u).decode("ascii").lower() == lb else None
+        a = _idna.ToASCII(lb).decode("ascii").lower()
+        if not a.startswith("xn--") or a[4:].encode("ascii").decode("punycode") != lb:
+            return None                                   # ß -> ss, ς -> σ, a dropped joiner: not this name
+        return a
+    except (UnicodeError, ValueError):
+        return None
+
+
 def _ascii(host: str) -> Optional[str]:
-    """``host`` as lower-case A-labels without a trailing dot, or None for something that is not a host name."""
+    """``host`` as lower-case A-labels without a trailing dot, or None for something that is not a host name (see
+    the module docstring for the IDNA round-trip rule)."""
     if not isinstance(host, str):
         return None
     h = host.strip().rstrip(".").lower()
     if not h or len(h) > 253 or any(c in h for c in "/\\@:?#% \t\r\n"):
         return None
-    try:
-        a = h.encode("idna").decode("ascii").lower()
-    except UnicodeError:
+    if any(_bad_char(c) for c in h):
         return None
-    labels = a.split(".")
-    if any(not lb or len(lb) > 63 for lb in labels):
+    h = h.translate(_DOTS)
+    n = unicodedata.normalize("NFKC", h).lower()
+    if n.count(".") != h.count(".") or any(_bad_char(c) for c in n):
+        return None                                       # NFKC must not invent a label separator (U+2488 "1.")
+    labels = [_label(lb) for lb in n.rstrip(".").split(".")]
+    if any(lb is None or not lb or len(lb) > 63 for lb in labels):
         return None
-    return a
+    a = ".".join(labels)
+    return a if len(a) <= 253 else None
+
+
+def _loose(host: str) -> Optional[str]:
+    """A refused host, loosened the way IDNA2003 would (invisibles removed, ß->ss, ς->σ), for the lookalike check."""
+    if not isinstance(host, str):
+        return None
+    h = unicodedata.normalize("NFKC", lookalikes.strip_invisible(host)).lower().translate(_DOTS)
+    h = h.replace("ß", "ss").replace("ς", "σ").strip().rstrip(".")
+    out = []
+    for lb in h.split("."):
+        if lb.startswith("xn--"):
+            try:
+                lb = lb[4:].encode("ascii").decode("punycode").replace("ß", "ss").replace("ς", "σ")
+            except (UnicodeError, ValueError):
+                return None
+        out.append(lb)
+    h = ".".join(out)
+    return h if h and len(h) <= 253 and not any(c in h for c in "/\\@:?#% \t\r\n") else None
 
 
 def _unicode(ascii_host: str) -> str:
@@ -53,8 +115,15 @@ def _site(d: str) -> str:
 def match(host: str, domain: str) -> Optional[str]:
     """``exact`` (the domain or its www. twin), ``subdomain``, ``lookalike`` or None."""
     h, d = _ascii(host), _ascii(domain)
-    if h is None or d is None:
+    if d is None:
         return None
+    if h is None:
+        loose = _loose(host)
+        if loose is None:
+            return None
+        fh, fd = _TABLE.fold_cased(loose), _TABLE.fold_cased(_unicode(_site(d)))
+        fh = fh[4:] if fh.startswith("www.") else fh
+        return LOOKALIKE if fh == fd or fh.endswith("." + fd) else None
     hs, ds = _site(h), _site(d)
     if hs == ds:
         return EXACT

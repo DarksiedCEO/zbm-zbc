@@ -922,3 +922,21 @@ def test_h2_smoke_one_call_makes_exactly_one_bounded_request_and_prints_no_key_o
     assert m.main([m.FLAG], {}, out=io.StringIO()) == 2                          # no key: configuration error
     assert m.main([m.FLAG], {"SEO_PERPLEXITY_API_KEY": KEY, "SEO_PERPLEXITY_API_KEY_FILE": _key_file(tmp_path)},
                   out=io.StringIO()) == 2
+
+
+@pytest.mark.parametrize("host,domain,want", [
+    ("faß.de", "fass.de", "lookalike"), ("fass.de", "faß.de", None),          # IDNA2003 would call both "exact"
+    ("xn--fa-hia.de", "fass.de", "lookalike"),                                 # the IDNA2008 A-label of faß.de
+    ("shop.faß.de", "fass.de", "lookalike"),
+    ("\u03c2.com", "\u03c3.com", "lookalike"), ("\u03c3.com", "\u03c2.com", None), ("xn--3xa.com", "\u03c3.com", "lookalike"),
+    ("ac\u200dme.com", "acme.com", "lookalike"), ("ac\u200cme.com", "acme.com", "lookalike"),
+    ("ac\u00adme.com", "acme.com", "lookalike"), ("ac\u2060me.com", "acme.com", "lookalike"),
+    ("ac\ufeffme.com", "acme.com", "lookalike"), ("blog.ac\u034fme.com", "acme.com", "lookalike"),
+    ("acme\u2488com", "acme1.com", "lookalike"),                              # NFKC must not invent a dot
+    ("ａｃｍｅ.com", "acme.com", "exact"), ("ACME.COM", "acme.com", "exact"), ("acme。com", "acme.com", "exact"),
+    ("shop.bücher.test", "bücher.test", "subdomain"), ("xn--bcher-kva.test", "bücher.test", "exact"),
+    ("аcme.com", "acme.com", "lookalike"), ("xn--cme-5cd.com", "acme.com", "lookalike"),
+])
+def test_m1_idna_round_trip_refuses_idna2003_mappings_and_invisibles(host, domain, want):
+    assert domain_match.match(host, domain) == want
+    assert domain_match.on_site(host, domain) is (want in ("exact", "subdomain"))
