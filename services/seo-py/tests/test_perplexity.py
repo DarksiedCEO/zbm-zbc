@@ -1262,6 +1262,15 @@ def test_r2_smoke_helper_never_echoes_a_mistyped_value(tmp_path):
         assert m.main([m.FLAG], env, out=out) == 2
         text = out.getvalue()
         assert KEY not in text and "configuration error" in text and len(text) < 300
+    out = io.StringIO()
+    m.main([m.FLAG], {"SEO_PERPLEXITY_API_KEY": KEY, "SEO_PERPLEXITY_TIMEOUT_SECONDS": KEY}, out=out)
+    assert "SEO_PERPLEXITY_TIMEOUT_SECONDS must be a whole number" in out.getvalue()     # the setting, by name
+
+    def raising(env):
+        raise ValueError("a library message quoting " + KEY)
+    out = io.StringIO()
+    assert m.main([m.FLAG], {}, engine_factory=raising, out=out) == 2
+    assert KEY not in out.getvalue() and "ValueError" in out.getvalue()
 
 
 def test_r2_a_cost_far_above_the_reserve_stops_the_run_and_is_a_finding(tmp_path):
@@ -1311,3 +1320,28 @@ def test_r2_a_normal_answer_reports_no_drift(tmp_path):
     c = callum(run_audit(h, setup_zbm(h)))
     assert c["facts"]["engines"]["perplexity"]["drift"]["zero_source_answers"] == 0
     assert not [x for x in c["findings"] if x["code"] == "ENGINE_ANSWERS_WITHOUT_SOURCES"]
+
+
+def test_r2_smoke_helper_meter_allows_one_request_even_if_the_adapter_would_retry():
+    import io
+    m = _smoke_module()
+
+    class Retrying:                                     # an adapter that ignores ``attempts`` and keeps asking
+        attempts, sent = 3, 0
+
+        def ask(self, prompt, meter=None, **kw):
+            for _ in range(5):
+                meter.before()                          # the helper's meter must refuse the second request
+                Retrying.sent += 1
+                meter.after(None)
+            raise AssertionError("unreachable")
+    out = io.StringIO()
+    assert m.main([m.FLAG], {}, engine_factory=lambda env: Retrying(), out=out) == 1
+    assert Retrying.sent == 1 and json.loads(out.getvalue())["detail"] == "RESERVATION_USED"
+
+
+def test_r2_bad_characters_are_refused_after_normalisation():
+    import unicodedata
+    for c in ("­", "‍", " ", "ㅤ", "ﾠ", " ", "\x07", "﻿"):
+        assert domain_match._ascii(f"ac{c}me.com") is None
+        assert any(domain_match._bad_char(x) for x in unicodedata.normalize("NFKC", c).lower())

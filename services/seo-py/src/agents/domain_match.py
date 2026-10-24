@@ -123,9 +123,9 @@ def _ascii(host: str) -> Optional[str]:
     h = host.strip().rstrip(".").lower()
     if not h or len(h) > 253 or any(c in h for c in "/\\@:?#% \t\r\n"):
         return None
-    if any(_bad_char(c) for c in h):
-        return None
-    h = h.translate(_DOTS)
+    h = h.translate(_DOTS)                                # (bad characters are checked after NFKC, below: no
+    # character outside _bad_char becomes one under NFKC + lower case, and none inside stops being one; checked over
+    # the whole code space, so one check after normalisation is enough)
     n = unicodedata.normalize("NFKC", h).lower()
     if n.count(".") != h.count(".") or any(_bad_char(c) for c in n):
         return None                                       # NFKC must not invent a label separator (U+2488 "1.")
