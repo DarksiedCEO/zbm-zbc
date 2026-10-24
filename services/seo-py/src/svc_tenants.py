@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from agents import domain_match
 from config import CAPABILITY_SWITCHES, PROVIDER_SWITCHES, TENANT_ID
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from primitives import Killed
@@ -34,8 +35,11 @@ OWN_TENANT = "zbm"
 
 
 def valid_domain(d) -> bool:
+    """A registrable host name; never a public suffix (``github.io``, ``co.uk``: AEGIS L3, agents/domain_match.py),
+    whose every customer subdomain would otherwise count as the tenant's site."""
     return isinstance(d, str) and bool(DOMAIN.fullmatch(d)) and not d.endswith((".local", ".internal", ".localhost",
-                                                                                ".arpa", ".invalid"))
+                                                                                ".arpa", ".invalid")) \
+        and not domain_match.is_public_suffix(d)
 
 
 def _site(d: str) -> str:

@@ -30,6 +30,29 @@ import lookalikes
 _TABLE = lookalikes.Table()
 EXACT, SUBDOMAIN, LOOKALIKE = "exact", "subdomain", "lookalike"
 
+# AEGIS L3: a vendored SUBSET of the Public Suffix List (https://publicsuffix.org/list/, checked Oct 2026): the
+# multi-label ICANN suffixes and the PRIVATE-section hosting platforms where customers' sites are subdomains. A tenant
+# may not register one of these (svc_tenants: DOMAIN_INVALID), and if one is ever a tenant's domain (an old log) it
+# matches nothing, so "github.io" can never claim every customer's "x.github.io" as its subdomain. Single-label TLDs
+# are refused by the domain syntax already. The list is a subset, not the PSL: a suffix missing here is caught only by
+# Andre registering the domain by hand (he registers every domain).
+PUBLIC_SUFFIXES = frozenset("""
+co.uk org.uk me.uk ltd.uk plc.uk net.uk ac.uk gov.uk sch.uk nhs.uk police.uk
+com.au net.au org.au edu.au gov.au id.au asn.au co.nz net.nz org.nz govt.nz ac.nz
+co.jp ne.jp or.jp ac.jp go.jp com.br net.br org.br gov.br com.cn net.cn org.cn gov.cn com.mx org.mx gob.mx
+co.za org.za gov.za co.in net.in org.in gov.in firm.in com.sg edu.sg gov.sg com.hk org.hk gov.hk
+com.tr org.tr gov.tr co.kr or.kr go.kr com.tw org.tw gov.tw co.il org.il gov.il com.ar com.co com.pe com.ph
+com.my com.vn com.pk com.ng com.eg com.sa com.ua co.id or.id ac.id go.id co.th in.th go.th
+github.io githubusercontent.com gitlab.io netlify.app netlify.com vercel.app now.sh pages.dev workers.dev
+herokuapp.com herokussl.com azurewebsites.net azurestaticapps.net cloudapp.net trafficmanager.net
+cloudfront.net amazonaws.com s3.amazonaws.com elasticbeanstalk.com awsapprunner.com amplifyapp.com
+appspot.com web.app firebaseapp.com run.app cloudfunctions.net blogspot.com
+wordpress.com wpengine.com wixsite.com squarespace.com myshopify.com webflow.io weebly.com
+onrender.com fly.dev railway.app up.railway.app glitch.me repl.co replit.app replit.dev ngrok.io ngrok-free.app
+ngrok.app surge.sh readthedocs.io gitbook.io notion.site carrd.co framer.website framer.app bubbleapps.io
+dyndns.org no-ip.org duckdns.org ddns.net
+""".split())
+
 
 _DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
 
@@ -112,10 +135,17 @@ def _site(d: str) -> str:
     return d[4:] if d.startswith("www.") else d
 
 
+def is_public_suffix(domain: str) -> bool:
+    """The domain (or its www. twin) is on the vendored public-suffix subset (AEGIS L3)."""
+    d = _ascii(domain)
+    return d is not None and (d in PUBLIC_SUFFIXES or _site(d) in PUBLIC_SUFFIXES)
+
+
 def match(host: str, domain: str) -> Optional[str]:
-    """``exact`` (the domain or its www. twin), ``subdomain``, ``lookalike`` or None."""
+    """``exact`` (the domain or its www. twin), ``subdomain``, ``lookalike`` or None. A public-suffix tenant domain
+    matches nothing."""
     h, d = _ascii(host), _ascii(domain)
-    if d is None:
+    if d is None or d in PUBLIC_SUFFIXES or _site(d) in PUBLIC_SUFFIXES:
         return None
     if h is None:
         loose = _loose(host)

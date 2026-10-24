@@ -1067,3 +1067,16 @@ def test_l2_a_reported_cost_of_zero_is_charged_at_the_reserve_so_the_spend_budge
     m.before()
     m.after("0.010000")
     assert m.spent() == Decimal("0.060000") and m.unknown == 1
+
+
+def test_l3_a_public_suffix_tenant_domain_is_refused_and_matches_nothing(tmp_path):
+    for ps in ("github.io", "co.uk", "vercel.app", "www.github.io"):
+        assert domain_match.match(f"customer.{ps}", ps) is None and domain_match.match(ps, ps) is None
+    assert domain_match.match("blog.acme.github.io", "acme.github.io") == "subdomain"      # a customer's own site
+    assert domain_match.match("acme.github.io", "acme.github.io") == "exact"
+    assert domain_match.match("other.github.io", "acme.github.io") is None
+    h = Harness(tmp_path)
+    for ps in ("github.io", "co.uk", "myshopify.com"):
+        h.refused(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": [ps]}, andre=True), 422,
+                  "DOMAIN_INVALID")
+    h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": ["acme.github.io"]}, andre=True))

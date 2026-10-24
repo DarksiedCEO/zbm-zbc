@@ -538,6 +538,19 @@ W4-3. **What is stored, and what is sent.**
      never by substring: `evilsite.test` and `site.test.evil.test` are not `site.test`. A host whose Unicode form folds
      to the tenant's domain on the shared lookalike table (`lookalikes.py`, e.g. a Cyrillic `і`) is counted as a
      `lookalike_citation` and never as the tenant.
+   - IDNA (AEGIS M1): Python's codec is IDNA2003, which maps `ß`→`ss`, `ς`→`σ` and drops ZWJ and soft hyphens.
+     A host counts as a name only when every label survives the IDNA round trip unchanged (after NFKC and lower
+     case) and it holds no format, default-ignorable, control or space character. Any other host is never the tenant
+     (`faß.de` is not `fass.de`); when its loosened form folds to the tenant it is a lookalike. No new dependency.
+     The cost: a tenant domain that needs `ß` or a final sigma matches nothing.
+   - Public suffixes (AEGIS L3): a tenant may not register a public suffix (`github.io`, `co.uk`, `vercel.app`, ...:
+     422 `DOMAIN_INVALID`), and a public-suffix tenant domain from an older log matches nothing, so one customer can
+     never claim every `*.github.io` site. The simpler correct option was chosen: refuse at registration, from a
+     vendored subset of the Public Suffix List in `agents/domain_match.py` (multi-label ICANN suffixes and the common
+     hosting platforms), not the whole list. A suffix missing from the subset relies on Andre, who registers every
+     domain by hand.
+   - A citation URL holding a backslash, an ASCII control character or whitespace is refused before parsing
+     (AEGIS M2: `https://evil.com\@acme.com/` parses as host `acme.com` but a browser goes to `evil.com`).
    - Prompts carry no personal data (`agents/prompt_guard.py`). A prompt set holding an e-mail address (any at-sign
      spelling, after the shared fold, including `[@]`, `&#64;` and "john at example dot com"), seven or more digits
      however separated (spaces, commas, underscores, every Unicode dash and connector), or an IPv4 address is refused
