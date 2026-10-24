@@ -56,14 +56,20 @@ import math
 import os
 import re
 import time
+from collections.abc import Callable, Iterator
 from datetime import date
-from typing import Callable, Iterator, Optional
 from urllib.parse import quote, urlencode
 
 import httpcore
 import httpx
 
-from finance_client import _DeadlineBackend, _DnsGate, _ip_literal, _Resolver, _system_resolve
+from finance_client import (
+    _DeadlineBackend,
+    _DnsGate,
+    _ip_literal,
+    _Resolver,
+    _system_resolve,
+)
 from primitives import Killed
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -102,7 +108,7 @@ class GscError(Exception):
     """A read that did not produce data. ``code`` is one of ``CODES``; ``detail`` a short closed-vocabulary hint
     (never text from Google, never a credential)."""
 
-    def __init__(self, code: str, detail: Optional[str] = None):
+    def __init__(self, code: str, detail: str | None = None):
         if code not in CODES:
             raise AssertionError(f"not a GSC reason code: {code}")
         super().__init__(code)
@@ -140,7 +146,7 @@ class ServiceAccountKey:
     """The service account's identity and its RSA signing key. Only ``sign`` uses the key; the PEM text is parsed once
     and dropped (Python cannot zero a string; the key itself lives in OpenSSL's memory through ``cryptography``)."""
 
-    __slots__ = ("client_email", "key_id", "_signer")
+    __slots__ = ("_signer", "client_email", "key_id")
 
     def __init__(self, client_email: str, key_id: str, signer):
         self.client_email = client_email
@@ -214,12 +220,12 @@ def build_assertion(key: ServiceAccountKey, now: int, scope: str = SCOPE) -> byt
     header = {"alg": "RS256", "typ": "JWT", "kid": key.key_id}
     claims = {"iss": key.client_email, "scope": scope, "aud": TOKEN_URL, "iat": int(now),
               "exp": int(now) + JWT_LIFETIME_S}
-    enc = lambda o: _b64url(json.dumps(o, separators=(",", ":"), sort_keys=True).encode("ascii"))  # noqa: E731
+    enc = lambda o: _b64url(json.dumps(o, separators=(",", ":"), sort_keys=True).encode("ascii"))
     signing_input = enc(header) + b"." + enc(claims)
     return signing_input + b"." + _b64url(key.sign(signing_input))
 
 
-def property_host(prop: str) -> Optional[str]:
+def property_host(prop: str) -> str | None:
     """The host a property is about (``sc-domain:example.com`` -> example.com), or None when malformed."""
     m = PROPERTY.fullmatch(prop or "")
     if m is None:
@@ -322,7 +328,7 @@ def parse_rows(obj, dims: tuple, row_limit: int, aggregation: str, start: str, e
 
 
 class _Retry(Exception):
-    def __init__(self, code: str, detail: str, retry_after: Optional[float] = None):
+    def __init__(self, code: str, detail: str, retry_after: float | None = None):
         super().__init__(code)
         self.code, self.detail, self.retry_after = code, detail, retry_after
 
@@ -333,11 +339,11 @@ class _GuardedStream(httpcore.NetworkStream):
     def __init__(self, inner, guard: Callable[[], None]):
         self._s, self._g = inner, guard
 
-    def read(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
         self._g()
         return self._s.read(max_bytes, timeout)
 
-    def write(self, buffer: bytes, timeout: Optional[float] = None) -> None:
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
         self._g()
         self._s.write(buffer, timeout)
 
@@ -411,10 +417,10 @@ class GscClient:
     def __init__(self, key: ServiceAccountKey, *, timeout_s: float = 10.0, deadline_s: float = 60.0,
                  attempts: int = 3, backoff_s: tuple = (1.0, 3.0), page_rows: int = 5000, max_pages: int = 10,
                  max_rows: int = 50_000, max_requests: int = 30,
-                 transport: Optional[httpx.BaseTransport] = None, network_backend=None,
+                 transport: httpx.BaseTransport | None = None, network_backend=None,
                  monotonic: Callable[[], float] = time.monotonic, wall: Callable[[], float] = time.time,
                  sleep: Callable[[float], None] = time.sleep, resolve: Callable[[str, int], list] = _system_resolve,
-                 dns_gate: Optional[_DnsGate] = None):
+                 dns_gate: _DnsGate | None = None):
         if not isinstance(key, ServiceAccountKey):
             raise TypeError("GscClient needs a ServiceAccountKey")
         if not 1 <= attempts <= 5 or not 1 <= page_rows <= ROW_LIMIT_MAX or max_pages < 1 or max_rows < 1:
@@ -427,7 +433,7 @@ class GscClient:
         self._inner_backend = network_backend        # tests only: the socket layer under the deadline backend
         self._mono, self._wall, self._sleep = monotonic, wall, sleep
         self._resolver = _GlobalResolver(_Resolver(resolve, dns_gate if dns_gate is not None else _GSC_DNS_GATE))
-        self._token: Optional[tuple] = None          # (_Secret, valid-until monotonic)
+        self._token: tuple | None = None          # (_Secret, valid-until monotonic)
         self.requests_made = 0                       # every HTTP attempt this client ever sent (status, tests)
 
     def __repr__(self) -> str:
@@ -435,13 +441,13 @@ class GscClient:
 
     # ------------------------------------------------------------------ one read
 
-    def open_read(self, guard: Callable[[], None]) -> "_Read":
+    def open_read(self, guard: Callable[[], None]) -> _Read:
         """A read session: one overall deadline and one request budget for everything it does."""
         return _Read(self, guard, self._mono() + self.deadline_s)
 
     # ------------------------------------------------------------------ token
 
-    def _cached_token(self) -> Optional[_Secret]:
+    def _cached_token(self) -> _Secret | None:
         t = self._token
         if t is not None and self._mono() < t[1]:
             return t[0]
@@ -486,7 +492,7 @@ class _Read:
         return secret
 
     def check_property(self, prop: str) -> str:
-        status, raw = self._api("GET", f"{API_BASE}/sites", None, MAX_SITES_BODY, site_scoped=False)
+        _status, raw = self._api("GET", f"{API_BASE}/sites", None, MAX_SITES_BODY, site_scoped=False)
         return parse_sites(_json(raw), prop)
 
     def query(self, prop: str, start: str, end: str, dims: tuple, aggregation: str, row_limit: int,
@@ -496,8 +502,8 @@ class _Read:
         body = {"startDate": start, "endDate": end, "dimensions": list(dims), "type": "web", "dataState": "final",
                 "aggregationType": aggregation, "rowLimit": row_limit, "startRow": start_row}
         url = f"{API_BASE}/sites/{quote(prop, safe='')}/searchAnalytics/query"
-        status, raw = self._api("POST", url, json.dumps(body, separators=(",", ":")).encode(), MAX_QUERY_BODY,
-                                site_scoped=True)
+        _status, raw = self._api("POST", url, json.dumps(body, separators=(",", ":")).encode(), MAX_QUERY_BODY,
+                                 site_scoped=True)
         return parse_rows(_json(raw), dims, row_limit, aggregation, start, end)
 
     def pages(self, prop: str, start: str, end: str, dims: tuple, aggregation: str, stats: dict) -> Iterator[list]:
@@ -521,15 +527,16 @@ class _Read:
                 if h in seen:
                     raise GscError("GSC_PROTOCOL_ERROR", "row_repeated_across_pages")
                 seen.add(h)
+            n = len(rows)                                   # before the consumer sees (and may clear) the page
             if rows:
                 yield rows
-            if len(rows) < limit:
+            if n < limit:
                 return
-            start_row += len(rows)
+            start_row += n
 
     # ------------------------------------------------------------------ transport
 
-    def _api(self, method: str, url: str, body: Optional[bytes], cap: int, site_scoped: bool) -> tuple[int, bytes]:
+    def _api(self, method: str, url: str, body: bytes | None, cap: int, site_scoped: bool) -> tuple[int, bytes]:
         """An authenticated call. A 401 with a cached token is retried once with a fresh token."""
         for fresh_try in (False, True):
             tok = self.token()
@@ -547,12 +554,12 @@ class _Read:
             return status, raw
         raise GscError("GSC_AUTH_REFUSED", "api_401")      # pragma: no cover - the loop always returns or raises
 
-    def _send(self, method: str, url: str, headers: dict, body: Optional[bytes], cap: int,
+    def _send(self, method: str, url: str, headers: dict, body: bytes | None, cap: int,
               token_call: bool = False, site_scoped: bool = False) -> tuple[int, bytes]:
         """One logical request with bounded retries. Returns (status, body) for 200 and 401; raises GscError for
         everything else (after retries where a retry can help)."""
         check_url(url)
-        last: Optional[_Retry] = None
+        last: _Retry | None = None
         for attempt in range(self.c.attempts):
             if self.left() <= 0:
                 break
@@ -615,7 +622,7 @@ class _Read:
             raise GscError("GSC_PROPERTY_NOT_GRANTED", "http_404")
         raise GscError("GSC_PROTOCOL_ERROR", f"http_{status}")
 
-    def _once(self, method: str, url: str, headers: dict, body: Optional[bytes], cap: int) -> tuple[int, bytes, dict]:
+    def _once(self, method: str, url: str, headers: dict, body: bytes | None, cap: int) -> tuple[int, bytes, dict]:
         left = self.left()
         if left <= 0:
             raise _Retry("GSC_UNAVAILABLE", "deadline")
@@ -631,25 +638,25 @@ class _Read:
         hdrs = {**headers, "Accept-Encoding": "identity", "User-Agent": "zbm-seo-py-gsc/1"}
         try:
             with httpx.Client(timeout=httpx.Timeout(min(self.c.timeout_s, left)), transport=transport,
-                              follow_redirects=False, trust_env=False) as client:
-                with client.stream(method, url, headers=hdrs, content=body) as resp:
-                    enc = resp.headers.get("content-encoding", "identity").strip().lower()
-                    if enc not in ("identity", ""):
-                        raise GscError("GSC_PROTOCOL_ERROR", "content_encoding")
-                    declared = resp.headers.get("content-length")
-                    if declared is not None and (not declared.isdigit() or int(declared) > cap):
+                              follow_redirects=False, trust_env=False) as client, \
+                    client.stream(method, url, headers=hdrs, content=body) as resp:
+                enc = resp.headers.get("content-encoding", "identity").strip().lower()
+                if enc not in ("identity", ""):
+                    raise GscError("GSC_PROTOCOL_ERROR", "content_encoding")
+                declared = resp.headers.get("content-length")
+                if declared is not None and (not declared.isdigit() or int(declared) > cap):
+                    raise GscError("GSC_PROTOCOL_ERROR", "body_too_large")
+                chunks, size = [], 0
+                for chunk in resp.iter_bytes():           # identity only (checked above): the bytes received
+                    if self.c._mono() >= self.end:
+                        raise _Retry("GSC_UNAVAILABLE", "deadline")
+                    self._guard()
+                    size += len(chunk)
+                    if size > cap:
                         raise GscError("GSC_PROTOCOL_ERROR", "body_too_large")
-                    chunks, size = [], 0
-                    for chunk in resp.iter_raw():
-                        if self.c._mono() >= self.end:
-                            raise _Retry("GSC_UNAVAILABLE", "deadline")
-                        self._guard()
-                        size += len(chunk)
-                        if size > cap:
-                            raise GscError("GSC_PROTOCOL_ERROR", "body_too_large")
-                        chunks.append(chunk)
-                    keep = {k: resp.headers.get(k) for k in ("retry-after",) if resp.headers.get(k) is not None}
-                    return resp.status_code, b"".join(chunks), keep
+                    chunks.append(chunk)
+                keep = {k: resp.headers.get(k) for k in ("retry-after",) if resp.headers.get(k) is not None}
+                return resp.status_code, b"".join(chunks), keep
         except (GscError, _Retry):
             raise
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
@@ -658,13 +665,13 @@ class _Read:
             raise GscError("GSC_PROTOCOL_ERROR", "exchange") from None
 
 
-def _retry_after(v: Optional[str]) -> Optional[float]:
+def _retry_after(v: str | None) -> float | None:
     if v is None or not re.fullmatch(r"[0-9]{1,4}", v.strip()):
         return None
     return float(min(int(v.strip()), 60))
 
 
-def _google_reason(raw: bytes) -> Optional[str]:
+def _google_reason(raw: bytes) -> str | None:
     obj = _json(raw, strict=False)
     try:
         errs = obj["error"]["errors"]

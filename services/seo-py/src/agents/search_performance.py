@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
-from typing import Iterable, Optional
 from urllib.parse import urlsplit
 
 import lookalikes
@@ -71,12 +71,12 @@ def window(now: datetime, days: int) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
-def brand_tokens(domains: Iterable[str], entity_name: Optional[str]) -> list:
+def brand_tokens(domains: Iterable[str], entity_name: str | None) -> list:
     """Brand words for the query classifier: each registered domain's first label (``www.`` dropped) and the entity
     record's name with spaces removed; at least four characters."""
     out = set()
     for d in domains or ():
-        d = d[4:] if d.startswith("www.") else d
+        d = d.removeprefix("www.")
         lab = d.split(".")[0]
         if len(lab) >= 4:
             out.add(lab)
@@ -132,7 +132,7 @@ class _Acc:
         self.c = self.i = 0
         self.pw = 0.0
 
-    def add(self, c: int, i: int, pos: Optional[float]) -> None:
+    def add(self, c: int, i: int, pos: float | None) -> None:
         self.c += c
         self.i += i
         if pos is not None:

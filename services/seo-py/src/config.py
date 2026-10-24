@@ -148,7 +148,7 @@ class Settings:
     finance_token: Optional[str] = field(default=None, repr=False)
     finance_caller_token: Optional[str] = field(default=None, repr=False)
     finance_timeout_s: int = 5
-    gsc_key: Optional[object] = field(default=None, repr=False)     # gsc_client.ServiceAccountKey (redacted repr)
+    gsc_key: object | None = field(default=None, repr=False)     # gsc_client.ServiceAccountKey (redacted repr)
     gsc_window_days: int = 28
     gsc_page_rows: int = 5000
     gsc_max_pages: int = 10
@@ -287,7 +287,7 @@ def _finance(env, s: "Settings") -> None:
     s.finance_url, s.finance_token, s.finance_caller_token = url, token, caller
 
 
-def _gsc(env, s: "Settings") -> None:
+def _gsc(env, s: Settings) -> None:
     """The Google Search Console connector (ADR 0017, "Search Console (first-party truth)"). Unset
     ``SEO_GSC_SERVICE_ACCOUNT_FILE`` = NOT_CONNECTED (no call is ever made). Set, it must name a Google service-account
     JSON key file under the *_FILE rules (absolute path, regular file, owned by this user, mode 0600 / 0400, no

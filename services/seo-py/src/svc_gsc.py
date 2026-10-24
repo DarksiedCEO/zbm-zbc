@@ -24,7 +24,6 @@ Rules:
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Optional
 
 from agents import search_performance as sp
 from clock import parse_iso
@@ -39,21 +38,21 @@ METHOD = ("Search Analytics (Google Search Console API, read-only scope) for the
           "totals by date, then page and query rows paged within caps, reduced at once to aggregates by date, page "
           "template and query class; no query text and no URL is kept")
 LIMITS = [
-    "Google returns top rows only and omits anonymised queries; the query-class breakdown therefore has an "
-    "'unattributed' remainder, and the page-template breakdown is aggregated by page (not comparable with property "
-    "totals).",
+    ("Google returns top rows only and omits anonymised queries; the query-class breakdown therefore has an "
+     "'unattributed' remainder, and the page-template breakdown is aggregated by page (not comparable with property "
+     "totals)."),
     "Search Analytics data lags 2-3 days; the window ends three Pacific-Time days ago and covers final data only.",
-    "Clicks and impressions are first-party observations; nothing here is paired with revenue yet (analytics and "
-    "CRM are NOT_CONNECTED), so no decision is drawn from them.",
+    ("Clicks and impressions are first-party observations; nothing here is paired with revenue yet (analytics and "
+     "CRM are NOT_CONNECTED), so no decision is drawn from them."),
 ]
 BLOCKED = frozenset({"GSC_AUTH_REFUSED", "GSC_PROPERTY_NOT_GRANTED", "GSC_BUDGET_EXHAUSTED"})
 
 
 def _site(d: str) -> str:
-    return d[4:] if d.startswith("www.") else d
+    return d.removeprefix("www.")
 
 
-def binding_ok(tenant: dict, prop: Optional[str]) -> bool:
+def binding_ok(tenant: dict, prop: str | None) -> bool:
     host = property_host(prop or "")
     return host is not None and _site(host) in {_site(d) for d in tenant["domains"]}
 
@@ -125,7 +124,7 @@ class GscMixin:
         outside the envelope); the envelope carries the outcome, the reason and the window totals."""
         port = self.ports.first_party.get("search_console")
 
-        def env(outcome: str, reason: Optional[str], facts: dict, nc=()) -> dict:
+        def env(outcome: str, reason: str | None, facts: dict, nc=()) -> dict:
             box["state"] = {"outcome": outcome, "reason": reason}
             return envelope(AGENT, TASK, outcome, [], reason=reason, methodology=METHOD, limitations=LIMITS,
                             not_connected=nc, facts={"requests": 0, **facts})
@@ -177,7 +176,7 @@ class GscMixin:
     # ------------------------------------------------------------------ report and retention
 
     @staticmethod
-    def gsc_report_block(box: dict) -> Optional[dict]:
+    def gsc_report_block(box: dict) -> dict | None:
         st = box.get("state")
         if st is None:
             return None
@@ -196,7 +195,7 @@ class GscMixin:
                   "totals": None if s is None else {k: s["totals"][k] for k in ("clicks", "impressions")}},
                  ("gsc_report", aid))]
 
-    def gsc_retained(self, report: Optional[dict], completed_at: Optional[str]) -> Optional[dict]:
+    def gsc_retained(self, report: dict | None, completed_at: str | None) -> dict | None:
         """Retention (minimisation): past SEO_GSC_RETENTION_DAYS a report's search-performance breakdowns are served
         as window totals only. The record log is append-only and keeps the aggregates it recorded (they identify no
         one; see ADR 0017 decision 18)."""

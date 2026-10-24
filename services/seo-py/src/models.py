@@ -78,7 +78,7 @@ GSC_PROPERTY = r"^(sc-domain:[a-z0-9.-]{4,253}|https?://[a-z0-9.-]{4,253}/[\x21-
 class GscPropertySet(Strict):
     """Andre binds a tenant to its Search Console property (null unbinds)."""
     request_id: RequestId
-    property: Optional[Annotated[StrictStr, Field(pattern=GSC_PROPERTY)]]
+    property: Annotated[StrictStr, Field(pattern=GSC_PROPERTY)] | None
 
 
 class LogIngestCreate(Strict):

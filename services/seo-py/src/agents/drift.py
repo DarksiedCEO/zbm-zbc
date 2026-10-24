@@ -26,6 +26,8 @@ assigned without the evidence listed with it; UNKNOWN is a valid answer and is u
 
 from __future__ import annotations
 
+import math
+from datetime import date
 from typing import Optional
 
 AGENT, TASK = "osei", "search_truth_drift"
@@ -187,7 +189,63 @@ def compare(a: dict, b: dict) -> dict:
             "persisted_by_agent": persisted,
             "overturned_by_agent": _count(changes, lambda c: c["change"] == "DISAPPEARED"
                                           and c["class"] in OVERTURNING),
-            "rules": "first matching rule R1..R8 (agents/drift.py); UNKNOWN when no rule's evidence holds"}
+            "rules": "first matching rule R1..R8 (agents/drift.py); UNKNOWN when no rule's evidence holds",
+            "search_performance": compare_search_performance(a, b)}
+
+
+# Search performance (first-party, Search Console; agents/search_performance.py). Window totals of clicks and
+# impressions are compared metric by metric; each change gets one class by the first rule whose evidence holds:
+#   SP1 TOOL_FAILURE       either run did not read Search Console (outcome not OK, or the section expired)
+#   SP2 MEASUREMENT_ERROR  the ruler moved: another property, window length, data state, search type or rules version
+#   SP3 SAMPLING_NOISE     the difference is within 2 * sqrt(before + after) (a Poisson band for two counts)
+#   SP4 REAL_CHANGE        outside that band: an observed change in first-party totals (no cause is claimed)
+# CTR and position are derived and shown before / after only. Whatever the class, the decision stays
+# INSUFFICIENT_EVIDENCE until revenue is connected (the Goodhart pairing): a search metric alone never justifies ACT.
+SP_RULES_VERSION = "2026-10-24.1"
+_SP_RULER = ("property", "days", "data_state", "search_type", "version")
+
+
+def _sp_ruler(sec: dict) -> dict:
+    w = sec.get("window") or {}
+    return {"property": sec.get("property"), "days": w.get("days"), "data_state": w.get("data_state"),
+            "search_type": w.get("search_type"), "version": (sec.get("versions") or {}).get("search_performance")}
+
+
+def compare_search_performance(a: dict, b: dict) -> dict | None:
+    ba, bb = a.get("search_performance"), b.get("search_performance")
+    if ba is None and bb is None:
+        return None
+    sa, sb = (ba or {}).get("section"), (bb or {}).get("section")
+    base = {"rules_version": SP_RULES_VERSION, "decision": "INSUFFICIENT_EVIDENCE",
+            "pairing": "revenue NOT_CONNECTED: no decision is drawn from search metrics alone", "metrics": {}}
+    if (ba or {}).get("outcome") != "OK" or (bb or {}).get("outcome") != "OK" or not sa or not sb \
+            or sa.get("expired") or sb.get("expired"):
+        ev = {"rule": "SP1", "before": {k: (ba or {}).get(k) for k in ("outcome", "reason")},
+              "after": {k: (bb or {}).get(k) for k in ("outcome", "reason")}}
+        base["metrics"] = {m: {"class": "TOOL_FAILURE", "evidence": ev} for m in ("clicks", "impressions")}
+        return base
+    ra, rb = _sp_ruler(sa), _sp_ruler(sb)
+    moved = {k: [ra[k], rb[k]] for k in _SP_RULER if ra[k] != rb[k]}
+    ta, tb = sa["totals"], sb["totals"]
+    try:
+        wa, wb = sa["window"], sb["window"]
+        overlap = (min(date.fromisoformat(wa["end"]), date.fromisoformat(wb["end"]))
+                   - max(date.fromisoformat(wa["start"]), date.fromisoformat(wb["start"]))).days + 1
+    except (KeyError, TypeError, ValueError):
+        overlap = None
+    base["windows_overlap_days"] = max(0, overlap) if overlap is not None else None
+    base["derived"] = {k: [ta.get(k), tb.get(k)] for k in ("ctr", "position")}
+    for m in ("clicks", "impressions"):
+        x, y = ta[m], tb[m]
+        if moved:
+            base["metrics"][m] = {"class": "MEASUREMENT_ERROR", "before": x, "after": y,
+                                  "evidence": {"rule": "SP2", "changed": moved}}
+            continue
+        band = 2 * math.sqrt(x + y)
+        cls, rule = ("SAMPLING_NOISE", "SP3") if abs(y - x) <= band else ("REAL_CHANGE", "SP4")
+        base["metrics"][m] = {"class": cls, "before": x, "after": y,
+                              "evidence": {"rule": rule, "difference": y - x, "band": round(band, 2)}}
+    return base
 
 
 def _count(changes: list, pred) -> dict:
