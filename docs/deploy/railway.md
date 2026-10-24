@@ -525,6 +525,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
     (`STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP=1`, `STRIPE_GATEWAY_FINANCE_PRIVATE_NAME`) to a real finance container;
   - the root-owned-volume path (`RAILWAY_RUN_UID=0`) is smoked for ledger-rust only, not finance, legal or seo, and the
     secret-file path for seo only, not `LEDGER_CALLERS` or the two `FIN_STRIPE_*` secrets;
+  - the ledger smoke authenticates with the shared `LEDGER_SERVICE_TOKEN`; the production auth mode (`LEDGER_CALLERS`
+    only, written to `LEDGER_CALLERS_FILE`, no shared token, per-caller department scopes) is never smoked;
   - no cross-service flow runs in CI (orchestrator → detection → ledger, stripe-gateway → finance); it was run once by
     hand on the build box without Docker;
   - `devtools/test_deploy_config.py` reads `.railway/railway.ts` as text; CI does not evaluate the file with the
