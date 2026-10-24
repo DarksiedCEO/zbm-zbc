@@ -940,3 +940,21 @@ def test_h2_smoke_one_call_makes_exactly_one_bounded_request_and_prints_no_key_o
 def test_m1_idna_round_trip_refuses_idna2003_mappings_and_invisibles(host, domain, want):
     assert domain_match.match(host, domain) == want
     assert domain_match.on_site(host, domain) is (want in ("exact", "subdomain"))
+
+
+@pytest.mark.parametrize("url", [
+    "https://evil.test\\@site.test/", "https://evil.test\\\\site.test/", "https://site.test\t.evil.test/",
+    "https://site.test\n.evil.test/", "https://site.test\x00.evil.test/", "https://site.test\x7f/",
+    "https://site.test /x", "https://site.test /x", "https://site.test /x", "https://site.test　/x",
+])
+def test_m2_citation_urls_with_backslash_control_or_whitespace_are_refused(url):
+    a = px.ProviderAnswer("ANSWER", "", [url, "https://competitor.test/a"], cite_from_text=False)
+    cites = probes.extract_citations(a)
+    assert [c["host"] for c in cites] == ["competitor.test"] and cites[0]["position"] == 1
+
+
+def test_m2_a_backslash_citation_through_the_service_is_not_the_tenant(tmp_path):
+    f = FakePerplexity(ok(sonar(citations=["https://evil.test\\@site.test/"])))
+    h = svc_harness(tmp_path, f)
+    p = callum(run_audit(h, setup_zbm(h)))["facts"]["engines"]["perplexity"]["prompts"][0]
+    assert p["cited"] == 0 and p["other_sources"] == []

@@ -43,6 +43,9 @@ AGENT_CALLUM, AGENT_NAOMI = "callum", "naomi"
 MIN_USABLE = 3
 Z95 = 1.959963984540054
 _URL = re.compile(r"https?://[^\s<>\"')\]]+")
+# a citation URL holding a backslash, an ASCII control character or any whitespace is refused, never parsed: urlsplit
+# reads "https://evil.test\\@site.test/" as host site.test while a browser goes to evil.test (AEGIS M2)
+_URL_REFUSED = re.compile(r"[\\\x00-\x20\x7f]")
 METHODOLOGY = ("Each prompt of prompt set {ps} v{ver} (sha256 {sha}) sent {n} times per engine. An answer is "
                "'mentioned' when a brand term appears (case-insensitive, whole words) and 'cited' when a citation "
                "(structured from the provider, or a URL in the text) is on {domain} or a subdomain. Rates exclude "
@@ -73,7 +76,7 @@ def extract_citations(ans: ProviderAnswer) -> list:
     text_items = _URL.findall(ans.text or "")[:200] if getattr(ans, "cite_from_text", True) else []
     for via, items in (("structured", ans.citations or []), ("text", text_items)):
         for u in items[:200]:
-            if not isinstance(u, str):
+            if not isinstance(u, str) or _URL_REFUSED.search(u) or any(c.isspace() for c in u):
                 continue
             u = u.rstrip(".,;:")
             try:
