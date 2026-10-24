@@ -981,3 +981,67 @@ def test_m3_names_and_street_addresses_are_a_documented_limit():
     import agents.prompt_guard as pg
     assert personal_data("what does Jane Smith of 12 Elm Street Long Beach think") is None   # not detected
     assert "street addresses" in pg.__doc__ and "NOT detected" in pg.__doc__
+
+
+class _ComposingStream(_FakeStream):
+    """The API takes ``wait`` seconds (injected clock) before the first byte; a read with a shorter timeout times out
+    after using that much of the wait."""
+
+    def __init__(self, clock, response, wait):
+        super().__init__(clock, response)
+        self.wait, self.read_timeouts = wait, []
+
+    def read(self, n, timeout=None):
+        self.read_timeouts.append(timeout)
+        if self.wait > 0:
+            used = min(timeout, self.wait)
+            self.clock.t += used
+            self.wait -= used
+            if self.wait > 0:
+                import httpcore
+                raise httpcore.ReadTimeout("slice")
+        return super().read(n, timeout)
+
+
+def test_l1_each_socket_read_waits_a_bounded_slice_and_a_slow_answer_still_arrives():
+    clock = Clock()
+    stream = _ComposingStream(clock, _http(json.dumps(sonar()).encode()), wait=7.0)
+    checks = []
+    a = socket_engine(clock, _FakeBackend(stream, clock), attempts=1).ask(
+        "q?", guard=lambda capability=None, provider=None: checks.append(clock.t))
+    assert a.status == "ANSWER" and 6.9 <= clock.t <= 7.5
+    assert stream.read_timeouts and all(t is not None and t <= px.READ_SLICE_S for t in stream.read_timeouts)
+    assert len([c for c in checks if 0 < c <= 7]) >= 3                  # the guard ran between slices
+
+
+def test_l1_a_switch_engaged_while_the_api_composes_stops_within_a_slice():
+    clock = Clock()
+    stream = _ComposingStream(clock, _http(json.dumps(sonar()).encode()), wait=20.0)
+
+    def guard(capability=None, provider=None):
+        if clock.t >= 3.0:
+            raise Killed("KILLED_PROVIDER")
+    with pytest.raises(px.EngineError) as e:
+        socket_engine(clock, _FakeBackend(stream, clock), attempts=1).ask("q?", guard=guard)
+    assert e.value.code == "ENGINE_KILLED" and clock.t <= 3.0 + px.READ_SLICE_S
+
+
+def test_l1_a_switch_engaged_during_the_last_read_drops_the_answer():
+    state = {"killed": False}
+    f = FakePerplexity(ok(sonar()), on_request=lambda req: state.update(killed=True))
+
+    def guard(capability=None, provider=None):
+        if state["killed"]:
+            raise Killed("KILLED_PROVIDER")
+
+    class M:
+        calls = charged = 0
+
+        def before(self):
+            M.calls += 1
+
+        def after(self, cost):
+            M.charged += 1
+    with pytest.raises(px.EngineError) as e:
+        engine(f).ask("q?", guard=guard, meter=M())
+    assert e.value.code == "ENGINE_KILLED" and len(f.requests) == 1 and M.charged == 1   # sent: still charged

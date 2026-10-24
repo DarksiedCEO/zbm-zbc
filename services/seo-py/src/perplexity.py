@@ -9,7 +9,8 @@ Rules:
   - fixed base URL and a CLOSED model allowlist (``MODELS``; default ``sonar``, the general Sonar model);
   - one HARD overall deadline per question, over DNS, connect, TLS, every read and write and the body loop
     (``_GuardedDeadlineBackend``: the Finance client's deadline backend pattern, plus the kill-switch guard before
-    every socket operation, plus an address check: api.perplexity.ai must resolve to public addresses only);
+    every socket operation and again after the response, every read waiting at most ``READ_SLICE_S`` between guard
+    checks, plus an address check: api.perplexity.ai must resolve to public addresses only);
   - a bounded response (``MAX_RESPONSE_BYTES``, identity coding only, JSON only, duplicate keys refused);
   - bounded retries ONLY on 429, 5xx and transport errors; ``Retry-After`` (whole seconds) honoured when it fits in
     the time left, otherwise the answer is ENGINE_RATE_LIMITED at once (never a sleep past the deadline);
@@ -59,6 +60,9 @@ MAX_RESPONSE_BYTES = 512 * 1024
 MAX_ANSWER_CHARS = 100_000
 MAX_SOURCES = 100
 MAX_RETRY_AFTER_S = 30
+# one socket read waits at most this long (within the deadline) before the kill-switch guard is checked again, so a
+# switch engaged while the API is still composing its answer stops the request within seconds (AEGIS L1)
+READ_SLICE_S = 2.0
 
 CODES = frozenset({"ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_UNAVAILABLE", "ENGINE_PROTOCOL_ERROR",
                    "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED"})
@@ -249,8 +253,16 @@ class _Stream(httpcore.NetworkStream):
         self._s, self._left, self._guard = inner, left, guard
 
     def read(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
-        self._guard()
-        return self._s.read(max_bytes, self._left(timeout, httpcore.ReadTimeout))
+        while True:
+            self._guard()
+            left = self._left(timeout, httpcore.ReadTimeout)     # raises once the deadline has passed
+            part = min(left, READ_SLICE_S)
+            try:
+                return self._s.read(max_bytes, part)
+            except httpcore.ReadTimeout:
+                if part >= left:
+                    raise                                         # the whole time left is used up
+                # a slice ran out with time left: check the switch, then wait again
 
     def write(self, buffer: bytes, timeout: Optional[float] = None) -> None:
         self._guard()
@@ -404,6 +416,7 @@ class PerplexityEngine:
             charged = False
             try:
                 status, headers, raw = self._post(body, end, guard)
+                self._check(guard)                   # a switch engaged during the last read: drop the answer
                 if status == 200:
                     ans = parse_response(raw, (model,))
                     if meter is not None:

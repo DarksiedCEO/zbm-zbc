@@ -479,7 +479,10 @@ W4-2. **The adapter** (`src/perplexity.py`) and its runs (`src/svc_engines.py`):
      - the name is resolved inside the deadline, on the resolver gate pattern of W3-6, with its own gate of two;
      - every resolved address must be public, so a resolver that answers a private or metadata address is refused
        before any connect;
-     - the kill-switch guard is checked before every socket operation;
+     - the kill-switch guard is checked before every socket operation, and again once the response is in (a switch
+       engaged during the last read drops the answer; the request stays charged);
+     - each socket read waits at most `READ_SLICE_S` (2 s) before the guard is checked again, within the deadline, so
+       a switch engaged while Perplexity is still composing stops the request within about 2 s (AEGIS L1);
      - the body loop stops at the deadline.
    - The response is bounded: at most 512 KiB, a declared length over that is refused, identity coding only,
      `application/json` only. Duplicate JSON keys, NaN and wrong types are refused (pydantic strict). Strictness covers the
