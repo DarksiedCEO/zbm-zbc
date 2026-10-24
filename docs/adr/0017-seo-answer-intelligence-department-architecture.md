@@ -76,7 +76,8 @@ own properties, then sold as an audit.
     `TOOL_FAILURE`, never a change).
 12. **Ports** (`ports.py`): fetch (connected); render; answer engines openai / anthropic / google / perplexity;
     prompt volume; first-party search_console / bing_webmaster / server_logs / analytics / crm; zero_day;
-    orca_publish; clientfix. All but fetch are NOT_CONNECTED in Wave 1.
+    orca_publish; clientfix. All but fetch are NOT_CONNECTED in Wave 1. (Wave 4: the Perplexity engine has a real
+    adapter, connected only with a key; see W4.)
 13. **The audit product.** `POST /seo/v1/tenants/{tid}/audits` runs Selene, Delia, Roman, the entity check, Callum
     and Naomi and stores the report record-first (`audit_requested`; `audit_approved_by_andre` when given;
     `audit_report_recorded` with the report's SHA-256). Own properties need no payment and refuse an invoice id; a
@@ -101,7 +102,7 @@ own properties, then sold as an audit.
 
 | # | Flag | Default built | Status |
 |---|---|---|---|
-| 1 | Perplexity in AI monitoring targets | **Included** (an engine port and a kill switch like the others) | founder decision pending |
+| 1 | Perplexity in AI monitoring targets | **Included** (an engine port and a kill switch like the others) | decided: Andre chose Perplexity (go-live plan); adapter built in Wave 4 (W4) |
 | 2 | Marcus | Authority intelligence on bought / open data, not an Ahrefs-scale crawler; **not in Wave 1** | founder decision pending |
 | 3 | Julian | Bound to hand-off rules; publishing via Dept 28 / Creative; **not in Wave 1** | founder decision pending |
 | 4 | Tenant isolation | The existing record-first log + ledger pattern with cross-tenant negative tests; **no Postgres** | founder decision pending |
@@ -131,7 +132,8 @@ Bearer token on every route but `/health`; per-caller tokens compared by digest 
 through the dashboard with his own token; tenant tokens only with the hub caller; personal-data keys refused in any
 body; request limits before any route; no-store on every answer; one process per data directory (flock) and one
 service instance per claim; SSRF-safe fetch; kill switches; crawled content as data. Short-lived, scoped, revocable
-credentials for providers are a requirement for whichever adapter is built first; Wave 1 holds none.
+credentials for providers are a requirement for whichever adapter is built first; Wave 1 holds none. (Wave 4: Perplexity
+offers no scoped or short-lived key; the compensating controls are in W4-5.)
 
 ## Limitations (honest)
 
@@ -391,8 +393,248 @@ binding is Andre's statement and is not cross-checked with Legal. The live run c
 Finance's production entrypoint (its bank feed and Legal are fail-closed stand-ins there); the paid path is proven by
 the contract test against Finance's app with its test fakes.
 
+## Wave 4 (go-live plan days 4-7; built Oct 24 2026 on `golive-perplexity`): the Perplexity answer-engine adapter
+
+Flag 1 is now Andre's decision: Perplexity is the first answer engine. The adapter ships NOT_CONNECTED: with no key the
+engine answers NOT_CONNECTED and the service starts exactly as before. With a key and no budget it is connected but
+asks nothing. Andre installs the key and the budgets on Railway (W4-6).
+
+W4-1. **The Perplexity API, verified on Oct 24 2026** (docs.perplexity.ai, read through the web; nothing was called):
+   - Request: `POST https://api.perplexity.ai/v1/sonar` with `Authorization: Bearer <key>` and
+     `Content-Type: application/json`; body `model` and `messages` (`role`, `content`)
+     (<https://docs.perplexity.ai/docs/sonar/quickstart>). The other request fields include `stream`, `max_tokens`,
+     `temperature`, `top_p`, `response_format`, the search filters and `web_search_options` (`search_context_size`,
+     `user_location`). This adapter sends only `model`, `messages` (one fixed system line and the prompt) and
+     `stream: false` (<https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/how-to.md>).
+   - **Sonar Chat Completions support ended on September 27, 2026.** Synchronous and streaming requests still work:
+     Perplexity reformulates them as Agent API requests (`POST https://api.perplexity.ai/v1/agent`). Asynchronous Sonar
+     requests are no longer supported (<https://docs.perplexity.ai/docs/sonar/overview>). This adapter makes
+     synchronous requests only. Moving to the Agent API is follow-up work (W4-8).
+   - Models: `sonar`, `sonar-pro`, `sonar-reasoning-pro`, `sonar-deep-research` (the how-to above). The allowlist here
+     is closed: `sonar` (the general model, the default) and `sonar-pro`.
+   - Response: `id`, `model`, `created`, `object` (`"chat.completion"`), `choices[]` (`message.role`,
+     `message.content`, `finish_reason`), `citations` (a list of URLs), `search_results[]` (`title`, `url`, `date`,
+     `last_updated`, `snippet`, `source`, `place_metadata`) (the quickstart, and
+     <https://docs.perplexity.ai/docs/sonar/openai-compatibility>). The documented examples elide some fields with
+     `// ...`.
+   - Usage and cost: `usage.prompt_tokens`, `completion_tokens`, `total_tokens`, `search_context_size` and
+     `usage.cost.{input_tokens_cost, output_tokens_cost, request_cost, total_cost}` in US dollars. Perplexity announced
+     these on Aug 1 2025 (<https://community.perplexity.ai/t/cost-information-now-included-in-api-response-json/833>).
+     The current Sonar pages do not show `usage`. The parser also accepts, as optional fields that are never required,
+     `citation_tokens`, `num_search_queries`, `reasoning_tokens` and the matching `*_cost` fields. Those come from
+     knowledge of the reasoning and deep-research models, and **this session did not verify them**.
+   - Rate limits: a limited request gets HTTP 429 with `Retry-After` and no `x-ratelimit-*` headers. `error.type` is
+     `request_rate_limit_exceeded`, `token_rate_limit_exceeded` or `overloaded`. For request limits `Retry-After` is
+     normally 1 second, and for token limits it includes up to 10 seconds of random delay. Perplexity advises backoff
+     with jitter, and a rejected request still counts toward the limit
+     (<https://docs.perplexity.ai/docs/admin/rate-limits-usage-tiers.md>). That page lists Agent API QPS by tier
+     (tier 0: 1, up to 33 at tiers 4-5) and **gives no Sonar-specific figure**.
+   - Errors: the docs index (<https://docs.perplexity.ai/llms.txt>) has no Sonar error-code reference. Mapping 401
+     and 403 to ENGINE_AUTH_REFUSED is the plain HTTP meaning. Mapping **402 is this service's assumption** (an account
+     that cannot pay).
+   - Pricing: the current pricing page (<https://docs.perplexity.ai/docs/getting-started/pricing.md>) does not list
+     Sonar model prices. So the budgets are set in requests and dollars, with a conservative reserve per request, and
+     the reported `total_cost` is used wherever the response carries one.
+   - Data retention (<https://docs.perplexity.ai/guides/privacy-security>): "Perplexity does not use Customer Content
+     to train generative AI models". Zero Data Retention is available only to eligible customers as an account-level
+     setting and is not the default. Perplexity logs usage metadata (token counts, model, timestamps, duration, the API
+     key). Some third-party model providers require limited retention. Perplexity cites SOC 2 Type II, a 2025 HIPAA gap
+     assessment and CAIQlite. The page states no retention period for prompts or outputs.
+   - Keys (<https://docs.perplexity.ai/docs/admin/api-key-management>,
+     <https://docs.perplexity.ai/api-reference/generate-auth-token-post>): a key is created in the console or with
+     `POST /generate_auth_token` (an optional `token_name`) and shown once. It is revoked with `/revoke_auth_token`.
+     **No expiry and no scope are documented**. Perplexity suggests rotating keys, for example every 90 days.
+
+W4-2. **The adapter** (`src/perplexity.py`) and its runs (`src/svc_engines.py`):
+   - Calls are fixed: one base URL, one path, one method. Redirects are never followed, and no proxy is taken from
+     the environment (`trust_env=False`). An answer from a model outside the allowlist is ENGINE_PROTOCOL_ERROR.
+   - Each question has one HARD overall deadline, `SEO_PERPLEXITY_TIMEOUT_SECONDS` (default 30), covering every
+     attempt. The production transport routes DNS, connect, TLS and every read and write through
+     `_GuardedDeadlineBackend`, the Finance client's deadline-backend pattern (W3-5 M1):
+     - the name is resolved inside the deadline, on the resolver gate pattern of W3-6, with its own gate of two;
+     - every resolved address must be public, so a resolver that answers a private or metadata address is refused
+       before any connect;
+     - the kill-switch guard is checked before every socket operation;
+     - the body loop stops at the deadline.
+   - The response is bounded: at most 512 KiB, a declared length over that is refused, identity coding only,
+     `application/json` only. Duplicate JSON keys, NaN and wrong types are refused (pydantic strict, unknown fields
+     refused at every level). `citations` is required, and an empty list is valid.
+   - Retries are bounded (`SEO_PERPLEXITY_MAX_ATTEMPTS`, 1..3) and happen only on 429, 5xx and transport errors.
+     `Retry-After` in whole seconds is honoured when it fits in the time left. Otherwise the answer is given at once
+     (ENGINE_RATE_LIMITED), so the adapter never sleeps past the deadline and never waits more than 30 s. Without
+     `Retry-After` the backoff is 0.5 s then 1.5 s, plus up to 25% jitter.
+   - The reason codes are a closed set: ENGINE_AUTH_REFUSED, ENGINE_RATE_LIMITED, ENGINE_UNAVAILABLE,
+     ENGINE_PROTOCOL_ERROR, ENGINE_BUDGET_EXHAUSTED, ENGINE_KILLED, ENGINE_NOT_CONNECTED. An error body is never read.
+     After an auth refusal, exhausted rate-limit retries, an exhausted budget or a switch, the run stops asking that
+     engine; the remaining prompts are reported as `prompts_not_asked`.
+   - **Budgets fail closed, and 0 means OFF.** There are four limits:
+     - `SEO_PERPLEXITY_DAILY_CALLS` and `SEO_PERPLEXITY_DAILY_SPEND_USD` (global);
+     - `SEO_PERPLEXITY_TENANT_DAILY_CALLS` and `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` (per tenant).
+
+     All four default to 0, and while any one of them is 0 nothing is asked (ENGINE_BUDGET_EXHAUSTED, detail
+     `BUDGET_OFF`). Budgets count per UTC day of the service clock.
+   - **Record-first reservations.** Before a prompt's requests, the service commits `engine_calls_reserved`
+     (samples x attempts requests, each at `SEO_PERPLEXITY_RESERVE_USD_PER_CALL`, default $0.05). The commit order is
+     typed evidence on the ledger, then the log line, then memory, and the reservation must fit the global and the
+     tenant's remaining day. A request is never sent without one: the meter refuses a request beyond the reservation's
+     count or spend. After the engine's prompts, `engine_run_settled` records:
+     - the requests made;
+     - the spend: the reported cost where Perplexity gave one, and the full reserve for any request whose cost is
+       unknown, including failures;
+     - the answers and the stop reason.
+
+     A run's usage is its settlement, or the sum of its reservations while unsettled. A process that dies mid-run
+     leaves its reservations charged, and they are replayed from the log at start.
+   - Kill switches: `provider:perplexity` and `capability:ai_probe`, plus the run's tenant, write, audit and global
+     switches. They are checked at the reservation, before every request and before every socket operation. A switch
+     engaged mid-request stops the engine at its next socket operation (Callum KILLED).
+
+W4-3. **What is stored, and what is sent.**
+   - The answer text is scanned in memory (brand mention, injection-like phrases) and dropped. A report keeps, per
+     prompt:
+     - the answers' SHA-256;
+     - the cited hosts (the top 10, with counts);
+     - whether the tenant was cited, and at which 1-based position in Perplexity's own citation order;
+     - lookalike counts, `errors_by_reason`, usage and cost.
+   - Citations come only from `citations` and `search_results`. A URL that the model wrote into its text is not a
+     citation, because a crawled page could have talked the model into writing it.
+   - Domain matching (`agents/domain_match.py`) compares IDNA A-labels by exact host, the `www.` twin or a subdomain,
+     never by substring: `evilsite.test` and `site.test.evil.test` are not `site.test`. A host whose Unicode form folds
+     to the tenant's domain on the shared lookalike table (`lookalikes.py`, e.g. a Cyrillic `і`) is counted as a
+     `lookalike_citation` and never as the tenant.
+   - Prompts carry no personal data (`agents/prompt_guard.py`). A prompt set holding an e-mail address (any at-sign
+     spelling, after the shared fold), seven or more digits however separated, or an IPv4 address is refused 422
+     `PROMPT_PERSONAL_DATA`. A stored prompt is checked again before sending and is skipped, unquoted in the report.
+   - The request carries only the prompt and one fixed instruction: no tenant, brand, domain, user identifier or
+     safety identifier.
+
+W4-4. **Wiring.**
+   - The probe framework (Callum) asks a METERED port only through the service's budget hook (`engine_budget`);
+     without one the engine is BLOCKED.
+   - Audits and scheduled re-audits take the same path (`_run_audit`), so both are budgeted and recorded alike.
+   - Naomi stays NOT_CONNECTED, because Perplexity is not a prompt-volume source.
+   - `/status` adds `answer_engines`: per engine its state, model, limits, the key's SOURCE (`file` or `env`, never the
+     key), the budgets with today's usage, and whether a switch covers it.
+   - Callum's scorecard adds `engine_runs`, built from the recorded reservations and settlements only: runs,
+     settled, unsettled, requests, answers, spend and stop reasons.
+   - The new ledger evidence types are `engine_calls_reserved` and `engine_run_settled`, carrying ids, counts,
+     Decimal strings and hashes only.
+   - `SEO_PERPLEXITY_API_KEY_FILE` left the NOT_BUILT list.
+
+W4-5. **Key handling, and the controls that compensate for a long-lived key.**
+   - Sources:
+     - `SEO_PERPLEXITY_API_KEY_FILE`, the repository's `*_FILE` rule: a regular file owned by the service user, mode
+       0600 or 0400, no symlink, no FIFO.
+     - `SEO_PERPLEXITY_API_KEY`, a plain variable, because Railway service variables are environment variables and
+       Railway mounts no secret files. The repository already takes the Finance service and caller tokens as plain
+       variables, so this follows existing practice.
+
+     Setting both refuses start. The key must be 20..512 printable characters and differ from every token the
+     service accepts or sends.
+   - The key is held in `ApiKey`: its repr is masked, it cannot be pickled, and `reveal()` is called in one place,
+     the Authorization header. It never reaches a log line, an exception, `/status`, a report, the log or the ledger.
+     A test scans every one of those, plus the data directory, after success, 429, 5xx, a malformed body echoing the
+     key and a 401. The live run scans the ledger, the data directory and the process output.
+   - Perplexity documents no scoped, short-lived or expiring keys, so the security model's requirement cannot be met
+     as written. The compensating controls are:
+     1. the key can only ever go to `api.perplexity.ai`, which must resolve to public addresses: no redirect, no
+        proxy, a fixed path;
+     2. spend is capped by four fail-closed budgets, every request is reserved on the ledger first, and requests of
+        unknown cost are charged in full;
+     3. a dedicated key per environment, named for its use (`token_name`), so revoking it touches nothing else;
+     4. rotation every 90 days and revocation on any suspicion (W4-6);
+     5. kill switches, including the start-time-sticky `SEO_KILLED_PROVIDERS=perplexity`;
+     6. prompts free of personal data, so a leaked key exposes no client data through the request history;
+     7. the file form preferred wherever the platform has secret files.
+
+     An env-var key is readable by anyone who can read the process environment or the Railway project's variables.
+     That is an accepted residual risk, stated here.
+
+W4-6. **How Andre installs the key on Railway** (his steps; nothing here is automated):
+   1. In the Perplexity console (API settings), create a key named for this use, e.g. `zbm-seo-railway-prod`. Copy
+      it once; it is not shown again.
+   2. In Railway, open the seo-py service, then Variables. Add `SEO_PERPLEXITY_API_KEY` with the key, and do NOT also
+      set `SEO_PERPLEXITY_API_KEY_FILE`.
+   3. In the same place, set the four budgets (all four above 0, or nothing is asked). A cautious start, Andre's call:
+      - `SEO_PERPLEXITY_DAILY_CALLS=200`
+      - `SEO_PERPLEXITY_DAILY_SPEND_USD=5`
+      - `SEO_PERPLEXITY_TENANT_DAILY_CALLS=100`
+      - `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD=3`
+
+      Leave `SEO_PERPLEXITY_MODEL` unset (`sonar`) and `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` unset ($0.05) unless he
+      decides otherwise.
+   4. Redeploy. On the dashboard, `GET /seo/v1/status` must show `answer_engines.perplexity.state = "connected"`,
+      `key_source = "env"` and `budget.state = "on"`. Any configuration error refuses start, with a message that never
+      contains the key.
+   5. First run: create a prompt set for `zbm` with `"engines": ["perplexity"]` (generic market questions, no names
+      or numbers), then request an own-properties audit with its `prompt_set_id`. Read Callum's facts in the report:
+      class, citation rate and interval, position, usage and cost. Then check `answer_engines.perplexity.budget` in
+      `/status`.
+   6. To stop it: engage `provider:perplexity` on `POST /seo/v1/kill-switches` (the dashboard or Compliance; only
+      Andre releases it), or set `SEO_KILLED_PROVIDERS=perplexity` and redeploy (sticky).
+   7. To rotate (every 90 days): create a new key, replace the variable, redeploy, check `/status`, then revoke the
+      old key in the Perplexity console. If a leak is suspected, engage the switch first, revoke at once, then install
+      a new key.
+
+W4-7. **Proof.**
+   - `tests/test_perplexity.py` uses no network: a fake Perplexity behind `httpx.MockTransport`, and, for the socket
+     layer, a fake network backend under httpcore's real connection pool. All deadlines run on an injected clock. It
+     covers:
+     - the documented request;
+     - strict parsing, with 19 malformed shapes;
+     - huge, endless, encoded, mistyped and redirected bodies;
+     - 401, 402 and 403; 429 with `Retry-After`; 5xx then success; retries exhausted; transport errors;
+     - slow drip, both through the transport and through the socket;
+     - a slow connect, and a private resolver answer;
+     - the production transport installing the guarded backend;
+     - a switch engaged mid-request;
+     - the meter;
+     - key masking, and the key-file rules;
+     - NOT_CONNECTED with no key, and budgets off by default;
+     - global and per-tenant budgets and their isolation, the spend budget, unknown cost charged in full;
+     - reservation before each request, settlement, the scorecard and the evidence view;
+     - switches before and during a run, replay after a restart, scheduled runs, cross-tenant 404s;
+     - domain-match and prompt-guard edge cases, prompt injection in the answer;
+     - the key-leak scan.
+   - The live run (W3-1) now runs the service under a socket guard that refuses and records any non-loopback DNS
+     lookup or connection, and it ends with that record empty. It proves:
+     - a key file open to group or others, or a key set two ways, refuses start;
+     - NOT_CONNECTED with no key, and an audit with a Perplexity prompt set asks nothing and reserves nothing;
+     - a prompt set holding personal data is refused;
+     - with a key file but budgets at 0, the engine is connected and BLOCKED;
+     - the key is in no ledger entry, data file or process output.
+   - The war room adds seven MUST scenarios: hostile answers, 17 protocol attacks, lookalike citations, a control,
+     switches before and during a run, and budgets off.
+
+W4-8. **Limitations (honest).**
+   - Nothing here has been run against the real Perplexity API: the build machine has no internet and no key. The
+     response model follows the documented examples, which elide fields. The parser is strict by design, so a real
+     answer carrying a field not modelled here is ENGINE_PROTOCOL_ERROR (fail closed) until that field is added after
+     checking the docs. Andre's first run (W4-6 step 5) is the first real contact.
+   - Sonar Chat Completions are past Perplexity's end-of-support date and are served by reformulating them as Agent
+     API requests. Their behaviour may change. Migrating to `POST /v1/agent` is the next step for this adapter.
+   - Spend here is Perplexity's reported cost, or the reserve where none is reported. Perplexity's invoice is
+     authoritative, and nothing reconciles the two.
+   - A prompt's reservation is the upper bound (samples x attempts), so a run near the day's limit can be refused even
+     though fewer requests would have sufficed (conservative).
+   - `Retry-After` given as an HTTP date is ignored, and the backoff applies.
+   - The optional usage fields and the 402 mapping noted in W4-1 are unverified.
+   - Observations come from one account at one time, so engines vary by user, location and model version. Perplexity
+     reports no model version, so the version is recorded as `sonar@?`.
+   - Naomi has no volume source.
+   - An env-var key is visible to whoever can read the environment or the Railway variables (W4-5).
+
+Founder-pending defaults added by Wave 4:
+- (17) every budget defaults to 0 (off);
+- (18) the model is `sonar`;
+- (19) the reserve per request is $0.05;
+- (20) after exhausted 429 retries, the run stops asking Perplexity for that audit;
+- (21) a plain environment variable is accepted for the key on Railway;
+- (22) `sonar-reasoning-pro` and `sonar-deep-research` are not on the allowlist.
+
 ## Unlock list
 
 Answer-engine adapters with scoped, short-lived credentials; a renderer; Search Console and Bing Webmaster; a
 prompt-volume source; Department 28 clientfix hand-off; the remaining agents per the spec's waves; the console pages.
-(Built in Wave 3: the live run against ledger-rust, W3-1; the Finance (31) client to verify invoices, W3-2.)
+(Built in Wave 3: the live run against ledger-rust, W3-1; the Finance (31) client to verify invoices, W3-2. Built in
+Wave 4: the Perplexity answer-engine adapter, W4.)
