@@ -71,6 +71,16 @@ class FinanceClientBind(Strict):
     finance_client_id: Annotated[StrictStr, Field(pattern=FINANCE_CLIENT)]
 
 
+# A Search Console property: a Domain property or a URL-prefix property (Google's two forms; gsc_client.PROPERTY)
+GSC_PROPERTY = r"^(sc-domain:[a-z0-9.-]{4,253}|https?://[a-z0-9.-]{4,253}/[\x21-\x7e]{0,200})$"
+
+
+class GscPropertySet(Strict):
+    """Andre binds a tenant to its Search Console property (null unbinds)."""
+    request_id: RequestId
+    property: Annotated[StrictStr, Field(pattern=GSC_PROPERTY)] | None
+
+
 class LogIngestCreate(Strict):
     request_id: RequestId
     domain: Annotated[StrictStr, Field(pattern=DOMAIN)]

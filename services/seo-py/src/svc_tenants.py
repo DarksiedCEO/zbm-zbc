@@ -10,7 +10,7 @@ Kill switches, each refusing with its own reason code:
   write                  every state change except the kill switches themselves
   tenant:<id>            everything for that tenant
   capability:<name>      fetch, render, ai_probe, audit, entity_write, prompt_sets
-  provider:<name>        web (all outbound crawling), openai, anthropic, google, perplexity
+  provider:<name>        web (all outbound crawling), openai, anthropic, google, perplexity, gsc (Search Console)
 Engaging is easy, releasing is not: the dashboard or Compliance (38) may ENGAGE any switch; only Andre releases one.
 An engage the ledger cannot record still takes effect at once, in memory (``volatile``: fail closed), and is
 reported as unrecorded. Switches set by the environment (SEO_KILL_GLOBAL, SEO_KILLED_CAPABILITIES,
@@ -189,7 +189,8 @@ class TenantsMixin:
 
     def _a_tenant_created(self, d, at):
         self.tenants[d["tenant_id"]] = {"tenant_id": d["tenant_id"], "kind": d["kind"], "domains": [],
-                                        "killed": False, "created_at": at, "finance_client_id": None}
+                                        "killed": False, "created_at": at, "finance_client_id": None,
+                                        "gsc_property": None}
 
     def set_domains(self, tid: str, body: dict) -> dict:
         domains = body["domains"]

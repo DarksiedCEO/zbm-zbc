@@ -4,7 +4,7 @@
  "department": "Search & Answer Intelligence (department 2)",
  "service": "seo-py",
  "driver": "seo_py.py",
- "basis": "ADR 0017 decisions 7-9, 11, 15, W2-1/W2-2 and W3-2: the fetcher is SSRF-safe (every hop's addresses checked, the connection made to the checked address, ports 80/443 only, one content coding decoded within the byte budget, one hard deadline); crawled content is data; a tenant-scoped caller sees its own tenant only and another tenant's object answers like a missing one; personal-data keys are refused; kill switches stop work and only Andre releases them; uploaded logs keep nothing identifying; a paid run needs Finance (31) to confirm the invoice",
+ "basis": "ADR 0017 decisions 7-9, 11, 15, W2-1/W2-2 and W3-2: the fetcher is SSRF-safe (every hop's addresses checked, the connection made to the checked address, ports 80/443 only, one content coding decoded within the byte budget, one hard deadline); crawled content is data; a tenant-scoped caller sees its own tenant only and another tenant's object answers like a missing one; personal-data keys are refused; kill switches stop work and only Andre releases them; uploaded logs keep nothing identifying; a paid run needs Finance (31) to confirm the invoice; the Search Console connector reaches only Google's two hosts, parses strictly, bounds every read and never leaks a credential",
  "variants_per_seed": 2,
  "scenarios": [
   {
@@ -1528,6 +1528,564 @@
      "args": {
       "key": "invoice_verified",
       "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "gsc-hostile-protocol",
+   "persona": "a hostile or broken Google answering redirects, garbage, endless or compressed bodies and malformed rows",
+   "basis": "ADR 0017 'Search Console (first-party truth)': the connector reaches only oauth2.googleapis.com and www.googleapis.com, follows no redirect, parses strictly, bounds retries, pages and the whole read, never lets a credential into an output, and an audit ends in a recorded state whatever Google answers",
+   "seeds": [
+    {
+     "literal": [
+      "token_redirect",
+      "token_garbage",
+      "token_huge",
+      "redirect_api",
+      "gzip_api",
+      "huge_api",
+      "sites_extra",
+      "dates_outside",
+      "nan_rows",
+      "repeat_pages",
+      "rows_over_limit",
+      "clicks_over_impressions",
+      "wrong_aggregation",
+      "extra_top_level",
+      "token_error_dict",
+      "sites_level_list",
+      "bigint_metric"
+     ],
+     "basis": "driver _HostileGoogle modes"
+    }
+   ],
+   "input_field": "mode",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "gsc",
+     "args": {
+      "mode": "$mode"
+     }
+    },
+    {
+     "action": "audit"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_answered",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_completed_never_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "only_google_hosts",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_foreign_hosts",
+      "value": []
+     }
+    },
+    {
+     "id": "only_the_bound_property",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_only_bound_property",
+      "value": true
+     }
+    },
+    {
+     "id": "requests_within_the_read_budget",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_requests_within_budget",
+      "value": true
+     }
+    },
+    {
+     "id": "no_token_assertion_or_key_in_any_output",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "protocol_error",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_reason",
+      "value": "GSC_PROTOCOL_ERROR"
+     }
+    }
+   ]
+  },
+  {
+   "id": "gsc-hostile-auth",
+   "persona": "a Google refusing the service account, echoing its credentials back, or not granting the property",
+   "basis": "ADR 0017 'Search Console (first-party truth)': the connector reaches only oauth2.googleapis.com and www.googleapis.com, follows no redirect, parses strictly, bounds retries, pages and the whole read, never lets a credential into an output, and an audit ends in a recorded state whatever Google answers; an echoed assertion or bearer token never reaches a report, the log or the ledger",
+   "seeds": [
+    {
+     "literal": [
+      "token_echo",
+      "api_401",
+      "api_echo_token",
+      "not_granted"
+     ],
+     "basis": "driver _HostileGoogle modes"
+    }
+   ],
+   "input_field": "mode",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "gsc",
+     "args": {
+      "mode": "$mode"
+     }
+    },
+    {
+     "action": "audit"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_answered",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_completed_never_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "only_google_hosts",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_foreign_hosts",
+      "value": []
+     }
+    },
+    {
+     "id": "only_the_bound_property",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_only_bound_property",
+      "value": true
+     }
+    },
+    {
+     "id": "requests_within_the_read_budget",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_requests_within_budget",
+      "value": true
+     }
+    },
+    {
+     "id": "no_token_assertion_or_key_in_any_output",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "refused_with_an_auth_code",
+     "severity": "MUST",
+     "check": "state_in",
+     "args": {
+      "key": "gsc_reason",
+      "values": [
+       "GSC_AUTH_REFUSED",
+       "GSC_PROPERTY_NOT_GRANTED"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "gsc-hostile-availability",
+   "persona": "a Google that rate-limits forever, fails, trickles its token answer, or a resolver that points Google's names at private addresses",
+   "basis": "ADR 0017 'Search Console (first-party truth)': the connector reaches only oauth2.googleapis.com and www.googleapis.com, follows no redirect, parses strictly, bounds retries, pages and the whole read, never lets a credential into an output, and an audit ends in a recorded state whatever Google answers; resolved addresses must be globally routable (no connect otherwise); waits are bounded by the read's deadline",
+   "seeds": [
+    {
+     "literal": [
+      "rate_limited",
+      "server_error",
+      "token_drip",
+      "dns_private",
+      "dns_mixed",
+      "dns_literal"
+     ],
+     "basis": "driver _HostileGoogle modes and the fake resolver"
+    }
+   ],
+   "input_field": "mode",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "gsc",
+     "args": {
+      "mode": "$mode"
+     }
+    },
+    {
+     "action": "audit"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_answered",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_completed_never_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "only_google_hosts",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_foreign_hosts",
+      "value": []
+     }
+    },
+    {
+     "id": "only_the_bound_property",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_only_bound_property",
+      "value": true
+     }
+    },
+    {
+     "id": "requests_within_the_read_budget",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_requests_within_budget",
+      "value": true
+     }
+    },
+    {
+     "id": "no_token_assertion_or_key_in_any_output",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "unavailable_or_rate_limited",
+     "severity": "MUST",
+     "check": "state_in",
+     "args": {
+      "key": "gsc_reason",
+      "values": [
+       "GSC_RATE_LIMITED",
+       "GSC_UNAVAILABLE"
+      ]
+     }
+    },
+    {
+     "id": "never_connected_to_a_non_global_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_connects_to_non_global",
+      "value": []
+     }
+    },
+    {
+     "id": "waits_bounded_by_the_deadline",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_waits_within_deadline",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "gsc-data-pii-and-pagination",
+   "persona": "a Google returning identifying queries and URLs, injected instructions, another 500 clients' properties, and pages without end",
+   "basis": "ADR 0017 'Search Console (first-party truth)': the connector reaches only oauth2.googleapis.com and www.googleapis.com, follows no redirect, parses strictly, bounds retries, pages and the whole read, never lets a credential into an output, and an audit ends in a recorded state whatever Google answers; only aggregates are kept (no query text, no URL identifier), crawled-like text is never an instruction, pagination stops at its caps",
+   "seeds": [
+    {
+     "literal": [
+      "honest",
+      "pii_and_injection",
+      "many_properties",
+      "endless_pages"
+     ],
+     "basis": "driver _HostileGoogle modes"
+    }
+   ],
+   "input_field": "mode",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "gsc",
+     "args": {
+      "mode": "$mode"
+     }
+    },
+    {
+     "action": "audit"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_answered",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_completed_never_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "only_google_hosts",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_foreign_hosts",
+      "value": []
+     }
+    },
+    {
+     "id": "only_the_bound_property",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_only_bound_property",
+      "value": true
+     }
+    },
+    {
+     "id": "requests_within_the_read_budget",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_requests_within_budget",
+      "value": true
+     }
+    },
+    {
+     "id": "no_token_assertion_or_key_in_any_output",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "read",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_reason",
+      "value": "OK"
+     }
+    },
+    {
+     "id": "no_identifier_leaked",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "leaks",
+      "value": []
+     }
+    },
+    {
+     "id": "no_switch_moved",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "switches_after.providers",
+      "value": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "gsc-kill-switch",
+   "persona": "Compliance engaging provider:gsc before or during a Search Console read",
+   "basis": "ADR 0017 decision 8 and the Search Console section: the guard runs before the read, before every request and on every socket operation",
+   "seeds": [
+    {
+     "literal": [
+      "before",
+      "mid_read"
+     ],
+     "basis": "when the switch is engaged"
+    }
+   ],
+   "input_field": "when",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "gsc",
+     "args": {
+      "mode": "endless_pages"
+     }
+    },
+    {
+     "action": "gsc_kill",
+     "args": {
+      "when": "$when"
+     }
+    },
+    {
+     "action": "audit"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_answered",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_completed_never_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "only_google_hosts",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_foreign_hosts",
+      "value": []
+     }
+    },
+    {
+     "id": "only_the_bound_property",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_only_bound_property",
+      "value": true
+     }
+    },
+    {
+     "id": "requests_within_the_read_budget",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_requests_within_budget",
+      "value": true
+     }
+    },
+    {
+     "id": "no_token_assertion_or_key_in_any_output",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "killed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "gsc_reason",
+      "value": "GSC_KILLED"
+     }
+    },
+    {
+     "id": "no_request_after_the_switch",
+     "severity": "MUST",
+     "check": "state_in",
+     "args": {
+      "key": "gsc_requests_after_kill",
+      "values": [
+       0,
+       null
+      ]
      }
     }
    ]

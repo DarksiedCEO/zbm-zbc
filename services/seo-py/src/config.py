@@ -30,7 +30,7 @@ KNOWN_CALLERS = ("dashboard", "seo_agent", "scheduler", "hub", "finance_31", "co
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules")
-PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity")
+PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc")
 
 # Pricing, locked by Andre (spec Oct 6). Config only: nothing in this service charges, quotes or invoices; payments
 # are Finance (31)'s, through Stripe. Above the top tier: "Contact us". Self-serve is not offered until the client
@@ -148,6 +148,16 @@ class Settings:
     finance_token: Optional[str] = field(default=None, repr=False)
     finance_caller_token: Optional[str] = field(default=None, repr=False)
     finance_timeout_s: int = 5
+    gsc_key: object | None = field(default=None, repr=False)     # gsc_client.ServiceAccountKey (redacted repr)
+    gsc_window_days: int = 28
+    gsc_page_rows: int = 5000
+    gsc_max_pages: int = 10
+    gsc_max_rows: int = 50_000
+    gsc_max_requests: int = 30
+    gsc_timeout_s: int = 10
+    gsc_deadline_s: int = 60
+    gsc_reads_per_day: int = 4
+    gsc_retention_days: int = 90
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -179,7 +189,8 @@ NOT_BUILT = {
     "SEO_ANTHROPIC_API_KEY_FILE": "the Anthropic answer-engine adapter: not built (probes NOT_CONNECTED)",
     "SEO_GOOGLE_API_KEY_FILE": "the Google answer-engine adapter: not built (probes NOT_CONNECTED)",
     "SEO_PERPLEXITY_API_KEY_FILE": "the Perplexity answer-engine adapter: not built (probes NOT_CONNECTED)",
-    "SEO_SEARCH_CONSOLE_CREDENTIALS_FILE": "Google Search Console (first-party truth): not built",
+    "SEO_SEARCH_CONSOLE_CREDENTIALS_FILE": "renamed: the Search Console connector reads SEO_GSC_SERVICE_ACCOUNT_FILE "
+                                           "(a Google service-account JSON key file)",
     "SEO_BING_WEBMASTER_KEY_FILE": "Bing Webmaster Tools (first-party truth): not built",
     "SEO_PROMPT_VOLUME_PROVIDER": "a prompt-volume data source for Naomi: none chosen or built",
     "SEO_ZERO_DAY_URL": "Zero-Day: a port only in Wave 1 (NOT_CONNECTED)",
@@ -276,6 +287,49 @@ def _finance(env, s: "Settings") -> None:
     s.finance_url, s.finance_token, s.finance_caller_token = url, token, caller
 
 
+def gsc_requests_needed(max_pages: int, page_rows: int, max_rows: int) -> int:
+    """The most requests one Search Console read sends when every request succeeds first time: the token, the site
+    list, the date totals, and for each of the two paginated queries (page, query) at most min(max_pages,
+    ceil(max_rows / page_rows)) pages. Retries and a token refresh draw on whatever SEO_GSC_MAX_REQUESTS leaves above
+    this."""
+    pages = min(max_pages, -(-max_rows // page_rows))
+    return 3 + 2 * pages
+
+
+def _gsc(env, s: Settings) -> None:
+    """The Google Search Console connector (ADR 0017, "Search Console (first-party truth)"). Unset
+    ``SEO_GSC_SERVICE_ACCOUNT_FILE`` = NOT_CONNECTED (no call is ever made). Set, it must name a Google service-account
+    JSON key file under the *_FILE rules (absolute path, regular file, owned by this user, mode 0600 / 0400, no
+    symlink, at most 16 KiB); a key that cannot be parsed refuses start. No error here ever quotes the file."""
+    s.gsc_window_days = _int(env, "SEO_GSC_WINDOW_DAYS", 28, 1, 90)
+    s.gsc_page_rows = _int(env, "SEO_GSC_PAGE_ROWS", 5000, 100, 25_000)
+    s.gsc_max_pages = _int(env, "SEO_GSC_MAX_PAGES", 10, 1, 40)
+    s.gsc_max_rows = _int(env, "SEO_GSC_MAX_ROWS", 50_000, 1000, 250_000)
+    s.gsc_max_requests = _int(env, "SEO_GSC_MAX_REQUESTS", 30, 6, 200)
+    s.gsc_timeout_s = _int(env, "SEO_GSC_TIMEOUT_SECONDS", 10, 1, 60)
+    s.gsc_deadline_s = _int(env, "SEO_GSC_DEADLINE_SECONDS", 60, 5, 300)
+    s.gsc_reads_per_day = _int(env, "SEO_GSC_READS_PER_DAY", 4, 1, 48)
+    s.gsc_retention_days = _int(env, "SEO_GSC_RETENTION_DAYS", 90, 1, 480)
+    need = gsc_requests_needed(s.gsc_max_pages, s.gsc_page_rows, s.gsc_max_rows)
+    if s.gsc_max_requests < need:
+        # AEGIS gl-gsc L5: a read must be able to reach its own page caps (and say truncated) before the request
+        # budget runs out; otherwise every large property would end GSC_BUDGET_EXHAUSTED instead of a truncated read
+        raise RuntimeError(f"SEO_GSC_MAX_REQUESTS ({s.gsc_max_requests}) cannot serve SEO_GSC_MAX_PAGES / "
+                           f"SEO_GSC_PAGE_ROWS / SEO_GSC_MAX_ROWS: one read needs up to {need} requests (token, site "
+                           "list, date totals, then the page and the query pagination). Raise SEO_GSC_MAX_REQUESTS or "
+                           "lower the page caps.")
+    if not (env.get("SEO_GSC_SERVICE_ACCOUNT_FILE") or "").strip():
+        return
+    from gsc_client import KeyFileInvalid, parse_service_account_key
+    raw = _secret_file_bytes(env, "SEO_GSC_SERVICE_ACCOUNT_FILE", max_bytes=16 * 1024)
+    try:
+        s.gsc_key = parse_service_account_key(raw)
+    except KeyFileInvalid as exc:
+        raise RuntimeError(f"SEO_GSC_SERVICE_ACCOUNT_FILE: {exc}") from None
+    finally:
+        raw = None
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ if env is None else env)
     service_token = (env.get("SEO_SERVICE_TOKEN") or "").strip()
@@ -322,6 +376,7 @@ def load(env: Optional[dict] = None) -> Settings:
     s.schedule_budget_runs = _int(env, "SEO_SCHEDULE_BUDGET_RUNS", 8, 1, 100)
     s.schedule_period_days = _int(env, "SEO_SCHEDULE_PERIOD_DAYS", 30, 1, 365)
     _finance(env, s)
+    _gsc(env, s)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it

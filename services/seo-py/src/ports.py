@@ -8,7 +8,9 @@ named NOT_CONNECTED port, and config.NOT_BUILT refuses to start if one is "selec
   render                 headless rendering (separate from fetch, explicit states)
   answer_engines         openai, anthropic, google, perplexity (flag 1: Perplexity included)
   prompt_volume          Naomi's prompt-volume source
-  first_party            Search Console, Bing Webmaster, server logs, analytics, CRM
+  first_party            Search Console, Bing Webmaster, server logs, analytics, CRM. Search Console is connected
+                         (gsc_client.GscClient) only when SEO_GSC_SERVICE_ACCOUNT_FILE names a service-account key;
+                         without it, it is NOT_CONNECTED like the others and no call is ever made
   zero_day, orca_publish flag 5: ports only
   clientfix              Department 28 fix execution (not in Wave 1)
   finance                Finance (31) invoice verification (Wave 3, W3-2: finance_client.py; NOT_CONNECTED unless
@@ -154,6 +156,15 @@ class DnsBotVerifier:
         return "verified" if ok else "failed"
 
 
+def gsc_from_settings(settings, **test_hooks):
+    """The Search Console connector (gsc_client.GscClient) for the configured service account. ``test_hooks``
+    (transport, network_backend, monotonic, wall, sleep, resolve, dns_gate) are for tests and the war room only."""
+    from gsc_client import GscClient
+    return GscClient(settings.gsc_key, timeout_s=settings.gsc_timeout_s, deadline_s=settings.gsc_deadline_s,
+                     page_rows=settings.gsc_page_rows, max_pages=settings.gsc_max_pages,
+                     max_rows=settings.gsc_max_rows, max_requests=settings.gsc_max_requests, **test_hooks)
+
+
 @dataclass
 class Ports:
     fetcher: object = None
@@ -178,10 +189,13 @@ class Ports:
             if settings.finance_url:
                 finance = FinanceClient(settings.finance_url, settings.finance_token, settings.finance_caller_token,
                                         timeout_s=settings.finance_timeout_s)
+        first_party = {n: NotConnectedSource(n) for n in FIRST_PARTY}
+        if settings is not None and getattr(settings, "gsc_key", None) is not None:
+            first_party["search_console"] = gsc_from_settings(settings)
         return cls(fetcher=fetcher, renderer=NotConnectedRenderer(),
                    engines={n: NotConnectedEngine(n) for n in ANSWER_ENGINES},
                    prompt_volume=NotConnectedSource("prompt_volume"),
-                   first_party={n: NotConnectedSource(n) for n in FIRST_PARTY},
+                   first_party=first_party,
                    zero_day=NotConnectedSource("zero_day"), orca_publish=NotConnectedSource("orca_publish"),
                    clientfix=NotConnectedSource("clientfix"),
                    bot_verifier=DnsBotVerifier() if settings is not None and settings.bot_verify_dns

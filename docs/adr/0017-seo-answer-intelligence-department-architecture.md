@@ -76,7 +76,8 @@ own properties, then sold as an audit.
     `TOOL_FAILURE`, never a change).
 12. **Ports** (`ports.py`): fetch (connected); render; answer engines openai / anthropic / google / perplexity;
     prompt volume; first-party search_console / bing_webmaster / server_logs / analytics / crm; zero_day;
-    orca_publish; clientfix. All but fetch are NOT_CONNECTED in Wave 1.
+    orca_publish; clientfix. All but fetch are NOT_CONNECTED in Wave 1. (Search Console: built Oct 24 2026 and
+    NOT_CONNECTED until a service-account key is configured; section "Search Console".)
 13. **The audit product.** `POST /seo/v1/tenants/{tid}/audits` runs Selene, Delia, Roman, the entity check, Callum
     and Naomi and stores the report record-first (`audit_requested`; `audit_approved_by_andre` when given;
     `audit_report_recorded` with the report's SHA-256). Own properties need no payment and refuse an invoice id; a
@@ -391,8 +392,256 @@ binding is Andre's statement and is not cross-checked with Legal. The live run c
 Finance's production entrypoint (its bank feed and Legal are fail-closed stand-ins there); the paid path is proven by
 the contract test against Finance's app with its test fakes.
 
+## Search Console (first-party truth) — go-live plan days 4-7, built Oct 24 2026 on `golive-gsc`
+
+**Status: built and tested; NOT_CONNECTED.** No Google credential exists yet. Without
+`SEO_GSC_SERVICE_ACCOUNT_FILE` the Search Console port is the old `NotConnectedSource`, every audit's
+`search_performance` section answers `GSC_NOT_CONNECTED` with zero requests, and the live run proves at process level
+(an audit hook on every name lookup and connect) that nothing leaves 127.0.0.1. Code: `src/gsc_client.py` (the
+connector), `src/svc_gsc.py` (binding, budget, record-first read, the audit section), `src/agents/search_performance.py`
+(aggregation; Osei's task), `src/agents/drift.py` (SP1-SP4).
+
+GSC-1. **Model.** A client adds this service's Google service account (its `client_email`) as a user of the client's
+own Search Console property; this service authenticates as that service account (two-legged JWT bearer flow, no
+user consent screen, no refresh token) with the read-only scope and reads aggregate performance for that one property.
+Nothing is ever written to Google.
+
+GSC-2. **Google facts this build relies on**, each read on Google's pages on Oct 24 2026 (WebFetch; the Search Console
+reference pages came back in a localized rendering, so the numbers and identifiers below were read from it, not
+translated prose):
+
+| Fact | Source |
+|---|---|
+| Token endpoint `POST https://oauth2.googleapis.com/token`, `application/x-www-form-urlencoded`, `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`, `assertion=<JWT>` | https://developers.google.com/identity/protocols/oauth2/service-account (fetched as https://developers.google.com/accounts/docs/OAuth2ServiceAccount, which serves it) |
+| JWT header `alg` RS256 and `typ` JWT required, `kid` optional (the key id); claims `iss` (service-account e-mail), `scope` (space-delimited), `aud` = the token URL, `iat`, `exp` at most one hour after `iat`; `sub` only for domain-wide delegation (not used); signature RSASSA-PKCS1-v1_5 with SHA-256, base64url | same |
+| Answer: `access_token`, `token_type` Bearer, `expires_in` (3600 in Google's example), `scope`; errors as `{"error", "error_description"}` with `invalid_grant` (clock skew / exp more than 65 minutes after iat; invalid signature: key deleted, disabled or expired), `unauthorized_client`, `access_denied`, `admin_policy_enforced`, `invalid_client`, `deleted_client`, `disabled_client`, `invalid_scope`, `org_internal` | same |
+| Scope `https://www.googleapis.com/auth/webmasters.readonly` accepted by both methods used (the other being `.../auth/webmasters`) | https://developers.google.com/webmaster-tools/v1/searchanalytics/query and https://developers.google.com/webmaster-tools/v1/sites/list |
+| `POST https://www.googleapis.com/webmasters/v3/sites/{siteUrl}/searchAnalytics/query`; siteUrl `http://www.example.com/` (URL-prefix) or `sc-domain:example.com` (Domain property) | https://developers.google.com/webmaster-tools/v1/searchanalytics/query; also https://developers.google.com/webmaster-tools/search-console-api-original/v3/searchanalytics/query |
+| Request: `startDate` / `endDate` YYYY-MM-DD in Pacific Time, inclusive, required; `dimensions` from country, device, page, query, searchAppearance, date, hour (none = one merged row; a dimension once); `type` default web; `aggregationType` auto (default), byPage, byProperty (not with page grouping or filtering; not for discover / googleNews), byNewsShowcasePanel; `rowLimit` 1-25,000, default 1,000; `startRow` zero-based, default 0, past the end = success with zero rows; `dataState` final (default) / all / hourly_all, case-insensitive | same |
+| Response: `rows[]` of `keys[]` (request order), `clicks`, `impressions`, `ctr` (0-1), `position`; `responseAggregationType`; `metadata.first_incomplete_date` / `first_incomplete_hour` only with dataState all / hourly_all, in America/Los_Angeles; sorted by clicks descending (date-grouped: ascending); dates without data omitted; the API "does not guarantee every row" (top rows only) | same |
+| Pagination: repeat the query raising `startRow` by the row limit until a response has 0 rows; at most 50,000 rows per day per search type; data typically available after 2-3 days; with page or query dimensions "some data may be dropped" | https://developers.google.com/webmaster-tools/v1/how-tos/all-your-data |
+| `GET https://www.googleapis.com/webmasters/v3/sites` -> `{"siteEntry": [{"siteUrl", "permissionLevel"}]}`, permissionLevel siteFullUser, siteOwner, siteRestrictedUser, siteUnverifiedUser | https://developers.google.com/webmaster-tools/v1/sites/list and https://developers.google.com/webmaster-tools/v1/sites |
+| Errors `{"error": {"code", "message", "errors": [{"domain", "reason", "message", ...}]}}`; 401 unauthorized / authError / expired; 403 insufficientPermissions, quotaExceeded, rateLimitExceeded, userRateLimitExceeded, accessNotConfigured (API not enabled), forbidden, accountDisabled, ...; 404 notFound; 429 rateLimitExceeded; 500 internalError; 503 backendError | https://developers.google.com/webmaster-tools/v1/errors |
+| Quotas: Search Analytics 1,200 QPM per site, 1,200 QPM per user, 40,000 QPM and 30,000,000 QPD per project; short-term (10-minute) and long-term (1-day) load limits, page and query grouping the most expensive, both together the worst; exceeding any quota answers "quota exceeded" (wait 15 minutes for the short-term one) | https://developers.google.com/webmaster-tools/limits |
+| CTR = clicks / impressions; position = average position of the topmost result; chart data aggregated by property, table rows by page for Pages; chart and table totals can differ | https://support.google.com/webmasters/answer/7576553 |
+| Users need a Google Account; groups cannot be added; Owner / Full / Restricted; the permissions table gives Restricted users the Performance report; at most 100 non-owners per property | https://support.google.com/webmasters/answer/7687615 |
+| A service account's e-mail can be added to a verified property as a **delegated owner** ("Provide your service account email as the delegated owner"); the e-mail is the key's `client_email` | https://developers.google.com/search/apis/indexing-api/v3/prereqs |
+
+Not found on the pages read: how far back Search Analytics data goes (the oft-quoted 16 months is from secondary
+sources only — UNVERIFIED; the connector asks for at most 90 days, so nothing here depends on it); a Retry-After on
+quota errors (honoured when present, capped at 60 s).
+
+GSC-3. **U1 — can a service-account e-mail be added as a USER (Full / Restricted) of a property? UNVERIFIED.** Google's
+pages confirm adding a service account as a delegated OWNER (Indexing API prerequisites) and that a user must be a
+Google Account, but no page read says a service account may be added as a Full or Restricted user. The connector does
+not depend on the level: it reads only when sites.list shows the property at siteOwner, siteFullUser or
+siteRestrictedUser (siteUnverifiedUser or absent = `GSC_PROPERTY_NOT_GRANTED`). Andre's first client onboarding
+settles U1: if Search Console refuses the e-mail as a user, the fallback Google documents is a delegated owner — more
+power than a read needs, so that is a founder decision (pending default 18 below), never automatic.
+
+GSC-4. **The connector** (`gsc_client.py`, standard library + httpx + `cryptography`):
+   - Key file: `SEO_GSC_SERVICE_ACCOUNT_FILE`, the *_FILE rules of `config._secret_file_bytes` (absolute path, regular
+     file, no symlink, owned by the service user, mode 0600 / 0400, at most 16 KiB). The JSON must be a Google
+     service-account key: `type` service_account, a `…iam.gserviceaccount.com` `client_email`, a hex
+     `private_key_id`, an RSA private key of at least 2048 bits, and `token_uri` exactly Google's token URL (the
+     assertion never goes anywhere else). A bad file refuses start; no error ever quotes it (the JSON parser's and
+     cryptography's exceptions are replaced, `from None`). The key lives in `ServiceAccountKey` (`__slots__`, no
+     `__dict__`, redacted repr, pickling and copying refused); `Settings.gsc_key` is `repr=False`. The PEM text is
+     dropped after parsing (Python cannot zero a string; the key itself is held by OpenSSL through cryptography).
+   - Token: a JWT signed per request of a token (`iat` = now, `exp` = now + 3600), cached as `_Secret` (redacted repr,
+     never pickled) until `expires_in` minus min(300 s, half its life). A 401 from the API with a cached token drops it
+     and retries once with a fresh one; a second 401 is `GSC_AUTH_REFUSED`. Token-endpoint 400 / 401 / 403 is
+     `GSC_AUTH_REFUSED` with Google's `error` from the documented closed set (never `error_description`); an `error`
+     that is not a string (Google documents a string) is `GSC_PROTOCOL_ERROR` `token_error_shape`.
+   - Hard deadline: ONE deadline per read (`SEO_GSC_DEADLINE_SECONDS`, default 60) over the token, the site check and
+     every page. Production requests go through Finance's `_DeadlineBackend` (finance_client.py; AEGIS SEO Wave 3 M1
+     and round 2): the Google host is resolved on a gated daemon thread inside the deadline (this module's own gate of
+     two), the connection is made to the resolved addresses, and every connect, TLS step, read and write is bounded by
+     the time left; the body loop checks the deadline too. If httpx stops exposing the pool's network backend, the
+     client refuses to call Google (`GSC_NOT_CONNECTED`) rather than call it unbounded. Per-attempt timeout
+     `SEO_GSC_TIMEOUT_SECONDS`.
+   - Allowlist: `oauth2.googleapis.com` and `www.googleapis.com` (both from the pages above), https, port 443, no
+     credentials or fragment in the URL, checked before every request and again in the network backend; redirects are
+     never followed (a 3xx is `GSC_PROTOCOL_ERROR`); every resolved address must be globally routable (a private,
+     loopback, link-local or mapped answer is refused, never connected to); an address literal is never a Google host.
+   - Retries: at most 3 attempts per request and only for connect errors, timeouts, 429, 500 / 502 / 503 / 504 and
+     403 rateLimitExceeded / userRateLimitExceeded, with backoff 1 s then 3 s (Retry-After honoured up to 60 s) and
+     never past the deadline. 403 quotaExceeded / dailyLimitExceeded is `GSC_RATE_LIMITED` at once (Google: wait).
+     A request budget per read (`SEO_GSC_MAX_REQUESTS`, default 30, retries included) -> `GSC_BUDGET_EXHAUSTED`.
+     Start-up refuses a budget below what the page caps need when every request succeeds first time — 3 + 2 ·
+     min(`SEO_GSC_MAX_PAGES`, ceil(`SEO_GSC_MAX_ROWS` / `SEO_GSC_PAGE_ROWS`)), 23 at the defaults — so a large
+     property ends a read `truncated`, not over budget (AEGIS gl-gsc L5); retries draw on the rest.
+   - Pagination: page dims `page` and `query` are read in pages of `SEO_GSC_PAGE_ROWS` (default 5,000) from startRow 0,
+     stopping at a short or empty page, at `SEO_GSC_MAX_PAGES` (10) pages or `SEO_GSC_MAX_ROWS` (50,000) rows; a cap
+     that stops it after a full page sets `truncated: true`. A key repeated within or across pages (the data moved
+     between requests) is `GSC_PROTOCOL_ERROR`. The date query is one page (at most window-days rows).
+   - Strict parsing: documented top-level fields only; `rows` a list no longer than the rowLimit asked; each row
+     `keys` (exactly one string per dimension), `clicks` and `impressions` whole, finite, 0..1e15 (a larger integer
+     is refused before any float conversion) and clicks <=
+     impressions, `ctr` 0..1, `position` >= 0; dates inside the window; `responseAggregationType` equal to what was
+     asked; `metadata` only its two documented keys; identity encoding only (gzip refused), bodies capped (16 KiB
+     token, 512 KiB sites, 8 MiB per query page, by Content-Length and on the bytes read). JSON `NaN` is refused.
+   - Reason codes and the section outcome: `GSC_NOT_CONNECTED` (NOT_CONNECTED), `GSC_PROPERTY_UNBOUND` (NOT_CONNECTED:
+     no binding), `GSC_KILLED` (KILLED), `GSC_AUTH_REFUSED` / `GSC_PROPERTY_NOT_GRANTED` / `GSC_BUDGET_EXHAUSTED`
+     (BLOCKED), `GSC_RATE_LIMITED` / `GSC_UNAVAILABLE` / `GSC_PROTOCOL_ERROR` (FAILED); plus `GSC_PROPERTY_INVALID`
+     and `GSC_PROPERTY_TAKEN` for bindings. A failed read never fails the audit (no 500; the audit completes with the
+     section's outcome and reason). Every membership test on a value from Google checks that it is a string first;
+     and if a malformed answer still raises something other than `GscError` (a parser gap), the section is FAILED
+     `GSC_PROTOCOL_ERROR` with `error_type` in its facts and only the exception's type logged (AEGIS gl-gsc M1: a
+     list `permissionLevel`, an object `error` from the token endpoint and a 400-digit metric used to end the whole
+     audit `RUN_FAILED`).
+
+GSC-5. **Tenant binding.** `POST /seo/v1/tenants/{tid}/gsc-property` (Andre's gate: dashboard caller plus his approval
+token) binds a tenant to `sc-domain:<domain>` or `http(s)://<domain>/…` where the domain is one of the tenant's own
+registered domains or its `www.` twin (`GSC_PROPERTY_INVALID` otherwise); `null` unbinds. A property, or one
+overlapping it, belongs to one tenant (`GSC_PROPERTY_TAKEN`; registering the domain itself to a second tenant was
+already `DOMAIN_TAKEN`). Recorded as `tenant_gsc_property_set` (the property's SHA-256 on the ledger). A read uses
+only the binding in state — no request can name a property — and a binding whose domain the tenant no longer holds is
+not read (`GSC_PROPERTY_UNBOUND`). The connector compares sites.list against that one property and never stores or
+returns the list (which would show other clients' properties). The hub reaches only its own tenant's audits (the
+existing scoping; tested).
+
+GSC-6. **Data, PII, retention, evidence.** Three queries per read, all `type=web`, `dataState=final`, window
+`SEO_GSC_WINDOW_DAYS` (28) ending three Pacific-Time days ago: (1) `date` aggregated byProperty — the property totals
+by date and, summed, the window totals (CTR recomputed from sums, never averaged; position impression-weighted over
+the dates, labelled an approximation); (2) `page` aggregated byPage — each URL reduced to a template by the log
+templater (`agents.logs.template_path`: e-mails, UUIDs, numbers, ids, tokens, file names replaced) and then the slug
+rule (`search_performance.slug_segment`, AEGIS gl-gsc L1): every segment that is not empty, a placeholder, one plain
+word of ASCII letters or such a word with a static extension becomes `{slug}` (`/users/jane-smith/profile` ->
+`/users/{slug}/profile`; hyphenated, dotted, underscored, digit-bearing and non-ASCII segments are never kept);
+CamelCase segments (`JaneSmith`) are `{slug}` too; literal words are lower-cased and the trailing slash dropped, so
+one page is one template; `{offsite}` for a host not the property's; a template that still holds a literal word but
+was produced by fewer than 3 distinct PAGES (`TEMPLATE_MIN_URLS`; a page is `page_key`: the path decoded once,
+lower-cased, without its trailing slash, host / www / scheme / port / query ignored — AEGIS gl-gsc certification:
+counting URL rows let one page reported under www, http and https keep its name) is counted in `{other}`, so no kept
+template describes one or two pages
+(placeholder-only templates such as `/` or `/{slug}` identify nothing and are kept); at most 200 templates, the rest
+(fewest clicks first) in `{other}`; reported as by-page sums that are NOT comparable with property totals; (3) `query` aggregated byProperty — each query classified into `pii_suspect`, `brand`, `question`,
+`local`, `commercial`, `other` (versioned `2026-10-24.3`) and dropped. `pii_suspect` is judged first, on the shared
+lookalike fold after invisible characters are removed: an e-mail in any spelling, ONE phone-like run of 7+ digits
+(digits joined only by phone separators, up to five in a row: space, dot, parentheses, slash, underscore, comma, plus,
+the ASCII hyphen, the Unicode hyphens and dashes U+2010..U+2015, the minus sign and the middle dot — `555 010 0199`,
+`(555) 010-0199`, `+44 20 7946 0958`, `555/010/0199`, `555–010–0199`, `555 -- 010 -- 0199`; ISO dates such as
+`2024-10-24` are taken out first; in a run with two or more year-like groups, 19xx / 20xx, those groups do not
+count; AEGIS gl-gsc certification L4 widened the separators and added the date rule), or a word the templater would
+replace (a word of digits and separators only is left to the run rule). Digits in different words are never added
+up (AEGIS gl-gsc L4: `iphone 15 pro 256gb 2024`, `24/7 plumber 90210` and `covid 19 2020 2021` used to be
+`pii_suspect`); a phone number with one year-like group (`555 010 2024`) is still caught, one with two is not. No query text, hash of a query, URL or per-query / per-URL row is stored — a page is
+stored only as the template above, which keeps plain one-word path segments (`/pricing`, `/users`) when 3 or more
+URLs share the template: dropping beats hashing, since a hash of a low-entropy name or e-mail falls to a dictionary. The query remainder (`unattributed`:
+anonymised queries and rows past the caps) is reported, never spread over the classes. Evidence class OBSERVED,
+first-party, data class measured, effect class null; `headline_score` is null; the section carries the Goodhart
+pairing (revenue NOT_CONNECTED -> decision INSUFFICIENT_EVIDENCE) and produces no findings. Retention: the aggregates
+live in the audit report (append-only log; nothing identifying, so nothing to shred, decision 18); after
+`SEO_GSC_RETENTION_DAYS` (90) a report's search-performance section is served as window totals only — by the audit
+view, by drift (which compares totals only) and by `GET /audit/export` (AEGIS gl-gsc L2: the export used to return
+the breakdowns of expired reports).
+
+GSC-7. **Wiring.** Audit: Osei's `search_performance` step runs after Naomi (the run guard first: a restricted Osei is
+RESTRICTED); the report gets `search_performance` = {outcome, reason, read_started, section}. **The section's outcome
+is not part of the audit's overall outcome** (AEGIS gl-gsc M2): `report.outcome` is the worst outcome over every
+other envelope (`svc_audits.overall_outcome`, stated in `report.outcome_rule`), so OK, `provider:gsc` engaged, a spent
+read budget or a Google outage leave the overall outcome exactly what it would be without Search Console; the
+section keeps its own outcome and reason in its envelope and in `report.search_performance`. Record-first:
+`gsc_read_started` (tenant, audit, property SHA-256, window) is committed to the ledger and the log BEFORE any request
+leaves (tested: the fake Google sees the event already recorded on its first request); a read that cannot be recorded
+is not made (BLOCKED with the ledger's reason); the result's SHA-256 is recorded beside the report as
+`gsc_read_recorded`. Osei's drift: `drift.compare` adds `search_performance` with rules `2026-10-24.2` (AEGIS
+gl-gsc L3) — SP0 NOT_CONNECTED (either run had no key, no binding, or predates the section: nothing was measured),
+SP1 TOOL_FAILURE (either run tried and did not read: KILLED, BLOCKED, FAILED, RESTRICTED), SP2 MEASUREMENT_ERROR
+(property, window length, data state, type or rules version moved), SP3 overlapping windows: with `o` of `d` days
+shared (`windows_overlap_days`), final data for a shared day is the same in both reads, so the difference of the
+totals is exactly new-only days minus old-only days — two Poisson counts over `d - o` days; under "no change" its
+variance is estimated as (before + after)·(d - o)/d and the band is 2·sqrt of that (o = 0 gives the plain
+2·sqrt(before + after)); with fewer than 7 fresh days (`SP_MIN_FRESH_DAYS`; a daily schedule over a 28-day window has
+one) the metric is UNKNOWN, not compared, since a day or two is dominated by day-of-week effects; inside the band
+SAMPLING_NOISE, SP4 outside it REAL_CHANGE (observed; no cause claimed). Real counts are over-dispersed relative to
+Poisson, so REAL_CHANGE means "outside Poisson noise", not "significant"; and if Google revised a shared day the
+revision shows as a difference. Drift uses only what survives retention (property, window, totals, versions), and the
+API and the scheduler both compare the retained view, so one pair gets one classification whichever path asks and
+whether or not the breakdowns have expired. The decision stays INSUFFICIENT_EVIDENCE whatever the class. The department scorecard
+keeps Osei's main card for data hygiene and adds a `search_performance` sub-card. `/status` shows `search_console`
+(state, service-account e-mail, scope, hosts, switch, caps, budget, tenants bound, requests made). Kill switch
+`provider:gsc` (also `SEO_KILLED_PROVIDERS=gsc`), with global / write / tenant / `capability:audit` as for every step,
+checked before the read, before every request and on every socket operation. Budget: `SEO_GSC_READS_PER_DAY` (4) per
+tenant in any 24 hours counted from recorded `gsc_read_started` on the injected clock — scheduled re-audits count
+too, so a schedule can never exceed it (over budget: BLOCKED `GSC_BUDGET_EXHAUSTED`, no request, the audit still
+runs). At the defaults one read costs at most 30 requests, far under Google's per-site 1,200 QPM.
+
+GSC-8. **Dependency.** `cryptography==50.0.1` added to seo-py's requirements for RS256 — the exact pin security-py
+already carries (and delivery-py's frozen lock), so no new package or version enters the repository; hand-rolled RSA
+on the standard library was not an option. AEGIS gl-gsc (info) suggested 50.0.2: not bumped on this branch, because seo-py alone moving
+would put a second cryptography version in the repository; the bump belongs in one change that moves security-py's
+pin, regenerates delivery-py's hashed `uv.lock` and reruns all three suites.
+
+GSC-9. **The key on Railway.** Railway variables are environment strings, and this service reads the key only from a
+file (the *_FILE rules). Store the JSON key base64-encoded in a Railway variable (e.g. `SEO_GSC_SERVICE_ACCOUNT_B64`;
+the service never reads it) and make the start command write it to a 0600 file before exec'ing the service:
+`sh -c 'umask 077 && mkdir -p /tmp/seo-secrets && printf %s "$SEO_GSC_SERVICE_ACCOUNT_B64" | base64 -d > /tmp/seo-secrets/gsc.json && unset SEO_GSC_SERVICE_ACCOUNT_B64 && SEO_GSC_SERVICE_ACCOUNT_FILE=/tmp/seo-secrets/gsc.json exec python3 -m api'`
+(from `services/seo-py/src`). The file is owned by the service user and 0600 (umask), so the start-up checks pass,
+and the variable is gone from the service's environment. Railway's own secret-handling features were not checked in
+this build; whatever it offers for sensitive variables should be used for this one.
+
+GSC-10. **Andre's steps** (nothing here can be done for him; the connector stays NOT_CONNECTED until step 4):
+   1. Google Cloud console: create a project for this (e.g. "zbm-seo-search-console").
+   2. APIs & Services -> Library: enable the **Google Search Console API** for that project (without it Google answers
+      403 accessNotConfigured, which this service reports as `GSC_AUTH_REFUSED`).
+   3. IAM & Admin -> Service accounts: create a service account (no project roles are needed; skip that step). On it,
+      Keys -> Add key -> Create new key -> **JSON**. The download is the only copy. Note its `client_email`.
+   4. Railway: add the key as a secret variable and the start command of GSC-9; deploy. Delete the downloaded file
+      from the laptop once Railway holds it (a lost key is replaced by creating a new one and deleting the old).
+   5. Check `GET /seo/v1/status`: `search_console.state` is `connected` and `service_account` shows the e-mail.
+   6. For each client: the client (an owner of the property) opens Search Console -> the property -> Settings ->
+      Users and permissions -> Add user, pastes the service-account e-mail and picks **Restricted** (Google's table
+      gives Restricted users the Performance report). If Search Console refuses it as a user (U1), stop and decide
+      whether to ask for a delegated owner instead (pending default 18).
+   7. Bind the tenant: `POST /seo/v1/tenants/{tid}/gsc-property` with `{"request_id": …, "property": …}` written
+      exactly as Search Console shows the property (`sc-domain:example.com` or `https://www.example.com/`), with his
+      approval token.
+   8. Run an audit; the report's `search_performance` should say OK. `GSC_PROPERTY_NOT_GRANTED` = step 6 not done or
+      not yet effective; `GSC_AUTH_REFUSED` = steps 2-4.
+   Key rotation: create a new key, update the Railway variable, redeploy, delete the old key in the console.
+
+GSC-11. **Tests.** `tests/test_gsc.py` (count: `docs/test-counts.md`; no network, injected clocks): the JWT verified with a key generated at
+run time (never in the repository); the token request; cache and refresh; Google's 401 / 403 reasons / 404 / 429 /
+5xx; retries stopping at the deadline; the request budget; pagination (exact multiples, caps, truncation, repeats)
+and totals (CTR, position, zero impressions, remainder, rows exceeding totals, missing dates); 17 malformed answers;
+gzip, oversized and endless bodies; a drip on the injected clock through MockTransport AND through the production
+deadline backend over a fake socket layer (TLS SNI is Google's name, the connect goes to the resolved address, every
+read bounded); DNS inside the deadline and non-global answers; the allowlist; a key that never leaks (errors, reprs,
+pickling, the log, the ledger, /status, the export); Andre-only binding; cross-tenant refusal; PII queries dropped;
+the kill switch before and mid-read; the budget including scheduled re-audits; no record, no request; retention;
+the SP rules. `tests/test_aegis_gl_gsc.py`: the AEGIS gl-gsc findings (M1, M2, L1-L6), each failing on 0c9a96a. Live run (W3-1): see GSC-1 and the README. War room (W3-3): five `gsc-*` scenarios, 33 cases, against a
+hostile fake Google; seeds 1-3 pass.
+
+GSC-12. **Limitations (honest).**
+   - Never run against Google: no credential exists. Everything above is proven against fakes built from the pages in
+     GSC-2; the first real read will be the first contact. U1 is unverified.
+   - Strictness has a cost: a new top-level field from Google, or a row Google sends with clicks > impressions, stops
+     the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
+   - Names in queries are not detected as such; they are safe only because no query text is kept. Page templates
+     collapse every multi-word slug to `{slug}` and send templates of fewer than 3 URLs to `{other}`, but a plain
+     one-word segment shared by 3 or more URLs is kept as written: a site whose paths name people with single words
+     (`/users/jsmith/{slug}` across three posts) can still show such a word. The threshold of 3 is this service's
+     choice, unmeasured.
+   - The page-template and query-class breakdowns cover the window, not each date; the query-class split is
+     heuristic and uncalibrated; brand detection uses the tenant's domains and entity name only.
+   - Position over the window is an impression-weighted mean of Google's daily positions, not Google's own
+     aggregate.
+   - The budget, caps and window are defaults nobody has measured against a real client (pending default 17).
+   - Resolver threads: as for Finance, a hung system resolver keeps its gated thread until the C library gives up;
+     with both slots held, reads are `GSC_UNAVAILABLE`.
+   - The append-only log keeps the aggregates past the retention period (served as totals only); purging needs a new
+     log epoch (decision 18).
+
+Founder-pending defaults added by the Search Console build: (17) 4 reads per tenant per day, a 28-day window ending 3
+days ago, 30 requests per read, 5,000-row pages, 10 pages, 50,000 rows, 90-day retention of breakdowns; (18) the
+service account is added as a Restricted user, and a delegated owner only if Andre decides so after U1; (19) the
+six query classes and the PII rule are this service's, versioned, and drop rather than hash.
+
 ## Unlock list
 
-Answer-engine adapters with scoped, short-lived credentials; a renderer; Search Console and Bing Webmaster; a
-prompt-volume source; Department 28 clientfix hand-off; the remaining agents per the spec's waves; the console pages.
-(Built in Wave 3: the live run against ledger-rust, W3-1; the Finance (31) client to verify invoices, W3-2.)
+Answer-engine adapters with scoped, short-lived credentials; a renderer; Bing Webmaster; a prompt-volume source;
+Department 28 clientfix hand-off; the remaining agents per the spec's waves; the console pages. Search Console is
+built and NOT_CONNECTED until Andre's steps (section "Search Console"). (Built in Wave 3: the live run against
+ledger-rust, W3-1; the Finance (31) client to verify invoices, W3-2.)

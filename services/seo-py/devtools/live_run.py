@@ -19,6 +19,15 @@ keys are refused; a scheduled re-audit runs its slot once and a second tick is a
 the recorded runs; a restart keeps everything and re-verifies; the evidence view marks each action committed exactly
 once; a truncated log is detected; no domain or NAP in the clear on the ledger; GET /ledger/verify valid.
 
+Google Search Console (go-live days 4-7): with no service-account key the connector is NOT_CONNECTED — /status says
+so, Andre binds the own tenant's property, the audit's search_performance section answers GSC_NOT_CONNECTED with zero
+requests, and nothing reaches the ledger as a read; a key file with loose permissions, a key that is not a
+service-account key, and the old variable name each refuse start without quoting the file; after the restart the
+service runs WITH a key generated here (never Google's, never written to the repository) and the ``gsc`` provider
+switch engaged by the environment: /status names the service account, the section is KILLED (GSC_KILLED) before any
+request. Every service process runs under an audit hook (``sitecustomize`` in the work directory) that writes down
+any name lookup or connect to anything but 127.0.0.1; the run fails if that file is not empty at the end.
+
 No outbound network: this run never crawls a real site (CI has none to crawl, and a live run must not depend on the
 internet). The web provider switch is engaged before the first audit, so every fetch stops at the kill-switch guard,
 which runs before name resolution. The crawler itself is proven against an in-process fixture in the test suite.
@@ -186,6 +195,56 @@ class Fin:
         return self.post("/fin/v1/invoices", body, caller="onboarding")
 
 
+TRAP = """
+import socket, sys
+_OUT = %r
+_LOCAL = {"127.0.0.1", "localhost", "::1", None, ""}
+def _hook(event, args):
+    try:
+        if event == "socket.getaddrinfo" and args and args[0] not in _LOCAL and not str(args[0]).startswith("127."):
+            hit = ("getaddrinfo", str(args[0]))
+        elif event == "socket.connect" and len(args) > 1 and isinstance(args[1], tuple) and args[1] \\
+                and not str(args[1][0]).startswith("127.") and args[1][0] not in _LOCAL:
+            hit = ("connect", str(args[1][0]))
+        else:
+            return
+        with open(_OUT, "a") as f:
+            f.write("%%s %%s\\n" %% hit)
+    except Exception:
+        pass
+sys.addaudithook(_hook)
+"""
+
+
+def _trap(work: Path) -> tuple[Path, Path]:
+    """A sitecustomize that records every non-loopback lookup or connect of the process it is loaded into."""
+    d = work / "trap"
+    d.mkdir(mode=0o700)
+    out = d / "outbound.log"
+    (d / "sitecustomize.py").write_text(TRAP % str(out))
+    return d, out
+
+
+def _gsc_key(work: Path, name: str, mode: int = 0o600, **over) -> str:
+    """A Google-shaped service-account key generated HERE for this run (an RSA key nobody at Google knows)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+    d = {"type": "service_account", "project_id": "zbm-seo-live", "private_key_id": hashlib.sha1(pem.encode())
+         .hexdigest(), "private_key": pem, "client_email": GSC_EMAIL, "token_uri": "https://oauth2.googleapis.com/token",
+         **over}
+    path = work / "etc" / name
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    os.write(fd, json.dumps(d).encode())
+    os.close(fd)
+    os.chmod(path, mode)
+    return str(path)
+
+
+GSC_EMAIL = "seo-reader@zbm-seo-live.iam.gserviceaccount.com"
+
+
 def _env(work: Path, ps: int, ledger_url: str) -> dict:
     etc = work / "etc"
     etc.mkdir(mode=0o700)
@@ -218,6 +277,8 @@ def _main(work: Path) -> int:
     fenv = _fin_env(work, pf, L)
     data = Path(env["SEO_DATA_DIR"])
     src = str(SVC / "src")
+    trap_dir, trap_out = _trap(work)
+    env["PYTHONPATH"] = str(trap_dir)
     try:
         (work / "ledger").mkdir()
         start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(pl),
@@ -240,6 +301,33 @@ def _main(work: Path) -> int:
                              cwd=src, capture_output=True, timeout=30)
         check("production without the log hash key refuses start",
               bad.returncode != 0 and b"SEO_LOG_HASH_KEY_FILE" in bad.stderr)
+
+        probe_code = "import socket\ntry:\n    socket.getaddrinfo('trap-selftest.invalid', 443)\nexcept OSError:\n    pass"
+        probe = subprocess.run([sys.executable, "-c", probe_code], env={**os.environ, "PYTHONPATH": str(trap_dir)},
+                               capture_output=True, timeout=30, check=False)
+        seen = trap_out.read_text() if trap_out.exists() else ""
+        check("the outbound audit hook works (a probe's lookup of a public name is written down)",
+              probe.returncode == 0 and "getaddrinfo trap-selftest.invalid" in seen)
+        trap_out.unlink(missing_ok=True)
+        loose = _gsc_key(work, "gsc-loose.json", mode=0o644)
+        bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env,
+                                                                 "SEO_GSC_SERVICE_ACCOUNT_FILE": loose},
+                             cwd=src, capture_output=True, timeout=30, check=False)
+        check("a Search Console key file readable by others refuses start",
+              bad.returncode != 0 and b"SEO_GSC_SERVICE_ACCOUNT_FILE" in bad.stderr and b"chmod 600" in bad.stderr)
+        user_key = _gsc_key(work, "gsc-user.json", type="authorized_user")
+        bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env,
+                                                                 "SEO_GSC_SERVICE_ACCOUNT_FILE": user_key},
+                             cwd=src, capture_output=True, timeout=30, check=False)
+        body_line = json.loads(Path(user_key).read_text())["private_key"].splitlines()[2]
+        check("a key that is not a service-account key refuses start and the error never quotes the key",
+              bad.returncode != 0 and b"not a service-account key" in bad.stderr
+              and body_line.encode() not in bad.stderr + bad.stdout and b"PRIVATE KEY" not in bad.stderr)
+        bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env,
+                                                                 "SEO_SEARCH_CONSOLE_CREDENTIALS_FILE": user_key},
+                             cwd=src, capture_output=True, timeout=30, check=False)
+        check("the old Search Console variable refuses start and names the new one",
+              bad.returncode != 0 and b"SEO_GSC_SERVICE_ACCOUNT_FILE" in bad.stderr)
 
         sp = start([sys.executable, "-m", "api"], env, src, "service", work)
         wait_health(S + "/health")
@@ -306,6 +394,30 @@ def _main(work: Path) -> int:
               "answer_engine:openai" in rep.get("not_connected", []) and "render" in rep.get("not_connected", [])
               and all(f.get("effect_class") is None for e in rep.get("agents", []) for f in e["findings"]))
         own_aid = au.json()["audit_id"]
+
+        # --- Search Console: NOT_CONNECTED, no outbound call --------------------------------------------------------
+        gsc_st = st["search_console"]
+        check("Search Console is NOT_CONNECTED without a key: no service account, no request made",
+              gsc_st["state"] == "NOT_CONNECTED" and gsc_st["reason"] == "GSC_NOT_CONNECTED"
+              and gsc_st["service_account"] is None and gsc_st["outbound_requests_made"] == 0
+              and ports["first_party"]["search_console"] == "NOT_CONNECTED")
+        prop = f"sc-domain:{OWN_DOMAIN}"
+        nb = a.post("/tenants/zbm/gsc-property", {"request_id": rid(), "property": prop}, caller="dashboard")
+        wrong = a.post("/tenants/zbm/gsc-property", {"request_id": rid(), "property": f"sc-domain:{CLIENT_DOMAIN}"},
+                       andre=True)
+        gb = a.post("/tenants/zbm/gsc-property", {"request_id": rid(), "property": prop}, andre=True)
+        check("only Andre binds a tenant's Search Console property, and only to the tenant's own domain",
+              nb.status_code == 403 and wrong.status_code == 422 and wrong.json()["detail"] == "GSC_PROPERTY_INVALID"
+              and gb.status_code == 200 and gb.json()["gsc_property"] == prop)
+        ga = a.post("/tenants/zbm/audits", {"request_id": rid(), "domain": OWN_DOMAIN, "paths": ["/"]})
+        grep = ga.json().get("report") or {}
+        gsec = next((x for x in grep.get("agents", []) if x.get("task") == "search_performance"), {})
+        check("the audit's search_performance section is NOT_CONNECTED (GSC_NOT_CONNECTED) with zero requests",
+              ga.status_code == 201 and gsec.get("outcome") == "NOT_CONNECTED"
+              and gsec.get("reason") == "GSC_NOT_CONNECTED" and gsec.get("facts", {}).get("requests") == 0
+              and grep.get("search_performance", {}).get("read_started") is False
+              and "first_party:search_console" in grep.get("not_connected", []))
+        gsc_aid = ga.json()["audit_id"]
 
         # --- a client's paid audit: invoice id, Andre, and Finance (31) verifies the invoice ------------------------
         body = {"domain": CLIENT_DOMAIN, "paths": ["/"]}
@@ -381,19 +493,33 @@ def _main(work: Path) -> int:
               and sv["slots"].get("0", {}).get("status") == "completed")
         dep = a.get("/department", caller="compliance_38").json()
         card = dep.get("agents", {}).get("selene", {}).get("scorecard", {})
-        check("the department view counts recorded runs only (Selene ran three audits, all KILLED)",
-              card.get("runs") == 3 and card.get("outcomes", {}).get("KILLED") == 3)
+        check("the department view counts recorded runs only (Selene ran four audits, all KILLED)",
+              card.get("runs") == 4 and card.get("outcomes", {}).get("KILLED") == 4)
 
-        # --- restart ----------------------------------------------------------------------------------------------
+        # --- restart, now WITH a service-account key and the gsc provider switch engaged by the environment -----------
         stop(sp, "service")
+        env = {**env, "SEO_GSC_SERVICE_ACCOUNT_FILE": _gsc_key(work, "gsc.json"), "SEO_KILLED_PROVIDERS": "gsc"}
         sp = start([sys.executable, "-m", "api"], env, src, "service", work)
         wait_health(S + "/health")
         st = a.get("/status").json()
+        g2 = st["search_console"]
+        kd = a.post("/tenants/zbm/audits", {"request_id": rid(), "domain": OWN_DOMAIN, "paths": ["/"]})
+        ksec = next((x for x in (kd.json().get("report") or {}).get("agents", [])
+                     if x.get("task") == "search_performance"), {})
+        st2 = a.get("/status").json()["search_console"]
+        check("with a key the connector is configured (service account shown) but the gsc switch stops the section "
+              "before any request (GSC_KILLED)", g2["state"] == "connected" and g2["service_account"] == GSC_EMAIL
+              and g2["killed"] is True and kd.status_code == 201 and ksec.get("outcome") == "KILLED"
+              and ksec.get("reason") == "GSC_KILLED" and ksec.get("facts", {}).get("requests") == 0
+              and st2["outbound_requests_made"] == 0)
+        killed_aid = kd.json()["audit_id"]
         audits = {x["audit_id"]: x for x in a.get("/tenants/zbm/audits").json()}
         again = a.post("/kill-switches", {"request_id": rid(), "switch": "provider:web", "engaged": False},
                        andre=True)
         check("after a restart the log re-verifies, every record survives, and the switch held until Andre released it",
               st["integrity"]["ok"] is True and audits.get(own_aid, {}).get("status") == "completed"
+              and audits.get(gsc_aid, {}).get("status") == "completed"
+              and audits.get(killed_aid, {}).get("status") == "completed"
               and st["kill_switches"]["providers"]["web"] is True
               and again.status_code == 200 and again.json()["providers"]["web"] is False)
         integ = a.get("/audit/integrity", caller="compliance_38").json()
@@ -431,8 +557,15 @@ def _main(work: Path) -> int:
                                "invoice_verification_overridden_by_andre", "audit_report_recorded",
                                "schedule_created"} <= set(types))
         reports = [x for x in mine_l if x["event_type"] == "audit_report_recorded"]
-        check("every completed audit (two one-off, one own and one client, plus one scheduled) has its report "
-              "recorded once", len({x["subject_id"] for x in reports}) == 3)
+        check("every completed audit (one own and one client one-off, one scheduled, two Search Console ones) has "
+              "its report recorded once", len({x["subject_id"] for x in reports}) == len(reports) == 5)
+        check("Search Console: the binding is a typed event; no read was ever started or recorded",
+              "tenant_gsc_property_set" in types and "gsc_read_started" not in types
+              and "gsc_read_recorded" not in types)
+        outbound = trap_out.read_text() if trap_out.exists() else ""
+        check("no service process looked up or connected to anything but 127.0.0.1 (audit hook)", outbound == "")
+        if outbound:
+            say(f"outbound attempts recorded: {outbound[:500]}")
         blob = json.dumps(mine_l)
         check("no domain, NAP, Finance client id or page content in the clear in seo's ledger events",
               OWN_DOMAIN not in blob and CLIENT_DOMAIN not in blob and "5318 East 2nd" not in blob

@@ -39,9 +39,9 @@ log = logging.getLogger("seo.audits")
 REPORT_VERSION = "seo-audit-report/1"
 _PATH_OK = re.compile(r"/[\x21-\x7e]{0,500}")
 GLOBAL_LIMITS = [
-    "Wave 1 reads public pages only. First-party truth (Search Console, Bing Webmaster Tools, server logs, analytics, "
-    "CRM) is NOT_CONNECTED, so nothing here is paired with qualified traffic, conversions or revenue, and no finding "
-    "claims a business effect (credit is not causation).",
+    "Wave 1 reads public pages only. First-party truth (Bing Webmaster Tools, analytics, CRM; Search Console unless "
+    "the search_performance section says it was read) is NOT_CONNECTED, so nothing here is paired with qualified "
+    "traffic, conversions or revenue, and no finding claims a business effect (credit is not causation).",
     "Observations are from one network location at one time (search-truth drift: a later run may differ because the "
     "site changed, because a measurement failed, or because an engine changed).",
     "No single visibility score is produced; per-engine readiness is an uncalibrated heuristic checklist.",
@@ -54,7 +54,9 @@ NOT_CONNECTED_WHY = {
     "render": "no headless renderer is wired (raw HTML only)",
     "answer_engines": "no answer-engine adapter is built; no engine was asked anything",
     "prompt_volume": "no prompt-volume source is chosen or built",
-    "first_party": "Search Console, Bing Webmaster, logs, analytics and CRM are not connected",
+    "first_party": "Bing Webmaster, analytics and CRM are not connected; Search Console only when a service-account "
+                   "key is configured AND Andre bound the tenant's property (see search_performance); server logs "
+                   "only as client uploads",
     "zero_day / orca_publish": "ports only in Wave 1 (founder-pending flag 5)",
     "clientfix": "fix execution is Department 28's, not in Wave 1",
 }
@@ -204,9 +206,10 @@ class AuditsMixin:
                     return self.audit_view(tid, aid)
                 rsha = sha(report)
                 self._commit("audit_completed", {"audit_id": aid, "report": report, "report_sha256": rsha},
-                             "seo", evidence=("audit_report_recorded", f"audit:{aid}",
-                                              {"audit_id": aid, "report_sha256": rsha, "outcome": report["outcome"],
-                                               "findings": report["summary"]["findings"]}, ("report", aid)))
+                             "seo", evidence=[("audit_report_recorded", f"audit:{aid}",
+                                               {"audit_id": aid, "report_sha256": rsha, "outcome": report["outcome"],
+                                                "findings": report["summary"]["findings"]}, ("report", aid))]
+                             + self.gsc_evidence(aid, report))
                 return self.audit_view(tid, aid)
         finally:
             with self.lock:
@@ -256,15 +259,21 @@ class AuditsMixin:
                           lambda: probes.run_callum(self.ports.engines, ps, body["domain"],
                                                     self.settings.probe_samples, ctx.guard, o)))
         envs.append(_step(ctx, "naomi", "prompt_volume", lambda: probes.run_naomi(self.ports.prompt_volume, ps)))
+        # Osei's first-party step: Search Console for the tenant's bound property (svc_gsc.py; NOT_CONNECTED
+        # without a service-account key, and then no outbound call is made)
+        gsc_box: dict = {}
+        envs.append(_step(ctx, "osei", "search_performance", lambda: self._gsc_section(aid, tid, ctx.guard, gsc_box)))
+        if envs[-1]["outcome"] in ("KILLED", "RESTRICTED") and "state" not in gsc_box:
+            gsc_box["state"] = {"outcome": envs[-1]["outcome"], "reason": envs[-1]["reason"]}
         # Osei's data-hygiene step (AEGIS 1472041 M2): a restricted Osei reports nothing. The parsers' own fail-closed
         # quarantine of malformed input still applies (refusing bad input is not Osei's judgement).
         envs.append(_step(ctx, "osei", "data_hygiene", lambda: envelope(
             "osei", "data_hygiene", "OK", [], facts=o.summary(), limitations=[],
             methodology="every quarantined input with reason, size and SHA-256; every observation with its time and "
                         "refresh tier")))
-        return self._report(aid, tid, body, ps, envs, o, started, pages)
+        return self._report(aid, tid, body, ps, envs, o, started, pages, gsc_box)
 
-    def _report(self, aid, tid, body, ps, envs, o, started, pages) -> dict:
+    def _report(self, aid, tid, body, ps, envs, o, started, pages, gsc_box=None) -> dict:
         all_findings = [f for e in envs for f in e["findings"]]
         by: dict = {"severity": {}, "decision": {}, "data_class": {}, "capability": {}}
         for f in all_findings:
@@ -274,7 +283,8 @@ class AuditsMixin:
         return {
             "report_version": REPORT_VERSION, "audit_id": aid, "tenant_id": tid, "domain": body["domain"],
             "scheme": body["scheme"], "paths": list(body["paths"]), "started_at": started,
-            "finished_at": iso(self.now()), "outcome": worst_outcome(e["outcome"] for e in envs),
+            "finished_at": iso(self.now()), "outcome": overall_outcome(envs),
+            "outcome_rule": OUTCOME_RULE,
             "agents": envs,
             "summary": {"findings": len(all_findings), **by, "agent_outcomes": {e["agent"]: e["outcome"] for e in envs}},
             "pages": {p: {"fetch": v["fetch"].summary(), "render_state": v["render"]["state"],
@@ -286,7 +296,9 @@ class AuditsMixin:
             "not_connected": nc, "not_connected_why": dict(NOT_CONNECTED_WHY),
             "limitations": GLOBAL_LIMITS + sorted({lim for e in envs for lim in e["limitations"]}),
             "legend": LEGEND,
-            "data_hygiene": next((e["facts"] for e in envs if e["agent"] == "osei" and e["outcome"] == "OK"), None),
+            "data_hygiene": next((e["facts"] for e in envs if e["agent"] == "osei" and e["task"] == "data_hygiene"
+                                  and e["outcome"] == "OK"), None),
+            "search_performance": self.gsc_report_block(gsc_box or {}),
             "prompt_set": None if ps is None else {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"],
                                                    "sha256": ps["sha256"]},
             "untrusted_content_rule": "every string quoted from a crawled page or an answer engine is data marked "
@@ -302,7 +314,7 @@ class AuditsMixin:
             if a["status"] == "running" and aid not in self.running_audits:
                 out["status"] = "running_elsewhere_or_interrupted"
             if full:
-                out["report"] = a["report"]
+                out["report"] = self.gsc_retained(a["report"], a.get("completed_at"))
             return out
 
     def drift_view(self, tid: str, aid: str, against: str) -> dict:
@@ -339,6 +351,18 @@ class AuditsMixin:
                              evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid}, ("interrupted", aid)))
                 n += 1
         return {"interrupted": n}
+
+
+# AEGIS gl-gsc M2 (ADR 0017 GSC-7): the Search Console section keeps its own outcome inside its section and is left
+# out of the audit's overall outcome. A kill switch on provider:gsc, a spent read budget or a Google outage is about
+# Google, not about the audited site, and must not relabel the whole audit KILLED / BLOCKED / FAILED.
+OUTSIDE_OVERALL = frozenset({("osei", "search_performance")})
+OUTCOME_RULE = ("the worst outcome over every agent's envelope except Osei's search_performance (Search Console), "
+                "whose outcome stays inside its own section")
+
+
+def overall_outcome(envs: list) -> str:
+    return worst_outcome(e["outcome"] for e in envs if (e["agent"], e["task"]) not in OUTSIDE_OVERALL)
 
 
 def _step(ctx, agent: str, task: str, fn):
