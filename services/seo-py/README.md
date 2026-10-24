@@ -5,8 +5,9 @@ core, machine readability, the AI-visibility probe framework and minimal proof, 
 then sold as a paid audit. Architecture, the eight founder-pending defaults, what Wave 1 does and does not do, the
 port list and the limitations: `docs/adr/0017-seo-answer-intelligence-department-architecture.md`.
 
-**Status:** built and tested (count: `docs/test-counts.md`); not in force. The only connected port is the web
-fetcher. Rendering, every answer engine (OpenAI, Anthropic, Google, Perplexity), prompt volume, all first-party
+**Status:** built and tested (count: `docs/test-counts.md`); not in force. The connected ports are the web
+fetcher and, once Andre installs a key and budgets (ADR 0017 Wave 4), the Perplexity answer engine. Rendering, the
+other answer engines (OpenAI, Anthropic, Google), prompt volume, all first-party
 sources (Search Console, Bing Webmaster Tools, logs, analytics, CRM), Zero-Day, ORCA Publish and Department 28
 clientfix are `NOT_CONNECTED` ports: they answer `NOT_CONNECTED`, never invented data, and setting any of their
 switches refuses start. This service never charges anyone and never calls Stripe.
@@ -80,6 +81,14 @@ worker. Exit 1 on any new MUST failure or ERROR.
 | `SEO_INVOICE_VERIFICATION` | `finance` | `finance`: a paying client's audit or schedule runs only when Finance (31) confirms its invoice is paid, Z Best Media's, this tenant's Finance client's, not refunded and not used before (ADR 0017 W3-2); `trust`: the Wave 1/2 behaviour (the id is not checked), shown in `/status` |
 | `SEO_FINANCE_URL`, `SEO_FINANCE_TOKEN`, `SEO_FINANCE_CALLER_TOKEN` | unset | Finance (31)'s base URL, its service token and this service's `seo_02` caller token there (all three or none). Unset with `finance`: every paid run is refused `FINANCE_NOT_CONFIGURED` unless Andre overrides |
 | `SEO_FINANCE_TIMEOUT_SECONDS` | `5` | per-attempt timeout of the invoice lookup (1..30); at most three attempts within one overall deadline |
+| `SEO_PERPLEXITY_API_KEY_FILE` | unset | Wave 4: the Perplexity API key in a file (regular file owned by the service user, mode 0600/0400, no symlink). Unset (and no `SEO_PERPLEXITY_API_KEY`): the Perplexity engine is `NOT_CONNECTED` and the service starts as before |
+| `SEO_PERPLEXITY_API_KEY` | unset | the same key as a plain variable, for platforms without secret files (Railway service variables). Setting both refuses start. The key is never logged, shown, recorded or reported (`/status` shows only `key_source`: `file` or `env`) |
+| `SEO_PERPLEXITY_MODEL` | `sonar` | closed allowlist: `sonar` (the general Sonar model) or `sonar-pro`; anything else refuses start |
+| `SEO_PERPLEXITY_TIMEOUT_SECONDS` | `30` | the hard overall deadline of one question (5..120): DNS, connect, TLS, every read and write, the body, and every retry |
+| `SEO_PERPLEXITY_MAX_ATTEMPTS` | `3` | requests per question (1..3); retries only on 429, 5xx and transport errors, `Retry-After` honoured within the deadline |
+| `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD` | `0`, `0` | the global daily budget (UTC day) in requests and US dollars. **0 = OFF: no request is made** (fail closed) |
+| `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | `0`, `0` | the same per tenant. All four must be above 0 before Perplexity is ever asked anything |
+| `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | `0.05` | what each request reserves against the spend budgets before it is sent (0.001..5), and what it costs when Perplexity reports no cost |
 | `SEO_BIND_ADDR` / `SEO_PORT` | `127.0.0.1` / `8500` | where the API listens |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | the evidence ledger; unset = every write refused (fail closed) |
@@ -88,7 +97,7 @@ The fetcher only ever connects to ports 80 and 443, accepts at most one content 
 within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SECONDS`) over the whole fetch.
 
 **Not built — setting any of these refuses start:** `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`,
-`SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_PERPLEXITY_API_KEY_FILE`,
+`SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,
 `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL`.
 

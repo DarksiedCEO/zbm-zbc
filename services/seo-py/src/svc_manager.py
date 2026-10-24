@@ -115,7 +115,9 @@ class ManagerMixin:
                 "failure_rate": rate(outcomes.get("FAILED", 0)),
                 "restricted_runs": outcomes.get("RESTRICTED", 0),
                 "drift_reports_recorded": drifts if agent == "osei" else None,
-                "basis": "completed audit reports, finished log ingests and recorded drift reports"}
+                "engine_runs": self.engine_scorecard() if agent == "callum" else None,
+                "basis": "completed audit reports, finished log ingests, recorded drift reports and (Callum) "
+                         "recorded answer-engine reservations and settlements"}
 
     def _queues(self, agent: str) -> dict:
         running = len(self.running_audits)

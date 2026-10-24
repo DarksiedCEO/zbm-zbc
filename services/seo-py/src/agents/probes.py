@@ -16,19 +16,26 @@ Callum's classes, per engine and prompt (from the answers actually sampled):
   INSUFFICIENT_EVIDENCE fewer than 3 usable answers (refusals / errors)
   ABSENT                neither mentioned nor cited and no sources cited at all
 
-Provider text is DATA: it is scanned for brand terms and URLs, never followed as an instruction. Without a connected
-provider port (Wave 1: none is built) an engine's outcome is NOT_CONNECTED and there are no findings for it — never
-an invented answer.
+Provider text is DATA: it is scanned for brand terms and URLs, never followed as an instruction, and dropped; the report
+keeps its SHA-256, the cited hosts (bounded), whether the tenant's site was cited and at which position. Without a
+connected provider port an engine's outcome is NOT_CONNECTED and there are no findings for it — never an invented
+answer. Wave 4 (ADR 0017 W4): the Perplexity adapter is METERED — asked only inside a budget reservation the service
+records first — and its citations are structured only (URLs in its text are not citations). A tenant domain matches
+by exact host or subdomain, IDNA-aware; a lookalike host is counted as such and never as the tenant.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from typing import Optional
 from urllib.parse import urlsplit
 
+from agents import domain_match
+from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed
+from perplexity import STOP_CODES, EngineError
 from ports import NOT_CONNECTED, ProviderAnswer
 from primitives import Killed
 
@@ -59,9 +66,12 @@ def wilson(k: int, n: int) -> Optional[list]:
 
 
 def extract_citations(ans: ProviderAnswer) -> list:
-    """Callum's extraction: the provider's structured citations, then URLs in the text. [{"url","host","via"}]."""
+    """Callum's extraction: the provider's structured citations, then (only for an adapter without structured
+    citations, ``cite_from_text``) URLs in the text. [{"url","host","via","position"}], position 1-based in the
+    provider's own citation order (structured first)."""
     out, seen = [], set()
-    for via, items in (("structured", ans.citations or []), ("text", _URL.findall(ans.text or "")[:200])):
+    text_items = _URL.findall(ans.text or "")[:200] if getattr(ans, "cite_from_text", True) else []
+    for via, items in (("structured", ans.citations or []), ("text", text_items)):
         for u in items[:200]:
             if not isinstance(u, str):
                 continue
@@ -72,12 +82,13 @@ def extract_citations(ans: ProviderAnswer) -> list:
                 continue
             if host and u not in seen:
                 seen.add(u)
-                out.append({"url": u[:500], "host": host, "via": via})
+                out.append({"url": u[:500], "host": host[:253], "via": via, "position": len(out) + 1})
     return out
 
 
 def _on_site(host: str, domain: str) -> bool:
-    return host == domain or host.endswith("." + domain) or ("www." + host) == domain
+    """Exact host or subdomain (with the www. twin), IDNA-aware, never by substring (agents/domain_match.py)."""
+    return domain_match.on_site(host, domain)
 
 
 def _mentioned(text: str, terms: list) -> bool:
@@ -90,80 +101,166 @@ def _valid_answer(a) -> bool:
         and isinstance(a.text, str) and isinstance(a.citations, list)
 
 
-def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard, osei) -> dict:
-    """All prompts of the set on one engine. Returns {"outcome", "prompts": [...], "model_versions": [...]}."""
+def _answer_hash(a: ProviderAnswer) -> str:
+    if isinstance(a.answer_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", a.answer_sha256):
+        return a.answer_sha256
+    return hashlib.sha256((a.text or "").encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard, osei, budget=None) -> dict:
+    """All prompts of the set on one engine. Returns {"outcome", "reason", "prompts": [...], "model_versions": [...],
+    "usage": {...}}. A METERED port (a real adapter that costs money: Perplexity) is asked only inside a budget
+    reservation recorded first (``budget``: the service's hook; without one nothing is asked)."""
     if port is None or not getattr(port, "connected", False):
         return {"engine": engine, "outcome": NOT_CONNECTED, "prompts": []}
+    metered = bool(getattr(port, "metered", False))
+    takes_guard = bool(getattr(port, "accepts_guard", False))
+    attempts = int(getattr(port, "attempts", 1) or 1)
+    if metered and budget is None:
+        return {"engine": engine, "outcome": "BLOCKED", "reason": "ENGINE_BUDGET_EXHAUSTED", "prompts": [],
+                "usage": None}
+    run = budget.open(engine, getattr(port, "model", None)) if metered else None
     results, versions = [], set()
     competitors = set(prompt_set.get("competitor_domains") or [])
-    for pi, prompt in enumerate(prompt_set["prompts"]):
-        tally = {"answers": 0, "refusals": 0, "errors": 0, "malformed": 0, "mentioned": 0, "cited": 0}
-        other_hosts: dict = {}
-        sample_versions = set()
-        injection_like = 0
-        for _ in range(n):
-            guard(capability="ai_probe", provider=engine)
-            try:
-                a = port.ask(prompt)
-            except Killed:
-                raise
-            except Exception:                         # a provider failure is counted, never raised
-                tally["errors"] += 1
+    stop: Optional[str] = None
+    answers_total = 0
+    try:
+        for pi, prompt in enumerate(prompt_set["prompts"]):
+            if stop is not None:
+                break
+            pd = personal_data(prompt)
+            if pd is not None:                         # never sent; the report does not quote it either
+                results.append(_refused_prompt(pi, n, pd))
                 continue
-            if not _valid_answer(a):
-                tally["malformed"] += 1
-                osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
-                continue
-            if a.status == NOT_CONNECTED:
-                return {"engine": engine, "outcome": NOT_CONNECTED, "prompts": []}
-            sample_versions.add(f"{a.model or '?'}@{a.model_version or '?'}")
-            if a.status == "REFUSAL":
-                tally["refusals"] += 1
-                continue
-            if a.status == "ERROR":
-                tally["errors"] += 1
-                continue
-            tally["answers"] += 1
-            if re.search(r"ignore (all |any )?(previous|prior) instructions|system prompt", a.text or "", re.I):
-                injection_like += 1                   # reported as data; changes nothing
-            cites = extract_citations(a)
-            if _mentioned(a.text, prompt_set["brand_terms"]):
-                tally["mentioned"] += 1
-            if any(_on_site(c["host"], domain) for c in cites):
-                tally["cited"] += 1
-            for c in cites:
-                if not _on_site(c["host"], domain):
-                    other_hosts[c["host"]] = other_hosts.get(c["host"], 0) + 1
-        versions |= sample_versions
-        k = tally["answers"]
-        rate_m = tally["mentioned"] / k if k else None
-        rate_c = tally["cited"] / k if k else None
-        if k < MIN_USABLE:
-            cls = "INSUFFICIENT_EVIDENCE"
-        elif rate_c is not None and rate_c >= 0.5:
-            cls = "STRENGTH"
-        elif tally["mentioned"] and not tally["cited"]:
-            cls = "MENTIONED_NOT_CITED"
-        elif not tally["mentioned"] and not tally["cited"] and other_hosts:
-            cls = "OPPORTUNITY"
-        elif not tally["mentioned"] and not tally["cited"]:
-            cls = "ABSENT"
-        else:
-            cls = "PARTIAL_CITATION"
-        top = sorted(other_hosts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
-        results.append({
-            "prompt_index": pi, "prompt": observed(prompt, 500), "samples": n, **tally,
-            "mention_rate": None if rate_m is None else round(rate_m, 4), "mention_ci95": wilson(tally["mentioned"], k),
-            "citation_rate": None if rate_c is None else round(rate_c, 4), "citation_ci95": wilson(tally["cited"], k),
-            "citation_variance": None if rate_c is None else round(rate_c * (1 - rate_c), 4),
-            "class": cls, "other_sources": [{"host": h, "answers": c, "competitor": h in competitors or any(
-                _on_site(h, d) for d in competitors)} for h, c in top],
-            "model_versions": sorted(sample_versions), "mixed_model_versions": len(sample_versions) > 1,
-            "injection_like_answers": injection_like})
-    return {"engine": engine, "outcome": "OK", "prompts": results, "model_versions": sorted(versions)}
+            meter = None
+            if run is not None:
+                try:
+                    meter = run.reserve(pi, n * attempts)      # recorded first; raises when over budget
+                except EngineError as e:
+                    stop = e.code
+                    break
+            tally = {"answers": 0, "refusals": 0, "errors": 0, "malformed": 0, "mentioned": 0, "cited": 0,
+                     "lookalike_citations": 0}
+            errors_by: dict = {}
+            other_hosts: dict = {}
+            sample_versions = set()
+            injection_like = 0
+            positions: list = []
+            hashes: list = []
+            for _ in range(n):
+                guard(capability="ai_probe", provider=engine)
+                try:
+                    a = port.ask(prompt, guard=guard, meter=meter) if takes_guard else port.ask(prompt)
+                except Killed:
+                    raise
+                except EngineError as e:
+                    tally["errors"] += 1
+                    errors_by[e.code] = errors_by.get(e.code, 0) + 1
+                    if e.code == "ENGINE_KILLED":
+                        raise Killed(e.detail if e.detail and e.detail.startswith("KILLED_") else
+                                     "KILLED_PROVIDER") from None
+                    if e.code == "ENGINE_PROTOCOL_ERROR":
+                        osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
+                    if e.code in STOP_CODES:
+                        stop = e.code
+                        break
+                    continue
+                except Exception:                         # a provider failure is counted, never raised
+                    tally["errors"] += 1
+                    continue
+                if not _valid_answer(a):
+                    tally["malformed"] += 1
+                    osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
+                    continue
+                if a.status == NOT_CONNECTED:
+                    return {"engine": engine, "outcome": NOT_CONNECTED, "prompts": []}
+                sample_versions.add(f"{a.model or '?'}@{a.model_version or '?'}")
+                if a.status == "REFUSAL":
+                    tally["refusals"] += 1
+                    continue
+                if a.status == "ERROR":
+                    tally["errors"] += 1
+                    continue
+                tally["answers"] += 1
+                hashes.append(_answer_hash(a))
+                if re.search(r"ignore (all |any )?(previous|prior) instructions|system prompt", a.text or "", re.I):
+                    injection_like += 1                   # reported as data; changes nothing
+                cites = extract_citations(a)
+                if _mentioned(a.text, prompt_set["brand_terms"]):
+                    tally["mentioned"] += 1
+                pos = None
+                for c in cites:
+                    m = domain_match.match(c["host"], domain)
+                    if m in (domain_match.EXACT, domain_match.SUBDOMAIN):
+                        pos = c["position"] if pos is None else pos
+                    elif m == domain_match.LOOKALIKE:
+                        tally["lookalike_citations"] += 1
+                    else:
+                        other_hosts[c["host"]] = other_hosts.get(c["host"], 0) + 1
+                positions.append(pos)
+                if pos is not None:
+                    tally["cited"] += 1
+            versions |= sample_versions
+            answers_total += tally["answers"]
+            results.append(_prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions,
+                                          injection_like, positions, hashes))
+    finally:
+        usage = run.settle(answers_total, stop) if run is not None else None
+    asked = len(results)
+    if stop is None:
+        outcome = "OK"
+    elif answers_total:
+        outcome = "PARTIAL"
+    else:
+        outcome = {"ENGINE_BUDGET_EXHAUSTED": "BLOCKED", "ENGINE_NOT_CONNECTED": NOT_CONNECTED}.get(stop, "FAILED")
+    return {"engine": engine, "outcome": outcome, "reason": stop, "prompts": results,
+            "prompts_not_asked": len(prompt_set["prompts"]) - asked, "model_versions": sorted(versions),
+            "usage": usage}
 
 
-def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard, osei) -> dict:
+def _refused_prompt(pi: int, n: int, kind: str) -> dict:
+    return {"prompt_index": pi, "prompt": None, "prompt_refused": f"personal_data:{kind}", "samples": 0,
+            "answers": 0, "refusals": 0, "errors": 0, "malformed": 0, "mentioned": 0, "cited": 0,
+            "lookalike_citations": 0, "errors_by_reason": {}, "mention_rate": None, "mention_ci95": None,
+            "citation_rate": None, "citation_ci95": None, "citation_variance": None, "class": "INSUFFICIENT_EVIDENCE",
+            "other_sources": [], "model_versions": [], "mixed_model_versions": False, "injection_like_answers": 0,
+            "cited_positions": [], "best_position": None, "answers_sha256": []}
+
+
+def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions, injection_like,
+                   positions, hashes) -> dict:
+    k = tally["answers"]
+    rate_m = tally["mentioned"] / k if k else None
+    rate_c = tally["cited"] / k if k else None
+    if k < MIN_USABLE:
+        cls = "INSUFFICIENT_EVIDENCE"
+    elif rate_c is not None and rate_c >= 0.5:
+        cls = "STRENGTH"
+    elif tally["mentioned"] and not tally["cited"]:
+        cls = "MENTIONED_NOT_CITED"
+    elif not tally["mentioned"] and not tally["cited"] and other_hosts:
+        cls = "OPPORTUNITY"
+    elif not tally["mentioned"] and not tally["cited"]:
+        cls = "ABSENT"
+    else:
+        cls = "PARTIAL_CITATION"
+    top = sorted(other_hosts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+    cited_at = [p for p in positions if p is not None]
+    return {
+        "prompt_index": pi, "prompt": observed(prompt, 500), "samples": n, **tally,
+        "errors_by_reason": dict(sorted(errors_by.items())),
+        "mention_rate": None if rate_m is None else round(rate_m, 4), "mention_ci95": wilson(tally["mentioned"], k),
+        "citation_rate": None if rate_c is None else round(rate_c, 4), "citation_ci95": wilson(tally["cited"], k),
+        "citation_variance": None if rate_c is None else round(rate_c * (1 - rate_c), 4),
+        "class": cls, "other_sources": [{"host": h, "answers": c, "competitor": h in competitors or any(
+            _on_site(h, d) for d in competitors)} for h, c in top],
+        "model_versions": sorted(sample_versions), "mixed_model_versions": len(sample_versions) > 1,
+        "injection_like_answers": injection_like,
+        "cited_positions": positions[:50], "best_position": min(cited_at) if cited_at else None,
+        "answers_sha256": hashes[:50]}
+
+
+def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard, osei, budget=None) -> dict:
     if prompt_set is None:
         return envelope(AGENT_CALLUM, "citation_sources", "INSUFFICIENT_EVIDENCE", [],
                         methodology="No prompt set was given for this audit; no engine was asked anything.",
@@ -173,7 +270,7 @@ def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, g
     per_engine, findings, not_connected = {}, [], set()
     try:
         for eng in prompt_set["engines"]:
-            r = probe_engine(eng, engines.get(eng), prompt_set, domain, n, guard, osei)
+            r = probe_engine(eng, engines.get(eng), prompt_set, domain, n, guard, osei, budget)
             per_engine[eng] = r
             if r["outcome"] == NOT_CONNECTED:
                 not_connected.add(f"answer_engine:{eng}")
@@ -187,13 +284,22 @@ def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, g
     except Killed as k:
         return envelope(AGENT_CALLUM, "citation_sources", "KILLED", [], methodology=methodology, limitations=LIMITS,
                         reason=k.code, facts={"engines": {e: {"outcome": v["outcome"]} for e, v in per_engine.items()}})
-    connected = [e for e, r in per_engine.items() if r["outcome"] == "OK"]
-    if not connected:
+    observed_ = [e for e, r in per_engine.items() if r["outcome"] in ("OK", "PARTIAL")]
+    stopped = {e: r for e, r in per_engine.items() if r["outcome"] in ("BLOCKED", "FAILED")}
+    for e, r in stopped.items():
+        findings.append(finding("ENGINE_RUN_STOPPED", "low", "measured", "WATCH", capability="P4",
+                                detail={"engine": e, "reason": r.get("reason"), "outcome": r["outcome"]}))
+    if not observed_ and stopped:
+        e, r = sorted(stopped.items())[0]
+        return envelope(AGENT_CALLUM, "citation_sources", r["outcome"], findings, methodology=methodology,
+                        limitations=LIMITS, not_connected=not_connected, reason=r.get("reason"),
+                        facts={"prompt_set": _ps_ref(prompt_set), "samples_per_prompt": n, "engines": per_engine})
+    if not observed_:
         return envelope(AGENT_CALLUM, "citation_sources", "NOT_CONNECTED", [], methodology=methodology,
                         limitations=LIMITS, not_connected=not_connected,
                         reason="no answer-engine port is connected; no engine was asked anything",
                         facts={"prompt_set": _ps_ref(prompt_set), "engines": {e: "NOT_CONNECTED" for e in per_engine}})
-    outcome = "OK" if len(connected) == len(per_engine) else "PARTIAL"
+    outcome = "OK" if all(per_engine[e]["outcome"] == "OK" for e in per_engine) else "PARTIAL"
     return envelope(AGENT_CALLUM, "citation_sources", outcome, findings, methodology=methodology, limitations=LIMITS,
                     not_connected=not_connected, facts={"prompt_set": _ps_ref(prompt_set), "samples_per_prompt": n,
                                                         "engines": per_engine})

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from agents import RunContext, bots, delia, entity_check, osei, probes, roman, selene
+from agents.prompt_guard import personal_data
 from clock import iso
 from envelope import CAPABILITIES, DATA_CLASSES, DECISIONS, EFFECT_CLASSES, envelope, sha, worst_outcome
 from errors import Conflict, Forbidden, Invalid, NotFound
@@ -52,7 +53,8 @@ LEGEND = {"data_classes": list(DATA_CLASSES), "effect_classes": list(EFFECT_CLAS
                   "(no effect is claimed)"}
 NOT_CONNECTED_WHY = {
     "render": "no headless renderer is wired (raw HTML only)",
-    "answer_engines": "no answer-engine adapter is built; no engine was asked anything",
+    "answer_engines": "an engine without an adapter (OpenAI, Anthropic, Google) or without a key (Perplexity) is "
+                      "NOT_CONNECTED; it was asked nothing",
     "prompt_volume": "no prompt-volume source is chosen or built",
     "first_party": "Search Console, Bing Webmaster, logs, analytics and CRM are not connected",
     "zero_day / orca_publish": "ports only in Wave 1 (founder-pending flag 5)",
@@ -69,6 +71,8 @@ class AuditsMixin:
         if any(not t for t in terms) or any(not p for p in prompts) or len(set(prompts)) != len(prompts) \
                 or any(any(ord(c) < 0x20 for c in s) for s in terms + prompts):
             raise Invalid(R("PROMPT_SET_INVALID"))
+        if any(personal_data(p) for p in prompts):         # W4-3: prompts sent to an engine carry no personal data
+            raise Invalid(R("PROMPT_PERSONAL_DATA"))
         content = {"name": body["name"], "brand_terms": terms, "competitor_domains": sorted(body["competitor_domains"]),
                    "prompts": prompts, "engines": sorted(set(body["engines"]))}
         with self.lock:
@@ -254,7 +258,8 @@ class AuditsMixin:
                           lambda: entity_check.run(ctx, pages, self.entity_for_tenant(tid))))
         envs.append(_step(ctx, "callum", "citation_sources",
                           lambda: probes.run_callum(self.ports.engines, ps, body["domain"],
-                                                    self.settings.probe_samples, ctx.guard, o)))
+                                                    self.settings.probe_samples, ctx.guard, o,
+                                                    self.engine_budget(tid, aid, ps))))
         envs.append(_step(ctx, "naomi", "prompt_volume", lambda: probes.run_naomi(self.ports.prompt_volume, ps)))
         # Osei's data-hygiene step (AEGIS 1472041 M2): a restricted Osei reports nothing. The parsers' own fail-closed
         # quarantine of malformed input still applies (refusing bad input is not Osei's judgement).

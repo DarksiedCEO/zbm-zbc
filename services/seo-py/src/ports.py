@@ -6,7 +6,10 @@ built for real in Wave 1 is the web fetcher (primitives/fetch.py: SSRF-safe, rob
 named NOT_CONNECTED port, and config.NOT_BUILT refuses to start if one is "selected" by environment.
 
   render                 headless rendering (separate from fetch, explicit states)
-  answer_engines         openai, anthropic, google, perplexity (flag 1: Perplexity included)
+  answer_engines         openai, anthropic, google, perplexity (flag 1: Perplexity included). Perplexity has a real
+                         adapter since Wave 4 (perplexity.py): connected only when an API key is configured
+                         (SEO_PERPLEXITY_API_KEY_FILE, or SEO_PERPLEXITY_API_KEY on Railway); without one it is
+                         NOT_CONNECTED and the service starts as before. The other three stay NOT_CONNECTED.
   prompt_volume          Naomi's prompt-volume source
   first_party            Search Console, Bing Webmaster, server logs, analytics, CRM
   zero_day, orca_publish flag 5: ports only
@@ -29,13 +32,22 @@ FIRST_PARTY = ("search_console", "bing_webmaster", "server_logs", "analytics", "
 
 @dataclass
 class ProviderAnswer:
-    """One sampled answer from an answer engine. ``status``: ANSWER, REFUSAL, ERROR or NOT_CONNECTED."""
+    """One sampled answer from an answer engine. ``status``: ANSWER, REFUSAL, ERROR or NOT_CONNECTED.
+
+    ``cite_from_text``: whether URLs written in the answer text count as citations (an adapter with structured
+    citations, Perplexity, sets False: a URL the model wrote — or a crawled page talked it into writing — is not a
+    citation). ``usage`` (tokens, cost as a Decimal string), ``answer_sha256`` and ``finish_reason`` are what an
+    adapter measured; the text itself is scanned by the probe framework and never stored."""
 
     status: str
     text: str = ""
     citations: list = field(default_factory=list)
     model: Optional[str] = None
     model_version: Optional[str] = None
+    cite_from_text: bool = True
+    usage: Optional[dict] = None
+    answer_sha256: Optional[str] = None
+    finish_reason: Optional[str] = None
 
 
 class NotConnectedEngine:
@@ -154,6 +166,16 @@ class DnsBotVerifier:
         return "verified" if ok else "failed"
 
 
+def perplexity_engine(settings):
+    """The Perplexity port for these settings: the adapter when a key is configured, NOT_CONNECTED otherwise."""
+    import perplexity
+    key = getattr(settings, "perplexity_key", None)
+    if key is None:
+        return perplexity.NotConnectedPerplexity()
+    return perplexity.PerplexityEngine(key, model=settings.perplexity_model, timeout_s=settings.perplexity_timeout_s,
+                                       attempts=settings.perplexity_attempts)
+
+
 @dataclass
 class Ports:
     fetcher: object = None
@@ -172,14 +194,16 @@ class Ports:
         from finance_client import FinanceClient, NotConnectedFinance
         fetcher = None
         finance = NotConnectedFinance()
+        engines = {n: NotConnectedEngine(n) for n in ANSWER_ENGINES}
         if settings is not None:
+            engines["perplexity"] = perplexity_engine(settings)
             from primitives.fetch import Fetcher
             fetcher = Fetcher.from_settings(settings)
             if settings.finance_url:
                 finance = FinanceClient(settings.finance_url, settings.finance_token, settings.finance_caller_token,
                                         timeout_s=settings.finance_timeout_s)
         return cls(fetcher=fetcher, renderer=NotConnectedRenderer(),
-                   engines={n: NotConnectedEngine(n) for n in ANSWER_ENGINES},
+                   engines=engines,
                    prompt_volume=NotConnectedSource("prompt_volume"),
                    first_party={n: NotConnectedSource(n) for n in FIRST_PARTY},
                    zero_day=NotConnectedSource("zero_day"), orca_publish=NotConnectedSource("orca_publish"),
@@ -198,6 +222,16 @@ class Ports:
                 "zero_day": st(self.zero_day), "orca_publish": st(self.orca_publish), "clientfix": st(self.clientfix),
                 "bot_dns_verification": st(self.bot_verifier), "bot_ip_range_verification": NOT_CONNECTED,
                 "finance": st(self.finance)}
+
+    def engine_details(self) -> dict:
+        """What /status shows of each answer engine: state, model, limits and the key's SOURCE (file or env), never
+        the key."""
+        out = {}
+        for n, p in self.engines.items():
+            d = getattr(p, "describe", None)
+            out[n] = d() if callable(d) else {"state": "connected" if getattr(p, "connected", False)
+                                              else NOT_CONNECTED}
+        return out
 
     def not_connected(self) -> list:
         s = self.status()
