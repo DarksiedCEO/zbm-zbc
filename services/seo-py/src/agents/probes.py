@@ -47,8 +47,10 @@ _URL = re.compile(r"https?://[^\s<>\"')\]]+")
 # reads "https://evil.test\\@site.test/" as host site.test while a browser goes to evil.test (AEGIS M2)
 _URL_REFUSED = re.compile(r"[\\\x00-\x20\x7f]")
 METHODOLOGY = ("Each prompt of prompt set {ps} v{ver} (sha256 {sha}) sent {n} times per engine. An answer is "
-               "'mentioned' when a brand term appears (case-insensitive, whole words) and 'cited' when a citation "
-               "(structured from the provider, or a URL in the text) is on {domain} or a subdomain. Rates exclude "
+               "'mentioned' when a brand term appears (case-insensitive, whole words) and 'cited' when a citation the "
+               "provider returned as structured data is on {domain} or a subdomain (IDNA-aware; lookalike hosts are "
+               "counted apart, never as {domain}). A URL written in an answer's text is not a citation, except for "
+               "an engine that returns no structured citations (Perplexity returns them). Rates exclude "
                "refusals and errors; intervals are 95% Wilson score intervals over usable answers. Classes: "
                "STRENGTH (cited in >= half), MENTIONED_NOT_CITED, OPPORTUNITY (others cited, not us), ABSENT, "
                "INSUFFICIENT_EVIDENCE (< {m} usable answers).")

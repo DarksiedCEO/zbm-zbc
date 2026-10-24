@@ -1080,3 +1080,10 @@ def test_l3_a_public_suffix_tenant_domain_is_refused_and_matches_nothing(tmp_pat
         h.refused(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": [ps]}, andre=True), 422,
                   "DOMAIN_INVALID")
     h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": ["acme.github.io"]}, andre=True))
+
+
+def test_l4_methodology_says_text_urls_are_not_citations_and_the_docstring_example_is_right():
+    m = probes.METHODOLOGY
+    assert "or a URL in the text" not in m and "A URL written in an answer's text is not a citation" in m
+    assert "xn--cme-5cd" in domain_match.__doc__ and "xn--cme-8cd" not in domain_match.__doc__
+    assert "xn--cme-5cd" == "аcme".encode("idna").decode()                       # Cyrillic а + "cme"
