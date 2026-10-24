@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 from agents import domain_match
 from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed
-from perplexity import STOP_CODES, EngineError
+from perplexity import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
 from ports import NOT_CONNECTED, ProviderAnswer
 from primitives import Killed
 
@@ -125,6 +125,9 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
     stop: Optional[str] = None
     stop_detail: Optional[str] = None
     answers_total = 0
+    errors_total = 0
+    errors_seen: dict = {}
+    protocol_run = 0                                    # consecutive ENGINE_PROTOCOL_ERRORs, across prompts
     try:
         for pi, prompt in enumerate(prompt_set["prompts"]):
             if stop is not None:
@@ -163,6 +166,12 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                         raise Killed(_switch_code(e)) from None
                     if e.code == "ENGINE_PROTOCOL_ERROR":
                         osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
+                        protocol_run += 1
+                        if protocol_run >= PROTOCOL_ERROR_STOP_AFTER:   # an unreadable shape: stop spending
+                            stop, stop_detail = e.code, "CONSECUTIVE_PROTOCOL_ERRORS"
+                            break
+                    else:
+                        protocol_run = 0
                     if e.code in STOP_CODES:
                         stop, stop_detail = e.code, e.detail
                         break
@@ -184,6 +193,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                     tally["errors"] += 1
                     continue
                 tally["answers"] += 1
+                protocol_run = 0
                 hashes.append(_answer_hash(a))
                 if re.search(r"ignore (all |any )?(previous|prior) instructions|system prompt", a.text or "", re.I):
                     injection_like += 1                   # reported as data; changes nothing
@@ -204,12 +214,22 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                     tally["cited"] += 1
             versions |= sample_versions
             answers_total += tally["answers"]
+            errors_total += tally["errors"] + tally["malformed"]
+            for code, k in errors_by.items():
+                errors_seen[code] = errors_seen.get(code, 0) + k
             results.append(_prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions,
                                           injection_like, positions, hashes))
+        if stop is None and not answers_total and errors_total:
+            # every request failed: never OK (AEGIS H2). The reason is the most frequent error code.
+            stop = sorted(errors_seen.items(), key=lambda kv: (-kv[1], kv[0]))[0][0] if errors_seen \
+                else "ENGINE_UNAVAILABLE"
+            stop_detail = "NO_ANSWERS"
     finally:
         usage = run.settle(answers_total, stop) if run is not None else None
     asked = len(results)
-    if stop is None:
+    if stop_detail == "NO_ANSWERS":
+        outcome = "FAILED"
+    elif stop is None:
         outcome = "OK"
     elif answers_total:
         outcome = "PARTIAL"

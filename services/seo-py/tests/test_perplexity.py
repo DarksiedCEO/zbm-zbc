@@ -122,8 +122,8 @@ def test_citations_come_from_citations_and_search_results_only():
         {"title": "t", "url": "https://b.test/2", "date": "2026-10-01", "last_updated": "2026-10-02", "snippet": "s",
          "source": "web"}, {"url": "https://a.test/1"}])))
     a = engine(f).ask("q?")
-    assert a.citations == ["https://a.test/1", "https://b.test/2"]
-    assert [c["host"] for c in probes.extract_citations(a)] == ["a.test", "b.test"]      # not site.test from text
+    assert a.citations == ["https://b.test/2", "https://a.test/1"]                       # search_results first
+    assert [c["host"] for c in probes.extract_citations(a)] == ["b.test", "a.test"]      # not site.test from text
 
 
 def test_the_model_allowlist_is_closed():
@@ -140,10 +140,16 @@ def test_the_model_allowlist_is_closed():
 @pytest.mark.parametrize("payload", [
     b"not json", b"{", b"[]", b"null", json.dumps(sonar())[:-1].encode(),
     b'{"id": "x", "id": "y"}',                                                      # duplicate keys
-    json.dumps({**sonar(), "surprise": 1}).encode(),                                # unknown top-level field
     json.dumps({**sonar(), "choices": [{"index": 0, "finish_reason": "stop", "message": {
-        "role": "assistant", "content": "x", "tool_calls": []}}]}).encode(),          # unknown nested field
-    json.dumps({k: v for k, v in sonar().items() if k != "citations"}).encode(),    # missing citations
+        "role": "assistant", "content": ["x"]}}]}).encode(),                          # answer text not a string
+    json.dumps({**sonar(), "choices": [{"index": 0, "message": {"role": "assistant"}}]}).encode(),  # no text
+    json.dumps({**sonar(), "search_results": [{"title": "t"}]}).encode(),           # a search result without url
+    json.dumps({**sonar(), "search_results": [{"url": 7}]}).encode(),               # a url that is not a string
+    json.dumps({**sonar(), "search_results": {"url": "https://a.test"}}).encode(),  # not a list
+    json.dumps({**sonar(), "model": 1}).encode(),
+    json.dumps({k: v for k, v in sonar().items() if k != "model"}).encode(),
+    json.dumps(sonar()).replace('"total_cost": 0.005132', '"total_cost": "0.005"').encode(),   # cost as a string
+    json.dumps({**sonar(), "usage": {**sonar()["usage"], "cost": {"request_cost": 0.005}}}).encode(),  # no total
     json.dumps({**sonar(), "choices": []}).encode(),
     json.dumps({**sonar(), "object": "response"}).encode(),
     json.dumps({**sonar(), "created": True}).encode(),                              # strict: a bool is not an int
@@ -151,7 +157,6 @@ def test_the_model_allowlist_is_closed():
     json.dumps({**sonar(), "citations": ["x"] * 101}).encode(),
     json.dumps(sonar()).replace('"total_cost": 0.005132', '"total_cost": NaN').encode(),
     json.dumps(sonar()).replace('"total_cost": 0.005132', '"total_cost": -1').encode(),
-    json.dumps(sonar()).replace('"request_cost"', '"bonus_cost"').encode(),         # unknown cost field
     json.dumps({**sonar(), "choices": [{"index": 0, "finish_reason": "stop", "message": {
         "role": "user", "content": "x"}}]}).encode(),
     b"\xff\xfe{}",
@@ -823,3 +828,97 @@ def test_h1_a_run_crossing_utc_midnight_books_each_reservation_on_its_own_day(tm
     assert h.ledger.of_type("engine_run_settled")[-1]["_payload"]["by_day"]["2026-10-25"]["calls"] == 3
     h2 = h.restart(**_midnight_env())
     assert h2.svc.engine_usage("perplexity", "2026-10-25")[0] == 3 and h2.svc.engine_usage("perplexity", "2026-10-24")[0] == 3
+
+
+SEARCH_RESULT = {"title": "t", "url": "https://site.test/p", "date": "2026-10-01", "last_updated": "2026-10-02",
+                 "snippet": "s", "source": "web", "place_metadata": None}
+
+
+@pytest.mark.parametrize("body", [
+    {k: v for k, v in sonar(search_results=[SEARCH_RESULT]).items() if k != "citations"},   # changelog May 2025
+    {**sonar(search_results=[SEARCH_RESULT]), "choices": [{"index": 0, "finish_reason": "stop", "message": {
+        "role": "assistant", "content": "x"}, "delta": {"role": "assistant", "content": ""}}]},
+    sonar(search_results=[{**SEARCH_RESULT, "id": 1}], effort="fast", preset="fast", images=[],
+          related_questions=["q"]),                                                  # documented, not read
+    {**sonar(search_results=[SEARCH_RESULT]), "choices": [{"finish_reason": "stop", "message": {
+        "role": "assistant", "content": "x"}}]},                                     # the examples elide index
+    {**sonar(search_results=[SEARCH_RESULT]), "usage": {**sonar()["usage"], "tool_calls_details": {"x": {}}}},
+], ids=["no-citations", "delta", "extra-fields", "no-index", "usage-extra"])
+def test_h2_documented_response_variants_parse_and_cite_from_search_results(body):
+    a = px.parse_response(json.dumps(body).encode())
+    assert a.status == "ANSWER" and "https://site.test/p" in a.citations
+    assert not hasattr(a, "effort") and "tool_calls_details" not in (a.usage or {})       # dropped, not kept
+
+
+def test_h2_a_model_name_the_docs_do_not_show_is_still_refused():
+    # docs.perplexity.ai (sonar-post, chat-completions-post, migrate how-to; Oct 24 2026) show only "sonar" for
+    # Sonar responses; "perplexity/sonar" appears nowhere, so it stays outside the allowlist (fail closed)
+    with pytest.raises(px.EngineError) as e:
+        px.parse_response(json.dumps(sonar(model="perplexity/sonar")).encode())
+    assert e.value.detail == "MODEL_NOT_ALLOWED"
+
+
+def test_h2_two_consecutive_protocol_errors_stop_the_run_and_it_is_failed_not_ok():
+    f = FakePerplexity(httpx.Response(200, json={"unreadable": 1}))
+    b = _UnlimitedBudget()
+    r = probes.probe_engine("perplexity", engine(f), {"prompts": ["q1", "q2", "q3"], "brand_terms": ["x"]},
+                            "site.test", 5, lambda **k: None, osei.Osei(FixedClock(T0)), b)
+    assert len(f.requests) == 2                                         # not 15: the run stops spending
+    assert r["outcome"] == "FAILED" and r["reason"] == "ENGINE_PROTOCOL_ERROR"
+    assert r["reason_detail"] == "CONSECUTIVE_PROTOCOL_ERRORS" and r["prompts_not_asked"] == 2
+    assert b.settled == (0, "ENGINE_PROTOCOL_ERROR")
+
+
+def test_h2_protocol_errors_that_are_not_consecutive_do_not_stop():
+    f = FakePerplexity(httpx.Response(200, json={"bad": 1}), ok(sonar()), httpx.Response(200, json={"bad": 1}),
+                       ok(sonar()))
+    r = probes.probe_engine("perplexity", engine(f), {"prompts": ["q1"], "brand_terms": ["x"]}, "site.test", 4,
+                            lambda **k: None, osei.Osei(FixedClock(T0)), _UnlimitedBudget())
+    assert len(f.requests) == 4 and r["outcome"] == "OK" and r["prompts"][0]["answers"] == 2
+
+
+def test_h2_a_run_with_errors_and_no_answers_is_never_ok():
+    f = FakePerplexity(httpx.Response(503))                             # not a stop code; every attempt fails
+    b = _UnlimitedBudget()
+    r = probes.probe_engine("perplexity", engine(f, attempts=1), {"prompts": ["q1", "q2"], "brand_terms": ["x"]},
+                            "site.test", 3, lambda **k: None, osei.Osei(FixedClock(T0)), b)
+    assert r["outcome"] == "FAILED" and r["reason"] == "ENGINE_UNAVAILABLE" and r["reason_detail"] == "NO_ANSWERS"
+    assert b.settled == (0, "ENGINE_UNAVAILABLE") and len(f.requests) == 6
+
+
+def test_h2_through_the_service_a_failed_run_is_reported_failed(tmp_path):
+    f = FakePerplexity(httpx.Response(200, json={"unreadable": 1}))
+    h = svc_harness(tmp_path, f)
+    c = callum(run_audit(h, setup_zbm(h, prompts=("q one about seo", "q two about seo"))))
+    assert c["outcome"] == "FAILED" and len(f.requests) == 2
+    assert c["facts"]["engines"]["perplexity"]["usage"]["stop_reason"] == "ENGINE_PROTOCOL_ERROR"
+
+
+def _smoke_module():
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parents[1] / "devtools" / "smoke_one_call.py"
+    spec = importlib.util.spec_from_file_location("smoke_one_call", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_h2_smoke_one_call_makes_exactly_one_bounded_request_and_prints_no_key_or_text(tmp_path):
+    import io
+    m = _smoke_module()
+    for script, want_rc, want in ((ok(sonar(text="SECRET-ANSWER-TEXT", search_results=[SEARCH_RESULT])), 0, "ANSWER"),
+                                  (httpx.Response(503), 1, "ENGINE_UNAVAILABLE"),
+                                  (httpx.Response(200, json={"x": 1}), 1, "ENGINE_PROTOCOL_ERROR")):
+        f = FakePerplexity(script)
+        out = io.StringIO()
+        rc = m.main([m.FLAG], {}, engine_factory=lambda env: engine(f, attempts=3), out=out)
+        rep = json.loads(out.getvalue())
+        assert rc == want_rc and rep["outcome"] == want and len(f.requests) == 1 and rep["requests_sent"] == 1
+        assert KEY not in out.getvalue() and "SECRET-ANSWER-TEXT" not in out.getvalue()
+    f = FakePerplexity()
+    out = io.StringIO()
+    assert m.main([], {}, engine_factory=lambda env: engine(f), out=out) == 2 and f.requests == []
+    assert m.main([m.FLAG], {}, out=io.StringIO()) == 2                          # no key: configuration error
+    assert m.main([m.FLAG], {"SEO_PERPLEXITY_API_KEY": KEY, "SEO_PERPLEXITY_API_KEY_FILE": _key_file(tmp_path)},
+                  out=io.StringIO()) == 2

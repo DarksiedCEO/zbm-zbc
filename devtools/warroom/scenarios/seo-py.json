@@ -1683,14 +1683,15 @@
   {
    "id": "answer-engine-hostile-protocol",
    "persona": "a Perplexity that answers malformed, oversized, encoded, redirected, trickled, refusing or endless",
-   "basis": "ADR 0017 W4-1: strict parsing (anything but the documented shape is ENGINE_PROTOCOL_ERROR), a bounded body, identity coding only, no redirect followed, one hard deadline, bounded retries on 429 / 5xx only",
+   "basis": "ADR 0017 W4-1/W4-2: strict parsing of the fields relied on (another shape is ENGINE_PROTOCOL_ERROR; documented extra fields and a missing citations field are tolerated; two protocol errors in a row stop the run; no answers is never OK), a bounded body, identity coding only, no redirect followed, one hard deadline, bounded retries on 429 / 5xx only",
    "seeds": [
     {
      "literal": [
       "not_json",
       "array_body",
-      "unknown_field",
-      "missing_citations",
+      "mistyped_text",
+      "mistyped_search_results",
+      "documented_variant",
       "duplicate_keys",
       "bool_created",
       "huge",
@@ -1807,6 +1808,24 @@
      "args": {
       "key": "bad_answers_counted",
       "value": 0
+     }
+    },
+    {
+     "id": "a_run_with_no_answer_is_never_ok",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "bad_run_reported_ok",
+      "value": false
+     }
+    },
+    {
+     "id": "a_documented_variant_is_answered",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "good_variant_unanswered",
+      "value": false
      }
     },
     {

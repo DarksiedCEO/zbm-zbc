@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""
+Perplexity first-real-call smoke (ADR 0017 W4-6 step 5a): EXACTLY ONE bounded request to the real API, nothing else.
+
+usage (Andre, on a machine with the key; never in CI):
+    SEO_PERPLEXITY_API_KEY_FILE=/path/to/key python3 devtools/smoke_one_call.py --one-real-call
+    (or SEO_PERPLEXITY_API_KEY=... on Railway's shell; set one of the two, not both)
+
+What it does: builds the production adapter (src/perplexity.py: fixed host and path, the guarded deadline backend,
+public-address check) with ONE attempt (no retry), a meter that allows ONE request, and the usual hard deadline
+(SEO_PERPLEXITY_TIMEOUT_SECONDS, default 30), and asks one fixed generic question that carries no personal data.
+
+What it prints (JSON, one object): the outcome (``ANSWER`` or the closed engine code and detail), the model the API
+reported, the finish reason, the answer's length and SHA-256 (never its text), how many citation URLs were parsed and
+their first hosts, the usage and reported cost, and ``requests_sent`` (0 or 1). It never prints the key, and it touches
+no ledger, no data directory and no budget: it is a protocol check before budgets are raised, not an audit.
+
+Exit 0 when the API answered and the answer parsed; 1 for any engine code (ENGINE_PROTOCOL_ERROR means the response
+shape changed: do NOT raise budgets, see ADR 0017 W4-1); 2 for a usage or configuration error.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from decimal import Decimal
+from pathlib import Path
+from urllib.parse import urlsplit
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+FLAG = "--one-real-call"
+PROMPT = "What is search engine optimization? Answer in two sentences."
+
+
+def _key(env: dict):
+    import perplexity
+    from config import _secret_file_bytes
+    path = (env.get("SEO_PERPLEXITY_API_KEY_FILE") or "").strip()
+    plain = (env.get("SEO_PERPLEXITY_API_KEY") or "").strip()
+    if bool(path) == bool(plain):
+        raise RuntimeError("set exactly one of SEO_PERPLEXITY_API_KEY_FILE or SEO_PERPLEXITY_API_KEY")
+    if path:
+        value, source = _secret_file_bytes(env, "SEO_PERPLEXITY_API_KEY_FILE").decode("ascii", "strict"), "file"
+    else:
+        value, source = plain, "env"
+    try:
+        return perplexity.ApiKey(value, source)
+    except ValueError:
+        raise RuntimeError("the key must be 20..512 printable ASCII characters without spaces") from None
+
+
+def _engine(env: dict):
+    import perplexity
+    timeout = int((env.get("SEO_PERPLEXITY_TIMEOUT_SECONDS") or "30").strip())
+    model = (env.get("SEO_PERPLEXITY_MODEL") or perplexity.DEFAULT_MODEL).strip()
+    return perplexity.PerplexityEngine(_key(env), model=model, timeout_s=timeout, attempts=1)
+
+
+def main(argv=None, env=None, engine_factory=None, out=None) -> int:
+    import perplexity
+    from agents.prompt_guard import personal_data
+    from svc_engines import _Meter
+    argv = sys.argv[1:] if argv is None else argv
+    env = dict(os.environ) if env is None else env
+    out = out or sys.stdout
+    if argv != [FLAG]:
+        print(f"refused: this makes one REAL, billed request; pass exactly {FLAG}", file=out)
+        return 2
+    assert personal_data(PROMPT) is None
+    try:
+        eng = (engine_factory or _engine)(env)
+    except (RuntimeError, ValueError, UnicodeDecodeError) as exc:
+        print(f"configuration error: {type(exc).__name__}: {exc}"[:300], file=out)
+        return 2
+    eng.attempts = 1                                      # one attempt, whatever the factory set
+    meter = _Meter(1, Decimal("5"))                       # and the meter refuses a second request regardless
+    report: dict = {"engine": perplexity.ENGINE, "endpoint": perplexity.BASE_URL + perplexity.PATH}
+    try:
+        a = eng.ask(PROMPT, meter=meter)
+    except perplexity.EngineError as e:
+        report.update(outcome=e.code, detail=e.detail, requests_sent=meter.calls)
+        print(json.dumps(report, sort_keys=True), file=out)
+        return 1
+    hosts = []
+    for u in a.citations[:10]:
+        try:
+            hosts.append((urlsplit(u).hostname or "?")[:100])
+        except ValueError:
+            hosts.append("?")
+    report.update(outcome=a.status, model=a.model, finish_reason=a.finish_reason, answer_chars=len(a.text),
+                  answer_sha256=a.answer_sha256, citations=len(a.citations), first_hosts=hosts, usage=a.usage,
+                  requests_sent=meter.calls)
+    print(json.dumps(report, sort_keys=True), file=out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

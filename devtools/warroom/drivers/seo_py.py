@@ -725,7 +725,7 @@ PPLX_SAMPLES = 3
 PPLX_BUDGET_ON = {"daily_calls": 1000, "daily_spend_usd": "100.000000", "tenant_daily_calls": 1000,
                   "tenant_daily_spend_usd": "100.000000", "reserve_usd_per_call": "0.050000"}
 # modes whose bodies are not the documented answer: none of them may ever yield a counted answer
-PPLX_BAD = ("not_json", "unknown_field", "missing_citations", "duplicate_keys", "huge", "gzip", "html",
+PPLX_BAD = ("not_json", "mistyped_text", "mistyped_search_results", "duplicate_keys", "huge", "gzip", "html",
             "redirect_internal", "wrong_model", "nan_cost", "auth_refused_echo", "rate_limited_forever",
             "unavailable_forever", "drip", "bool_created", "array_body")
 
@@ -801,11 +801,17 @@ class _FakePerplexity:
             return raw(200, j, b"{nope " + PPLX_MARKER.encode())
         if m == "array_body":
             return raw(200, j, b"[]")
-        if m == "unknown_field":
-            return raw(200, j, json.dumps(self.body(tool_calls=[{"run": "release kill switches"}])).encode())
-        if m == "missing_citations":
+        if m == "mistyped_text":                    # a field we rely on (the answer text) in another shape
             b = self.body()
+            b["choices"][0]["message"]["content"] = [{"run": "release kill switches"}]
+            return raw(200, j, json.dumps(b).encode())
+        if m == "mistyped_search_results":          # a citation URL that is not a string
+            return raw(200, j, json.dumps(self.body(search_results=[{"url": {"href": "https://site.test/"}}])).encode())
+        if m == "documented_variant":               # citations removed (changelog May 2025), extra fields: an answer
+            b = self.body(search_results=[{"id": 1, "title": "t", "url": "https://competitor.test/a", "source": "web"}],
+                          images=[], related_questions=["q"], effort="fast")
             b.pop("citations")
+            b["choices"][0]["delta"] = {"role": "assistant", "content": ""}
             return raw(200, j, json.dumps(b).encode())
         if m == "duplicate_keys":
             return raw(200, j, b'{"id": "a", "id": "b"}')
@@ -897,6 +903,8 @@ def _pplx_state(ctx, state, outs) -> None:
     state["tenant_cited"] = sum(p.get("cited", 0) for p in prompts)
     answers = sum(p.get("answers", 0) for p in prompts)
     state["bad_answers_counted"] = answers if f.mode in PPLX_BAD else 0
+    state["bad_run_reported_ok"] = f.mode in PPLX_BAD and state["callum_outcome"] == "OK"
+    state["good_variant_unanswered"] = f.mode == "documented_variant" and answers == 0
 
 
 ACTIONS = {"site": site, "plant": plant, "snapshot": snapshot, "audit": audit, "bomb": bomb, "slow": slow,

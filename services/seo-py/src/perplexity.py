@@ -13,13 +13,18 @@ Rules:
   - a bounded response (``MAX_RESPONSE_BYTES``, identity coding only, JSON only, duplicate keys refused);
   - bounded retries ONLY on 429, 5xx and transport errors; ``Retry-After`` (whole seconds) honoured when it fits in
     the time left, otherwise the answer is ENGINE_RATE_LIMITED at once (never a sleep past the deadline);
-  - STRICT parsing (pydantic, strict types, unknown fields refused at every level): anything that is not the
-    documented response shape is ENGINE_PROTOCOL_ERROR, never a guessed answer;
+  - STRICT parsing of what we rely on (pydantic, strict types): the answer text, the model, the citation URLs and
+    the usage/cost numbers must have the documented shape, or the answer is ENGINE_PROTOCOL_ERROR, never a guessed
+    answer. Fields we do not read (documented optional ones such as ``images``, ``related_questions``, a choice's
+    ``delta``, a search result's ``id``, ``usage.tool_calls_details``) are ignored and dropped, never stored: the API
+    adds fields over time and a known-but-irrelevant field must not stop the run (AEGIS H2);
+  - citations come from ``search_results[].url`` first (the field Perplexity says to use since May 2025, when it
+    announced ``citations`` removed) and from ``citations`` when present (the Sonar reference examples still show it);
   - usage and cost (``usage.cost.total_cost``) captured as Decimal strings for the spend budgets;
   - the API key is held in ``ApiKey`` (its repr is masked; ``reveal()`` is called in exactly one place, the request
     header) and never reaches a log line, an exception, a report, the log or the ledger;
   - the answer is DATA: its text is returned to the probe framework to be scanned, hashed and dropped; citations
-    come only from the structured ``citations`` / ``search_results`` fields, never from URLs in the text.
+    come only from the structured ``search_results`` / ``citations`` fields, never from URLs in the text.
 
 Closed reason codes (``CODES``): ENGINE_AUTH_REFUSED, ENGINE_RATE_LIMITED, ENGINE_UNAVAILABLE, ENGINE_PROTOCOL_ERROR,
 ENGINE_BUDGET_EXHAUSTED, ENGINE_KILLED, ENGINE_NOT_CONNECTED.
@@ -57,7 +62,10 @@ MAX_RETRY_AFTER_S = 30
 
 CODES = frozenset({"ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_UNAVAILABLE", "ENGINE_PROTOCOL_ERROR",
                    "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED"})
-# a run stops asking this engine after one of these (asking again cannot help, or must not happen)
+# a run stops asking this engine after one of these (asking again cannot help, or must not happen). A run also stops
+# after PROTOCOL_ERROR_STOP_AFTER consecutive ENGINE_PROTOCOL_ERRORs (agents/probes.py): a response shape we cannot
+# read will not change on the next request, and every request costs money.
+PROTOCOL_ERROR_STOP_AFTER = 2
 STOP_CODES = frozenset({"ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED",
                         "ENGINE_NOT_CONNECTED"})
 # The one fixed instruction sent with every question: no tenant, no person, no brand, no identifier of any kind.
@@ -110,7 +118,8 @@ class ApiKey:
 # ---------------------------------------------------------------------------------------------- the response shape
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    # strict types on every field we model; fields we do not model are ignored (dropped, never read or stored)
+    model_config = ConfigDict(extra="ignore", strict=True, frozen=True)
 
 
 Bounded = Annotated[StrictStr, Field(max_length=2000)]
@@ -122,8 +131,8 @@ class _Message(_Strict):
 
 
 class _Choice(_Strict):
-    index: Annotated[StrictInt, Field(ge=0, le=16)]
-    finish_reason: Optional[Literal["stop", "length"]] = None
+    index: Optional[Annotated[StrictInt, Field(ge=0, le=16)]] = None      # the reference examples elide it
+    finish_reason: Optional[Annotated[StrictStr, Field(pattern=r"^[a-z_]{1,40}$")]] = None
     message: _Message
 
 
@@ -154,9 +163,9 @@ Count = Annotated[StrictInt, Field(ge=0, le=100_000_000)]
 
 
 class _Usage(_Strict):
-    prompt_tokens: Count
-    completion_tokens: Count
-    total_tokens: Count
+    prompt_tokens: Optional[Count] = None
+    completion_tokens: Optional[Count] = None
+    total_tokens: Optional[Count] = None
     search_context_size: Optional[Literal["low", "medium", "high"]] = None
     citation_tokens: Optional[Count] = None
     num_search_queries: Optional[Count] = None
@@ -170,8 +179,9 @@ class _Response(_Strict):
     created: Annotated[StrictInt, Field(ge=0, le=10**11)]
     object: Literal["chat.completion"]
     choices: Annotated[list[_Choice], Field(min_length=1, max_length=4)]
-    citations: Annotated[list[Annotated[StrictStr, Field(min_length=1, max_length=2048)]],
-                         Field(max_length=MAX_SOURCES)]
+    # removed per the changelog (May 2025), still in the Sonar reference examples: optional, used when present
+    citations: Optional[Annotated[list[Annotated[StrictStr, Field(min_length=1, max_length=2048)]],
+                                  Field(max_length=MAX_SOURCES)]] = None
     search_results: Optional[Annotated[list[_SearchResult], Field(max_length=MAX_SOURCES)]] = None
     usage: Optional[_Usage] = None
 
@@ -199,7 +209,9 @@ def money(x) -> Optional[str]:
 
 
 def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
-    """The documented Sonar response -> a ProviderAnswer. Anything else is ENGINE_PROTOCOL_ERROR."""
+    """The documented Sonar response -> a ProviderAnswer. A field we rely on with any other shape is
+    ENGINE_PROTOCOL_ERROR. Sources: ``search_results[].url`` in order (primary), then any ``citations`` URL not
+    already listed."""
     try:
         obj = json.loads(body.decode("utf-8"), object_pairs_hook=_no_duplicates,
                          parse_constant=lambda c: (_ for _ in ()).throw(ValueError("NaN")))
@@ -208,11 +220,11 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
         raise EngineError("ENGINE_PROTOCOL_ERROR") from None
     if r.model not in allowed_models:
         raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED")
-    first = min(r.choices, key=lambda c: c.index)
-    sources = list(r.citations)
-    for s in r.search_results or ():
-        if s.url not in sources:
-            sources.append(s.url)
+    first = min(r.choices, key=lambda c: 0 if c.index is None else c.index)
+    sources: list = []
+    for u in [s.url for s in (r.search_results or ())] + list(r.citations or ()):
+        if u not in sources:
+            sources.append(u)
     usage = None
     if r.usage is not None:
         u = r.usage
