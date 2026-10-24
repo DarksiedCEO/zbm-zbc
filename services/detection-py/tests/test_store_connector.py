@@ -125,6 +125,25 @@ def test_embedded_ipv4_is_extracted(v6, v4):
     assert ipaddress.IPv4Address(v4) in _embedded_v4(ipaddress.IPv6Address(v6))
 
 
+@pytest.mark.parametrize("addr", ["::ffff:100.64.0.1", "::ffff:224.0.0.1", "::ffff:198.18.0.1"])
+def test_mapped_non_public_ipv4_is_refused(addr):
+    """Only the embedded-IPv4 check catches these on Python 3.12 (its IPv6 ``is_global`` calls them global); on 3.13
+    ``is_global`` refuses them too."""
+    from store_connector.net import is_public
+    assert not is_public(addr)
+
+
+def test_embedded_ipv4_check_does_not_rely_on_is_global(monkeypatch):
+    """The embedded-IPv4 check holds even if this Python's IPv6 ``is_global`` called every address global (on 3.13
+    no real input reaches it otherwise: ``is_global`` already refuses what it refuses)."""
+    import ipaddress
+    from store_connector.net import is_public
+    monkeypatch.setattr(ipaddress.IPv6Address, "is_global", property(lambda self: True))
+    for addr in ("::ffff:10.0.0.1", "::ffff:127.0.0.1", "2001:0:4136:e378:8000:63bf:f5ff:fffe"):
+        assert not is_public(addr), addr
+    assert is_public("::ffff:23.227.38.65")
+
+
 def test_resolver_keeps_ordinary_public_ipv6():
     r = Resolver(lambda h, p: ["2620:127:f00f:e::"], DnsGate(2))
     assert r("acme-store.myshopify.com", 443, 5.0) == ["2620:127:f00f:e::"]

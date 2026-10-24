@@ -307,7 +307,7 @@ def test_report_cli_refuses_a_naive_timestamp(tmp_path):
     scan_file.write_text(json.dumps(_projection_scan(window)))
     cli = Path(__file__).resolve().parents[1] / "devtools" / "rr_report.py"
     out = subprocess.run([sys.executable, str(cli), str(scan_file), "--md", str(tmp_path / "r.md")],
-                         capture_output=True, text=True, timeout=120)
+                         capture_output=True, text=True, timeout=120, check=False)
     assert out.returncode == 2 and "refused:" in out.stderr and "Traceback" not in out.stderr
     assert not (tmp_path / "r.md").exists()
 
