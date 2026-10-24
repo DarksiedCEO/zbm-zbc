@@ -514,3 +514,33 @@ def test_cert_l4_iso_dates_and_year_lists_are_not_pii(q):
 def test_cert_l4_the_year_group_rule_still_holds():
     assert sp.longest_digit_run("covid 19 2020 2021") == 2
     assert sp.longest_digit_run("555 010 2024") == 10            # one year-like group: still a phone number
+
+
+# ====================================================================== certification L3: the scheduler's retention path
+
+def test_cert_l3_the_scheduler_hands_drift_the_retained_view(tmp_path, monkeypatch):
+    """Retention of 1 day, a schedule every 7 days: when the second slot's drift is recorded the first report has
+    expired, and the scheduler must compare it as the API serves it (totals only), never the raw record."""
+    import svc_schedules
+    seen = []
+    real = svc_schedules.drift_mod.compare
+
+    def spy(older, newer):
+        seen.append((older["search_performance"]["section"], newer["search_performance"]["section"]))
+        return real(older, newer)
+    monkeypatch.setattr(svc_schedules.drift_mod, "compare", spy)
+    fake = FakeGoogle()
+    fake.pages += [("https://acme.test/blog/post-3", 1, 5, 2.0)]
+    h = _setup(tmp_path, fake, SEO_GSC_RETENTION_DAYS="1")
+    sch = h.ok(h.post("/tenants/acme/schedules", {"request_id": rid(), "domain": "acme.test", "paths": ["/"],
+                                                   "every_days": 7}), 201)
+    h.ok(h.post("/jobs/schedule-tick/run", {"request_id": rid()}, caller="scheduler"))
+    h.clock.advance(days=7, minutes=1)
+    tick = h.ok(h.post("/jobs/schedule-tick/run", {"request_id": rid()}, caller="scheduler"))
+    assert tick["drift_recorded"] == 1 and len(seen) == 1
+    older, newer = seen[0]
+    assert older.get("expired") is True and "by_query_class" not in older and "by_page_template" not in older
+    assert not newer.get("expired") and "by_page_template" in newer           # the new report is not expired yet
+    d = h.ok(h.get(f"/tenants/acme/schedules/{sch['schedule_id']}"))["drifts"][-1]
+    api = h.ok(h.get(f"/tenants/acme/audits/{d['newer']}/drift", params={"against": d["older"]}))
+    assert api["search_performance"] == d["drift"]["search_performance"]
