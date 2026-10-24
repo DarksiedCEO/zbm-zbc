@@ -616,7 +616,8 @@ jobs:
   # Railway images (go-live Days 1-2, docs/deploy/railway.md): build every production Dockerfile the Railway services
   # deploy from — never pushed anywhere — and smoke each container the way Railway starts it: PORT set, the production
   # bind value, GET /health 200, the service running as uid 10001, `docker stop` stopping it without a SIGKILL, a
-  # missing token refusing the start, and the ledger on a root-owned volume with RAILWAY_RUN_UID=0
+  # missing token refusing the start with the service's own message, seo-py started as root (the entrypoint writes a
+  # secret file only as root) and the ledger on a root-owned volume with RAILWAY_RUN_UID=0
   # (devtools/railway_smoke.py). Same shape as delivery-docker-live: Linux only (no Docker on the macOS runners).
   # The Go and Rust build stages are pinned by exact tag only (no digest yet; docs/deploy/railway.md "Open items").
   # ---------------------------------------------------------------------------------------------------------------

@@ -117,8 +117,19 @@ Some settings are a path to a file holding a secret, owner-only (the services re
 file, a symlink, or a file owned by another user). Railway holds variables, not files. So: set the **value** in a
 Railway variable named like the setting **without `_FILE`**; the entrypoint writes it to
 `/run/zbm-secrets/<name>` (inside the container, mode 0600, owned by uid 10001), points the `*_FILE` setting at it,
-and removes the value variable from the service's environment. Setting both the value and the `*_FILE` variable
-refuses the start.
+and starts the service without the value variable. Setting both the value and the `*_FILE` variable refuses the
+start.
+
+What "without the value variable" does and does not cover (AEGIS L3): the service process's environment does not
+hold the value, but the value stays (1) a Railway variable — visible in the dashboard and to anyone with `railway ssh`
+on the service — and (2) in the entrypoint's own initial environment, `/proc/1/environ`, for the life of the
+container. Only a different uid keeps the service from reading (2): the entrypoint runs as root and the service as
+uid 10001. So the entrypoint writes a secret file only when it runs as root (`RAILWAY_RUN_UID=0`, which the three
+services with these secrets — ledger, finance, seo — already set for their volume); started as any other user with a
+value variable set, it refuses with `--secret-file <NAME>_FILE: <NAME> is set but this container runs as uid ...,
+not root`. The CI smoke starts seo-py as root for this reason and checks that the file is 0600/10001, that the value
+is not in the service's environment, that uid 10001 cannot read `/proc/1/environ`, and that the non-root start
+refuses.
 
 | Railway variable (the value) | Written to | Read by |
 |---|---|---|
@@ -462,7 +473,7 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   proxy blocks every container registry. The first real build is the `railway-images` CI job. What was verified
   without Docker: each service started through the entrypoint with each Dockerfile's exact arguments, as root with
   root-owned data directories (what `RAILWAY_RUN_UID=0` gives), binding every interface with `PORT` set — health,
-  uid 10001, data-dir ownership and mode, secret files 0600 and absent from the environment, a full scan through
+  uid 10001, data-dir ownership and mode, secret files 0600 and absent from the service's environment, a full scan through
   orchestrator → detection → ledger, stripe-gateway → finance with the `rail_gateway` caller, ledger restart with
   per-caller tokens, the second-writer refusal, every entrypoint refusal, and SIGTERM as PID 1 in a PID namespace.
 - **Base images.** Runtime stages: `python:3.12-slim` pinned by the digest ADR 0011 records (2026-10-02); it gets no
@@ -493,6 +504,7 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   install the hash lock. They can differ (the lock already takes certifi 2026.10.19 for PYSEC-2026-4320). `audit-python`
   audits the lock too.
 - **Secrets are Railway variables.** The vault (Cybersecurity 22) is not built. `*_FILE` secrets are written inside the
-  container, owner-only, but the values live in Railway.
+  container, owner-only, but the values live in Railway (dashboard, `railway ssh`) and in the root-owned entrypoint's
+  `/proc/1/environ` (see "How `*_FILE` secrets map onto Railway").
 - **Startup order** is enforced only by retries: a department that exhausted its retries before the ledger was up stays
   down until redeployed.

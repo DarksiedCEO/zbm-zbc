@@ -11,7 +11,12 @@
 #                          holds variables, not files: the value of NAME without its _FILE suffix (e.g.
 #                          FIN_STRIPE_SECRET_KEY for FIN_STRIPE_SECRET_KEY_FILE) is written to a 0600 file under
 #                          /run/zbm-secrets owned by the service user, NAME is pointed at it, and the value variable
-#                          is removed from the service's environment. Setting both refuses start.
+#                          is not passed to the service's process. Setting both refuses start. Writing a secret
+#                          needs root (RAILWAY_RUN_UID=0; AEGIS L3): this script's own initial environment
+#                          (/proc/1/environ) keeps the value for the life of the container, and only a different uid
+#                          (the service as 10001, PID 1 as root) keeps the service from reading it there. Started as
+#                          any other user with a secret value set, it refuses. The value also stays a Railway
+#                          variable (dashboard, `railway ssh`).
 #   -- COMMAND...          the service.
 #
 # Users. The image runs as the service user (uid/gid 10001) by default. A Railway volume is mounted owned by root,
@@ -92,6 +97,9 @@ write_secret() {
     unset "$value_var"
     if [ -z "$value" ]; then
         return 0
+    fi
+    if [ "$AS_ROOT" != 1 ]; then
+        die "--secret-file $file_var: $value_var is set but this container runs as uid $(id -u), not root. The value would stay readable by the service in /proc/1/environ (same uid). Set RAILWAY_RUN_UID=0 on this service (this script then writes the file as root and runs the service as uid $APP_UID), or unset $value_var and provide $file_var as a file"
     fi
     if is_set "$file_var" && [ -n "$(value_of "$file_var")" ]; then
         die "both $value_var and $file_var are set; set only $value_var (Railway) or only $file_var (a file you provide)"

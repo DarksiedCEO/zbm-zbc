@@ -7,11 +7,17 @@ each image this starts a container the way Railway does — PORT set, the produc
   - GET /health answers 200 through the published port (the service listens on PORT, on every interface);
   - the image's user is 10001:10001 and the service runs as uid 10001;
   - `docker stop` (SIGTERM to the entrypoint, PID 1) stops it with the service's own status, not a SIGKILL;
-  - started without its required token, the container exits non-zero (fail closed).
+  - started without its required token, the container exits 1 with the SERVICE's own refusal naming that token
+    (fail closed for the right reason: an entrypoint refusal or a crash does not pass).
 
 The ledger starts first and stays up on a private Docker network (alias `ledger`): finance-py, legal-py and seo-py
 refuse to start with a data directory and no reachable ledger (their local log is verified against it), which is also
 the startup order on Railway.
+
+seo-py is started as root (`--user 0:0`), the way Railway starts it with RAILWAY_RUN_UID=0: its entrypoint writes
+SEO_LOG_HASH_KEY to a secret file, which zbm-entrypoint does only as root (AEGIS L3). Checked once: the secret file is
+0600 and owned by 10001, the value is not in the service's environment and the service cannot read PID 1's
+environment; started as 10001 with the value set, the entrypoint refuses.
 
 And once, for ledger-rust, the Railway volume path: a root-owned named volume at /data, the container started as
 root with RAILWAY_RUN_UID=0 — the entrypoint must hand /data/ledger to uid 10001 and run the ledger as 10001.
@@ -41,22 +47,38 @@ def tok() -> str:
     return secrets.token_hex(32)
 
 
-# name -> (internal port, env for a healthy start, the variable whose absence must refuse the start)
-def images() -> dict[str, tuple[int, dict[str, str], str]]:
+# name -> (internal port, env for a healthy start, the variable whose absence must refuse the start, the text the
+# service's own refusal prints). Every service refuses with exit status 1.
+def images() -> dict[str, tuple[int, dict[str, str], str, str]]:
     return {
-        "ledger-rust": (8090, {"LEDGER_BIND_ADDR": "[::]", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN}, "LEDGER_SERVICE_TOKEN"),
-        "detection-py": (8000, {"DETECTION_BIND_ADDR": "::", "ZBM_SERVICE_TOKEN": tok()}, "ZBM_SERVICE_TOKEN"),
-        "finance-py": (8410, {"FIN_BIND_ADDR": "::", "FIN_SERVICE_TOKEN": tok(), **LEDGER_ENV}, "FIN_SERVICE_TOKEN"),
-        "legal-py": (8420, {"LEGAL_BIND_ADDR": "::", "LEGAL_SERVICE_TOKEN": tok(), **LEDGER_ENV}, "LEGAL_SERVICE_TOKEN"),
+        "ledger-rust": (8090, {"LEDGER_BIND_ADDR": "[::]", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN}, "LEDGER_SERVICE_TOKEN",
+                        "ledger-rust: REFUSING TO START — LEDGER_SERVICE_TOKEN is not set"),
+        "detection-py": (8000, {"DETECTION_BIND_ADDR": "::", "ZBM_SERVICE_TOKEN": tok()}, "ZBM_SERVICE_TOKEN",
+                         "RuntimeError: ZBM_SERVICE_TOKEN is not set"),
+        "finance-py": (8410, {"FIN_BIND_ADDR": "::", "FIN_SERVICE_TOKEN": tok(), **LEDGER_ENV}, "FIN_SERVICE_TOKEN",
+                       "RuntimeError: FIN_SERVICE_TOKEN is not set"),
+        "legal-py": (8420, {"LEGAL_BIND_ADDR": "::", "LEGAL_SERVICE_TOKEN": tok(), **LEDGER_ENV}, "LEGAL_SERVICE_TOKEN",
+                     "RuntimeError: LEGAL_SERVICE_TOKEN is not set"),
         "seo-py": (8500, {"SEO_BIND_ADDR": "::", "SEO_SERVICE_TOKEN": tok(), "SEO_LOG_HASH_KEY": tok(), **LEDGER_ENV},
-                   "SEO_SERVICE_TOKEN"),
+                   "SEO_SERVICE_TOKEN", "RuntimeError: SEO_SERVICE_TOKEN must be set"),
         "orchestrator": (8080, {"ORCHESTRATOR_BIND_ADDR": "[::]", "ORCHESTRATOR_SERVICE_TOKEN": tok(),
                                 "DETECTION_SERVICE_TOKEN": tok(), "DETECTION_SERVICE_URL": "http://detection.invalid:8000",
-                                **LEDGER_ENV}, "ORCHESTRATOR_SERVICE_TOKEN"),
+                                **LEDGER_ENV}, "ORCHESTRATOR_SERVICE_TOKEN", "ORCHESTRATOR_SERVICE_TOKEN is not set"),
         "stripe-gateway": (8470, {"STRIPE_GATEWAY_BIND_ADDR": "::", "STRIPE_GATEWAY_FINANCE_URL": "http://127.0.0.1:9",
                                   "STRIPE_GATEWAY_FINANCE_TOKEN": tok(), "STRIPE_GATEWAY_CALLER_TOKEN": tok()},
-                           "STRIPE_GATEWAY_CALLER_TOKEN"),
+                           "STRIPE_GATEWAY_CALLER_TOKEN",
+                           "stripe-gateway: REFUSING TO START — STRIPE_GATEWAY_CALLER_TOKEN must be set"),
     }
+
+
+# images whose entrypoint writes a secret file from a variable the smoke sets: zbm-entrypoint does that only as root
+# (AEGIS L3), so they start as root, as Railway starts them with RAILWAY_RUN_UID=0 (the service still runs as 10001)
+ROOT_START = {"seo-py": "SEO_LOG_HASH_KEY"}
+REFUSAL_EXIT = "1"
+
+
+def user_args(img: str) -> list[str]:
+    return ["--user", "0:0"] if img in ROOT_START else []
 
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -119,7 +141,8 @@ def start(img: str, port: int, env: dict[str, str], tag: str, alias: str | None 
     user = docker("image", "inspect", "--format", "{{.Config.User}}", tag).stdout.strip()
     check(f"{img}: image user is 10001:10001", user == "10001:10001", user)
     net = ["--network", NETWORK] + (["--network-alias", alias] if alias else [])
-    r = docker("run", "-d", "--name", name, *net, "-p", f"127.0.0.1::{port}", "-e", f"PORT={port}", *env_args(env), tag)
+    r = docker("run", "-d", "--name", name, *net, *user_args(img), "-p", f"127.0.0.1::{port}", "-e", f"PORT={port}",
+               *env_args(env), tag)
     if r.returncode != 0:
         check(f"{img}: container starts", False, r.stderr[-400:])
         return None
@@ -143,20 +166,68 @@ def stop_check(img: str, name: str) -> None:
     docker("rm", "-f", name)
 
 
-def refuses_without(img: str, port: int, env: dict[str, str], required: str, tag: str) -> None:
-    name = f"{PREFIX}-{img}-noauth"
-    docker("rm", "-f", name)
-    bad = {k: v for k, v in env.items() if k != required}
-    r = docker("run", "-d", "--name", name, "--network", NETWORK, "-e", f"PORT={port}", *env_args(bad), tag)
-    end = time.time() + 45
+def wait_exit(name: str, secs: float = 45) -> str:
+    """'<running> <exit code>' once the container stopped (or the last state seen after secs)."""
+    end = time.time() + secs
     state = "?"
-    while r.returncode == 0 and time.time() < end:
+    while time.time() < end:
         state = docker("inspect", "--format", "{{.State.Running}} {{.State.ExitCode}}", name).stdout.strip()
         if state.startswith("false"):
             break
         time.sleep(1)
-    check(f"{img}: without {required} the container refuses to start (fail closed)",
-          r.returncode == 0 and state.startswith("false") and not state.endswith(" 0"), state)
+    return state
+
+
+def logs(name: str) -> str:
+    r = docker("logs", name)
+    return r.stdout + r.stderr
+
+
+def refuses_without(img: str, port: int, env: dict[str, str], required: str, refusal: str, tag: str) -> None:
+    name = f"{PREFIX}-{img}-noauth"
+    docker("rm", "-f", name)
+    bad = {k: v for k, v in env.items() if k != required}
+    r = docker("run", "-d", "--name", name, "--network", NETWORK, *user_args(img), "-e", f"PORT={port}",
+               *env_args(bad), tag)
+    state = wait_exit(name) if r.returncode == 0 else "not started"
+    out = logs(name) if r.returncode == 0 else r.stderr
+    # the specific refusal: exit status 1 AND the service's own message naming the missing token (not the
+    # entrypoint refusing, not a crash for some other reason)
+    ok = state == f"false {REFUSAL_EXIT}" and refusal in out and "zbm-entrypoint: REFUSING" not in out
+    check(f"{img}: without {required} the service refuses to start (exit {REFUSAL_EXIT}, '{refusal}')", ok,
+          state if ok else f"{state}; logs: {out[-800:]}")
+    docker("rm", "-f", name)
+
+
+def secret_file_root_path(img: str, port: int, env: dict[str, str], tag: str) -> None:
+    """AEGIS L3: the secret value never reaches the service; as 10001 with the value set, the entrypoint refuses."""
+    value_var = ROOT_START[img]
+    name = f"{PREFIX}-{img}-secret"
+    docker("rm", "-f", name)
+    r = docker("run", "-d", "--name", name, "--network", NETWORK, *user_args(img), "-p", f"127.0.0.1::{port}",
+               "-e", f"PORT={port}", *env_args(env), tag)
+    if r.returncode == 0 and wait_health(name, port)[0]:
+        target = "/run/zbm-secrets/" + f"{value_var}_FILE".lower().replace("_", "-")
+        st = docker("exec", name, "stat", "-c", "%u %a", target).stdout.strip()
+        check(f"{img}: the {value_var} secret file is owned by 10001, mode 600", st == "10001 600", st)
+        script = ('c=$(cut -d" " -f1 /proc/1/task/1/children); '
+                  f'if tr "\\0" "\\n" < "/proc/$c/environ" | grep -q "^{value_var}="; then echo in-env; fi; '
+                  'if setpriv --reuid=10001 --regid=10001 --clear-groups cat /proc/1/environ >/dev/null 2>&1; '
+                  'then echo pid1-readable; fi; echo done')
+        out = docker("exec", name, "sh", "-c", script).stdout.split()
+        check(f"{img}: {value_var} is not in the service's environment and uid 10001 cannot read PID 1's",
+              out == ["done"], " ".join(out))
+    else:
+        check(f"{img}: starts as root for the secret-file check", False, (r.stderr or logs(name))[-800:])
+    docker("rm", "-f", name)
+    name = f"{PREFIX}-{img}-secret-nonroot"
+    docker("rm", "-f", name)
+    r = docker("run", "-d", "--name", name, "--network", NETWORK, "-e", f"PORT={port}", *env_args(env), tag)
+    state = wait_exit(name) if r.returncode == 0 else "not started"
+    out = logs(name) if r.returncode == 0 else r.stderr
+    want = f"zbm-entrypoint: REFUSING TO START — --secret-file {value_var}_FILE: {value_var} is set but this container runs as uid 10001, not root"
+    check(f"{img}: as uid 10001 with {value_var} set, the entrypoint refuses (exit 1)",
+          state == "false 1" and want in out, f"{state}; logs: {out[-600:]}")
     docker("rm", "-f", name)
 
 
@@ -208,16 +279,17 @@ def main() -> int:
         for img in names:
             if img == "ledger-rust":
                 continue
-            port, env, required = table[img]
+            port, env, required, refusal = table[img]
             name = start(img, port, env, f"zbm-ci/{img}:ci")
             if name:
                 stop_check(img, name)
-            refuses_without(img, port, env, required, f"zbm-ci/{img}:ci")
+            refuses_without(img, port, env, required, refusal, f"zbm-ci/{img}:ci")
+            if img in ROOT_START:
+                secret_file_root_path(img, port, env, f"zbm-ci/{img}:ci")
         if "ledger-rust" in names:
             if ledger:
                 stop_check("ledger-rust", ledger)
-            refuses_without("ledger-rust", 8090, table["ledger-rust"][1], "LEDGER_SERVICE_TOKEN",
-                            "zbm-ci/ledger-rust:ci")
+            refuses_without("ledger-rust", 8090, *table["ledger-rust"][1:], "zbm-ci/ledger-rust:ci")
             ledger_volume("zbm-ci/ledger-rust:ci")
     finally:
         left = docker("ps", "-aq", "--filter", f"name={PREFIX}").stdout.split()
