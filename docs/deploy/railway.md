@@ -105,7 +105,8 @@ services; it changes no service guard:
   and the secret files and hand them to 10001, and starts the service as 10001 with `setpriv --reuid=10001
   --regid=10001 --clear-groups --no-new-privs`. The service process never runs as root; started as root without
   `setpriv`, the entrypoint refuses.
-- **Signals.** The entrypoint stays PID 1 and forwards SIGTERM/SIGINT. Run directly as PID 1, ledger-rust ignores
+- **Signals.** The entrypoint stays PID 1 and forwards SIGTERM, and SIGINT as SIGTERM (a backgrounded child ignores
+  SIGINT, so forwarding it as INT stopped nothing; AEGIS L2). Run directly as PID 1, ledger-rust ignores
   SIGTERM (it re-raises it with the default disposition, which the kernel drops for PID 1) and would be killed
   mid-write at the end of Railway's draining window; checked in a PID namespace on the build box.
 - **`*_FILE` secrets** — next section.

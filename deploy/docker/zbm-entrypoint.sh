@@ -20,7 +20,7 @@
 # runs the service as 10001 through setpriv (no supplementary groups, no_new_privs). The service never runs as root:
 # started as root without setpriv, this script refuses.
 #
-# Signals. This script stays PID 1 and forwards SIGTERM/SIGINT to the service. As PID 1 the service would ignore a
+# Signals. This script stays PID 1 and forwards SIGTERM to the service; SIGINT is forwarded as SIGTERM. As PID 1 the service would ignore a
 # signal whose disposition is the default (the kernel does not deliver it to PID 1): ledger-rust re-raises SIGTERM
 # with the default disposition to die of it, which PID 1 ignores, and it would be SIGKILLed mid-write at the end of
 # Railway's draining window instead of stopping cleanly.
@@ -179,7 +179,9 @@ forward() {
     fi
 }
 trap 'forward TERM' TERM
-trap 'forward INT' INT
+# SIGINT is forwarded as SIGTERM (AEGIS L2): a child started with & by a non-interactive shell has SIGINT ignored,
+# so forwarding INT would never stop it. Every service stops cleanly on SIGTERM.
+trap 'forward TERM' INT
 
 "$@" &
 child=$!
