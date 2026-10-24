@@ -432,9 +432,10 @@ ROUTE_REQUEST_MODELS: dict[str, type[BaseModel]] = {
     "/agents/platform-integration/detect": PlatformConnectionsRequest,
     "/agents/contract-pricing-term-drift/detect": ContractTermsRequest,
     "/correlation/overlaps": FindingsRequest,
-    "/stores/sync": StoreRequest,
-    "/stores/snapshot": StoreRequest,
 }
+# Body routes deliberately NOT in the table: they take only {"client_id"} (ADR 0020 /stores routes), so the
+# 64 KiB DEFAULT_BODY_BYTES is their limit (tests/test_body_limits.py checks the two sets cover every POST route).
+SMALL_BODY_ROUTES = frozenset({"/stores/sync", "/stores/snapshot"})
 ROUTE_BODY_LIMITS: dict[str, int] = {path: body_limit_for(model) for path, model in ROUTE_REQUEST_MODELS.items()}
 MAX_BODY_BYTES = max(ROUTE_BODY_LIMITS.values())  # the largest limit of any route
 

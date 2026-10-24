@@ -226,7 +226,11 @@ def test_route_limits_are_the_computed_worst_case_plus_headroom():
 
 def test_every_body_route_is_in_the_limit_table():
     body_routes = {r.path for r in app.routes if "POST" in getattr(r, "methods", set())}
-    assert body_routes == set(ROUTE_REQUEST_MODELS)
+    # ADR 0020: the /stores routes take only {"client_id"} and keep the 64 KiB default limit.
+    assert body_routes == set(ROUTE_REQUEST_MODELS) | api.SMALL_BODY_ROUTES
+    assert not api.SMALL_BODY_ROUTES & set(ROUTE_BODY_LIMITS)
+    for path in api.SMALL_BODY_ROUTES:
+        assert post(path, b"x" * (api.DEFAULT_BODY_BYTES + 1)).status_code == 413
 
 
 def test_a_model_field_without_a_limit_cannot_be_sized():

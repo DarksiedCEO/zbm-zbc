@@ -200,12 +200,11 @@ scan, or a scan whose labels and figures disagree, is refused.
 
 **The client (merchant), in their own Shopify:**
 
-1. *If you already have a custom app made in your Shopify admin (legacy, before Jan 1 2026)* and want to use it:
-   Shopify admin → Settings → Apps and sales channels → Develop apps → your app → Configuration → Admin API access
-   scopes: tick **only** `read_orders` (and `read_all_orders` if we are to look back more than 60 days); untick every
-   other scope, especially every `write_` scope → Save → API credentials → Install/Reveal the Admin API access token
-   once (S1: it is shown only once). Send it to Andre through the secure channel he gives you — never by email or
-   chat.
+1. *If you already have a custom app made in your Shopify admin (legacy; S1: none can be created any more)* and
+   want to use it: in that app's configuration in your Shopify admin (menu names are not verified here), set the
+   Admin API access scopes to **only** `read_orders` (and `read_all_orders` if we are to look back more than 60
+   days) — no other scope, above all no `write_` scope — save, then generate or reveal the Admin API access token
+   (S1: it is shown only once). Send it to Andre through the secure channel he gives you — never by email or chat.
 2. *Otherwise (the documented path for new apps, S2/S3):* in the Shopify **Dev Dashboard**, under your own
    organization, create an app; on its version set Admin API access scopes to **only** `read_orders` (+
    `read_all_orders` if needed); release the version and install it on your store, approving the scopes. Send Andre
