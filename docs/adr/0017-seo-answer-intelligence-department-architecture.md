@@ -519,8 +519,11 @@ template describes one or two pages
 (fewest clicks first) in `{other}`; reported as by-page sums that are NOT comparable with property totals; (3) `query` aggregated byProperty — each query classified into `pii_suspect`, `brand`, `question`,
 `local`, `commercial`, `other` (versioned `2026-10-24.3`) and dropped. `pii_suspect` is judged first, on the shared
 lookalike fold after invisible characters are removed: an e-mail in any spelling, ONE phone-like run of 7+ digits
-(digits joined only by spaces, hyphens, dots or parentheses: `555 010 0199`, `(555) 010-0199`, `+44 20 7946 0958`;
-in a run with two or more year-like groups, 19xx / 20xx, those groups do not count), or a word the templater would
+(digits joined only by phone separators, up to five in a row: space, dot, parentheses, slash, underscore, comma, plus,
+the ASCII hyphen, the Unicode hyphens and dashes U+2010..U+2015, the minus sign and the middle dot — `555 010 0199`,
+`(555) 010-0199`, `+44 20 7946 0958`, `555/010/0199`, `555–010–0199`, `555 -- 010 -- 0199`; ISO dates such as
+`2024-10-24` are taken out first; in a run with two or more year-like groups, 19xx / 20xx, those groups do not
+count; AEGIS gl-gsc certification L4 widened the separators and added the date rule), or a word the templater would
 replace (a word of digits and separators only is left to the run rule). Digits in different words are never added
 up (AEGIS gl-gsc L4: `iphone 15 pro 256gb 2024`, `24/7 plumber 90210` and `covid 19 2020 2021` used to be
 `pii_suspect`); a phone number with one year-like group (`555 010 2024`) is still caught, one with two is not. No query text, hash of a query, URL or per-query / per-URL row is stored — a page is

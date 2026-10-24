@@ -491,3 +491,26 @@ def test_cert_l1_plain_words_in_any_single_case_are_kept_lower_cased():
         assert sp.slug_segment(seg) == seg
         assert sp.page_template(f"https://acme.test/{seg}/", {"acme.test"}) == "/" + seg.lower()
     assert sp.page_template("https://acme.test/", {"acme.test"}) == "/"
+
+
+# ====================================================================== certification L4: wider separators, ISO dates
+
+@pytest.mark.parametrize("q", ["555/010/0199", "555_010_0199", "555,010,0199", "555+010+0199", "555–010–0199",
+                               "555—010—0199", "555‒010‒0199", "555−010−0199",
+                               "555·010·0199", "555 -- 010 -- 0199", "call 555 / 010 / 0199",
+                               "2024-10-24 555 0199"])
+def test_cert_l4_phone_numbers_with_any_separator_are_caught(q):
+    assert sp.longest_digit_run(q) >= 7, q
+    assert sp.classify_query(q, ["acme"]) == "pii_suspect", q
+
+
+@pytest.mark.parametrize("q", ["2024-10-24", "order placed 2024-10-24", "2024/10/24 report", "2024.10.24",
+                               "2024–10–24", "covid 19 2020 2021", "2020-2021 tax rates",
+                               "iphone 15 pro 256gb 2024", "24/7 plumber 90210"])
+def test_cert_l4_iso_dates_and_year_lists_are_not_pii(q):
+    assert sp.classify_query(q, ["acme"]) != "pii_suspect", q
+
+
+def test_cert_l4_the_year_group_rule_still_holds():
+    assert sp.longest_digit_run("covid 19 2020 2021") == 2
+    assert sp.longest_digit_run("555 010 2024") == 10            # one year-like group: still a phone number

@@ -18,7 +18,7 @@ What is kept (evidence class: OBSERVED, first-party; data class: measured):
     or two pages); at most ``TEMPLATE_CAP`` templates, the rest in ``{other}``;
   - by QUERY CLASS (grouped by ``query``, aggregated by property): each query is classified into a closed set and
     dropped. No query text, no hash of one, and no per-query row is ever kept. A query that looks like personal
-    data (an e-mail in any spelling, one phone-like run of 7+ digits, an id- or token-like word) is counted as ``pii_suspect`` — the class
+    data (an e-mail in any spelling, one phone-like run of 7+ digits not an ISO date, an id- or token-like word) is counted as ``pii_suspect`` — the class
     is checked FIRST, so such a query never counts as brand or anything else. Dropping beats hashing: a hash of a
     low-entropy name or e-mail is reversed by a dictionary.
   - the remainder: property totals minus the query-class sums is reported as ``unattributed`` (Google's anonymised
@@ -104,18 +104,25 @@ def brand_tokens(domains: Iterable[str], entity_name: str | None) -> list:
 
 
 PII_DIGIT_RUN = 7
-# one run of digits joined only by phone separators (space, hyphen, dot, parentheses; at most three in a row)
-_DIGIT_RUN = re.compile(r"\d(?:[ .()\-]{0,3}\d)*")
+# phone separators: space, dot, parentheses, slash, underscore, comma, plus, the ASCII hyphen, the Unicode hyphens and
+# dashes (U+2010..U+2015: hyphen, non-breaking hyphen, figure dash, en dash, em dash, horizontal bar), the minus sign
+# and the middle dot; up to five in a row (" -- ", ") - ") between two digits (AEGIS gl-gsc certification L4)
+_SEP = " .()/_,+\\-\u2010-\u2015\u2212\u00b7"
+_DIGIT_RUN = re.compile(r"\d(?:[" + _SEP + r"]{0,5}\d)*")
 _YEAR = re.compile(r"(?:19|20)\d\d")
+# an ISO calendar date (YYYY-MM-DD, also with / . or a Unicode dash, the same separator twice): not a phone number
+_ISO_DATE = re.compile(r"(?<!\d)(?:19|20)\d\d([-/.\u2010-\u2015\u2212])(?:0?[1-9]|1[0-2])\1"
+                       r"(?:0?[1-9]|[12]\d|3[01])(?!\d)")
 
 
 def longest_digit_run(text: str) -> int:
     """The most digits in one phone-like run: ``555 010 0199``, ``(555) 010-0199``, ``+44 20 7946 0958`` count 10, 10
     and 12. Digits in different runs (``iphone 15 pro 256gb 2024``) are never added up (AEGIS gl-gsc L4). A run with
     two or more year-like groups (19xx / 20xx: ``covid 19 2020 2021``) is a list of years: its year groups do not
-    count. A phone number holding one such group (``555 010 2024``) is still caught."""
+    count. A phone number holding one such group (``555 010 2024``) is still caught. ISO dates (``2024-10-24``) are
+    taken out first and break a run."""
     best = 0
-    for m in _DIGIT_RUN.finditer(text):
+    for m in _DIGIT_RUN.finditer(_ISO_DATE.sub(" # ", text)):
         groups = re.findall(r"\d+", m.group())
         years = [g for g in groups if _YEAR.fullmatch(g)]
         n = sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g))
