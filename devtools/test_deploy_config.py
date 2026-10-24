@@ -9,7 +9,8 @@ it in the `hygiene-static` job, and `python -m pytest devtools/` collects it:
 - the Python images install only deploy/python/requirements.lock.txt, with hashes, and its direct pins are the
   services' requirements.txt pins without pytest;
 - .railway/railway.ts deploys exactly these Dockerfiles, one replica each, RAILWAY_RUN_UID=0 on every service with a
-  volume, a PORT equal to the port the CI smoke uses, and holds no secret value (secrets are preserve() or references);
+  volume, a daily backup schedule on every volume, a PORT equal to the port the CI smoke uses, and holds no secret
+  value (secrets are preserve() or references);
 - the CI job builds every one of them and the smoke script covers every one;
 - docs/deploy/railway.md names every environment variable the deployed code reads (Python, Go, Rust and the
   dashboard), every variable the IaC sets, and every Dockerfile.
@@ -187,6 +188,13 @@ class RailwayIac(unittest.TestCase):
                 self.assertEqual(f'"/data":' in b, has_volume)
                 self.assertEqual('RAILWAY_RUN_UID: "0"' in b, has_volume, "RAILWAY_RUN_UID=0 exactly with a volume")
                 self.assertIn('deploy("/health", ' + ("true" if has_volume else "false") + ")", b)
+
+    def test_every_volume_has_a_daily_backup_schedule(self):
+        # AEGIS L6: each service with a volume goes through withDailyBackups (backupSchedules ["DAILY"] on its attachment)
+        self.assertIn('const DAILY_BACKUPS: VolumeMount["backupSchedules"] = ["DAILY"];', self.text)
+        for svc, (*_r, has_volume) in SERVICES.items():
+            with self.subTest(service=svc):
+                self.assertEqual(f'withDailyBackups(service("{svc}", ' in self.text, has_volume)
 
     def test_one_replica_and_restart_on_failure(self):
         self.assertIn("numReplicas: 1,", self.text)

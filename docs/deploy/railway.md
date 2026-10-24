@@ -421,9 +421,12 @@ Do these in order. Nothing in the repository creates anything; each step is your
    `ledger-rust: EVENT {"event":"ledger_created",...}` and `listening on [::]:8090`, and does **not** show the
    `LEDGER_CALLERS_FILE is not set` warning. Then deploy `detection` and `legal`; then `finance`; then `orchestrator`,
    `stripe-gateway` and `seo`. A department that crashed because the ledger was not up yet: Redeploy it.
-9. **Volume backups.** For `ledger-data`, `finance-data`, `legal-data`, `seo-data`: enable daily backups (volume →
-   Backups). Restoring a backup later makes the ledger refuse to start until the one-shot `LEDGER_ALLOW_RESET` flow
-   (services/ledger-rust/README.md).
+9. **Volume backups.** The IaC declares a daily backup schedule for `ledger-data`, `finance-data`, `legal-data` and
+   `seo-data` (`backupSchedules: ["DAILY"]` on each service's volume attachment, the SDK field; AEGIS L6). Check that
+   `railway config plan` shows the schedule and that each volume → Backups shows Daily after the apply; if the plan
+   does not carry it (the engine that applies it is in the Railway CLI, not the SDK, and has not been run against
+   this file), enable daily backups there by hand. Restoring a backup later makes the ledger refuse to start until
+   the one-shot `LEDGER_ALLOW_RESET` flow (services/ledger-rust/README.md).
 10. **Restart policy check.** Each service's Settings should show restart policy On Failure, 10 retries, and
     healthcheck path `/health` (from the IaC file).
 11. **Dashboard on Vercel.** Project root `apps/dashboard-ts`. Set the five variables in the dashboard table
@@ -465,7 +468,7 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
       `/healthz` answers 200 once logged in.
 - [ ] Redeploy `ledger`: it comes back Active, its log says it loaded the existing entries with the chain verified, and
       the dashboard still loads.
-- [ ] Volume backups enabled on the four volumes.
+- [ ] Volume backups: each of the four volumes → Backups shows the Daily schedule from the IaC.
 
 ## Open items and risks
 
@@ -490,7 +493,9 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - **Railway behaviours taken from the docs or the SDK types, not observed:** `preserve()` on a variable that does not
   exist yet (first apply); `${{service.VARIABLE}}` interpolation inside the two JSON maps, including the hyphen in
   `stripe-gateway`; `requiredMountPath` (an SDK field, not described in the docs); `RAILWAY_RUN_UID=0`;
-  `checkSuites: true` (wait for CI); `railway ssh` sessions having the service's variables.
+  `checkSuites: true` (wait for CI); `railway ssh` sessions having the service's variables; the CLI applying
+  `backupSchedules` from a volume attachment (the SDK types it and emits it in the graph; checked by evaluating the
+  file, not by a plan).
 - **stripe-gateway private-network opt-in** (`STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP`) relaxes AEGIS launch-hardening
   L8 for one named host on the private network: `http://<STRIPE_GATEWAY_FINANCE_PRIVATE_NAME>.railway.internal[:port]`
   (IaC: `finance`; AEGIS L1). It needs AEGIS review before merge.

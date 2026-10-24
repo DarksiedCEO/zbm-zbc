@@ -11,6 +11,7 @@
 // (`finance.env.FIN_SERVICE_TOKEN`), or interpolated with Railway's `${{service.VARIABLE}}` syntax inside a JSON map.
 // Never use ctx.randomString for a secret: it is a hash of the environment name and a label, not random.
 import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
+import type { ServiceNode, VolumeMount } from "railway/iac";
 
 const REPO = "DarksiedCEO/zbm-zbc";
 const BRANCH = "main"; // the branch Railway deploys from
@@ -41,6 +42,19 @@ const deploy = (healthcheckPath: string, withVolume: boolean) => ({
   ...(withVolume ? { requiredMountPath: "/data" } : {}),
 });
 
+// Daily backups of every volume (AEGIS L6). The SDK's field is `backupSchedules` on a service's volume attachment
+// (railway 3.13.1 .d.ts: `VolumeMount["backupSchedules"]`, `Array<"DAILY" | "WEEKLY" | "MONTHLY">`, also typed on
+// `ServiceNode.volumeAttachments[name]`). service() builds the attachment from `volumeMounts: { "/data": vol }` but
+// takes no schedule there, so it is set on the attachment it built; a service passed here without a volume
+// attachment fails the evaluation rather than silently having no backup.
+const DAILY_BACKUPS: VolumeMount["backupSchedules"] = ["DAILY"];
+const withDailyBackups = <T extends ServiceNode>(svc: T): T => {
+  const attachments = Object.values(svc.volumeAttachments ?? {});
+  if (attachments.length === 0) throw new Error(`${svc.name}: no volume attachment to give a backup schedule`);
+  for (const a of attachments) a.backupSchedules = DAILY_BACKUPS;
+  return svc;
+};
+
 const PRIVATE = (name: string, port: number) => `http://${name}.railway.internal:${port}`;
 
 export default defineRailway(() => {
@@ -52,7 +66,7 @@ export default defineRailway(() => {
   const seoData = volume("seo-data");
 
   // ------------------------------------------------------------------------------------------------ ledger (first)
-  const ledger = service("ledger", {
+  const ledger = withDailyBackups(service("ledger", {
     source: source(),
     build: dockerfile("services/ledger-rust/Dockerfile", ["services/ledger-rust/**"]),
     deploy: deploy("/health", true),
@@ -64,7 +78,7 @@ export default defineRailway(() => {
       RAILWAY_RUN_UID: "0", // the entrypoint hands /data/ledger to uid 10001, then runs the ledger as 10001
       LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope; written to LEDGER_CALLERS_FILE
     },
-  });
+  }));
 
   // ------------------------------------------------------------------------------------------------ detection
   const detection = service("detection", {
@@ -79,7 +93,7 @@ export default defineRailway(() => {
   });
 
   // ------------------------------------------------------------------------------------------------ legal
-  const legal = service("legal", {
+  const legal = withDailyBackups(service("legal", {
     source: source(),
     build: dockerfile("services/legal-py/Dockerfile", ["services/legal-py/**", "deploy/python/**"]),
     deploy: deploy("/health", true),
@@ -95,10 +109,10 @@ export default defineRailway(() => {
       LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
       LEGAL_CALLER_TOKENS: '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}"}',
     },
-  });
+  }));
 
   // ------------------------------------------------------------------------------------------------ finance
-  const finance = service("finance", {
+  const finance = withDailyBackups(service("finance", {
     source: source(),
     build: dockerfile("services/finance-py/Dockerfile", ["services/finance-py/**", "deploy/python/**"]),
     deploy: deploy("/health", true),
@@ -124,7 +138,7 @@ export default defineRailway(() => {
       FIN_STRIPE_SUCCESS_URL: preserve(),
       FIN_STRIPE_CANCEL_URL: preserve(),
     },
-  });
+  }));
 
   // ------------------------------------------------------------------------------------------------ orchestrator
   // Public: the dashboard (Vercel) calls GET /revenue-recovery/findings over its Railway domain.
@@ -162,7 +176,7 @@ export default defineRailway(() => {
   });
 
   // ------------------------------------------------------------------------------------------------ seo
-  const seo = service("seo", {
+  const seo = withDailyBackups(service("seo", {
     source: source(),
     build: dockerfile("services/seo-py/Dockerfile", ["services/seo-py/**", "deploy/python/**"]),
     deploy: deploy("/health", true),
@@ -182,7 +196,7 @@ export default defineRailway(() => {
       SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       SEO_FINANCE_CALLER_TOKEN: preserve(),
     },
-  });
+  }));
 
   return project("zbm-zbc", {
     resources: [ledgerData, legalData, financeData, seoData, ledger, detection, legal, finance, orchestrator, stripeGateway, seo],
