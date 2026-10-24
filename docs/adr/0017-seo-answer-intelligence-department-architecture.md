@@ -509,11 +509,15 @@ templater (`agents.logs.template_path`: e-mails, UUIDs, numbers, ids, tokens, fi
 rule (`search_performance.slug_segment`, AEGIS gl-gsc L1): every segment that is not empty, a placeholder, one plain
 word of ASCII letters or such a word with a static extension becomes `{slug}` (`/users/jane-smith/profile` ->
 `/users/{slug}/profile`; hyphenated, dotted, underscored, digit-bearing and non-ASCII segments are never kept);
-`{offsite}` for a host not the property's; a template that still holds a literal word but was produced by fewer than
-3 distinct page URLs (`TEMPLATE_MIN_URLS`) is counted in `{other}`, so no kept template describes one or two pages
+CamelCase segments (`JaneSmith`) are `{slug}` too; literal words are lower-cased and the trailing slash dropped, so
+one page is one template; `{offsite}` for a host not the property's; a template that still holds a literal word but
+was produced by fewer than 3 distinct PAGES (`TEMPLATE_MIN_URLS`; a page is `page_key`: the path decoded once,
+lower-cased, without its trailing slash, host / www / scheme / port / query ignored — AEGIS gl-gsc certification:
+counting URL rows let one page reported under www, http and https keep its name) is counted in `{other}`, so no kept
+template describes one or two pages
 (placeholder-only templates such as `/` or `/{slug}` identify nothing and are kept); at most 200 templates, the rest
 (fewest clicks first) in `{other}`; reported as by-page sums that are NOT comparable with property totals; (3) `query` aggregated byProperty — each query classified into `pii_suspect`, `brand`, `question`,
-`local`, `commercial`, `other` (versioned `2026-10-24.2`) and dropped. `pii_suspect` is judged first, on the shared
+`local`, `commercial`, `other` (versioned `2026-10-24.3`) and dropped. `pii_suspect` is judged first, on the shared
 lookalike fold after invisible characters are removed: an e-mail in any spelling, ONE phone-like run of 7+ digits
 (digits joined only by spaces, hyphens, dots or parentheses: `555 010 0199`, `(555) 010-0199`, `+44 20 7946 0958`;
 in a run with two or more year-like groups, 19xx / 20xx, those groups do not count), or a word the templater would

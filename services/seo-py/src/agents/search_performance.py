@@ -10,10 +10,11 @@ What is kept (evidence class: OBSERVED, first-party; data class: measured):
     CTRs); position impression-weighted over the dates (Google's per-date positions; an approximation, said so);
   - by PAGE TEMPLATE (grouped by ``page``, aggregated by page): each URL reduced to a template with the log rules
     (``agents.logs.template_path``: e-mails, ids, numbers, tokens, file names replaced), then the slug rule
-    (``slug_segment``: every segment that is not one plain word of ASCII letters, a placeholder, or a word with a
+    (``slug_segment``: every CamelCase segment, and every segment that is not one plain word of ASCII letters, a placeholder, or a word with a
     static extension becomes ``{slug}``, so ``/users/jane-smith/profile`` is ``/users/{slug}/profile``); a URL not
     on the property's hosts counts as ``{offsite}``. A template that still holds a literal path word and was produced
-    by fewer than ``TEMPLATE_MIN_URLS`` distinct page URLs is counted in ``{other}`` (no kept template describes one
+    by fewer than ``TEMPLATE_MIN_URLS`` distinct pages (``page_key``: the lower-cased path without its trailing slash;
+    host, scheme and query ignored) is counted in ``{other}`` (no kept template describes one
     or two pages); at most ``TEMPLATE_CAP`` templates, the rest in ``{other}``;
   - by QUERY CLASS (grouped by ``query``, aggregated by property): each query is classified into a closed set and
     dropped. No query text, no hash of one, and no per-query row is ever kept. A query that looks like personal
@@ -31,17 +32,20 @@ NOT_CONNECTED, so every decision drawn from them is INSUFFICIENT_EVIDENCE). It p
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-10-24.2"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-10-24.3"                     # query classes, templating and the aggregation rules below
+# .3 (AEGIS gl-gsc certification lows): {other} counts distinct normalised pages; CamelCase segments are {slug};
+#    the digit-run separators widened and ISO dates not counted
 # .2 (AEGIS gl-gsc L1, L4): the slug rule and the low-count collapse for page templates; the PII digit rule counts one
 #    digit run (phone separators allowed), not digits summed across words
 QUERY_CLASSES = ("pii_suspect", "brand", "question", "local", "commercial", "other")
@@ -49,6 +53,7 @@ TEMPLATE_CAP = 200
 TEMPLATE_MIN_URLS = 3                         # a template with a literal word needs at least this many distinct URLs
 _TEMPLATE_TRACK = 5000                        # distinct templates tracked during a read before new ones go to {other}
 _WORD = re.compile(r"[A-Za-z]{1,30}")
+_CAMEL = re.compile(r"[a-z][A-Z]")              # JaneSmith, janeSmith: a capital after a small letter
 _WORD_EXT = re.compile(r"([A-Za-z]{1,30})\.([A-Za-z0-9]{1,5})")
 _PLACEHOLDER = re.compile(r"\{(?:email|uuid|number|id|token|slug)\}|\{file\}\.[a-z0-9]{1,5}")
 LAG_DAYS = 3                                  # Google: "Data is typically available after 2-3 days"
@@ -153,7 +158,11 @@ def slug_segment(seg: str) -> str:
     one plain word of ASCII letters (``blog``, ``users``), or such a word with a static extension (``index.html``);
     otherwise ``{slug}``. Hyphenated, dotted, underscored, spaced, digit-bearing and non-ASCII segments are the ones
     that carry names and titles (``jane-smith``, ``john.q.public``, ``post-1``), so none of them is kept."""
-    if seg == "" or _PLACEHOLDER.fullmatch(seg) or _WORD.fullmatch(seg):
+    if seg == "" or _PLACEHOLDER.fullmatch(seg):
+        return seg
+    if _CAMEL.search(seg):                       # CamelCase joins words: JaneSmith is a name (AEGIS gl-gsc cert L1)
+        return "{slug}"
+    if _WORD.fullmatch(seg):
         return seg
     m = _WORD_EXT.fullmatch(seg)
     if m and m.group(2).lower() in logs_mod.STATIC_EXT:
@@ -179,7 +188,23 @@ def page_template(url: str, hosts: set) -> str:
     t = logs_mod.template_path(p.path or "/")
     if t is None:
         return "{unreadable}"
-    return "/" + "/".join(slug_segment(s) for s in t.split("/")[1:])
+    # one page, one template: literal words lower-cased (after the CamelCase check) and no trailing slash, the same
+    # normalisation as page_key (AEGIS gl-gsc certification L1)
+    segs = [slug_segment(x) for x in t.split("/")[1:]]
+    out = "/" + "/".join(x if x.startswith("{") else x.lower() for x in segs)
+    return out.rstrip("/") or "/"
+
+
+def page_key(url: str) -> bytes:
+    """What makes two Search Console page URLs the same page for the ``{other}`` threshold: the path decoded once,
+    lower-cased, without a trailing slash; host (www or not), scheme, port, query and fragment ignored. Only an 8-byte
+    hash of it is held, in memory, during the read (AEGIS gl-gsc cert L1: one page under several URLs is one page)."""
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        path = ""
+    norm = unquote(path).lower().rstrip("/")
+    return hashlib.blake2b(norm.encode("utf-8", "surrogatepass"), digest_size=8).digest()
 
 
 def _metric(clicks: int, impressions: int, pos_weighted: float) -> dict:
@@ -221,7 +246,7 @@ def read_aggregates(rd, prop: str, start: str, end: str, hosts: set, brands: lis
         total.pw += acc.pw
     # 2. page templates (aggregated by page)
     templates: dict = {}
-    urls: dict = {}                               # template -> distinct page URLs (rows) that produced it
+    urls: dict = {}                               # template -> hashes of the distinct pages (page_key) behind it
     pstats: dict = {}
     for rows in rd.pages(prop, start, end, ("page",), "byPage", pstats):
         for keys, c, i, _ctr, pos in rows:
@@ -229,7 +254,7 @@ def read_aggregates(rd, prop: str, start: str, end: str, hosts: set, brands: lis
             if t not in templates and len(templates) >= _TEMPLATE_TRACK:
                 t = "{other}"
             templates.setdefault(t, _Acc()).add(c, i, pos)
-            urls[t] = urls.get(t, 0) + 1
+            urls.setdefault(t, set()).add(page_key(keys[0]))
         rows.clear()
     templates, collapsed = _collapse(templates, urls)
     # 3. query classes (aggregated by property); the query text is classified and dropped here
@@ -275,7 +300,7 @@ def _collapse(templates: dict, urls: dict) -> tuple[dict, int]:
     for t, acc in templates.items():
         if t == "{other}":
             continue
-        if has_literal(t) and urls.get(t, 0) < TEMPLATE_MIN_URLS:
+        if has_literal(t) and len(urls.get(t, ())) < TEMPLATE_MIN_URLS:
             other.add(acc.c, acc.i, None)
             other.pw += acc.pw
             n += 1

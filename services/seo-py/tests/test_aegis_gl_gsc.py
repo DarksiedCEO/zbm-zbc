@@ -172,7 +172,7 @@ def test_l1_slugs_and_identifiers_are_collapsed():
     cases = {"https://acme.test/users/jane-smith/profile": "/users/{slug}/profile",
              "https://acme.test/patients/john-q-public-dob-1980-01-02": "/patients/{number}",
              "https://acme.test/people/john.q.public": "/people/{slug}",
-             "https://acme.test/p/jane_smith/": "/p/{slug}/",
+             "https://acme.test/p/jane_smith/": "/p/{slug}",
              "https://acme.test/blog/post-1": "/blog/{slug}",
              "https://acme.test/w/Zoë": "/w/{slug}",
              "https://acme.test/u/jane.doe@example.com": "/u/{email}",
@@ -434,3 +434,60 @@ def test_l6_a_service_account_key_is_never_shallow_copied():
     with pytest.raises(TypeError) as ei:
         copy.copy(g._Secret("t" * 20))
     assert "never copied" in str(ei.value)
+
+
+# ====================================================================== certification L1: {other} counts distinct pages
+
+def _templates(pages, collapsed=None):
+    fake = FakeGoogle()
+    fake.pages = pages
+    rd = client(fake).open_read(lambda: None)
+    out = sp.read_aggregates(rd, PROP, *W, {"acme.test", "www.acme.test"}, ["acme"])["by_page_template"]
+    if collapsed is not None:
+        assert out["templates_collapsed_into_other"] == collapsed, out["templates_collapsed_into_other"]
+    return {t["template"]: (t["clicks"], t["impressions"]) for t in out["templates"]}
+
+
+@pytest.mark.parametrize("path", ["/team/jane", "/u/jsmith"])
+@pytest.mark.parametrize("variants", [
+    ("https://acme.test{p}", "https://www.acme.test{p}", "http://acme.test{p}"),          # host and scheme
+    ("https://acme.test{p}", "http://www.acme.test{p}", "https://www.acme.test{p}"),
+    ("https://acme.test{p}?a=1", "https://acme.test{p}?a=2", "https://acme.test{p}?utm_source=x"),   # query strings
+    ("https://acme.test{p}", "https://acme.test{p}?ref=1", "https://www.acme.test{p}#top"),
+    ("https://acme.test{p}", "https://acme.test{p}/", "https://www.acme.test{p}/?x=1"),    # trailing slash
+    ("https://acme.test{p}", "https://ACME.test{p}", "https://acme.test:443{p}"),          # host case, port
+], ids=["www-scheme", "www-scheme-2", "query", "query-fragment", "trailing-slash", "host-case-port"])
+def test_cert_l1_one_page_under_several_urls_is_one_page(path, variants):
+    got = _templates([(v.format(p=path), 2, 20, 3.0) for v in variants], collapsed=1)     # one template, one page
+    assert path not in got and set(got) == {"{other}"} and got["{other}"] == (6, 60), got
+
+
+def test_cert_l1_case_variants_of_one_page_never_reach_three():
+    got = _templates([(f"https://acme.test{p}", 1, 10, 3.0) for p in ("/team/jane", "/Team/Jane", "/TEAM/JANE")],
+                     collapsed=1)
+    assert set(got) == {"{other}"}
+
+
+def test_cert_l1_three_distinct_pages_still_keep_their_template():
+    got = _templates([(f"https://acme.test/blog/post-{i}", 1, 10, 3.0) for i in range(3)]
+                     + [("https://www.acme.test/blog/post-0?x=1", 1, 10, 3.0)])
+    assert got == {"/blog/{slug}": (4, 40)}
+
+
+def test_cert_l1_page_key_normalisation():
+    k = sp.page_key
+    assert k("https://acme.test/Team/Jane/?q=1#x") == k("http://www.acme.test/team/jane") == k("/team/%6Aane")
+    assert k("https://acme.test/team/jane") != k("https://acme.test/team/john")
+
+
+@pytest.mark.parametrize("seg", ["JaneSmith", "janeSmith", "JohnQPublic", "MaryAnneO"])
+def test_cert_l1_camelcase_segments_are_slugs(seg):
+    assert sp.slug_segment(seg) == "{slug}"
+    assert sp.page_template(f"https://acme.test/team/{seg}", {"acme.test"}) == "/team/{slug}"
+
+
+def test_cert_l1_plain_words_in_any_single_case_are_kept_lower_cased():
+    for seg in ("team", "Team", "TEAM", "About"):
+        assert sp.slug_segment(seg) == seg
+        assert sp.page_template(f"https://acme.test/{seg}/", {"acme.test"}) == "/" + seg.lower()
+    assert sp.page_template("https://acme.test/", {"acme.test"}) == "/"
