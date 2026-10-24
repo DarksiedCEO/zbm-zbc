@@ -2,13 +2,20 @@
 
 - ``status``: what is registered and what snapshot is held. Never makes an outbound call.
 - ``sync``: reads one client's store into a minimised in-memory snapshot. Order of checks, every one before the first
-  outbound byte: kill switch -> registration (NOT_CONNECTED) -> one sync at a time -> the client's daily budget ->
+  outbound byte: kill switch -> registration (NOT_CONNECTED) -> one sync at a time for this client
+  (STORE_SYNC_IN_PROGRESS) -> at most ``RR_STORE_MAX_CONCURRENT_SYNCS`` syncs across clients, default 2
+  (STORE_SYNC_CAPACITY) -> the client's daily budget ->
   the credential files -> ``rr_store_read_requested`` on the ledger (record-first). Then token exchange (client
   credentials only), preflight (scopes, shop identity, currency), the orders pages, translation, the size check, and
-  ``rr_store_read_completed`` on the ledger; the snapshot replaces the client's previous one only after that record.
+  ``rr_store_read_completed`` on the ledger; the snapshot replaces the client's previous one only after that record,
+  and only if the client's registration (shop, credential reference, approval) is still the one the read used
+  (STORE_REGISTRATION_CHANGED otherwise). A completion the ledger did not record is LEDGER_COMPLETION_UNRECORDED:
+  the store WAS called, and the read is discarded.
 - ``snapshot``: the held snapshot for orchestrator-go's scan. Never makes an outbound call. Refused when the kill
   switch is on, when the client is no longer registered (its snapshot is dropped), or when it is older than the
-  client's ``snapshot_max_age_hours`` (dropped: that is the retention rule).
+  client's ``snapshot_max_age_hours`` (dropped: that is the retention rule), and dropped (NOT_SYNCED) when the
+  client's current registration names another shop, credential reference or approval than the snapshot was read
+  under (``status`` drops it the same way).
 
 Tenancy: every map is keyed by client_id; a sync uses only that client's registration and credential; the
 connections file refuses one shop under two clients. Snapshots live in process memory only (no disk, nothing
@@ -43,6 +50,7 @@ from .translate import agent_coverage, translate
 MAX_SNAPSHOT_BYTES = 7 * 1024 * 1024
 DEFAULT_SYNC_DEADLINE_S = 120.0
 DATA_SOURCE = "shopify"
+DEFAULT_MAX_CONCURRENT_SYNCS = 2
 
 
 @dataclass(frozen=True)
@@ -51,6 +59,19 @@ class Snapshot:
     snapshot_id: str
     taken_at: datetime
     body: bytes                 # the JSON served to orchestrator-go (orders + coverage), built once
+    # The registration the snapshot was read under (AEGIS M1). A snapshot is served only while the client's
+    # current registration names the same shop, the same credential reference and the same approval.
+    shop: str
+    credential: object          # the StaticTokenRef / ClientCredentialsRef (file references, never a secret)
+    approval_ref: str
+
+
+def _registration(conn: Connection) -> tuple:
+    return (conn.shop, conn.credential, conn.approval.approval_ref)
+
+
+def _same_registration(snap: Snapshot, conn: Connection) -> bool:
+    return (snap.shop, snap.credential, snap.approval_ref) == _registration(conn)
 
 
 def _canonical(obj) -> bytes:
@@ -64,7 +85,10 @@ class StoreService:
                  monotonic: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  resolve: Callable[[str, int], list] = system_resolve, dns_gate: Optional[DnsGate] = None,
-                 sync_deadline_s: float = DEFAULT_SYNC_DEADLINE_S, new_sync_id: Callable[[], str] = None):
+                 sync_deadline_s: float = DEFAULT_SYNC_DEADLINE_S, new_sync_id: Callable[[], str] = None,
+                 max_concurrent_syncs: int = DEFAULT_MAX_CONCURRENT_SYNCS):
+        if max_concurrent_syncs < 1:
+            raise ValueError("max_concurrent_syncs must be at least 1")
         self._connections_file = connections_file
         self._kill_file = kill_file
         self._disabled = disabled
@@ -74,7 +98,11 @@ class StoreService:
         self._resolve, self._dns_gate = resolve, dns_gate
         self._deadline = sync_deadline_s
         self._new_sync_id = new_sync_id or (lambda: secrets.token_hex(16))
-        self._sync_lock = threading.Lock()
+        # AEGIS L2: one sync at a time PER CLIENT, and at most ``max_concurrent_syncs`` across all clients, so one
+        # tenant's slow store cannot hold every other tenant's sync.
+        self._client_locks: dict[str, threading.Lock] = {}
+        self._sync_slots = threading.BoundedSemaphore(max_concurrent_syncs)
+        self.max_concurrent_syncs = max_concurrent_syncs
         self._state = threading.Lock()
         self._snapshots: dict[str, Snapshot] = {}
         self._syncs_today: dict[tuple[str, str], int] = {}
@@ -89,7 +117,12 @@ class StoreService:
             deadline = float(env.get("RR_STORE_SYNC_DEADLINE_SECONDS") or DEFAULT_SYNC_DEADLINE_S)
         except ValueError:
             deadline = DEFAULT_SYNC_DEADLINE_S
-        return cls(connections_file=(env.get("RR_STORE_CONNECTIONS_FILE") or "").strip() or None,
+        try:
+            cap = int(env.get("RR_STORE_MAX_CONCURRENT_SYNCS") or DEFAULT_MAX_CONCURRENT_SYNCS)
+        except ValueError:
+            cap = DEFAULT_MAX_CONCURRENT_SYNCS
+        return cls(max_concurrent_syncs=min(max(cap, 1), 16),
+                   connections_file=(env.get("RR_STORE_CONNECTIONS_FILE") or "").strip() or None,
                    kill_file=(env.get("RR_STORE_KILL_SWITCH_FILE") or "").strip() or None,
                    disabled=(env.get("RR_STORE_READS_DISABLED") or "").strip() == "1",
                    ledger=ledger_from_env(env), sync_deadline_s=min(max(deadline, 10.0), 600.0))
@@ -115,7 +148,7 @@ class StoreService:
         except StoreError as e:
             return {**out, "connected": False, "reason": e.code}
         with self._state:
-            snap = self._snapshots.get(client_id)
+            snap = self._current(client_id, conn)
         return {**out, "connected": True, "reason": None, "shop": conn.shop, "credential_kind": conn.credential.kind,
                 "budget": conn.budget.model_dump(), "snapshot_id": snap.snapshot_id if snap else None,
                 "snapshot_taken_at": snap.taken_at.isoformat() if snap else None}
@@ -125,7 +158,7 @@ class StoreService:
             raise StoreError("STORE_READS_DISABLED")
         conn = self._connection(client_id)
         with self._state:
-            snap = self._snapshots.get(client_id)
+            snap = self._current(client_id, conn)
             if snap is None:
                 raise StoreError("NOT_SYNCED")
             age_h = (self._now() - snap.taken_at).total_seconds() / 3600.0
@@ -134,18 +167,41 @@ class StoreService:
                 raise StoreError("SNAPSHOT_STALE")
             return snap.body
 
+    def _current(self, client_id: str, conn: Connection) -> Optional[Snapshot]:
+        """The held snapshot, if it was read under the client's CURRENT registration; otherwise it is dropped (the
+        shop, credential or approval changed: what was read belongs to the old registration). Caller holds _state."""
+        snap = self._snapshots.get(client_id)
+        if snap is not None and not _same_registration(snap, conn):
+            self._snapshots.pop(client_id, None)
+            return None
+        return snap
+
+    def _registration_unchanged(self, conn: Connection) -> bool:
+        try:
+            now = load_connections(self._connections_file).get(conn.client_id)
+        except StoreError:
+            return False
+        return now is not None and _registration(now) == _registration(conn)
+
     # ---- the sync --------------------------------------------------------------------------------------------
 
     def sync(self, client_id: str) -> dict:
         if self.killed():
             raise StoreError("STORE_READS_DISABLED")
         conn = self._connection(client_id)
-        if not self._sync_lock.acquire(blocking=False):
+        with self._state:
+            lock = self._client_locks.setdefault(conn.client_id, threading.Lock())
+        if not lock.acquire(blocking=False):
             raise StoreError("STORE_SYNC_IN_PROGRESS")
         try:
-            return self._sync_locked(conn)
+            if not self._sync_slots.acquire(blocking=False):
+                raise StoreError("STORE_SYNC_CAPACITY")
+            try:
+                return self._sync_locked(conn)
+            finally:
+                self._sync_slots.release()
         finally:
-            self._sync_lock.release()
+            lock.release()
 
     def _sync_locked(self, conn: Connection) -> dict:
         now = self._now()
@@ -193,6 +249,10 @@ class StoreService:
         except Exception:
             self._record_failed(sync_id, conn, "STORE_RESPONSE_INVALID", session)
             raise StoreError("STORE_RESPONSE_INVALID") from None
+        if not self._registration_unchanged(conn):
+            # AEGIS M1: re-registered (another shop, credential or approval) or deregistered while reading
+            self._record_failed(sync_id, conn, "STORE_REGISTRATION_CHANGED", session)
+            raise StoreError("STORE_REGISTRATION_CHANGED")
         st = session.stats
         done = {**base, "snapshot_id": snap.snapshot_id, "snapshot_sha256": hashlib.sha256(snap.body).hexdigest(),
                 "orders_read": counts["orders_read"], "orders_analysed": counts["orders_analysed"],
@@ -205,8 +265,12 @@ class StoreService:
                                 f"read={counts['orders_read']} analysed={counts['orders_analysed']} "
                                 f"pages={st.pages} cost={int(st.cost_points)}")
         except LedgerNotRecorded:
-            raise StoreError("LEDGER_UNAVAILABLE") from None
+            # AEGIS L1: requests WERE made; the read is discarded because its completion is not on the ledger
+            self._record_failed(sync_id, conn, "LEDGER_COMPLETION_UNRECORDED", session)
+            raise StoreError("LEDGER_COMPLETION_UNRECORDED") from None
         with self._state:
+            if not self._registration_unchanged(conn):
+                raise StoreError("STORE_REGISTRATION_CHANGED")
             self._snapshots[conn.client_id] = snap
         return {"client_id": conn.client_id, "sync_id": sync_id, "snapshot_id": snap.snapshot_id,
                 "orders_read": counts["orders_read"], "orders_analysed": counts["orders_analysed"],
@@ -220,8 +284,8 @@ class StoreService:
             self._ledger.record(f"rrs.{sync_id}.failed", "rr_store_read_failed", conn.client_id, payload,
                                 f"rrs1 failed client={conn.client_id} reason={code} "
                                 f"requests={session.stats.requests}")
-        except LedgerNotRecorded:
-            pass                                       # the sync already failed; its requested record stands
+        except Exception:  # noqa: BLE001, S110 - best effort: the sync already failed; its requested record stands
+            pass
 
     def _build(self, conn: Connection, now: datetime, orders: list[Order], counts: dict, read) -> Snapshot:
         created = [o.placed_at for o in orders]
@@ -246,6 +310,7 @@ class StoreService:
                            "orders": order_json, "coverage": coverage})
         if len(body) > MAX_SNAPSHOT_BYTES:
             raise StoreError("STORE_SNAPSHOT_TOO_LARGE")
-        return Snapshot(client_id=conn.client_id, snapshot_id=snapshot_id, taken_at=now, body=body)
+        return Snapshot(client_id=conn.client_id, snapshot_id=snapshot_id, taken_at=now, body=body, shop=conn.shop,
+                        credential=conn.credential, approval_ref=conn.approval.approval_ref)
 
 

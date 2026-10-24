@@ -30,7 +30,7 @@ from zbm_schema import EvidenceClass, Order
 # ---- harness -------------------------------------------------------------------------------------------------
 
 def _service(tmp_path, fake: FakeShopify, conns=None, *, ledger=None, clock=None, now=NOW, kill_file=None,
-             disabled=False, deadline=120.0):
+             disabled=False, deadline=120.0, **kw):
     if conns is None:
         tok = write_secret(tmp_path, "acme.token", TOKEN)
         conns = [conn("acme", "acme-store", tok)]
@@ -40,7 +40,7 @@ def _service(tmp_path, fake: FakeShopify, conns=None, *, ledger=None, clock=None
     svc = StoreService(connections_file=path, kill_file=kill_file, disabled=disabled,
                        ledger=ledger if ledger is not None else MemoryLedger(), transport=fake.transport,
                        monotonic=clock.monotonic, sleep=clock.sleep, now=lambda: holder["now"],
-                       sync_deadline_s=deadline, new_sync_id=iter(f"{i:032x}" for i in range(1, 99)).__next__)
+                       sync_deadline_s=deadline, new_sync_id=iter(f"{i:032x}" for i in range(1, 99)).__next__, **kw)
     svc._holder, svc._clock = holder, clock
     return svc
 
@@ -568,8 +568,21 @@ def test_snapshot_kept_only_after_the_completion_record(tmp_path):
     fake = FakeShopify(orders=[order(1)])
     ledger = MemoryLedger(fail_types=("rr_store_read_completed",))
     svc = _service(tmp_path, fake, ledger=ledger)
-    assert _err(svc.sync, "acme") == "LEDGER_UNAVAILABLE"
+    # AEGIS L1: the store WAS called, so the answer must not say "nothing was read"
+    assert _err(svc.sync, "acme") == "LEDGER_COMPLETION_UNRECORDED" and fake.requests
+    assert "LEDGER_COMPLETION_UNRECORDED" not in NO_OUTBOUND
+    assert "nothing was read" not in REASONS["LEDGER_COMPLETION_UNRECORDED"][1]
     assert _err(svc.snapshot, "acme") == "NOT_SYNCED"
+    assert [e["event_type"] for e in ledger.events] == ["rr_store_read_requested", "rr_store_read_failed"]
+    assert ledger.events[1]["payload"]["reason"] == "LEDGER_COMPLETION_UNRECORDED"
+    assert ledger.events[1]["payload"]["requests"] == len(fake.requests)
+
+
+def test_completion_unrecorded_and_failed_record_also_down(tmp_path):
+    fake = FakeShopify(orders=[order(1)])
+    ledger = MemoryLedger(fail_types=("rr_store_read_completed", "rr_store_read_failed"))
+    svc = _service(tmp_path, fake, ledger=ledger)
+    assert _err(svc.sync, "acme") == "LEDGER_COMPLETION_UNRECORDED"      # the failed record is best effort
     assert [e["event_type"] for e in ledger.events] == ["rr_store_read_requested"]
 
 
@@ -769,11 +782,14 @@ def test_no_raw_pii_is_stored(tmp_path):
 def test_one_sync_at_a_time(tmp_path):
     fake = FakeShopify(orders=[order(1)])
     svc = _service(tmp_path, fake)
-    assert svc._sync_lock.acquire(blocking=False)
+    svc.sync("acme")
+    fake.requests.clear()
+    lock = svc._client_locks["acme"]
+    assert lock.acquire(blocking=False)
     try:
         assert _err(svc.sync, "acme") == "STORE_SYNC_IN_PROGRESS" and fake.requests == []
     finally:
-        svc._sync_lock.release()
+        lock.release()
 
 
 def test_snapshot_size_cap(tmp_path, monkeypatch):
@@ -799,3 +815,157 @@ def test_production_transport_resolves_inside_the_deadline_and_refuses_private_a
     s.use_static_token(Secret(TOKEN))
     assert _err(s.preflight) == "STORE_UNAVAILABLE"
     assert asked == [("acme-store.myshopify.com", 443)] * 3 and clock.sleeps == [1.0, 1.0]
+
+
+# ---- AEGIS golive-rr M1: a snapshot is served only under the registration it was read with ---------------------
+
+def _two_shops(tmp_path):
+    fake = FakeShopify(shops={"shop-a": [order(1)], "shop-b": [order(2), order(3)]},
+                       tokens={"shop-a": TOKEN, "shop-b": TOKEN_B})
+    ta, tb = write_secret(tmp_path, "a", TOKEN), write_secret(tmp_path, "b", TOKEN_B)
+    return fake, ta, tb
+
+
+def test_swapped_registration_drops_the_snapshot(tmp_path):
+    fake, ta, tb = _two_shops(tmp_path)
+    svc = _service(tmp_path, fake, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)])
+    svc.sync("client-b")
+    assert len(json.loads(svc.snapshot("client-b"))["orders"]) == 2
+    # the operator swaps the shops: client-b no longer owns shop-b
+    write_connections(tmp_path, [conn("client-a", "shop-b", tb), conn("client-b", "shop-a", ta)])
+    st = svc.status("client-b")
+    assert st["shop"] == "shop-a" and st["snapshot_id"] is None
+    assert _err(svc.snapshot, "client-b") == "NOT_SYNCED"
+    assert _err(svc.snapshot, "client-a") == "NOT_SYNCED"
+    # dropped, not hidden: swapping back does not resurrect shop-b's orders
+    write_connections(tmp_path, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)])
+    assert _err(svc.snapshot, "client-b") == "NOT_SYNCED"
+
+
+def test_swap_drops_the_snapshot_from_the_scan_route(tmp_path, monkeypatch):
+    import api
+    from conftest import TEST_SERVICE_TOKEN
+    from fastapi.testclient import TestClient
+    fake, ta, tb = _two_shops(tmp_path)
+    svc = _service(tmp_path, fake, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)])
+    monkeypatch.setattr(api, "STORE", svc)
+    client, auth = TestClient(api.app), {"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}
+    assert client.post("/stores/sync", json={"client_id": "client-b"}, headers=auth).status_code == 200
+    write_connections(tmp_path, [conn("client-a", "shop-b", tb), conn("client-b", "shop-a", ta)])
+    for who in ("client-b", "client-a"):
+        r = client.post("/stores/snapshot", json={"client_id": who}, headers=auth)
+        assert r.status_code == 409 and r.json()["detail"]["reason"] == "NOT_SYNCED", r.text
+
+
+@pytest.mark.parametrize("change", ["credential", "approval"])
+def test_changed_credential_or_approval_drops_the_snapshot(tmp_path, change):
+    fake = FakeShopify(orders=[order(1)])
+    tok = write_secret(tmp_path, "t", TOKEN)
+    c = conn("acme", "acme-store", tok)
+    svc = _service(tmp_path, fake, [c])
+    svc.sync("acme")
+    c2 = json.loads(json.dumps(c))
+    if change == "credential":
+        c2["credential"]["token_file"] = write_secret(tmp_path, "t2", TOKEN)
+    else:
+        c2["approval"]["approval_ref"] = "andre-approval-2"
+    write_connections(tmp_path, [c2])
+    assert svc.status("acme")["snapshot_id"] is None
+    assert _err(svc.snapshot, "acme") == "NOT_SYNCED"
+
+
+def test_a_budget_change_keeps_the_snapshot(tmp_path):
+    fake = FakeShopify(orders=[order(1)])
+    tok = write_secret(tmp_path, "t", TOKEN)
+    svc = _service(tmp_path, fake, [conn("acme", "acme-store", tok)])
+    svc.sync("acme")
+    write_connections(tmp_path, [conn("acme", "acme-store", tok, syncs_per_day=2)])
+    assert json.loads(svc.snapshot("acme"))["client_id"] == "acme"
+
+
+def test_re_registration_during_the_read_discards_it(tmp_path):
+    fake, ta, tb = _two_shops(tmp_path)
+    other = FakeShopify(shops=fake.shops, tokens=dict(fake.tokens))
+
+    def swap_then_answer(request):
+        write_connections(tmp_path, [conn("client-a", "shop-b", tb), conn("client-b", "shop-a", ta)])
+        return other.handle(request)
+    fake.script = [None, swap_then_answer]                    # preflight, then the orders page
+    ledger = MemoryLedger()
+    svc = _service(tmp_path, fake, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)], ledger=ledger)
+    assert _err(svc.sync, "client-b") == "STORE_REGISTRATION_CHANGED"
+    assert _err(svc.snapshot, "client-b") == "NOT_SYNCED"
+    assert [e["event_type"] for e in ledger.events] == ["rr_store_read_requested", "rr_store_read_failed"]
+    assert ledger.events[1]["payload"]["reason"] == "STORE_REGISTRATION_CHANGED"
+
+
+def test_re_registration_after_the_completion_record_is_not_stored(tmp_path):
+    fake, ta, tb = _two_shops(tmp_path)
+
+    class SwapOnCompletion(MemoryLedger):
+        def record(self, event_id, event_type, subject_id, payload, summary):
+            super().record(event_id, event_type, subject_id, payload, summary)
+            if event_type == "rr_store_read_completed":
+                write_connections(tmp_path, [conn("client-a", "shop-b", tb), conn("client-b", "shop-a", ta)])
+    svc = _service(tmp_path, fake, [conn("client-a", "shop-a", ta), conn("client-b", "shop-b", tb)],
+                   ledger=SwapOnCompletion())
+    assert _err(svc.sync, "client-b") == "STORE_REGISTRATION_CHANGED"
+    assert svc._snapshots == {}
+
+
+# ---- AEGIS golive-rr L2: a sync locks its own client; a small global cap ----------------------------------------
+
+def test_one_clients_sync_does_not_block_another(tmp_path):
+    import threading
+    fake = FakeShopify(shops={"acme-store": [order(1)], "bravo-store": [order(2)]},
+                       tokens={"acme-store": TOKEN, "bravo-store": TOKEN_B})
+    entered, release = threading.Event(), threading.Event()
+    inner = fake.handle
+
+    def slow_for_acme(request):
+        if request.url.host.startswith("acme-store"):
+            entered.set()
+            assert release.wait(10)
+        return inner(request)
+    fake.handle = slow_for_acme
+    conns = [conn("acme", "acme-store", write_secret(tmp_path, "a", TOKEN)),
+             conn("bravo", "bravo-store", write_secret(tmp_path, "b", TOKEN_B))]
+    svc = _service(tmp_path, fake, conns)
+    box = {}
+    t = threading.Thread(target=lambda: box.setdefault("acme", svc.sync("acme")))
+    t.start()
+    try:
+        assert entered.wait(10)
+        assert _err(svc.sync, "acme") == "STORE_SYNC_IN_PROGRESS"
+        assert svc.sync("bravo")["orders_read"] == 1                # not blocked by acme's slow store
+    finally:
+        release.set()
+        t.join(10)
+    assert box["acme"]["orders_read"] == 1
+
+
+def test_global_sync_cap(tmp_path):
+    fake = FakeShopify(shops={"acme-store": [order(1)], "bravo-store": [order(2)]},
+                       tokens={"acme-store": TOKEN, "bravo-store": TOKEN_B})
+    conns = [conn("acme", "acme-store", write_secret(tmp_path, "a", TOKEN)),
+             conn("bravo", "bravo-store", write_secret(tmp_path, "b", TOKEN_B))]
+    ledger = MemoryLedger()
+    svc = _service(tmp_path, fake, conns, ledger=ledger, max_concurrent_syncs=1)
+    assert svc._sync_slots.acquire(blocking=False)               # another client's sync holds the only slot
+    try:
+        assert _err(svc.sync, "bravo") == "STORE_SYNC_CAPACITY"
+        assert fake.requests == [] and ledger.events == []
+        assert "STORE_SYNC_CAPACITY" in NO_OUTBOUND
+    finally:
+        svc._sync_slots.release()
+    svc.sync("bravo")
+    svc.sync("acme")                                             # the slot is given back after each sync
+
+
+def test_sync_cap_from_env():
+    assert StoreService.from_env({}).max_concurrent_syncs == 2
+    assert StoreService.from_env({"RR_STORE_MAX_CONCURRENT_SYNCS": "3"}).max_concurrent_syncs == 3
+    assert StoreService.from_env({"RR_STORE_MAX_CONCURRENT_SYNCS": "0"}).max_concurrent_syncs == 1
+    assert StoreService.from_env({"RR_STORE_MAX_CONCURRENT_SYNCS": "x"}).max_concurrent_syncs == 2
+    with pytest.raises(ValueError):
+        StoreService(max_concurrent_syncs=0)

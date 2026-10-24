@@ -14,7 +14,8 @@ REASONS: dict[str, tuple[int, str]] = {
     "STORE_CONFIG_INVALID": (503, "the store connections file is missing, unreadable or invalid"),
     "STORE_CREDENTIAL_UNREADABLE": (503, "the registered credential file cannot be read safely"),
     "STORE_BUDGET_EXHAUSTED": (429, "this client's store-read budget for the day is used up"),
-    "STORE_SYNC_IN_PROGRESS": (409, "a store sync is already running"),
+    "STORE_SYNC_IN_PROGRESS": (409, "a store sync is already running for this client"),
+    "STORE_SYNC_CAPACITY": (429, "too many store syncs are running at once; try again shortly"),
     "LEDGER_UNAVAILABLE": (503, "the evidence ledger did not record the read request; nothing was read"),
     "NOT_SYNCED": (409, "the store is connected but has not been synced yet"),
     "SNAPSHOT_STALE": (409, "the last store snapshot is older than this client's allowed age; sync again"),
@@ -34,11 +35,15 @@ REASONS: dict[str, tuple[int, str]] = {
     "STORE_CURRENCY_UNSUPPORTED": (422, "the shop's currency is not USD"),
     "STORE_COST_BUDGET_EXHAUSTED": (502, "the read used this client's query-cost budget before finishing"),
     "STORE_SNAPSHOT_TOO_LARGE": (502, "the minimised snapshot exceeds the size the scan path accepts"),
+    "STORE_REGISTRATION_CHANGED": (409, ("the client's store registration changed during the sync; the read was "
+                                         "discarded, sync again")),
+    "LEDGER_COMPLETION_UNRECORDED": (503, ("the store was read but the evidence ledger did not record the completion; "
+                                           "the read was discarded, sync again")),
 }
 
 NO_OUTBOUND = frozenset({"NOT_CONNECTED", "STORE_READS_DISABLED", "STORE_CONFIG_INVALID",
                          "STORE_CREDENTIAL_UNREADABLE", "STORE_BUDGET_EXHAUSTED", "STORE_SYNC_IN_PROGRESS",
-                         "LEDGER_UNAVAILABLE", "NOT_SYNCED", "SNAPSHOT_STALE"})
+                         "STORE_SYNC_CAPACITY", "LEDGER_UNAVAILABLE", "NOT_SYNCED", "SNAPSHOT_STALE"})
 
 
 class StoreError(Exception):
