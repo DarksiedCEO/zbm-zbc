@@ -12,7 +12,6 @@ import json
 import logging
 import os
 
-import httpcore
 import httpx
 import pytest
 
@@ -138,7 +137,7 @@ def test_the_model_allowlist_is_closed():
 
 # ---------------------------------------------------------------------------------------------- strict parsing
 
-@pytest.mark.parametrize("raw", [
+@pytest.mark.parametrize("payload", [
     b"not json", b"{", b"[]", b"null", json.dumps(sonar())[:-1].encode(),
     b'{"id": "x", "id": "y"}',                                                      # duplicate keys
     json.dumps({**sonar(), "surprise": 1}).encode(),                                # unknown top-level field
@@ -157,8 +156,8 @@ def test_the_model_allowlist_is_closed():
         "role": "user", "content": "x"}}]}).encode(),
     b"\xff\xfe{}",
 ])
-def test_anything_but_the_documented_shape_is_a_protocol_error(raw):  # noqa: F811 - the parameter shadows raw()
-    f = FakePerplexity(globals()["raw"](200, {"content-type": "application/json"}, raw))
+def test_anything_but_the_documented_shape_is_a_protocol_error(payload):
+    f = FakePerplexity(raw(200, {"content-type": "application/json"}, payload))
     assert code_of(lambda: engine(f).ask("q?")) == "ENGINE_PROTOCOL_ERROR"
     assert len(f.requests) == 1                                                       # never retried
 
