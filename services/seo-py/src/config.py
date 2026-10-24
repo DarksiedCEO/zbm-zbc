@@ -287,6 +287,15 @@ def _finance(env, s: "Settings") -> None:
     s.finance_url, s.finance_token, s.finance_caller_token = url, token, caller
 
 
+def gsc_requests_needed(max_pages: int, page_rows: int, max_rows: int) -> int:
+    """The most requests one Search Console read sends when every request succeeds first time: the token, the site
+    list, the date totals, and for each of the two paginated queries (page, query) at most min(max_pages,
+    ceil(max_rows / page_rows)) pages. Retries and a token refresh draw on whatever SEO_GSC_MAX_REQUESTS leaves above
+    this."""
+    pages = min(max_pages, -(-max_rows // page_rows))
+    return 3 + 2 * pages
+
+
 def _gsc(env, s: Settings) -> None:
     """The Google Search Console connector (ADR 0017, "Search Console (first-party truth)"). Unset
     ``SEO_GSC_SERVICE_ACCOUNT_FILE`` = NOT_CONNECTED (no call is ever made). Set, it must name a Google service-account
@@ -301,6 +310,14 @@ def _gsc(env, s: Settings) -> None:
     s.gsc_deadline_s = _int(env, "SEO_GSC_DEADLINE_SECONDS", 60, 5, 300)
     s.gsc_reads_per_day = _int(env, "SEO_GSC_READS_PER_DAY", 4, 1, 48)
     s.gsc_retention_days = _int(env, "SEO_GSC_RETENTION_DAYS", 90, 1, 480)
+    need = gsc_requests_needed(s.gsc_max_pages, s.gsc_page_rows, s.gsc_max_rows)
+    if s.gsc_max_requests < need:
+        # AEGIS gl-gsc L5: a read must be able to reach its own page caps (and say truncated) before the request
+        # budget runs out; otherwise every large property would end GSC_BUDGET_EXHAUSTED instead of a truncated read
+        raise RuntimeError(f"SEO_GSC_MAX_REQUESTS ({s.gsc_max_requests}) cannot serve SEO_GSC_MAX_PAGES / "
+                           f"SEO_GSC_PAGE_ROWS / SEO_GSC_MAX_ROWS: one read needs up to {need} requests (token, site "
+                           "list, date totals, then the page and the query pagination). Raise SEO_GSC_MAX_REQUESTS or "
+                           "lower the page caps.")
     if not (env.get("SEO_GSC_SERVICE_ACCOUNT_FILE") or "").strip():
         return
     from gsc_client import KeyFileInvalid, parse_service_account_key

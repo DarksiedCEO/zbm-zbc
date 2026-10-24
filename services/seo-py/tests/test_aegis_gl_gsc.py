@@ -319,3 +319,32 @@ def test_l4_longest_digit_run():
     assert sp.longest_digit_run("call (555) 010-0199 now") == 10
     assert sp.longest_digit_run("iphone 15 pro 256gb 2024") == 4
     assert sp.longest_digit_run("covid 19 2020 2021") == 2
+
+
+# ====================================================================== L5: the request budget covers the page caps
+
+def test_l5_startup_refuses_page_caps_the_request_budget_cannot_serve():
+    import config as config_mod
+    from helpers import base_env
+    with pytest.raises(RuntimeError) as ei:
+        config_mod.load(base_env(SEO_GSC_MAX_PAGES="40", SEO_GSC_PAGE_ROWS="1000", SEO_GSC_MAX_REQUESTS="30"))
+    assert "83" in str(ei.value) and "SEO_GSC_MAX_REQUESTS" in str(ei.value)
+    s = config_mod.load(base_env(SEO_GSC_MAX_PAGES="40", SEO_GSC_PAGE_ROWS="1000", SEO_GSC_MAX_REQUESTS="83"))
+    assert s.gsc_max_requests == 83
+    d = config_mod.load(base_env())                     # the defaults: 10 pages each, 23 of 30 requests
+    assert config_mod.gsc_requests_needed(d.gsc_max_pages, d.gsc_page_rows, d.gsc_max_rows) == 23
+    assert config_mod.gsc_requests_needed(40, 5000, 50_000) == 23     # max_rows bounds the pages too
+
+
+def test_l5_at_the_largest_accepted_caps_a_read_ends_truncated_not_over_budget():
+    import config as config_mod
+    from helpers import base_env
+    s = config_mod.load(base_env(SEO_GSC_MAX_PAGES="40", SEO_GSC_PAGE_ROWS="100", SEO_GSC_MAX_ROWS="4000",
+                                 SEO_GSC_MAX_REQUESTS="83"))
+    fake = FakeGoogle()
+    fake.queries = [(f"q{i}", 1, 10, 3.0) for i in range(5000)]
+    fake.pages = [(f"https://acme.test/p{i}", 1, 10, 3.0) for i in range(5000)]
+    rd = client(fake, page_rows=s.gsc_page_rows, max_pages=s.gsc_max_pages, max_rows=s.gsc_max_rows,
+                max_requests=s.gsc_max_requests).open_read(lambda: None)
+    out = sp.read_aggregates(rd, PROP, *W, {"acme.test"}, ["acme"])
+    assert out["by_page_template"]["truncated"] and out["by_query_class"]["truncated"] and rd.requests == 83

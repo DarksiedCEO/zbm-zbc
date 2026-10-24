@@ -468,6 +468,9 @@ GSC-4. **The connector** (`gsc_client.py`, standard library + httpx + `cryptogra
      403 rateLimitExceeded / userRateLimitExceeded, with backoff 1 s then 3 s (Retry-After honoured up to 60 s) and
      never past the deadline. 403 quotaExceeded / dailyLimitExceeded is `GSC_RATE_LIMITED` at once (Google: wait).
      A request budget per read (`SEO_GSC_MAX_REQUESTS`, default 30, retries included) -> `GSC_BUDGET_EXHAUSTED`.
+     Start-up refuses a budget below what the page caps need when every request succeeds first time — 3 + 2 ·
+     min(`SEO_GSC_MAX_PAGES`, ceil(`SEO_GSC_MAX_ROWS` / `SEO_GSC_PAGE_ROWS`)), 23 at the defaults — so a large
+     property ends a read `truncated`, not over budget (AEGIS gl-gsc L5); retries draw on the rest.
    - Pagination: page dims `page` and `query` are read in pages of `SEO_GSC_PAGE_ROWS` (default 5,000) from startRow 0,
      stopping at a short or empty page, at `SEO_GSC_MAX_PAGES` (10) pages or `SEO_GSC_MAX_ROWS` (50,000) rows; a cap
      that stops it after a full page sets `truncated: true`. A key repeated within or across pages (the data moved
