@@ -302,9 +302,9 @@ def _main(work: Path) -> int:
         check("production without the log hash key refuses start",
               bad.returncode != 0 and b"SEO_LOG_HASH_KEY_FILE" in bad.stderr)
 
-        probe = subprocess.run([sys.executable, "-c", "import socket\ntry:\n    socket.getaddrinfo("
-                                "'trap-selftest.invalid', 443)\nexcept OSError:\n    pass"],
-                               env={**os.environ, "PYTHONPATH": str(trap_dir)}, capture_output=True, timeout=30)
+        probe_code = "import socket\ntry:\n    socket.getaddrinfo('trap-selftest.invalid', 443)\nexcept OSError:\n    pass"
+        probe = subprocess.run([sys.executable, "-c", probe_code], env={**os.environ, "PYTHONPATH": str(trap_dir)},
+                               capture_output=True, timeout=30, check=False)
         seen = trap_out.read_text() if trap_out.exists() else ""
         check("the outbound audit hook works (a probe's lookup of a public name is written down)",
               probe.returncode == 0 and "getaddrinfo trap-selftest.invalid" in seen)
@@ -312,20 +312,20 @@ def _main(work: Path) -> int:
         loose = _gsc_key(work, "gsc-loose.json", mode=0o644)
         bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env,
                                                                  "SEO_GSC_SERVICE_ACCOUNT_FILE": loose},
-                             cwd=src, capture_output=True, timeout=30)
+                             cwd=src, capture_output=True, timeout=30, check=False)
         check("a Search Console key file readable by others refuses start",
               bad.returncode != 0 and b"SEO_GSC_SERVICE_ACCOUNT_FILE" in bad.stderr and b"chmod 600" in bad.stderr)
         user_key = _gsc_key(work, "gsc-user.json", type="authorized_user")
         bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env,
                                                                  "SEO_GSC_SERVICE_ACCOUNT_FILE": user_key},
-                             cwd=src, capture_output=True, timeout=30)
+                             cwd=src, capture_output=True, timeout=30, check=False)
         body_line = json.loads(Path(user_key).read_text())["private_key"].splitlines()[2]
         check("a key that is not a service-account key refuses start and the error never quotes the key",
               bad.returncode != 0 and b"not a service-account key" in bad.stderr
               and body_line.encode() not in bad.stderr + bad.stdout and b"PRIVATE KEY" not in bad.stderr)
         bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env,
                                                                  "SEO_SEARCH_CONSOLE_CREDENTIALS_FILE": user_key},
-                             cwd=src, capture_output=True, timeout=30)
+                             cwd=src, capture_output=True, timeout=30, check=False)
         check("the old Search Console variable refuses start and names the new one",
               bad.returncode != 0 and b"SEO_GSC_SERVICE_ACCOUNT_FILE" in bad.stderr)
 
