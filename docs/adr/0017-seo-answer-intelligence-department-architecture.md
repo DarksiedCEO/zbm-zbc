@@ -492,7 +492,13 @@ W4-2. **The adapter** (`src/perplexity.py`) and its runs (`src/svc_engines.py`):
      level). `citations` is optional, and so are `search_results`, a choice's `index` and the token counts.
    - **A run stops spending on an unreadable shape.** Two ENGINE_PROTOCOL_ERRORs with no answer between them (across
      prompts; only an answer resets the count, a 503 or a transport error between them does not: AEGIS round 2) stop
-     the engine for that run, detail `REPEATED_PROTOCOL_ERRORS`. A run that ends
+     the engine for that run, detail `REPEATED_PROTOCOL_ERRORS`.
+   - **Drift is visible** (AEGIS round 2). Because unmodelled fields are ignored, a moved citations field would
+     otherwise look like answers that cite nothing. Each answer carries the NAMES (never the values) of the
+     top-level keys the parser does not model (at most 20; a name that is not a plain identifier is `<other>`), and
+     the engine's facts carry `drift`: those names, `zero_source_answers` and `answers`, plus `zero_source_answers`
+     per prompt. When every answer had no source, Callum adds a finding `ENGINE_ANSWERS_WITHOUT_SOURCES` with the
+     key names. The smoke helper prints `zero_sources` and `unmodelled_keys`. A run that ends
      with errors and no answer at all is `FAILED` (detail `NO_ANSWERS`, reason the most frequent error code), never
      `OK`.
    - Retries are bounded (`SEO_PERPLEXITY_MAX_ATTEMPTS`, 1..3) and happen only on 429, 5xx and transport errors.

@@ -1279,3 +1279,35 @@ def test_r2_a_cost_far_above_the_reserve_stops_the_run_and_is_a_finding(tmp_path
     f2 = FakePerplexity(ok(body))
     h2 = svc_harness(tmp_path / "b", f2, SEO_PERPLEXITY_RESERVE_USD_PER_CALL="0.05")
     assert callum(run_audit(h2, setup_zbm(h2)))["outcome"] == "OK" and len(f2.requests) == 3
+
+
+def test_r2_drift_unmodelled_key_names_and_zero_source_answers_are_visible(tmp_path):
+    import io
+    moved = sonar(citations=[], sources=["https://site.test/"], **{"weird key!": 1, "z" * 50: 2})
+    moved.pop("citations")
+    a = px.parse_response(json.dumps(moved).encode())
+    assert a.citations == [] and a.unmodelled_keys == ("<other>", "sources")
+    many = sonar(**{f"k{i:02d}": i for i in range(30)})
+    assert len(px.parse_response(json.dumps(many).encode()).unmodelled_keys) == px.MAX_UNMODELLED_KEYS
+    f = FakePerplexity(ok(moved))
+    h = svc_harness(tmp_path, f)
+    c = callum(run_audit(h, setup_zbm(h)))
+    e = c["facts"]["engines"]["perplexity"]
+    assert e["drift"] == {"unmodelled_keys": ["<other>", "sources"], "zero_source_answers": 3, "answers": 3}
+    assert e["prompts"][0]["zero_source_answers"] == 3
+    fnd = [x for x in c["findings"] if x["code"] == "ENGINE_ANSWERS_WITHOUT_SOURCES"]
+    assert fnd and fnd[0]["detail"]["unmodelled_keys"] == ["<other>", "sources"]
+    assert "https://site.test/" not in json.dumps(c["findings"])                       # names only, never values
+    m = _smoke_module()
+    out = io.StringIO()
+    assert m.main([m.FLAG], {}, engine_factory=lambda env: engine(FakePerplexity(ok(moved))), out=out) == 0
+    rep = json.loads(out.getvalue())
+    assert rep["zero_sources"] is True and rep["unmodelled_keys"] == ["<other>", "sources"]
+
+
+def test_r2_a_normal_answer_reports_no_drift(tmp_path):
+    f = FakePerplexity(ok(sonar(search_results=[SEARCH_RESULT])))
+    h = svc_harness(tmp_path, f)
+    c = callum(run_audit(h, setup_zbm(h)))
+    assert c["facts"]["engines"]["perplexity"]["drift"]["zero_source_answers"] == 0
+    assert not [x for x in c["findings"] if x["code"] == "ENGINE_ANSWERS_WITHOUT_SOURCES"]

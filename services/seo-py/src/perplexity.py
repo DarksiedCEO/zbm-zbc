@@ -60,6 +60,7 @@ MAX_RESPONSE_BYTES = 512 * 1024
 MAX_ANSWER_CHARS = 100_000
 MAX_SOURCES = 100
 MAX_RETRY_AFTER_S = 30
+MAX_UNMODELLED_KEYS = 20                     # drift visibility: at most this many unmodelled top-level key NAMES
 # one socket read waits at most this long (within the deadline) before the kill-switch guard is checked again, so a
 # switch engaged while the API is still composing its answer stops the request within seconds (AEGIS L1)
 READ_SLICE_S = 2.0
@@ -213,6 +214,18 @@ def money(x) -> Optional[str]:
     return str(d) if d >= 0 else None
 
 
+def unmodelled_keys(obj: dict) -> tuple:
+    """The NAMES (never the values) of top-level response keys the parser does not model, sorted and bounded, so a
+    moved or renamed citations field shows up (AEGIS round 2). A name that is not a plain identifier is reported as
+    "<other>"."""
+    names = set()
+    for k in obj:
+        if k in _Response.model_fields:
+            continue
+        names.add(k if re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", k) else "<other>")
+    return tuple(sorted(names)[:MAX_UNMODELLED_KEYS])
+
+
 def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
     """The documented Sonar response -> a ProviderAnswer. A field we rely on with any other shape is
     ENGINE_PROTOCOL_ERROR. Sources: ``search_results[].url`` in order (primary), then any ``citations`` URL not
@@ -238,9 +251,11 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
                  "num_search_queries": u.num_search_queries,
                  "total_cost_usd": money(u.cost.total_cost) if u.cost is not None else None}
     text = first.message.content
-    return ProviderAnswer("ANSWER", text, sources[:MAX_SOURCES], r.model, None, cite_from_text=False,
-                          usage=usage, answer_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
-                          finish_reason=first.finish_reason)
+    ans = ProviderAnswer("ANSWER", text, sources[:MAX_SOURCES], r.model, None, cite_from_text=False,
+                         usage=usage, answer_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
+                         finish_reason=first.finish_reason)
+    ans.unmodelled_keys = unmodelled_keys(obj)        # names only (drift visibility), read by agents/probes.py
+    return ans
 
 
 def cost_of(ans: ProviderAnswer) -> Optional[str]:

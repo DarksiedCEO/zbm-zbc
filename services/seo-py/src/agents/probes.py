@@ -41,6 +41,7 @@ from primitives import Killed
 
 AGENT_CALLUM, AGENT_NAOMI = "callum", "naomi"
 MIN_USABLE = 3
+MAX_DRIFT_KEYS = 20
 Z95 = 1.959963984540054
 _URL = re.compile(r"https?://[^\s<>\"')\]]+")
 # a citation URL holding a backslash, an ASCII control character or any whitespace is refused, never parsed: urlsplit
@@ -132,6 +133,8 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
     answers_total = 0
     errors_total = 0
     errors_seen: dict = {}
+    drift_keys: set = set()     # names of unmodelled top-level response keys seen in this run (bounded)
+    zero_source_total = 0       # answers with no usable source at all
     protocol_run = 0            # ENGINE_PROTOCOL_ERRORs since the last answer, across prompts; other errors (503,
                                 # transport) do not reset it (AEGIS round 2): only an answer does
     try:
@@ -159,6 +162,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
             injection_like = 0
             positions: list = []
             hashes: list = []
+            zero_sources = 0
             for _ in range(n):
                 guard(capability="ai_probe", provider=engine)
                 try:
@@ -202,6 +206,11 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                 if re.search(r"ignore (all |any )?(previous|prior) instructions|system prompt", a.text or "", re.I):
                     injection_like += 1                   # reported as data; changes nothing
                 cites = extract_citations(a)
+                if not cites:
+                    zero_sources += 1
+                for k in getattr(a, "unmodelled_keys", ()) or ():
+                    if isinstance(k, str) and len(drift_keys) < MAX_DRIFT_KEYS:
+                        drift_keys.add(k[:40])
                 if _mentioned(a.text, prompt_set["brand_terms"]):
                     tally["mentioned"] += 1
                 pos = None
@@ -222,11 +231,12 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                     break
             versions |= sample_versions
             answers_total += tally["answers"]
+            zero_source_total += zero_sources
             errors_total += tally["errors"] + tally["malformed"]
             for code, k in errors_by.items():
                 errors_seen[code] = errors_seen.get(code, 0) + k
-            results.append(_prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions,
-                                          injection_like, positions, hashes))
+            results.append({**_prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions,
+                                             injection_like, positions, hashes), "zero_source_answers": zero_sources})
         if stop is None and not answers_total and errors_total:
             # every request failed: never OK (AEGIS H2). The reason is the most frequent error code.
             stop = sorted(errors_seen.items(), key=lambda kv: (-kv[1], kv[0]))[0][0] if errors_seen \
@@ -245,7 +255,8 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
         outcome = {"ENGINE_BUDGET_EXHAUSTED": "BLOCKED", "ENGINE_NOT_CONNECTED": NOT_CONNECTED}.get(stop, "FAILED")
     return {"engine": engine, "outcome": outcome, "reason": stop, "reason_detail": stop_detail, "prompts": results,
             "prompts_not_asked": len(prompt_set["prompts"]) - asked, "model_versions": sorted(versions),
-            "usage": usage}
+            "usage": usage, "drift": {"unmodelled_keys": sorted(drift_keys), "zero_source_answers": zero_source_total,
+                                      "answers": answers_total}}
 
 
 def _switch_code(e: EngineError) -> str:
@@ -260,7 +271,7 @@ def _refused_prompt(pi: int, n: int, kind: str) -> dict:
             "lookalike_citations": 0, "errors_by_reason": {}, "mention_rate": None, "mention_ci95": None,
             "citation_rate": None, "citation_ci95": None, "citation_variance": None, "class": "INSUFFICIENT_EVIDENCE",
             "other_sources": [], "model_versions": [], "mixed_model_versions": False, "injection_like_answers": 0,
-            "cited_positions": [], "best_position": None, "answers_sha256": []}
+            "cited_positions": [], "best_position": None, "answers_sha256": [], "zero_source_answers": 0}
 
 
 def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions, injection_like,
@@ -326,6 +337,13 @@ def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, g
         findings.append(finding("ENGINE_RUN_STOPPED", "low", "measured", "WATCH", capability="P4",
                                 detail={"engine": e, "reason": r.get("reason"), "outcome": r["outcome"]}))
     for e, r in per_engine.items():
+        d = r.get("drift") or {}
+        if d.get("answers") and d.get("zero_source_answers") == d.get("answers"):
+            # every answer came without a single source: a citations field may have moved (names of unmodelled keys
+            # are in the detail; never their values)
+            findings.append(finding("ENGINE_ANSWERS_WITHOUT_SOURCES", "low", "measured", "WATCH", capability="P4",
+                                    detail={"engine": e, "answers": d["answers"],
+                                            "unmodelled_keys": d.get("unmodelled_keys", [])}))
         if r.get("reason_detail") == "COST_ABOVE_RESERVE":
             findings.append(finding("ENGINE_COST_ABOVE_RESERVE", "medium", "measured", "WATCH", capability="P4",
                                     detail={"engine": e, "outcome": r["outcome"], "usage": r.get("usage")}))

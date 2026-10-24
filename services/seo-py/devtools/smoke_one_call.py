@@ -12,7 +12,9 @@ public-address check) with ONE attempt (no retry), a meter that allows ONE reque
 
 What it prints (JSON, one object): the outcome (``ANSWER`` or the closed engine code and detail), the model the API
 reported, the finish reason, the answer's length and SHA-256 (never its text), how many citation URLs were parsed and
-their first hosts, the usage and reported cost, and ``requests_sent`` (0 or 1). It never prints the key, and it touches
+their first hosts, ``zero_sources`` and the NAMES of top-level response keys the parser does not model
+(``unmodelled_keys``: a moved citations field shows up here), the usage and reported cost, and ``requests_sent``
+(0 or 1). It never prints the key, and it touches
 no ledger, no data directory and no budget: it is a protocol check before budgets are raised, not an audit.
 
 Exit 0 when the API answered and the answer parsed; 1 for any engine code (ENGINE_PROTOCOL_ERROR means the response
@@ -104,6 +106,7 @@ def main(argv=None, env=None, engine_factory=None, out=None) -> int:
             hosts.append("?")
     report.update(outcome=a.status, model=a.model, finish_reason=a.finish_reason, answer_chars=len(a.text),
                   answer_sha256=a.answer_sha256, citations=len(a.citations), first_hosts=hosts, usage=a.usage,
+                  zero_sources=not a.citations, unmodelled_keys=list(getattr(a, "unmodelled_keys", ()) or ()),
                   requests_sent=meter.calls)
     print(json.dumps(report, sort_keys=True), file=out)
     return 0
