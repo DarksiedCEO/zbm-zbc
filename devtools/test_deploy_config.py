@@ -18,6 +18,7 @@ it in the `hygiene-static` job, and `python -m pytest devtools/` collects it:
 from __future__ import annotations
 
 import ast
+import json
 import re
 import unittest
 from pathlib import Path
@@ -173,6 +174,25 @@ class Dockerfiles(unittest.TestCase):
         self.assertTrue(ENTRY.stat().st_mode & 0o111, "deploy/docker/zbm-entrypoint.sh must be executable")
 
 
+REF = re.compile(r"\$\{\{[a-z][a-z0-9-]*\.[A-Z][A-Z0-9_]*\}\}")
+
+
+def secret_value_ok(value: str) -> bool:
+    """A secret in the IaC is preserve(), a reference (`finance.env.X`), or a JSON map literal whose EVERY value is
+    exactly one `${{service.VARIABLE}}` reference (AEGIS L5): a literal secret placed next to a reference is refused."""
+    if re.fullmatch(r"preserve\(\)|[a-z][A-Za-z]*\.env\.[A-Z0-9_]+", value):
+        return True
+    m = re.fullmatch(r"'(\{.*\})'", value)
+    if not m:
+        return False
+    try:
+        mapping = json.loads(m.group(1))
+    except ValueError:
+        return False
+    return (isinstance(mapping, dict) and bool(mapping)
+            and all(isinstance(v, str) and REF.fullmatch(v) for v in mapping.values()))
+
+
 class RailwayIac(unittest.TestCase):
     def setUp(self):
         self.blocks = iac_services()
@@ -207,8 +227,21 @@ class RailwayIac(unittest.TestCase):
             for name, value in re.findall(r"^\s+([A-Z][A-Z0-9_]+):\s*(.+?),?\s*(?://.*)?$", b, re.M):
                 if re.search(r"TOKEN|SECRET|KEY|PASSWORD|CALLERS", name):
                     with self.subTest(service=svc, variable=name):
-                        self.assertRegex(value, r"^(preserve\(\)|[a-z]+\.env\.[A-Z0-9_]+|'\{.*\$\{\{.*\}\}.*\}')$",
-                                         "a secret must be preserve(), a reference, or a ${{...}} map")
+                        self.assertTrue(secret_value_ok(value), f"{value}: a secret must be preserve(), a reference, "
+                                        "or a JSON map whose every value is one ${{service.VARIABLE}}")
+
+    def test_the_secret_check_refuses_a_literal_inside_a_reference_map(self):
+        q = lambda body: "'" + body + "'"   # noqa: E731  the map as it appears in railway.ts, single-quoted
+        good = ["preserve()", "finance.env.FIN_SERVICE_TOKEN",
+                q('{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_X}}"}')]
+        bad = [q('{"a": "${{x.Y}}", "b": "a-literal-secret-value"}'), q('{"a": "prefix-${{x.Y}}"}'),
+               q('{"a": "${{x.Y}}${{x.Z}}"}'), q("{}"), q('{"a": "${{x.Y}}", "b": {"c": "literal"}}'),
+               q("{... ${{x.Y}} ...}"), '"a-literal-secret"', "ctx.randomString('x')",
+               q('{"a": "${{x.Y}}"}') + " + secret"]
+        for v in good:
+            self.assertTrue(secret_value_ok(v), v)
+        for v in bad:
+            self.assertFalse(secret_value_ok(v), v)
 
 
 class CiAndSmoke(unittest.TestCase):

@@ -511,5 +511,17 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - **Secrets are Railway variables.** The vault (Cybersecurity 22) is not built. `*_FILE` secrets are written inside the
   container, owner-only, but the values live in Railway (dashboard, `railway ssh`) and in the root-owned entrypoint's
   `/proc/1/environ` (see "How `*_FILE` secrets map onto Railway").
+- **Deploy checks (AEGIS L5), the part not yet done.** Done: the smoke's "fail closed" requires exit 1 and each
+  service's own refusal text; the IaC check refuses a literal secret inside a `${{...}}` reference map. Still open
+  (as recorded by the fix engineer; reconcile with the AEGIS report's L5 list):
+  - the smoke has never run (no Docker on the build box); its first run is the `railway-images` CI job;
+  - stripe-gateway is smoked against a loopback Finance only, not through the private-network opt-in
+    (`STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP=1`, `STRIPE_GATEWAY_FINANCE_PRIVATE_NAME`) to a real finance container;
+  - the root-owned-volume path (`RAILWAY_RUN_UID=0`) is smoked for ledger-rust only, not finance, legal or seo, and the
+    secret-file path for seo only, not `LEDGER_CALLERS` or the two `FIN_STRIPE_*` secrets;
+  - no cross-service flow runs in CI (orchestrator → detection → ledger, stripe-gateway → finance); it was run once by
+    hand on the build box without Docker;
+  - `devtools/test_deploy_config.py` reads `.railway/railway.ts` as text; CI does not evaluate the file with the
+    pinned SDK (it was evaluated by hand with `node --experimental-strip-types` and type-checked with `tsc --strict`).
 - **Startup order** is enforced only by retries: a department that exhausted its retries before the ledger was up stays
   down until redeployed.
