@@ -205,6 +205,48 @@ func TestConfigFailsClosed(t *testing.T) {
 	}
 }
 
+// Go-live Days 1-2: on Railway the gateway reaches Finance at http://<name>.railway.internal (private network,
+// WireGuard-encrypted, not routed from the internet). Plain http there needs the explicit opt-in, is limited to that
+// suffix, and every other plain-http host is still refused.
+func TestRailwayPrivateHTTPOptIn(t *testing.T) {
+	base := map[string]string{"STRIPE_GATEWAY_FINANCE_TOKEN": svcTok, "STRIPE_GATEWAY_CALLER_TOKEN": callerTok}
+	load := func(url, optIn string) (config, error) {
+		env := map[string]string{"STRIPE_GATEWAY_FINANCE_URL": url, allowRailwayPrivateHTTPEnv: optIn}
+		for k, v := range base {
+			env[k] = v
+		}
+		return loadConfig(func(k string) string { return env[k] })
+	}
+	if _, err := load("http://finance.railway.internal:8410", ""); err == nil {
+		t.Fatal("plain http to a private-network host started without the opt-in")
+	}
+	for _, u := range []string{"http://finance.railway.internal:8410", "http://FINANCE.railway.internal",
+		"http://finance-31.railway.internal:8410/"} {
+		c, err := load(u, "1")
+		if err != nil || !c.privateHTTP {
+			t.Fatalf("%s with the opt-in: %v (privateHTTP=%v)", u, err, c.privateHTTP)
+		}
+	}
+	for _, u := range []string{"http://finance.internal", "http://railway.internal", "http://.railway.internal",
+		"http://a.b.railway.internal", "http://finance.railway.internal.evil.example", "http://10.0.0.5:8410",
+		"http://[fd12::1]:8410", "http://-x.railway.internal", "http://x_y.railway.internal"} {
+		if _, err := load(u, "1"); err == nil {
+			t.Errorf("%s started with the opt-in: only <label>.railway.internal is private", u)
+		}
+	}
+	for _, v := range []string{"true", "yes", "2", " 1"} {
+		if _, err := load("http://finance.railway.internal", v); err == nil {
+			t.Errorf("opt-in value %q started (only 1 or 0/unset)", v)
+		}
+	}
+	if c, err := load("http://127.0.0.1:8410", "1"); err != nil || c.privateHTTP {
+		t.Fatalf("loopback with the opt-in: %v %v", err, c.privateHTTP)
+	}
+	if c, err := load("https://finance.example", "0"); err != nil || c.privateHTTP {
+		t.Fatalf("https with the opt-in off: %v %v", err, c.privateHTTP)
+	}
+}
+
 func TestServerLimits(t *testing.T) {
 	s := newServer("127.0.0.1:0", http.NotFoundHandler())
 	if s.ReadHeaderTimeout != 5*time.Second || s.ReadTimeout == 0 || s.WriteTimeout <= upstreamTimeout ||

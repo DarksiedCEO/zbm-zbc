@@ -30,5 +30,10 @@ STRIPE_GATEWAY_BIND_ADDR=127.0.0.1 STRIPE_GATEWAY_PORT=8470 ./stripe-gateway
 
 - It refuses to start without both tokens (at least 32 characters each, and different from each other).
 - It binds loopback by default. Put it behind the HTTPS reverse proxy that is the public hostname.
+- Plain `http://` to Finance is accepted only for a loopback Finance, unless
+  `STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP=1` (exactly `1`; `0`/unset is off, anything else refuses to start):
+  then also for a `<service>.railway.internal` host — Railway's private network, which Railway encrypts with
+  WireGuard and does not route from the internet. Every other plain-http host, and any IP literal, is still refused.
+  Railway setup: `docs/deploy/railway.md`.
 - Register `https://<host>/webhooks/stripe` as the Stripe endpoint, with the events listed in
   `services/finance-py/README.md`.

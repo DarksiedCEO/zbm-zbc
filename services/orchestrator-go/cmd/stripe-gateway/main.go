@@ -59,6 +59,41 @@ type config struct {
 	serviceToken string
 	callerToken  string
 	addr         string
+	// privateHTTP: Finance is reached over plain http on Railway's private network (the opt-in was used)
+	privateHTTP bool
+}
+
+// allowRailwayPrivateHTTPEnv is the opt-in for plain http to Finance on Railway's private network. Only "1" turns it
+// on; unset, empty or "0" leave it off; any other value refuses to start (a typo never silently means "off").
+const allowRailwayPrivateHTTPEnv = "STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP"
+
+const railwayPrivateSuffix = ".railway.internal"
+
+func railwayPrivateHTTP(raw string) (bool, error) {
+	switch raw {
+	case "", "0":
+		return false, nil
+	case "1":
+		return true, nil
+	}
+	return false, fmt.Errorf("%s must be 1 (on) or 0/unset (off)", allowRailwayPrivateHTTPEnv)
+}
+
+// isRailwayPrivateHost: a DNS name <label>.railway.internal (Railway's private-network names), never an IP literal.
+func isRailwayPrivateHost(host string) bool {
+	if net.ParseIP(host) != nil || !strings.HasSuffix(host, railwayPrivateSuffix) {
+		return false
+	}
+	label := strings.TrimSuffix(host, railwayPrivateSuffix)
+	if label == "" || len(label) > 63 {
+		return false
+	}
+	for _, r := range label {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return label[0] != '-' && label[len(label)-1] != '-'
 }
 
 func loadConfig(getenv func(string) string) (config, error) {
@@ -72,12 +107,22 @@ func loadConfig(getenv func(string) string) (config, error) {
 		return c, errors.New("STRIPE_GATEWAY_FINANCE_URL must be Finance's base URL (http:// or https://)")
 	}
 	// The Finance tokens and Stripe's body (it can carry client names and emails) never cross a network in clear
-	// text: plain http is accepted only to a loopback Finance (AEGIS launch-hardening L8).
+	// text: plain http is accepted only to a loopback Finance (AEGIS launch-hardening L8) — or, with the explicit
+	// opt-in below, to a Finance on Railway's private network, which Railway encrypts (WireGuard) and does not
+	// route from the internet (docs/deploy/railway.md; go-live Days 1-2).
+	privateHTTP, err := railwayPrivateHTTP(getenv(allowRailwayPrivateHTTPEnv))
+	if err != nil {
+		return c, err
+	}
 	if u.Scheme == "http" {
-		ip := net.ParseIP(u.Hostname())
-		if !(u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())) {
-			return c, errors.New("STRIPE_GATEWAY_FINANCE_URL: plain http only to a loopback Finance; use https")
+		host := strings.ToLower(u.Hostname())
+		ip := net.ParseIP(host)
+		loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
+		if !loopback && !(privateHTTP && isRailwayPrivateHost(host)) {
+			return c, errors.New("STRIPE_GATEWAY_FINANCE_URL: plain http only to a loopback Finance (or, with " +
+				allowRailwayPrivateHTTPEnv + "=1, to a <service>.railway.internal host); use https")
 		}
+		c.privateHTTP = !loopback
 	}
 	for name, v := range map[string]string{"STRIPE_GATEWAY_FINANCE_TOKEN": c.serviceToken,
 		"STRIPE_GATEWAY_CALLER_TOKEN": c.callerToken} {
@@ -239,6 +284,10 @@ func main() {
 		log.Fatalf("stripe-gateway: REFUSING TO START — %v", err)
 	}
 	srv := newServer(cfg.addr, newMux(newGateway(cfg)))
+	if cfg.privateHTTP {
+		log.Printf("stripe-gateway: %s=1 — Finance is reached over plain http on Railway's private network",
+			allowRailwayPrivateHTTPEnv)
+	}
 	log.Printf("stripe-gateway listening on %s, forwarding to Finance at %s%s", cfg.addr, cfg.financeURL, financePath)
 	log.Fatal(srv.ListenAndServe())
 }
