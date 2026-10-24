@@ -660,7 +660,13 @@ W4-7. **Proof.**
      - reservation before each request, settlement, the scorecard and the evidence view;
      - switches before and during a run, replay after a restart, scheduled runs, cross-tenant 404s;
      - domain-match and prompt-guard edge cases, prompt injection in the answer;
-     - the key-leak scan.
+     - the key-leak scan;
+     - the AEGIS gl-pplx fixes (Oct 24 2026): a run crossing UTC midnight (each reservation on its own day, the
+       settlement split by day, replay), the documented response variants (no `citations`, a choice's `delta`, extra
+       fields, no `index`), two protocol errors stopping a run, a no-answer run FAILED, the one-call smoke helper,
+       IDNA2003 mappings and invisible characters, backslash and whitespace citation URLs, the widened prompt guard,
+       read slices and the post-response guard, zero cost charged at the reserve, public-suffix tenant domains, and
+       one test per AEGIS mutant (all 24 of AEGIS's `mutate.py` mutants are killed).
    - The live run (W3-1) now runs the service under a socket guard that refuses and records any non-loopback DNS
      lookup or connection, and it ends with that record empty. It proves:
      - a key file open to group or others, or a key set two ways, refuses start;
@@ -668,8 +674,9 @@ W4-7. **Proof.**
      - a prompt set holding personal data is refused;
      - with a key file but budgets at 0, the engine is connected and BLOCKED;
      - the key is in no ledger entry, data file or process output.
-   - The war room adds seven MUST scenarios: hostile answers, 17 protocol attacks, lookalike citations, a control,
-     switches before and during a run, and budgets off.
+   - The war room adds eight MUST scenarios: hostile answers, the protocol attacks (relied-on fields mistyped, a
+     documented variant that must be answered, no-answer runs never OK), lookalike citations, a control, switches
+     before and during a run, budgets off, and a ledger outage while the reservation is recorded.
 
 W4-8. **Limitations (honest).**
    - Nothing here has been run against the real Perplexity API: the build machine has no internet and no key. The
