@@ -1,0 +1,12 @@
+# Runtime dependencies of the Railway Python images (detection-py, finance-py, legal-py, seo-py).
+# These are the services' own requirements.txt pins without pytest (a test-only dependency); the four files are
+# identical, and devtools/test_deploy_config.py fails if a pin here differs from them.
+# Regenerate the hash-locked file (every transitive dependency pinned with its sha256) with:
+#   uv pip compile deploy/python/requirements.in --generate-hashes --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28 --exclude-newer <a date at least two weeks back> \
+#     -o deploy/python/requirements.lock.txt
+pydantic==2.13.3
+fastapi==0.141.1
+starlette==1.7.0
+uvicorn[standard]==0.46.0
+httpx==0.28.1
