@@ -11,7 +11,9 @@ tenant and entity record; every port but the fetcher NOT_CONNECTED; a second pro
 tenants and domains are Andre's, a domain belongs to one tenant; the hub sees its own tenant only (another tenant
 answers the same 404 as a missing one); a kill switch engaged over the API stops the crawler at the fetch guard
 before any DNS lookup or socket; only Andre releases it; the audit is recorded first and its report's SHA-256 is on
-the ledger; a client audit needs an invoice id and Andre, and the invoice is verified with the real Finance (31)
+the ledger; the Perplexity answer engine (ADR 0017 Wave 4) is NOT_CONNECTED without a key, asks nothing and records
+no reservation, and with a key file but no budget it is connected yet BLOCKED (budgets fail closed), the key shown
+nowhere; a client audit needs an invoice id and Andre, and the invoice is verified with the real Finance (31)
 process (a draft invoice is refused INVOICE_NOT_PAID, an unknown one INVOICE_NOT_FOUND, another client's
 INVOICE_TENANT_MISMATCH, none of them overridable; Finance stopped is FINANCE_UNAVAILABLE, which only Andre may
 override, recorded; a reused invoice is refused); Finance (31) sees status, never the report; personal-data
@@ -19,7 +21,9 @@ keys are refused; a scheduled re-audit runs its slot once and a second tick is a
 the recorded runs; a restart keeps everything and re-verifies; the evidence view marks each action committed exactly
 once; a truncated log is detected; no domain or NAP in the clear on the ledger; GET /ledger/verify valid.
 
-No outbound network: this run never crawls a real site (CI has none to crawl, and a live run must not depend on the
+No outbound network, proven: the service process runs with a socket guard (``sitecustomize`` on its PYTHONPATH) that
+refuses and records every DNS lookup and connection to anything but loopback; the run ends with that record empty.
+This run never crawls a real site (CI has none to crawl, and a live run must not depend on the
 internet). The web provider switch is engaged before the first audit, so every fetch stops at the kill-switch guard,
 which runs before name resolution. The crawler itself is proven against an in-process fixture in the test suite.
 A PAID invoice is not reachable through Finance's production entrypoint without its bank feed and Legal (both
@@ -64,6 +68,7 @@ FIN_TOKEN = derived("finance service token")
 FIN_ANDRE = derived("finance andre approval token")
 FIN_CALLERS = {c: derived(f"finance caller {c}") for c in ("onboarding", "seo_02")}
 FIN_SRC = SVC.parent / "finance-py" / "src"
+PPLX_KEY = "live-only-" + derived("perplexity api key")     # never sent anywhere: no budget, no outbound network
 ACME_PARTY = "acme-party-live"
 OWN_DOMAIN = "zbestmedia-live.test"
 CLIENT_DOMAIN = "acme-live.test"
@@ -186,6 +191,54 @@ class Fin:
         return self.post("/fin/v1/invoices", body, caller="onboarding")
 
 
+NET_GUARD = """
+import json, os, socket
+_LOG = os.environ["SEO_LIVE_NET_LOG"]
+_gai, _connect = socket.getaddrinfo, socket.socket.connect
+_LOCAL = ("127.0.0.1", "localhost", "::1")
+
+
+def _note(kind, target):
+    with open(_LOG, "a") as f:
+        f.write(json.dumps([kind, str(target)[:200]]) + "\\n")
+
+
+def _getaddrinfo(host, *a, **k):
+    if str(host) not in _LOCAL:
+        _note("dns", host)
+        raise socket.gaierror(socket.EAI_NONAME, "live run: no outbound DNS")
+    return _gai(host, *a, **k)
+
+
+def _sock_connect(self, addr):
+    if isinstance(addr, tuple) and str(addr[0]) not in _LOCAL:
+        _note("connect", addr[0])
+        raise OSError("live run: no outbound connection")
+    return _connect(self, addr)
+
+
+socket.getaddrinfo = _getaddrinfo
+socket.socket.connect = _sock_connect
+"""
+
+
+def _net_guard(work: Path) -> dict:
+    """The service process's socket guard: every non-loopback DNS lookup or connection refused and recorded."""
+    d = work / "netguard"
+    d.mkdir()
+    (d / "sitecustomize.py").write_text(NET_GUARD)
+    return {"PYTHONPATH": str(d), "SEO_LIVE_NET_LOG": str(work / "outbound.jsonl")}
+
+
+def _key_file(work: Path, mode: int = 0o600) -> str:
+    p = work / "etc" / f"perplexity-{mode:o}.key"
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    os.write(fd, PPLX_KEY.encode())
+    os.close(fd)
+    os.chmod(p, mode)
+    return str(p)
+
+
 def _env(work: Path, ps: int, ledger_url: str) -> dict:
     etc = work / "etc"
     etc.mkdir(mode=0o700)
@@ -214,7 +267,8 @@ def _main(work: Path) -> int:
     L, S, F = f"http://127.0.0.1:{pl}", f"http://127.0.0.1:{ps}", f"http://127.0.0.1:{pf}"
     lh = {"Authorization": f"Bearer {LEDGER_TOKEN}"}
     env = {**_env(work, ps, L), "SEO_FINANCE_URL": F, "SEO_FINANCE_TOKEN": FIN_TOKEN,
-           "SEO_FINANCE_CALLER_TOKEN": FIN_CALLERS["seo_02"]}
+           "SEO_FINANCE_CALLER_TOKEN": FIN_CALLERS["seo_02"], **_net_guard(work)}
+    netlog = work / "outbound.jsonl"
     fenv = _fin_env(work, pf, L)
     data = Path(env["SEO_DATA_DIR"])
     src = str(SVC / "src")
@@ -240,6 +294,16 @@ def _main(work: Path) -> int:
                              cwd=src, capture_output=True, timeout=30)
         check("production without the log hash key refuses start",
               bad.returncode != 0 and b"SEO_LOG_HASH_KEY_FILE" in bad.stderr)
+        bad = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env, "SEO_PERPLEXITY_API_KEY_FILE":
+                                                                 _key_file(work, 0o644)},
+                             cwd=src, capture_output=True, timeout=30)
+        both = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env, "SEO_PERPLEXITY_API_KEY_FILE":
+                                                                  _key_file(work), "SEO_PERPLEXITY_API_KEY": PPLX_KEY},
+                              cwd=src, capture_output=True, timeout=30)
+        check("a Perplexity key file open to group or others refuses start, and so does a key set two ways; the key "
+              "is never echoed", bad.returncode != 0 and b"group or others" in bad.stderr
+              and both.returncode != 0 and b"both set" in both.stderr
+              and PPLX_KEY.encode() not in bad.stderr + both.stderr)
 
         sp = start([sys.executable, "-m", "api"], env, src, "service", work)
         wait_health(S + "/health")
@@ -384,8 +448,33 @@ def _main(work: Path) -> int:
         check("the department view counts recorded runs only (Selene ran three audits, all KILLED)",
               card.get("runs") == 3 and card.get("outcomes", {}).get("KILLED") == 3)
 
-        # --- restart ----------------------------------------------------------------------------------------------
+        # --- Perplexity (Wave 4): no key, NOT_CONNECTED, nothing asked ---------------------------------------------
+        pe = st["answer_engines"]["perplexity"]
+        check("with no key the Perplexity engine is NOT_CONNECTED in /status, its budget OFF, and the service started",
+              pe["state"] == "NOT_CONNECTED" and pe["budget"]["state"] == "OFF" and pe["budget"]["used_calls"] == 0
+              and ports["answer_engines"]["perplexity"] == "NOT_CONNECTED")
+        pset = a.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "live-core",
+                                                   "brand_terms": ["Z Best Media"], "engines": ["perplexity"],
+                                                   "prompts": ["who recovers marketplace revenue in long beach"]})
+        psid = pset.json()["prompt_set_id"]
+        pii_ps = a.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "live-pii", "brand_terms": ["Z Best"],
+                                                     "engines": ["perplexity"], "prompts": ["call me on 562 248 6617"]})
+        check("a prompt set is versioned; one holding personal data is refused before anything could send it",
+              pset.status_code == 201 and pii_ps.status_code == 422 and pii_ps.json()["detail"] == "PROMPT_PERSONAL_DATA")
+        pa = a.post("/tenants/zbm/audits", {"request_id": rid(), "domain": OWN_DOMAIN, "paths": ["/"],
+                                            "prompt_set_id": psid})
+        cal = next((x for x in (pa.json().get("report") or {}).get("agents", []) if x["agent"] == "callum"), {})
+        ents = httpx.get(L + "/ledger/entries", headers=lh, timeout=60).json()
+        check("an audit with a Perplexity prompt set: Callum NOT_CONNECTED, no finding, no engine reservation on the "
+              "ledger (nothing is asked without one), no outbound call",
+              pa.status_code == 201 and cal.get("outcome") == "NOT_CONNECTED" and cal.get("findings") == []
+              and "answer_engine:perplexity" in cal.get("not_connected", [])
+              and not [x for x in ents if x.get("event_type") in ("engine_calls_reserved", "engine_run_settled")]
+              and not (netlog.exists() and netlog.read_text().strip()))
+
+        # --- restart (now with a Perplexity key file and no budget) ------------------------------------------------
         stop(sp, "service")
+        env = {**env, "SEO_PERPLEXITY_API_KEY_FILE": _key_file(work)}
         sp = start([sys.executable, "-m", "api"], env, src, "service", work)
         wait_health(S + "/health")
         st = a.get("/status").json()
@@ -396,6 +485,23 @@ def _main(work: Path) -> int:
               st["integrity"]["ok"] is True and audits.get(own_aid, {}).get("status") == "completed"
               and st["kill_switches"]["providers"]["web"] is True
               and again.status_code == 200 and again.json()["providers"]["web"] is False)
+        pe = st["answer_engines"]["perplexity"]
+        check("with a key file the engine is connected (key source 'file', model sonar) but its budget is OFF; the "
+              "key appears nowhere in /status", pe["state"] == "connected" and pe["key_source"] == "file"
+              and pe["model"] == "sonar" and pe["budget"]["state"] == "OFF" and PPLX_KEY not in json.dumps(st))
+        a.post("/kill-switches", {"request_id": rid(), "switch": "provider:web", "engaged": True},
+               caller="compliance_38")
+        pb = a.post("/tenants/zbm/audits", {"request_id": rid(), "domain": OWN_DOMAIN, "paths": ["/"],
+                                            "prompt_set_id": psid})
+        cal = next((x for x in (pb.json().get("report") or {}).get("agents", []) if x["agent"] == "callum"), {})
+        ents = httpx.get(L + "/ledger/entries", headers=lh, timeout=60).json()
+        check("budgets fail closed: with a key but every budget 0, Callum is BLOCKED ENGINE_BUDGET_EXHAUSTED, nothing "
+              "is reserved or asked, no outbound call",
+              pb.status_code == 201 and cal.get("outcome") == "BLOCKED"
+              and cal.get("reason") == "ENGINE_BUDGET_EXHAUSTED"
+              and cal.get("facts", {}).get("engines", {}).get("perplexity", {}).get("reason_detail") == "BUDGET_OFF"
+              and not [x for x in ents if x.get("event_type") in ("engine_calls_reserved", "engine_run_settled")]
+              and not (netlog.exists() and netlog.read_text().strip()))
         integ = a.get("/audit/integrity", caller="compliance_38").json()
         check("the integrity route reports the ledger's real verdict",
               integ["ledger_valid"] is True and integ["integrity"]["ok"] is True)
@@ -431,12 +537,18 @@ def _main(work: Path) -> int:
                                "invoice_verification_overridden_by_andre", "audit_report_recorded",
                                "schedule_created"} <= set(types))
         reports = [x for x in mine_l if x["event_type"] == "audit_report_recorded"]
-        check("every completed audit (two one-off, one own and one client, plus one scheduled) has its report "
-              "recorded once", len({x["subject_id"] for x in reports}) == 3)
+        check("every completed audit (two own and one client one-off, one scheduled, two with a Perplexity prompt "
+              "set) has its report recorded once", len({x["subject_id"] for x in reports}) == 5)
         blob = json.dumps(mine_l)
         check("no domain, NAP, Finance client id or page content in the clear in seo's ledger events",
               OWN_DOMAIN not in blob and CLIENT_DOMAIN not in blob and "5318 East 2nd" not in blob
               and "248-6617" not in blob and ACME_PARTY not in blob)
+        logs = b"".join(p.read_bytes() for p in list(data.rglob("*")) + [work / "service.log"] if p.is_file())
+        check("the Perplexity key is in no ledger entry, no log line, no data-directory file and no process output",
+              PPLX_KEY not in json.dumps(ents) and PPLX_KEY.encode() not in logs)
+        out = netlog.read_text().strip() if netlog.exists() else ""
+        check("the service made no outbound DNS lookup or connection in the whole run (socket guard record empty)",
+              out == "")
         say(f"finance events on the shared ledger: {sum(1 for x in ents if x.get('department') == 'finance')}")
         v = httpx.get(L + "/ledger/verify", headers=lh, timeout=120)
         check("ledger verifies valid", v.status_code == 200 and v.json().get("valid") is True)
