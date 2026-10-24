@@ -783,3 +783,19 @@ def test_snapshot_size_cap(tmp_path, monkeypatch):
     svc = _service(tmp_path, fake)
     assert _err(svc.sync, "acme") == "STORE_SNAPSHOT_TOO_LARGE"
 
+
+
+def test_production_transport_resolves_inside_the_deadline_and_refuses_private_answers():
+    """No injected transport: the real httpx transport with the deadline backend. The fake resolver answers a
+    private address, so no socket is ever opened; retries are bounded and the result is STORE_UNAVAILABLE."""
+    clock = Clock()
+    asked = []
+
+    def resolve(host, port):
+        asked.append((host, port))
+        return ["10.0.0.7"]
+    s = ShopifySession("acme-store", deadline_s=30, monotonic=clock.monotonic, sleep=clock.sleep, resolve=resolve,
+                       dns_gate=DnsGate(2))
+    s.use_static_token(Secret(TOKEN))
+    assert _err(s.preflight) == "STORE_UNAVAILABLE"
+    assert asked == [("acme-store.myshopify.com", 443)] * 3 and clock.sleeps == [1.0, 1.0]

@@ -46,4 +46,230 @@ existing legacy custom-app token, or an offline token from a future OAuth flow),
 
 ## Decisions
 
-(Filled in below as the build lands.)
+### 1. Where it lives
+
+Revenue Recovery is two services: **detection-py** hosts the agents (and now the store connector), **orchestrator-go**
+hosts the scan (agents, correlation, ledger record; ADR 0001, ADR 0003 section 13). The connector is in detection-py
+(`src/store_connector/`) because the repo's outbound-call conventions (seo-py `finance_client.py`) are Python and the
+translation target (`zbm_schema.Order`) is there. The orchestrator never talks to a store.
+
+```
+Andre/ops ──POST /stores/sync──▶ detection-py ──(record-first: rr_store_read_requested)──▶ ledger-rust
+                                     │  token exchange* / preflight / orders pages  ──▶ https://<shop>.myshopify.com
+                                     │  translate -> minimised snapshot (memory)    ──▶ rr_store_read_completed
+orchestrator-go ──POST /stores/snapshot──▶ detection-py (no outbound) ──▶ agents ──▶ rr_scan_started/…/completed
+                                                                                         (src=shopify:<snapshot_id>)
+```
+\* client credentials only.
+
+### 2. Routes (detection-py, service bearer token)
+
+| Route | Outbound call? | Answers |
+|---|---|---|
+| `GET /stores/{client_id}/status` | never | registration, kill switch, budget, held snapshot id; never the credential or its path |
+| `POST /stores/sync` `{"client_id"}` | only this route, only after every gate in section 5 | 200 `{sync_id, snapshot_id, orders_read, orders_analysed, orders_excluded, truncated_by, pages, cost_points, throttle_waits}` or a reason code |
+| `POST /stores/snapshot` `{"client_id"}` | never | the held snapshot (orders + coverage) or a reason code |
+
+orchestrator-go `POST /revenue-recovery/scan?client_id=<tenant>`: the fixture tenant is unchanged; any other tenant
+asks `/stores/snapshot` FIRST and, on a refusal, answers 409 (`NOT_CONNECTED`, `NOT_SYNCED`, `SNAPSHOT_STALE`, ...),
+429 (budget) or 503 (kill switch, config) with `{"error", "reason"}`, having run no agent and written nothing (it
+used to answer 422 "no live data source"). With a snapshot, every agent runs (the store feeds the order agents; the
+rest get empty batches), the started record says `src=shopify:<snapshot_id> fixture=0` (the rrs1/rrc2 formats are
+unchanged, so no rollback hazard; the snapshot id is the link to detection-py's `rr_store_read_completed`), and the
+result carries `store_snapshot_id` and `store_coverage`, with `non_live_data_source: false`. The findings view's
+`non_live_data_source` is now false only when every counted scan read a store.
+
+### 3. Credentials (no prior pattern existed)
+
+Revenue Recovery held no client credentials before this. The pattern is the repo's `*_FILE` rule:
+`RR_STORE_CONNECTIONS_FILE` is a JSON file **Andre writes when he approves a connection** (his approval gate: each
+entry must carry `approval: {approved_by: "andre", approved_on, approval_ref}`), holding secret **references** only:
+`{"kind": "static_token", "token_file": "/abs/path"}` or `{"kind": "client_credentials", "client_id_file",
+"client_secret_file"}`. An inline secret is refused (the model forbids unknown fields). Secret files: absolute path,
+regular file, no symlink (`O_NOFOLLOW`), owned by the service user, mode 0600/0400, at most 4 KiB, read at use time
+(rotation needs no restart). The connections file is re-read on every call (registering or removing a client needs no
+restart), must not be group/other-writable, and refuses one shop under two clients or one client twice. Unset: every
+client is NOT_CONNECTED.
+
+The credential lives in a `Secret` (repr `Secret(<redacted>)`, not picklable) and goes only into the
+`X-Shopify-Access-Token` header or the token-exchange form. Errors carry fixed messages chosen in `reasons.py`, never
+upstream text; the ledger payloads and the snapshot hold counts, codes, the shop handle and digests.
+
+**Limitation (on record):** "Andre's approval gate" here is the deployment file itself: whoever can write
+`RR_STORE_CONNECTIONS_FILE` can register a store. `approved_by` is a declaration in that file, not a signature. A
+signed approval (as in ooh-py's gate) is the upgrade path.
+
+### 4. The connector (`shopify_client.py`, `net.py`, `shop_domain.py`, `shopify_models.py`)
+
+- **GraphQL Admin API only, read-only.** Two query constants (`RrPreflight`, `RrOrders`) and the client-credentials
+  token exchange; variables only, nothing interpolated. API version pinned to **`2026-10`** (S4); an answer whose
+  `X-Shopify-API-Version` differs (fall-forward) is `STORE_API_VERSION_MISMATCH`.
+- **Minimum scopes:** `read_orders` (required) and `read_all_orders` (optional, for a lookback over 60 days, S10).
+  The preflight reads `currentAppInstallation.accessScopes` (S10) and refuses a credential with any `write_*`
+  scope (`STORE_TOKEN_HAS_WRITE_SCOPE`) or any other scope (`STORE_TOKEN_EXCESS_SCOPE`, e.g. `read_customers`); for
+  client credentials the token response's `scope` is checked first, before any GraphQL call. A lookback over 60
+  days without `read_all_orders` is clamped to 60 and the report says so. The preflight also checks
+  `shop.myshopifyDomain` equals the registered shop and `shop.currencyCode` is USD.
+- **Host and SSRF:** the URL is built only from a validated handle: 3-60 of `[a-z0-9-]`, ASCII checked before
+  lowercasing (the Kelvin sign cannot fold to `k`), no ACE/punycode prefix, optional `.myshopify.com` suffix — no
+  scheme, port, path, userinfo, dot, IP literal or other domain. Resolution happens inside the deadline on at most
+  two resolver threads (`DnsGate`), and every resolved address must be public unicast (`is_global`, not multicast):
+  loopback, private, link-local (169.254.169.254), CGNAT, reserved and mapped-loopback answers are refused before a
+  socket opens. No proxy from the environment, no redirects followed.
+- **Hard deadline** per sync (default 120 s, `RR_STORE_SYNC_DEADLINE_SECONDS`, 10-600) covering the exchange, every
+  page, every wait, every name lookup and every socket operation (`DeadlineBackend`, the seo-py pattern); the body
+  loop stops at the deadline (a slow drip is `STORE_DEADLINE_EXCEEDED`). Per-request timeout 30 s within it.
+- **Bounded response:** 2 MiB per answer, `Accept-Encoding: identity` (a compressed answer is refused, so the cap
+  counts received bytes), JSON content type required.
+- **Throttling (S5, S6, S7):** `THROTTLED` (HTTP 200 + `errors[].extensions.code`) waits
+  `(requestedQueryCost - currentlyAvailable) / restoreRate`, clamped to 1-10 s; HTTP 429 waits 1 s; at most 8 waits
+  per request (`STORE_THROTTLED`); between pages the client paces when the bucket cannot cover the next page. 5xx
+  and `INTERNAL_SERVER_ERROR` retry at most twice. A wait that would cross the deadline is not slept.
+- **Pagination (S8):** `orders(first, after, query: "created_at:>='<start>'", sortKey: CREATED_AT, reverse: true)`,
+  newest first; 10 orders per page, halved down to 1 on `MAX_COST_EXCEEDED` (S6: 1,000-point single-query cap); a
+  cursor that does not advance is refused; caps: `max_orders` (≤ 1,000), `max_cost_points` per sync, 1,000 pages.
+  Hitting a cap is recorded as `truncated_by` and the window actually read is in the coverage note.
+- **Bulk operations: not used.** They need the `bulkOperationRunQuery` mutation, deliver results from a signed URL on
+  another host (S9: `storage.googleapis.com` in the example), and complete asynchronously over minutes to days —
+  against the read-only, `*.myshopify.com`-only, hard-deadline constraints. Capped pagination covers a 1,000-order
+  snapshot.
+- **Strict parsing:** every node model forbids unknown fields and is parsed in strict JSON mode; a node carrying a
+  field the query never asked for (an email, a customer) is `STORE_RESPONSE_INVALID` and nothing is kept; partial
+  answers (`data` + `errors`) are refused.
+- **Unverified details, failing closed:** the GraphQL error code `MAX_COST_EXCEEDED` (not on the pages read; an
+  unrecognised code is `STORE_RESPONSE_INVALID`, never a retry loop), and `>=` with a quoted timestamp in the
+  `created_at` filter (the orders query documents `created_at:<=2024` and quoted values; checked on the first live
+  sync).
+
+### 5. Gates before the first outbound byte; reason codes
+
+`sync`: kill switch → registration (`NOT_CONNECTED`) → one sync at a time (`STORE_SYNC_IN_PROGRESS`) → the client's
+daily budget (`STORE_BUDGET_EXHAUSTED`) → the credential files (`STORE_CREDENTIAL_UNREADABLE`) → the ledger record
+(`LEDGER_UNAVAILABLE`). Closed codes: `store_connector/reasons.py` (each with its HTTP status and fixed message;
+`NO_OUTBOUND` lists the ones decided before any outbound call).
+
+**Kill switch:** `RR_STORE_READS_DISABLED=1` (environment) or the existence of the file named by
+`RR_STORE_KILL_SWITCH_FILE` (`touch` it: every sync stops, a running sync stops at its next page, and held
+snapshots are not served — no restart). **Per-tenant budget** (in the connection entry, with hard ceilings):
+`syncs_per_day` (default 4, ≤ 24; counted per UTC day, in process memory — a restart resets it), `max_orders`
+(1,000), `max_cost_points` (50,000, ≤ 200,000), `lookback_days` (60, ≤ 365), `snapshot_max_age_hours` (24, ≤ 168).
+
+### 6. Protected customer data and minimisation (S11)
+
+The queries request no customer, name, email, phone, address, note, IP or custom attribute (pinned by a test over
+the query text); so ZBM needs Shopify's Level 1 only, which S11 says is "Always available" to custom apps. Every
+order gets `customer_id: "not-collected"` — the agents fed by this source never need to link orders to a person, so
+nothing is hashed because nothing is collected. Kept per order: `shopify-order-<id>`, created time, financial status,
+line items (SKU, unit price, quantity), discount codes and values. Snapshots are in process memory only, replaced
+by the next sync, dropped when older than `snapshot_max_age_hours`, when the client is deregistered, and on restart
+(retention). The ledger holds only payload hashes and summaries with counts. The Level 1 duties that are not code —
+telling the merchant what is processed and why, the data-protection agreement — are in section 9.
+
+Translation is conservative: an order whose discounts the discount agent's model would misstate is **excluded and
+counted**, never reshaped: test, cancelled, not (partially) paid, more line items or discount applications than a
+page holds, shipping codes, codes on selected items only (`ENTITLED`/`EXPLICIT`), fixed codes applied per item
+(`EACH`), zero-value codes, non-USD or over-precise money, codes the schema cannot hold. Automatic/manual/script
+discounts are not codes and are counted, not modelled.
+
+### 7. Ledger evidence (record-first)
+
+detection-py now writes to ledger-rust (department `rr_store`, actor `detection_py`; config
+`DETECTION_LEDGER_URL` + `DETECTION_LEDGER_TOKEN_FILE`): `rrs.<sync_id>.requested` BEFORE the first outbound byte
+(none without it), then `rrs.<sync_id>.completed` (snapshot id and SHA-256, orders read/analysed, requests, pages,
+cost points, throttle waits, granted scopes, truncation) — the snapshot is kept only after this record — or
+`rrs.<sync_id>.failed` with the reason code (best effort). With `LEDGER_CALLERS_FILE`, give detection-py a write
+caller scoped to `rr_store` only.
+
+### 8. The scan's findings and the client report
+
+Agent coverage of this source: **discount-misuse** is fed (OBSERVED: the excess of stacked codes over the best single
+code, exact cents, labels observed/high — unchanged agent). Affiliate, abandoned-cart, renewal, server-side,
+cross-channel, platform and contract agents get no data from Shopify orders and are listed **NOT COVERED** with the
+reason (abandoned checkouts are deliberately not read: they carry contact details, and whether a recovery message
+went out is not in the order data).
+
+`services/detection-py/src/rr_report.py` (+ `devtools/rr_report.py SCAN.json --md OUT.md [--json OUT.json]`) turns
+one orchestrator scan result into the client report: what was read (window, counts, every exclusion reason), the
+checks run with covered/NOT COVERED, each finding with its amount, evidence class, labels, cause and method (OBSERVED
+= quotable; ESTIMATED = "est."; UNKNOWN = no figure), overlaps flagged "do not add", per-check OBSERVED subtotals
+only, and **projections** — ESTIMATED, confidence low, `observed × 365 / window days` with the assumption written
+out, only for a window of 14 days or more, never added to anything. No headline score, no grand total. A fixture
+scan, or a scan whose labels and figures disagree, is refused.
+
+### 9. Connecting a store — exact steps
+
+**The client (merchant), in their own Shopify:**
+
+1. *If you already have a custom app made in your Shopify admin (legacy, before Jan 1 2026)* and want to use it:
+   Shopify admin → Settings → Apps and sales channels → Develop apps → your app → Configuration → Admin API access
+   scopes: tick **only** `read_orders` (and `read_all_orders` if we are to look back more than 60 days); untick every
+   other scope, especially every `write_` scope → Save → API credentials → Install/Reveal the Admin API access token
+   once (S1: it is shown only once). Send it to Andre through the secure channel he gives you — never by email or
+   chat.
+2. *Otherwise (the documented path for new apps, S2/S3):* in the Shopify **Dev Dashboard**, under your own
+   organization, create an app; on its version set Admin API access scopes to **only** `read_orders` (+
+   `read_all_orders` if needed); release the version and install it on your store, approving the scopes. Send Andre
+   the app's **Client ID** and **Client secret** through the secure channel. (UNVERIFIED on shopify.dev that a
+   merchant without a Partner account can do this; S3 is a Shopify staff forum answer. If you cannot, tell Andre:
+   the alternative is an app ZBM owns installed by OAuth, not built yet.)
+3. Agree to ZBM's data-processing terms (Level 1 duties, S11): ZBM reads orders, line items and discount codes to find
+   discount-stacking leakage; no customer names, emails, phones or addresses are read; snapshots are kept at most
+   the agreed hours in memory; you can stop it at any time by uninstalling the app or removing its scopes.
+
+**Andre, on the detection-py host:**
+
+1. Put each secret in its own file, owned by the service user, `chmod 600`, outside the repo (e.g.
+   `/etc/zbm/secrets/rr/<client>.shopify_token`, or `<client>.client_id` + `<client>.client_secret`). Never commit
+   them (the repo is public).
+2. Add the client to the connections file (mode 600, path in `RR_STORE_CONNECTIONS_FILE`) — this is the approval:
+   ```json
+   {"version": 1, "connections": [{"client_id": "<zbm client id>", "platform": "shopify",
+     "shop": "<handle>.myshopify.com",
+     "credential": {"kind": "static_token", "token_file": "/etc/zbm/secrets/rr/<client>.shopify_token"},
+     "approval": {"approved_by": "andre", "approved_on": "2026-10-24", "approval_ref": "<contract or ticket ref>"},
+     "budget": {"syncs_per_day": 4, "max_orders": 1000, "lookback_days": 60, "snapshot_max_age_hours": 24}}]}
+   ```
+   (client credentials: `"credential": {"kind": "client_credentials", "client_id_file": "…", "client_secret_file": "…"}`).
+3. Give detection-py a ledger: `DETECTION_LEDGER_URL` and `DETECTION_LEDGER_TOKEN_FILE` (a write caller scoped to
+   `rr_store` in `LEDGER_CALLERS_FILE`). Without it every sync is `LEDGER_UNAVAILABLE` and nothing is read.
+4. Optionally set `RR_STORE_KILL_SWITCH_FILE=/etc/zbm/rr_store.KILL` (touch the file to stop all store reads).
+5. Check: `GET /stores/<client>/status` → `connected: true`. Sync: `POST /stores/sync {"client_id": "<client>"}`
+   → 200 with `snapshot_id`; a 422 `STORE_TOKEN_HAS_WRITE_SCOPE` / `STORE_TOKEN_EXCESS_SCOPE` means the client must
+   untick scopes; 502 `STORE_API_VERSION_MISMATCH` means `2026-10` is no longer served — bump `API_VERSION` after
+   reading the release notes.
+6. Scan: `POST /revenue-recovery/scan?client_id=<client>` on orchestrator-go; save the JSON; render
+   `python3 services/detection-py/devtools/rr_report.py scan.json --md report.md`; review it before sending.
+7. To disconnect: remove the entry (the held snapshot is dropped on the next call), delete the secret files, and ask
+   the client to uninstall the app or revoke the token.
+
+## Tests and runs
+
+- `services/detection-py/tests/test_store_connector.py`, `tests/test_store_api_report.py` (fake GraphQL over
+  `httpx.MockTransport`, injected clock; no network, no wall clock, no /proc): success and cursor pagination,
+  truncation, non-advancing cursor, lookback/scope clamp, translation exclusions; THROTTLED with `extensions.cost`
+  waits, capped waits and retries, 429, pacing, deadline across waits, MAX_COST_EXCEEDED halving; 401/403/402/423/
+  404/302/400, GraphQL codes, bounded 5xx and connect retries; malformed, partial, compressed, wrong-type, deeply
+  nested and huge bodies; version fall-forward; unrequested PII fields; shop and currency checks; slow drip; SSRF
+  handles and non-public resolution (also through the real transport); scope policy and write-scope refusal before
+  any order read; client-credentials exchange; NOT_CONNECTED with no outbound call; kill switch at once and mid-read;
+  per-tenant daily budgets; record-first; snapshot kept only after its completion record; failure records;
+  snapshot expiry; credential file rules; strict connections file; cross-tenant isolation; token and client secret
+  never in logs, reprs, errors, ledger, snapshot, status, API answers or reports; no raw PII stored; the scan path
+  through the real routes and the client report.
+- `services/orchestrator-go/cmd/orchestrator/store_scan_test.go` (+ updated E-3 and L2 tests): NOT_CONNECTED and
+  other refusals with nothing written, a connected snapshot scanned and recorded with `src=shopify:<id> fixture=0`,
+  bad snapshots fail the scan, the fixture scan unchanged.
+- `services/detection-py/devtools/live_run.py`: real ledger-rust, detection-py `serve.py` under a socket audit hook,
+  real orchestrator-go — NOT_CONNECTED end to end, record-first refusal, kill switch, fixture scan, ledger valid,
+  and no outbound attempt from detection-py. Counts: docs/test-counts.md.
+
+## Limitations
+
+- No live Shopify call has been made: no token exists. The query shapes were checked against Shopify's Admin schema
+  tool (S12), not against a store; the first real sync is the first end-to-end check.
+- U2's merchant-created Dev Dashboard path is UNVERIFIED on shopify.dev; OAuth (ZBM-owned app, custom distribution)
+  is not built.
+- Budgets and snapshots are per process and in memory (a restart resets the day's sync count and drops snapshots;
+  two detection-py processes would each have their own). One sync at a time per process.
+- Only the discount-misuse agent is fed by this source; seven agents are NOT COVERED by it.
+- The approval is a file entry, not a signature (section 3).

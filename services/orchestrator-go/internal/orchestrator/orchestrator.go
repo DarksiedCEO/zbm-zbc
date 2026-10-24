@@ -15,9 +15,10 @@
 //     idempotently; only completed scans count (ledger_record.go,
 //     recorded.go). One scan runs at a time: a concurrent request gets
 //     ErrScanInProgress (409).
-//   - E-3: every scan has a tenant (client_id). Only the fixture tenant has a
-//     data source today; a scan with no client_id defaults to it and records
-//     that it did. Every finding is checked to belong to the tenant, to come
+//   - E-3: every scan has a tenant (client_id). The fixture tenant reads the
+//     fixture pool, any other tenant its connected store's snapshot (ADR
+//     0020); a scan with no client_id defaults to the fixture tenant and
+//     records that it did. Every finding is checked to belong to the tenant, to come
 //     from the agent that was called, and to carry its derived id.
 //   - E-6: detect calls are batched under detection-py's 1,000-item cap, and
 //     correlation is batched by correlation key so no entity's findings are
