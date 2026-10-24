@@ -55,6 +55,38 @@ def _dt(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
 
 
+_MD_SPECIAL = set("\\`*_[]<>|~&")
+
+
+def _md(text: str) -> str:
+    """Text from the store (a discount code inside a finding's cause) as literal Markdown: no link, image, HTML,
+    emphasis or table cell can be smuggled into the client's report."""
+    return "".join("\\" + ch if ch in _MD_SPECIAL else ch for ch in str(text)).replace("\n", " ").replace("\r", " ")
+
+
+def _window_days(window: dict, taken: datetime | None) -> tuple[int | None, str | None]:
+    """(days, basis) of the window the observed figures cover (AEGIS golive-rr M2).
+
+    Not truncated: every order in the requested lookback was read, so the window is the lookback itself
+    (``requested_start`` to the snapshot time, else ``lookback_days``) however few orders it held: measuring from the
+    oldest order would shrink the window and inflate a yearly projection. Truncated: older orders were not read, so
+    the figures cover only back to the oldest order read."""
+    if not taken:
+        return None, None
+    if window.get("truncated_by"):
+        oldest = _dt(window.get("oldest_order_read"))
+        if not oldest:
+            return None, None
+        return max(1, round((taken - oldest).total_seconds() / 86400)), "oldest_order_read"
+    start = _dt(window.get("requested_start"))
+    if start:
+        return max(1, round((taken - start).total_seconds() / 86400)), "requested_window"
+    lb = window.get("lookback_days")
+    if isinstance(lb, int) and not isinstance(lb, bool) and lb >= 1:
+        return lb, "requested_window"
+    return None, None
+
+
 def build_report(scan: dict) -> dict:
     src = scan.get("data_source") or ""
     cov = scan.get("store_coverage")
@@ -83,10 +115,7 @@ def build_report(scan: dict) -> dict:
 
     window = cov.get("window") or {}
     taken = _dt(cov.get("taken_at"))
-    oldest = _dt(window.get("oldest_order_read"))
-    window_days = None
-    if taken and oldest:
-        window_days = max(1, round((taken - oldest).total_seconds() / 86400))
+    window_days, window_basis = _window_days(window, taken)
 
     agents = []
     projections = []
@@ -105,10 +134,17 @@ def build_report(scan: dict) -> dict:
         agents.append(entry)
         if observed and window_days and window_days >= MIN_PROJECTION_WINDOW_DAYS:
             total = sum(observed, Decimal(0))
+            if window_basis == "requested_window":
+                basis = (f"{_fmt(total)} observed in the {window_days}-day window read (every order in it was read) "
+                         f"x 365/{window_days}")
+            else:
+                basis = (f"{_fmt(total)} observed over the {window_days} days back to the oldest order read (the read "
+                         f"stopped at the {str(window.get('truncated_by')).replace('_', ' ')} limit) "
+                         f"x 365/{window_days}")
             projections.append({
                 "agent_id": agent_id, "evidence_class": "ESTIMATED", "confidence": "low",
                 "amount_usd": str((total * Decimal(365) / Decimal(window_days)).quantize(CENT, ROUND_HALF_UP)),
-                "basis": f"{_fmt(total)} observed over {window_days} days x 365/{window_days}",
+                "basis": basis,
                 "assumption": ("the store keeps the same order volume, the same codes and the same stacking rate for "
                                "a year; nothing in the data shows that it will"),
             })
@@ -119,7 +155,7 @@ def build_report(scan: dict) -> dict:
         "report_version": "rr-client-report-1",
         "client_id": client, "shop": cov.get("shop"), "scan_id": scan["scan_id"], "as_of": scan["as_of"],
         "data_source": src, "snapshot_id": scan.get("store_snapshot_id"), "api_version": cov.get("api_version"),
-        "window": window, "window_days": window_days, "counts": cov.get("counts") or {},
+        "window": window, "window_days": window_days, "window_basis": window_basis, "counts": cov.get("counts") or {},
         "agents": agents, "findings": rows, "projections": projections,
         "overlapping_entities": sorted(overlap_entities),
         "evidence_counts": {k: sum(1 for r in rows if r["evidence_class"] == k)
@@ -140,6 +176,12 @@ def _amount_text(r: dict) -> str:
 def render_markdown(rep: dict) -> str:
     w = rep["window"]
     c = rep["counts"]
+    if rep.get("window_basis") == "requested_window":
+        scope_line = (f"- Window read: every order created from {w.get('requested_start') or '—'} to the snapshot "
+                      f"({rep['window_days'] or 0} days; lookback asked: {w.get('lookback_days')} days")
+    else:
+        scope_line = (f"- Orders created from {w.get('oldest_order_read') or '—'} to {w.get('newest_order_read') or '—'} "
+                      f"({rep['window_days'] or 0} days; lookback asked: {w.get('lookback_days')} days")
     L = [f"# Revenue Recovery findings — {rep['shop']}.myshopify.com", "",
          f"Client `{rep['client_id']}` · scan `{rep['scan_id']}` · as of {rep['as_of']} · "
          f"store snapshot `{rep['snapshot_id']}` (Shopify Admin API {rep['api_version']})", "",
@@ -151,10 +193,11 @@ def render_markdown(rep: dict) -> str:
          "- There is no overall score and no grand total: figures of different kinds are never added together, and "
          "an order flagged by two checks is marked, not counted twice.", "",
          "## What we looked at", "",
-         f"- Orders created from {w.get('oldest_order_read') or '—'} to {w.get('newest_order_read') or '—'} "
-         f"({rep['window_days'] or 0} days; lookback asked: {w.get('lookback_days')} days"
+         f"{scope_line}"
          f"{', limited to 60 days by the granted scopes' if w.get('lookback_limited_by_scope') else ''}"
          f"{'; read stopped at the ' + w['truncated_by'].replace('_', ' ') + ' limit, so older orders were not read' if w.get('truncated_by') else ''}).",
+         *([f"- Orders found in the window are dated {w.get('oldest_order_read')} to {w.get('newest_order_read')}."]
+           if rep.get("window_basis") == "requested_window" and w.get("oldest_order_read") else []),
          f"- {c.get('orders_read', 0)} orders read; {c.get('orders_analysed', 0)} analysed; "
          f"{sum((c.get('orders_excluded') or {}).values())} left out (below).", ""]
     if c.get("orders_excluded"):
@@ -163,7 +206,7 @@ def render_markdown(rep: dict) -> str:
         L.append("")
     L += ["## Checks run", "", "| Check | Covered by this store's data | Findings | Observed in window |", "|---|---|---|---|"]
     for a in rep["agents"]:
-        cov = "yes" if a["covered"] else f"NOT COVERED — {a['why']}"
+        cov = "yes" if a["covered"] else f"NOT COVERED — {_md(a['why'])}"
         obs = _fmt(Decimal(a["observed_usd_in_window"])) if a["observed_usd_in_window"] else "—"
         L.append(f"| {a['title']} | {cov} | {a['findings'] if a['covered'] else '—'} | {obs} |")
     L += ["", "A check marked NOT COVERED had no data from this source: it found nothing because it could not look, "
@@ -175,8 +218,8 @@ def render_markdown(rep: dict) -> str:
               f"- **{_amount_text(r)}** · evidence {r['evidence_class']}"
               + (f" · labels {r['classification']}/{r['confidence']}" if r["classification"] else "")
               + (" · quotable" if r["quotable"] else ""),
-              f"- {r['cause']}",
-              f"- How: {r['methodology']}"]
+              f"- {_md(r['cause'])}",
+              f"- How: {_md(r['methodology'])}"]
         if r["also_claimed_by_another_agent"]:
             L.append("- Also flagged by another check: do not add the two figures together.")
         L.append("")

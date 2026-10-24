@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 from decimal import Decimal
@@ -163,8 +164,18 @@ def test_scan_on_store_data_gives_observed_findings_and_a_client_report(client, 
     days = rep["window_days"]
     assert Decimal(p["amount_usd"]) == (Decimal("15.00") * 365 / days).quantize(Decimal("0.01"))
     assert rep["counts"]["orders_excluded"] == {"test_order": 1}
+    assert rep["window_basis"] == "requested_window" and days == 60      # not truncated: the whole lookback
     md = rr_report.render_markdown(rep)
-    assert "NOT COVERED" in md and "est. $" in md and "quotable" in md
+    # AEGIS golive-rr L4: assert on the table rows, not on the explanatory paragraph that also says NOT COVERED
+    rows = {line.split(" | ")[0].lstrip("| "): line for line in md.splitlines()
+            if line.startswith("| ") and line.count(" | ") == 3}
+    assert rows["Stacked discount codes"] == "| Stacked discount codes | yes | 3 | $15.00 |"
+    not_covered = [t for t, line in rows.items() if " | NOT COVERED — " in line]
+    assert sorted(not_covered) == sorted(rr_report.AGENT_TITLES[a] for a in rr_report.AGENT_TITLES
+                                         if a != "discount-misuse-v1")
+    for t in not_covered:
+        assert rows[t].endswith(" | — | — |")
+    assert "est. $" in md and "quotable" in md
     assert "score" not in md.lower().replace("no overall score", "")
     assert "grand total" not in md.lower().replace("no grand total", "")
     for secret in SECRETS:
@@ -203,6 +214,58 @@ def test_estimated_and_unknown_findings_render_as_such():
     assert not any(r["quotable"] for r in rep["findings"])
     md = rr_report.render_markdown(rep)
     assert "est. $12.00" in md and "no dollar figure" in md and "do not add the two figures together" in md
+
+
+def _projection_scan(window: dict, observed: str = "100.00", code: str = "SAVE10") -> dict:
+    cov = {"shop": "acme-store", "api_version": "2026-10", "taken_at": "2026-10-24T12:00:00+00:00",
+           "window": window, "counts": {}, "customer_data": "none",
+           "agents": {"discount-misuse-v1": {"covered": True, "why": "x"}}}
+    f = {"client_id": "acme", "entity_id": "shopify-order-1", "finding_id": "f1", "agent_id": "discount-misuse-v1",
+         "cause_description": f"2 discount codes stacked on one order ({code}, TAKE5)", "methodology": "m",
+         "evidence_class": "OBSERVED",
+         "recoverable_value": {"amount_usd": observed, "classification": "observed", "confidence": "high"}}
+    return {"scan_id": "s", "client_id": "acme", "as_of": "2026-10-24T12:00:00Z", "data_source": "shopify:snap-x",
+            "non_live_data_source": False, "store_coverage": cov, "store_snapshot_id": "snap-x", "findings": [f]}
+
+
+def test_sparse_orders_do_not_inflate_the_projection():
+    """AEGIS golive-rr M2: a 60-day lookback read in full whose oldest order is 20 days old covers 60 days, not 20."""
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": None,
+              "oldest_order_read": "2026-10-04T12:00:00+00:00", "newest_order_read": "2026-10-23T12:00:00+00:00"}
+    rep = rr_report.build_report(_projection_scan(window))
+    (p,) = rep["projections"]
+    assert rep["window_days"] == 60 and rep["window_basis"] == "requested_window"
+    assert p["amount_usd"] == "608.33"                            # 100 x 365/60, not 100 x 365/20 = 1825.00
+    assert "over 20 days" not in p["basis"] and "60-day window read" in p["basis"]
+    md = rr_report.render_markdown(rep)
+    assert "$1,825.00" not in md and "est. $608.33 a year" in md
+    assert "every order created from 2026-08-25T12:00:00+00:00" in md
+    # without requested_start, lookback_days gives the same window
+    w2 = {k: v for k, v in window.items() if k != "requested_start"}
+    assert rr_report.build_report(_projection_scan(w2))["projections"][0]["amount_usd"] == "608.33"
+
+
+def test_truncated_read_measures_from_the_oldest_order_read():
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": "max_orders",
+              "oldest_order_read": "2026-10-04T12:00:00+00:00", "newest_order_read": "2026-10-23T12:00:00+00:00"}
+    rep = rr_report.build_report(_projection_scan(window))
+    (p,) = rep["projections"]
+    assert rep["window_days"] == 20 and rep["window_basis"] == "oldest_order_read"
+    assert p["amount_usd"] == "1825.00"
+    assert "back to the oldest order read" in p["basis"] and "max orders limit" in p["basis"]
+    assert "older orders were not read" in rr_report.render_markdown(rep)
+    # truncated but no oldest order: no window, no projection
+    rep = rr_report.build_report(_projection_scan({**window, "oldest_order_read": None}))
+    assert rep["window_days"] is None and rep["projections"] == []
+
+
+def test_discount_codes_are_escaped_in_the_markdown():
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": None}
+    md = rr_report.render_markdown(rr_report.build_report(
+        _projection_scan(window, code="[click](https://evil.example)<img src=x>|*x*")))
+    (line,) = [x for x in md.splitlines() if "discount codes stacked" in x]
+    assert re.search(r"(?<!\\)[\[\]<>|*`_]", line) is None, line          # nothing unescaped
+    assert "\\[click\\](https://evil.example)\\<img src=x\\>\\|\\*x\\*" in md
 
 
 def test_report_cli(tmp_path, client, store):
