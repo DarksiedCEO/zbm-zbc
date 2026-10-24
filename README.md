@@ -258,7 +258,7 @@ exclusion, not an oversight.
 
 ## Running it
 
-Requires: Python 3.12+ (CI tests 3.12 and 3.13; 3.11 is not tested — fix wave 25), Go 1.24+, Rust/cargo, Node 22+.
+Requires: Python 3.12+ (CI tests 3.12 and 3.13; 3.11 is not tested — fix wave 25), Go 1.27.3+ (orchestrator-go's `go.mod`), Rust/cargo, Node 22+.
 
 **All three backend services fail closed and refuse to start without
 their auth token set** (post-hardening, Sep 22 2026). Pick your own real

@@ -225,8 +225,9 @@ jobs:
   # pytest in the venv), then `.venv/bin/python -m pytest -q` and `ruff check src tests devtools`. The Docker
   # live module skips here with its printed reason; the delivery-docker-live job below is where it must run.
   # tests/test_toolchains.py drives the REAL go, cargo and node toolchains on the toy fixtures (ADR 0011 toolchain
-  # amendment): Rust stable, Go (version from fixtures/dlv/toy-go/go.mod) and Node 22 are installed first, so those
-  # tests run instead of failing on a missing binary.
+  # amendment): Rust stable, Go 1.27.3 (the version orchestrator-go's go.mod requires; the toy fixture's own
+  # `go 1.23` line is only its minimum) and Node 22 are installed first, so those tests run instead of failing on a
+  # missing binary.
   # ---------------------------------------------------------------------------------------------------------------
   delivery-py:
     name: delivery-py (${{ matrix.python }}, ${{ matrix.os }})
@@ -260,7 +261,7 @@ jobs:
           node-version: "22"   # the toy-ts fixture runs .ts files under `node --test`; needs Node 22.18+ type stripping
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: fixtures/dlv/toy-go/go.mod
+          go-version: "1.27.3"   # a supported Go (AEGIS M1); keep equal to services/orchestrator-go/go.mod
           cache: false   # the fixture has no go.sum (no module dependencies); nothing to key a cache on
       - name: Rust stable (the toy-rs fixture is built with cargo test --locked --offline)
         run: |
@@ -651,7 +652,7 @@ jobs:
           exit "$code"
       - name: The base images actually used (record their digests when pinning, docs/deploy/railway.md)
         run: |
-          for ref in golang:1.24.7-bookworm rust:1.99.1-slim-bookworm; do
+          for ref in golang:1.27.3-bookworm rust:1.99.1-slim-bookworm; do
             echo "$ref $(docker image inspect "$ref" --format '{{index .RepoDigests 0}}' 2>/dev/null || echo unknown)"
           done
       - name: Smoke every container (/health, uid 10001, SIGTERM, fail closed, ledger volume)
