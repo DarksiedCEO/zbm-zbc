@@ -970,7 +970,8 @@ def test_m2_a_backslash_citation_through_the_service_is_not_the_tenant(tmp_path)
     ("John AT example DOT co dot uk", "email"),
     ("best SEO agency 2025-2026", None), ("best CRM 2025 2026", None), ("trends 2025–2026", None),
     ("plans for 2025/2026", None), ("1 000 000 visitors", None), ("1,000,000 visitors", None),
-    ("version 1.2.3.4", None), ("v1.2.3.4 release notes", None), ("release 10.0.0.1 changes", None),
+    ("version 1.2.3.4", "ip"), ("v1.2.3.4 release notes", "ip"), ("release 10.0.0.1 changes", "ip"),   # r2: quads
+    ("version 2.10.300", None), ("v1.2.3 release notes", None),
     ("ip 192.168.0.1", "ip"), ("server 10.20.30.40", "ip"), ("listed at yelp.com", None),
 ])
 def test_m3_prompt_guard_separators_obfuscated_at_and_allowed_numbers(text, kind):
@@ -1181,3 +1182,17 @@ def test_m4_a_retry_after_over_the_cap_answers_rate_limited_at_once_even_with_ti
 def test_m4_a_host_with_a_url_delimiter_is_never_the_tenant(c):
     assert domain_match.match(f"evil.test{c}x.site.test", "site.test") is None
     assert domain_match.match(f"x{c}.site.test", "site.test") is None
+
+
+@pytest.mark.parametrize("text,kind", [
+    ("call 555.123.456", "number"), ("tel 0612 345 678", "number"), ("call 1 234 567", "number"),
+    ("acct 1,234,567,890", "number"), ("version 192.168.0.1", "ip"), ("build 10.0.0.1 admin panel", "ip"),
+    ("call 1 000 000 1234", "number"), ("call 5 000 000 2", "number"), ("budget 12 000 000", None),
+    ("1 000 000 visitors", None), ("1,000,000 visitors", None), ("1.000.000 users", None),
+    ("best SEO agency 2025-2026", None), ("best CRM 2025 2026", None),
+    ("listed at yelp dot com", None), ("reviews at google dot com", None), ("is it listed at bbb dot org", None),
+    ("john at example dot com", "email"), ("sales1 at corp dot co dot uk", "email"),
+    ("contact j.doe at example dot com", "email"),
+])
+def test_r2_m1_only_round_counts_and_no_version_masked_quads(text, kind):
+    assert personal_data(text) == kind

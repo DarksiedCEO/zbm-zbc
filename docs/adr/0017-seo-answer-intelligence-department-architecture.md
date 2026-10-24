@@ -554,8 +554,12 @@ W4-3. **What is stored, and what is sent.**
    - Prompts carry no personal data (`agents/prompt_guard.py`). A prompt set holding an e-mail address (any at-sign
      spelling, after the shared fold, including `[@]`, `&#64;` and "john at example dot com"), seven or more digits
      however separated (spaces, commas, underscores, every Unicode dash and connector), or an IPv4 address is refused
-     422 `PROMPT_PERSONAL_DATA`. Allowed on purpose (AEGIS M3): a 4-digit year range (`2025-2026`, `2025 2026`), a
-     count grouped in thousands (`1 000 000`) and a version string (`version 1.2.3.4`); a real IP is still refused.
+     422 `PROMPT_PERSONAL_DATA`. Allowed on purpose (AEGIS M3, tightened in round 2): a 4-digit year range (`2025-2026`,
+     `2025 2026`), a ROUND count (1-3 digits then only `000` groups, e.g. `1 000 000`, with no other digit within
+     three characters; `1 234 567` and `0612 345 678` are numbers) and a two- or three-part version (`v1.2.3`). A
+     dotted quad that could be an address is refused whatever precedes it (`version 192.168.0.1` included). Prose
+     such as "listed at yelp dot com" is not taken for a spelled-out address (a short list of words prose puts
+     before "at").
      **Personal names and street addresses are not detected**: no pattern tells them from a business or a place, so
      prompt sets stay staff-written generic market questions. A stored prompt is checked again before sending and is
      skipped, unquoted in the report.
