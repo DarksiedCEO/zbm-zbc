@@ -123,6 +123,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
     results, versions = [], set()
     competitors = set(prompt_set.get("competitor_domains") or [])
     stop: Optional[str] = None
+    stop_detail: Optional[str] = None
     answers_total = 0
     try:
         for pi, prompt in enumerate(prompt_set["prompts"]):
@@ -137,7 +138,9 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                 try:
                     meter = run.reserve(pi, n * attempts)      # recorded first; raises when over budget
                 except EngineError as e:
-                    stop = e.code
+                    if e.code == "ENGINE_KILLED":
+                        raise Killed(_switch_code(e)) from None
+                    stop, stop_detail = e.code, e.detail
                     break
             tally = {"answers": 0, "refusals": 0, "errors": 0, "malformed": 0, "mentioned": 0, "cited": 0,
                      "lookalike_citations": 0}
@@ -157,12 +160,11 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                     tally["errors"] += 1
                     errors_by[e.code] = errors_by.get(e.code, 0) + 1
                     if e.code == "ENGINE_KILLED":
-                        raise Killed(e.detail if e.detail and e.detail.startswith("KILLED_") else
-                                     "KILLED_PROVIDER") from None
+                        raise Killed(_switch_code(e)) from None
                     if e.code == "ENGINE_PROTOCOL_ERROR":
                         osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
                     if e.code in STOP_CODES:
-                        stop = e.code
+                        stop, stop_detail = e.code, e.detail
                         break
                     continue
                 except Exception:                         # a provider failure is counted, never raised
@@ -213,9 +215,15 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
         outcome = "PARTIAL"
     else:
         outcome = {"ENGINE_BUDGET_EXHAUSTED": "BLOCKED", "ENGINE_NOT_CONNECTED": NOT_CONNECTED}.get(stop, "FAILED")
-    return {"engine": engine, "outcome": outcome, "reason": stop, "prompts": results,
+    return {"engine": engine, "outcome": outcome, "reason": stop, "reason_detail": stop_detail, "prompts": results,
             "prompts_not_asked": len(prompt_set["prompts"]) - asked, "model_versions": sorted(versions),
             "usage": usage}
+
+
+def _switch_code(e: EngineError) -> str:
+    """The kill switch behind an ENGINE_KILLED (its own code when the guard gave one)."""
+    return e.detail if e.detail and (e.detail.startswith("KILLED_") or e.detail == "SERVICE_CLOSED") \
+        else "KILLED_PROVIDER"
 
 
 def _refused_prompt(pi: int, n: int, kind: str) -> dict:
