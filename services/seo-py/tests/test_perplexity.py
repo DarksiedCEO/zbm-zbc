@@ -775,3 +775,51 @@ def test_the_key_leaks_nowhere(tmp_path, caplog):
             surfaces.append(p.read_bytes().decode("utf-8", "replace"))
     for s in surfaces:
         assert KEY not in s and derived("perplexity api key") not in s
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS gl-pplx fixes
+
+def _midnight_env():
+    return {"SEO_PERPLEXITY_API_KEY": KEY, "SEO_PROBE_SAMPLES": "3", "SEO_PERPLEXITY_DAILY_CALLS": "9",
+           "SEO_PERPLEXITY_TENANT_DAILY_CALLS": "9", "SEO_PERPLEXITY_DAILY_SPEND_USD": "100",
+           "SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD": "100"}
+
+
+def _midnight_harness(tmp_path, f, clk):
+    h = Harness(tmp_path, data_dir=str(tmp_path / "data"), clock=clk, **_midnight_env())
+    h.ports.fetcher = None
+    h.ports.engines["perplexity"] = engine(f)
+    return h
+
+
+def test_h1_a_run_crossing_utc_midnight_books_each_reservation_on_its_own_day(tmp_path):
+    from datetime import datetime, timezone
+    clk = FixedClock(datetime(2026, 10, 24, 23, 59, 0, tzinfo=timezone.utc))
+    moved = {"done": False}
+
+    def tick(req):
+        if not moved["done"]:
+            clk.advance(minutes=2)                                   # the first request crosses midnight
+            moved["done"] = True
+    f = FakePerplexity(ok(sonar(citations=["https://site.test/"])), on_request=tick)
+    h = _midnight_harness(tmp_path, f, clk)
+    psid = setup_zbm(h, prompts=("q one about seo", "q two about seo", "q three about seo", "q four about seo"))
+    c = callum(run_audit(h, psid))["facts"]["engines"]["perplexity"]
+    # prompt 1: 9 reserved on Oct 24. prompt 2: 9 reserved on Oct 25 (0 + 9 <= 9). prompt 3: 9 + 9 > 9 -> refused.
+    assert len(f.requests) == 6 and c["outcome"] == "PARTIAL" and c["reason_detail"] == "GLOBAL_DAILY_BUDGET"
+    assert c["prompts_not_asked"] == 2
+    run = list(h.svc.engine_runs.values())[0]
+    assert {k: v["day"] for k, v in run["reservations"].items()} == {"0": "2026-10-24", "1": "2026-10-25"}
+    assert run["settled"]["by_day"] == {"2026-10-24": {"calls": 3, "spend_usd": "0.015396"},
+                                        "2026-10-25": {"calls": 3, "spend_usd": "0.015396"}}
+    assert h.svc.engine_usage("perplexity", "2026-10-24")[0] == 3
+    assert h.svc.engine_usage("perplexity", "2026-10-25")[0] == 3
+    st = h.ok(h.get("/status"))["answer_engines"]["perplexity"]["budget"]
+    assert st["day"] == "2026-10-25" and st["used_calls"] == 3
+    # unsettled (a process that died mid-run): each reservation still counts on its own day
+    run["settled"] = None
+    assert h.svc.engine_usage("perplexity", "2026-10-25")[0] == 9 and h.svc.engine_usage("perplexity", "2026-10-24")[0] == 9
+    # and the split survives a replay of the log
+    assert h.ledger.of_type("engine_run_settled")[-1]["_payload"]["by_day"]["2026-10-25"]["calls"] == 3
+    h2 = h.restart(**_midnight_env())
+    assert h2.svc.engine_usage("perplexity", "2026-10-25")[0] == 3 and h2.svc.engine_usage("perplexity", "2026-10-24")[0] == 3

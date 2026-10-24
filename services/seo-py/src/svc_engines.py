@@ -13,8 +13,11 @@ A METERED engine (a real adapter that costs money; Perplexity) is asked only ins
                           charged in full), answers, the stop reason. Bookkeeping, recorded even under the write
                           switch (like an interruption record).
 
-Budgets are per UTC day of the service clock. A run's usage is its settlement when there is one, otherwise the sum of
-its reservations: a process that dies mid-run leaves its reservations charged (fail closed). Payloads carry ids,
+Budgets are per UTC day of the service clock, and the day belongs to each RESERVATION, not to the run: a run that
+crosses UTC midnight books every later prompt's reservation on the day it was made, checked against that day's budget.
+A reservation's requests (and their spend) count on the reservation's day. A run's usage on a day is its settlement's
+share for that day (``by_day``) when there is a settlement, otherwise the sum of that day's reservations: a process
+that dies mid-run leaves its reservations charged (fail closed). Payloads carry ids,
 counts, Decimal strings and hashes: never a prompt, an answer, a key or a URL.
 """
 
@@ -39,8 +42,8 @@ def _d(x) -> Decimal:
 class _Meter:
     """One prompt's reservation: at most ``calls`` requests and at most their reserved spend."""
 
-    def __init__(self, calls: int, per_call: Decimal):
-        self.reserved_calls, self.per_call = calls, per_call
+    def __init__(self, calls: int, per_call: Decimal, day: Optional[str] = None):
+        self.reserved_calls, self.per_call, self.day = calls, per_call, day
         self.reserved_spend = per_call * calls
         self.calls, self.known, self.unknown = 0, ZERO, 0
 
@@ -72,6 +75,17 @@ class _Run:
         self.meters.append(meter)
         return meter
 
+    def _by_day(self) -> dict:
+        """Calls and spend split by the day of the reservation each meter belongs to (H1: a run that crosses UTC
+        midnight charges each day only with its own reservations' requests)."""
+        out: dict = {}
+        for m in self.meters:
+            d = out.setdefault(m.day, {"calls": 0, "spend_usd": ZERO})
+            d["calls"] += m.calls
+            d["spend_usd"] += m.spent()
+        return {k: {"calls": v["calls"], "spend_usd": str(v["spend_usd"].quantize(MICRO))}
+                for k, v in sorted(out.items(), key=lambda kv: str(kv[0]))}
+
     def settle(self, answers: int, stop: Optional[str]) -> dict:
         calls = sum(m.calls for m in self.meters)
         unknown = sum(m.unknown for m in self.meters)
@@ -79,7 +93,7 @@ class _Run:
         usage = {"run_id": self.run_id, "calls": calls, "calls_cost_unknown": unknown, "spend_usd": str(spend),
                  "reserved_calls": sum(m.reserved_calls for m in self.meters),
                  "reserved_usd": str(sum((m.reserved_spend for m in self.meters), ZERO).quantize(MICRO)),
-                 "answers": answers, "stop_reason": stop, "settled": False}
+                 "answers": answers, "stop_reason": stop, "by_day": self._by_day(), "settled": False}
         if not self.meters:
             return usage
         try:
@@ -113,14 +127,23 @@ class EnginesMixin:
     def engine_usage(self, engine: str, day: str, tenant: Optional[str] = None) -> tuple[int, Decimal]:
         calls, spend = 0, ZERO
         for r in self.engine_runs.values():
-            if r["engine"] != engine or r["day"] != day or (tenant is not None and r["tenant_id"] != tenant):
+            if r["engine"] != engine or (tenant is not None and r["tenant_id"] != tenant):
                 continue
-            if r["settled"] is not None:
-                calls += r["settled"]["calls"]
-                spend += _d(r["settled"]["spend_usd"])
+            s = r["settled"]
+            if s is not None and s.get("by_day") is not None:
+                share = s["by_day"].get(day)
+                if share is not None:
+                    calls += share["calls"]
+                    spend += _d(share["spend_usd"])
+            elif s is not None:
+                if r["day"] == day:                      # a settlement recorded before by_day existed
+                    calls += s["calls"]
+                    spend += _d(s["spend_usd"])
             else:
-                calls += sum(x["calls"] for x in r["reservations"].values())
-                spend += sum((_d(x["spend_usd"]) for x in r["reservations"].values()), ZERO)
+                for x in r["reservations"].values():
+                    if x.get("day", r["day"]) == day:
+                        calls += x["calls"]
+                        spend += _d(x["spend_usd"])
         return calls, spend
 
     def _engine_reserve(self, run: _Run, prompt_index: int, calls: int) -> _Meter:
@@ -153,7 +176,7 @@ class EnginesMixin:
                                        ("reserve", run.run_id, prompt_index)))
             except Unavailable:
                 raise EngineError("ENGINE_BUDGET_EXHAUSTED", "RESERVATION_NOT_RECORDED") from None
-        return _Meter(calls, per_call)
+        return _Meter(calls, per_call, day)
 
     def _engine_settle(self, run: _Run, usage: dict) -> None:
         with self.lock:
@@ -162,7 +185,7 @@ class EnginesMixin:
             data = {"run_id": run.run_id, "audit_id": run.aid, "tenant_id": run.tid, "engine": run.engine,
                     "model": run.model, **{k: usage[k] for k in ("calls", "calls_cost_unknown", "spend_usd",
                                                                   "reserved_calls", "reserved_usd", "answers",
-                                                                  "stop_reason")}}
+                                                                  "stop_reason", "by_day")}}
             self._commit("engine_run_settled", data, "seo",
                          evidence=("engine_run_settled", f"audit:{run.aid}", dict(data), ("settle", run.run_id)))
 
@@ -171,7 +194,8 @@ class EnginesMixin:
                                                       "tenant_id": d["tenant_id"], "engine": d["engine"],
                                                       "model": d["model"], "day": d["day"], "reservations": {},
                                                       "settled": None, "reserved_at": at})
-        r["reservations"][str(d["prompt_index"])] = {"calls": d["calls"], "spend_usd": d["spend_usd"]}
+        # each reservation keeps ITS day (the run's "day" is only the day of its first reservation)
+        r["reservations"][str(d["prompt_index"])] = {"calls": d["calls"], "spend_usd": d["spend_usd"], "day": d["day"]}
 
     def _a_engine_run_settled(self, d, at):
         r = self.engine_runs.get(d["run_id"])
@@ -179,6 +203,7 @@ class EnginesMixin:
             return
         r["settled"] = {k: d[k] for k in ("calls", "calls_cost_unknown", "spend_usd", "reserved_calls",
                                           "reserved_usd", "answers", "stop_reason")}
+        r["settled"]["by_day"] = d.get("by_day")
         r["settled_at"] = at
 
     # ------------------------------------------------------------------ views
