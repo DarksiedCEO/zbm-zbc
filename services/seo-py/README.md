@@ -40,13 +40,18 @@ The real ledger-rust binary, this service's production entrypoint and Finance (3
 verification leg) as separate processes over real HTTP with real tokens and durable data directories (CI job
 `live-run (seo-py, …)`; ADR 0017 Wave 3, W3-1 and W3-2). It makes no outbound
 connection: the web provider switch is engaged over the API before the first audit, so every fetch stops at the
-kill-switch guard before name resolution. Exit 0 only when every check held; the script prints its own N/N.
+kill-switch guard before name resolution. Search Console: NOT_CONNECTED without a key (zero requests, nothing on the
+ledger as a read), bad key files refuse start without quoting the key, and with a run-generated key plus
+`SEO_KILLED_PROVIDERS=gsc` the section is `GSC_KILLED` before any request; an audit hook in every service process
+records any non-loopback lookup or connect and the run fails unless that record is empty. Exit 0 only when every check
+held; the script prints its own N/N.
 
 ## War room
 
 `python3 devtools/warroom/run.py --department seo-py --seed 1` (from the repo root; CI job `warroom`, ADR 0018 and
 ADR 0017 W3-3): the service's real fetcher against a fake internet of hostile sites, logs and callers, inside a sealed
-worker. Exit 1 on any new MUST failure or ERROR.
+worker. The `gsc-*` scenarios run the real Search Console connector against a hostile fake Google. Exit 1 on any new
+MUST failure or ERROR.
 
 ## Settings
 
