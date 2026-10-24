@@ -1262,3 +1262,20 @@ def test_r2_smoke_helper_never_echoes_a_mistyped_value(tmp_path):
         assert m.main([m.FLAG], env, out=out) == 2
         text = out.getvalue()
         assert KEY not in text and "configuration error" in text and len(text) < 300
+
+
+def test_r2_a_cost_far_above_the_reserve_stops_the_run_and_is_a_finding(tmp_path):
+    body = sonar(citations=["https://site.test/"])
+    body["usage"]["cost"]["total_cost"] = 0.21                          # > 4 x the $0.05 reserve
+    f = FakePerplexity(ok(body))
+    h = svc_harness(tmp_path, f, SEO_PERPLEXITY_RESERVE_USD_PER_CALL="0.05")
+    c = callum(run_audit(h, setup_zbm(h, prompts=("q one about seo", "q two about seo"))))
+    e = c["facts"]["engines"]["perplexity"]
+    assert len(f.requests) == 1 and e["outcome"] == "PARTIAL" and e["reason_detail"] == "COST_ABOVE_RESERVE"
+    assert e["reason"] == "ENGINE_BUDGET_EXHAUSTED" and e["prompts_not_asked"] == 1
+    assert any(x["code"] == "ENGINE_COST_ABOVE_RESERVE" for x in c["findings"])
+    assert h.ledger.of_type("engine_run_settled")[-1]["_payload"]["spend_usd"] == "0.210000"
+    body["usage"]["cost"]["total_cost"] = 0.2                           # exactly 4 x: allowed
+    f2 = FakePerplexity(ok(body))
+    h2 = svc_harness(tmp_path / "b", f2, SEO_PERPLEXITY_RESERVE_USD_PER_CALL="0.05")
+    assert callum(run_audit(h2, setup_zbm(h2)))["outcome"] == "OK" and len(f2.requests) == 3

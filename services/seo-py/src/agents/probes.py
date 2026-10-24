@@ -216,6 +216,10 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                 positions.append(pos)
                 if pos is not None:
                     tally["cited"] += 1
+                if meter is not None and getattr(meter, "over_reserve", False):
+                    # one request cost more than COST_GUARD_MULTIPLE x the reserve: stop spending (AEGIS round 2)
+                    stop, stop_detail = "ENGINE_BUDGET_EXHAUSTED", "COST_ABOVE_RESERVE"
+                    break
             versions |= sample_versions
             answers_total += tally["answers"]
             errors_total += tally["errors"] + tally["malformed"]
@@ -321,6 +325,10 @@ def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, g
     for e, r in stopped.items():
         findings.append(finding("ENGINE_RUN_STOPPED", "low", "measured", "WATCH", capability="P4",
                                 detail={"engine": e, "reason": r.get("reason"), "outcome": r["outcome"]}))
+    for e, r in per_engine.items():
+        if r.get("reason_detail") == "COST_ABOVE_RESERVE":
+            findings.append(finding("ENGINE_COST_ABOVE_RESERVE", "medium", "measured", "WATCH", capability="P4",
+                                    detail={"engine": e, "outcome": r["outcome"], "usage": r.get("usage")}))
     if not observed_ and stopped:
         e, r = sorted(stopped.items())[0]
         return envelope(AGENT_CALLUM, "citation_sources", r["outcome"], findings, methodology=methodology,

@@ -518,6 +518,9 @@ W4-2. **The adapter** (`src/perplexity.py`) and its runs (`src/svc_engines.py`):
      - the spend: the reported cost where Perplexity gave one, and the full reserve for any request whose cost is
        unknown or reported as 0, including failures (a request is never free here, so the spend budget always binds;
        AEGIS L2);
+     - a single request whose reported cost exceeds 4x the reserve per call (`COST_GUARD_MULTIPLE`) stops the run
+       (`ENGINE_BUDGET_EXHAUSTED`, detail `COST_ABOVE_RESERVE`) and adds a finding `ENGINE_COST_ABOVE_RESERVE`: the
+       cost is only known after the request, so the guard limits the damage to that one request (AEGIS round 2);
      - the answers and the stop reason.
 
      A run's usage is its settlement, or the sum of its reservations while unsettled. A process that dies mid-run

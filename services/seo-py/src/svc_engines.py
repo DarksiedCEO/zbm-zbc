@@ -32,6 +32,9 @@ from perplexity import EngineError
 from reasons import R
 
 ZERO = Decimal("0")
+# a single request whose reported cost exceeds this many times the reserve per call stops the run (COST_ABOVE_RESERVE):
+# the reserve is the budget's estimate, and a cost far above it means the estimate (or the provider) is wrong
+COST_GUARD_MULTIPLE = 4
 MICRO = Decimal("0.000001")
 
 
@@ -46,6 +49,7 @@ class _Meter:
         self.reserved_calls, self.per_call, self.day = calls, per_call, day
         self.reserved_spend = per_call * calls
         self.calls, self.known, self.unknown = 0, ZERO, 0
+        self.over_reserve = False
 
     def spent(self) -> Decimal:
         return self.known + self.per_call * self.unknown
@@ -64,6 +68,8 @@ class _Meter:
             self.unknown += 1
         else:
             self.known += _d(cost)
+            if _d(cost) > self.per_call * COST_GUARD_MULTIPLE:
+                self.over_reserve = True                  # the probe stops the run (AEGIS round 2)
 
 
 class _Run:
