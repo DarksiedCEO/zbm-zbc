@@ -205,45 +205,101 @@ func TestConfigFailsClosed(t *testing.T) {
 	}
 }
 
-// Go-live Days 1-2: on Railway the gateway reaches Finance at http://<name>.railway.internal (private network,
-// WireGuard-encrypted, not routed from the internet). Plain http there needs the explicit opt-in, is limited to that
-// suffix, and every other plain-http host is still refused.
+// Go-live Days 1-2: on Railway the gateway reaches Finance at http://finance.railway.internal (private network,
+// WireGuard-encrypted, not routed from the internet). Plain http there needs the explicit opt-in and is limited to
+// the ONE service named by STRIPE_GATEWAY_FINANCE_PRIVATE_NAME (default "finance", AEGIS L1); every other
+// plain-http host, including other services on the same private network, is still refused.
+func loadPrivate(url, optIn, name string) (config, error) {
+	env := map[string]string{"STRIPE_GATEWAY_FINANCE_URL": url, allowRailwayPrivateHTTPEnv: optIn,
+		financePrivateNameEnv: name, "STRIPE_GATEWAY_FINANCE_TOKEN": svcTok, "STRIPE_GATEWAY_CALLER_TOKEN": callerTok}
+	return loadConfig(func(k string) string { return env[k] })
+}
+
 func TestRailwayPrivateHTTPOptIn(t *testing.T) {
-	base := map[string]string{"STRIPE_GATEWAY_FINANCE_TOKEN": svcTok, "STRIPE_GATEWAY_CALLER_TOKEN": callerTok}
-	load := func(url, optIn string) (config, error) {
-		env := map[string]string{"STRIPE_GATEWAY_FINANCE_URL": url, allowRailwayPrivateHTTPEnv: optIn}
-		for k, v := range base {
-			env[k] = v
-		}
-		return loadConfig(func(k string) string { return env[k] })
-	}
-	if _, err := load("http://finance.railway.internal:8410", ""); err == nil {
+	if _, err := loadPrivate("http://finance.railway.internal:8410", "", ""); err == nil {
 		t.Fatal("plain http to a private-network host started without the opt-in")
 	}
 	for _, u := range []string{"http://finance.railway.internal:8410", "http://FINANCE.railway.internal",
-		"http://finance-31.railway.internal:8410/"} {
-		c, err := load(u, "1")
+		"http://finance.railway.internal:8410/"} {
+		c, err := loadPrivate(u, "1", "")
 		if err != nil || !c.privateHTTP {
 			t.Fatalf("%s with the opt-in: %v (privateHTTP=%v)", u, err, c.privateHTTP)
 		}
 	}
 	for _, u := range []string{"http://finance.internal", "http://railway.internal", "http://.railway.internal",
 		"http://a.b.railway.internal", "http://finance.railway.internal.evil.example", "http://10.0.0.5:8410",
-		"http://[fd12::1]:8410", "http://-x.railway.internal", "http://x_y.railway.internal"} {
-		if _, err := load(u, "1"); err == nil {
-			t.Errorf("%s started with the opt-in: only <label>.railway.internal is private", u)
+		"http://[fd12::1]:8410", "http://-x.railway.internal", "http://x_y.railway.internal",
+		"http://finance-31.railway.internal:8410", "http://finance.railway.internal:8410/fin",
+		"http://finance.railway.internal:8410?x=1", "http://finance.railway.internal:8410#f",
+		"http://finance.railway.internal:8410/?", "http://finance.railway.internal.:8410"} {
+		if _, err := loadPrivate(u, "1", ""); err == nil {
+			t.Errorf("%s started with the opt-in: only http://finance.railway.internal[:port] is accepted", u)
 		}
 	}
 	for _, v := range []string{"true", "yes", "2", " 1"} {
-		if _, err := load("http://finance.railway.internal", v); err == nil {
+		if _, err := loadPrivate("http://finance.railway.internal", v, ""); err == nil {
 			t.Errorf("opt-in value %q started (only 1 or 0/unset)", v)
 		}
 	}
-	if c, err := load("http://127.0.0.1:8410", "1"); err != nil || c.privateHTTP {
+	if c, err := loadPrivate("http://127.0.0.1:8410", "1", ""); err != nil || c.privateHTTP {
 		t.Fatalf("loopback with the opt-in: %v %v", err, c.privateHTTP)
 	}
-	if c, err := load("https://finance.example", "0"); err != nil || c.privateHTTP {
+	if c, err := loadPrivate("https://finance.example", "0", ""); err != nil || c.privateHTTP {
 		t.Fatalf("https with the opt-in off: %v %v", err, c.privateHTTP)
+	}
+}
+
+// AEGIS L1: the opt-in reaches one named host, not any service on the private network.
+func TestRailwayPrivateHTTPIsPinnedToTheFinanceName(t *testing.T) {
+	for _, u := range []string{"http://ledger.railway.internal:8090", "http://localhost.railway.internal:8410",
+		"http://legal.railway.internal:8420", "http://seo.railway.internal"} {
+		if _, err := loadPrivate(u, "1", ""); err == nil {
+			t.Errorf("%s started with the opt-in and the default name finance", u)
+		}
+	}
+	// a configured name is the only one accepted
+	if c, err := loadPrivate("http://finance-31.railway.internal:8410", "1", "finance-31"); err != nil || !c.privateHTTP {
+		t.Fatalf("the configured name was refused: %v (privateHTTP=%v)", err, c.privateHTTP)
+	}
+	if _, err := loadPrivate("http://finance.railway.internal:8410", "1", "finance-31"); err == nil {
+		t.Error("the default name was accepted although another name is configured")
+	}
+	if _, err := loadPrivate("http://ledger.railway.internal:8090", "1", "finance-31"); err == nil {
+		t.Error("ledger accepted with a configured Finance name")
+	}
+	for _, name := range []string{"localhost", "Finance", "finance.railway.internal", "a.b", "-x", "x-", "x_y",
+		" finance", strings.Repeat("a", 64)} {
+		if _, err := loadPrivate("http://finance.railway.internal", "1", name); err == nil {
+			t.Errorf("%s=%q accepted: must be one lowercase DNS label, not localhost", financePrivateNameEnv, name)
+		}
+	}
+}
+
+// AEGIS L4: a Finance URL with userinfo is refused in every mode, and no credential reaches the error or the log.
+func TestFinanceURLWithUserinfoIsRefused(t *testing.T) {
+	for _, tc := range []struct{ url, optIn string }{
+		{"http://user:hunter2-secret@127.0.0.1:8410", ""},
+		{"http://user@localhost:8410", ""},
+		{"http://@127.0.0.1:8410", ""},
+		{"http://user:hunter2-secret@finance.railway.internal:8410", "1"},
+		{"http://user@finance.railway.internal", "1"},
+		{"https://user:hunter2-secret@finance.example", ""},
+	} {
+		_, err := loadPrivate(tc.url, tc.optIn, "")
+		if err == nil {
+			t.Errorf("%s (opt-in %q) started: userinfo must be refused", tc.url, tc.optIn)
+			continue
+		}
+		if strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), "user:") {
+			t.Errorf("the refusal leaks the credential: %v", err)
+		}
+	}
+	if got := redactedURL("http://user:hunter2-secret@127.0.0.1:8410"); strings.Contains(got, "hunter2") ||
+		strings.Contains(got, "user") {
+		t.Errorf("redactedURL kept the userinfo: %s", got)
+	}
+	if got := redactedURL("http://finance.railway.internal:8410"); got != "http://finance.railway.internal:8410" {
+		t.Errorf("redactedURL changed a clean URL: %s", got)
 	}
 }
 

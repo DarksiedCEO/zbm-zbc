@@ -154,6 +154,8 @@ export default defineRailway(() => {
       STRIPE_GATEWAY_BIND_ADDR: "::",
       STRIPE_GATEWAY_FINANCE_URL: PRIVATE("finance", 8410),
       STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP: "1",
+      // the opt-in reaches only http://<this name>.railway.internal[:port] (AEGIS L1): the finance service above
+      STRIPE_GATEWAY_FINANCE_PRIVATE_NAME: "finance",
       STRIPE_GATEWAY_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       STRIPE_GATEWAY_CALLER_TOKEN: preserve(),
     },

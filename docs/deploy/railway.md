@@ -80,7 +80,8 @@ Railway's private network: `<service>.railway.internal`, encrypted with WireGuar
 Railway advises plain `http://` on it (docs.railway.com, "Private networking: how it works"). In environments created
 after 2025-10-16 the names resolve to IPv4 and IPv6; older environments are IPv6-only. The services therefore bind
 `::` (Python, stripe-gateway) or `[::]` (ledger, orchestrator: they join host and port with a colon, so the brackets
-are needed), which on Linux is dual-stack. If the service names are changed in Railway, change the URLs with them.
+are needed), which on Linux is dual-stack. If the service names are changed in Railway, change the URLs with them
+(and `STRIPE_GATEWAY_FINANCE_PRIVATE_NAME` with finance's name).
 
 ## How the images start
 
@@ -245,8 +246,9 @@ otherwise. Examples are never real values.
 | `PORT` | yes | no | `8470` (IaC) | copied to `STRIPE_GATEWAY_PORT` |
 | `STRIPE_GATEWAY_PORT` | — | no | (from `PORT`) | |
 | `STRIPE_GATEWAY_BIND_ADDR` | yes | no | `::` (IaC) | default `127.0.0.1` |
-| `STRIPE_GATEWAY_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | → finance |
-| `STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP` | yes on Railway | no | `1` (IaC) | without it plain http is accepted only to a loopback Finance (AEGIS L8); `1` also accepts one `<name>.railway.internal` host. Added for this deploy; **needs AEGIS review** |
+| `STRIPE_GATEWAY_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | → finance; a URL with a user or password (`user@host`) is refused in every mode (AEGIS L4), and the startup log prints it with any userinfo removed |
+| `STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP` | yes on Railway | no | `1` (IaC) | without it plain http is accepted only to a loopback Finance (AEGIS L8); `1` also accepts exactly `http://<STRIPE_GATEWAY_FINANCE_PRIVATE_NAME>.railway.internal[:port]` (no path, query or user) and no other private-network host (AEGIS L1). Added for this deploy; **needs AEGIS review** |
+| `STRIPE_GATEWAY_FINANCE_PRIVATE_NAME` | no | no | `finance` (IaC; the default when unset) | the one Railway service name the opt-in reaches: a single lowercase DNS label, never `localhost`. `ledger.railway.internal`, `localhost.railway.internal` or any other name is refused |
 | `STRIPE_GATEWAY_FINANCE_TOKEN` | yes | yes | ref `finance.FIN_SERVICE_TOKEN` (IaC) | ≥ 32 characters |
 | `STRIPE_GATEWAY_CALLER_TOKEN` | yes | yes | (you) | finance's `rail_gateway` caller token; must differ from the Finance token |
 
@@ -478,7 +480,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   `stripe-gateway`; `requiredMountPath` (an SDK field, not described in the docs); `RAILWAY_RUN_UID=0`;
   `checkSuites: true` (wait for CI); `railway ssh` sessions having the service's variables.
 - **stripe-gateway private-network opt-in** (`STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP`) relaxes AEGIS launch-hardening
-  L8 for one named network. It needs AEGIS review before merge.
+  L8 for one named host on the private network: `http://<STRIPE_GATEWAY_FINANCE_PRIVATE_NAME>.railway.internal[:port]`
+  (IaC: `finance`; AEGIS L1). It needs AEGIS review before merge.
 - **Two public services.** The orchestrator's token has no minimum-length check and no rate limit, so its entropy is
   the only defence (use `openssl rand -hex 32`). Anyone holding it can also start a scan.
 - **No scheduler is deployed.** Finance's daily reconciliation and Stripe-session job, Legal's daily jobs and seo's
