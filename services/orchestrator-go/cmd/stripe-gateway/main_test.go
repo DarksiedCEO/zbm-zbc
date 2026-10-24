@@ -205,6 +205,160 @@ func TestConfigFailsClosed(t *testing.T) {
 	}
 }
 
+// Go-live Days 1-2: on Railway the gateway reaches Finance at http://finance.railway.internal (private network,
+// WireGuard-encrypted, not routed from the internet). Plain http there needs the explicit opt-in and is limited to
+// the ONE service named by STRIPE_GATEWAY_FINANCE_PRIVATE_NAME (default "finance", AEGIS L1); every other
+// plain-http host, including other services on the same private network, is still refused.
+func loadPrivate(url, optIn, name string) (config, error) {
+	env := map[string]string{"STRIPE_GATEWAY_FINANCE_URL": url, allowRailwayPrivateHTTPEnv: optIn,
+		financePrivateNameEnv: name, "STRIPE_GATEWAY_FINANCE_TOKEN": svcTok, "STRIPE_GATEWAY_CALLER_TOKEN": callerTok}
+	return loadConfig(func(k string) string { return env[k] })
+}
+
+func TestRailwayPrivateHTTPOptIn(t *testing.T) {
+	if _, err := loadPrivate("http://finance.railway.internal:8410", "", ""); err == nil {
+		t.Fatal("plain http to a private-network host started without the opt-in")
+	}
+	for _, u := range []string{"http://finance.railway.internal:8410", "http://FINANCE.railway.internal",
+		"http://finance.railway.internal:8410/"} {
+		c, err := loadPrivate(u, "1", "")
+		if err != nil || !c.privateHTTP {
+			t.Fatalf("%s with the opt-in: %v (privateHTTP=%v)", u, err, c.privateHTTP)
+		}
+	}
+	for _, u := range []string{"http://finance.internal", "http://railway.internal", "http://.railway.internal",
+		"http://a.b.railway.internal", "http://finance.railway.internal.evil.example", "http://10.0.0.5:8410",
+		"http://[fd12::1]:8410", "http://-x.railway.internal", "http://x_y.railway.internal",
+		"http://finance-31.railway.internal:8410", "http://finance.railway.internal:8410/fin",
+		"http://finance.railway.internal:8410?x=1", "http://finance.railway.internal:8410#f",
+		"http://finance.railway.internal:8410/?", "http://finance.railway.internal.:8410"} {
+		if _, err := loadPrivate(u, "1", ""); err == nil {
+			t.Errorf("%s started with the opt-in: only http://finance.railway.internal[:port] is accepted", u)
+		}
+	}
+	for _, v := range []string{"true", "yes", "2", " 1"} {
+		if _, err := loadPrivate("http://finance.railway.internal", v, ""); err == nil {
+			t.Errorf("opt-in value %q started (only 1 or 0/unset)", v)
+		}
+	}
+	if c, err := loadPrivate("http://127.0.0.1:8410", "1", ""); err != nil || c.privateHTTP {
+		t.Fatalf("loopback with the opt-in: %v %v", err, c.privateHTTP)
+	}
+	if c, err := loadPrivate("https://finance.example", "0", ""); err != nil || c.privateHTTP {
+		t.Fatalf("https with the opt-in off: %v %v", err, c.privateHTTP)
+	}
+}
+
+// AEGIS L1: the opt-in reaches one named host, not any service on the private network.
+func TestRailwayPrivateHTTPIsPinnedToTheFinanceName(t *testing.T) {
+	for _, u := range []string{"http://ledger.railway.internal:8090", "http://localhost.railway.internal:8410",
+		"http://legal.railway.internal:8420", "http://seo.railway.internal"} {
+		if _, err := loadPrivate(u, "1", ""); err == nil {
+			t.Errorf("%s started with the opt-in and the default name finance", u)
+		}
+	}
+	// a configured name is the only one accepted
+	if c, err := loadPrivate("http://finance-31.railway.internal:8410", "1", "finance-31"); err != nil || !c.privateHTTP {
+		t.Fatalf("the configured name was refused: %v (privateHTTP=%v)", err, c.privateHTTP)
+	}
+	if _, err := loadPrivate("http://finance.railway.internal:8410", "1", "finance-31"); err == nil {
+		t.Error("the default name was accepted although another name is configured")
+	}
+	if _, err := loadPrivate("http://ledger.railway.internal:8090", "1", "finance-31"); err == nil {
+		t.Error("ledger accepted with a configured Finance name")
+	}
+	for _, name := range []string{"localhost", "Finance", "finance.railway.internal", "a.b", "-x", "x-", "x_y",
+		" finance", strings.Repeat("a", 64)} {
+		if _, err := loadPrivate("http://finance.railway.internal", "1", name); err == nil {
+			t.Errorf("%s=%q accepted: must be one lowercase DNS label, not localhost", financePrivateNameEnv, name)
+		}
+	}
+}
+
+// AEGIS L4: a Finance URL with userinfo is refused in every mode, and no credential reaches the error or the log.
+func TestFinanceURLWithUserinfoIsRefused(t *testing.T) {
+	for _, tc := range []struct{ url, optIn string }{
+		{"http://user:hunter2-secret@127.0.0.1:8410", ""},
+		{"http://user@localhost:8410", ""},
+		{"http://@127.0.0.1:8410", ""},
+		{"http://user:hunter2-secret@finance.railway.internal:8410", "1"},
+		{"http://user@finance.railway.internal", "1"},
+		{"https://user:hunter2-secret@finance.example", ""},
+	} {
+		_, err := loadPrivate(tc.url, tc.optIn, "")
+		if err == nil {
+			t.Errorf("%s (opt-in %q) started: userinfo must be refused", tc.url, tc.optIn)
+			continue
+		}
+		if strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), "user:") {
+			t.Errorf("the refusal leaks the credential: %v", err)
+		}
+	}
+	if got := redactedURL("http://user:hunter2-secret@127.0.0.1:8410"); strings.Contains(got, "hunter2") ||
+		strings.Contains(got, "user") {
+		t.Errorf("redactedURL kept the userinfo: %s", got)
+	}
+	if got := redactedURL("http://finance.railway.internal:8410"); got != "http://finance.railway.internal:8410" {
+		t.Errorf("redactedURL changed a clean URL: %s", got)
+	}
+}
+
+// AEGIS R2-1: a non-ASCII host is refused before any case folding, in every mode. strings.ToLower folds U+0130 'İ'
+// to 'i' and U+212A (Kelvin sign) to 'k', so these would otherwise match the pinned name (or "localhost") while the
+// client dials a different, punycode host.
+func TestNonASCIIHostIsRefused(t *testing.T) {
+	for _, tc := range []struct{ url, optIn, name string }{
+		{"http://F\u0130NANCE.railway.internal:8410", "1", ""},    // U+0130 -> "finance"
+		{"http://f\u0130nance.railway.internal", "1", ""},         // lowercase context too
+		{"http://F%C4%B0NANCE.railway.internal:8410", "1", ""},    // the same, percent-encoded
+		{"http://\u212Aafka.railway.internal:8410", "1", "kafka"}, // U+212A -> "kafka", a configured name
+		{"http://LOCALHOST\u212A:8410", "", ""},                   // never mistaken for a loopback name
+		{"http://loc\u0130lhost:8410", "", ""},                    // nor "localhost" via U+0130
+		{"https://f\u0130nance.example", "", ""},                  // https too
+	} {
+		if _, err := loadPrivate(tc.url, tc.optIn, tc.name); err == nil {
+			t.Errorf("%q (opt-in %q, name %q) started: a non-ASCII host must be refused", tc.url, tc.optIn, tc.name)
+		}
+	}
+	// the ASCII spellings still work
+	if _, err := loadPrivate("http://kafka.railway.internal:8410", "1", "kafka"); err != nil {
+		t.Fatalf("ASCII configured name refused: %v", err)
+	}
+	if _, err := loadPrivate("http://FINANCE.railway.internal:8410", "1", ""); err != nil {
+		t.Fatalf("ASCII upper-case name refused: %v", err)
+	}
+}
+
+// AEGIS R2-2: no '?' or '#' in the base URL, even empty ones, in any mode; and the delivery URL is built with
+// url.JoinPath, so the Finance path can never land in a fragment or query.
+func TestQueryOrFragmentInTheBaseURLIsRefused(t *testing.T) {
+	for _, tc := range []struct{ url, optIn string }{
+		{"http://finance.railway.internal:8410#", "1"}, {"http://finance.railway.internal:8410?", "1"},
+		{"http://finance.railway.internal:8410/#", "1"}, {"http://finance.railway.internal:8410#x", "1"},
+		{"http://127.0.0.1:8410#", ""}, {"http://127.0.0.1:8410?", ""}, {"http://localhost:8410?a=b", ""},
+		{"https://finance.example#", ""}, {"https://finance.example/base?x=1", ""},
+	} {
+		if _, err := loadPrivate(tc.url, tc.optIn, ""); err == nil {
+			t.Errorf("%s (opt-in %q) started: '?' and '#' must be refused", tc.url, tc.optIn)
+		}
+	}
+	for base, want := range map[string]string{
+		"http://finance.railway.internal:8410":  "http://finance.railway.internal:8410" + financePath,
+		"http://finance.railway.internal:8410/": "http://finance.railway.internal:8410" + financePath,
+		"http://127.0.0.1:8410":                 "http://127.0.0.1:8410" + financePath,
+		"https://finance.example/base/":         "https://finance.example/base" + financePath,
+	} {
+		optIn := ""
+		if strings.Contains(base, "railway") {
+			optIn = "1"
+		}
+		c, err := loadPrivate(base, optIn, "")
+		if err != nil || c.financeEndpoint != want {
+			t.Errorf("%s: endpoint %q (%v), want %q", base, c.financeEndpoint, err, want)
+		}
+	}
+}
+
 func TestServerLimits(t *testing.T) {
 	s := newServer("127.0.0.1:0", http.NotFoundHandler())
 	if s.ReadHeaderTimeout != 5*time.Second || s.ReadTimeout == 0 || s.WriteTimeout <= upstreamTimeout ||

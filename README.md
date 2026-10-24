@@ -9,6 +9,9 @@ hygiene check now fails a hand-written count, see "Testing"). See `docs/adr/0001
 full architecture rationale and scope boundary (Tier 3 excluded, see that
 doc for why).
 
+**Deploying:** the first-revenue services run on Railway (the dashboard on Vercel) — runbook, every variable and
+secret, and the go-live steps: **[docs/deploy/railway.md](docs/deploy/railway.md)**.
+
 ## Status
 
 **8/8 detection agents (Tier 1 A–D, Tier 2 E–H) + full trust/safety net +
@@ -255,7 +258,7 @@ exclusion, not an oversight.
 
 ## Running it
 
-Requires: Python 3.12+ (CI tests 3.12 and 3.13; 3.11 is not tested — fix wave 25), Go 1.24+, Rust/cargo, Node 22+.
+Requires: Python 3.12+ (CI tests 3.12 and 3.13; 3.11 is not tested — fix wave 25), Go 1.27.3+ (orchestrator-go's `go.mod`), Rust/cargo, Node 22+.
 
 **All three backend services fail closed and refuse to start without
 their auth token set** (post-hardening, Sep 22 2026). Pick your own real

@@ -55,10 +55,57 @@ const (
 )
 
 type config struct {
-	financeURL   string
-	serviceToken string
-	callerToken  string
-	addr         string
+	financeURL string
+	// financeEndpoint: the full URL deliveries are POSTed to, built once with url.JoinPath (never by concatenating
+	// strings, which put the path into a fragment or query when the base URL had one; AEGIS R2-2)
+	financeEndpoint string
+	serviceToken    string
+	callerToken     string
+	addr            string
+	// privateHTTP: Finance is reached over plain http on Railway's private network (the opt-in was used)
+	privateHTTP bool
+}
+
+// allowRailwayPrivateHTTPEnv is the opt-in for plain http to Finance on Railway's private network. Only "1" turns it
+// on; unset, empty or "0" leave it off; any other value refuses to start (a typo never silently means "off").
+const allowRailwayPrivateHTTPEnv = "STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP"
+
+const railwayPrivateSuffix = ".railway.internal"
+
+func railwayPrivateHTTP(raw string) (bool, error) {
+	switch raw {
+	case "", "0":
+		return false, nil
+	case "1":
+		return true, nil
+	}
+	return false, fmt.Errorf("%s must be 1 (on) or 0/unset (off)", allowRailwayPrivateHTTPEnv)
+}
+
+// financePrivateNameEnv names the ONE Railway service the private-network opt-in reaches (AEGIS L1): with the opt-in,
+// plain http is accepted only to http://<that name>.railway.internal[:port], never to any other service on the
+// private network. Unset means "finance", the Finance service's name in .railway/railway.ts.
+const financePrivateNameEnv = "STRIPE_GATEWAY_FINANCE_PRIVATE_NAME"
+
+const defaultFinancePrivateName = "finance"
+
+// financePrivateName: the configured name, a single lowercase DNS label (a-z, 0-9, inner hyphens, at most 63), and
+// never "localhost" (localhost.railway.internal must not be mistaken for a loopback Finance or vice versa).
+func financePrivateName(raw string) (string, error) {
+	if raw == "" {
+		return defaultFinancePrivateName, nil
+	}
+	bad := len(raw) > 63 || raw == "localhost" || raw[0] == '-' || raw[len(raw)-1] == '-'
+	for _, r := range raw {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			bad = true
+		}
+	}
+	if bad {
+		return "", fmt.Errorf("%s must be one lowercase DNS label (the Finance service's Railway name), not "+
+			"localhost", financePrivateNameEnv)
+	}
+	return raw, nil
 }
 
 func loadConfig(getenv func(string) string) (config, error) {
@@ -71,14 +118,51 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if c.financeURL == "" || err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return c, errors.New("STRIPE_GATEWAY_FINANCE_URL must be Finance's base URL (http:// or https://)")
 	}
-	// The Finance tokens and Stripe's body (it can carry client names and emails) never cross a network in clear
-	// text: plain http is accepted only to a loopback Finance (AEGIS launch-hardening L8).
-	if u.Scheme == "http" {
-		ip := net.ParseIP(u.Hostname())
-		if !(u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())) {
-			return c, errors.New("STRIPE_GATEWAY_FINANCE_URL: plain http only to a loopback Finance; use https")
+	// No credentials in the URL (AEGIS L4): the Finance tokens travel in headers, and the URL is printed in the
+	// startup log. The URL itself is never put in this error.
+	if u.User != nil {
+		return c, errors.New("STRIPE_GATEWAY_FINANCE_URL must not contain a user or password (user@host)")
+	}
+	// A base URL has no query or fragment, not even an empty one ("...:8410#" or "...:8410?"): refused on the raw
+	// string, in every mode (AEGIS R2-2).
+	if strings.ContainsAny(c.financeURL, "?#") {
+		return c, errors.New("STRIPE_GATEWAY_FINANCE_URL must not contain '?' or '#' (Finance's base URL only)")
+	}
+	// ASCII host names only, checked BEFORE any case folding, in every mode (AEGIS R2-1): strings.ToLower folds
+	// U+0130 'İ' to 'i' (and U+212A Kelvin to 'k'), so "FİNANCE.railway.internal" would pass the name pin while the
+	// client dials its punycode form, a different host.
+	for i := 0; i < len(u.Hostname()); i++ {
+		if u.Hostname()[i] >= 0x80 {
+			return c, errors.New("STRIPE_GATEWAY_FINANCE_URL: the host name must be ASCII (use the punycode form)")
 		}
 	}
+	// The Finance tokens and Stripe's body (it can carry client names and emails) never cross a network in clear
+	// text: plain http is accepted only to a loopback Finance (AEGIS launch-hardening L8) — or, with the explicit
+	// opt-in below, to the one named Finance service on Railway's private network, which Railway encrypts
+	// (WireGuard) and does not route from the internet (docs/deploy/railway.md; go-live Days 1-2).
+	privateHTTP, err := railwayPrivateHTTP(getenv(allowRailwayPrivateHTTPEnv))
+	if err != nil {
+		return c, err
+	}
+	privateName, err := financePrivateName(getenv(financePrivateNameEnv))
+	if err != nil {
+		return c, err
+	}
+	if u.Scheme == "http" {
+		host := strings.ToLower(u.Hostname())
+		ip := net.ParseIP(host)
+		loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
+		// exactly http://<name>.railway.internal[:port]: no path, query or fragment (the base URL only)
+		private := privateHTTP && host == privateName+railwayPrivateSuffix && u.Path == "" && u.RawQuery == "" &&
+			!u.ForceQuery && u.Fragment == "" && u.Opaque == ""
+		if !loopback && !private {
+			return c, errors.New("STRIPE_GATEWAY_FINANCE_URL: plain http only to a loopback Finance (or, with " +
+				allowRailwayPrivateHTTPEnv + "=1, to exactly http://" + privateName + railwayPrivateSuffix +
+				"[:port], the name from " + financePrivateNameEnv + "); use https")
+		}
+		c.privateHTTP = !loopback
+	}
+	c.financeEndpoint = u.JoinPath(financePath).String()
 	for name, v := range map[string]string{"STRIPE_GATEWAY_FINANCE_TOKEN": c.serviceToken,
 		"STRIPE_GATEWAY_CALLER_TOKEN": c.callerToken} {
 		if len(v) < minTokenLen {
@@ -171,7 +255,7 @@ func (g *gateway) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.financeURL+financePath, bytes.NewReader(fwd))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.financeEndpoint, bytes.NewReader(fwd))
 	if err != nil {
 		answer(w, http.StatusServiceUnavailable, "try again")
 		return
@@ -233,12 +317,27 @@ func newServer(addr string, h http.Handler) *http.Server {
 	}
 }
 
+// redactedURL is what the startup log prints: loadConfig already refuses a URL with userinfo, and this masks any
+// userinfo regardless (defence in depth; the log must never carry a credential).
+func redactedURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(unparseable)"
+	}
+	u.User = nil
+	return u.String()
+}
+
 func main() {
 	cfg, err := loadConfig(os.Getenv)
 	if err != nil {
 		log.Fatalf("stripe-gateway: REFUSING TO START — %v", err)
 	}
 	srv := newServer(cfg.addr, newMux(newGateway(cfg)))
-	log.Printf("stripe-gateway listening on %s, forwarding to Finance at %s%s", cfg.addr, cfg.financeURL, financePath)
+	if cfg.privateHTTP {
+		log.Printf("stripe-gateway: %s=1 — Finance is reached over plain http on Railway's private network",
+			allowRailwayPrivateHTTPEnv)
+	}
+	log.Printf("stripe-gateway listening on %s, forwarding to Finance at %s", cfg.addr, redactedURL(cfg.financeEndpoint))
 	log.Fatal(srv.ListenAndServe())
 }

@@ -225,8 +225,9 @@ jobs:
   # pytest in the venv), then `.venv/bin/python -m pytest -q` and `ruff check src tests devtools`. The Docker
   # live module skips here with its printed reason; the delivery-docker-live job below is where it must run.
   # tests/test_toolchains.py drives the REAL go, cargo and node toolchains on the toy fixtures (ADR 0011 toolchain
-  # amendment): Rust stable, Go (version from fixtures/dlv/toy-go/go.mod) and Node 22 are installed first, so those
-  # tests run instead of failing on a missing binary.
+  # amendment): Rust stable, Go 1.27.3 (the version orchestrator-go's go.mod requires; the toy fixture's own
+  # `go 1.23` line is only its minimum) and Node 22 are installed first, so those tests run instead of failing on a
+  # missing binary.
   # ---------------------------------------------------------------------------------------------------------------
   delivery-py:
     name: delivery-py (${{ matrix.python }}, ${{ matrix.os }})
@@ -260,7 +261,7 @@ jobs:
           node-version: "22"   # the toy-ts fixture runs .ts files under `node --test`; needs Node 22.18+ type stripping
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: fixtures/dlv/toy-go/go.mod
+          go-version: "1.27.3"   # a supported Go (AEGIS M1); keep equal to services/orchestrator-go/go.mod
           cache: false   # the fixture has no go.sum (no module dependencies); nothing to key a cache on
       - name: Rust stable (the toy-rs fixture is built with cargo test --locked --offline)
         run: |
@@ -613,6 +614,58 @@ jobs:
         run: docker rm -f ci-registry >/dev/null 2>&1 || true
 
   # ---------------------------------------------------------------------------------------------------------------
+  # Railway images (go-live Days 1-2, docs/deploy/railway.md): build every production Dockerfile the Railway services
+  # deploy from — never pushed anywhere — and smoke each container the way Railway starts it: PORT set, the production
+  # bind value, GET /health 200, the service running as uid 10001, `docker stop` stopping it without a SIGKILL, a
+  # missing token refusing the start with the service's own message, seo-py started as root (the entrypoint writes a
+  # secret file only as root) and the ledger on a root-owned volume with RAILWAY_RUN_UID=0
+  # (devtools/railway_smoke.py). Same shape as delivery-docker-live: Linux only (no Docker on the macOS runners).
+  # The Go and Rust build stages are pinned by exact tag only (no digest yet; docs/deploy/railway.md "Open items").
+  # ---------------------------------------------------------------------------------------------------------------
+  railway-images:
+    name: railway-images
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Docker daemon present
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Build every Railway image (no push)
+        shell: bash
+        run: |
+          set +e
+          {
+            set -e
+            docker build -f services/ledger-rust/Dockerfile -t zbm-ci/ledger-rust:ci .
+            docker build -f services/detection-py/Dockerfile -t zbm-ci/detection-py:ci .
+            docker build -f services/finance-py/Dockerfile -t zbm-ci/finance-py:ci .
+            docker build -f services/legal-py/Dockerfile -t zbm-ci/legal-py:ci .
+            docker build -f services/seo-py/Dockerfile -t zbm-ci/seo-py:ci .
+            docker build -f services/orchestrator-go/Dockerfile.orchestrator -t zbm-ci/orchestrator:ci .
+            docker build -f services/orchestrator-go/Dockerfile.stripe-gateway -t zbm-ci/stripe-gateway:ci .
+          } 2>&1 | tee "$RUNNER_TEMP/railway-build.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/railway-build.log" --code "$code" \
+            --suite "docker:railway-images build"
+          exit "$code"
+      - name: The base images actually used (record their digests when pinning, docs/deploy/railway.md)
+        run: |
+          for ref in golang:1.27.3-bookworm rust:1.99.1-slim-bookworm; do
+            echo "$ref $(docker image inspect "$ref" --format '{{index .RepoDigests 0}}' 2>/dev/null || echo unknown)"
+          done
+      - name: Smoke every container (/health, uid 10001, SIGTERM, fail closed, ledger volume)
+        shell: bash
+        run: |
+          set +e
+          python3 devtools/railway_smoke.py 2>&1 | tee "$RUNNER_TEMP/railway-smoke.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/railway-smoke.log" --code "$code" \
+            --suite "docker:railway-images smoke"
+          exit "$code"
+
+  # ---------------------------------------------------------------------------------------------------------------
   # Dependency audits. Always run (they are cheap next to the suites and a lockfile change anywhere matters).
   # ---------------------------------------------------------------------------------------------------------------
   audit-python:
@@ -636,6 +689,8 @@ jobs:
             echo "== $req"
             pip-audit -r "$req" --strict --progress-spinner off
           done
+      - name: pip-audit the Railway images' hash lock (every transitive dependency they install)
+        run: pip-audit -r deploy/python/requirements.lock.txt --require-hashes --no-deps --disable-pip --strict --progress-spinner off
       - name: pip-audit delivery-py's uv.lock
         # The two deer-flow packages are git-sourced (pinned to a commit) and have no registry version to look up;
         # pip-audit refuses URL requirements, so they are excluded here and stated in docs/ci.md.
@@ -821,6 +876,15 @@ jobs:
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-docker-args.log" --code "$code" \
             --suite "devtools:test_ci_docker_args"
           exit "$code"
+      - name: Railway deploy files agree (Dockerfiles, entrypoint, lock, IaC, CI job, docs/deploy/railway.md)
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest devtools/test_deploy_config.py -v 2>&1 | tee "$RUNNER_TEMP/test-deploy-config.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-deploy-config.log" --code "$code" \
+            --suite "devtools:test_deploy_config"
+          exit "$code"
       - name: The annotation converter's own self-test (every log format, escaping, caps, redaction, ci.yml wiring)
         shell: bash
         run: |
@@ -857,6 +921,7 @@ jobs:
       - dashboard-ts
       - live-runs
       - delivery-docker-live
+      - railway-images
       - audit-python
       - audit-rust
       - audit-node

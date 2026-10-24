@@ -1,0 +1,29 @@
+# orchestrator-go cmd/stripe-gateway (the Stripe webhook entry point) — production image for Railway
+# (docs/deploy/railway.md). Build context: the repository root.
+#   docker build -f services/orchestrator-go/Dockerfile.stripe-gateway -t zbm/stripe-gateway .
+#
+# Build stage: golang:1.27.3-bookworm, the go.mod version CI tests with (actions/setup-go reads go.mod); Go 1.27.3 is
+# the newest supported release (go.dev/doc/devel/release, 2026-10-19; AEGIS M1). OPEN ITEM: pinned by exact tag only
+# — the build box this was written on cannot reach any container registry to resolve a digest (the tag is listed in
+# docker-library/official-images library/golang); pin it by digest (docs/deploy/railway.md, "Open items"). The module has no dependencies (no go.sum), so nothing is downloaded.
+# Static binary (CGO off), no VCS stamping (the build context has no .git), GOTOOLCHAIN=local (never fetch a toolchain).
+#
+# Runtime stage: python:3.12-slim pinned by the digest ADR 0011 records — the one base image digest this repository
+# records and CI has built; it carries /bin/sh and setpriv for deploy/docker/zbm-entrypoint.sh. Runs as uid/gid 10001.
+# Bind: STRIPE_GATEWAY_BIND_ADDR (127.0.0.1 unless set; :: for every interface). No state, no Stripe secret.
+FROM golang:1.27.3-bookworm AS build
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath GOTELEMETRY=off
+WORKDIR /src
+COPY services/orchestrator-go/go.mod ./
+COPY services/orchestrator-go/cmd ./cmd
+COPY services/orchestrator-go/internal ./internal
+RUN go build -buildvcs=false -ldflags="-s -w" -o /out/stripe-gateway ./cmd/stripe-gateway
+
+FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+RUN groupadd --gid 10001 zbm \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin zbm
+COPY deploy/docker/zbm-entrypoint.sh /usr/local/bin/zbm-entrypoint
+RUN chmod 0755 /usr/local/bin/zbm-entrypoint
+COPY --from=build /out/stripe-gateway /usr/local/bin/stripe-gateway
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/zbm-entrypoint", "--port-var", "STRIPE_GATEWAY_PORT", "--", "/usr/local/bin/stripe-gateway"]

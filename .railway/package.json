@@ -1,0 +1,9 @@
+{
+  "name": "zbm-zbc-railway-iac",
+  "private": true,
+  "type": "module",
+  "description": "Railway infrastructure as code (.railway/railway.ts) for the go-live services; see docs/deploy/railway.md",
+  "devDependencies": {
+    "railway": "3.13.1"
+  }
+}
