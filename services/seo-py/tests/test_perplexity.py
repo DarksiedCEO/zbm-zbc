@@ -865,7 +865,7 @@ def test_h2_two_consecutive_protocol_errors_stop_the_run_and_it_is_failed_not_ok
                             "site.test", 5, lambda **k: None, osei.Osei(FixedClock(T0)), b)
     assert len(f.requests) == 2                                         # not 15: the run stops spending
     assert r["outcome"] == "FAILED" and r["reason"] == "ENGINE_PROTOCOL_ERROR"
-    assert r["reason_detail"] == "CONSECUTIVE_PROTOCOL_ERRORS" and r["prompts_not_asked"] == 2
+    assert r["reason_detail"] == "REPEATED_PROTOCOL_ERRORS" and r["prompts_not_asked"] == 2
     assert b.settled == (0, "ENGINE_PROTOCOL_ERROR")
 
 
@@ -1196,3 +1196,31 @@ def test_m4_a_host_with_a_url_delimiter_is_never_the_tenant(c):
 ])
 def test_r2_m1_only_round_counts_and_no_version_masked_quads(text, kind):
     assert personal_data(text) == kind
+
+
+def _cycling_engine(script):
+    sent = []
+
+    def handler(req):
+        sent.append(1)
+        item = script[(len(sent) - 1) % len(script)]
+        return httpx.Response(item.status_code, headers=item.headers, stream=httpx.ByteStream(item.content))
+    clock = Clock()
+    return sent, px.PerplexityEngine(px.ApiKey(KEY, "env"), transport=httpx.MockTransport(handler), monotonic=clock,
+                                     sleep=clock.sleep, rand=lambda: 0.0)
+
+
+def test_r2_protocol_errors_between_503s_still_stop_the_run():
+    bad, unavailable = httpx.Response(200, json={"nope": 1}), httpx.Response(503)
+    sent, e = _cycling_engine([bad, unavailable, unavailable, unavailable])
+    r = probes.probe_engine("perplexity", e, {"prompts": ["q0", "q1", "q2"], "brand_terms": ["x"]}, "site.test", 5,
+                            lambda **k: None, osei.Osei(FixedClock(T0)), _UnlimitedBudget())
+    assert len(sent) == 5 and r["outcome"] == "FAILED"            # bad, 503 x3 (one ask), bad -> stop; not 29
+    assert r["reason"] == "ENGINE_PROTOCOL_ERROR" and r["reason_detail"] == "REPEATED_PROTOCOL_ERRORS"
+
+
+def test_r2_an_answer_between_protocol_errors_resets_the_count():
+    sent, e = _cycling_engine([httpx.Response(200, json={"nope": 1}), ok(sonar(citations=["https://site.test/"]))])
+    r = probes.probe_engine("perplexity", e, {"prompts": ["q0", "q1", "q2"], "brand_terms": ["x"]}, "site.test", 5,
+                            lambda **k: None, osei.Osei(FixedClock(T0)), _UnlimitedBudget())
+    assert len(sent) == 15 and r["outcome"] == "OK" and sum(p["answers"] for p in r["prompts"]) == 7

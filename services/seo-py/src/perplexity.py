@@ -67,7 +67,8 @@ READ_SLICE_S = 2.0
 CODES = frozenset({"ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_UNAVAILABLE", "ENGINE_PROTOCOL_ERROR",
                    "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED"})
 # a run stops asking this engine after one of these (asking again cannot help, or must not happen). A run also stops
-# after PROTOCOL_ERROR_STOP_AFTER consecutive ENGINE_PROTOCOL_ERRORs (agents/probes.py): a response shape we cannot
+# after PROTOCOL_ERROR_STOP_AFTER ENGINE_PROTOCOL_ERRORs with no answer in between, whatever other errors come between
+# them (agents/probes.py): a response shape we cannot
 # read will not change on the next request, and every request costs money.
 PROTOCOL_ERROR_STOP_AFTER = 2
 STOP_CODES = frozenset({"ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED",

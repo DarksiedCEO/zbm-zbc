@@ -132,7 +132,8 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
     answers_total = 0
     errors_total = 0
     errors_seen: dict = {}
-    protocol_run = 0                                    # consecutive ENGINE_PROTOCOL_ERRORs, across prompts
+    protocol_run = 0            # ENGINE_PROTOCOL_ERRORs since the last answer, across prompts; other errors (503,
+                                # transport) do not reset it (AEGIS round 2): only an answer does
     try:
         for pi, prompt in enumerate(prompt_set["prompts"]):
             if stop is not None:
@@ -173,10 +174,8 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                         osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
                         protocol_run += 1
                         if protocol_run >= PROTOCOL_ERROR_STOP_AFTER:   # an unreadable shape: stop spending
-                            stop, stop_detail = e.code, "CONSECUTIVE_PROTOCOL_ERRORS"
+                            stop, stop_detail = e.code, "REPEATED_PROTOCOL_ERRORS"
                             break
-                    else:
-                        protocol_run = 0
                     if e.code in STOP_CODES:
                         stop, stop_detail = e.code, e.detail
                         break
