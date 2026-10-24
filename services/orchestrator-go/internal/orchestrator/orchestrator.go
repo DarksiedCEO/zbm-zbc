@@ -59,6 +59,7 @@ type scanSource struct {
 	fixture    bool
 	snapshotID string
 	coverage   json.RawMessage
+	covered    map[string]bool // store scans: the agents the source feeds (nil for fixtures)
 }
 
 // storeRefusalStatus maps detection-py's refusal to this API's status:
@@ -345,11 +346,17 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 		// still runs, on an empty batch, and the snapshot's coverage note
 		// says which agents this source does not feed (a report must not
 		// read their silence as a clean result).
-		src = scanSource{name: DataSourceShopifyPrefix + snap.SnapshotID, snapshotID: snap.SnapshotID, coverage: snap.Coverage}
+		src = scanSource{name: DataSourceShopifyPrefix + snap.SnapshotID, snapshotID: snap.SnapshotID, coverage: snap.Coverage,
+			covered: snap.CoveredAgents}
 		orders = snap.Orders
 		subs, ssEvents = []client.Subscription{}, []client.ServerSideEvent{}
 		touchpoints, platforms, terms = []client.ChannelTouchpoint{}, []client.PlatformConnectionStatus{}, []client.ContractTerm{}
 	} else {
+		if tenant != FixtureClientID {
+			// Defensive (AEGIS golive-rr info): only the fixture tenant may
+			// ever be scanned from the shared fixture pool.
+			return nil, stepErr("choose scan source", fmt.Errorf("tenant %q has no store snapshot and is not the fixture pool", tenant))
+		}
 		orders, err = o.detection.FixtureOrders(ctx)
 		if err != nil {
 			return nil, stepErr("fetch fixture orders", err)
@@ -428,6 +435,12 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 
 	all := []client.Finding{} // never nil: a clean store is [] on the wire (E-1)
 	agentsRun := []string{}
+	// agentsRecorded (AEGIS golive-rr L5): the agents the started event
+	// names. A fixture scan: every agent run. A store scan: only the agents
+	// its coverage note marks covered (the others ran on no data from this
+	// source), plus any agent that nonetheless returned a finding, so the
+	// ledger never omits an agent whose findings it records. ADR 0020.
+	agentsRecorded := []string{}
 	seen := map[string]string{} // finding_id -> its content (detected_at aside)
 	for _, a := range agents {
 		fs, err := a.run(ctx)
@@ -452,6 +465,9 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 			all = append(all, f)
 		}
 		agentsRun = append(agentsRun, a.id)
+		if src.covered == nil || src.covered[a.id] || len(fs) > 0 {
+			agentsRecorded = append(agentsRecorded, a.id)
+		}
 	}
 
 	overlaps, err := o.correlate(ctx, all)
@@ -467,7 +483,7 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 	}
 	started := startedEvent(startedPayload{
 		ScanID: scanID, ClientID: tenant, AsOf: asOfWire, DataSource: src.name,
-		Fixture: src.fixture, TenantDefaulted: defaulted, Agents: agentsRun,
+		Fixture: src.fixture, TenantDefaulted: defaulted, Agents: agentsRecorded,
 	})
 	// Each finding's event, followed (L1) by its value-basis event when its
 	// figure is rate-derived. findingOf[i] is the finding events[i] records.

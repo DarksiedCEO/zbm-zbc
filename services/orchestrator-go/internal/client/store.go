@@ -21,6 +21,9 @@ type StoreSnapshot struct {
 	DataSource string          `json:"data_source"`
 	Orders     []Order         `json:"orders"`
 	Coverage   json.RawMessage `json:"coverage"`
+	// CoveredAgents: the agent ids the coverage note marks covered (AEGIS
+	// golive-rr L5). Parsed from Coverage; never on the wire.
+	CoveredAgents map[string]bool `json:"-"`
 }
 
 // StoreRefusal is detection-py's answer that no snapshot can be served:
@@ -101,6 +104,23 @@ func (c *DetectionClient) StoreSnapshot(ctx context.Context, clientID string) (*
 		return nil, fmt.Errorf("%w: %d orders", ErrBadSnapshot, len(snap.Orders))
 	case len(snap.Coverage) == 0 || snap.Coverage[0] != '{':
 		return nil, fmt.Errorf("%w: coverage missing", ErrBadSnapshot)
+	}
+	var cov struct {
+		Agents map[string]struct {
+			Covered *bool `json:"covered"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(snap.Coverage, &cov); err != nil || cov.Agents == nil {
+		return nil, fmt.Errorf("%w: coverage lists no agents", ErrBadSnapshot)
+	}
+	snap.CoveredAgents = map[string]bool{}
+	for id, a := range cov.Agents {
+		if a.Covered == nil {
+			return nil, fmt.Errorf("%w: coverage of %.64q has no covered flag", ErrBadSnapshot, id)
+		}
+		if *a.Covered {
+			snap.CoveredAgents[id] = true
+		}
 	}
 	if snap.Orders == nil {
 		snap.Orders = []Order{}

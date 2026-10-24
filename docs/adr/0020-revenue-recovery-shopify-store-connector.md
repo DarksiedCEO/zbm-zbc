@@ -76,6 +76,11 @@ asks `/stores/snapshot` FIRST and, on a refusal, answers 409 (`NOT_CONNECTED`, `
 used to answer 422 "no live data source"). With a snapshot, every agent runs (the store feeds the order agents; the
 rest get empty batches), the started record says `src=shopify:<snapshot_id> fixture=0` (the rrs1/rrc2 formats are
 unchanged, so no rollback hazard; the snapshot id is the link to detection-py's `rr_store_read_completed`), and the
+started record's `agents` (the hashed payload's list and the summary's `agents=<n>`) name only the agents the
+snapshot's coverage note marks covered, plus any other agent that returned a finding anyway — not all eight that
+ran on empty batches (AEGIS golive-rr L5; a fixture scan still names all eight; the record format is unchanged, only
+which ids a store scan lists). A snapshot whose coverage note has no `agents` map, or an agent without a boolean
+`covered`, fails the scan before anything is written. The
 result carries `store_snapshot_id` and `store_coverage`, with `non_live_data_source: false`. The findings view's
 `non_live_data_source` is now false only when every counted scan read a store.
 
@@ -143,10 +148,19 @@ signed approval (as in ooh-py's gate) is the upgrade path.
 
 ### 5. Gates before the first outbound byte; reason codes
 
-`sync`: kill switch → registration (`NOT_CONNECTED`) → one sync at a time (`STORE_SYNC_IN_PROGRESS`) → the client's
-daily budget (`STORE_BUDGET_EXHAUSTED`) → the credential files (`STORE_CREDENTIAL_UNREADABLE`) → the ledger record
-(`LEDGER_UNAVAILABLE`). Closed codes: `store_connector/reasons.py` (each with its HTTP status and fixed message;
-`NO_OUTBOUND` lists the ones decided before any outbound call).
+`sync`: kill switch → registration (`NOT_CONNECTED`) → one sync at a time for this client (`STORE_SYNC_IN_PROGRESS`)
+→ at most `RR_STORE_MAX_CONCURRENT_SYNCS` syncs across all clients (default 2, clamped 1-16; `STORE_SYNC_CAPACITY`)
+→ the client's daily budget (`STORE_BUDGET_EXHAUSTED`) → the credential files (`STORE_CREDENTIAL_UNREADABLE`) → the
+ledger record (`LEDGER_UNAVAILABLE`). Closed codes: `store_connector/reasons.py` (each with its HTTP status and fixed
+message; `NO_OUTBOUND` lists the ones decided before any outbound call).
+
+After the read (AEGIS golive-rr): if the client's registration changed while it ran — another shop, credential
+reference or `approval_ref`, or deregistered — the read is discarded (`STORE_REGISTRATION_CHANGED`, recorded as
+failed; checked before the completion record and again when the snapshot is stored). If the completion record
+itself fails, the answer is `LEDGER_COMPLETION_UNRECORDED` (the store WAS called; not in `NO_OUTBOUND`), the read is
+discarded and the failure is recorded best effort. A held snapshot carries the shop, credential reference and
+`approval_ref` it was read under; `snapshot` and `status` drop it (`NOT_SYNCED`) as soon as the current registration
+differs in any of them, so a client never gets a shop it no longer owns.
 
 **Kill switch:** `RR_STORE_READS_DISABLED=1` (environment) or the existence of the file named by
 `RR_STORE_KILL_SWITCH_FILE` (`touch` it: every sync stops, a running sync stops at its next page, and held
@@ -193,7 +207,11 @@ one orchestrator scan result into the client report: what was read (window, coun
 checks run with covered/NOT COVERED, each finding with its amount, evidence class, labels, cause and method (OBSERVED
 = quotable; ESTIMATED = "est."; UNKNOWN = no figure), overlaps flagged "do not add", per-check OBSERVED subtotals
 only, and **projections** — ESTIMATED, confidence low, `observed × 365 / window days` with the assumption written
-out, only for a window of 14 days or more, never added to anything. No headline score, no grand total. A fixture
+out, only for a window of 14 days or more, never added to anything. The window (AEGIS golive-rr M2): when the read
+was not truncated, every order in the requested lookback was read, so the window is the lookback (`requested_start`
+to the snapshot time, else `lookback_days`) however sparse the orders; only a truncated read is measured back to the
+oldest order read. The report's `window_basis` and the projection's stated basis say which. Store-supplied text
+(discount codes in a finding's cause) is escaped in the Markdown. No headline score, no grand total. A fixture
 scan, or a scan whose labels and figures disagree, is refused.
 
 ### 9. Connecting a store — exact steps
@@ -257,7 +275,7 @@ scan, or a scan whose labels and figures disagree, is refused.
   through the real routes and the client report.
 - `services/orchestrator-go/cmd/orchestrator/store_scan_test.go` (+ updated E-3 and L2 tests): NOT_CONNECTED and
   other refusals with nothing written, a connected snapshot scanned and recorded with `src=shopify:<id> fixture=0`,
-  bad snapshots fail the scan, the fixture scan unchanged.
+  bad snapshots fail the scan, the fixture scan unchanged; the started record names only covered agents (L5).
 - `services/detection-py/devtools/live_run.py`: real ledger-rust, detection-py `serve.py` under a socket audit hook,
   real orchestrator-go — NOT_CONNECTED end to end, record-first refusal, kill switch, fixture scan, ledger valid,
   and no outbound attempt from detection-py. Counts: docs/test-counts.md.
@@ -269,6 +287,7 @@ scan, or a scan whose labels and figures disagree, is refused.
 - U2's merchant-created Dev Dashboard path is UNVERIFIED on shopify.dev; OAuth (ZBM-owned app, custom distribution)
   is not built.
 - Budgets and snapshots are per process and in memory (a restart resets the day's sync count and drops snapshots;
-  two detection-py processes would each have their own). One sync at a time per process.
+  two detection-py processes would each have their own). One sync at a time per client and at most
+  `RR_STORE_MAX_CONCURRENT_SYNCS` per process.
 - Only the discount-misuse agent is fed by this source; seven agents are NOT COVERED by it.
 - The approval is a file entry, not a signature (section 3).

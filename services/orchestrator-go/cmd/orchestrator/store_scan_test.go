@@ -137,6 +137,9 @@ func TestStore_SnapshotForAnotherTenantFailsTheScan(t *testing.T) {
 		"other source":  strings.Replace(storeSnapshotBody("acme", 1), `"data_source":"shopify",`, `"data_source":"amazon",`, 1),
 		"not json":      "<html>",
 		"500 no reason": "",
+		// AEGIS golive-rr L5: the coverage note must say which agents it feeds
+		"coverage without agents":    strings.Replace(storeSnapshotBody("acme", 1), `"agents":{`, `"agents_x":{`, 1),
+		"agent without covered flag": strings.Replace(storeSnapshotBody("acme", 1), `"covered":true,`, ``, 1),
 	} {
 		det, led := twoLeakDetection(), newMemLedger()
 		status := "200"
@@ -167,5 +170,64 @@ func TestStore_FixtureScanUnchanged(t *testing.T) {
 		if r == "POST /stores/snapshot" {
 			t.Fatal("the fixture tenant asked for a store snapshot")
 		}
+	}
+}
+
+// AEGIS golive-rr L5: a store scan's started record names the agents its
+// coverage note marks covered (plus any agent that returned a finding
+// anyway), not all eight that ran.
+func startedSummary(t *testing.T, led *memLedger) string {
+	t.Helper()
+	for _, e := range led.snapshot() {
+		if e["event_type"] == "rr_scan_started" {
+			return e["summary"].(string)
+		}
+	}
+	t.Fatal("no started record")
+	return ""
+}
+
+func TestStore_StartedRecordNamesOnlyCoveredAgents(t *testing.T) {
+	det, led := newFakeDetection(), newMemLedger()
+	det.stores["acme"] = [2]string{"200", storeSnapshotBody("acme", 3)}
+	srv := fixWaveServer(t, det, led)
+	code, _, body := scan(t, srv, "?client_id=acme")
+	if code != http.StatusOK {
+		t.Fatalf("scan = %d %s", code, body)
+	}
+	var res struct {
+		AgentsRun []string `json:"agents_run"`
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.AgentsRun) != 8 {
+		t.Fatalf("agents run %v", res.AgentsRun)
+	}
+	if s := startedSummary(t, led); !strings.HasSuffix(s, " agents=1") {
+		t.Fatalf("started record %q: want only the covered agent", s)
+	}
+}
+
+func TestStore_StartedRecordKeepsAnUncoveredAgentThatFoundSomething(t *testing.T) {
+	det, led := twoLeakDetection(), newMemLedger() // abandoned-cart (not covered) flags o0
+	det.stores["acme"] = [2]string{"200", storeSnapshotBody("acme", 3)}
+	srv := fixWaveServer(t, det, led)
+	if code, _, body := scan(t, srv, "?client_id=acme"); code != http.StatusOK {
+		t.Fatalf("scan = %d %s", code, body)
+	}
+	if s := startedSummary(t, led); !strings.HasSuffix(s, " agents=2") {
+		t.Fatalf("started record %q: want the covered agent and the one that returned a finding", s)
+	}
+}
+
+func TestStore_FixtureStartedRecordNamesAllAgents(t *testing.T) {
+	det, led := twoLeakDetection(), newMemLedger()
+	srv := fixWaveServer(t, det, led)
+	if code, _, body := scan(t, srv, ""); code != http.StatusOK {
+		t.Fatalf("scan = %d %s", code, body)
+	}
+	if s := startedSummary(t, led); !strings.HasSuffix(s, " agents=8") {
+		t.Fatalf("fixture started record %q", s)
 	}
 }
