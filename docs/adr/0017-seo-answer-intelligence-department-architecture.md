@@ -519,7 +519,9 @@ anonymised queries and rows past the caps) is reported, never spread over the cl
 first-party, data class measured, effect class null; `headline_score` is null; the section carries the Goodhart
 pairing (revenue NOT_CONNECTED -> decision INSUFFICIENT_EVIDENCE) and produces no findings. Retention: the aggregates
 live in the audit report (append-only log; nothing identifying, so nothing to shred, decision 18); after
-`SEO_GSC_RETENTION_DAYS` (90) a report's search-performance section is served as window totals only.
+`SEO_GSC_RETENTION_DAYS` (90) a report's search-performance section is served as window totals only — by the audit
+view, by drift (which compares totals only) and by `GET /audit/export` (AEGIS gl-gsc L2: the export used to return
+the breakdowns of expired reports).
 
 GSC-7. **Wiring.** Audit: Osei's `search_performance` step runs after Naomi (the run guard first: a restricted Osei is
 RESTRICTED); the report gets `search_performance` = {outcome, reason, read_started, section}. **The section's outcome

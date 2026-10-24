@@ -202,3 +202,23 @@ def test_l1_templates_of_fewer_than_three_urls_with_a_literal_word_go_to_other()
 def test_l1_the_method_text_no_longer_claims_no_url_is_kept():
     import svc_gsc
     assert "no URL is kept" not in svc_gsc.METHOD and "{slug}" in svc_gsc.METHOD
+
+
+# ====================================================================== L2: retention also binds the export
+
+def test_l2_export_serves_expired_sections_as_totals_only(tmp_path):
+    fake = FakeGoogle()
+    fake.pages += [("https://acme.test/blog/post-3", 1, 5, 2.0)]
+    h = _setup(tmp_path, fake, SEO_GSC_RETENTION_DAYS="1")
+    audit(h, "acme", "acme.test")
+
+    def exported():
+        ev = h.ok(h.get("/audit/export", params={"limit": 1000}))["events"]
+        return [e["data"]["report"]["search_performance"]["section"] for e in ev if e["kind"] == "audit_completed"]
+    fresh = exported()
+    assert fresh and "by_query_class" in fresh[0] and "by_page_template" in fresh[0]
+    h.clock.advance(days=2)
+    (old,) = exported()
+    assert old["expired"] is True and "by_query_class" not in old and "by_page_template" not in old
+    assert "by_date" not in old and old["totals"]["clicks"] == fresh[0]["totals"]["clicks"]
+    assert "/blog/{slug}" not in json.dumps(h.ok(h.get("/audit/export", params={"limit": 1000})))

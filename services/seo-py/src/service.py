@@ -578,6 +578,11 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         out = []
         for r in self.log.iter_records(max(1, since_seq)):
             d = {k: v for k, v in r["data"].items() if k not in ("_obj", "request_sha")}
+            if r["kind"] == "audit_completed" and isinstance(d.get("report"), dict):
+                # AEGIS gl-gsc L2: retention applies here too. Past SEO_GSC_RETENTION_DAYS the report's
+                # search-performance breakdowns are served as totals only, as in the audit view (the section says
+                # ``expired``; report_sha256 is still the hash of the report as recorded)
+                d["report"] = self.gsc_retained(d["report"], r["at"])
             out.append({"seq": r["seq"], "kind": r["kind"], "at": r["at"], "data": d})
             if len(out) >= limit:
                 break
