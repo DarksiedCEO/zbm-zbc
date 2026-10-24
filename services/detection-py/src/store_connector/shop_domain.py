@@ -25,7 +25,10 @@ def shop_handle(raw: object) -> str:
     text = raw.lower()
     if text.endswith(SHOPIFY_SUFFIX):
         text = text[: -len(SHOPIFY_SUFFIX)]
-    if not _HANDLE.fullmatch(text) or text.startswith("xn--") or "--" in text[2:4]:
+    if text.startswith("xn--"):
+        # checked on its own (AEGIS golive-rr L4), before the general "--" rule that would also catch it
+        raise ShopDomainError("shop must not be an IDN/punycode (xn--) handle")
+    if not _HANDLE.fullmatch(text) or "--" in text[2:4]:
         raise ShopDomainError("shop must be an ASCII handle or <handle>.myshopify.com")
     return text
 

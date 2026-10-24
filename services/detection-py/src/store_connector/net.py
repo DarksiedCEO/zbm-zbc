@@ -6,7 +6,8 @@ process (``DnsGate``), every socket operation (connect, TLS, each read and write
 (``DeadlineBackend``), and the backend connects only to the resolved addresses.
 
 Added for a client-supplied host (SSRF): a resolved address must be a public unicast address (``is_global`` and not
-multicast). A name that resolves to a loopback, private, link-local, shared or reserved address is refused as if it
+multicast); an IPv6 address in a NAT64, IPv4-compatible, site-local or 6to4 range is refused, and any IPv4 address
+embedded in an IPv6 one (mapped, 6to4, Teredo, NAT64) must itself be public. A name that resolves to a loopback, private, link-local, shared or reserved address is refused as if it
 did not resolve, so a hostile DNS answer for ``*.myshopify.com`` cannot point the connector inside our network.
 """
 
@@ -85,8 +86,40 @@ def ip_literal(host: str) -> Optional[str]:
         return None
 
 
+# AEGIS golive-rr L3: IPv6 ranges that carry (or translate to) an IPv4 address, or that are deprecated site-local.
+# Refused whole, whatever ``is_global`` says on this Python: NAT64 well-known (64:ff9b::/96) and local-use
+# (64:ff9b:1::/48) prefixes, IPv4-compatible (::/96), site-local (fec0::/10) and 6to4 (2002::/16).
+_REFUSED_V6 = tuple(ipaddress.ip_network(n) for n in
+                    ("64:ff9b::/96", "64:ff9b:1::/48", "::/96", "fec0::/10", "2002::/16"))
+
+
+def _embedded_v4(addr: ipaddress.IPv6Address) -> list:
+    out = []
+    if addr.ipv4_mapped is not None:
+        out.append(addr.ipv4_mapped)
+    if addr.sixtofour is not None:
+        out.append(addr.sixtofour)
+    if addr.teredo is not None:
+        out.extend(addr.teredo)
+    if any(addr in n for n in _REFUSED_V6[:3]):              # NAT64 / IPv4-compatible: the low 32 bits
+        out.append(ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF))
+    return out
+
+
+def _public_v4(addr: ipaddress.IPv4Address) -> bool:
+    return addr.is_global and not addr.is_multicast
+
+
 def is_public(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
+    if isinstance(addr, ipaddress.IPv4Address):
+        return _public_v4(addr)
+    if getattr(addr, "scope_id", None):
+        return False
+    if any(addr in n for n in _REFUSED_V6):
+        return False
+    if not all(_public_v4(v4) for v4 in _embedded_v4(addr)):
+        return False
     return addr.is_global and not addr.is_multicast
 
 

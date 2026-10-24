@@ -94,17 +94,40 @@ def test_ssrf_shop_domains_are_refused(raw):
         shop_handle(raw)
 
 
+@pytest.mark.parametrize("raw", ["xn--acme-9ra", "XN--ACME-9RA", "xn--acme-9ra.myshopify.com", "xn--80ak6aa92e"])
+def test_punycode_handles_are_refused_as_such(raw):
+    with pytest.raises(ShopDomainError, match=r"IDN/punycode \(xn--\)"):
+        shop_handle(raw)
+
+
 def test_the_url_is_built_only_from_the_handle():
     assert graphql_url("acme-store", m.API_VERSION) == \
         f"https://acme-store.myshopify.com/admin/api/{m.API_VERSION}/graphql.json"
 
 
 @pytest.mark.parametrize("addr", ["127.0.0.1", "10.0.0.5", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1",
-                                  "0.0.0.0", "::1", "fe80::1", "fc00::1", "224.0.0.1", "::ffff:127.0.0.1"])
+                                  "0.0.0.0", "::1", "fe80::1", "fc00::1", "224.0.0.1", "::ffff:127.0.0.1",
+                                  # AEGIS golive-rr L3: IPv6 forms that embed or translate to a private IPv4
+                                  "64:ff9b::a00:1", "64:ff9b::7f00:1", "64:ff9b::1773:2641", "64:ff9b:1::a00:1",
+                                  "::a00:1", "::1773:2641", "fec0::1", "2002:a00:1::1", "2002:1773:2641::1",
+                                  "2001:0:4136:e378:8000:63bf:f5ff:fffe", "::ffff:10.0.0.1"])
 def test_resolver_refuses_non_public_addresses(addr):
     r = Resolver(lambda h, p: [addr], DnsGate(2))
     with pytest.raises(httpcore.ConnectError):
         r("acme-store.myshopify.com", 443, 5.0)
+
+
+@pytest.mark.parametrize("v6,v4", [("64:ff9b::a00:1", "10.0.0.1"), ("::a00:1", "10.0.0.1"),
+                                   ("2002:a00:1::1", "10.0.0.1"), ("::ffff:10.0.0.1", "10.0.0.1")])
+def test_embedded_ipv4_is_extracted(v6, v4):
+    import ipaddress
+    from store_connector.net import _embedded_v4
+    assert ipaddress.IPv4Address(v4) in _embedded_v4(ipaddress.IPv6Address(v6))
+
+
+def test_resolver_keeps_ordinary_public_ipv6():
+    r = Resolver(lambda h, p: ["2620:127:f00f:e::"], DnsGate(2))
+    assert r("acme-store.myshopify.com", 443, 5.0) == ["2620:127:f00f:e::"]
 
 
 def test_resolver_refuses_address_literal_hosts_and_returns_public_addresses():
@@ -370,9 +393,22 @@ def test_malformed_bodies_are_refused(body, headers):
 
 
 def test_huge_body_is_refused_at_the_cap():
-    big = b'{"data": {"x": "' + b"a" * (3 * 1024 * 1024) + b'"}}'
-    fake = FakeShopify(script=[httpx.Response(200, content=big, headers={"content-type": "application/json",
-                                                                          "x-shopify-api-version": m.API_VERSION})])
+    """AEGIS golive-rr L4: a VALID preflight answer padded past the cap is refused, and the same answer padded to
+    just under the cap is accepted, so the refusal comes from the size cap and not from parsing."""
+    from store_connector.shopify_client import MAX_RESPONSE_BYTES
+    valid = json.dumps({"data": {"shop": {"currencyCode": "USD", "myshopifyDomain": "acme-store.myshopify.com"},
+                                 "currentAppInstallation": {"accessScopes": [{"handle": "read_orders"}]}},
+                        "extensions": cost(requested=2, actual=2)}).encode()
+
+    def padded(total: int) -> bytes:                  # JSON whitespace after the opening brace: still valid JSON
+        return valid[:1] + b" " * (total - len(valid)) + valid[1:]
+
+    h = {"content-type": "application/json", "x-shopify-api-version": m.API_VERSION}
+    under, over = padded(MAX_RESPONSE_BYTES), padded(MAX_RESPONSE_BYTES + 1)
+    assert len(under) == MAX_RESPONSE_BYTES and json.loads(over)["data"]["shop"]["currencyCode"] == "USD"
+    ok = _session(FakeShopify(script=[httpx.Response(200, content=under, headers=h)])).preflight()
+    assert ok.shop.currencyCode == "USD"
+    fake = FakeShopify(script=[httpx.Response(200, content=over, headers=h)])
     assert _err(_session(fake).preflight) == "STORE_RESPONSE_INVALID"
 
 
