@@ -1045,3 +1045,25 @@ def test_l1_a_switch_engaged_during_the_last_read_drops_the_answer():
     with pytest.raises(px.EngineError) as e:
         engine(f).ask("q?", guard=guard, meter=M())
     assert e.value.code == "ENGINE_KILLED" and len(f.requests) == 1 and M.charged == 1   # sent: still charged
+
+
+def test_l2_a_reported_cost_of_zero_is_charged_at_the_reserve_so_the_spend_budget_binds(tmp_path):
+    body = sonar(citations=["https://site.test/"])
+    body["usage"]["cost"]["total_cost"] = 0
+    f = FakePerplexity(ok(body))
+    h = svc_harness(tmp_path, f, SEO_PERPLEXITY_DAILY_SPEND_USD="0.6", SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD="0.6",
+                    SEO_PERPLEXITY_RESERVE_USD_PER_CALL="0.05")
+    psid = setup_zbm(h)
+    u = callum(run_audit(h, psid))["facts"]["engines"]["perplexity"]["usage"]
+    assert u["calls"] == 3 and u["calls_cost_unknown"] == 3 and u["spend_usd"] == "0.150000"
+    assert callum(run_audit(h, psid))["outcome"] == "OK"               # 0.15 + 0.45 reserved <= 0.6
+    c = callum(run_audit(h, psid))                                      # 0.30 + 0.45 > 0.6: the budget binds
+    assert c["outcome"] == "BLOCKED" and len(f.requests) == 6
+    from svc_engines import _Meter
+    from decimal import Decimal
+    m = _Meter(2, Decimal("0.05"))
+    m.before()
+    m.after("0.000000")
+    m.before()
+    m.after("0.010000")
+    assert m.spent() == Decimal("0.060000") and m.unknown == 1

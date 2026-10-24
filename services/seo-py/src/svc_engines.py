@@ -9,8 +9,8 @@ A METERED engine (a real adapter that costs money; Perplexity) is asked only ins
                           global or the tenant's daily call or spend budget would be passed, when ANY of the four
                           budgets is 0 (0 means OFF: fail closed), or when the reservation cannot be recorded.
   engine_run_settled      after the engine's prompts: calls actually made, spend (the provider's reported cost where
-                          it gave one, the reserve per call where it did not: a request whose cost is unknown is
-                          charged in full), answers, the stop reason. Bookkeeping, recorded even under the write
+                          it gave one, the reserve per call where it did not: a request whose cost is unknown, or
+                          reported as 0, is charged in full), answers, the stop reason. Bookkeeping, recorded even under the write
                           switch (like an interruption record).
 
 Budgets are per UTC day of the service clock, and the day belongs to each RESERVATION, not to the run: a run that
@@ -58,7 +58,9 @@ class _Meter:
         self.calls += 1
 
     def after(self, cost: Optional[str]) -> None:
-        if cost is None:
+        if cost is None or _d(cost) <= 0:
+            # unknown, or reported as 0 (a request is never free here): charged at the reserve, so the spend budget
+            # still binds (AEGIS L2)
             self.unknown += 1
         else:
             self.known += _d(cost)

@@ -515,7 +515,8 @@ W4-2. **The adapter** (`src/perplexity.py`) and its runs (`src/svc_engines.py`):
      count or spend. After the engine's prompts, `engine_run_settled` records:
      - the requests made;
      - the spend: the reported cost where Perplexity gave one, and the full reserve for any request whose cost is
-       unknown, including failures;
+       unknown or reported as 0, including failures (a request is never free here, so the spend budget always binds;
+       AEGIS L2);
      - the answers and the stop reason.
 
      A run's usage is its settlement, or the sum of its reservations while unsettled. A process that dies mid-run
