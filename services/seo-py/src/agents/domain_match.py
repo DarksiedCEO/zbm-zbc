@@ -97,8 +97,12 @@ def _ascii(host: str) -> Optional[str]:
     labels = [_label(lb) for lb in n.rstrip(".").split(".")]
     if any(lb is None or not lb or len(lb) > 63 for lb in labels):
         return None
-    a = ".".join(labels)
-    return a if len(a) <= 253 else None
+    h = n.rstrip(".")
+    try:
+        a = h.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return None
+    return a if a == ".".join(labels) and len(a) <= 253 else None      # the codec agrees with the label check
 
 
 def _loose(host: str) -> Optional[str]:
@@ -116,7 +120,7 @@ def _loose(host: str) -> Optional[str]:
                 return None
         out.append(lb)
     h = ".".join(out)
-    return h if h and len(h) <= 253 and not any(c in h for c in "/\\@:?#% \t\r\n") else None
+    return h if h and len(h) <= 253 and not any(ch in "/\\@:?#% \t\r\n" for ch in h) else None
 
 
 def _unicode(ascii_host: str) -> str:

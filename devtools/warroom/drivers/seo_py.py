@@ -882,6 +882,25 @@ def pplx_kill_mid_run(ctx, switch):
     ctx.pplx.on_request = hook
 
 
+def pplx_ledger_down(ctx, at="reservation"):
+    """The ledger is down exactly while the engine's reservation is recorded (AEGIS M4): record-first means no
+    request may be sent."""
+    if at != "reservation":
+        raise ValueError(f"unknown outage point {at}")
+    h = ctx.h
+    real = h.svc._commit
+
+    def commit(kind, data, actor, evidence=None):
+        if kind != "engine_calls_reserved":
+            return real(kind, data, actor, evidence)
+        h.ledger.fail = True
+        try:
+            return real(kind, data, actor, evidence)
+        finally:
+            h.ledger.fail = False
+    h.svc._commit = commit
+
+
 def _pplx_state(ctx, state, outs) -> None:
     f = ctx.pplx
     state["pplx_requests"] = len(f.requests)
@@ -902,6 +921,7 @@ def _pplx_state(ctx, state, outs) -> None:
     prompts = eng.get("prompts", []) if isinstance(eng, dict) else []
     state["tenant_cited"] = sum(p.get("cited", 0) for p in prompts)
     answers = sum(p.get("answers", 0) for p in prompts)
+    state["pplx_reason_detail"] = eng.get("reason_detail") if isinstance(eng, dict) else None
     state["bad_answers_counted"] = answers if f.mode in PPLX_BAD else 0
     state["bad_run_reported_ok"] = f.mode in PPLX_BAD and state["callum_outcome"] == "OK"
     state["good_variant_unanswered"] = f.mode == "documented_variant" and answers == 0
@@ -911,7 +931,8 @@ ACTIONS = {"site": site, "plant": plant, "snapshot": snapshot, "audit": audit, "
            "giant": giant, "inject": inject, "log_pii": log_pii, "log_hostile": log_hostile,
            "two_clients": two_clients, "probe": probe, "personal_data_key": personal_data_key, "kill": kill,
            "release_without_andre": release_without_andre, "kill_mid_run": kill_mid_run, "paid_run": paid_run,
-           "perplexity": perplexity, "answer_audit": answer_audit, "pplx_kill_mid_run": pplx_kill_mid_run}
+           "perplexity": perplexity, "answer_audit": answer_audit, "pplx_kill_mid_run": pplx_kill_mid_run,
+           "pplx_ledger_down": pplx_ledger_down}
 
 
 # ============================================================================================ observation

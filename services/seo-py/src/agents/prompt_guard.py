@@ -63,7 +63,7 @@ def personal_data(text: str) -> Optional[str]:
     t = t.translate(_DASHES)
     if _IPV4.search(_VERSION.sub(" v ", t)):
         return "ip"
-    rest = _COUNT.sub(" n ", _YEARS.sub(" y ", _VERSION.sub(" v ", t)))
-    if _DIGITS.search(rest):
+    t = _COUNT.sub(" n ", _YEARS.sub(" y ", _VERSION.sub(" v ", t)))       # the allowed numbers, set aside
+    if _DIGITS.search(t):
         return "number"
     return None

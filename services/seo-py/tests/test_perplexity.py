@@ -1087,3 +1087,97 @@ def test_l4_methodology_says_text_urls_are_not_citations_and_the_docstring_examp
     assert "or a URL in the text" not in m and "A URL written in an answer's text is not a citation" in m
     assert "xn--cme-5cd" in domain_match.__doc__ and "xn--cme-8cd" not in domain_match.__doc__
     assert "xn--cme-5cd" == "аcme".encode("idna").decode()                       # Cyrillic а + "cme"
+
+
+# ---------------------------------------------------------------------------------------------- M4: mutant killers
+
+def test_m4_budget_off_reports_its_own_detail(tmp_path):
+    for var in ("SEO_PERPLEXITY_DAILY_CALLS", "SEO_PERPLEXITY_TENANT_DAILY_CALLS", "SEO_PERPLEXITY_DAILY_SPEND_USD",
+                "SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD"):
+        f = FakePerplexity()
+        h = svc_harness(tmp_path / var, f, **{var: "0"})
+        e = callum(run_audit(h, setup_zbm(h)))["facts"]["engines"]["perplexity"]
+        assert e["outcome"] == "BLOCKED" and e["reason_detail"] == "BUDGET_OFF" and f.requests == []
+
+
+@pytest.mark.parametrize("limit,second", [(11, "BLOCKED"), (12, "OK")])
+def test_m4_global_budget_boundary(tmp_path, limit, second):
+    f = FakePerplexity()
+    h = svc_harness(tmp_path, f, SEO_PERPLEXITY_DAILY_CALLS=str(limit))
+    psid = setup_zbm(h)
+    assert callum(run_audit(h, psid))["outcome"] == "OK"               # 9 reserved, 3 used
+    c = callum(run_audit(h, psid))                                      # 3 + 9 = 12: allowed at 12, refused at 11
+    assert c["outcome"] == second
+    if second == "BLOCKED":
+        assert c["facts"]["engines"]["perplexity"]["reason_detail"] == "GLOBAL_DAILY_BUDGET" and len(f.requests) == 3
+
+
+def test_m4_the_meter_refuses_a_request_beyond_its_reserved_count():
+    from svc_engines import _Meter
+    from decimal import Decimal
+    m = _Meter(2, Decimal("0.05"))
+    for _ in range(2):
+        m.before()
+        m.after("0.001000")                                            # cheap: the spend check alone would allow more
+    with pytest.raises(px.EngineError) as e:
+        m.before()
+    assert e.value.detail == "RESERVATION_USED" and m.calls == 2
+
+
+def _ledger_down_at_reservation(h):
+    real = h.svc._commit
+
+    def commit(kind, data, actor, evidence=None):
+        if kind == "engine_calls_reserved":
+            h.ledger.fail = True
+            try:
+                return real(kind, data, actor, evidence)
+            finally:
+                h.ledger.fail = False
+        return real(kind, data, actor, evidence)
+    h.svc._commit = commit
+
+
+def test_m4_a_ledger_outage_at_reservation_sends_no_request(tmp_path):
+    f = FakePerplexity()
+    h = svc_harness(tmp_path, f)
+    psid = setup_zbm(h)
+    _ledger_down_at_reservation(h)
+    e = callum(run_audit(h, psid))["facts"]["engines"]["perplexity"]
+    assert f.requests == [] and e["outcome"] == "BLOCKED" and e["reason_detail"] == "RESERVATION_NOT_RECORDED"
+    assert h.ledger.of_type("engine_calls_reserved") == [] and h.svc.engine_usage("perplexity", h.svc.today()) == (
+        0, px.Decimal("0"))
+
+
+def test_m4_an_error_detail_is_a_closed_code_or_nothing():
+    assert px.EngineError("ENGINE_KILLED", "KILLED_PROVIDER").detail == "KILLED_PROVIDER"
+    for bad in ("Bearer " + KEY, "lower_case", "A" * 41, "WITH SPACE", "KEY\n", ""):
+        assert px.EngineError("ENGINE_UNAVAILABLE", bad).detail is None
+
+    def guard(capability=None, provider=None):
+        raise Killed(KEY)                                               # a guard whose code is not a code
+    with pytest.raises(px.EngineError) as e:
+        engine(FakePerplexity()).ask("q?", guard=guard)
+    assert e.value.code == "ENGINE_KILLED" and e.value.detail is None
+
+
+def test_m4_the_deadline_bounds_every_socket_operation_after_time_has_passed():
+    clock = Clock()
+    stream = _FakeStream(clock, _http(json.dumps(sonar()).encode()))
+    backend = _FakeBackend(stream, clock, connect_cost=25.0)           # 25 of the 30 s gone by the TLS handshake
+    socket_engine(clock, backend, timeout_s=30, attempts=1).ask("q?")
+    assert backend.timeouts[0] <= 30 and stream.timeouts[0] is not None and stream.timeouts[0] <= 5.0 + 1e-9
+    assert all(t is not None and t <= 5.0 + 1e-9 for t in stream.timeouts)
+
+
+def test_m4_a_retry_after_over_the_cap_answers_rate_limited_at_once_even_with_time_left():
+    clock = Clock()
+    f = FakePerplexity(httpx.Response(429, headers={"retry-after": str(px.MAX_RETRY_AFTER_S + 15)}), ok(sonar()))
+    assert code_of(lambda: engine(f, clock, timeout_s=120).ask("q?")) == "ENGINE_RATE_LIMITED"
+    assert len(f.requests) == 1 and clock.slept == []
+
+
+@pytest.mark.parametrize("c", list("/\\@:?#%"))
+def test_m4_a_host_with_a_url_delimiter_is_never_the_tenant(c):
+    assert domain_match.match(f"evil.test{c}x.site.test", "site.test") is None
+    assert domain_match.match(f"x{c}.site.test", "site.test") is None

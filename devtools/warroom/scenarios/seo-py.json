@@ -2329,6 +2329,100 @@
      }
     }
    ]
+  },
+  {
+   "id": "answer-engine-ledger-down-at-reservation",
+   "persona": "the ledger goes down exactly while the engine's reservation is being recorded",
+   "basis": "ADR 0017 W4-2: record-first; a reservation that cannot be recorded refuses the run (RESERVATION_NOT_RECORDED) and no request is ever sent (AEGIS M4)",
+   "seeds": [
+    {
+     "literal": [
+      "reservation"
+     ],
+     "basis": "the record-first step"
+    }
+   ],
+   "input_field": "at",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "perplexity",
+     "args": {
+      "mode": "answer"
+     }
+    },
+    {
+     "action": "pplx_ledger_down",
+     "args": {
+      "at": "$at"
+     }
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "answer_audit"
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "nothing_asked",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "pplx_requests",
+      "value": 0
+     }
+    },
+    {
+     "id": "nothing_reserved",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "pplx_reservations",
+      "value": 0
+     }
+    },
+    {
+     "id": "callum_blocked",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "callum_outcome",
+      "value": "BLOCKED"
+     }
+    },
+    {
+     "id": "refused_as_not_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "pplx_reason_detail",
+      "value": "RESERVATION_NOT_RECORDED"
+     }
+    },
+    {
+     "id": "key_appears_nowhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "pplx_key_leaked",
+      "value": false
+     }
+    }
+   ]
   }
  ]
 }
