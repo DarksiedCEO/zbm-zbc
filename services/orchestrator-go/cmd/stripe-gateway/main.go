@@ -55,10 +55,13 @@ const (
 )
 
 type config struct {
-	financeURL   string
-	serviceToken string
-	callerToken  string
-	addr         string
+	financeURL string
+	// financeEndpoint: the full URL deliveries are POSTed to, built once with url.JoinPath (never by concatenating
+	// strings, which put the path into a fragment or query when the base URL had one; AEGIS R2-2)
+	financeEndpoint string
+	serviceToken    string
+	callerToken     string
+	addr            string
 	// privateHTTP: Finance is reached over plain http on Railway's private network (the opt-in was used)
 	privateHTTP bool
 }
@@ -120,6 +123,19 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if u.User != nil {
 		return c, errors.New("STRIPE_GATEWAY_FINANCE_URL must not contain a user or password (user@host)")
 	}
+	// A base URL has no query or fragment, not even an empty one ("...:8410#" or "...:8410?"): refused on the raw
+	// string, in every mode (AEGIS R2-2).
+	if strings.ContainsAny(c.financeURL, "?#") {
+		return c, errors.New("STRIPE_GATEWAY_FINANCE_URL must not contain '?' or '#' (Finance's base URL only)")
+	}
+	// ASCII host names only, checked BEFORE any case folding, in every mode (AEGIS R2-1): strings.ToLower folds
+	// U+0130 'İ' to 'i' (and U+212A Kelvin to 'k'), so "FİNANCE.railway.internal" would pass the name pin while the
+	// client dials its punycode form, a different host.
+	for i := 0; i < len(u.Hostname()); i++ {
+		if u.Hostname()[i] >= 0x80 {
+			return c, errors.New("STRIPE_GATEWAY_FINANCE_URL: the host name must be ASCII (use the punycode form)")
+		}
+	}
 	// The Finance tokens and Stripe's body (it can carry client names and emails) never cross a network in clear
 	// text: plain http is accepted only to a loopback Finance (AEGIS launch-hardening L8) — or, with the explicit
 	// opt-in below, to the one named Finance service on Railway's private network, which Railway encrypts
@@ -146,6 +162,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		c.privateHTTP = !loopback
 	}
+	c.financeEndpoint = u.JoinPath(financePath).String()
 	for name, v := range map[string]string{"STRIPE_GATEWAY_FINANCE_TOKEN": c.serviceToken,
 		"STRIPE_GATEWAY_CALLER_TOKEN": c.callerToken} {
 		if len(v) < minTokenLen {
@@ -238,7 +255,7 @@ func (g *gateway) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.financeURL+financePath, bytes.NewReader(fwd))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.financeEndpoint, bytes.NewReader(fwd))
 	if err != nil {
 		answer(w, http.StatusServiceUnavailable, "try again")
 		return
@@ -321,7 +338,6 @@ func main() {
 		log.Printf("stripe-gateway: %s=1 — Finance is reached over plain http on Railway's private network",
 			allowRailwayPrivateHTTPEnv)
 	}
-	log.Printf("stripe-gateway listening on %s, forwarding to Finance at %s%s", cfg.addr, redactedURL(cfg.financeURL),
-		financePath)
+	log.Printf("stripe-gateway listening on %s, forwarding to Finance at %s", cfg.addr, redactedURL(cfg.financeEndpoint))
 	log.Fatal(srv.ListenAndServe())
 }

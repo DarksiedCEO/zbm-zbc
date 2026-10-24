@@ -303,6 +303,62 @@ func TestFinanceURLWithUserinfoIsRefused(t *testing.T) {
 	}
 }
 
+// AEGIS R2-1: a non-ASCII host is refused before any case folding, in every mode. strings.ToLower folds U+0130 'İ'
+// to 'i' and U+212A (Kelvin sign) to 'k', so these would otherwise match the pinned name (or "localhost") while the
+// client dials a different, punycode host.
+func TestNonASCIIHostIsRefused(t *testing.T) {
+	for _, tc := range []struct{ url, optIn, name string }{
+		{"http://F\u0130NANCE.railway.internal:8410", "1", ""},    // U+0130 -> "finance"
+		{"http://f\u0130nance.railway.internal", "1", ""},         // lowercase context too
+		{"http://F%C4%B0NANCE.railway.internal:8410", "1", ""},    // the same, percent-encoded
+		{"http://\u212Aafka.railway.internal:8410", "1", "kafka"}, // U+212A -> "kafka", a configured name
+		{"http://LOCALHOST\u212A:8410", "", ""},                   // never mistaken for a loopback name
+		{"http://loc\u0130lhost:8410", "", ""},                    // nor "localhost" via U+0130
+		{"https://f\u0130nance.example", "", ""},                  // https too
+	} {
+		if _, err := loadPrivate(tc.url, tc.optIn, tc.name); err == nil {
+			t.Errorf("%q (opt-in %q, name %q) started: a non-ASCII host must be refused", tc.url, tc.optIn, tc.name)
+		}
+	}
+	// the ASCII spellings still work
+	if _, err := loadPrivate("http://kafka.railway.internal:8410", "1", "kafka"); err != nil {
+		t.Fatalf("ASCII configured name refused: %v", err)
+	}
+	if _, err := loadPrivate("http://FINANCE.railway.internal:8410", "1", ""); err != nil {
+		t.Fatalf("ASCII upper-case name refused: %v", err)
+	}
+}
+
+// AEGIS R2-2: no '?' or '#' in the base URL, even empty ones, in any mode; and the delivery URL is built with
+// url.JoinPath, so the Finance path can never land in a fragment or query.
+func TestQueryOrFragmentInTheBaseURLIsRefused(t *testing.T) {
+	for _, tc := range []struct{ url, optIn string }{
+		{"http://finance.railway.internal:8410#", "1"}, {"http://finance.railway.internal:8410?", "1"},
+		{"http://finance.railway.internal:8410/#", "1"}, {"http://finance.railway.internal:8410#x", "1"},
+		{"http://127.0.0.1:8410#", ""}, {"http://127.0.0.1:8410?", ""}, {"http://localhost:8410?a=b", ""},
+		{"https://finance.example#", ""}, {"https://finance.example/base?x=1", ""},
+	} {
+		if _, err := loadPrivate(tc.url, tc.optIn, ""); err == nil {
+			t.Errorf("%s (opt-in %q) started: '?' and '#' must be refused", tc.url, tc.optIn)
+		}
+	}
+	for base, want := range map[string]string{
+		"http://finance.railway.internal:8410":  "http://finance.railway.internal:8410" + financePath,
+		"http://finance.railway.internal:8410/": "http://finance.railway.internal:8410" + financePath,
+		"http://127.0.0.1:8410":                 "http://127.0.0.1:8410" + financePath,
+		"https://finance.example/base/":         "https://finance.example/base" + financePath,
+	} {
+		optIn := ""
+		if strings.Contains(base, "railway") {
+			optIn = "1"
+		}
+		c, err := loadPrivate(base, optIn, "")
+		if err != nil || c.financeEndpoint != want {
+			t.Errorf("%s: endpoint %q (%v), want %q", base, c.financeEndpoint, err, want)
+		}
+	}
+}
+
 func TestServerLimits(t *testing.T) {
 	s := newServer("127.0.0.1:0", http.NotFoundHandler())
 	if s.ReadHeaderTimeout != 5*time.Second || s.ReadTimeout == 0 || s.WriteTimeout <= upstreamTimeout ||

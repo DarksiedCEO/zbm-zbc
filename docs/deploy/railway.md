@@ -258,7 +258,7 @@ otherwise. Examples are never real values.
 | `PORT` | yes | no | `8470` (IaC) | copied to `STRIPE_GATEWAY_PORT` |
 | `STRIPE_GATEWAY_PORT` | — | no | (from `PORT`) | |
 | `STRIPE_GATEWAY_BIND_ADDR` | yes | no | `::` (IaC) | default `127.0.0.1` |
-| `STRIPE_GATEWAY_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | → finance; a URL with a user or password (`user@host`) is refused in every mode (AEGIS L4), and the startup log prints it with any userinfo removed |
+| `STRIPE_GATEWAY_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | → finance; a URL with a user or password (`user@host`) is refused in every mode (AEGIS L4), and the startup log prints it with any userinfo removed; a `?` or `#` (even empty; R2-2) or a non-ASCII host name (R2-1: `İ`/U+0130 and the Kelvin sign fold to ASCII under lower-casing) is refused too |
 | `STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP` | yes on Railway | no | `1` (IaC) | without it plain http is accepted only to a loopback Finance (AEGIS L8); `1` also accepts exactly `http://<STRIPE_GATEWAY_FINANCE_PRIVATE_NAME>.railway.internal[:port]` (no path, query or user) and no other private-network host (AEGIS L1). Added for this deploy; **needs AEGIS review** |
 | `STRIPE_GATEWAY_FINANCE_PRIVATE_NAME` | no | no | `finance` (IaC; the default when unset) | the one Railway service name the opt-in reaches: a single lowercase DNS label, never `localhost`. `ledger.railway.internal`, `localhost.railway.internal` or any other name is refused |
 | `STRIPE_GATEWAY_FINANCE_TOKEN` | yes | yes | ref `finance.FIN_SERVICE_TOKEN` (IaC) | ≥ 32 characters |
