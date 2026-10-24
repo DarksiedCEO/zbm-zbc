@@ -687,6 +687,8 @@ jobs:
             echo "== $req"
             pip-audit -r "$req" --strict --progress-spinner off
           done
+      - name: pip-audit the Railway images' hash lock (every transitive dependency they install)
+        run: pip-audit -r deploy/python/requirements.lock.txt --require-hashes --no-deps --disable-pip --strict --progress-spinner off
       - name: pip-audit delivery-py's uv.lock
         # The two deer-flow packages are git-sourced (pinned to a commit) and have no registry version to look up;
         # pip-audit refuses URL requirements, so they are excluded here and stated in docs/ci.md.

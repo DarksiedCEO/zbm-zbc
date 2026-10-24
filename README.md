@@ -9,6 +9,9 @@ hygiene check now fails a hand-written count, see "Testing"). See `docs/adr/0001
 full architecture rationale and scope boundary (Tier 3 excluded, see that
 doc for why).
 
+**Deploying:** the first-revenue services run on Railway (the dashboard on Vercel) — runbook, every variable and
+secret, and the go-live steps: **[docs/deploy/railway.md](docs/deploy/railway.md)**.
+
 ## Status
 
 **8/8 detection agents (Tier 1 A–D, Tier 2 E–H) + full trust/safety net +

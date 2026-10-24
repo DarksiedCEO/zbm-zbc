@@ -4,7 +4,9 @@
 # Regenerate the hash-locked file (every transitive dependency pinned with its sha256) with:
 #   uv pip compile deploy/python/requirements.in --generate-hashes --python-version 3.12 \
 #     --python-platform x86_64-manylinux_2_28 --exclude-newer <a date at least two weeks back> \
-#     -o deploy/python/requirements.lock.txt
+#     [--exclude-newer-package <pkg>=<date> --upgrade-package <pkg>] -o deploy/python/requirements.lock.txt
+# The bracketed part admits a newer release of one package for a security fix: the Oct 24 2026 lock takes certifi
+# 2026.10.19, the fix for PYSEC-2026-4320 (pip-audit; audit-python audits this lock).
 pydantic==2.13.3
 fastapi==0.141.1
 starlette==1.7.0
