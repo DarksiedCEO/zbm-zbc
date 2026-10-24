@@ -17,7 +17,7 @@ What is kept (evidence class: OBSERVED, first-party; data class: measured):
     or two pages); at most ``TEMPLATE_CAP`` templates, the rest in ``{other}``;
   - by QUERY CLASS (grouped by ``query``, aggregated by property): each query is classified into a closed set and
     dropped. No query text, no hash of one, and no per-query row is ever kept. A query that looks like personal
-    data (an e-mail in any spelling, 7+ digits, an id- or token-like word) is counted as ``pii_suspect`` — the class
+    data (an e-mail in any spelling, one phone-like run of 7+ digits, an id- or token-like word) is counted as ``pii_suspect`` — the class
     is checked FIRST, so such a query never counts as brand or anything else. Dropping beats hashing: a hash of a
     low-entropy name or e-mail is reversed by a dictionary.
   - the remainder: property totals minus the query-class sums is reported as ``unattributed`` (Google's anonymised
@@ -98,6 +98,35 @@ def brand_tokens(domains: Iterable[str], entity_name: str | None) -> list:
     return sorted(out)
 
 
+PII_DIGIT_RUN = 7
+# one run of digits joined only by phone separators (space, hyphen, dot, parentheses; at most three in a row)
+_DIGIT_RUN = re.compile(r"\d(?:[ .()\-]{0,3}\d)*")
+_YEAR = re.compile(r"(?:19|20)\d\d")
+
+
+def longest_digit_run(text: str) -> int:
+    """The most digits in one phone-like run: ``555 010 0199``, ``(555) 010-0199``, ``+44 20 7946 0958`` count 10, 10
+    and 12. Digits in different runs (``iphone 15 pro 256gb 2024``) are never added up (AEGIS gl-gsc L4). A run with
+    two or more year-like groups (19xx / 20xx: ``covid 19 2020 2021``) is a list of years: its year groups do not
+    count. A phone number holding one such group (``555 010 2024``) is still caught."""
+    best = 0
+    for m in _DIGIT_RUN.finditer(text):
+        groups = re.findall(r"\d+", m.group())
+        years = [g for g in groups if _YEAR.fullmatch(g)]
+        n = sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g))
+        best = max(best, n)
+    return best
+
+
+def _word_identifies(w: str) -> bool:
+    """A word the log templater would replace (e-mail, UUID, file name, token, a letters-and-digits mix). A word of
+    digits and separators only (``2020-2021``) is left to the digit-run rule instead of the templater's total count."""
+    kind = logs_mod._kind(w)
+    if kind == "{number}" and not any(c.isalpha() for c in w):
+        return False
+    return kind not in (None, "{id}")
+
+
 def classify_query(q: str, brands: list) -> str:
     """One query -> one class from ``QUERY_CLASSES``; the text is not kept. PII first (judged on the lookalike fold,
     after invisible characters are removed, like the log templater)."""
@@ -105,7 +134,7 @@ def classify_query(q: str, brands: list) -> str:
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
     if "@" in folded or logs_mod._EMAIL.search(folded) or logs_mod._AT_WORD.search(folded) \
-            or logs_mod._digits(folded) >= 7 or any(logs_mod._kind(w) not in (None, "{id}") for w in words):
+            or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words):
         return "pii_suspect"
     squashed = re.sub(r"[^a-z0-9]", "", folded)
     if any(b in squashed for b in brands):

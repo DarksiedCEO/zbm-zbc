@@ -510,9 +510,13 @@ word of ASCII letters or such a word with a static extension becomes `{slug}` (`
 3 distinct page URLs (`TEMPLATE_MIN_URLS`) is counted in `{other}`, so no kept template describes one or two pages
 (placeholder-only templates such as `/` or `/{slug}` identify nothing and are kept); at most 200 templates, the rest
 (fewest clicks first) in `{other}`; reported as by-page sums that are NOT comparable with property totals; (3) `query` aggregated byProperty — each query classified into `pii_suspect`, `brand`, `question`,
-`local`, `commercial`, `other` (versioned `2026-10-24.1`) and dropped. `pii_suspect` is judged first, on the shared
-lookalike fold after invisible characters are removed: an e-mail in any spelling, 7+ digits in total, or a word the
-templater would replace. No query text, hash of a query, URL or per-query / per-URL row is stored — a page is
+`local`, `commercial`, `other` (versioned `2026-10-24.2`) and dropped. `pii_suspect` is judged first, on the shared
+lookalike fold after invisible characters are removed: an e-mail in any spelling, ONE phone-like run of 7+ digits
+(digits joined only by spaces, hyphens, dots or parentheses: `555 010 0199`, `(555) 010-0199`, `+44 20 7946 0958`;
+in a run with two or more year-like groups, 19xx / 20xx, those groups do not count), or a word the templater would
+replace (a word of digits and separators only is left to the run rule). Digits in different words are never added
+up (AEGIS gl-gsc L4: `iphone 15 pro 256gb 2024`, `24/7 plumber 90210` and `covid 19 2020 2021` used to be
+`pii_suspect`); a phone number with one year-like group (`555 010 2024`) is still caught, one with two is not. No query text, hash of a query, URL or per-query / per-URL row is stored — a page is
 stored only as the template above, which keeps plain one-word path segments (`/pricing`, `/users`) when 3 or more
 URLs share the template: dropping beats hashing, since a hash of a low-entropy name or e-mail falls to a dictionary. The query remainder (`unattributed`:
 anonymised queries and rows past the caps) is reported, never spread over the classes. Evidence class OBSERVED,

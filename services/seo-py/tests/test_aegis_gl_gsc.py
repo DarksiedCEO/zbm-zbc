@@ -297,3 +297,25 @@ def test_l3_scheduler_drift_uses_the_retained_view(tmp_path):
     sched = d["drift"]["search_performance"]
     api = h.ok(h.get(f"/tenants/acme/audits/{d['newer']}/drift", params={"against": d["older"]}))
     assert api["search_performance"] == sched and sched["metrics"]["clicks"]["class"] == "SAMPLING_NOISE"
+
+
+# ====================================================================== L4: the PII digit rule
+
+@pytest.mark.parametrize("q", ["iphone 15 pro 256gb 2024", "best laptops 2025 under 1000", "24/7 plumber 90210",
+                               "covid 19 2020 2021", "2020-2021 tax rates"])
+def test_l4_digits_in_separate_words_are_not_added_up(q):
+    assert sp.classify_query(q, ["acme"]) != "pii_suspect"
+
+
+@pytest.mark.parametrize("q", ["555 010 0199", "(555) 010-0199", "+44 20 7946 0958", "555-0199", "555.010.0199",
+                               "５５５０１００１９９", "0161 496 0000", "07700 900123", "ssn 123-45-6789", "123 45 6789",
+                               "555 010 2024", "acme 5550100199", "4111 1111 1111 1111", "order 1234567",
+                               "a1b2c3d4e5f6g7", "jane doe at gmail dot com"])
+def test_l4_real_phone_numbers_and_identifiers_are_still_caught(q):
+    assert sp.classify_query(q, ["acme"]) == "pii_suspect"
+
+
+def test_l4_longest_digit_run():
+    assert sp.longest_digit_run("call (555) 010-0199 now") == 10
+    assert sp.longest_digit_run("iphone 15 pro 256gb 2024") == 4
+    assert sp.longest_digit_run("covid 19 2020 2021") == 2
