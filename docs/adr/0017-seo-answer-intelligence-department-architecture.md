@@ -563,7 +563,9 @@ runs). At the defaults one read costs at most 30 requests, far under Google's pe
 
 GSC-8. **Dependency.** `cryptography==50.0.1` added to seo-py's requirements for RS256 — the exact pin security-py
 already carries (and delivery-py's frozen lock), so no new package or version enters the repository; hand-rolled RSA
-on the standard library was not an option.
+on the standard library was not an option. AEGIS gl-gsc (info) suggested 50.0.2: not bumped on this branch, because seo-py alone moving
+would put a second cryptography version in the repository; the bump belongs in one change that moves security-py's
+pin, regenerates delivery-py's hashed `uv.lock` and reruns all three suites.
 
 GSC-9. **The key on Railway.** Railway variables are environment strings, and this service reads the key only from a
 file (the *_FILE rules). Store the JSON key base64-encoded in a Railway variable (e.g. `SEO_GSC_SERVICE_ACCOUNT_B64`;
