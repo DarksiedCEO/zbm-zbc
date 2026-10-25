@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>SEO audit: acme.test</title>
+<style>
+:root{--accent:#1f4e79;--ink:#1a1a1a;--muted:#555;--line:#d9d9d9;--soft:#f5f6f8}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:var(--ink);font:15px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:860px;margin:0 auto;padding:32px 20px 48px}
+header.cover{border-top:6px solid var(--accent);padding-top:20px;margin-bottom:28px}
+h1{font-size:26px;margin:0 0 4px}
+h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--accent)}
+h3{font-size:16px;margin:22px 0 6px}h4{font-size:14px;margin:16px 0 4px}
+.brand{color:var(--muted);margin:0 0 16px}
+code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--soft);padding:1px 4px;
+  border-radius:3px;overflow-wrap:anywhere}
+dl.facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}
+dl.facts dt{font-weight:600}dl.facts dd{margin:0;overflow-wrap:anywhere}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:14px}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+th{background:var(--soft)}
+.status{display:inline-block;font-weight:700;font-size:12px;letter-spacing:.03em;padding:2px 8px;border-radius:10px;
+  border:1px solid currentColor}
+.st-ok{color:#1b6e3a}.st-partial{color:#8a5a00}.st-off{color:#8a1c1c}
+.notclean{background:#fff4f4;border-left:4px solid #8a1c1c;padding:8px 12px;margin:8px 0}
+.finding{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:4px;padding:10px 14px;
+  margin:12px 0;break-inside:avoid}
+.finding h4{margin-top:0}
+.sev{font-weight:700;text-transform:uppercase;font-size:12px}
+.sev-critical{color:#8a1c1c}.sev-high{color:#b33a00}.sev-medium{color:#8a5a00}.sev-low{color:#35537a}.sev-info{color:#555}
+.meta{color:var(--muted);font-size:13px}
+ul{padding-left:20px}
+.preview{background:#fff4d6;border:1px solid #c9a227;padding:8px 12px;margin-bottom:16px;font-weight:600}
+footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;color:var(--muted);font-size:13px}
+@media print{body{font-size:11pt}main{max-width:none;padding:0}h2{break-after:avoid}section.area{break-before:page}
+a{color:inherit;text-decoration:none}}
+</style>
+</head>
+<body>
+<main>
+<header class="cover">
+<h1>SEO technical audit: <code>acme.test</code></h1>
+<p class="brand">Prepared by Z Best Media</p>
+<dl class="facts">
+<dt>Website audited</dt><dd><code>https://acme.test</code></dd>
+<dt>Audit ID</dt><dd><code>seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></dd>
+<dt>Run</dt><dd>2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC</dd>
+<dt>Run outcome</dt><dd>PARTIAL (whether every check could run; not a score)</dd>
+<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on Z Best Media's tamper-evident ledger when the audit completed</dd>
+<dt>Pages audited (3)</dt><dd><a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a>, <a href="https://acme.test/about" rel="nofollow noopener noreferrer"><code>/about</code></a>, <a href="https://acme.test/pricing" rel="nofollow noopener noreferrer"><code>/pricing</code></a></dd>
+</dl>
+</header>
+<section>
+<h2>What was checked</h2>
+<table><thead><tr><th>Area</th><th>Status</th><th>Findings</th><th>Data freshness</th></tr></thead><tbody>
+<tr><td>Crawlability</td><td><span class="status st-ok">CHECKED</span></td><td>5</td><td>observed during the run; refresh recommended by 2026-10-25</td></tr>
+<tr><td>Sitemaps and llms.txt</td><td><span class="status st-ok">CHECKED</span></td><td>3</td><td>observed during the run; refresh recommended by 2026-10-25</td></tr>
+<tr><td>Content structure</td><td><span class="status st-ok">CHECKED</span></td><td>3</td><td>observed during the run; refresh recommended by 2026-10-31</td></tr>
+<tr><td>Entity consistency</td><td><span class="status st-ok">CHECKED</span></td><td>1</td><td>observed during the run; refresh recommended by 2026-10-31</td></tr>
+<tr><td>Search performance (Google Search Console)</td><td><span class="status st-ok">CHECKED</span></td><td>0</td><td>Google data for 2026-09-24 to 2026-10-21 (Pacific Time, final data; Google&#x27;s figures lag about 3 days)</td></tr>
+<tr><td>AI visibility (answer engines)</td><td><span class="status st-ok">CHECKED</span></td><td>2</td><td>observed during the run; refresh recommended by 2026-10-31</td></tr>
+</tbody></table>
+<p>Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.</p>
+<h3>Not connected for this audit</h3>
+<ul>
+<li>OpenAI answer engine.</li>
+<li>Web analytics (traffic, conversions).</li>
+<li>CRM (leads, revenue).</li>
+<li>Prompt volume: how often real people ask the market questions is not known.</li>
+<li>JavaScript rendering: pages were read as raw HTML; content added by JavaScript was not seen.</li>
+</ul>
+<h3>How to read this report</h3>
+<ul>
+<li>Every finding states its <strong>severity</strong> (critical, high, medium, low, info), its <strong>evidence class</strong> (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption), the <strong>rule</strong> that produced it, and a <strong>recommended fix</strong>.</li>
+<li>There is no overall score and no grade. Findings of different kinds are not added together.</li>
+<li>This report does not promise rankings, traffic or citations by any search or answer engine, and it makes no comparison claims about any other provider.</li>
+<li>Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.</li>
+</ul>
+</section>
+<section class="area" id="crawlability">
+<h2>Crawlability</h2>
+<p><span class="status st-ok">CHECKED</span> Whether search and AI crawlers can reach and index the audited pages: robots.txt, status codes, redirects, noindex signals and canonical links.</p>
+<p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-25.</p>
+<div class="finding">
+<h4>robots.txt blocks a search crawler</h4>
+<p class="meta"><span class="sev sev-high">high</span> · Recommended action: Fix · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>ROBOTS_BLOCKS_SEARCH_CRAWLER</code> · Area <code>P2</code></p>
+<p><strong>Fix.</strong> Remove or narrow the Disallow rule for this crawler unless blocking it is intended.</p>
+<p><strong>Where.</strong> <code>/robots.txt</code></p>
+<ul>
+<li>Evidence at <code>/robots.txt</code>: token: <code>Bingbot</code>; blocked paths: <code>/pricing</code>; rules: <code>Disallow: /pricing</code></li>
+</ul>
+</div>
+<div class="finding">
+<h4>Page asks not to be indexed (noindex)</h4>
+<p class="meta"><span class="sev sev-medium">medium</span> · Recommended action: Test a change · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>NOINDEX</code> · Area <code>P1</code></p>
+<p><strong>Fix.</strong> Remove the noindex (meta robots or X-Robots-Tag header) if this page should appear in search; keep it if hiding it is intended.</p>
+<p><strong>Where.</strong> <a href="https://acme.test/pricing" rel="nofollow noopener noreferrer"><code>/pricing</code></a></p>
+</div>
+<div class="finding">
+<h4>Redirect chain</h4>
+<p class="meta"><span class="sev sev-medium">medium</span> · Recommended action: Fix · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>REDIRECT_CHAIN</code> · Area <code>P1</code></p>
+<p><strong>Fix.</strong> Point links and redirects straight at the final URL (one hop), using a permanent (301/308) redirect.</p>
+<p><strong>Where.</strong> <a href="https://acme.test/about" rel="nofollow noopener noreferrer"><code>/about</code></a></p>
+<ul>
+<li>Evidence at <a href="https://acme.test/about" rel="nofollow noopener noreferrer"><code>/about</code></a>: statuses: 301, 302; hops: 2; temporary: yes; final url: <code>/{slug}</code></li>
+</ul>
+</div>
+<div class="finding">
+<h4>No canonical link</h4>
+<p class="meta"><span class="sev sev-low">low</span> · Recommended action: Monitor (may be intentional) · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>CANONICAL_MISSING</code> · Area <code>P1</code></p>
+<p><strong>Fix.</strong> Add a self-referencing rel=canonical to the page.</p>
+<p><strong>Where.</strong> <a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a>, <a href="https://acme.test/pricing" rel="nofollow noopener noreferrer"><code>/pricing</code></a></p>
+</div>
+<div class="finding">
+<h4>robots.txt blocks an AI or dataset crawler</h4>
+<p class="meta"><span class="sev sev-info">info</span> · Recommended action: Monitor (may be intentional) · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>ROBOTS_BLOCKS_AI_OR_DATASET_CRAWLER</code> · Area <code>P2</code></p>
+<p><strong>Fix.</strong> No fix needed if this is your policy. If you want this operator to read your site, allow its user-agent token.</p>
+<p><strong>Where.</strong> <code>/robots.txt</code></p>
+<ul>
+<li>Evidence at <code>/robots.txt</code>: token: <code>GPTBot</code>; purpose: <code>ai_training</code>; blocked paths: <code>/</code>; rules: <code>Disallow: /</code></li>
+</ul>
+</div>
+</section>
+<section class="area" id="sitemaps">
+<h2>Sitemaps and llms.txt</h2>
+<p><span class="status st-ok">CHECKED</span> Whether the XML sitemaps can be read and list the right URLs, and whether an llms.txt file is published (an emerging, non-standard convention).</p>
+<p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-25.</p>
+<div class="finding">
+<h4>Sitemap lists URLs on another host</h4>
+<p class="meta"><span class="sev sev-medium">medium</span> · Recommended action: Fix · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>SITEMAP_LOC_OTHER_HOST</code> · Area <code>P3</code></p>
+<p><strong>Fix.</strong> List only URLs of this site in its sitemap.</p>
+<ul>
+<li>Evidence: count: 2; examples: <code>{offsite} (cdn.example)</code></li>
+</ul>
+</div>
+<div class="finding">
+<h4>Every sitemap URL has the same lastmod</h4>
+<p class="meta"><span class="sev sev-low">low</span> · Recommended action: Test a change · Evidence: <strong>INFERRED</strong> (drawn by a stated rule from what was observed, not measured directly: every URL carries the same lastmod, so it likely does not reflect real changes) · Rule <code>SITEMAP_LASTMOD_ALL_IDENTICAL</code> · Area <code>P3</code></p>
+<p><strong>Fix.</strong> Set &lt;lastmod&gt; per URL from the page&#x27;s real last change, or leave it out.</p>
+<ul>
+<li>Evidence: count: 40</li>
+</ul>
+</div>
+<div class="finding">
+<h4>No llms.txt</h4>
+<p class="meta"><span class="sev sev-info">info</span> · Recommended action: Monitor (may be intentional) · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>LLMS_TXT_ABSENT</code> · Area <code>P3</code></p>
+<p><strong>Fix.</strong> Nothing required: llms.txt is an emerging, non-standard convention and its absence is not a defect.</p>
+<p><strong>Where.</strong> <code>/llms.txt</code></p>
+<ul>
+<li>Evidence at <code>/llms.txt</code>: status: 404</li>
+</ul>
+</div>
+</section>
+<section class="area" id="content">
+<h2>Content structure</h2>
+<p><span class="status st-ok">CHECKED</span> How each audited page is structured for machines: title, description, headings, language, structured data (JSON-LD) and how much text is in the raw HTML.</p>
+<p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-31.</p>
+<div class="finding">
+<h4>Not exactly one H1 heading</h4>
+<p class="meta"><span class="sev sev-medium">medium</span> · Recommended action: Fix · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>H1_COUNT</code> · Area <code>P3</code></p>
+<p><strong>Fix.</strong> Give the page one H1 that states its topic.</p>
+<p><strong>Where.</strong> <a href="https://acme.test/pricing" rel="nofollow noopener noreferrer"><code>/pricing</code></a></p>
+<ul>
+<li>Evidence at <a href="https://acme.test/pricing" rel="nofollow noopener noreferrer"><code>/pricing</code></a>: h1 count: 0</li>
+</ul>
+</div>
+<div class="finding">
+<h4>Structured data has errors</h4>
+<p class="meta"><span class="sev sev-medium">medium</span> · Recommended action: Fix · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>STRUCTURED_DATA_ERRORS</code> · Area <code>P3</code></p>
+<p><strong>Fix.</strong> Add the required properties listed below to the JSON-LD.</p>
+<p><strong>Where.</strong> <a href="https://acme.test/about" rel="nofollow noopener noreferrer"><code>/about</code></a></p>
+<ul>
+<li>Evidence at <a href="https://acme.test/about" rel="nofollow noopener noreferrer"><code>/about</code></a>: issues: <code>REQUIRED_MISSING LocalBusiness address</code></li>
+</ul>
+</div>
+<div class="finding">
+<h4>Title length outside the usual range</h4>
+<p class="meta"><span class="sev sev-low">low</span> · Recommended action: Test a change · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>TITLE_LENGTH</code> · Area <code>P3</code></p>
+<p><strong>Fix.</strong> Consider a title of roughly 15-65 characters that describes the page (a heuristic, not a rule).</p>
+<p><strong>Where.</strong> <a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a></p>
+<ul>
+<li>Evidence at <a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a>: length: 80; heuristic range: 15, 65</li>
+</ul>
+</div>
+</section>
+<section class="area" id="entity">
+<h2>Entity consistency</h2>
+<p><span class="status st-ok">CHECKED</span> Whether the business details in the pages&#x27; Organization / LocalBusiness markup match your canonical business record (name, address, phone).</p>
+<p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-31.</p>
+<div class="finding">
+<h4>Business detail differs from your record</h4>
+<p class="meta"><span class="sev sev-high">high</span> · Recommended action: Fix · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>ENTITY_FIELD_MISMATCH</code> · Area <code>P6</code></p>
+<p><strong>Fix.</strong> Change the markup to match your business record exactly (the record is the authority). The values are in the audit record.</p>
+<p><strong>Where.</strong> <a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a></p>
+<ul>
+<li>Evidence at <a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a>: field: <code>telephone</code></li>
+</ul>
+</div>
+</section>
+<section class="area" id="search">
+<h2>Search performance (Google Search Console)</h2>
+<p><span class="status st-ok">CHECKED</span> Clicks, impressions, click-through rate and position from your own Google Search Console property, when it is connected.</p>
+<p class="meta">Data freshness: Google data for 2026-09-24 to 2026-10-21 (Pacific Time, final data; Google&#x27;s figures lag about 3 days).</p>
+<p>Property <code>sc-domain:acme.test</code>, 2026-09-24 to 2026-10-21 (28 days).</p>
+<table><thead><tr><th>Measure</th><th>Value</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>Clicks</td><td>140</td><td>OBSERVED (first-party, as reported by Google Search Console)</td></tr>
+<tr><td>Impressions</td><td>1,400</td><td>OBSERVED (first-party, as reported by Google Search Console)</td></tr>
+<tr><td>Click-through rate</td><td>10.0%</td><td>OBSERVED (clicks divided by impressions over the window)</td></tr>
+<tr><td>Average position</td><td>7.5</td><td>ESTIMATED (assumption: the impression-weighted mean of Google's daily positions approximates the window's position; it is not Google's own figure)</td></tr>
+</tbody></table>
+<p>These figures are not paired with revenue (analytics and CRM are not connected), so no decision is drawn from them.</p>
+<h3>By query class (no query text is kept)</h3>
+<table><thead><tr><th>Class</th><th>Clicks</th><th>Impressions</th><th>CTR</th></tr></thead><tbody>
+<tr><td>set aside (looked like personal data; dropped)</td><td>2</td><td>5</td><td>40.0%</td></tr>
+<tr><td>brand</td><td>20</td><td>100</td><td>20.0%</td></tr>
+<tr><td>questions</td><td>10</td><td>150</td><td>6.7%</td></tr>
+<tr><td>local intent</td><td>5</td><td>60</td><td>8.3%</td></tr>
+<tr><td>commercial intent</td><td>0</td><td>0</td><td>n/a</td></tr>
+<tr><td>other</td><td>3</td><td>40</td><td>7.5%</td></tr>
+<tr><td>unattributed (anonymised by Google, or past the caps)</td><td>100</td><td>1,045</td><td>n/a</td></tr>
+</tbody></table>
+<h3>By page template (aggregated by page; not comparable with the totals above)</h3>
+<table><thead><tr><th>Page template</th><th>Clicks</th><th>Impressions</th><th>CTR</th></tr></thead><tbody>
+<tr><td><code>/blog/{slug}</code></td><td>40</td><td>500</td><td>8.0%</td></tr>
+<tr><td><code>{other}</code></td><td>3</td><td>30</td><td>10.0%</td></tr>
+</tbody></table>
+<p>No findings for the parts of this area that were checked.</p>
+</section>
+<section class="area" id="ai">
+<h2>AI visibility (answer engines)</h2>
+<p><span class="status st-ok">CHECKED</span> Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market questions, sampled several times each.</p>
+<p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-31.</p>
+<table><thead><tr><th>Engine</th><th>Status</th><th>Questions asked</th><th>Not asked</th></tr></thead><tbody>
+<tr><td><code>perplexity</code></td><td>CHECKED</td><td>2</td><td>0</td></tr>
+</tbody></table>
+<p>Each question was asked 5 times per engine (question set version 2, fingerprint <code>dddddddddddddddd</code>). Questions are referred to by number; their text and the answers are not reproduced.</p>
+<p>Prompt volume: <strong>NOT CONNECTED</strong>. How often real people ask these questions is not known.</p>
+<div class="finding">
+<h4>Not mentioned or cited; other sources were</h4>
+<p class="meta"><span class="sev sev-medium">medium</span> · Recommended action: Test a change · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>CITATION_OPPORTUNITY</code> · Area <code>P4</code></p>
+<p><strong>Fix.</strong> Test a page that answers this question directly; see which kinds of sources were cited instead.</p>
+<ul>
+<li>Evidence: engine: <code>perplexity</code>; question: Question 2; usable answers: 5; cited instead: <code>yelp.com (3 answers)</code>, <code>rival.test (2 answers) (a competitor you named)</code></li>
+</ul>
+</div>
+<div class="finding">
+<h4>Cited in at least half of the answers</h4>
+<p class="meta"><span class="sev sev-info">info</span> · Recommended action: Monitor (may be intentional) · Evidence: <strong>OBSERVED</strong> (measured by this audit&#x27;s own requests) · Rule <code>CITATION_STRENGTH</code> · Area <code>P4</code></p>
+<p><strong>Fix.</strong> Keep the cited pages current and accurate.</p>
+<ul>
+<li>Evidence: engine: <code>perplexity</code>; question: Question 1; usable answers: 5; citation rate: 80.0% (95% interval 37.5% to 96.4%); mention rate: 100.0% (95% interval 56.5% to 100.0%)</li>
+</ul>
+</div>
+</section>
+<section class="area">
+<h2>Methodology and limits</h2>
+<h3>Applies to the whole audit</h3>
+<ul>
+<li>Wave 1 reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).</li>
+<li>No single visibility score is produced.</li>
+</ul>
+<h3>Crawlability</h3>
+<p><strong>Method.</strong> Fetched robots.txt and each audited page (bot family list 2026-10-10.1).</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>Observed from one network location at one time.</li>
+</ul>
+<h3>Sitemaps and llms.txt</h3>
+<p><strong>Method.</strong> Sitemaps from robots.txt Sitemap lines.</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>llms.txt is non-standard.</li>
+</ul>
+<h3>Content structure</h3>
+<p><strong>Method.</strong> Raw HTML parsed; structured data validated (rules 2026-10-09.1).</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>Heuristic checklist, uncalibrated.</li>
+</ul>
+<h3>Entity consistency</h3>
+<p><strong>Method.</strong> Organization / LocalBusiness JSON-LD compared with the canonical entity record.</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>Only the audited pages were read.</li>
+</ul>
+<h3>Search performance (Google Search Console)</h3>
+<p><strong>Method.</strong> Search Analytics for the bound property.</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>Google returns top rows only.</li>
+</ul>
+<h3>AI visibility (answer engines)</h3>
+<p><strong>Method.</strong> Each prompt of prompt set core v2 sent 5 times per engine.</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>One sample of N answers at one time from one account.</li>
+</ul>
+<h3>Inputs set aside</h3>
+<p>Malformed or unsafe inputs were set aside unread (never parsed further):</p>
+<ul>
+<li><code>XML_DOCTYPE_REFUSED</code>: 1</li>
+</ul>
+<h3>Versions</h3>
+<ul>
+<li>bot families: <code>2026-10-10.1</code></li>
+<li>report: <code>seo-audit-report/1</code></li>
+<li>schema rules: <code>2026-10-09.1</code></li>
+<li>report renderer: <code>seo-client-report/1</code></li>
+</ul>
+</section>
+<footer>Prepared by Z Best Media. This report recommends changes; it does not make any change to your site.</footer>
+</main>
+</body>
+</html>

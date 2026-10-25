@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>SEO audit: acme.test</title>
+<style>
+:root{--accent:#1f4e79;--ink:#1a1a1a;--muted:#555;--line:#d9d9d9;--soft:#f5f6f8}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:var(--ink);font:15px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:860px;margin:0 auto;padding:32px 20px 48px}
+header.cover{border-top:6px solid var(--accent);padding-top:20px;margin-bottom:28px}
+h1{font-size:26px;margin:0 0 4px}
+h2{font-size:20px;margin:36px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--accent)}
+h3{font-size:16px;margin:22px 0 6px}h4{font-size:14px;margin:16px 0 4px}
+.brand{color:var(--muted);margin:0 0 16px}
+code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--soft);padding:1px 4px;
+  border-radius:3px;overflow-wrap:anywhere}
+dl.facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}
+dl.facts dt{font-weight:600}dl.facts dd{margin:0;overflow-wrap:anywhere}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:14px}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+th{background:var(--soft)}
+.status{display:inline-block;font-weight:700;font-size:12px;letter-spacing:.03em;padding:2px 8px;border-radius:10px;
+  border:1px solid currentColor}
+.st-ok{color:#1b6e3a}.st-partial{color:#8a5a00}.st-off{color:#8a1c1c}
+.notclean{background:#fff4f4;border-left:4px solid #8a1c1c;padding:8px 12px;margin:8px 0}
+.finding{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:4px;padding:10px 14px;
+  margin:12px 0;break-inside:avoid}
+.finding h4{margin-top:0}
+.sev{font-weight:700;text-transform:uppercase;font-size:12px}
+.sev-critical{color:#8a1c1c}.sev-high{color:#b33a00}.sev-medium{color:#8a5a00}.sev-low{color:#35537a}.sev-info{color:#555}
+.meta{color:var(--muted);font-size:13px}
+ul{padding-left:20px}
+.preview{background:#fff4d6;border:1px solid #c9a227;padding:8px 12px;margin-bottom:16px;font-weight:600}
+footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;color:var(--muted);font-size:13px}
+@media print{body{font-size:11pt}main{max-width:none;padding:0}h2{break-after:avoid}section.area{break-before:page}
+a{color:inherit;text-decoration:none}}
+</style>
+</head>
+<body>
+<main>
+<header class="cover">
+<h1>SEO technical audit: <code>acme.test</code></h1>
+<p class="brand">Prepared by Z Best Media</p>
+<dl class="facts">
+<dt>Website audited</dt><dd><code>https://acme.test</code></dd>
+<dt>Audit ID</dt><dd><code>seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></dd>
+<dt>Run</dt><dd>2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC</dd>
+<dt>Run outcome</dt><dd>NOT_CONNECTED (whether every check could run; not a score)</dd>
+<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on Z Best Media's tamper-evident ledger when the audit completed</dd>
+<dt>Pages audited (1)</dt><dd><a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a></dd>
+</dl>
+</header>
+<section>
+<h2>What was checked</h2>
+<table><thead><tr><th>Area</th><th>Status</th><th>Findings</th><th>Data freshness</th></tr></thead><tbody>
+<tr><td>Crawlability</td><td><span class="status st-off">NOT CONNECTED</span></td><td>—</td><td>not observed in this audit</td></tr>
+<tr><td>Sitemaps and llms.txt</td><td><span class="status st-off">NOT COVERED</span></td><td>—</td><td>not observed in this audit</td></tr>
+<tr><td>Content structure</td><td><span class="status st-off">NOT COVERED</span></td><td>—</td><td>not observed in this audit</td></tr>
+<tr><td>Entity consistency</td><td><span class="status st-off">NOT COVERED</span></td><td>—</td><td>not observed in this audit</td></tr>
+<tr><td>Search performance (Google Search Console)</td><td><span class="status st-off">NOT CONNECTED</span></td><td>—</td><td>not observed in this audit</td></tr>
+<tr><td>AI visibility (answer engines)</td><td><span class="status st-off">NOT COVERED</span></td><td>—</td><td>not observed in this audit</td></tr>
+</tbody></table>
+<p>Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.</p>
+<h3>Not connected for this audit</h3>
+<ul>
+<li>Perplexity answer engine.</li>
+<li>Web fetching: no page could be read.</li>
+<li>Google Search Console (your own search data).</li>
+<li>Prompt volume: how often real people ask the market questions is not known.</li>
+<li>JavaScript rendering: pages were read as raw HTML; content added by JavaScript was not seen.</li>
+</ul>
+<h3>How to read this report</h3>
+<ul>
+<li>Every finding states its <strong>severity</strong> (critical, high, medium, low, info), its <strong>evidence class</strong> (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption), the <strong>rule</strong> that produced it, and a <strong>recommended fix</strong>.</li>
+<li>There is no overall score and no grade. Findings of different kinds are not added together.</li>
+<li>This report does not promise rankings, traffic or citations by any search or answer engine, and it makes no comparison claims about any other provider.</li>
+<li>Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.</li>
+</ul>
+</section>
+<section class="area" id="crawlability">
+<h2>Crawlability</h2>
+<p><span class="status st-off">NOT CONNECTED</span> Whether search and AI crawlers can reach and index the audited pages: robots.txt, status codes, redirects, noindex signals and canonical links.</p>
+<p class="meta">Data freshness: not observed in this audit.</p>
+<p class="notclean">The data source for this area is not connected for this audit. Nothing is reported here because this area was not checked. This is not a clean result.</p>
+</section>
+<section class="area" id="sitemaps">
+<h2>Sitemaps and llms.txt</h2>
+<p><span class="status st-off">NOT COVERED</span> Whether the XML sitemaps can be read and list the right URLs, and whether an llms.txt file is published (an emerging, non-standard convention).</p>
+<p class="meta">Data freshness: not observed in this audit.</p>
+<p class="notclean">This audit did not include this check. Nothing is reported here because this area was not checked. This is not a clean result.</p>
+</section>
+<section class="area" id="content">
+<h2>Content structure</h2>
+<p><span class="status st-off">NOT COVERED</span> How each audited page is structured for machines: title, description, headings, language, structured data (JSON-LD) and how much text is in the raw HTML.</p>
+<p class="meta">Data freshness: not observed in this audit.</p>
+<p class="notclean">This audit did not include this check. Nothing is reported here because this area was not checked. This is not a clean result.</p>
+</section>
+<section class="area" id="entity">
+<h2>Entity consistency</h2>
+<p><span class="status st-off">NOT COVERED</span> Whether the business details in the pages&#x27; Organization / LocalBusiness markup match your canonical business record (name, address, phone).</p>
+<p class="meta">Data freshness: not observed in this audit.</p>
+<p class="notclean">Not enough could be observed to report on this area. Nothing is reported here because this area was not checked. This is not a clean result.</p>
+</section>
+<section class="area" id="search">
+<h2>Search performance (Google Search Console)</h2>
+<p><span class="status st-off">NOT CONNECTED</span> Clicks, impressions, click-through rate and position from your own Google Search Console property, when it is connected.</p>
+<p class="meta">Data freshness: not observed in this audit.</p>
+<p class="notclean">Google Search Console is not connected to this service. Nothing is reported here because this area was not checked. This is not a clean result. (reason <code>GSC_NOT_CONNECTED</code>)</p>
+</section>
+<section class="area" id="ai">
+<h2>AI visibility (answer engines)</h2>
+<p><span class="status st-off">NOT COVERED</span> Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market questions, sampled several times each.</p>
+<p class="meta">Data freshness: not observed in this audit.</p>
+<p class="notclean">No set of market questions was chosen for this audit, so no answer engine was asked anything. Nothing is reported here because this area was not checked. This is not a clean result. (reason <code>NO_PROMPT_SET</code>)</p>
+<p>Prompt volume: <strong>NOT CONNECTED</strong>. How often real people ask these questions is not known.</p>
+</section>
+<section class="area">
+<h2>Methodology and limits</h2>
+<h3>Applies to the whole audit</h3>
+<ul>
+<li>Wave 1 reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).</li>
+<li>No single visibility score is produced.</li>
+</ul>
+<h3>Crawlability</h3>
+<p><strong>Method.</strong> no fetcher is wired</p>
+<h3>Entity consistency</h3>
+<p><strong>Method.</strong> Organization / LocalBusiness JSON-LD compared with the canonical entity record.</p>
+<h3>Search performance (Google Search Console)</h3>
+<p><strong>Method.</strong> Search Analytics for the bound property.</p>
+<h3>AI visibility (answer engines)</h3>
+<p><strong>Method.</strong> No prompt set was given for this audit; no engine was asked anything.</p>
+<h3>Versions</h3>
+<ul>
+<li>bot families: <code>2026-10-10.1</code></li>
+<li>report: <code>seo-audit-report/1</code></li>
+<li>schema rules: <code>2026-10-09.1</code></li>
+<li>report renderer: <code>seo-client-report/1</code></li>
+</ul>
+</section>
+<footer>Prepared by Z Best Media. This report recommends changes; it does not make any change to your site.</footer>
+</main>
+</body>
+</html>
