@@ -465,6 +465,69 @@ Do these in order. Nothing in the repository creates anything; each step is your
 Operating the private services (your approval routes on finance, legal and seo) goes through `railway ssh` into that
 service and a request to `127.0.0.1:<port>` from inside it; there is deliberately no public route to them.
 
+### Delivering an SEO client report from Railway (AEGIS final go-live M-1)
+
+The client report is produced only by `services/seo-py/devtools/render_report.py fetch`. That command is the
+recorded delivery path: the service records the render on the ledger before answering, and the command writes the
+file (mode 0600) only when the document's SHA-256 and size match the answer and the service's ledger-backed
+`client-reports` list holds the same `report_id` and `document_sha256`. A hand-made request skips both checks, so do
+not use one. `--api` must be https or a loopback address, because the request carries three tokens, and seo has
+neither https nor a public domain.
+
+**Decision: an SSH tunnel to the container's loopback, with the command run on your own machine.** The script is
+**not** added to the seo image. The tunnel keeps the three tokens and the client document off the server: they never
+sit in the container's filesystem or shell history, and the file is written 0600 on your machine, where you send it
+from. Railway SSH supports local port forwarding to "the container's loopback and your project's private network";
+public destinations are refused, and the connection "is dialed from inside the container, so `127.0.0.1` is the
+container's own loopback" (https://docs.railway.com/cli/ssh, read Oct 25 2026). seo binds `::` dual-stack
+(`SEO_BIND_ADDR`, `serve.py` → `dual_stack`), so the container's `127.0.0.1:8500` reaches it.
+
+You need: an SSH key registered with Railway (`railway ssh keys add`; the CLI also prompts on the first
+`railway ssh`), a checkout of the commit seo runs, and Python 3.12 or 3.13 with `services/seo-py/requirements.txt`
+installed (the script imports `httpx` and `client_report` from `services/seo-py/src`).
+
+1. Get seo's **service instance ID**: in the dashboard open the `seo` service, press `Ctrl+K` / `Cmd+K`, choose
+   **Copy Service Instance ID**. Do not use **Copy Service ID**: it is not a valid SSH target.
+2. Open the tunnel in its own terminal and leave it running (`-N` holds the tunnel open without a shell):
+
+   ```sh
+   ssh -N -L 127.0.0.1:18500:127.0.0.1:8500 <seo-service-instance-id>@ssh.railway.com
+   ```
+
+3. In a second terminal, check that the tunnel reaches seo: `curl -sS http://127.0.0.1:18500/health` should return
+   200 with `{"status":"ok"}`.
+4. Write the three tokens to files that only you can read. Copy the values from the seo service's Variables tab:
+   `SEO_SERVICE_TOKEN`, the `dashboard` value inside `SEO_CALLER_TOKENS`, and `SEO_ANDRE_APPROVAL_TOKEN`. Paste each
+   one into its file; do not echo it on a command line.
+
+   ```sh
+   umask 077 && mkdir -p ~/.zbm-seo && cd ~/.zbm-seo
+   cat > service.token     # paste SEO_SERVICE_TOKEN, Enter, Ctrl-D
+   cat > dashboard.token   # paste the "dashboard" token from SEO_CALLER_TOKENS, Enter, Ctrl-D
+   cat > andre.token       # paste SEO_ANDRE_APPROVAL_TOKEN, Enter, Ctrl-D
+   ```
+
+5. From the checkout's `services/seo-py`, render. The tenant is the client's tenant id; the audit id is
+   `seo-aud-<40 hex>` from the completed audit.
+
+   ```sh
+   python3 devtools/render_report.py fetch --api http://127.0.0.1:18500 --tenant <tenant> --audit <audit-id> \
+     --format html --out ~/client-reports/<tenant>-<audit-id>.html \
+     --service-token-file ~/.zbm-seo/service.token --caller-token-file ~/.zbm-seo/dashboard.token \
+     --andre-token-file ~/.zbm-seo/andre.token
+   ```
+
+   Exit 0 prints one JSON line with `report_id`, `document_sha256` and `bytes`. Keep that line with the delivery
+   record. Exit 2 (`refused: ...`) means nothing was written. To fetch the same document again, re-run with the same
+   `--request-id`.
+6. Have a person review the document before it is sent. Then close the tunnel (Ctrl-C) and delete
+   `~/.zbm-seo/*.token`.
+
+This procedure has not been run against a real Railway deployment: nothing in this repository has been applied to
+Railway yet. CI covers the command against a loopback service (seo-py tests and live run); the tunnel itself is
+Railway's, as documented above. If the tunnel is refused, do not fall back to a hand-made request. Stop, and treat
+delivery as blocked.
+
 ## Smoke-test checklist
 
 Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the stripe-gateway's domain.
@@ -473,6 +536,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - [ ] ledger log: `ledger_created` on the first deploy, the callers listed (orchestrator-go, finance-py, legal-py,
       seo-py, each with its one department), no shared-token warning.
 - [ ] finance, legal, seo logs: no `REFUSING TO START` / `refusing to start`.
+- [ ] SEO report delivery path: open the seo tunnel (steps 1-2 of "Delivering an SEO client report from Railway"),
+      `curl -sS http://127.0.0.1:18500/health` → 200 `{"status":"ok"}`, then close it.
 - [ ] `curl -sS https://$ORCH/health` → 200 `{"status":"ok","service":"orchestrator-go"}`.
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' https://$ORCH/revenue-recovery/findings` → `401` (no token).
 - [ ] `curl -sS -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" https://$ORCH/revenue-recovery/findings` → 200,
