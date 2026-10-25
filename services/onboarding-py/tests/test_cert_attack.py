@@ -188,7 +188,10 @@ AEGIS_MISSES = [
     ("password\u200b: zerowidth6613", "zerowidth6613"),
     ("ｐａｓｓｗｏｒｄ: fullwidth4471", "fullwidth4471"),
     ("creds admin / Gl0wworm!", "Gl0wworm"),
-    ("my PIN is 48213", "48213"),
+    # AEGIS wave3 L-D: the digit-only secrets carry a space, a character no hex id or digest can contain, so a
+    # random event id can never "leak" them by chance ("48213" once matched inside ...7b4bf2dbd482134c). The
+    # contiguous-PIN shape stays covered by test_fix_wave1 (intake refusal and output scrub of "my PIN is 4821").
+    ("my PIN is 48 213", "48 213"),
     ("card 4111 1111 1111 1111", "4111 1111 1111 1111"),
     ("card 5500005555555559", "5500005555555559"),
     ("api key AKIAQWERTYUIOPASDFGH", "AKIAQWERTYUIOPASDFGH"),
@@ -196,7 +199,7 @@ AEGIS_MISSES = [
     ("пароль: medved7719", "medved7719"),
     ("p@ssw0rd = leetspeak3317", "leetspeak3317"),
     ("lee@acme.example / Kumquat-99x!", "Kumquat-99x"),
-    ("otp 739104", "739104"),
+    ("otp 739 104", "739 104"),
 ]
 
 
@@ -319,8 +322,10 @@ def test_credential_spray_never_leaks_anywhere(caplog):
     everything = "\n".join(outputs)
     everything += "\n".join(r.getMessage() for r in caplog.records)
     # event_id / payload_sha256 are SHA-256 hex digests of scrubbed material:
-    # they cannot carry a secret, but any 5-digit fragment can occur in a
-    # digest by chance (fix wave 4: with stable event ids, "48213" did).
+    # they cannot carry a secret, but any digit-only fragment can occur in a
+    # digest by chance (fix wave 4: with stable event ids, "48213" did). Other
+    # random hex ids stay in `everything`, which is why AEGIS_MISSES' digit
+    # secrets contain a space (L-D).
     everything += json.dumps([{k: v for k, v in e.items() if k not in ("event_id", "payload_sha256")}
                               for e in svc.ledger.events]) + json.dumps(svc.ledger.payloads, default=str)
     everything += json.dumps([e.model_dump(mode="json") for e in svc.bus.events])
