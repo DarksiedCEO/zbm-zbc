@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from decimal import ROUND_HALF_UP, Decimal
 
 import httpx
 
@@ -61,9 +62,57 @@ def code_app(code: str, *, pct: float | None = None, amount: str | None = None, 
             "targetType": target, "value": value, "code": code}
 
 
+def allocation(index: int, amount: str) -> dict:
+    return {"allocatedAmountSet": money(amount), "discountApplication": {"index": index}}
+
+
+def shopify_allocations(apps: list, lines: list) -> list:
+    """Per-line ``discountAllocations`` as Shopify records them for order-level (ALL / LINE_ITEM) discounts, per its
+    combination rules (help.shopify.com/manual/discounts/discount-combinations): every percentage discount is
+    computed on the same subtotal, then fixed-amount discounts apply to what is left. The whole amount is put on the
+    first priced line (only the per-application sum matters to the connector). Shipping discounts get none."""
+    out = [[] for _ in lines]
+    priced = [i for i, li in enumerate(lines) if Decimal(li["originalUnitPriceSet"]["shopMoney"]["amount"]) > 0
+              and li["quantity"] > 0]
+    if not priced:
+        return out
+    subtotal = sum(Decimal(lines[i]["originalUnitPriceSet"]["shopMoney"]["amount"]) * lines[i]["quantity"]
+                   for i in priced)
+    pct_given = Decimal("0.00")
+    for a in apps:
+        if a["targetType"] == "LINE_ITEM" and a["value"]["__typename"] == "PricingPercentageValue":
+            g = (subtotal * Decimal(str(a["value"]["percentage"])) / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+            pct_given += g
+            if g > 0:
+                out[priced[0]].append(allocation(a["index"], str(g)))
+    remaining = subtotal - pct_given
+    for a in apps:
+        if a["targetType"] == "LINE_ITEM" and a["value"]["__typename"] == "MoneyV2":
+            g = max(min(Decimal(a["value"]["amount"]), remaining), Decimal("0.00"))
+            remaining -= g
+            if g > 0:
+                out[priced[0]].append(allocation(a["index"], str(g)))
+    return out
+
+
 def order(n: int, *, codes: list | None = None, lines: list | None = None, status: str = "PAID",
           created: datetime | None = None, test: bool = False, cancelled: bool = False,
-          more_lines: bool = False, extra: dict | None = None) -> dict:
+          more_lines: bool = False, extra: dict | None = None, refunded: str = "0.00",
+          allocations: list | None = None) -> dict:
+    """A fake Shopify order node. Discount applications get their position as ``index`` unless they carry one;
+    lines get ``currentQuantity = quantity`` unless set, and ``discountAllocations`` from ``allocations`` (one list
+    per line) or, by default, as Shopify would record them (``shopify_allocations``)."""
+    apps = [{"index": i, **a} for i, a in enumerate(codes or [])]
+    lines = [dict(li) for li in (lines if lines is not None else
+                                 [{"sku": f"SKU-{n}", "quantity": 2, "originalUnitPriceSet": money("50.00")}])]
+    for li in lines:
+        li.setdefault("currentQuantity", li["quantity"])
+    try:
+        default_allocs = shopify_allocations(apps, lines)
+    except (ArithmeticError, KeyError, TypeError, ValueError):
+        default_allocs = [[] for _ in lines]   # malformed money in a test of the money checks: nothing allocated
+    for i, li in enumerate(lines):
+        li.setdefault("discountAllocations", allocations[i] if allocations is not None else default_allocs[i])
     node = {
         "legacyResourceId": str(5000 + n),
         "createdAt": (created or (NOW - timedelta(hours=n))).isoformat().replace("+00:00", "Z"),
@@ -71,10 +120,9 @@ def order(n: int, *, codes: list | None = None, lines: list | None = None, statu
         "test": test,
         "currencyCode": "USD",
         "displayFinancialStatus": status,
-        "discountApplications": {"pageInfo": {"hasNextPage": False}, "nodes": codes or []},
-        "lineItems": {"pageInfo": {"hasNextPage": more_lines},
-                      "nodes": lines if lines is not None else
-                      [{"sku": f"SKU-{n}", "quantity": 2, "originalUnitPriceSet": money("50.00")}]},
+        "totalRefundedSet": money(refunded),
+        "discountApplications": {"pageInfo": {"hasNextPage": False}, "nodes": apps},
+        "lineItems": {"pageInfo": {"hasNextPage": more_lines}, "nodes": lines},
     }
     if extra:
         node.update(extra)

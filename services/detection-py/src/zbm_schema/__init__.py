@@ -140,6 +140,13 @@ class DiscountApplication(BaseModel):
     # which converts it to Decimal via str() so the arithmetic stays exact.
     percent_off: Optional[float] = Field(default=None, ge=0, le=100, allow_inf_nan=False)
     amount_off_usd: Optional[PositiveMoney] = None
+    # H-1 (final go-live AEGIS, Oct 25 2026): the dollar amount the store itself
+    # recorded as given by this code on this order (Shopify: the sum of the
+    # line items' discountAllocations for this discount application), when the
+    # source records one. When every code on an order carries it, the
+    # discount-misuse agent uses these amounts instead of recomputing the codes
+    # from their nominal values. None = not recorded by the source.
+    recorded_usd: Optional[Money] = None
 
     @model_validator(mode="after")
     def _one_discount_mode(self):

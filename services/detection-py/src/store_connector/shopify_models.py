@@ -33,12 +33,15 @@ ORDERS_QUERY = (
     "orders(first: $first, after: $after, query: $q, sortKey: CREATED_AT, reverse: true) { "
     "pageInfo { hasNextPage endCursor } "
     "nodes { legacyResourceId createdAt cancelledAt test currencyCode displayFinancialStatus "
+    "totalRefundedSet { shopMoney { amount currencyCode } } "
     f"discountApplications(first: {DISCOUNT_APPLICATIONS_PER_ORDER}) {{ pageInfo {{ hasNextPage }} "
-    "nodes { __typename allocationMethod targetSelection targetType "
+    "nodes { __typename index allocationMethod targetSelection targetType "
     "value { __typename ... on MoneyV2 { amount currencyCode } ... on PricingPercentageValue { percentage } } "
     "... on DiscountCodeApplication { code } } } "
     f"lineItems(first: {LINE_ITEMS_PER_ORDER}) {{ pageInfo {{ hasNextPage }} "
-    "nodes { sku quantity originalUnitPriceSet { shopMoney { amount currencyCode } } } } } } }"
+    "nodes { sku quantity currentQuantity originalUnitPriceSet { shopMoney { amount currencyCode } } "
+    "discountAllocations { allocatedAmountSet { shopMoney { amount currencyCode } } "
+    "discountApplication { index } } } } } } }"
 )
 
 # Fields the connector must never request (protected customer data level 2 and identifying order fields).
@@ -65,10 +68,25 @@ class HasNext(_Node):
     hasNextPage: bool
 
 
+class AllocationApplicationRef(_Node):
+    index: int = Field(ge=0, le=10**6)
+
+
+class DiscountAllocationNode(_Node):
+    """What Shopify recorded as given to this line by one discount application (H-1: the recorded amount is used,
+    not a recomputation from the code's nominal value)."""
+    allocatedAmountSet: MoneyBag
+    discountApplication: AllocationApplicationRef
+
+
 class LineItemNode(_Node):
     sku: Optional[str] = Field(default=None, max_length=1024)
     quantity: int = Field(ge=0, le=10**9)
+    # Units excluding refunded and removed ones; differs from quantity after a refund or an order edit.
+    currentQuantity: int = Field(ge=0, le=10**9)
     originalUnitPriceSet: MoneyBag
+    # One per discount application that gave this line anything. Includes amounts on refunded and removed units.
+    discountAllocations: list[DiscountAllocationNode] = Field(max_length=250)
 
 
 class LineItems(_Node):
@@ -90,6 +108,7 @@ class PercentValue(_Node):
 class DiscountApplicationNode(_Node):
     typename: Literal["AutomaticDiscountApplication", "DiscountCodeApplication", "ManualDiscountApplication",
                       "ScriptDiscountApplication"] = Field(alias="__typename")
+    index: int = Field(ge=0, le=10**6)
     allocationMethod: Literal["ACROSS", "EACH"]
     targetSelection: Literal["ALL", "ENTITLED", "EXPLICIT"]
     targetType: Literal["LINE_ITEM", "SHIPPING_LINE"]
@@ -119,6 +138,7 @@ class OrderNode(_Node):
     test: bool
     currencyCode: str = Field(pattern=r"^[A-Z]{3}$")
     displayFinancialStatus: Optional[FinancialStatus] = None
+    totalRefundedSet: MoneyBag
     discountApplications: DiscountApplications
     lineItems: LineItems
 

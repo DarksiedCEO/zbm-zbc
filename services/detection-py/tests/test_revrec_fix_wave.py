@@ -143,7 +143,7 @@ def test_p3_discount_stacking_claims_only_the_excess_over_the_best_single_code()
     (f,) = j["findings"]
     # 10.00 + 5% of 90.00 = 14.50 given; WELCOME10 alone = 10.00 -> 4.50 beyond policy.
     assert f["recoverable_value"]["amount_usd"] == "4.50"
-    assert f["evidence_class"] == "OBSERVED" and f["methodology_id"] == "disc_excess_best_code"
+    assert f["evidence_class"] == "ESTIMATED" and f["methodology_id"] == "disc_excess_best_code"
 
 
 def test_discount_best_single_code_can_be_an_amount_off_code():
@@ -195,8 +195,8 @@ def test_every_finding_carries_an_evidence_class_and_a_methodology_note():
     assert claimed == sorted([
         ("affiliate-coupon-extension-v1", "ord_1002", "12.00", "ESTIMATED"),
         ("affiliate-coupon-extension-v1", "ord_1007", None, "UNKNOWN"),
-        ("discount-misuse-v1", "ord_1003", "48.00", "OBSERVED"),
-        ("discount-misuse-v1", "ord_1007", "16.88", "OBSERVED"),
+        ("discount-misuse-v1", "ord_1003", "48.00", "ESTIMATED"),
+        ("discount-misuse-v1", "ord_1007", "16.88", "ESTIMATED"),
         ("abandoned-cart-coverage-v1", "ord_1005", None, "UNKNOWN"),
         ("renewal-never-triggered-v1", "sub_2001", "39.00", "ESTIMATED"),
         ("server-side-attribution-v1", "ord_3001", None, "UNKNOWN"),

@@ -23,6 +23,11 @@ found on shopify.dev and the design does not depend on it being true.
 | S9 | Bulk queries: started by the `bulkOperationRunQuery` **mutation**; results are a JSONL file at a signed URL (the example host is `storage.googleapis.com`) that expires after a week; up to five concurrent bulk queries per shop from 2026-01; must complete within 10 days; polling or a webhook. | https://shopify.dev/docs/apps/build/apis/graphql-admin/bulk-operations/queries.md |
 | S10 | Scopes: `read_orders` covers "orders created within the last 60 days"; `read_all_orders` adds older orders, "doesn't grant access on its own", needs Shopify approval for Partner-organization apps but apps created in the Dev Dashboard under a merchant organization "don't need to request Shopify approval"; "Any scope that writes a resource also grants read access to it"; an installation's granted scopes are read from `currentAppInstallation { accessScopes { handle } }`. | https://shopify.dev/docs/api/usage/access-scopes |
 | S11 | Protected customer data includes "Orders, draft orders, abandoned checkouts, refunds, transactions" relating to a customer. Level 1 = customer data excluding name, address, phone and email; Level 2 adds those fields. Level 1 requirements include processing "only the minimum personal data required", stated purposes, retention periods, encryption at rest and in transit, merchant data-protection agreements. Level 1 is "Always available" to custom apps; public apps need review. | https://shopify.dev/docs/apps/launch/protected-customer-data |
+| S13 | (Oct 25 2026, H-1) `DiscountAllocation` (2026-10, "latest"): `allocatedAmountSet: MoneyBag!` "The money amount that's allocated to a line based on the associated discount application in shop and presentment currencies"; `discountApplication: DiscountApplication!` "The discount application that the allocated amount originated from" (`allocatedAmount` is deprecated). | https://shopify.dev/docs/api/admin-graphql/latest/objects/DiscountAllocation |
+| S14 | (Oct 25 2026, H-1) `DiscountApplication` interface (2026-10): `index: Int!` "An ordered index that can be used to identify the discount application and indicate the precedence of the discount application for calculations"; also `allocationMethod`, `targetSelection`, `targetType`, `value`; implemented by `AutomaticDiscountApplication`, `DiscountCodeApplication`, `ManualDiscountApplication`, `ScriptDiscountApplication`. | https://shopify.dev/docs/api/admin-graphql/latest/interfaces/DiscountApplication |
+| S15 | (Oct 25 2026, H-1) `LineItem` (front matter `api_version: 2026-10`): `discountAllocations: [DiscountAllocation!]!` "The discounts that have been allocated to the line item by discount applications" — a plain list, and it **includes discounts on refunded and removed quantities**; `quantity: Int!` "The number of units ordered, including refunded and removed units"; `currentQuantity: Int!` "The number of units ordered, excluding refunded and removed units". | https://shopify.dev/docs/api/admin-graphql/latest/objects/LineItem.md |
+| S16 | (Oct 25 2026, H-1) `Order` (2026-10): `totalRefundedSet: MoneyBag!` "The total amount that was refunded, in shop and presentment currencies"; `discountApplications` "A list of discounts that are applied to the order, excluding order edits and refunds". Cross-checked in Shopify's Admin schema tool (S12's tool) for `DiscountAllocation`, `LineItem.currentQuantity`, `Order.totalRefundedSet`. | https://shopify.dev/docs/api/admin-graphql/latest/objects/Order |
+| S17 | (Oct 25 2026, H-1) Combining discounts: "Multiple discounts are applied to an order only when the setting on each discount allows the combination"; with two or more percentage order discounts "both percentages are calculated on the original subtotal"; "All order discounts are applied on the order subtotal after product discounts have been applied"; a percentage order discount applies before a fixed-amount one; at most 5 product or order discount codes per order. **help.shopify.com, not shopify.dev**; used only to explain why a recomputation is wrong and why the one-code policy is an assumption, never as an input to a figure. | https://help.shopify.com/manual/discounts/discount-combinations |
 | S12 | Schema (Shopify's Admin schema tool, pinned version not stated by the tool): `Order` has `legacyResourceId`, `createdAt`, `cancelledAt`, `test`, `currencyCode`, `displayFinancialStatus` (`AUTHORIZED EXPIRED PAID PARTIALLY_PAID PARTIALLY_REFUNDED PENDING REFUNDED VOIDED`), `discountCodes`, `discountApplications` (connection); `DiscountCodeApplication {code allocationMethod(ACROSS EACH) targetSelection(ALL ENTITLED EXPLICIT) targetType(LINE_ITEM SHIPPING_LINE) value: PricingValue = MoneyV2 | PricingPercentageValue}`; `LineItem {sku quantity originalUnitPriceSet}`; `Shop.currencyCode`; `AppInstallation.accessScopes`. | Shopify Admin GraphQL schema (MCP `graphql_schema`), cross-checked against S5 |
 
 ### U2 — can a merchant hand over an Admin API token without App Store review?
@@ -185,6 +190,29 @@ page holds, shipping codes, codes on selected items only (`ENTITLED`/`EXPLICIT`)
 (`EACH`), zero-value codes, non-USD or over-precise money, codes the schema cannot hold. Automatic/manual/script
 discounts are not codes and are counted, not modelled.
 
+**H-1 (final go-live AEGIS, Oct 25 2026).** The query now also asks for each discount application's `index` (S14),
+each line's `currentQuantity` and `discountAllocations { allocatedAmountSet { shopMoney } discountApplication {
+index } }` (S13, S15), and the order's `totalRefundedSet` (S16). Each code's dollar amount on an order is what
+Shopify **recorded** for it — the sum, over every line, of the allocations whose `discountApplication.index` is that
+code's `index` — carried as `DiscountApplication.recorded_usd`. It is never recomputed from the code's nominal value
+against the full price: S17 says Shopify computes two percentage order codes on the same subtotal (a sequential
+recompute said $9.00 on the AEGIS $100 / 10% + 10% order where Shopify records $10 + $10), and applies order codes
+after product and automatic discounts. Exact per-code attribution does not exist, so the order is **excluded and
+counted**, for:
+
+| Reason | Why no exact figure exists |
+|---|---|
+| `non_code_discount_present` | any automatic, manual or script discount application: it changed the base the codes applied to (the AEGIS $100 / two 10% codes / 50% automatic case used to read $9.00 OBSERVED). It used to be counted and ignored while the order was still analysed. |
+| `partially_refunded` | `displayFinancialStatus` `PARTIALLY_REFUNDED`: S15's allocations still include the refunded units' discount. It used to be analysed at original prices. |
+| `refund_recorded` | `totalRefundedSet` above zero on any analysed status. |
+| `line_items_refunded_or_removed` | a line whose `currentQuantity` differs from `quantity` (refund or order edit, S15). |
+| `discount_allocation_unmatched` | an allocation pointing at an index the order's applications do not have, or two applications sharing one index. |
+| `recorded_discount_exceeds_subtotal` | the recorded code amounts add up to more than the analysed lines' subtotal. |
+
+A refunded or partly refunded order could in principle be attributed from `refunds { refundLineItems }`; that is not
+built, so those orders are left out, and the report lists them under "Left out because". Leaving an order out can
+only lower a figure, never raise it.
+
 ### 7. Ledger evidence (record-first)
 
 detection-py now writes to ledger-rust (department `rr_store`, actor `detection_py`; config
@@ -196,8 +224,32 @@ caller scoped to `rr_store` only.
 
 ### 8. The scan's findings and the client report
 
-Agent coverage of this source: **discount-misuse** is fed (OBSERVED: the excess of stacked codes over the best single
-code, exact cents, labels observed/high — unchanged agent). Affiliate, abandoned-cart, renewal, server-side,
+Agent coverage of this source: **discount-misuse** is fed: the excess of stacked codes over the best single code,
+exact cents. From Shopify the stack's total is the recorded allocations (section 6), minus the most the single
+most valuable code could have given alone on the full subtotal, never less than what was recorded for it (so the
+excess is a floor); methodology `disc_excess_recorded`. Sources that record no per-code amounts keep the old
+recompute (`disc_excess_best_code`); an order where only some codes carry a recorded amount gives no finding.
+
+**Evidence class: ESTIMATED, labels attributed/medium (H-1 decision).** The figure was labelled OBSERVED/high and so
+"quotable". Two honest options existed: keep OBSERVED and print the assumption next to the figure, or demote. We
+demote, because OBSERVED here means "read off recorded transactions/terms, exact arithmetic only" (ADR 0001,
+`EvidenceClass`), and the claim that the excess is *revenue lost* rests on a rule the data does not contain: that
+the store intends one code per order. S17 says Shopify only lets codes combine when the setting on each discount
+allows it, so every stack on a Shopify order is one the store's own configuration permitted; it is not an observed
+violation. A figure that is true only under a stated assumption is exactly `ESTIMATED` ("observed inputs combined
+with a stated assumption"), and zbm_schema's M2 rule then caps its labels at attributed/medium. OBSERVED with a
+caveat would still have been marked quotable and summed into the OBSERVED column, which the report's own
+"the only figures we quote as facts" line would contradict. The finding's cause now states the assumption next to
+the figure ("Assumption, not an observed breach: this counts as a leak only if the store intends at most one code
+per order. Shopify combines codes only when each discount's combination setting allows it, so the store's own
+settings permitted this stack."), and "against single-code policy" / "beyond any one authorized code" are gone.
+Reading each discount's `combinesWith` would tell whether the combination was configured on purpose, but not what
+the merchant intended; it needs a discounts scope and is not built.
+
+**Projection.** One projection per check and evidence class, never adding an OBSERVED base to an ESTIMATED one. The
+base is the corrected findings in the window (so excluded orders are not in it, and the stated assumption says so).
+A projection is always ESTIMATED, confidence low; one built on ESTIMATED findings says `est.` in its basis and adds
+their assumption (for this check: that the store intends at most one discount code per order). Affiliate, abandoned-cart, renewal, server-side,
 cross-channel, platform and contract agents get no data from Shopify orders and are listed **NOT COVERED** with the
 reason (abandoned checkouts are deliberately not read: they carry contact details, and whether a recovery message
 went out is not in the order data).
@@ -205,9 +257,9 @@ went out is not in the order data).
 `services/detection-py/src/rr_report.py` (+ `devtools/rr_report.py SCAN.json --md OUT.md [--json OUT.json]`) turns
 one orchestrator scan result into the client report: what was read (window, counts, every exclusion reason), the
 checks run with covered/NOT COVERED, each finding with its amount, evidence class, labels, cause and method (OBSERVED
-= quotable; ESTIMATED = "est."; UNKNOWN = no figure), overlaps flagged "do not add", per-check OBSERVED subtotals
-only, and **projections** — ESTIMATED, confidence low, `observed × 365 / window days` with the assumption written
-out, only for a window of 14 days or more, never added to anything. The window (AEGIS golive-rr M2): when the read
+= quotable; ESTIMATED = "est."; UNKNOWN = no figure), overlaps flagged "do not add", per-check OBSERVED and ESTIMATED
+subtotals in separate columns, and **projections** — ESTIMATED, confidence low, `base × 365 / window days` per
+evidence class with the assumption written out, only for a window of 14 days or more, never added to anything. The window (AEGIS golive-rr M2): when the read
 was not truncated, every order in the requested lookback was read, so the window is the lookback (`requested_start`
 to the snapshot time, else `lookback_days`) however sparse the orders; only a truncated read is measured back to the
 oldest order read. The report's `window_basis` and the projection's stated basis say which. Store-supplied text
@@ -272,7 +324,12 @@ scan, or a scan whose labels and figures disagree, is refused.
   per-tenant daily budgets; record-first; snapshot kept only after its completion record; failure records;
   snapshot expiry; credential file rules; strict connections file; cross-tenant isolation; token and client secret
   never in logs, reprs, errors, ledger, snapshot, status, API answers or reports; no raw PII stored; the scan path
-  through the real routes and the client report.
+  through the real routes and the client report. H-1 (Oct 25 2026): the $100 / two 10% codes / 50% automatic case
+  (excluded, no figure), partially refunded / refund recorded / reduced-quantity orders (excluded), recorded-allocation
+  arithmetic (split across lines, below and above nominal, zero recorded), inconsistent allocations, partly recorded
+  orders, ten 64-character codes within the cause limit, ESTIMATED labels and the stated assumption, projections per
+  evidence class, and refusal of a scan whose ledger did not verify (L-3). Every new guard was mutation-checked
+  (disabled one at a time; each made the suite fail).
 - `services/orchestrator-go/cmd/orchestrator/store_scan_test.go` (+ updated E-3 and L2 tests): NOT_CONNECTED and
   other refusals with nothing written, a connected snapshot scanned and recorded with `src=shopify:<id> fixture=0`,
   bad snapshots fail the scan, the fixture scan unchanged; the started record names only covered agents (L5).
@@ -282,6 +339,10 @@ scan, or a scan whose labels and figures disagree, is refused.
 
 ## Limitations
 
+- H-1: orders with an automatic/manual/script discount or any refund are left out rather than attributed, so a store
+  that runs automatic discounts alongside codes gets few or no analysed orders. Shopify's exact combination
+  arithmetic (S17) was read on help.shopify.com and has not been observed on a store; the figures do not depend on
+  it, because they use the recorded allocations.
 - No live Shopify call has been made: no token exists. The query shapes were checked against Shopify's Admin schema
   tool (S12), not against a store; the first real sync is the first end-to-end check.
 - U2's merchant-created Dev Dashboard path is UNVERIFIED on shopify.dev; OAuth (ZBM-owned app, custom distribution)

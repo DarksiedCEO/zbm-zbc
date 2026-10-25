@@ -11,8 +11,12 @@ The existing Revenue Recovery rules apply (ADR 0001 "Evidence class and methodol
     and findings on one order from two agents are flagged, not summed (ADR 0001 decision 3);
   - an agent that had no data from this source is listed as NOT COVERED with the reason — its silence is never shown
     as a clean result.
-Projections are ESTIMATED by construction (an observed window extended to a year, with the assumption stated); they
-are not findings and are not on the ledger.
+Projections are ESTIMATED by construction (a window's figures extended to a year, with the assumption stated); they
+are not findings and are not on the ledger. One projection per check and evidence class: an OBSERVED and an
+ESTIMATED base are never added together, and a projection from ESTIMATED findings also carries their assumptions.
+
+L-3 (final go-live AEGIS, Oct 25 2026): a scan whose ledger chain did not verify is refused, never rendered with
+"chain verified: NO".
 """
 
 from __future__ import annotations
@@ -118,11 +122,38 @@ def _window_days(window: dict, taken: datetime | None) -> tuple[int | None, str 
     return None, None
 
 
+PROJECTION_ASSUMPTION = ("the store keeps the same order volume, the same codes and the same stacking rate for a "
+                         "year; nothing in the data shows that it will. Orders left out of the analysis (listed "
+                         "above) are not in the base")
+
+
+def _projection(agent_id: str, ev_class: str, total: Decimal, window_days: int, window_basis: str | None,
+                window: dict) -> dict:
+    """One ESTIMATED yearly projection from one evidence class of one check's figures in the window (H-1: the base
+    is the corrected findings, and an ESTIMATED base says so and keeps its findings' assumption)."""
+    base = f"{_fmt(total)} observed" if ev_class == "OBSERVED" else f"est. {_fmt(total)} (ESTIMATED findings)"
+    if window_basis == "requested_window":
+        basis = f"{base} in the {window_days}-day window read (every order in it was read) x 365/{window_days}"
+    else:
+        basis = (f"{base} over the {window_days} days back to the oldest order read (the read stopped at the "
+                 f"{str(window.get('truncated_by')).replace('_', ' ')} limit) x 365/{window_days}")
+    assumption = PROJECTION_ASSUMPTION
+    if ev_class != "OBSERVED":
+        assumption += "; and the assumption stated on each finding holds"
+        if agent_id == "discount-misuse-v1":
+            assumption += " (that the store intends at most one discount code per order)"
+    return {"agent_id": agent_id, "evidence_class": "ESTIMATED", "base_evidence_class": ev_class, "confidence": "low",
+            "amount_usd": str((total * Decimal(365) / Decimal(window_days)).quantize(CENT, ROUND_HALF_UP)),
+            "basis": basis, "assumption": assumption}
+
+
 def build_report(scan: dict) -> dict:
     src = scan.get("data_source") or ""
     cov = scan.get("store_coverage")
     if not src.startswith("shopify:") or not isinstance(cov, dict) or scan.get("non_live_data_source") is not False:
         raise ReportInputError("not a scan of a connected store (fixture scans are never reported to a client)")
+    if (scan.get("ledger_verify") or {}).get("valid") is not True:
+        raise ReportInputError("the scan's ledger chain did not verify; no client report is rendered from it")
     client = scan["client_id"]
     findings = scan.get("findings") or []
     overlap_entities = {k.split("|", 2)[2] for k in (scan.get("overlapping_claims") or {})}
@@ -163,22 +194,11 @@ def build_report(scan: dict) -> dict:
                  "estimated_usd_in_window": str(sum(estimated, Decimal(0)).quantize(CENT)) if estimated else None,
                  "findings_without_figure": sum(1 for r in a_rows if r["evidence_class"] == "UNKNOWN")}
         agents.append(entry)
-        if observed and window_days and window_days >= MIN_PROJECTION_WINDOW_DAYS:
-            total = sum(observed, Decimal(0))
-            if window_basis == "requested_window":
-                basis = (f"{_fmt(total)} observed in the {window_days}-day window read (every order in it was read) "
-                         f"x 365/{window_days}")
-            else:
-                basis = (f"{_fmt(total)} observed over the {window_days} days back to the oldest order read (the read "
-                         f"stopped at the {str(window.get('truncated_by')).replace('_', ' ')} limit) "
-                         f"x 365/{window_days}")
-            projections.append({
-                "agent_id": agent_id, "evidence_class": "ESTIMATED", "confidence": "low",
-                "amount_usd": str((total * Decimal(365) / Decimal(window_days)).quantize(CENT, ROUND_HALF_UP)),
-                "basis": basis,
-                "assumption": ("the store keeps the same order volume, the same codes and the same stacking rate for "
-                               "a year; nothing in the data shows that it will"),
-            })
+        if window_days and window_days >= MIN_PROJECTION_WINDOW_DAYS:
+            for ev_class, figures in (("OBSERVED", observed), ("ESTIMATED", estimated)):
+                if figures:
+                    projections.append(_projection(agent_id, ev_class, sum(figures, Decimal(0)), window_days,
+                                                   window_basis, window))
     unknown_agents = sorted(set(by_agent) - {a["agent_id"] for a in agents})
     if unknown_agents:
         raise ReportInputError("findings from an agent the coverage note does not list")
@@ -193,7 +213,7 @@ def build_report(scan: dict) -> dict:
                             for k in ("OBSERVED", "ESTIMATED", "MODELED", "UNKNOWN")},
         "customer_data": cov.get("customer_data"),
         "ledger": {"scan_events": scan.get("ledger_events_created", 0) + scan.get("ledger_events_already_present", 0),
-                   "verified": bool((scan.get("ledger_verify") or {}).get("valid"))},
+                   "verified": True},
     }
 
 
@@ -205,6 +225,8 @@ def _amount_text(r: dict) -> str:
 
 
 def render_markdown(rep: dict) -> str:
+    if (rep.get("ledger") or {}).get("verified") is not True:
+        raise ReportInputError("the scan's ledger chain did not verify; no client report is rendered from it")
     w = rep["window"]
     c = rep["counts"]
     if rep.get("window_basis") == "requested_window":
@@ -219,7 +241,8 @@ def render_markdown(rep: dict) -> str:
          "## How to read this report", "",
          "- **OBSERVED** figures are read off your store's own order records with exact arithmetic. They are the only "
          "figures we quote as facts.",
-         "- **est.** figures are ESTIMATED: observed inputs plus an assumption we state next to them.",
+         "- **est.** figures are ESTIMATED: observed inputs plus an assumption we state next to them. They hold only "
+         "if that assumption holds, and we do not quote them as facts.",
          "- **No dollar figure** means we found the gap but the data cannot support an amount.",
          "- There is no overall score and no grand total: figures of different kinds are never added together, and "
          "an order flagged by two checks is marked, not counted twice.", "",
@@ -235,11 +258,13 @@ def render_markdown(rep: dict) -> str:
         L += ["| Left out because | Orders |", "|---|---|"]
         L += [f"| {k.replace('_', ' ')} | {v} |" for k, v in c["orders_excluded"].items()]
         L.append("")
-    L += ["## Checks run", "", "| Check | Covered by this store's data | Findings | Observed in window |", "|---|---|---|---|"]
+    L += ["## Checks run", "", "| Check | Covered by this store's data | Findings | Observed in window | "
+          "Estimated in window |", "|---|---|---|---|---|"]
     for a in rep["agents"]:
         cov = "yes" if a["covered"] else f"NOT COVERED — {_md(a['why'])}"
         obs = _fmt(Decimal(a["observed_usd_in_window"])) if a["observed_usd_in_window"] else "—"
-        L.append(f"| {a['title']} | {cov} | {a['findings'] if a['covered'] else '—'} | {obs} |")
+        est = f"est. {_fmt(Decimal(a['estimated_usd_in_window']))}" if a["estimated_usd_in_window"] else "—"
+        L.append(f"| {a['title']} | {cov} | {a['findings'] if a['covered'] else '—'} | {obs} | {est} |")
     L += ["", "A check marked NOT COVERED had no data from this source: it found nothing because it could not look, "
           "not because there is nothing there.", "", "## Findings", ""]
     if not rep["findings"]:
@@ -263,8 +288,8 @@ def render_markdown(rep: dict) -> str:
           f"- {rep['customer_data']}. Orders are identified by their Shopify order ID only.",
           "- The read was read-only: the connection had no write access, and we refuse any credential that has it.", "",
           "## Evidence", "",
-          f"- Scan recorded on ZBM's tamper-evident ledger ({rep['ledger']['scan_events']} events; chain verified: "
-          f"{'yes' if rep['ledger']['verified'] else 'NO'}), tied to the store read by snapshot `{rep['snapshot_id']}`.",
+          f"- Scan recorded on ZBM's tamper-evident ledger ({rep['ledger']['scan_events']} events; chain verified), "
+          f"tied to the store read by snapshot `{rep['snapshot_id']}`.",
           ""]
     return "\n".join(L)
 

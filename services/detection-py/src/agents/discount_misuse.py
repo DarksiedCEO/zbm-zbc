@@ -1,17 +1,31 @@
 """
 Agent: Discount Misuse Detection
 Single job: flag orders where more than one discount code was applied to
-a single order — store policy (encoded here as the agent's rule) is one
-code per order. Stacking beyond that is the leak: revenue given away
-beyond what any single authorized promotion intended.
+a single order, and put a dollar figure on what the stack gave away beyond
+the single most valuable code.
 
-E-4 (Oct 6 2026): the recoverable amount is the EXCESS — what the stacked
-codes gave away beyond what the single most valuable code on the order would
-have given on its own. It used to be the whole combined discount, which
-also claimed the discount the customer was entitled to (probe P3: $100
-order, 10% + 5% codes -> $14.50 claimed; the leak is $4.50). Each code is
-assumed to be individually valid, the reading most favourable to the
-customer, so the figure is a floor of the leak under the one-code policy.
+E-4 (Oct 6 2026): the figure is the EXCESS — what the stacked codes gave
+away beyond what the single most valuable code on the order would have
+given on its own (probe P3: $100 order, 10% + 5% codes -> the excess is
+$4.50, not the whole $14.50).
+
+H-1 (final go-live AEGIS, Oct 25 2026):
+  - When the source recorded what each code gave (Shopify: the line items'
+    discountAllocations, store_connector.translate), those recorded amounts
+    are the stack's total. They are never recomputed from the codes'
+    nominal values against the full price (Shopify computes two percentage
+    order codes on the same subtotal, and applies order codes after product
+    and automatic discounts; a recomputation misstates both).
+  - The "one code per order" policy is this agent's ASSUMPTION, not
+    something read from the store. Shopify only lets codes combine when the
+    store's own discount settings allow it, so a stack on a Shopify order is
+    not an observed violation. Every finding is therefore ESTIMATED
+    (labels attributed/medium, the most zbm_schema allows ESTIMATED
+    evidence), and its cause states the assumption next to the figure. It
+    is never OBSERVED, so the client report never marks it quotable.
+  - The subtrahend is the most any one code could have given ALONE on the
+    full subtotal (never less than what the store recorded for it), so the
+    excess is a floor under the stated assumption.
 """
 
 from __future__ import annotations
@@ -35,14 +49,26 @@ from zbm_schema import (
     Order,
     ValueClassification,
 )
+from zbm_schema.limits import CAUSE_DESCRIPTION_MAX_CHARS
 
 AGENT_ID = "discount-misuse-v1"
 METHODOLOGY_ID = "disc_excess_best_code"
+METHODOLOGY_ID_RECORDED = "disc_excess_recorded"
+ASSUMPTION = (
+    "Assumption, not an observed breach: this counts as a leak only if the store intends at most one code per "
+    "order. Shopify combines codes only when each discount's combination setting allows it, so the store's own "
+    "settings permitted this stack."
+)
 METHODOLOGY = (
-    "Discount given by all stacked codes, applied in order against the running subtotal, minus the "
-    "discount the single most valuable code on the order would have given alone on the full subtotal. "
-    "Every code is assumed individually valid, so this is the least the one-code policy was breached by. "
-    "Exact cent arithmetic on the recorded order."
+    "Discount given by all stacked codes, applied in order against the running subtotal (the source recorded no "
+    "per-code amounts), minus the discount the single most valuable code would have given alone on the full "
+    "subtotal. Exact cent arithmetic. ESTIMATED: a leak only under the assumed one-code-per-order policy."
+)
+METHODOLOGY_RECORDED = (
+    "Sum of the discount the store recorded for each stacked code on this order (Shopify's per-line discount "
+    "allocations), minus the most the single most valuable code could have given alone on the full subtotal. "
+    "Only orders whose discounts are all codes, with no refund and no reduced line, are analysed. Exact cents. "
+    "ESTIMATED: a leak only under the assumed one-code-per-order policy, which the store's settings did not enforce."
 )
 
 
@@ -80,6 +106,18 @@ def _single_code_discount_usd(order: Order, d: DiscountApplication) -> Decimal:
         return quantize_money(min(d.amount_off_usd, order.subtotal_usd))
 
 
+def _cause(order: Order, given_away: Decimal, best_single: Decimal, excess: Decimal, recorded: bool) -> str:
+    given = (f"The store recorded ${format_money(given_away)} of discount from them" if recorded else
+             f"Applied in turn they give ${format_money(given_away)}")
+    rest = (f"; the most valuable code alone would have given at most ${format_money(best_single)}, so "
+            f"${format_money(excess)} was given beyond one code. {ASSUMPTION}")
+    codes = ", ".join(d.code for d in order.discounts)
+    text = f"{len(order.discounts)} discount codes on one order ({codes}). {given}{rest}"
+    if len(text) > CAUSE_DESCRIPTION_MAX_CHARS:
+        text = f"{len(order.discounts)} discount codes on one order. {given}{rest}"
+    return text
+
+
 def detect(orders: list[Order], *, client_id: str) -> list[Finding]:
     findings: list[Finding] = []
 
@@ -87,11 +125,22 @@ def detect(orders: list[Order], *, client_id: str) -> list[Finding]:
         if len(order.discounts) <= 1:
             continue  # zero or one discount code is within policy — not a leak
 
-        given_away = _effective_discount_usd(order)
-        best_single = max(_single_code_discount_usd(order, d) for d in order.discounts)
+        recorded_amounts = [d.recorded_usd for d in order.discounts]
+        if all(r is not None for r in recorded_amounts):
+            recorded = True
+            with money_context():
+                given_away = quantize_money(sum(recorded_amounts, Decimal("0.00")))
+                # Never less than what the store recorded for that code (H-1: the excess stays a floor).
+                best_single = max(max(_single_code_discount_usd(order, d), d.recorded_usd) for d in order.discounts)
+        elif any(r is not None for r in recorded_amounts):
+            continue  # some codes recorded and some not: no exact figure exists, so no finding
+        else:
+            recorded = False
+            given_away = _effective_discount_usd(order)
+            best_single = max(_single_code_discount_usd(order, d) for d in order.discounts)
         with money_context():
-            # Never negative for valid input (stacking gives at least what any
-            # one of its codes gives alone); max() guards cent rounding.
+            # max() guards cent rounding and recorded amounts below the
+            # best code's stand-alone value.
             excess = quantize_money(max(given_away - best_single, Decimal(0)))
         if excess <= 0:
             # N6 (AEGIS round 2): stacked codes that gave away nothing after
@@ -103,7 +152,6 @@ def detect(orders: list[Order], *, client_id: str) -> list[Finding]:
             # single code (e.g. a second 0% code, or a first code that already
             # took the whole subtotal).
             continue
-        codes = ", ".join(d.code for d in order.discounts)
 
         findings.append(
             new_finding(
@@ -114,23 +162,19 @@ def detect(orders: list[Order], *, client_id: str) -> list[Finding]:
                 entity_id=order.order_id,
                 customer_id=order.customer_id,
                 cause_certainty=CauseCertainty.NAMED,
-                cause_description=(
-                    f"{len(order.discounts)} discount codes stacked on one order ({codes}), "
-                    f"against single-code policy. The stack gave away ${format_money(given_away)}; the most "
-                    f"valuable single code alone would have given ${format_money(best_single)}, so "
-                    f"${format_money(excess)} was given away beyond any one authorized code."
-                ),
+                cause_description=_cause(order, given_away, best_single, excess, recorded),
                 recoverable_value=LabeledValue(
                     amount_usd=excess,
-                    classification=ValueClassification.OBSERVED,
-                    # Was VERY_HIGH. The arithmetic is exact, but the one-code
-                    # policy is this agent's assumption, not read from the
-                    # store's own promotion rules.
-                    confidence=DecisionConfidence.HIGH,
+                    # H-1: was OBSERVED/HIGH. The arithmetic is exact, but the
+                    # one-code policy is this agent's assumption (see module
+                    # docstring), so the figure is ESTIMATED and its labels
+                    # are capped at attributed/medium (zbm_schema M2).
+                    classification=ValueClassification.ATTRIBUTED,
+                    confidence=DecisionConfidence.MEDIUM,
                 ),
-                evidence_class=EvidenceClass.OBSERVED,
-                methodology_id=METHODOLOGY_ID,
-                methodology=METHODOLOGY,
+                evidence_class=EvidenceClass.ESTIMATED,
+                methodology_id=METHODOLOGY_ID_RECORDED if recorded else METHODOLOGY_ID,
+                methodology=METHODOLOGY_RECORDED if recorded else METHODOLOGY,
             )
         )
 

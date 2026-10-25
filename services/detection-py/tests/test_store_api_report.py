@@ -138,7 +138,9 @@ def test_refusal_answers_carry_only_the_reason(client, store):
 
 # ---- scan on store data + report ----------------------------------------------------------------------------
 
-def test_scan_on_store_data_gives_observed_findings_and_a_client_report(client, store, caplog):
+def test_scan_on_store_data_gives_estimated_findings_and_a_client_report(client, store, caplog):
+    """H-1 (final go-live AEGIS): stacked-code figures are ESTIMATED (the one-code policy is an assumption, and
+    Shopify only combines codes the store set to combine), so none is quotable and the projection says so."""
     caplog.set_level(logging.DEBUG)
     nodes = [_stacked(i) for i in range(1, 4)] + [order(i) for i in range(4, 40)] + [order(40, test=True)]
     for i, n in enumerate(nodes):                     # spread over 30 days so a projection is allowed
@@ -147,20 +149,22 @@ def test_scan_on_store_data_gives_observed_findings_and_a_client_report(client, 
     assert client.post("/stores/sync", json={"client_id": "acme"}, headers=AUTH).status_code == 200
     scan = simulate_scan(client, "acme")
     assert len(scan["findings"]) == 3
-    assert {f["evidence_class"] for f in scan["findings"]} == {"OBSERVED"}
+    assert {f["evidence_class"] for f in scan["findings"]} == {"ESTIMATED"}
     assert {f["agent_id"] for f in scan["findings"]} == {"discount-misuse-v1"}
+    assert {f["methodology_id"] for f in scan["findings"]} == {"disc_excess_recorded"}
     rep = rr_report.build_report(scan)
-    assert rep["evidence_counts"] == {"OBSERVED": 3, "ESTIMATED": 0, "MODELED": 0, "UNKNOWN": 0}
-    assert all(r["quotable"] for r in rep["findings"])
+    assert rep["evidence_counts"] == {"OBSERVED": 0, "ESTIMATED": 3, "MODELED": 0, "UNKNOWN": 0}
+    assert not any(r["quotable"] for r in rep["findings"])
     disc = next(a for a in rep["agents"] if a["agent_id"] == "discount-misuse-v1")
-    assert disc["covered"] and disc["observed_usd_in_window"] == "15.00"
+    assert disc["covered"] and disc["observed_usd_in_window"] is None and disc["estimated_usd_in_window"] == "15.00"
     assert rep["agents"][0]["agent_id"] == "discount-misuse-v1"
     assert [a["agent_id"] for a in rep["agents"] if not a["covered"]] == [
         "affiliate-coupon-extension-v1", "abandoned-cart-coverage-v1", "renewal-never-triggered-v1",
         "server-side-attribution-v1", "cross-channel-attribution-v1", "platform-integration-v1",
         "contract-pricing-term-drift-v1"]
     (p,) = rep["projections"]
-    assert p["evidence_class"] == "ESTIMATED" and p["confidence"] == "low"
+    assert p["evidence_class"] == "ESTIMATED" and p["confidence"] == "low" and p["base_evidence_class"] == "ESTIMATED"
+    assert "at most one discount code per order" in p["assumption"] and p["basis"].startswith("est. $15.00")
     days = rep["window_days"]
     assert Decimal(p["amount_usd"]) == (Decimal("15.00") * 365 / days).quantize(Decimal("0.01"))
     assert rep["counts"]["orders_excluded"] == {"test_order": 1}
@@ -168,14 +172,16 @@ def test_scan_on_store_data_gives_observed_findings_and_a_client_report(client, 
     md = rr_report.render_markdown(rep)
     # AEGIS golive-rr L4: assert on the table rows, not on the explanatory paragraph that also says NOT COVERED
     rows = {line.split(" | ")[0].lstrip("| "): line for line in md.splitlines()
-            if line.startswith("| ") and line.count(" | ") == 3}
-    assert rows["Stacked discount codes"] == "| Stacked discount codes | yes | 3 | $15.00 |"
+            if line.startswith("| ") and line.count(" | ") == 4}
+    assert rows["Stacked discount codes"] == "| Stacked discount codes | yes | 3 | — | est. $15.00 |"
     not_covered = [t for t, line in rows.items() if " | NOT COVERED — " in line]
     assert sorted(not_covered) == sorted(rr_report.AGENT_TITLES[a] for a in rr_report.AGENT_TITLES
                                          if a != "discount-misuse-v1")
     for t in not_covered:
-        assert rows[t].endswith(" | — | — |")
-    assert "est. $" in md and "quotable" in md
+        assert rows[t].endswith(" | — | — | — |")
+    assert "est. $" in md and "· quotable" not in md
+    for line in (x for x in md.splitlines() if x.startswith("- ") and "discount codes on one order" in x):
+        assert "Assumption, not an observed breach" in line and "settings permitted this stack" in line
     assert "score" not in md.lower().replace("no overall score", "")
     assert "grand total" not in md.lower().replace("no grand total", "")
     for secret in SECRETS:
@@ -203,7 +209,7 @@ def test_estimated_and_unknown_findings_render_as_such():
     base = {"client_id": "acme", "entity_id": "o1", "cause_description": "c", "methodology": "m"}
     scan = {"scan_id": "s", "client_id": "acme", "as_of": "2026-10-24T12:00:00Z", "data_source": "shopify:snap-x",
             "non_live_data_source": False, "store_coverage": cov, "store_snapshot_id": "snap-x",
-            "overlapping_claims": {"acme|order|o1": []},
+            "ledger_verify": {"valid": True}, "overlapping_claims": {"acme|order|o1": []},
             "findings": [{**base, "finding_id": "f1", "agent_id": "affiliate-coupon-extension-v1",
                           "evidence_class": "ESTIMATED", "recoverable_value": {"amount_usd": "12.00",
                           "classification": "attributed", "confidence": "medium"}},
@@ -225,7 +231,49 @@ def _projection_scan(window: dict, observed: str = "100.00", code: str = "SAVE10
          "evidence_class": "OBSERVED",
          "recoverable_value": {"amount_usd": observed, "classification": "observed", "confidence": "high"}}
     return {"scan_id": "s", "client_id": "acme", "as_of": "2026-10-24T12:00:00Z", "data_source": "shopify:snap-x",
-            "non_live_data_source": False, "store_coverage": cov, "store_snapshot_id": "snap-x", "findings": [f]}
+            "non_live_data_source": False, "store_coverage": cov, "store_snapshot_id": "snap-x", "findings": [f],
+            "ledger_verify": {"valid": True}}
+
+
+def test_report_refuses_a_scan_whose_ledger_did_not_verify(tmp_path):
+    """L-3 (final go-live AEGIS): refused, never rendered as "chain verified: NO"."""
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": None}
+    good = _projection_scan(window)
+    for verify in ({"valid": False}, {}, None, {"valid": "true"}, {"valid": 1}):
+        scan = {**good, "ledger_verify": verify}
+        with pytest.raises(rr_report.ReportInputError, match="did not verify"):
+            rr_report.build_report(scan)
+    scan = {k: v for k, v in good.items() if k != "ledger_verify"}
+    with pytest.raises(rr_report.ReportInputError):
+        rr_report.build_report(scan)
+    rep = rr_report.build_report(good)
+    md = rr_report.render_markdown(rep)
+    assert "chain verified)" in md and "chain verified: NO" not in md
+    with pytest.raises(rr_report.ReportInputError):
+        rr_report.render_markdown({**rep, "ledger": {**rep["ledger"], "verified": False}})
+    scan_file = tmp_path / "scan.json"
+    scan_file.write_text(json.dumps({**good, "ledger_verify": {"valid": False}}))
+    cli = Path(__file__).resolve().parents[1] / "devtools" / "rr_report.py"
+    out = subprocess.run([sys.executable, str(cli), str(scan_file), "--md", str(tmp_path / "r.md")],
+                         capture_output=True, text=True, timeout=120, check=False)
+    assert out.returncode == 2 and "did not verify" in out.stderr and not (tmp_path / "r.md").exists()
+
+
+def test_projection_keeps_observed_and_estimated_bases_apart():
+    """H-1: one projection per evidence class; an ESTIMATED base carries its findings' assumption."""
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": None}
+    scan = _projection_scan(window)
+    est = {**scan["findings"][0], "finding_id": "f2", "entity_id": "shopify-order-2", "evidence_class": "ESTIMATED",
+           "recoverable_value": {"amount_usd": "30.00", "classification": "attributed", "confidence": "medium"}}
+    scan["findings"].append(est)
+    rep = rr_report.build_report(scan)
+    by = {p["base_evidence_class"]: p for p in rep["projections"]}
+    assert set(by) == {"OBSERVED", "ESTIMATED"}
+    assert by["OBSERVED"]["amount_usd"] == "608.33" and by["ESTIMATED"]["amount_usd"] == "182.50"   # 30 x 365/60
+    assert all(p["evidence_class"] == "ESTIMATED" and p["confidence"] == "low" for p in by.values())
+    assert "one discount code per order" in by["ESTIMATED"]["assumption"]
+    assert "one discount code per order" not in by["OBSERVED"]["assumption"]
+    assert "790.83" not in json.dumps(rep) + rr_report.render_markdown(rep)                          # never summed
 
 
 def test_sparse_orders_do_not_inflate_the_projection():

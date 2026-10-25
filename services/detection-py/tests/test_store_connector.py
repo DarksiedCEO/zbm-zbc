@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from _store_fakes import (CC_ID, CC_SECRET, CC_TOKEN, NOW, SECRETS, TOKEN, TOKEN_B, Clock, FakeShopify,
-                          MemoryLedger, code_app, conn, cost, money, order, write_connections, write_secret)
+                          MemoryLedger, allocation, code_app, conn, cost, money, order, write_connections, write_secret)
 from agents import discount_misuse
 from store_connector import shopify_models as m
 from store_connector.config import Secret, load_connections, read_secret_file
@@ -202,8 +202,10 @@ def test_success_paginates_with_cursors_and_translates(tmp_path):
     findings = discount_misuse.detect(orders, client_id="acme")
     assert len(findings) == 5
     f = findings[0]
-    assert f.evidence_class == EvidenceClass.OBSERVED and f.customer_id == CUSTOMER_NOT_COLLECTED
-    # $100 subtotal: 10% = $10, then $5 -> stack $15; best single code $10 -> $5.00 beyond policy
+    # H-1: ESTIMATED (the one-code policy is an assumption), computed from the amounts Shopify recorded
+    assert f.evidence_class == EvidenceClass.ESTIMATED and f.customer_id == CUSTOMER_NOT_COLLECTED
+    assert f.methodology_id == "disc_excess_recorded"
+    # $100 subtotal: recorded 10% = $10 and $5 -> stack $15; best single code alone $10 -> $5.00 beyond one code
     assert f.recoverable_value.amount_usd == Decimal("5.00")
     assert f.entity_id.startswith("shopify-order-")
 
@@ -245,6 +247,14 @@ def test_lookback_beyond_60_days_needs_read_all_orders(tmp_path):
     assert r2.lookback_days == 200 and not r2.lookback_limited_by_scope
 
 
+_AUTO50 = {"__typename": "AutomaticDiscountApplication", "allocationMethod": "ACROSS", "targetSelection": "ALL",
+           "targetType": "LINE_ITEM", "value": {"__typename": "PricingPercentageValue", "percentage": 50.0}}
+
+
+def _translate(nodes: list):
+    return translate([m.OrderNode.model_validate_json(json.dumps(n)) for n in nodes])
+
+
 def test_translation_excludes_what_the_agent_would_misstate():
     nodes = [order(1, test=True), order(2, cancelled=True), order(3, status="REFUNDED"), order(4, status=None),
              order(5, more_lines=True),
@@ -253,21 +263,124 @@ def test_translation_excludes_what_the_agent_would_misstate():
              order(8, codes=[code_app("EACH5", amount="5.00", alloc="EACH"), code_app("C", pct=5.0)]),
              order(9, lines=[{"sku": "X", "quantity": 1, "originalUnitPriceSet": money("1.005")}]),
              order(10, lines=[{"sku": None, "quantity": 1, "originalUnitPriceSet": money("0.00")}]),
-             order(11, codes=[{"__typename": "AutomaticDiscountApplication", "allocationMethod": "ACROSS",
-                               "targetSelection": "ALL", "targetType": "LINE_ITEM",
-                               "value": {"__typename": "PricingPercentageValue", "percentage": 10.0}}]),
+             # H-1 (final go-live AEGIS): an automatic discount on the order -> no exact per-code attribution,
+             # excluded (it used to be analysed with the automatic discount ignored).
+             order(11, codes=[{**_AUTO50, "value": {"__typename": "PricingPercentageValue", "percentage": 10.0}}]),
              order(12, codes=[code_app("Z" * 65, pct=5.0)]),
+             order(13, codes=[code_app("A", pct=10.0), code_app("B", pct=10.0)], status="PARTIALLY_REFUNDED"),
+             order(14, refunded="5.00"),
+             order(15, lines=[{"sku": "X", "quantity": 2, "currentQuantity": 1, "originalUnitPriceSet": money("50.00")}]),
              order(1)]
-    parsed = [m.OrderNode.model_validate_json(json.dumps(n)) for n in nodes]
-    orders, counts = translate(parsed)
-    assert [o.order_id for o in orders] == ["shopify-order-5010", "shopify-order-5011"]
+    orders, counts = _translate(nodes)
+    assert [o.order_id for o in orders] == ["shopify-order-5010"]
     assert counts["orders_excluded"] == {
         "cancelled": 1, "discount_code_format": 1, "duplicate_in_read": 1, "financial_status_refunded": 1,
-        "financial_status_unknown": 1, "line_items_over_cap": 1, "money_format_or_currency": 1,
-        "per_item_fixed_discount_not_modelled": 1, "shipping_discount_code_not_modelled": 1,
+        "financial_status_unknown": 1, "line_items_over_cap": 1, "line_items_refunded_or_removed": 1,
+        "money_format_or_currency": 1, "non_code_discount_present": 1, "partially_refunded": 1,
+        "per_item_fixed_discount_not_modelled": 1, "refund_recorded": 1, "shipping_discount_code_not_modelled": 1,
         "targeted_discount_code_not_modelled": 1, "test_order": 1}
     assert counts["line_items_dropped_zero_value"] == 1 and counts["non_code_discounts_left_out"] == 1
     assert all(o.customer_id == CUSTOMER_NOT_COLLECTED for o in orders)
+
+
+def test_h1_automatic_discount_with_two_codes_is_not_analysed():
+    """The AEGIS H-1 case: $100 order (2 x $50), codes A 10% and B 10%, plus a 50% automatic discount. The report
+    used to say $9.00 OBSERVED ("the stack gave away $19.00") against the full price. No exact per-code figure
+    exists once an automatic discount changed the base, so the order is left out and counted, and no figure is
+    claimed."""
+    codes_only = order(1, codes=[code_app("A", pct=10.0), code_app("B", pct=10.0)])
+    with_auto = order(2, codes=[_AUTO50, code_app("A", pct=10.0), code_app("B", pct=10.0)],
+                      allocations=[[allocation(0, "50.00"), allocation(1, "5.00"), allocation(2, "5.00")]])
+    orders, counts = _translate([codes_only, with_auto])
+    assert [o.order_id for o in orders] == ["shopify-order-5001"]
+    assert counts["orders_excluded"] == {"non_code_discount_present": 1}
+    assert counts["non_code_discounts_left_out"] == 1
+    (f,) = discount_misuse.detect(orders, client_id="acme")
+    # Shopify computes both percentage codes on the same $100 subtotal (help.shopify.com discount combinations):
+    # recorded $10 + $10 = $20, best single code alone $10 -> $10.00 (the old sequential recompute said $9.00).
+    assert f.recoverable_value.amount_usd == Decimal("10.00")
+    assert f.evidence_class == EvidenceClass.ESTIMATED
+    assert f.recoverable_value.classification.value == "attributed"
+    assert f.recoverable_value.confidence.value == "medium"
+    assert "The store recorded $20.00" in f.cause_description
+    assert "Assumption, not an observed breach" in f.cause_description
+    assert "against single-code policy" not in f.cause_description
+
+
+@pytest.mark.parametrize("node", [
+    order(1, codes=[code_app("A", pct=10.0), code_app("B", pct=10.0)], status="PARTIALLY_REFUNDED"),
+    order(1, codes=[code_app("A", pct=10.0), code_app("B", pct=10.0)], refunded="45.00"),
+    order(1, codes=[code_app("A", pct=10.0), code_app("B", pct=10.0)],
+          lines=[{"sku": "X", "quantity": 2, "currentQuantity": 1, "originalUnitPriceSet": money("50.00")}]),
+], ids=["partially_refunded", "refund_recorded", "line_items_refunded_or_removed"])
+def test_h1_refunded_orders_are_not_counted_at_original_prices(node):
+    """Shopify's discountAllocations include the discount on refunded and removed units, so a refunded order has
+    no exact figure: excluded and counted under its own reason."""
+    orders, counts = _translate([node])
+    assert orders == [] and discount_misuse.detect(orders, client_id="acme") == []
+    (reason,) = counts["orders_excluded"]
+    assert reason in ("partially_refunded", "refund_recorded", "line_items_refunded_or_removed")
+
+
+def test_h1_recorded_allocations_are_used_not_recomputed():
+    """The amounts Shopify recorded per code (summed over every line's discountAllocations for the code's
+    discount application index) are the stack's total; the nominal values are only used for the stand-alone
+    best code, which is never below what was recorded for it."""
+    lines = [{"sku": "A", "quantity": 1, "originalUnitPriceSet": money("60.00")},
+             {"sku": "B", "quantity": 1, "originalUnitPriceSet": money("40.00")}]
+    # 10% + $30: recorded 6+4 for the percent code and 18+12 for the fixed code, split across both lines
+    node = order(1, codes=[code_app("P10", pct=10.0), code_app("FLAT30", amount="30.00")], lines=lines,
+                 allocations=[[allocation(0, "6.00"), allocation(1, "18.00")],
+                              [allocation(0, "4.00"), allocation(1, "12.00")]])
+    (o,), _ = _translate([node])
+    assert [(d.code, d.recorded_usd) for d in o.discounts] == [("P10", Decimal("10.00")), ("FLAT30", Decimal("30.00"))]
+    (f,) = discount_misuse.detect([o], client_id="acme")
+    assert f.recoverable_value.amount_usd == Decimal("10.00")             # 40 recorded - 30 (FLAT30 alone)
+    # A store that recorded less than the nominal values (e.g. its own rounding or a cap) is believed, not the
+    # nominal values: recorded 10 + 25 = 35, best alone 30 -> 5.00.
+    low = order(2, codes=[code_app("P10", pct=10.0), code_app("FLAT30", amount="30.00")], lines=lines,
+                allocations=[[allocation(0, "10.00"), allocation(1, "25.00")], []])
+    (o2,), _ = _translate([low])
+    (f2,) = discount_misuse.detect([o2], client_id="acme")
+    assert f2.recoverable_value.amount_usd == Decimal("5.00")
+    # A code that recorded MORE than it could give alone: the subtrahend is the recorded amount (a floor).
+    high = order(3, codes=[code_app("P10", pct=10.0), code_app("P5", pct=5.0)],
+                 allocations=[[allocation(0, "12.00"), allocation(1, "5.00")]])
+    (o3,), _ = _translate([high])
+    (f3,) = discount_misuse.detect([o3], client_id="acme")
+    assert f3.recoverable_value.amount_usd == Decimal("5.00")             # 17 - max(10 alone, 12 recorded)
+    # A code Shopify recorded nothing for gives nothing; a stack whose total is within the best code gives no finding.
+    none = order(4, codes=[code_app("P10", pct=10.0), code_app("P5", pct=5.0)], allocations=[[allocation(0, "10.00")]])
+    (o4,), _ = _translate([none])
+    assert o4.discounts[1].recorded_usd == Decimal("0.00") and discount_misuse.detect([o4], client_id="acme") == []
+
+
+def test_h1_inconsistent_allocations_are_excluded():
+    codes = [code_app("A", pct=10.0), code_app("B", pct=10.0)]
+    unmatched = order(1, codes=codes, allocations=[[allocation(7, "10.00")]])
+    dup = order(2, codes=[{**codes[0], "index": 0}, {**codes[1], "index": 0}])
+    eur = order(3, codes=codes, allocations=[[{"allocatedAmountSet": money("10.00", "EUR"),
+                                               "discountApplication": {"index": 0}}]])
+    over = order(4, codes=codes, allocations=[[allocation(0, "80.00"), allocation(1, "30.00")]])
+    orders, counts = _translate([unmatched, dup, eur, over])
+    assert orders == []
+    assert counts["orders_excluded"] == {"discount_allocation_unmatched": 2, "money_format_or_currency": 1,
+                                         "recorded_discount_exceeds_subtotal": 1}
+
+
+def test_h1_a_partly_recorded_order_gives_no_finding():
+    o = Order.model_validate({
+        "order_id": "o1", "customer_id": "c", "placed_at": "2026-10-01T00:00:00Z", "status": "paid",
+        "line_items": [{"sku": "s", "unit_price_usd": "100.00", "quantity": 1}], "source_platform": "shopify",
+        "discounts": [{"code": "A", "percent_off": 10, "recorded_usd": "10.00"}, {"code": "B", "percent_off": 10}]})
+    assert discount_misuse.detect([o], client_id="acme") == []
+
+
+def test_h1_cause_fits_the_schema_with_ten_long_codes():
+    codes = [code_app(f"{i}" + "C" * 63, pct=1.0) for i in range(10)]
+    (o,), _ = _translate([order(1, codes=codes)])
+    (f,) = discount_misuse.detect([o], client_id="acme")
+    assert "Assumption, not an observed breach" in f.cause_description and len(f.cause_description) <= 1024
 
 
 # ---- throttling -----------------------------------------------------------------------------------------------
