@@ -18,8 +18,10 @@ line items' ``discountAllocations`` that point at the code's discount applicatio
 recomputation from the code's nominal value. Shopify's allocations include amounts on refunded and removed units,
 and an automatic, manual or script discount changes what each code was applied to, so no exact per-code attribution
 exists for: an order with any non-code discount application (``non_code_discount_present``), a partially refunded
-order (``partially_refunded``), an order with any refund recorded (``refund_recorded``), and an order whose line
-quantities were reduced by a refund or an edit (``line_items_refunded_or_removed``). Those orders are excluded and
+order (``partially_refunded``), an order with any refund recorded (``refund_recorded``), an order whose line
+quantities were reduced by a refund or an edit (``line_items_refunded_or_removed``), an edited order
+(``order_edited``: ``discountApplications`` omits order-edit discounts), and an order whose line allocations do not
+add up to Shopify's ``totalDiscountsSet`` (``discount_total_mismatch``). Those orders are excluded and
 counted; the report lists them as left out.
 """
 
@@ -97,6 +99,9 @@ def _recorded_by_index(n: m.OrderNode) -> tuple[Optional[dict], Optional[str]]:
     known = {app.index for app in n.discountApplications.nodes}
     if len(known) != len(n.discountApplications.nodes):
         return None, "discount_allocation_unmatched"
+    total = _usd(n.totalDiscountsSet.shopMoney) if n.totalDiscountsSet is not None else None
+    if total is None:
+        return None, "money_format_or_currency"
     by_index: dict = {}
     for li in n.lineItems.nodes:
         for al in li.discountAllocations:
@@ -107,6 +112,10 @@ def _recorded_by_index(n: m.OrderNode) -> tuple[Optional[dict], Optional[str]]:
             if amount is None:
                 return None, "money_format_or_currency"
             by_index[idx] = by_index.get(idx, Decimal("0.00")) + amount
+    # L-B: every discount on the order must be accounted for by the allocations read; a discount the list omits
+    # (an order-edit discount) or an allocation that inflates a code would make the sums differ.
+    if sum(by_index.values(), Decimal("0.00")) != total:
+        return None, "discount_total_mismatch"
     return by_index, None
 
 
@@ -149,6 +158,9 @@ def translate(nodes: list) -> tuple[list[Order], dict]:
             continue
         if n.discountApplications.pageInfo.hasNextPage:
             excluded["discount_applications_over_cap"] += 1
+            continue
+        if n.edited:
+            excluded["order_edited"] += 1
             continue
         if any(li.currentQuantity != li.quantity for li in n.lineItems.nodes):
             excluded["line_items_refunded_or_removed"] += 1

@@ -131,7 +131,7 @@ def _projection(agent_id: str, ev_class: str, total: Decimal, window_days: int, 
                 window: dict) -> dict:
     """One ESTIMATED yearly projection from one evidence class of one check's figures in the window (H-1: the base
     is the corrected findings, and an ESTIMATED base says so and keeps its findings' assumption)."""
-    base = f"{_fmt(total)} observed" if ev_class == "OBSERVED" else f"est. {_fmt(total)} (ESTIMATED findings)"
+    base = f"{_fmt(total)} observed" if ev_class == "OBSERVED" else f"est. {_fmt(total)} ({ev_class} findings)"
     if window_basis == "requested_window":
         basis = f"{base} in the {window_days}-day window read (every order in it was read) x 365/{window_days}"
     else:
@@ -187,15 +187,18 @@ def build_report(scan: dict) -> dict:
     for agent_id, c in listed:
         a_rows = by_agent.get(agent_id, [])
         observed = [Decimal(r["amount_usd"]) for r in a_rows if r["evidence_class"] == "OBSERVED"]
-        estimated = [Decimal(r["amount_usd"]) for r in a_rows if r["evidence_class"] in ("ESTIMATED", "MODELED")]
+        # L-A (AEGIS wave3): MODELED has its own column and projection; it is never summed under ESTIMATED.
+        estimated = [Decimal(r["amount_usd"]) for r in a_rows if r["evidence_class"] == "ESTIMATED"]
+        modeled = [Decimal(r["amount_usd"]) for r in a_rows if r["evidence_class"] == "MODELED"]
         entry = {"agent_id": agent_id, "title": AGENT_TITLES.get(agent_id, agent_id), "covered": bool(c["covered"]),
                  "why": c["why"], "findings": len(a_rows),
                  "observed_usd_in_window": str(sum(observed, Decimal(0)).quantize(CENT)) if observed else None,
                  "estimated_usd_in_window": str(sum(estimated, Decimal(0)).quantize(CENT)) if estimated else None,
+                 "modeled_usd_in_window": str(sum(modeled, Decimal(0)).quantize(CENT)) if modeled else None,
                  "findings_without_figure": sum(1 for r in a_rows if r["evidence_class"] == "UNKNOWN")}
         agents.append(entry)
         if window_days and window_days >= MIN_PROJECTION_WINDOW_DAYS:
-            for ev_class, figures in (("OBSERVED", observed), ("ESTIMATED", estimated)):
+            for ev_class, figures in (("OBSERVED", observed), ("ESTIMATED", estimated), ("MODELED", modeled)):
                 if figures:
                     projections.append(_projection(agent_id, ev_class, sum(figures, Decimal(0)), window_days,
                                                    window_basis, window))
@@ -243,6 +246,8 @@ def render_markdown(rep: dict) -> str:
          "figures we quote as facts.",
          "- **est.** figures are ESTIMATED: observed inputs plus an assumption we state next to them. They hold only "
          "if that assumption holds, and we do not quote them as facts.",
+         "- **MODELED** figures (marked est.) come from a statistical model; they have their own column and projection "
+         "and are never added to observed or estimated figures.",
          "- **No dollar figure** means we found the gap but the data cannot support an amount.",
          "- There is no overall score and no grand total: figures of different kinds are never added together, and "
          "an order flagged by two checks is marked, not counted twice.", "",
@@ -259,12 +264,13 @@ def render_markdown(rep: dict) -> str:
         L += [f"| {k.replace('_', ' ')} | {v} |" for k, v in c["orders_excluded"].items()]
         L.append("")
     L += ["## Checks run", "", "| Check | Covered by this store's data | Findings | Observed in window | "
-          "Estimated in window |", "|---|---|---|---|---|"]
+          "Estimated in window | Modeled in window |", "|---|---|---|---|---|---|"]
     for a in rep["agents"]:
         cov = "yes" if a["covered"] else f"NOT COVERED — {_md(a['why'])}"
         obs = _fmt(Decimal(a["observed_usd_in_window"])) if a["observed_usd_in_window"] else "—"
         est = f"est. {_fmt(Decimal(a['estimated_usd_in_window']))}" if a["estimated_usd_in_window"] else "—"
-        L.append(f"| {a['title']} | {cov} | {a['findings'] if a['covered'] else '—'} | {obs} | {est} |")
+        mod = f"est. {_fmt(Decimal(a['modeled_usd_in_window']))}" if a.get("modeled_usd_in_window") else "—"
+        L.append(f"| {a['title']} | {cov} | {a['findings'] if a['covered'] else '—'} | {obs} | {est} | {mod} |")
     L += ["", "A check marked NOT COVERED had no data from this source: it found nothing because it could not look, "
           "not because there is nothing there.", "", "## Findings", ""]
     if not rep["findings"]:

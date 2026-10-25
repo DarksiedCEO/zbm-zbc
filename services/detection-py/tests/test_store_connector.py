@@ -368,6 +368,39 @@ def test_h1_inconsistent_allocations_are_excluded():
                                          "recorded_discount_exceeds_subtotal": 1}
 
 
+def test_lb_allocations_must_add_up_to_shopifys_total_discount():
+    """AEGIS wave3 L-B (the re-review probe's case 11): an order-edit discount is not in discountApplications; if its
+    allocations shared the codes' indexes they would inflate both codes ($25 + $25 recorded on a $100 order with two
+    10% codes -> a $25.00 figure where the codes gave $10 + $10). Shopify's totalDiscountsSet ($20) disagrees with
+    the allocations ($50), so the order is excluded and no figure is claimed."""
+    codes = [code_app("A", pct=10.0), code_app("B", pct=10.0)]
+    inflated = order(1, codes=codes, allocations=[[allocation(0, "25.00"), allocation(1, "25.00")]],
+                     total_discounts="20.00")
+    orders, counts = _translate([inflated])
+    assert orders == [] and counts["orders_excluded"] == {"discount_total_mismatch": 1}
+    # the same allocations, if Shopify's own total agreed, would be analysed (the guard is the total, not the amounts)
+    agreed = order(2, codes=codes, allocations=[[allocation(0, "25.00"), allocation(1, "25.00")]])
+    (o,), _ = _translate([agreed])
+    assert discount_misuse.detect([o], client_id="acme")[0].recoverable_value.amount_usd == Decimal("25.00")
+    # a discount the list omits (allocation total below Shopify's total) is excluded too
+    omitted = order(3, codes=codes, total_discounts="70.00")
+    assert _translate([omitted])[1]["orders_excluded"] == {"discount_total_mismatch": 1}
+
+
+def test_lb_edited_orders_and_missing_totals_are_excluded():
+    codes = [code_app("A", pct=10.0), code_app("B", pct=10.0)]
+    edited = order(1, codes=codes, edited=True)
+    no_total = order(2, codes=codes)
+    no_total["totalDiscountsSet"] = None
+    eur_total = order(3, codes=codes)
+    eur_total["totalDiscountsSet"] = money("20.00", "EUR")
+    orders, counts = _translate([edited, no_total, eur_total])
+    assert orders == []
+    assert counts["orders_excluded"] == {"order_edited": 1, "money_format_or_currency": 2}
+    assert m.ORDERS_QUERY.count(" edited ") == 1 and "totalDiscountsSet { shopMoney { amount currencyCode } }" \
+        in m.ORDERS_QUERY
+
+
 def test_h1_a_partly_recorded_order_gives_no_finding():
     o = Order.model_validate({
         "order_id": "o1", "customer_id": "c", "placed_at": "2026-10-01T00:00:00Z", "status": "paid",

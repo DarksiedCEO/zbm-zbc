@@ -98,7 +98,7 @@ def shopify_allocations(apps: list, lines: list) -> list:
 def order(n: int, *, codes: list | None = None, lines: list | None = None, status: str = "PAID",
           created: datetime | None = None, test: bool = False, cancelled: bool = False,
           more_lines: bool = False, extra: dict | None = None, refunded: str = "0.00",
-          allocations: list | None = None) -> dict:
+          allocations: list | None = None, total_discounts: str | None = None, edited: bool = False) -> dict:
     """A fake Shopify order node. Discount applications get their position as ``index`` unless they carry one;
     lines get ``currentQuantity = quantity`` unless set, and ``discountAllocations`` from ``allocations`` (one list
     per line) or, by default, as Shopify would record them (``shopify_allocations``)."""
@@ -113,6 +113,12 @@ def order(n: int, *, codes: list | None = None, lines: list | None = None, statu
         default_allocs = [[] for _ in lines]   # malformed money in a test of the money checks: nothing allocated
     for i, li in enumerate(lines):
         li.setdefault("discountAllocations", allocations[i] if allocations is not None else default_allocs[i])
+    if total_discounts is None:     # default: what Shopify records, the sum of every line allocation
+        try:
+            total_discounts = str(sum((Decimal(al["allocatedAmountSet"]["shopMoney"]["amount"])
+                                       for li in lines for al in li["discountAllocations"]), Decimal("0.00")))
+        except (ArithmeticError, KeyError, TypeError, ValueError):
+            total_discounts = "0.00"
     node = {
         "legacyResourceId": str(5000 + n),
         "createdAt": (created or (NOW - timedelta(hours=n))).isoformat().replace("+00:00", "Z"),
@@ -120,7 +126,9 @@ def order(n: int, *, codes: list | None = None, lines: list | None = None, statu
         "test": test,
         "currencyCode": "USD",
         "displayFinancialStatus": status,
+        "edited": edited,
         "totalRefundedSet": money(refunded),
+        "totalDiscountsSet": money(total_discounts),
         "discountApplications": {"pageInfo": {"hasNextPage": False}, "nodes": apps},
         "lineItems": {"pageInfo": {"hasNextPage": more_lines}, "nodes": lines},
     }

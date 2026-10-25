@@ -33,7 +33,8 @@ ORDERS_QUERY = (
     "orders(first: $first, after: $after, query: $q, sortKey: CREATED_AT, reverse: true) { "
     "pageInfo { hasNextPage endCursor } "
     "nodes { legacyResourceId createdAt cancelledAt test currencyCode displayFinancialStatus "
-    "totalRefundedSet { shopMoney { amount currencyCode } } "
+    "edited totalRefundedSet { shopMoney { amount currencyCode } } "
+    "totalDiscountsSet { shopMoney { amount currencyCode } } "
     f"discountApplications(first: {DISCOUNT_APPLICATIONS_PER_ORDER}) {{ pageInfo {{ hasNextPage }} "
     "nodes { __typename index allocationMethod targetSelection targetType "
     "value { __typename ... on MoneyV2 { amount currencyCode } ... on PricingPercentageValue { percentage } } "
@@ -139,6 +140,11 @@ class OrderNode(_Node):
     currencyCode: str = Field(pattern=r"^[A-Z]{3}$")
     displayFinancialStatus: Optional[FinancialStatus] = None
     totalRefundedSet: MoneyBag
+    # L-B (AEGIS wave3 re-review): "Whether the order has had any edits applied", and the order's total discount
+    # ("both order and line level discounts", nullable). discountApplications omits order-edit discounts, so an
+    # edited order, or one whose line allocations do not add up to this total, has no exact per-code figure.
+    edited: bool
+    totalDiscountsSet: Optional[MoneyBag] = None
     discountApplications: DiscountApplications
     lineItems: LineItems
 

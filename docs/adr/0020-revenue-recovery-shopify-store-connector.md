@@ -28,6 +28,7 @@ found on shopify.dev and the design does not depend on it being true.
 | S15 | (Oct 25 2026, H-1) `LineItem` (front matter `api_version: 2026-10`): `discountAllocations: [DiscountAllocation!]!` "The discounts that have been allocated to the line item by discount applications" — a plain list, and it **includes discounts on refunded and removed quantities**; `quantity: Int!` "The number of units ordered, including refunded and removed units"; `currentQuantity: Int!` "The number of units ordered, excluding refunded and removed units". | https://shopify.dev/docs/api/admin-graphql/latest/objects/LineItem.md |
 | S16 | (Oct 25 2026, H-1) `Order` (2026-10): `totalRefundedSet: MoneyBag!` "The total amount that was refunded, in shop and presentment currencies"; `discountApplications` "A list of discounts that are applied to the order, excluding order edits and refunds". Cross-checked in Shopify's Admin schema tool (S12's tool) for `DiscountAllocation`, `LineItem.currentQuantity`, `Order.totalRefundedSet`. | https://shopify.dev/docs/api/admin-graphql/latest/objects/Order |
 | S17 | (Oct 25 2026, H-1) Combining discounts: "Multiple discounts are applied to an order only when the setting on each discount allows the combination"; with two or more percentage order discounts "both percentages are calculated on the original subtotal"; "All order discounts are applied on the order subtotal after product discounts have been applied"; a percentage order discount applies before a fixed-amount one; at most 5 product or order discount codes per order. **help.shopify.com, not shopify.dev**; used only to explain why a recomputation is wrong and why the one-code policy is an assumption, never as an input to a figure. | https://help.shopify.com/manual/discounts/discount-combinations |
+| S18 | (Oct 25 2026, AEGIS wave3 L-B) `Order.totalDiscountsSet: MoneyBag` (nullable) "The total amount discounted on the order before returns, in shop and presentment currencies. This includes both order and line level discounts."; `Order.edited: Boolean!` "Whether the order has had any edits applied. For example, adding or removing line items, updating quantities, or changing prices." Neither is deprecated. Read on the page and in Shopify's Admin schema tool. | https://shopify.dev/docs/api/admin-graphql/latest/objects/Order |
 | S12 | Schema (Shopify's Admin schema tool, pinned version not stated by the tool): `Order` has `legacyResourceId`, `createdAt`, `cancelledAt`, `test`, `currencyCode`, `displayFinancialStatus` (`AUTHORIZED EXPIRED PAID PARTIALLY_PAID PARTIALLY_REFUNDED PENDING REFUNDED VOIDED`), `discountCodes`, `discountApplications` (connection); `DiscountCodeApplication {code allocationMethod(ACROSS EACH) targetSelection(ALL ENTITLED EXPLICIT) targetType(LINE_ITEM SHIPPING_LINE) value: PricingValue = MoneyV2 | PricingPercentageValue}`; `LineItem {sku quantity originalUnitPriceSet}`; `Shop.currencyCode`; `AppInstallation.accessScopes`. | Shopify Admin GraphQL schema (MCP `graphql_schema`), cross-checked against S5 |
 
 ### U2 — can a merchant hand over an Admin API token without App Store review?
@@ -211,6 +212,8 @@ counted**, for:
 | `line_items_refunded_or_removed` | a line whose `currentQuantity` differs from `quantity` (refund or order edit, S15). |
 | `discount_allocation_unmatched` | an allocation pointing at an index the order's applications do not have, or two applications sharing one index. |
 | `recorded_discount_exceeds_subtotal` | the recorded code amounts add up to more than the analysed lines' subtotal. |
+| `order_edited` | (L-B) `Order.edited` is true (S18). `discountApplications` omits order-edit discounts (S16), so an edit discount's allocation could share an index with a code and inflate it. |
+| `discount_total_mismatch` | (L-B) the sum of every line allocation differs from `totalDiscountsSet.shopMoney` (S18), or that total is absent or not USD (`money_format_or_currency`): some discount on the order is not accounted for by the applications read. The re-review's probe case — two 10% codes on $100 with $25 + $25 recorded where Shopify's total is $20 — used to give a $25.00 figure; it is now excluded. |
 
 A refunded or partly refunded order could in principle be attributed from `refunds { refundLineItems }`; that is not
 built, so those orders are left out, and the report lists them under "Left out because". Leaving an order out can
@@ -249,7 +252,9 @@ settings permitted this stack."), and "against single-code policy" / "beyond any
 Reading each discount's `combinesWith` would tell whether the combination was configured on purpose, but not what
 the merchant intended; it needs a discounts scope and is not built.
 
-**Projection.** One projection per check and evidence class, never adding an OBSERVED base to an ESTIMATED one. The
+**Projection.** One projection per check and evidence class, never adding an OBSERVED base to an ESTIMATED one, nor a
+MODELED base to either (L-A: MODELED has its own "Modeled in window" column and its own projection; no agent emits
+MODELED today). The
 base is the corrected findings in the window (so excluded orders are not in it, and the stated assumption says so).
 A projection is always ESTIMATED, confidence low; one built on ESTIMATED findings says `est.` in its basis and adds
 their assumption (for this check: that the store intends at most one discount code per order). Affiliate, abandoned-cart, renewal, server-side,

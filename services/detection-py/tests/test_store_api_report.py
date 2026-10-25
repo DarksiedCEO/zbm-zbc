@@ -172,13 +172,13 @@ def test_scan_on_store_data_gives_estimated_findings_and_a_client_report(client,
     md = rr_report.render_markdown(rep)
     # AEGIS golive-rr L4: assert on the table rows, not on the explanatory paragraph that also says NOT COVERED
     rows = {line.split(" | ")[0].lstrip("| "): line for line in md.splitlines()
-            if line.startswith("| ") and line.count(" | ") == 4}
-    assert rows["Stacked discount codes"] == "| Stacked discount codes | yes | 3 | — | est. $15.00 |"
+            if line.startswith("| ") and line.count(" | ") == 5}
+    assert rows["Stacked discount codes"] == "| Stacked discount codes | yes | 3 | — | est. $15.00 | — |"
     not_covered = [t for t, line in rows.items() if " | NOT COVERED — " in line]
     assert sorted(not_covered) == sorted(rr_report.AGENT_TITLES[a] for a in rr_report.AGENT_TITLES
                                          if a != "discount-misuse-v1")
     for t in not_covered:
-        assert rows[t].endswith(" | — | — | — |")
+        assert rows[t].endswith(" | — | — | — | — |")
     assert "est. $" in md and "· quotable" not in md
     for line in (x for x in md.splitlines() if x.startswith("- ") and "discount codes on one order" in x):
         assert "Assumption, not an observed breach" in line and "settings permitted this stack" in line
@@ -257,6 +257,31 @@ def test_report_refuses_a_scan_whose_ledger_did_not_verify(tmp_path):
     out = subprocess.run([sys.executable, str(cli), str(scan_file), "--md", str(tmp_path / "r.md")],
                          capture_output=True, text=True, timeout=120, check=False)
     assert out.returncode == 2 and "did not verify" in out.stderr and not (tmp_path / "r.md").exists()
+
+
+def test_modeled_figures_have_their_own_column_and_projection():
+    """AEGIS wave3 L-A: a MODELED figure is never summed under ESTIMATED (column or projection)."""
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": 60, "truncated_by": None}
+    scan = _projection_scan(window)
+    base = scan["findings"][0]
+    scan["findings"] = [
+        {**base, "finding_id": "f1", "entity_id": "shopify-order-1", "evidence_class": "ESTIMATED",
+         "recoverable_value": {"amount_usd": "30.00", "classification": "attributed", "confidence": "medium"}},
+        {**base, "finding_id": "f2", "entity_id": "shopify-order-2", "evidence_class": "MODELED",
+         "recoverable_value": {"amount_usd": "12.00", "classification": "attributed", "confidence": "low"}}]
+    rep = rr_report.build_report(scan)
+    (a,) = rep["agents"]
+    assert a["estimated_usd_in_window"] == "30.00" and a["modeled_usd_in_window"] == "12.00"
+    assert a["observed_usd_in_window"] is None
+    by = {p["base_evidence_class"]: p for p in rep["projections"]}
+    assert set(by) == {"ESTIMATED", "MODELED"}
+    assert by["ESTIMATED"]["amount_usd"] == "182.50" and by["MODELED"]["amount_usd"] == "73.00"   # 30, 12 x 365/60
+    assert by["MODELED"]["basis"].startswith("est. $12.00 (MODELED findings)")
+    md = rr_report.render_markdown(rep)
+    row = next(x for x in md.splitlines() if x.startswith("| Stacked discount codes |"))
+    assert row == "| Stacked discount codes | yes | 2 | — | est. $30.00 | est. $12.00 |"
+    for summed in ("42.00", "255.50"):                                    # 30 + 12 and 182.50 + 73.00: never shown
+        assert summed not in md + json.dumps(rep)
 
 
 def test_projection_keeps_observed_and_estimated_bases_apart():
