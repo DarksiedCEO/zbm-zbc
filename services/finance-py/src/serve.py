@@ -149,4 +149,6 @@ def run(app, host: str, port: int) -> None:
     # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
     # normal exit (status 143) and exit handlers run.
     with launch_guard.sigterm_exits():
-        uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())
+        # golive-combined: the IPv6 wildcard (Railway's production bind) is bound dual-stack by launch_guard.serve
+        # (asyncio would bind it IPv6-only); any other host goes to uvicorn.run unchanged
+        launch_guard.serve(uvicorn, app, host, port, "finance-py", **uvicorn_kwargs())

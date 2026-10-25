@@ -494,8 +494,9 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 
 ## Open items and risks
 
-- **Docker builds have not run yet.** The build box these files were written on has no Docker daemon and its egress
-  proxy blocks every container registry. The first real build is the `railway-images` CI job. What was verified
+- **Docker builds: first run in CI on golive-combined.** The build box has no Docker daemon and its egress proxy blocks
+  every container registry. CI runs 40147816673 and 40149787508 built all seven images (step "Build every Railway
+  image" green); the smoke then failed only the four Python images' IPv4 health checks (next item). What was verified
   without Docker: each service started through the entrypoint with each Dockerfile's exact arguments, as root with
   root-owned data directories (what `RAILWAY_RUN_UID=0` gives), binding every interface with `PORT` set — health,
   uid 10001, data-dir ownership and mode, secret files 0600 and absent from the service's environment, a full scan through
@@ -515,9 +516,17 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   to the go line, and the go line alone makes an older Go refuse to build (`go.mod requires go >= 1.27.3`, with the
   images' `GOTOOLCHAIN=local`) and is what setup-go reads. Keep the four places equal on every Go bump: `go.mod`, the delivery-py job's `go-version`, the two `FROM` lines
   (and the digest step in `railway-images`).
-- **IPv6 bind not exercised here.** This box's kernel has no IPv6, so `::` / `[::]` could not be run; the same code
-  paths were run with `0.0.0.0`. The CI job runs the production values. If a service on Railway fails with "Address
-  family not supported", set its bind variable to `0.0.0.0` (IPv4 private networking works in new environments).
+- **IPv6 bind: dual-stack (fixed on golive-combined).** The first `railway-images` run (CI 40147816673 / 40149787508)
+  showed all four Python images listening on `[::]` and refusing every IPv4 connection (`ConnectionResetError`):
+  uvicorn binds through asyncio's `create_server`, which sets `IPV6_V6ONLY` on the sockets it binds itself, while the
+  Go and Rust services bind `[::]` dual-stack and passed. On Railway the same IPv6-only socket would fail any IPv4
+  peer: Railway's docs say private DNS in environments created after Oct 16 2025 resolves to IPv4 and IPv6 (legacy
+  environments: IPv6 only), and do not state the health check's address family (a Railway community report shows
+  uvicorn on `::` failing the health check where `0.0.0.0` passed). The launchers now bind `::` themselves with
+  `IPV6_V6ONLY` cleared (`launch_guard.serve`, shared by every Python service; only the IPv6 wildcard takes the new
+  path) and hand uvicorn that socket, so one socket serves IPv4 and IPv6. This box's kernel has no IPv6; the CI job
+  runs the production values. If a service on Railway fails with "Address family not supported", set its bind
+  variable to `0.0.0.0`.
 - **Railway behaviours taken from the docs or the SDK types, not observed:** `preserve()` on a variable that does not
   exist yet (first apply); `${{service.VARIABLE}}` interpolation inside the two JSON maps, including the hyphen in
   `stripe-gateway`; `requiredMountPath` (an SDK field, not described in the docs); `RAILWAY_RUN_UID=0`;
