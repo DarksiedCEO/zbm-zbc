@@ -216,7 +216,8 @@ You never type those two; you set the tokens they point at.
 ## Environment variables
 
 Every variable each deployed service reads, taken from its code (`devtools/test_deploy_config.py` fails when the code
-reads one this page does not name). "IaC" = set by `.railway/railway.ts`; "you" = you set the value once in Railway;
+reads one this page does not name; for the Python services it collects every name under the service's prefixes and
+every upper-case name read from the environment whatever its prefix, and checks its own scan, AEGIS M-2). "IaC" = set by `.railway/railway.ts`; "you" = you set the value once in Railway;
 "ref" = a Railway reference to another service's variable. Defaults are the code's; leave them unless a row says
 otherwise. Examples are never real values.
 
@@ -249,6 +250,11 @@ otherwise. Examples are never real values.
 | `DETECTION_SWITCH_INTERVAL_SECONDS` | no | no | `0.001` | launcher tuning, 0.0001..0.05 |
 | `DETECTION_DRAINS_MAX` | no | no | `512` | concurrent graceful-close drains |
 | `DETECTION_LEDGER_URL`, `DETECTION_LEDGER_TOKEN_FILE` | no | token yes | unset | the Revenue Recovery store connector's evidence ledger (ADR 0020; `*_FILE` rules). Unset: every store read fails closed (record-first). Not mapped by this deploy (see "How `*_FILE` secrets map onto Railway") |
+| `RR_STORE_CONNECTIONS_FILE` | no | file holds secret references | unset (**this deploy: unset — the store connector is OFF**) | the approved Shopify connections (ADR 0020 section 3). Unset: no client is registered, every `/stores/*` call answers `NOT_CONNECTED` and no outbound call is made. The store connector is **not wired on Railway yet** (see "Open items and risks") |
+| `RR_STORE_READS_DISABLED` | no | no | unset | Revenue Recovery kill switch 1: `1` stops every store sync and snapshot (`STORE_READS_DISABLED`). Read when detection starts, so changing it needs a redeploy of detection |
+| `RR_STORE_KILL_SWITCH_FILE` | no | no | unset | Revenue Recovery kill switch 2: a path; while a file exists there every sync stops (a running one at its next page) and held snapshots are not served, with no restart. On Railway it needs a path the service can write (a volume, or `railway ssh` + `touch`); detection has no volume in this deploy |
+| `RR_STORE_MAX_CONCURRENT_SYNCS` | no | no | `2` | store syncs at once across all clients, clamped 1..16 |
+| `RR_STORE_SYNC_DEADLINE_SECONDS` | no | no | `120` | hard deadline per sync, clamped 10..600 |
 
 ### orchestrator (orchestrator-go `cmd/orchestrator`)
 
@@ -611,7 +617,11 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   the fixture pool; the Shopify store connector needs `DETECTION_LEDGER_URL` and `DETECTION_LEDGER_TOKEN_FILE`, which
   this deploy does not set (detection runs non-root and maps no secret file), so every store read fails closed with
   `LEDGER_UNAVAILABLE`. Wiring it needs a ledger caller for detection in `LEDGER_CALLERS`, a `--secret-file` in the
-  detection image and `RAILWAY_RUN_UID=0` for it.
+  detection image and `RAILWAY_RUN_UID=0` for it. This deploy also sets no `RR_STORE_CONNECTIONS_FILE`, so no store
+  is registered and the connector is **off**: every `/stores/*` call is `NOT_CONNECTED`. When it is wired, the two
+  stops are `RR_STORE_READS_DISABLED=1` (then redeploy detection) and the file named by `RR_STORE_KILL_SWITCH_FILE`
+  (takes effect at once; needs a writable path, which detection does not have today). Both are in the detection
+  table above.
 - **Search Console is NOT_CONNECTED on Railway** (golive-gsc): the seo image maps no `SEO_GSC_SERVICE_ACCOUNT_FILE`.
   Turning it on needs `--secret-file SEO_GSC_SERVICE_ACCOUNT_FILE` in the seo image (the value variable would be
   `SEO_GSC_SERVICE_ACCOUNT`, the JSON key) and Andre's steps in ADR 0017 "Search Console".

@@ -43,8 +43,13 @@ SERVICES = {
                        "stripe-gateway", False),
     "seo": ("services/seo-py/Dockerfile", "SEO_PORT", 8500, "seo-py", True),
 }
-PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
+PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
                "seo-py": ("SEO_",)}
+# AEGIS final go-live M-2: the prefix scan alone missed detection-py's RR_STORE_* variables (both Revenue Recovery
+# kill switches among them). Besides the prefixes, any upper-case name in an environment-read position is collected
+# whatever its prefix: os.environ.get("X"), os.environ["X"], os.getenv("X"), env.get("X"), env["X"] (the services'
+# config functions take the environment as `env`).
+ENV_READ = re.compile(r"""(?:\benviron\.get|\benviron\[|\bgetenv|\benv\.get|\benv\[)\(?\s*["']([A-Z][A-Z0-9_]+)["']""")
 # string literals under src/ that look like variables but are not read from the environment: thin-client prefixes
 # (`_thin(env, "FIN_VI", ...)` reads FIN_VI_URL / _TOKEN / _CALLER_TOKEN, which are named) and a reason code
 NOT_VARIABLES = {"FIN_VI", "FIN_COMPLIANCE", "FIN_LEGAL", "LEDGER_UNAVAILABLE"}
@@ -81,6 +86,7 @@ def code_variables() -> dict[str, set[str]]:
             text = p.read_text(encoding="utf-8")
             names |= {n for n in re.findall(r"""["']([A-Z][A-Z0-9_]+)["']""", text)
                       if n.startswith(prefixes + ("LEDGER_SERVICE_",))}
+            names |= set(ENV_READ.findall(text))
         out[svc] = names - NOT_VARIABLES
     go: set[str] = set()
     for p in (REPO / "services" / "orchestrator-go" / "cmd").rglob("*.go"):
@@ -253,6 +259,32 @@ class CiAndSmoke(unittest.TestCase):
                 self.assertIn(f"docker build -f {df} -t zbm-ci/{name}:ci .", ci)
                 self.assertRegex(smoke, rf'"{re.escape(name)}": \({port}, ')
         self.assertIn("      - railway-images\n", ci.split("  required:", 1)[1])
+
+
+class VariableScan(unittest.TestCase):
+    """M-2: the scan itself is checked, so a green Runbook test means the set it compared was complete."""
+
+    def test_detection_store_connector_variables_are_scanned(self):
+        rr = {"RR_STORE_CONNECTIONS_FILE", "RR_STORE_KILL_SWITCH_FILE", "RR_STORE_READS_DISABLED",
+              "RR_STORE_MAX_CONCURRENT_SYNCS", "RR_STORE_SYNC_DEADLINE_SECONDS"}
+        self.assertLessEqual(rr, code_variables()["detection-py"])
+
+    def test_env_reads_are_found_whatever_their_prefix(self):
+        text = ('os.environ.get("AA_ONE")\nos.environ["BB_TWO"]\nos.getenv("CC_THREE")\n'
+                'env.get("DD_FOUR")\nenv["EE_FIVE"]\nx = "NOT_READ"\nenvelope.get("FF_SIX")\n')
+        self.assertEqual(sorted(ENV_READ.findall(text)), ["AA_ONE", "BB_TWO", "CC_THREE", "DD_FOUR", "EE_FIVE"])
+
+    def test_no_python_service_reads_a_variable_outside_its_prefixes_unseen(self):
+        """Every upper-case name a Python service reads in an environment-read position is either under the
+        service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
+        outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set()}
+        for svc, prefixes in PY_SERVICES.items():
+            found = set()
+            for p in (REPO / "services" / svc / "src").rglob("*.py"):
+                found |= {n for n in ENV_READ.findall(p.read_text(encoding="utf-8"))
+                          if not n.startswith(prefixes + ("LEDGER_SERVICE_",))}
+            with self.subTest(service=svc):
+                self.assertEqual(found, outside_prefixes[svc])
 
 
 class Runbook(unittest.TestCase):
