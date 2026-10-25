@@ -17,6 +17,7 @@ import importlib.util
 import json
 import os
 import re
+import uuid
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -904,6 +905,75 @@ def test_cli_fetch_writes_0600_also_over_an_existing_file_and_never_through_a_sy
     capsys.readouterr()
     assert cli.main(_fetch_args(tmp_path, link), client=_FakeService(b"<p>doc</p>", ok)) == 2
     assert target.read_text() == "keep" and "cannot write --out" in capsys.readouterr().err
+
+
+class _MustNotBeCalled:
+    def post(self, url, **k):
+        raise AssertionError("the service was called although --out could not be written")
+
+    get = post
+
+
+_RID = "0b5c4b7e-3d1a-4c55-9f0e-2a8f6c1d9e10"
+_OK = lambda r: [{"report_id": r["report_id"], "document_sha256": r["document_sha256"]}]  # noqa: E731
+
+
+def test_cli_checks_the_out_directory_before_calling_the_service(tmp_path, capsys, monkeypatch):
+    """AEGIS wave3 L-C: a render is recorded before the service answers, so --out is checked first: a missing
+    directory, a directory that is a file, an unwritable directory or a symlink is refused with no call made."""
+    cli = _cli()
+    missing = tmp_path / "client-reports" / "r.html"
+    assert cli.main(_fetch_args(tmp_path, missing), client=_MustNotBeCalled()) == 2
+    err = capsys.readouterr().err
+    assert "cannot write --out" in err and "does not exist" in err and "mkdir -p -m 700" in err
+    assert not missing.parent.exists()
+    afile = tmp_path / "afile"
+    afile.write_text("x")
+    assert cli.main(_fetch_args(tmp_path, afile / "r.html"), client=_MustNotBeCalled()) == 2
+    assert "cannot write --out" in capsys.readouterr().err
+    real_access = cli.os.access
+    monkeypatch.setattr(cli.os, "access", lambda p, m: False if str(p) == str(tmp_path) else real_access(p, m))
+    assert cli.main(_fetch_args(tmp_path, tmp_path / "r.html"), client=_MustNotBeCalled()) == 2
+    assert "not writable" in capsys.readouterr().err and not (tmp_path / "r.html").exists()
+    monkeypatch.setattr(cli.os, "access", real_access)
+    (tmp_path / "t.txt").write_text("keep")
+    (tmp_path / "l.html").symlink_to(tmp_path / "t.txt")
+    assert cli.main(_fetch_args(tmp_path, tmp_path / "l.html"), client=_MustNotBeCalled()) == 2
+    assert (tmp_path / "t.txt").read_text() == "keep" and "request id" not in capsys.readouterr().err
+
+
+def test_cli_prints_the_request_id_on_a_failure_after_the_render_was_recorded(tmp_path, capsys, monkeypatch):
+    """AEGIS wave3 L-C: after the POST, any failure names the request id so the documented retry
+    (--request-id) returns the same document instead of recording a second render. Nothing is left at --out."""
+    cli = _cli()
+    out = tmp_path / "r.html"
+    # the recorded list does not hold the render: refused, the explicit request id is printed, no file is left
+    args = _fetch_args(tmp_path, out) + ["--request-id", _RID]
+    assert cli.main(args, client=_FakeService(b"<p>doc</p>", [])) == 2
+    err = capsys.readouterr().err
+    assert "recorded renders do not list" in err and f"--request-id {_RID}" in err and not out.exists()
+    # without --request-id the generated one is printed (a UUID)
+    assert cli.main(_fetch_args(tmp_path, out), client=_FakeService(b"<p>doc</p>", [])) == 2
+    m_ = re.search(r"request id: ([0-9a-f-]{36}) ", capsys.readouterr().err)
+    assert m_ and str(uuid.UUID(m_.group(1))) == m_.group(1)
+    # a write that fails after the render was recorded also prints it; an existing file keeps its content
+    out.write_text("previous")
+
+    def boom(fd, n):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(cli.os, "ftruncate", boom)
+    assert cli.main(args, client=_FakeService(b"<p>doc</p>", _OK)) == 2
+    err = capsys.readouterr().err
+    assert "cannot write --out" in err and f"--request-id {_RID}" in err and out.read_text() == "previous"
+
+
+def test_cli_refused_before_the_post_prints_no_request_id(tmp_path, capsys):
+    cli = _cli()
+    args = _fetch_args(tmp_path, tmp_path / "r.html")
+    args[args.index("seo-aud-" + "0" * 40)] = "not-an-id"
+    assert cli.main(args, client=_MustNotBeCalled()) == 2
+    err = capsys.readouterr().err
+    assert "malformed" in err and "request id" not in err and not (tmp_path / "r.html").exists()
 
 
 # ---------------------------------------------------------------------------------------------- golive-wave2

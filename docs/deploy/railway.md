@@ -512,21 +512,27 @@ installed (the script imports `httpx` and `client_report` from `services/seo-py/
    cat > service.token     # paste SEO_SERVICE_TOKEN, Enter, Ctrl-D
    cat > dashboard.token   # paste the "dashboard" token from SEO_CALLER_TOKENS, Enter, Ctrl-D
    cat > andre.token       # paste SEO_ANDRE_APPROVAL_TOKEN, Enter, Ctrl-D
+   mkdir -p -m 700 ~/client-reports
    ```
 
 5. From the checkout's `services/seo-py`, render. The tenant is the client's tenant id; the audit id is
-   `seo-aud-<40 hex>` from the completed audit.
+   `seo-aud-<40 hex>` from the completed audit. Pick the request id once and keep it in the shell, so that a retry
+   reuses it:
 
    ```sh
+   RID="$(python3 -c 'import uuid; print(uuid.uuid4())')"; echo "request id: $RID"
    python3 devtools/render_report.py fetch --api http://127.0.0.1:18500 --tenant <tenant> --audit <audit-id> \
-     --format html --out ~/client-reports/<tenant>-<audit-id>.html \
+     --format html --out ~/client-reports/<tenant>-<audit-id>.html --request-id "$RID" \
      --service-token-file ~/.zbm-seo/service.token --caller-token-file ~/.zbm-seo/dashboard.token \
      --andre-token-file ~/.zbm-seo/andre.token
    ```
 
-   Exit 0 prints one JSON line with `report_id`, `document_sha256` and `bytes`. Keep that line with the delivery
-   record. Exit 2 (`refused: ...`) means nothing was written. To fetch the same document again, re-run with the same
-   `--request-id`.
+   Exit 0 prints one JSON line with `report_id`, `request_id`, `document_sha256` and `bytes`. Keep that line with the
+   delivery record. Exit 2 (`refused: ...`) means nothing was written. The command checks `--out` (directory present
+   and writable, not a symlink) **before** it calls seo, so an output problem never records a render. If it fails
+   after calling seo, it prints `request id: <RID>`, because seo may already have recorded the render. Fix the cause,
+   then re-run the same command with the same `--request-id "$RID"`: seo returns the same document, or
+   `REPORT_CHANGED` if the audit's retained view changed since, and does not record a second render.
 6. Have a person review the document before it is sent. Then close the tunnel (Ctrl-C) and delete
    `~/.zbm-seo/*.token`.
 

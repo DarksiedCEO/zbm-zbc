@@ -15,7 +15,10 @@ recorded renders (``GET .../client-reports``, which holds a render only after th
 ``report_id`` with the same ``document_sha256``. It does not read the ledger itself. ``--api`` must be https, except
 for a loopback host (127.0.0.0/8, ::1, localhost): the request carries the service, caller and approval tokens.
 Re-running with the same ``--request-id`` returns the same document (or REPORT_CHANGED when the retained view changed
-since). Tokens are read from files (0600 recommended), never from the command line.
+since). Tokens are read from files (0600 recommended), never from the command line. ``--out`` is checked and opened
+before the service is called (AEGIS wave3 L-C: its directory must exist and be writable; no symlink), so an output
+problem never records a render; a failure after the call prints ``request id: <id>`` for the retry. Pass an explicit
+``--request-id`` (docs/deploy/railway.md does).
 
 ``preview`` renders offline from a saved audit view (the body of ``GET /seo/v1/tenants/{tid}/audits/{aid}``). Nothing
 is recorded, so the document carries a PREVIEW banner and is not for delivery. Exit 2 when the audit cannot be
@@ -88,6 +91,7 @@ def fetch(a: argparse.Namespace, client=None) -> tuple[bytes, dict]:
     own = client is None
     client = client or httpx.Client(timeout=60, follow_redirects=False, trust_env=False)
     try:
+        a.posted = True     # from here on the service may have recorded a render under body["request_id"]
         r = client.post(f"{base}/seo/v1/tenants/{a.tenant}/audits/{a.audit}/client-report", json=body, headers=headers)
         listed = client.get(f"{base}/seo/v1/tenants/{a.tenant}/audits/{a.audit}/client-reports",
                             headers={k: v for k, v in headers.items() if k != "X-Andre-Approval-Token"}) \
@@ -124,6 +128,33 @@ def preview(a: argparse.Namespace) -> tuple[bytes, dict]:
                   "document_sha256": client_report.document_sha256(data), "recorded": False}
 
 
+def _open_out(path: str) -> tuple[int, bool]:
+    """(fd, created) for --out, opened BEFORE anything is rendered or recorded (AEGIS wave3 L-C): a missing or
+    unwritable directory, a symlink or a non-regular file is refused while nothing has been recorded yet. Never
+    through a symlink; the content is replaced only after a successful render (see main)."""
+    parent = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(parent):
+        raise OSError(2, f"the directory {parent} does not exist (create it first: mkdir -p -m 700 {parent})")
+    if not os.access(parent, os.W_OK | os.X_OK):
+        raise OSError(13, f"the directory {parent} is not writable")
+    existed = os.path.lexists(path)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        if not os.path.isfile(path) or os.path.islink(path):
+            raise OSError(21, "not a regular file")
+    except OSError:
+        os.close(fd)
+        raise
+    return fd, not existed
+
+
+def _retry_hint(a: argparse.Namespace) -> None:
+    if a.cmd == "fetch" and getattr(a, "posted", False):
+        print(f"request id: {a.request_id} (the service may have recorded this render; re-run with "
+              f"--request-id {a.request_id} to get the same document without recording a new render)",
+              file=sys.stderr)
+
+
 def main(argv: Optional[list] = None, client=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -143,21 +174,33 @@ def main(argv: Optional[list] = None, client=None) -> int:
         s.add_argument("--format", choices=sorted(client_report.FORMATS), required=True)
         s.add_argument("--out", required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "fetch":
+        a.request_id = a.request_id or str(uuid.uuid4())   # known up front, so a failure can name it
+    try:
+        # AEGIS wave3 L-C: --out is checked and opened before the service is called (a render is recorded on the
+        # ledger before the service answers). AEGIS N-2: never through a symlink.
+        fd, created = _open_out(a.out)
+    except OSError as e:
+        print(f"refused: cannot write --out ({e.strerror or e})", file=sys.stderr)
+        return 2
     try:
         data, meta = fetch(a, client) if a.cmd == "fetch" else preview(a)
     except (client_report.ReportInputError, PermissionError, ValueError, KeyError, TypeError, OSError) as e:
+        os.close(fd)
+        if created:
+            os.unlink(a.out)
         print(f"refused: {e}", file=sys.stderr)
+        _retry_hint(a)
         return 2
     try:
-        # AEGIS N-2: never through a symlink, and 0600 even when the file already existed (O_CREAT's mode applies
-        # only to a new file)
-        fd = os.open(a.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            os.ftruncate(fh.fileno(), 0)
+            os.fchmod(fh.fileno(), 0o600)       # 0600 even when the file already existed (N-2)
+            fh.write(data)
     except OSError as e:
-        print(f"refused: cannot write --out ({e.strerror})", file=sys.stderr)
+        print(f"refused: cannot write --out ({e.strerror or e})", file=sys.stderr)
+        _retry_hint(a)
         return 2
-    with os.fdopen(fd, "wb") as fh:
-        os.fchmod(fh.fileno(), 0o600)
-        fh.write(data)
     print(json.dumps({**meta, "out": a.out, "bytes": len(data)}, sort_keys=True))
     return 0
 
