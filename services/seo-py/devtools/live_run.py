@@ -617,9 +617,11 @@ def _main(work: Path) -> int:
               and st["kill_switches"]["providers"]["web"] is True
               and again.status_code == 200 and again.json()["providers"]["web"] is False)
         pe = st["answer_engines"]["perplexity"]
-        check("with a key file the engine is connected (key source 'file', model sonar) but its budget is OFF; the "
-              "key appears nowhere in /status", pe["state"] == "connected" and pe["key_source"] == "file"
-              and pe["model"] == "sonar" and pe["budget"]["state"] == "OFF" and PPLX_KEY not in json.dumps(st))
+        check("with a key file the engine is connected (key source 'file', the Agent API, model perplexity/sonar) but "
+              "its budget is OFF; the key appears nowhere in /status", pe["state"] == "connected"
+              and pe["key_source"] == "file" and pe["protocol"] == "agent" and pe["path"] == "/v1/agent"
+              and pe["model"] == "perplexity/sonar" and pe["budget"]["state"] == "OFF"
+              and PPLX_KEY not in json.dumps(st))
         a.post("/kill-switches", {"request_id": rid(), "switch": "provider:web", "engaged": True},
                caller="compliance_38")
         pb = a.post("/tenants/zbm/audits", {"request_id": rid(), "domain": OWN_DOMAIN, "paths": ["/"],
