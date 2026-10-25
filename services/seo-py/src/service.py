@@ -120,6 +120,10 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
                                   "stale, another instance's, or already adopted); refusing to start")
         try:
+            import client_report
+            if not isinstance(getattr(settings, "report_branding", None), client_report.Branding):
+                # AEGIS L-8: refuse to start rather than answer the client-report route with a 500
+                raise RuntimeError("settings.report_branding must be a client_report.Branding")
             self._start()
         except BaseException:
             self.close()

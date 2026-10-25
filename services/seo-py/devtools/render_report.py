@@ -8,10 +8,14 @@ usage:
       [--brand-name NAME] [--brand-accent '#RRGGBB']
 
 ``fetch`` is the delivery path: it asks the service (``POST /seo/v1/tenants/{tid}/audits/{aid}/client-report``, the
-dashboard caller with Andre's approval token), which records the render on the ledger BEFORE answering; the document
-is written only when its SHA-256 matches the one the service recorded. Re-running with the same ``--request-id``
-returns the same document (or REPORT_CHANGED when the retained view changed since). Tokens are read from files
-(0600 recommended), never from the command line.
+dashboard caller with Andre's approval token), which records the render on the ledger BEFORE answering. The document
+is written (mode 0600) only when (1) its SHA-256 and size match the answer's own ``document_sha256`` / ``bytes`` (a
+truncated or altered transfer) and (2) the service's list of recorded renders
+(``GET .../client-reports``, which holds a render only after the ledger accepted its event) has this ``report_id``
+with the same ``document_sha256``. It does not read the ledger itself. ``--api`` must be https, except for a loopback
+host (127.0.0.0/8, ::1, localhost): the request carries the service, caller and approval tokens. Re-running with the
+same ``--request-id`` returns the same document (or REPORT_CHANGED when the retained view changed since). Tokens are
+read from files (0600 recommended), never from the command line.
 
 ``preview`` renders offline from a saved audit view (the body of ``GET /seo/v1/tenants/{tid}/audits/{aid}``). Nothing
 is recorded, so the document carries a PREVIEW banner and is not for delivery. Exit 2 when the audit cannot be
@@ -22,7 +26,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
+import os
 import re
 import sys
 import uuid
@@ -44,10 +50,34 @@ def _token(path: str) -> str:
     return tok
 
 
+def api_base(url: str) -> str:
+    """The service's base URL: https, or http only to a loopback host (AEGIS M-3: the request carries three secrets).
+    No credentials, query or fragment."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(url)
+        host, _port = (u.hostname or ""), u.port
+    except ValueError:
+        raise ValueError("--api is not a URL") from None
+    if u.username or u.password or u.query or u.fragment or not host:
+        raise ValueError("--api must be scheme://host[:port][/path] without credentials, query or fragment")
+    if u.scheme == "https":
+        return url.rstrip("/")
+    if u.scheme == "http":
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = host.lower() == "localhost"
+        if loopback:
+            return url.rstrip("/")
+    raise ValueError("--api must be https (plain http only to a loopback host): the request carries the tokens")
+
+
 def fetch(a: argparse.Namespace, client=None) -> tuple[bytes, dict]:
     import httpx
     if not TENANT.fullmatch(a.tenant) or not AUDIT.fullmatch(a.audit):
         raise ValueError("tenant or audit id malformed")
+    base = api_base(a.api)
     headers = {"Authorization": f"Bearer {_token(a.service_token_file)}",
                "X-SEO-Caller-Token": _token(a.caller_token_file),
                "X-Andre-Approval-Token": _token(a.andre_token_file)}
@@ -55,8 +85,10 @@ def fetch(a: argparse.Namespace, client=None) -> tuple[bytes, dict]:
     own = client is None
     client = client or httpx.Client(timeout=60, follow_redirects=False, trust_env=False)
     try:
-        r = client.post(f"{a.api.rstrip('/')}/seo/v1/tenants/{a.tenant}/audits/{a.audit}/client-report",
-                        json=body, headers=headers)
+        r = client.post(f"{base}/seo/v1/tenants/{a.tenant}/audits/{a.audit}/client-report", json=body, headers=headers)
+        listed = client.get(f"{base}/seo/v1/tenants/{a.tenant}/audits/{a.audit}/client-reports",
+                            headers={k: v for k, v in headers.items() if k != "X-Andre-Approval-Token"}) \
+            if r.status_code == 200 else None
     finally:
         if own:
             client.close()
@@ -70,7 +102,11 @@ def fetch(a: argparse.Namespace, client=None) -> tuple[bytes, dict]:
     rep = r.json()
     data = rep["content"].encode("utf-8")
     if hashlib.sha256(data).hexdigest() != rep["document_sha256"] or len(data) != rep["bytes"]:
-        raise ValueError("the document does not match the SHA-256 the service recorded")
+        raise ValueError("the document does not match the SHA-256 in the service's answer")
+    rows = listed.json() if listed is not None and listed.status_code == 200 else None
+    if not isinstance(rows, list) or not any(isinstance(x, dict) and x.get("report_id") == rep["report_id"]
+                                             and x.get("document_sha256") == rep["document_sha256"] for x in rows):
+        raise ValueError("the service's recorded renders do not list this document")
     meta = {k: rep[k] for k in ("report_id", "audit_id", "format", "document_sha256", "audit_report_sha256",
                                 "renderer_version")} | {"request_id": body["request_id"], "recorded": True}
     return data, meta
@@ -109,7 +145,9 @@ def main(argv: Optional[list] = None, client=None) -> int:
     except (client_report.ReportInputError, PermissionError, ValueError, KeyError, TypeError, OSError) as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2
-    Path(a.out).write_bytes(data)
+    fd = os.open(a.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
     print(json.dumps({**meta, "out": a.out, "bytes": len(data)}, sort_keys=True))
     return 0
 

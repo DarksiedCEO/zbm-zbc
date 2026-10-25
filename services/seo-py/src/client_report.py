@@ -49,6 +49,7 @@ LOCATIONS_MAX = 20             # affected pages listed per finding group
 INSTANCES_MAX = 5              # instances whose details are shown per finding group
 TEMPLATES_MAX = 25             # Search Console page templates shown
 DASH = "\u2014"
+WITHHELD = "[withheld: may contain personal data]"
 SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
 _TOKEN = re.compile(r"[A-Za-z0-9_.:/+-]{1,80}")
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
@@ -58,6 +59,7 @@ _REQ_PATH = re.compile(r"/[\x21-\x7e]{0,500}")
 _ACCENT = re.compile(r"#[0-9a-fA-F]{6}")
 _BRAND = re.compile(r"[A-Za-z0-9 .,&'()-]{1,60}")
 _SHA = re.compile(r"[0-9a-f]{64}")
+_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _ID = re.compile(r"seo-[a-z]{2,5}-[0-9a-f]{40}")
 # ISO dates and the service's dated rule versions ("2026-10-10.1") are not personal data; they are taken out before
 # the personal-data check (whose digit-run rule would otherwise withhold every methodology naming a version)
@@ -348,18 +350,40 @@ def safe_text(s: Any, limit: int = TEXT_MAX) -> str:
     if len(t) > limit:
         t = t[: limit - 1] + "…"
     if personal_data(_DATES.sub(" ", t)) is not None:     # judged on exactly what would be shown
-        return "[withheld: may contain personal data]"
+        return WITHHELD
     return t
 
 
 def safe_token(s: Any) -> str:
+    """A code-shaped value (a state, a media type, a rule token); judged for personal data like any text (a crawled
+    ``Content-Type`` of ``tel:+15550100199`` is code-shaped too)."""
     t = _clean(s)
-    return t if _TOKEN.fullmatch(t) else safe_text(t, 60)
+    if not _TOKEN.fullmatch(t):
+        return safe_text(t, 60)
+    return WITHHELD if personal_data(_DATES.sub(" ", t)) is not None else t
 
 
 def safe_host(h: Any) -> Optional[str]:
+    """A plain LDH host name that does not look like personal data, else None."""
     h = str(h or "").lower().rstrip(".")
-    return h if _HOST.fullmatch(h) else None
+    return h if _HOST.fullmatch(h) and personal_data(h) is None else None
+
+
+def _templated(p: str) -> str:
+    t = logs_mod.template_path(p) if isinstance(p, str) else None
+    if t is None:
+        return "{unreadable}"
+    segs = [sp.slug_segment(x) for x in t.split("/")[1:]]
+    return ("/" + "/".join(segs)).rstrip("/") or "/"
+
+
+def shown_path(p: str) -> tuple[str, bool]:
+    """(what is shown, whether it may be a link) for a path the audit request named: the query string and fragment
+    are never shown (AEGIS L-4), and a path that still looks like personal data is shown as its template, unlinked."""
+    base = re.split(r"[?#]", p, maxsplit=1)[0] or "/"
+    if personal_data(_DATES.sub(" ", base)) is not None:
+        return _templated(base), False
+    return base, True
 
 
 class _Ctx:
@@ -368,6 +392,7 @@ class _Ctx:
         self.paths = list(paths)
         self.hosts = {domain.removeprefix("www."), "www." + domain.removeprefix("www.")}
         self.pages = {f"{scheme}://{domain}{p}": p for p in self.paths}
+        self.shown = {p: shown_path(p) for p in self.paths}
 
     def page_url(self, path: str) -> str:
         return f"{self.scheme}://{self.domain}{path}"
@@ -375,7 +400,7 @@ class _Ctx:
     def location(self, url: Any) -> dict:
         """{"kind": "page", "path"} for a page the request named; else {"kind": "template", "text"}."""
         if isinstance(url, str) and url in self.pages:
-            return {"kind": "page", "path": self.pages[url]}
+            return {"kind": "page", "path": self.shown[self.pages[url]][0]}
         return {"kind": "template", "text": self.template(url)}
 
     def template(self, url: Any) -> str:
@@ -392,12 +417,8 @@ class _Ctx:
 
     def path(self, p: Any) -> str:
         if isinstance(p, str) and p in self.paths:
-            return p
-        t = logs_mod.template_path(p) if isinstance(p, str) else None
-        if t is None:
-            return "{unreadable}"
-        segs = [sp.slug_segment(x) for x in t.split("/")[1:]]
-        return ("/" + "/".join(segs)).rstrip("/") or "/"
+            return self.shown[p][0]
+        return _templated(p)
 
 
 def _num(v: Any) -> Optional[str]:
@@ -518,9 +539,10 @@ def _groups(findings: list, ctx: _Ctx) -> list:
             continue
         if f["code"] in INTERNAL_CODES:
             continue
-        sev = f.get("severity") if f.get("severity") in SEVERITY_ORDER else "info"
-        dc = f.get("data_class") if f.get("data_class") in EVIDENCE else "unknown"
-        dec = f.get("decision") if f.get("decision") in DECISION_TEXT else "INSUFFICIENT_EVIDENCE"
+        sev, dc, dec = f.get("severity"), f.get("data_class"), f.get("decision")
+        if sev not in SEVERITY_ORDER or dc not in EVIDENCE or dec not in DECISION_TEXT:
+            # refused, never downgraded (AEGIS L-10): the recorded report holds a value outside the closed vocabularies
+            raise ReportInputError("a finding outside the closed vocabularies")
         cap = f.get("capability") if isinstance(f.get("capability"), str) and _TOKEN.fullmatch(f["capability"]) \
             else None
         key = (SEVERITY_ORDER.index(sev), f["code"], dc, dec)
@@ -551,6 +573,16 @@ def _groups(findings: list, ctx: _Ctx) -> list:
                     "locations": locs[:LOCATIONS_MAX], "locations_more": max(0, len(locs) - LOCATIONS_MAX),
                     "instances": inst[:INSTANCES_MAX], "instances_more": max(0, len(inst) - INSTANCES_MAX)})
     return out
+
+
+def _note(g: dict) -> str:
+    """A finding group of an area that was not checked, as one plain line (values already made safe)."""
+    bits = []
+    for inst in g["instances"][:INSTANCES_MAX]:
+        bits.append("; ".join(f"{lbl}: " + (", ".join(v["v"]) if v["t"] == "list" else str(v["v"]))
+                              for lbl, v in inst["items"]))
+    return (f"Run note: {g['title']} (rule {g['code']})" + (f": {' | '.join(bits)}" if bits else "")
+            + ". This area was not checked; the note explains why, it is not a finding.")[:600]
 
 
 def _search_block(env: Optional[dict], block: Optional[dict]) -> Optional[dict]:
@@ -584,7 +616,7 @@ def _search_block(env: Optional[dict], block: Optional[dict]) -> Optional[dict]:
         rows = [r for r in pt["templates"] if isinstance(r, dict) and isinstance(r.get("template"), str)]
         for r in rows[:TEMPLATES_MAX]:
             tpl = r["template"]
-            if not tpl.startswith("{"):
+            if tpl not in ("{other}", "{offsite}", "{unreadable}"):
                 tpl = sp_path(tpl)
             out["templates"].append({"template": tpl, "clicks": _num(r.get("clicks")) or "0",
                                      "impressions": _num(r.get("impressions")) or "0", "ctr": _pct(r.get("ctr"))})
@@ -607,25 +639,44 @@ def _ai_block(env: Optional[dict]) -> Optional[dict]:
     facts = env.get("facts") if isinstance(env.get("facts"), dict) else {}
     engines = facts.get("engines") if isinstance(facts.get("engines"), dict) else {}
     rows = []
+    n = facts.get("samples_per_prompt")
+    samples = n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else None
     for name in sorted(engines):
         if not _TOKEN.fullmatch(str(name)):
             continue
         e = engines[name]
         if isinstance(e, str):
             rows.append({"engine": name, "status": STATUS.get(e, STATUS["FAILED"])[0], "asked": None,
-                         "not_asked": None})
+                         "not_asked": None, "sampling": "Nothing was asked."})
             continue
         if not isinstance(e, dict):
             continue
         prompts = e.get("prompts") if isinstance(e.get("prompts"), list) else []
+        asked = sum(1 for p in prompts if isinstance(p, dict) and p.get("prompt_refused") is None)
+        na = e.get("prompts_not_asked")
+        not_asked = na if isinstance(na, int) and not isinstance(na, bool) and na >= 0 else None
         rows.append({"engine": name, "status": STATUS.get(e.get("outcome"), STATUS["FAILED"])[0],
-                     "asked": _num(len(prompts)), "not_asked": _num(e.get("prompts_not_asked"))})
-    samples = _num(facts.get("samples_per_prompt"))
+                     "asked": _num(asked), "not_asked": _num(not_asked),
+                     "sampling": _sampling(e.get("outcome"), asked, len(prompts) - asked, not_asked, samples)})
     ps = facts.get("prompt_set") if isinstance(facts.get("prompt_set"), dict) else None
-    return {"engines": rows, "samples": samples,
+    return {"engines": rows, "samples": _num(samples),
             "prompt_set_version": _num(ps.get("version")) if ps else None,
             "prompt_set_sha": ps.get("sha256")[:16] if ps and isinstance(ps.get("sha256"), str)
             and _SHA.fullmatch(ps["sha256"]) else None}
+
+
+def _sampling(outcome: Any, asked: int, refused: int, not_asked: Optional[int], samples: Optional[int]) -> str:
+    """What was asked of one engine, stated only as far as the record shows it (AEGIS M-1): a per-question count is
+    claimed only for an engine that finished every question (outcome OK, nothing left unasked)."""
+    skipped = f" {refused} question(s) were not sent because they looked like personal data." if refused else ""
+    if asked == 0:
+        return "Nothing was asked." + skipped
+    if outcome == "OK" and not_asked == 0 and samples:
+        return f"Each of the {asked} question(s) asked was asked {samples} times.{skipped}"
+    rest = (f" {not_asked} question(s) were not asked." if not_asked else
+            " How many questions were left unasked is not recorded." if not_asked is None else "")
+    up_to = f", each up to {samples} times" if samples else ""
+    return f"Sampling did not finish: {asked} question(s) were asked{up_to}.{rest}{skipped}"
 
 
 def _freshness(key: str, report: dict, env: Optional[dict], tiers: dict) -> str:
@@ -634,9 +685,11 @@ def _freshness(key: str, report: dict, env: Optional[dict], tiers: dict) -> str:
     fin = report["finished_at"]
     if key == "search":
         sb = (report.get("search_performance") or {}).get("section") or {}
-        w = sb.get("window") or {}
-        return (f"Google data for {safe_token(w.get('start'))} to {safe_token(w.get('end'))} (Pacific Time, final "
-                "data; Google's figures lag about 3 days)")
+        w = sb.get("window") if isinstance(sb.get("window"), dict) else {}
+        start, end = w.get("start"), w.get("end")
+        if not (isinstance(start, str) and _DAY.fullmatch(start) and isinstance(end, str) and _DAY.fullmatch(end)):
+            return "no Search Console data in this report"
+        return f"Google data for {start} to {end} (Pacific Time, final data; Google's figures lag about 3 days)"
     tier = {"crawlability": ("robots", "page"), "sitemaps": ("sitemap", "llms_txt"), "content": ("page",),
             "entity": ("page",), "ai": ("ai_probe",)}[key]
     days = min(int(tiers.get(t, 7)) for t in tier)
@@ -688,6 +741,11 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
         if key == "ai":
             naomi = envs.get(("naomi", "prompt_volume"))
             sec["volume"] = _status(naomi)
+        # AEGIS L-6: an area that was not checked lists no findings; what its run recorded (an engine run stopped,
+        # a page blocked) is a note under its methodology and limits
+        sec["notes"] = [] if st["checked"] else [_note(g) for g in sec["groups"]]
+        if not st["checked"]:
+            sec["groups"] = []
         sections.append(sec)
     nc = sorted({x for x in (report.get("not_connected") or []) if isinstance(x, str)})
     not_connected = [NOT_CONNECTED_TEXT[x] for x in nc if x in NOT_CONNECTED_TEXT]
@@ -698,8 +756,13 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
         if env is None:
             continue
         lims = env.get("limitations") if isinstance(env.get("limitations"), list) else []
+        sec = next(x for x in sections if x["key"] == key)
+        notes = list(sec["notes"])
+        if key == "ai" and sec["ai"] and any(not e["sampling"].startswith("Each of") for e in sec["ai"]["engines"]):
+            notes.append("The method above is the plan. Not every engine was asked every question that many times; "
+                         "the per-engine lines in the AI visibility section state what was actually asked.")
         methods.append({"title": title, "method": safe_text(env.get("methodology") or "", 1500),
-                        "limits": [safe_text(x, 600) for x in lims[:20] if isinstance(x, str)]})
+                        "limits": [safe_text(x, 600) for x in lims[:20] if isinstance(x, str)] + notes})
     quarantined = hygiene.get("quarantined") if isinstance(hygiene.get("quarantined"), list) else []
     q_counts: dict = {}
     for q in quarantined:
@@ -710,7 +773,8 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
         "renderer_version": RENDERER_VERSION, "preview": bool(preview),
         "brand": {"name": branding.name, "accent": branding.accent},
         "audit_id": aid, "report_sha256": rsha, "domain": domain, "scheme": scheme,
-        "pages": [{"path": p, "url": ctx.page_url(p)} for p in paths],
+        "pages": [{"path": ctx.shown[p][0], "url": ctx.page_url(ctx.shown[p][0]) if ctx.shown[p][1] else None}
+                  for p in paths],
         "started": started, "finished": finished,
         "run_outcome": report.get("outcome") if isinstance(report.get("outcome"), str)
         and _CODE.fullmatch(report["outcome"]) else "UNKNOWN",
@@ -780,8 +844,8 @@ def render_markdown(m: dict) -> str:
           f"- **Audit ID:** {md_code(m['audit_id'])}",
           f"- **Run:** {md(m['started'])} to {md(m['finished'])}",
           f"- **Run outcome:** {md(m['run_outcome'])} (whether every check could run; not a score)",
-          f"- **Audit record:** report SHA-256 {md_code(m['report_sha256'])}, recorded on {md(m['brand']['name'])}'s "
-          "tamper-evident ledger when the audit completed.",
+          f"- **Audit record:** report SHA-256 {md_code(m['report_sha256'])}, recorded on a tamper-evident ledger "
+          "when the audit completed.",
           f"- **Pages audited ({len(m['pages'])}):** " + ", ".join(md_code(p["path"]) for p in m["pages"]), "",
           "### What was checked", "",
           "| Area | Status | Findings | Data freshness |", "|---|---|---|---|"]
@@ -826,6 +890,13 @@ def render_markdown(m: dict) -> str:
     return "\n".join(L)
 
 
+def _no_findings(st: dict) -> str:
+    if st["outcome"] == "OK":
+        return "No findings in this area."
+    return ("No findings in the part that could be checked. The rest of this area was not checked, so this is not a "
+            "clean result.")
+
+
 def _md_section(s: dict) -> list:
     st = s["status"]
     L = [f"## {md(s['title'])}", "", f"**Status: {md(st['label'])}.** {md(s['what'])}", "",
@@ -841,8 +912,10 @@ def _md_section(s: dict) -> list:
         L += _md_search(s["search"])
     if s["key"] == "ai":
         L += _md_ai(s)
+    if not st["checked"] and s["notes"]:
+        L += ["Notes from the run are listed under Methodology and limits.", ""]
     if st["checked"] and not s["groups"]:
-        L += ["No findings for the parts of this area that were checked.", ""]
+        L += [md(_no_findings(st)), ""]
     if s["dropped"]:
         L += [f"{md(s['dropped'])} more findings are in the audit record (the list is bounded).", ""]
     for g in s["groups"]:
@@ -907,11 +980,11 @@ def _md_ai(s: dict) -> list:
         L += [f"| {md_code(e['engine'])} | {md(e['status'])} | {md(e['asked'] or '—')} | "
               f"{md(e['not_asked'] or '—')} |" for e in a["engines"]]
         L.append("")
-        if a["samples"]:
-            L += [f"Each question was asked {md(a['samples'])} times per engine"
-                  + (f" (question set version {md(a['prompt_set_version'])}, fingerprint "
-                     f"{md_code(a['prompt_set_sha'])})" if a["prompt_set_version"] and a["prompt_set_sha"] else "")
-                  + ". Questions are referred to by number; their text and the answers are not reproduced.", ""]
+        L += [f"- {md_code(e['engine'])}: {md(e['sampling'])}" for e in a["engines"]] + [""]
+        L += [("Question set"
+               + (f" version {md(a['prompt_set_version'])}, fingerprint {md_code(a['prompt_set_sha'])}"
+                  if a["prompt_set_version"] and a["prompt_set_sha"] else "")
+               + ". Questions are referred to by number; their text and the answers are not reproduced."), ""]
     v = s.get("volume")
     if v and not v["checked"]:
         L += [f"Prompt volume: **{md(v['label'])}**. How often real people ask these questions is not known.", ""]
@@ -1001,8 +1074,8 @@ def render_html(m: dict) -> str:
           f"<dt>Audit ID</dt><dd><code>{h(m['audit_id'])}</code></dd>",
           f"<dt>Run</dt><dd>{h(m['started'])} to {h(m['finished'])}</dd>",
           f"<dt>Run outcome</dt><dd>{h(m['run_outcome'])} (whether every check could run; not a score)</dd>",
-          f"<dt>Audit record</dt><dd>report SHA-256 <code>{h(m['report_sha256'])}</code>, recorded on "
-          f"{h(m['brand']['name'])}'s tamper-evident ledger when the audit completed</dd>",
+          f"<dt>Audit record</dt><dd>report SHA-256 <code>{h(m['report_sha256'])}</code>, recorded on a "
+          "tamper-evident ledger when the audit completed</dd>",
           f"<dt>Pages audited ({len(m['pages'])})</dt><dd>"
           + ", ".join(_h_loc({"kind": "page", "path": p["path"]}, pages) for p in m["pages"]) + "</dd>",
           "</dl>", "</header>",
@@ -1067,8 +1140,10 @@ def _h_section(s: dict, pages: dict) -> list:
         o += _h_search(s["search"])
     if s["key"] == "ai":
         o += _h_ai(s)
+    if not st["checked"] and s["notes"]:
+        o.append("<p>Notes from the run are listed under Methodology and limits.</p>")
     if st["checked"] and not s["groups"]:
-        o.append("<p>No findings for the parts of this area that were checked.</p>")
+        o.append(f"<p>{h(_no_findings(st))}</p>")
     if s["dropped"]:
         o.append(f"<p>{h(s['dropped'])} more findings are in the audit record (the list is bounded).</p>")
     for g in s["groups"]:
@@ -1144,12 +1219,12 @@ def _h_ai(s: dict) -> list:
         o += [f"<tr><td><code>{h(e['engine'])}</code></td><td>{h(e['status'])}</td><td>{h(e['asked'] or '—')}"
               f"</td><td>{h(e['not_asked'] or '—')}</td></tr>" for e in a["engines"]]
         o.append("</tbody></table>")
-        if a["samples"]:
-            o.append(f"<p>Each question was asked {h(a['samples'])} times per engine"
-                     + (f" (question set version {h(a['prompt_set_version'])}, fingerprint "
-                        f"<code>{h(a['prompt_set_sha'])}</code>)" if a["prompt_set_version"] and a["prompt_set_sha"]
-                        else "")
-                     + ". Questions are referred to by number; their text and the answers are not reproduced.</p>")
+        o += ["<ul>"] + [f"<li><code>{h(e['engine'])}</code>: {h(e['sampling'])}</li>" for e in a["engines"]]
+        o.append("</ul>")
+        o.append("<p>Question set"
+                 + (f" version {h(a['prompt_set_version'])}, fingerprint <code>{h(a['prompt_set_sha'])}</code>"
+                    if a["prompt_set_version"] and a["prompt_set_sha"] else "")
+                 + ". Questions are referred to by number; their text and the answers are not reproduced.</p>")
     v = s.get("volume")
     if v and not v["checked"]:
         o.append(f"<p>Prompt volume: <strong>{h(v['label'])}</strong>. How often real people ask these questions is "

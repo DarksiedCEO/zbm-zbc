@@ -51,7 +51,7 @@ a{color:inherit;text-decoration:none}}
 <dt>Audit ID</dt><dd><code>seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></dd>
 <dt>Run</dt><dd>2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC</dd>
 <dt>Run outcome</dt><dd>PARTIAL (whether every check could run; not a score)</dd>
-<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on Z Best Media's tamper-evident ledger when the audit completed</dd>
+<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on a tamper-evident ledger when the audit completed</dd>
 <dt>Pages audited (3)</dt><dd><a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a>, <a href="https://acme.test/about" rel="nofollow noopener noreferrer"><code>/about</code></a>, <a href="https://acme.test/pricing" rel="nofollow noopener noreferrer"><code>/pricing</code></a></dd>
 </dl>
 </header>
@@ -229,7 +229,7 @@ a{color:inherit;text-decoration:none}}
 <tr><td><code>/blog/{slug}</code></td><td>40</td><td>500</td><td>8.0%</td></tr>
 <tr><td><code>{other}</code></td><td>3</td><td>30</td><td>10.0%</td></tr>
 </tbody></table>
-<p>No findings for the parts of this area that were checked.</p>
+<p>No findings in this area.</p>
 </section>
 <section class="area" id="ai">
 <h2>AI visibility (answer engines)</h2>
@@ -238,7 +238,10 @@ a{color:inherit;text-decoration:none}}
 <table><thead><tr><th>Engine</th><th>Status</th><th>Questions asked</th><th>Not asked</th></tr></thead><tbody>
 <tr><td><code>perplexity</code></td><td>CHECKED</td><td>2</td><td>0</td></tr>
 </tbody></table>
-<p>Each question was asked 5 times per engine (question set version 2, fingerprint <code>dddddddddddddddd</code>). Questions are referred to by number; their text and the answers are not reproduced.</p>
+<ul>
+<li><code>perplexity</code>: Each of the 2 question(s) asked was asked 5 times.</li>
+</ul>
+<p>Question set version 2, fingerprint <code>dddddddddddddddd</code>. Questions are referred to by number; their text and the answers are not reproduced.</p>
 <p>Prompt volume: <strong>NOT CONNECTED</strong>. How often real people ask these questions is not known.</p>
 <div class="finding">
 <h4>Not mentioned or cited; other sources were</h4>

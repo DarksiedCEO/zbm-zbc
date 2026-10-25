@@ -164,7 +164,7 @@ class Settings:
     perplexity_timeout_s: int = 30
     perplexity_attempts: int = 3
     perplexity_budget: dict = field(default_factory=lambda: dict(PERPLEXITY_BUDGET_OFF))
-    report_branding: object = None                   # client_report.Branding (white label; SEO_REPORT_BRAND_*)
+    report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -395,6 +395,11 @@ def _perplexity(env, s: "Settings") -> None:
     if value in ours:
         raise RuntimeError("the Perplexity API key must differ from every token this service accepts or sends")
     s.perplexity_key = key
+
+
+def _default_branding():
+    import client_report
+    return client_report.DEFAULT_BRANDING
 
 
 def _branding(env):

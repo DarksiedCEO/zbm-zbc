@@ -8,7 +8,7 @@ Prepared by Z Best Media.
 - **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
 - **Run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
 - **Run outcome:** PARTIAL (whether every check could run; not a score)
-- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on Z Best Media's tamper-evident ledger when the audit completed.
+- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
 - **Pages audited (3):** ` / `, ` /about `, ` /pricing `
 
 ### What was checked
@@ -191,7 +191,7 @@ These figures are not paired with revenue (analytics and CRM are not connected),
 | ` /blog/{slug} ` | 40 | 500 | 8.0% |
 | ` {other} ` | 3 | 30 | 10.0% |
 
-No findings for the parts of this area that were checked.
+No findings in this area.
 
 ## AI visibility (answer engines)
 
@@ -203,7 +203,9 @@ Data freshness: observed during the run; refresh recommended by 2026-10-31.
 |---|---|---|---|
 | ` perplexity ` | CHECKED | 2 | 0 |
 
-Each question was asked 5 times per engine (question set version 2, fingerprint ` dddddddddddddddd `). Questions are referred to by number; their text and the answers are not reproduced.
+- ` perplexity `: Each of the 2 question(s) asked was asked 5 times.
+
+Question set version 2, fingerprint ` dddddddddddddddd `. Questions are referred to by number; their text and the answers are not reproduced.
 
 Prompt volume: **NOT CONNECTED**. How often real people ask these questions is not known.
 

@@ -51,7 +51,7 @@ a{color:inherit;text-decoration:none}}
 <dt>Audit ID</dt><dd><code>seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></dd>
 <dt>Run</dt><dd>2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC</dd>
 <dt>Run outcome</dt><dd>PARTIAL (whether every check could run; not a score)</dd>
-<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on Z Best Media's tamper-evident ledger when the audit completed</dd>
+<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on a tamper-evident ledger when the audit completed</dd>
 <dt>Pages audited (1)</dt><dd><a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a></dd>
 </dl>
 </header>
@@ -85,25 +85,25 @@ a{color:inherit;text-decoration:none}}
 <h2>Crawlability</h2>
 <p><span class="status st-ok">CHECKED</span> Whether search and AI crawlers can reach and index the audited pages: robots.txt, status codes, redirects, noindex signals and canonical links.</p>
 <p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-25.</p>
-<p>No findings for the parts of this area that were checked.</p>
+<p>No findings in this area.</p>
 </section>
 <section class="area" id="sitemaps">
 <h2>Sitemaps and llms.txt</h2>
 <p><span class="status st-ok">CHECKED</span> Whether the XML sitemaps can be read and list the right URLs, and whether an llms.txt file is published (an emerging, non-standard convention).</p>
 <p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-25.</p>
-<p>No findings for the parts of this area that were checked.</p>
+<p>No findings in this area.</p>
 </section>
 <section class="area" id="content">
 <h2>Content structure</h2>
 <p><span class="status st-ok">CHECKED</span> How each audited page is structured for machines: title, description, headings, language, structured data (JSON-LD) and how much text is in the raw HTML.</p>
 <p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-31.</p>
-<p>No findings for the parts of this area that were checked.</p>
+<p>No findings in this area.</p>
 </section>
 <section class="area" id="entity">
 <h2>Entity consistency</h2>
 <p><span class="status st-ok">CHECKED</span> Whether the business details in the pages&#x27; Organization / LocalBusiness markup match your canonical business record (name, address, phone).</p>
 <p class="meta">Data freshness: observed during the run; refresh recommended by 2026-10-31.</p>
-<p>No findings for the parts of this area that were checked.</p>
+<p>No findings in this area.</p>
 </section>
 <section class="area" id="search">
 <h2>Search performance (Google Search Console)</h2>
@@ -119,6 +119,10 @@ a{color:inherit;text-decoration:none}}
 <table><thead><tr><th>Engine</th><th>Status</th><th>Questions asked</th><th>Not asked</th></tr></thead><tbody>
 <tr><td><code>perplexity</code></td><td>NOT CONNECTED</td><td>—</td><td>—</td></tr>
 </tbody></table>
+<ul>
+<li><code>perplexity</code>: Nothing was asked.</li>
+</ul>
+<p>Question set version 2, fingerprint <code>dddddddddddddddd</code>. Questions are referred to by number; their text and the answers are not reproduced.</p>
 <p>Prompt volume: <strong>NOT CONNECTED</strong>. How often real people ask these questions is not known.</p>
 </section>
 <section class="area">
@@ -156,6 +160,10 @@ a{color:inherit;text-decoration:none}}
 <p><strong>Method.</strong> Search Analytics for the bound property.</p>
 <h3>AI visibility (answer engines)</h3>
 <p><strong>Method.</strong> no engine connected</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>The method above is the plan. Not every engine was asked every question that many times; the per-engine lines in the AI visibility section state what was actually asked.</li>
+</ul>
 <h3>Versions</h3>
 <ul>
 <li>bot families: <code>2026-10-10.1</code></li>

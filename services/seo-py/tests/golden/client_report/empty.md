@@ -8,7 +8,7 @@ Prepared by Z Best Media.
 - **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
 - **Run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
 - **Run outcome:** PARTIAL (whether every check could run; not a score)
-- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on Z Best Media's tamper-evident ledger when the audit completed.
+- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
 - **Pages audited (1):** ` / `
 
 ### What was checked
@@ -44,7 +44,7 @@ Findings are counted per rule (one rule may affect several pages). An area marke
 
 Data freshness: observed during the run; refresh recommended by 2026-10-25.
 
-No findings for the parts of this area that were checked.
+No findings in this area.
 
 ## Sitemaps and ` llms.txt `
 
@@ -52,7 +52,7 @@ No findings for the parts of this area that were checked.
 
 Data freshness: observed during the run; refresh recommended by 2026-10-25.
 
-No findings for the parts of this area that were checked.
+No findings in this area.
 
 ## Content structure
 
@@ -60,7 +60,7 @@ No findings for the parts of this area that were checked.
 
 Data freshness: observed during the run; refresh recommended by 2026-10-31.
 
-No findings for the parts of this area that were checked.
+No findings in this area.
 
 ## Entity consistency
 
@@ -68,7 +68,7 @@ No findings for the parts of this area that were checked.
 
 Data freshness: observed during the run; refresh recommended by 2026-10-31.
 
-No findings for the parts of this area that were checked.
+No findings in this area.
 
 ## Search performance (Google Search Console)
 
@@ -89,6 +89,10 @@ The data source for this area is not connected for this audit. Nothing is report
 | Engine | Status | Questions asked | Not asked |
 |---|---|---|---|
 | ` perplexity ` | NOT CONNECTED | — | — |
+
+- ` perplexity `: Nothing was asked.
+
+Question set version 2, fingerprint ` dddddddddddddddd `. Questions are referred to by number; their text and the answers are not reproduced.
 
 Prompt volume: **NOT CONNECTED**. How often real people ask these questions is not known.
 
@@ -138,6 +142,10 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 ### AI visibility (answer engines)
 
 **Method.** no engine connected
+
+**Limits.**
+
+- The method above is the plan. Not every engine was asked every question that many times; the per-engine lines in the AI visibility section state what was actually asked.
 
 ### Versions
 

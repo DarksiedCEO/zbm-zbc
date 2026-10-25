@@ -8,7 +8,7 @@ Prepared by Z Best Media.
 - **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
 - **Run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
 - **Run outcome:** NOT\_CONNECTED (whether every check could run; not a score)
-- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on Z Best Media's tamper-evident ledger when the audit completed.
+- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
 - **Pages audited (1):** ` / `
 
 ### What was checked

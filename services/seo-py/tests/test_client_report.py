@@ -112,7 +112,7 @@ def test_nothing_connected_is_never_shown_clean(fmt):
 
 def test_empty_findings_are_stated_per_checked_area_and_unbound_gsc_is_not_connected():
     t = render("empty", "markdown")
-    assert t.count("No findings for the parts of this area that were checked.") == 4
+    assert t.count("No findings in this area.") == 4
     gsc = _section(t, "Search performance (Google Search Console)", True)
     assert "NOT CONNECTED" in gsc and "No Search Console property is linked" in gsc and cr.NOT_CLEAN in gsc
     ai = _section(t, "AI visibility (answer engines)", True)
@@ -570,7 +570,7 @@ def test_cli_fetch_goes_through_the_recorded_route(tmp_path, srv, capsys):
         files[name] = tmp_path / f"{name}.tok"
         files[name].write_text(tok + "\n")
     out = tmp_path / "r.md"
-    args = ["fetch", "--api", "http://testserver", "--tenant", "zbm", "--audit", aid, "--format", "markdown",
+    args = ["fetch", "--api", "http://127.0.0.1:8500", "--tenant", "zbm", "--audit", aid, "--format", "markdown",
             "--out", str(out), "--service-token-file", str(files["service"]), "--caller-token-file",
             str(files["caller"]), "--andre-token-file", str(files["andre"]), "--request-id", rid()]
     cli = _cli()
@@ -586,3 +586,226 @@ def test_cli_fetch_goes_through_the_recorded_route(tmp_path, srv, capsys):
     other = copy.copy(args)
     other[other.index(aid)] = "not-an-id"
     assert cli.main(other, client=h.client) == 2
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS 3abca49
+
+from envelope import envelope, finding  # noqa: E402
+
+_NOT_OBSERVED = [o for o in cr.STATUS if o not in ("OK", "PARTIAL")]      # None = the area is missing entirely
+_MAY_CARRY_FINDINGS = {"BLOCKED", "FAILED", "INSUFFICIENT_EVIDENCE", "PARTIAL", "OK"}
+
+
+def _with_crawl(outcome, findings=True):
+    """``full()`` with Selene's envelope replaced by one of the given outcome (None: the envelope removed)."""
+    v = fx.fresh("full")
+    agents = [e for e in v["report"]["agents"] if e["agent"] != "selene"]
+    if outcome is not None:
+        fl = [finding("PAGE_BLOCKED_FOR_OUR_CRAWLER", "info", "measured", "INSUFFICIENT_EVIDENCE",
+                      url="https://acme.test/", detail={"note": "x"})] \
+            if findings and outcome in _MAY_CARRY_FINDINGS else []
+        agents.insert(0, envelope("selene", "crawlability", outcome, fl, reason="KILLED_GLOBAL" if outcome == "KILLED"
+                                  else None, methodology="Fetched robots.txt.", limitations=["One location."]))
+    v["report"]["agents"] = agents
+    return v
+
+
+@pytest.mark.parametrize("fmt", ["markdown", "html"])
+@pytest.mark.parametrize("outcome", _NOT_OBSERVED, ids=lambda o: str(o))
+@pytest.mark.parametrize("with_findings", [True, False])
+def test_no_unobserved_status_ever_reads_clean(outcome, with_findings, fmt):
+    """AEGIS M-2: every not-observed outcome (stopped, blocked, failed, suspended, input set aside, not connected,
+    not covered, missing) says it was not checked, shows no findings count and no 'No findings' line, and lists no
+    finding (L-6: what its run recorded is a note under the limits)."""
+    t = cr.render(_with_crawl(outcome, with_findings), "acme", fmt)[0].decode()
+    md = fmt == "markdown"
+    if md:
+        t = t.replace("` robots.txt `", "robots.txt").replace("\\_", "_")
+    body = _section(t, "Crawlability", md)
+    label = cr.STATUS[outcome][0]
+    assert (md and f"**Status: {label}.**" in body) or (not md and f">{label}</span>" in body), label
+    assert cr.NOT_CLEAN in body
+    assert "No findings" not in body and "not a clean result" in body
+    assert ("**Rule:**" not in body) if md else ('class="finding"' not in body)
+    row = re.search(r"\| Crawlability \| \*\*[^|]*\*\* \| ([^|]*) \|", t) if md else \
+        re.search(r"<tr><td>Crawlability</td><td>.*?</td><td>([^<]*)</td>", t)
+    assert row and row.group(1).strip() == cr.DASH
+    if with_findings and outcome in _MAY_CARRY_FINDINGS:
+        assert "Notes from the run are listed under Methodology and limits." in body
+        assert "Run note: Page not read: robots.txt disallows our crawler (rule PAGE_BLOCKED_FOR_OUR_CRAWLER)" in t
+
+
+@pytest.mark.parametrize("fmt", ["markdown", "html"])
+@pytest.mark.parametrize("with_findings", [True, False])
+def test_partly_checked_never_reads_clean(with_findings, fmt):
+    t = cr.render(_with_crawl("PARTIAL", with_findings), "acme", fmt)[0].decode().replace("` robots.txt `",
+                                                                                          "robots.txt")
+    body = _section(t, "Crawlability", fmt == "markdown")
+    assert "PARTLY CHECKED" in body and "Part of this area could not be checked" in body
+    assert "No findings in this area." not in body
+    if with_findings:
+        assert "Page not read: robots.txt disallows our crawler" in body and "No findings" not in body
+    else:
+        assert "No findings in the part that could be checked. The rest of this area was not checked, so this is " \
+               "not a clean result." in body
+
+
+def test_only_ok_reads_no_findings_in_this_area():
+    t = cr.render(_with_crawl("OK", False), "acme", "markdown")[0].decode()
+    assert "No findings in this area." in _section(t, "Crawlability", True)
+
+
+def _ai(engines, samples=5):
+    v = fx.fresh("full")
+    for e in v["report"]["agents"]:
+        if e["agent"] == "callum":
+            e["facts"]["engines"] = engines
+            e["facts"]["samples_per_prompt"] = samples
+    return v
+
+
+def test_sampling_is_claimed_per_engine_and_only_when_every_question_was_asked():
+    """AEGIS M-1: no blanket 'each question was asked N times per engine'."""
+    full = fx._engine("perplexity", 2)
+    partial = {**fx._engine("perplexity", 2), "outcome": "PARTIAL", "reason": "ENGINE_BUDGET_EXHAUSTED",
+               "prompts_not_asked": 1}
+    stopped = {"engine": "anthropic", "outcome": "BLOCKED", "reason": "ENGINE_BUDGET_EXHAUSTED", "prompts": [],
+               "prompts_not_asked": 3}
+    refused = {**fx._engine("google", 1), "prompts": fx._engine("google", 1)["prompts"]
+               + [{"prompt_index": 1, "prompt": None, "prompt_refused": "personal_data:email"}]}
+    engines = {"perplexity": partial, "openai": "NOT_CONNECTED", "anthropic": stopped, "google": refused,
+               "zfull": full}
+    for fmt in ("markdown", "html"):
+        t = cr.render(_ai(engines), "acme", fmt)[0].decode()
+        assert "Each question was asked" not in t
+        assert "The method above is the plan." in t
+        assert "Sampling did not finish: 2 question(s) were asked, each up to 5 times. 1 question(s) were not " \
+               "asked." in t
+        assert "openai</code>: Nothing was asked." in t or "` openai `: Nothing was asked." in t
+        assert ("anthropic</code>: Nothing was asked." in t) or ("` anthropic `: Nothing was asked." in t)
+        assert "Each of the 1 question(s) asked was asked 5 times. 1 question(s) were not sent because they " \
+               "looked like personal data." in t
+        assert "Each of the 2 question(s) asked was asked 5 times." in t
+    # an OK engine without a recorded not-asked count is not claimed complete
+    t = cr.render(_ai({"perplexity": {k: v for k, v in full.items() if k != "prompts_not_asked"}}), "acme",
+                  "markdown")[0].decode()
+    assert "How many questions were left unasked is not recorded." in t and "Each of the" not in t
+
+
+def test_cli_refuses_plain_http_except_loopback():
+    """AEGIS M-3."""
+    cli = _cli()
+    for ok in ("https://seo.internal", "https://seo.internal:8443/", "http://127.0.0.1:8500", "http://[::1]:8500",
+               "http://localhost:8500", "http://127.9.9.9"):
+        assert cli.api_base(ok) == ok.rstrip("/")
+    for bad in ("http://seo.internal", "http://10.0.0.5:8500", "ftp://127.0.0.1", "https://u:p@seo.internal",
+                "https://seo.internal/?x=1", "https://seo.internal/#f", "http://localhost.evil.test", "seo.internal",
+                "http://[::1"):
+        with pytest.raises(ValueError):
+            cli.api_base(bad)
+
+
+def test_cli_fetch_refuses_plain_http_before_sending_anything(tmp_path, capsys):
+    cli = _cli()
+    sent = []
+
+    class Spy:
+        def post(self, *a, **k):
+            sent.append(a)
+
+        get = post
+    tok = tmp_path / "t.tok"
+    tok.write_text("x" * 40)
+    args = ["fetch", "--api", "http://seo.example", "--tenant", "zbm", "--audit", "seo-aud-" + "0" * 40, "--format",
+            "html", "--out", str(tmp_path / "o.html"), "--service-token-file", str(tok), "--caller-token-file",
+            str(tok), "--andre-token-file", str(tok)]
+    assert cli.main(args, client=Spy()) == 2 and sent == []
+    assert "https" in capsys.readouterr().err and not (tmp_path / "o.html").exists()
+
+
+def test_code_shaped_values_hosts_and_templates_are_checked_for_personal_data():
+    """AEGIS L-1, L-2, L-3."""
+    v = fx.fresh("full")
+    sel = v["report"]["agents"][0]
+    sel["findings"] += [
+        finding("PAGE_NOT_HTML", "low", "measured", "WATCH", url="https://acme.test/",
+                detail={"content_type": "tel:+15550100199"}),
+        finding("CANONICAL_OTHER_HOST", "medium", "measured", "TEST", url="https://acme.test/",
+                detail={"canonical": "https://jane-doe-5550100199.evil.test/x"})]
+    v["report"]["search_performance"]["section"]["by_page_template"]["templates"].insert(
+        0, {"template": "{x}/jane.doe@example.com/5550100199", "clicks": 1, "impressions": 2, "ctr": 0.5})
+    for fmt in ("markdown", "html"):
+        t = cr.render(v, "acme", fmt)[0].decode()
+        assert "5550100199" not in t and "jane" not in t
+        assert cr.WITHHELD in t and "{offsite}" in t
+
+
+def test_request_paths_never_show_a_query_string_or_personal_data():
+    """AEGIS L-4."""
+    v = fx.fresh("full")
+    v["report"]["paths"] = ["/", "/account?email=jane.doe@example.com", "/u/555-010-0199"]
+    for fmt in ("markdown", "html"):
+        t = cr.render(v, "acme", fmt)[0].decode()
+        assert "jane" not in t and "email=" not in t and "555-010-0199" not in t
+        assert "/account" in t and "/u/{number}" in t
+    p = _Tags()
+    p.feed(cr.render(v, "acme", "html")[0].decode())
+    assert {val for _t, k, val in p.attrs if k == "href"} == {"https://acme.test/", "https://acme.test/account"}
+
+
+def test_white_label_does_not_attribute_the_ledger_to_the_reseller():
+    """AEGIS L-5."""
+    for fmt in ("markdown", "html"):
+        t = render("full", fmt, branding=cr.Branding("Acme Partners", "#123456"))
+        assert "Acme Partners's" not in t and "Acme Partners'" not in t
+        assert "recorded on a tamper-evident ledger when the audit completed" in t
+
+
+def test_search_console_freshness_without_a_window():
+    """AEGIS L-7."""
+    v = fx.fresh("full")
+    for e in v["report"]["agents"]:
+        if e["task"] == "search_performance":
+            e["outcome"] = "PARTIAL"
+    v["report"]["search_performance"]["section"] = None
+    t = cr.render(v, "acme", "markdown")[0].decode()
+    assert "None to None" not in t and "no Search Console data in this report" in t
+
+
+@pytest.mark.parametrize("field,value", [("severity", "CRITICAL"), ("severity", None), ("data_class", "guessed"),
+                                         ("decision", "MAYBE")])
+def test_a_finding_outside_the_vocabularies_is_refused_not_downgraded(field, value):
+    """AEGIS L-10."""
+    v = fx.fresh("full")
+    v["report"]["agents"][0]["findings"][0][field] = value
+    with pytest.raises(cr.ReportInputError):
+        cr.render(v, "acme", "html")
+
+
+def test_service_refuses_to_start_without_valid_branding(tmp_path):
+    """AEGIS L-8: a Settings built without load() carries the default; anything else refuses start."""
+    assert config_mod.Settings(service_token="x" * 40).report_branding == cr.DEFAULT_BRANDING
+    from ledger import Recorder
+    from service import SeoService
+    from store import RecordLog
+    from helpers import FakeLedger
+    s = config_mod.load(base_env())
+    s.report_branding = None
+    with pytest.raises(RuntimeError, match="report_branding"):
+        SeoService(s, Recorder(FakeLedger()), RecordLog(None))
+
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("switch,code", [("global", "KILLED_GLOBAL"), ("write", "KILLED_WRITE")])
+def test_route_global_and_write_switches(tmp_path, srv, switch, code):
+    install_site(srv)
+    h = _harness(tmp_path, srv)
+    aid = _audit(h)["audit_id"]
+    req = rid()
+    first = h.ok(_report(h, "zbm", aid, request_id=req))
+    h.ok(h.switch(switch))
+    h.refused(_report(h, "zbm", aid), 403, code)
+    h.refused(_report(h, "zbm", aid, request_id=req), 403, code)            # a replay too
+    assert len(h.ledger.of_type("client_report_rendered")) == 1
+    h.ok(h.switch(switch, engaged=False, andre=True))
+    assert h.ok(_report(h, "zbm", aid, request_id=req)) == first

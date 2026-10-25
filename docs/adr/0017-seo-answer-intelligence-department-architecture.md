@@ -1060,9 +1060,47 @@ CR-6. **The route and the evidence.** `POST /seo/v1/tenants/{tid}/audits/{aid}/c
 
 CR-7. **White label and the CLI.** The preparer's name and accent colour are configuration (`SEO_REPORT_BRAND_NAME`,
    `SEO_REPORT_BRAND_ACCENT`; validated, a bad value refuses start; default Z Best Media). No third-party promotion,
-   no "powered by". `devtools/render_report.py fetch` calls the route with tokens read from files and writes the
-   document only when its SHA-256 matches the recorded one; `preview` renders a saved audit view offline with a
+   no "powered by". `devtools/render_report.py fetch` calls the route over https (plain http only to a loopback host)
+   with tokens read from files and writes the document (0600) only when its SHA-256 matches the answer and the
+   service's list of recorded renders (CR-9, L-9); `preview` renders a saved audit view offline with a
    "PREVIEW. Rendered offline and not recorded on the ledger. Not for delivery to a client." banner.
+
+CR-9. **AEGIS review of 3abca49 (CERTIFIED WITH CONDITIONS), findings closed.**
+   - M-1: no blanket "each question was asked N times per engine". Each engine gets its own line. "Each of the n
+     question(s) asked was asked N times" is written only for an engine whose outcome is OK with `prompts_not_asked`
+     recorded as 0. Otherwise the line says "Sampling did not finish: n question(s) were asked, each up to N times"
+     with how many were not asked (or that the count is not recorded), or "Nothing was asked" for an engine not
+     connected or stopped before its first question. Prompts refused as personal data are counted apart. When any
+     engine did not finish, the appendix adds that the method describes the plan.
+   - M-2: a parametrised test covers every not-observed status (each `STATUS` key but OK and PARTIAL, plus a missing
+     envelope), in both formats, with and without findings. Each must give the label, the not-clean sentence, the
+     dash in the findings column, no "No findings" line and no finding. PARTIAL now reads "No findings in the part
+     that could be checked ... not a clean result"; only OK reads "No findings in this area." Mutating `_status` to
+     treat any one of these outcomes as checked fails the tests.
+   - M-3: the CLI refuses an `--api` that is not https, except plain http to a loopback host (127.0.0.0/8, ::1,
+     localhost). It also refuses credentials, a query or a fragment in the URL. The check runs before anything is
+     sent.
+   - L-1, L-3: code-shaped values (`safe_token`) and host names (`safe_host`) go through the personal-data check. A
+     host that fails it is shown as a bare `{offsite}`.
+   - L-2: only `{other}`, `{offsite}` and `{unreadable}` are kept from a recorded Search Console template as written.
+     Every other template is templated again.
+   - L-4: a path the audit request named is shown without its query string or fragment. If what remains looks like
+     personal data, it is shown as its template and is not linked.
+   - L-5: the cover says "recorded on a tamper-evident ledger", with no brand name.
+   - L-6: an area that was not checked lists no findings. What its run recorded (an engine run stopped, a page
+     blocked) becomes a "Run note" line under that area's limits.
+   - L-7: Search Console freshness without a well-formed window reads "no Search Console data in this report".
+   - L-8: `Settings.report_branding` defaults to the ZBM branding, and the service refuses to start when it is not a
+     `Branding`.
+   - L-9: the CLI writes the document (mode 0600) only when its hash and size match the answer, and the service's
+     list of recorded renders holds the same `report_id` and `document_sha256`. That list holds a render only after
+     the ledger accepted its event. The CLI does not read the ledger itself, and CR-7's wording is corrected
+     accordingly.
+   - L-10: a finding whose severity, data class or decision is outside the closed vocabularies makes the audit
+     unrenderable (`REPORT_NOT_RENDERABLE`). It is never downgraded.
+   - Shipped tests now cover the global and write kill switches on the route, including on a replay.
+   - Out of scope here: O-1 (`tests/test_dual_stack_listener.py`'s `python -I` child writing `src/__pycache__`) is
+     being fixed on the combined branch.
 
 CR-8. **Limitations (honest).**
    - The fixes are generic, per rule; they are not tailored to the client's platform (CMS, CDN) and nobody has yet
