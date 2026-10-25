@@ -164,7 +164,7 @@ conn.close(); c.close(); s.close()
 def test_ipv4_reaches_the_real_wildcard_socket_or_the_launcher_refuses_without_ipv6():
     import subprocess
 
-    r = subprocess.run([sys.executable, "-I", "-c", _REAL_SOCKET_CHILD, str(SRC)], capture_output=True, text=True,
+    r = subprocess.run([sys.executable, "-I", "-B", "-c", _REAL_SOCKET_CHILD, str(SRC)], capture_output=True, text=True,
                        timeout=60)
     assert r.returncode == 0, r.stderr[-2000:]
     out = r.stdout.split()
