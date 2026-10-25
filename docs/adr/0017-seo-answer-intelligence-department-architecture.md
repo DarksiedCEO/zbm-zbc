@@ -981,6 +981,102 @@ Founder-pending defaults added by Wave 4 (numbered after the Search Console buil
 - (24) a plain environment variable is accepted for the key on Railway;
 - (25) `sonar-reasoning-pro` and `sonar-deep-research` are not on the allowlist.
 
+## Client report (go-live plan: the deliverable of the SEO technical audit; built Oct 24 2026 on `golive-seo-report`)
+
+The document a paying client receives for the first offer. Code: `src/client_report.py` (the renderer),
+`src/svc_reports.py` (the recorded route), `devtools/render_report.py` (the CLI); tests `tests/test_client_report.py`
+with golden files in `tests/golden/client_report/` and fixture audits in `tests/report_fixtures.py`.
+
+CR-1. **Deterministic rendering.** A completed audit view (`audit_view`, i.e. the retained view: Search Console
+   breakdowns past `SEO_GSC_RETENTION_DAYS` are already reduced to totals) becomes a neutral model and then Markdown or
+   one self-contained HTML page (inline CSS, no script, no external asset, no image; a `Content-Security-Policy` meta of
+   `default-src 'none'; style-src 'unsafe-inline'`; print CSS so a browser prints it to PDF). No model call, no clock,
+   no randomness, no network: the same audit view, tenant and branding give the same bytes (tested, including reversed
+   key order and reversed finding order). The document shows the run's own times (`started_at`, `finished_at`, UTC);
+   when it was rendered is on the ledger, not in the document. It refuses (`REPORT_NOT_RENDERABLE`) anything that is not
+   a completed audit of the tenant, of report version `seo-audit-report/1`, with a well-formed id, target, times and
+   report hash.
+
+CR-2. **Structure.** Cover: domain, audit id, run times, run outcome ("whether every check could run; not a score"),
+   the audit report's SHA-256, the audited pages, a "What was checked" table (area, status, findings per rule, data
+   freshness) and the NOT CONNECTED list in plain words. Then one section per area — crawlability (Selene), sitemaps and
+   llms.txt (Delia), content structure (Roman), entity consistency (the entity check), search performance (Osei's
+   Search Console section), AI visibility (Callum, with Naomi's prompt-volume state) — then "Methodology and limits",
+   generated from the report's global limitations and each envelope's `methodology` and `limitations`, the quarantined
+   inputs by reason, and the rule versions. Data freshness per section: crawl areas "observed during the run; refresh
+   recommended by" the run's end plus the Osei refresh tier (robots / sitemap 1 day, pages and AI probes 7 days);
+   Search Console its window (Pacific Time, final data, about 3 days' lag); an area not observed says so.
+
+CR-3. **Nothing unobserved is shown clean.** Status per area from the envelope's outcome: OK = CHECKED, PARTIAL = PARTLY
+   CHECKED, NOT_CONNECTED = NOT CONNECTED, INSUFFICIENT_EVIDENCE (or an envelope missing from the report) = NOT COVERED,
+   BLOCKED / FAILED / KILLED / QUARANTINED / RESTRICTED = NOT CHECKED (blocked / failed / stopped / input set aside /
+   suspended). Every such area carries the reason in plain words (a closed table keyed by reason code, e.g.
+   `GSC_NOT_CONNECTED`, `GSC_PROPERTY_UNBOUND`, `NO_PROMPT_SET`) and the sentence "Nothing is reported here because this
+   area was not checked. This is not a clean result."; "No findings" is written only for a checked area.
+
+CR-4. **Findings.** Grouped by (severity, rule, data class, decision) and ordered critical → info; each group has a
+   plain-English title and fix from a closed per-rule table (an unknown rule gets its code as title, a neutral fix and
+   no detail), the severity, the decision in words (ACT "Fix", TEST "Test a change", WATCH "Monitor (may be
+   intentional)", ...), the evidence class, the rule id and the capability area, where it was seen (at most 20
+   locations) and the evidence of at most 5 instances. Evidence class labels from `data_class`: measured = OBSERVED
+   ("measured by this audit's own requests"), inferred = INFERRED with the rule it rests on, estimated / modeled =
+   ESTIMATED / MODELED with the assumption (no Wave-1 finding is estimated; if one ever is without a recorded
+   assumption, the report says to treat it as unverified), unknown = UNKNOWN. Search Console clicks and impressions are
+   OBSERVED (first-party, as reported by Google); the window's position is ESTIMATED with its assumption (an
+   impression-weighted mean of Google's daily positions). There is no overall score, grade or percentage, findings of
+   different kinds are never added up, and the report states that it promises no rankings, traffic or citations and
+   makes no comparison claim about any other provider (flag 7). `ENGINE_COST_ABOVE_RESERVE` (our spend) stays in the
+   audit record and out of the client document.
+
+CR-5. **Untrusted text, personal data, retention.** Only detail keys listed for a rule are rendered, each by kind
+   (number, yes/no, code-shaped token, text, URL, path, structured-data issue, rate with its 95% interval, cited host).
+   Crawled text is cleaned of control characters, bounded (160 characters; lists 5 items) and withheld as "[withheld:
+   may contain personal data]" when `agents.prompt_guard.personal_data` flags exactly what would be shown (ISO dates
+   and dated rule versions are taken out first). A crawled URL is shown only as a path template
+   (`agents.logs.template_path` plus the Search Console slug rule, so names in hyphenated slugs and e-mails, numbers and
+   tokens become placeholders); another host is `{offsite}` with its name only when it is plain LDH; a path the audit
+   request named is shown as written. Entity values (the canonical record and what the page says) are not printed: the
+   field name is. Never rendered: an answer body, a prompt's or query's text (questions are "Question 1", "Question
+   2"), answer hashes, per-query or per-URL Search Console rows, spend. HTML: every value through `html.escape`; the only
+   links are the audited pages on the tenant's registered domain, built from the request's scheme, domain and path
+   (never from crawled text), with `rel="nofollow noopener noreferrer"`. Markdown: every value escaped (backslash, backtick,
+   `*`, `_`, `[`, `]`, `<`, `>`, `|`, `~`, `&`, `#`, `!`), and any token GitHub-flavoured Markdown could autolink (`://`, `www.`, `@`, a dotted host) is put in a
+   code span with a fence longer than any backtick run in it; values never start a line. Tested with HTML and Markdown
+   injection in every rendered field (an HTML parser checks that only our tags and attributes exist; Markdown is
+   checked outside code spans).
+
+CR-6. **The route and the evidence.** `POST /seo/v1/tenants/{tid}/audits/{aid}/client-report` with
+   `{"request_id", "format": "markdown" | "html"}`: the dashboard caller with Andre's approval token only; another
+   tenant's audit answers the same 404 `AUDIT_NOT_FOUND` as a missing one; an audit that did not complete is 409
+   `AUDIT_NOT_COMPLETED`. Kill switches: global, write, the tenant's, the new `capability:reports`, and
+   `capability:audit`. Record-first: `client_report_rendered` (report id, tenant, audit, format, renderer version
+   `seo-client-report/1`, the audit report's SHA-256, the document's SHA-256 and size, the branding's SHA-256; no
+   document, domain or time) is on the ledger and the log before the answer; if the ledger cannot record it, no document
+   is returned (503). The answer is JSON (`content`, `media_type`, the hashes), so the API never serves HTML from its own
+   origin. Idempotent by request id; a replay whose document no longer matches the recorded hash (the Search Console
+   breakdowns expired in between) is refused `REPORT_CHANGED` rather than handing out an unrecorded document — a new
+   request id records the new render. `GET .../client-reports` (dashboard, compliance_38) lists the recorded renders
+   (ids and hashes only).
+
+CR-7. **White label and the CLI.** The preparer's name and accent colour are configuration (`SEO_REPORT_BRAND_NAME`,
+   `SEO_REPORT_BRAND_ACCENT`; validated, a bad value refuses start; default Z Best Media). No third-party promotion,
+   no "powered by". `devtools/render_report.py fetch` calls the route with tokens read from files and writes the
+   document only when its SHA-256 matches the recorded one; `preview` renders a saved audit view offline with a
+   "PREVIEW. Rendered offline and not recorded on the ledger. Not for delivery to a client." banner.
+
+CR-8. **Limitations (honest).**
+   - The fixes are generic, per rule; they are not tailored to the client's platform (CMS, CDN) and nobody has yet
+     reviewed them with a real client. Titles and fixes are English only.
+   - Personal-data detection is the prompt guard's (e-mails, phone-like digit runs, IPv4); names and street addresses
+     in crawled text are not detected, which is why crawled text is bounded, URL paths are templated and entity values
+     are not printed. Withholding can over-trigger on a crawled value with many digits.
+   - Templates hide which exact URL is affected when the path is not one the audit request named; the exact URLs stay
+     in the audit record (dashboard), not in the client document.
+   - PDF is "print from a browser"; there is no server-side PDF and no visual regression test of the print layout.
+   - The document is as good as the audit: the agents' own limits (one location, one time, no
+     rendering, Search Console and Perplexity NOT_CONNECTED until Andre's steps) is carried into the appendix, not fixed.
+   - An unknown future rule renders with its code and no detail until it is added to the rule table.
+
 ## Unlock list
 
 Answer-engine adapters with scoped, short-lived credentials (OpenAI, Anthropic, Google); a renderer; Bing Webmaster; a

@@ -65,7 +65,7 @@ MUST failure or ERROR.
 | `SEO_NON_PRODUCTION` | `0` | `1` allows an in-memory run without `SEO_DATA_DIR` (tests only) |
 | `SEO_DATA_DIR` | — | the record log and its lock (flock: one process per directory) |
 | `SEO_KILL_GLOBAL` | `0` | `1` starts with the global kill switch engaged; it cannot be released at runtime |
-| `SEO_KILLED_CAPABILITIES` | empty | comma list of `fetch`, `render`, `ai_probe`, `audit`, `entity_write`, `prompt_sets` killed at start (sticky) |
+| `SEO_KILLED_CAPABILITIES` | empty | comma list of `fetch`, `render`, `ai_probe`, `audit`, `entity_write`, `prompt_sets`, `logs`, `schedules`, `reports` killed at start (sticky) |
 | `SEO_KILLED_PROVIDERS` | empty | comma list of `web`, `openai`, `anthropic`, `google`, `perplexity` killed at start (sticky) |
 | `SEO_FETCH_TIMEOUT_SECONDS` | `10` | per-phase timeout (1..60); the whole response must arrive within twice this |
 | `SEO_FETCH_MAX_BYTES` | 2 MiB | decoded body cap (64 KiB..10 MiB) |
@@ -101,6 +101,7 @@ MUST failure or ERROR.
 | `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD` | `0`, `0` | the global daily budget (UTC day) in requests and US dollars. **0 = OFF: no request is made** (fail closed) |
 | `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | `0`, `0` | the same per tenant. All four must be above 0 before Perplexity is ever asked anything |
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | `0.05` | what each request reserves against the spend budgets before it is sent (0.001..5), and what it costs when Perplexity reports no cost |
+| `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | `Z Best Media` / `#1f4e79` | white label of the client report: the preparer's name (1-60 letters, digits, spaces, `. , & ' ( ) -`) and accent colour (`#RRGGBB`); anything else refuses start |
 | `SEO_BIND_ADDR` / `SEO_PORT` | `127.0.0.1` / `8500` | where the API listens |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | the evidence ledger; unset = every write refused (fail closed) |
@@ -109,6 +110,13 @@ MUST failure or ERROR.
 two allowlisted Google hosts, a hard deadline, bounded retries and pagination, aggregates only (no query text, no
 URL), a `search_performance` section in every audit report (`NOT_CONNECTED` until a key is configured and Andre binds
 the tenant's property), kill switch `provider:gsc`. Setup steps for Andre: ADR 0017, "Search Console".
+
+**Client report** (`src/client_report.py`, `src/svc_reports.py`, `devtools/render_report.py`): a completed audit as
+Markdown or one self-contained HTML page (inline CSS, no script, printable to PDF from a browser), rendered
+deterministically with no model call; no overall score; NOT CONNECTED / NOT COVERED areas stated plainly; crawled text
+escaped, URLs as templates, no prompt, answer or query text. `python3 devtools/render_report.py fetch ...` asks the
+service (recorded on the ledger); `... preview AUDIT.json ...` renders offline with a PREVIEW banner. ADR 0017,
+"Client report".
 
 The fetcher only ever connects to ports 80 and 443, accepts at most one content coding (gzip or deflate), decoded
 within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SECONDS`) over the whole fetch.
@@ -136,6 +144,8 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets |
 | `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant and verified with Finance; `invoice_override` (Andre, only when Finance cannot answer) |
 | `GET /tenants/{tid}/audits[/{aid}]` | scoped (finance_31 gets status only) | audits and reports |
+| `POST /tenants/{tid}/audits/{aid}/client-report` | Andre | the client-facing report of a completed audit, `{"request_id", "format": "markdown" \| "html"}`; recorded first (`client_report_rendered` with the document's SHA-256), answered as JSON with the document in `content` (ADR 0017, "Client report") |
+| `GET /tenants/{tid}/audits/{aid}/client-reports` | dashboard, compliance_38 | the recorded renders of one audit (ids and hashes, never the document) |
 | `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
 | `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |
 | `POST /tenants/{tid}/schedules`, `.../{sid}/status`; `GET` both | dashboard, seo_agent (+ Andre for clients) | scheduled re-audits; drift report per consecutive pair (Wave 2) |
