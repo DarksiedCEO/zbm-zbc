@@ -722,6 +722,50 @@ def _regex_structure(p: re.Pattern) -> list[str]:
     return found
 
 
+def _not_in_reviewed_form(text, named: dict) -> set:
+    """Names of the patterns in ``named`` whose (source, flags) is not their reviewed form in REVIEWED_PATTERNS (or
+    that have none): their absolute cost was never reviewed, so the 50 ms bound is asserted for them on every run."""
+    out = set()
+    for k, p in named.items():
+        if k not in REVIEWED_PATTERNS:
+            out.add(k)
+            continue
+        r = _reviewed(text, k)
+        if (p.pattern, p.flags) != (r.pattern, r.flags):
+            out.add(k)
+    return out
+
+
+def review_absolute_cost(attempts: int = 5) -> list[tuple]:
+    """The review measurement of the absolute bound (run on an unloaded machine, on each supported Python, when a
+    pattern of shared.text is added or changed, before its reviewed form is updated in REVIEWED_PATTERNS): per
+    pattern, the best of ``attempts`` CPU readings on each adversarial 100 000-char input, and whether the worst is
+    under ABS_CPU_MAX. ``python -c "import sys; sys.path[:0] = ['src', 'tests']; import test_fix_wave_4 as t;
+    print(t.review_absolute_cost())"`` from services/creative-py."""
+    import shared.text as text
+
+    rows = []
+    for name, p in sorted((k, v) for k, v in vars(text).items() if isinstance(v, re.Pattern)):
+        worst = max(min(regex_cpu(p, s) for _ in range(attempts)) for s in _adversarial_inputs(ABS_N))
+        rows.append((name, round(worst * 1000, 2), worst < ABS_CPU_MAX))
+    return rows
+
+
+def test_lim_the_absolute_bound_is_asserted_for_every_pattern_not_in_its_reviewed_form():
+    """Deterministic (no timing): an unchanged pattern is exempt from the per-run 50 ms reading; a pattern whose source
+    or flags differ from its reviewed form, or that has no reviewed form, is not."""
+    import shared.text as text
+
+    named = {k: v for k, v in vars(text).items() if isinstance(v, re.Pattern)}
+    assert _not_in_reviewed_form(text, named) == set()      # the module as reviewed (table-built forms included)
+    changed = dict(named, _RUNS=re.compile(r"(.)\1{1,}", re.DOTALL))        # same matches, new source
+    reflagged = dict(named, _AZ_ONLY=re.compile(r"[^a-z]+", re.IGNORECASE))
+    new = dict(named, _BRAND_NEW=re.compile(r"x+"))
+    assert _not_in_reviewed_form(text, changed) == {"_RUNS"}
+    assert _not_in_reviewed_form(text, reflagged) == {"_AZ_ONLY"}
+    assert _not_in_reviewed_form(text, new) == {"_BRAND_NEW"}
+
+
 def test_lim_every_regex_in_text_module_is_linear_time():
     """Linearity is asserted two ways, neither against another pattern's speed (annotated CI, Oct 10 2026: a ratio to
     an unrelated reference regex measured the runner's constant factors and failed a linear pattern every time):
@@ -733,12 +777,21 @@ def test_lim_every_regex_in_text_module_is_linear_time():
       times the CPU of the short side, best of 5; a quadratic pattern reads ~16 there
       (``test_lim_the_growth_bound_fails_superlinear_patterns_and_passes_a_costly_linear_one``).
 
-    The 50 ms bound per 100 000 chars stays (absolute cost). The ratio to LINEAR_REF is printed only."""
+    The 50 ms bound per 100 000 chars (absolute cost) is asserted on every run for a pattern that differs from its
+    reviewed form (REVIEWED_PATTERNS: new or changed, so its cost has not been reviewed). For an unchanged pattern the
+    absolute cost is a constant of (pattern, CPython's sre engine) checked at review (``review_absolute_cost``, below),
+    and on every run it is read and printed, not asserted: golive-combined CI (Oct 25 2026, macos-26 3.13) read
+    `(.)\1+` at 54, 116 and 96 ms on three fresh readings against 50 ms, a pattern pinned and reviewed, unchanged
+    since wave 4 — the runner's speed, not the pattern's (the same wall-clock flake fix wave G removed from
+    onboarding-py). A slower rewrite of a reviewed pattern fails the reviewed-form bound on every platform
+    (test_lim_every_regex_in_text_module_costs_no_more_than_its_reviewed_form). The ratio to LINEAR_REF is printed
+    only."""
     import shared.text as text
 
     import hashlib
 
     named = {k: v for k, v in vars(text).items() if isinstance(v, re.Pattern)}
+    unreviewed = _not_in_reviewed_form(text, named)
     patterns = list(named.values())
     assert len(patterns) >= 2
     for name, p in named.items():
@@ -748,7 +801,7 @@ def test_lim_every_regex_in_text_module_is_linear_time():
         assert not risky or same, (name, p.pattern[:80], risky, "a super-linear-capable construct no reviewer has "
                                    "explained (or the reviewed pattern changed)")
     worst, worst_ratio, at, worst_growth, grew = 0.0, 0.0, None, 0.0, None
-    for p in patterns:
+    for name, p in named.items():
         for small, large, s in zip(_adversarial_inputs(GROWTH_SMALL), _adversarial_inputs(GROWTH_LARGE),
                                    _adversarial_inputs(ABS_N)):
             t_small, t_large, growth = regex_same_work(p, small, large)
@@ -759,10 +812,13 @@ def test_lim_every_regex_in_text_module_is_linear_time():
             if dt / ref > worst_ratio:
                 worst_ratio, at = dt / ref, (p.pattern, s[:10])
             assert growth < GROWTH_RATIO_MAX, (p.pattern, s[:10], t_small, t_large, growth)
-            assert dt < ABS_CPU_MAX, (p.pattern, s[:10], "every reading (dt, ref) over the bound", readings)
+            if name in unreviewed:
+                assert dt < ABS_CPU_MAX, (name, p.pattern, s[:10], "a pattern not in its reviewed form: every "
+                                          "reading (dt, ref) over the bound", readings)
             if REGEX_RATIO_CALIBRATED:
                 assert dt / ref < REGEX_RATIO_MAX, (p.pattern, s[:10], "every reading (dt, ref) over", readings)
-    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per {ABS_N} chars (bound {ABS_CPU_MAX * 1000:.0f} ms); worst same-work growth "
+    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per {ABS_N} chars (bound {ABS_CPU_MAX * 1000:.0f} ms, asserted "
+          f"for patterns not in their reviewed form: {sorted(unreviewed) or 'none'}); worst same-work growth "
           f"{GROWTH_SPAN} x {GROWTH_SMALL} vs {GROWTH_LARGE} chars {worst_growth:.2f}x (bound {GROWTH_RATIO_MAX}) at "
           f"{grew!r}; worst CPU ratio to a single linear scan {worst_ratio:.2f} (bound {REGEX_RATIO_MAX}, "
           f"{'asserted' if REGEX_RATIO_CALIBRATED else 'NOT asserted on ' + sys.platform}) at {at!r}")
