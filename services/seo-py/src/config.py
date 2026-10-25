@@ -29,7 +29,8 @@ from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 KNOWN_CALLERS = ("dashboard", "seo_agent", "scheduler", "hub", "finance_31", "compliance_38")
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
-CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules")
+CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules",
+                       "reports")
 PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc")
 
 # Pricing, locked by Andre (spec Oct 6). Config only: nothing in this service charges, quotes or invoices; payments
@@ -163,6 +164,7 @@ class Settings:
     perplexity_timeout_s: int = 30
     perplexity_attempts: int = 3
     perplexity_budget: dict = field(default_factory=lambda: dict(PERPLEXITY_BUDGET_OFF))
+    report_branding: object = None                   # client_report.Branding (white label; SEO_REPORT_BRAND_*)
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -395,6 +397,17 @@ def _perplexity(env, s: "Settings") -> None:
     s.perplexity_key = key
 
 
+def _branding(env):
+    """The client report's white-label branding: a preparer name and an accent colour (client_report.Branding)."""
+    import client_report
+    name = (env.get("SEO_REPORT_BRAND_NAME") or "").strip() or client_report.DEFAULT_BRANDING.name
+    accent = (env.get("SEO_REPORT_BRAND_ACCENT") or "").strip() or client_report.DEFAULT_BRANDING.accent
+    try:
+        return client_report.Branding(name=name, accent=accent)
+    except ValueError as exc:
+        raise RuntimeError(f"SEO_REPORT_BRAND_NAME / SEO_REPORT_BRAND_ACCENT: {exc}") from None
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ if env is None else env)
     service_token = (env.get("SEO_SERVICE_TOKEN") or "").strip()
@@ -443,6 +456,7 @@ def load(env: Optional[dict] = None) -> Settings:
     _finance(env, s)
     _gsc(env, s)
     _perplexity(env, s)
+    s.report_branding = _branding(env)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it

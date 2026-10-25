@@ -41,6 +41,7 @@ from svc_gsc import GscMixin
 from svc_invoices import InvoicesMixin
 from svc_logs import LogsMixin
 from svc_manager import ManagerMixin
+from svc_reports import ReportsMixin
 from svc_schedules import SchedulesMixin
 from svc_tenants import TenantsMixin
 
@@ -70,7 +71,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin):
+                 GscMixin, EnginesMixin, ReportsMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         import ports as ports_mod
@@ -93,6 +94,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.agent_states: dict[str, dict] = {}
         self.gsc_reads: dict[str, list] = {}             # tenant -> times of recorded Search Console reads (budget)
         self.engine_runs: dict[str, dict] = {}          # Wave 4: metered answer-engine runs (svc_engines.py)
+        self.client_reports: dict[str, dict] = {}       # recorded client-report renders (svc_reports.py)
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now

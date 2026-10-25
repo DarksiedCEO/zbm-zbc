@@ -474,6 +474,17 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
               scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "compliance_38"))) -> dict:
         return svc.drift_view(scope[1], _id(aid), against)
 
+    @app.post(P + "/tenants/{tid}/audits/{aid}/client-report", dependencies=auth)
+    def client_report(aid: str, req: dict = Depends(body(m.ClientReportCreate)), who: str = Depends(andre),
+                      scope: tuple = Depends(scoped("dashboard"))) -> dict:
+        """Andre's: the client-facing report of a completed audit (Markdown or self-contained HTML), recorded first
+        with its SHA-256 (svc_reports.py). JSON carries the document so the API never serves HTML from its origin."""
+        return svc.render_client_report(scope[1], _id(aid), req)
+
+    @app.get(P + "/tenants/{tid}/audits/{aid}/client-reports", dependencies=auth)
+    def client_reports(aid: str, scope: tuple = Depends(scoped("dashboard", "compliance_38"))) -> list:
+        return svc.client_reports_view(scope[1], _id(aid))
+
     @app.get(P + "/tenants/{tid}/audits/{aid}", dependencies=auth)
     def audit(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31",
                                                       "compliance_38"))) -> dict:

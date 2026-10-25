@@ -56,6 +56,11 @@ class EntityFieldSet(Strict):
     expected_version: Annotated[StrictInt, Field(ge=1, le=1_000_000)]
 
 
+class ClientReportCreate(Strict):
+    request_id: RequestId
+    format: Literal["markdown", "html"]
+
+
 class AuditCreate(Strict):
     request_id: RequestId
     domain: Annotated[StrictStr, Field(pattern=DOMAIN)]
