@@ -385,7 +385,8 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_GSC_READS_PER_DAY`, `SEO_GSC_RETENTION_DAYS` | no | no | `4`, `90` | reads per tenant per 24 h; days before breakdowns are served as totals only |
 | `SEO_PERPLEXITY_API_KEY` | no | yes | unset | the Perplexity key as a plain variable (the Railway form; ADR 0017 W4). Unset = the engine is `NOT_CONNECTED`. Must differ from every seo token |
 | `SEO_PERPLEXITY_API_KEY_FILE` | no | — | unset | the same key as a file; not used on Railway (setting both refuses start) |
-| `SEO_PERPLEXITY_MODEL`, `SEO_PERPLEXITY_TIMEOUT_SECONDS`, `SEO_PERPLEXITY_MAX_ATTEMPTS` | no | no | `sonar`, `30`, `3` | closed model list (`sonar`, `sonar-pro`); hard deadline per question; requests per question |
+| `SEO_PERPLEXITY_PROTOCOL` | no | no | `agent` | `agent` (the Agent API, `POST /v1/agent`) or `sonar` (the legacy request, rollback only; ADR 0017 W4-8) |
+| `SEO_PERPLEXITY_MODEL`, `SEO_PERPLEXITY_TIMEOUT_SECONDS`, `SEO_PERPLEXITY_MAX_ATTEMPTS` | no | no | `perplexity/sonar`, `30`, `3` | closed model list per protocol (`perplexity/sonar` on the Agent API; `sonar`, `sonar-pro` on the rollback); hard deadline per question; requests per question |
 | `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD`, `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | no | no | `0` each | daily budgets (UTC day). **0 = OFF: nothing is asked**; all four must be above 0 |
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | no | no | `0.05` | reserved per request before it is sent (0.001..5) |
 | `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`, `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL` | no | — | unset | not built (`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`: renamed): setting any refuses to start |

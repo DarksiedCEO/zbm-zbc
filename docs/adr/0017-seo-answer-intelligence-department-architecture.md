@@ -647,7 +647,83 @@ Flag 1 is now Andre's decision: Perplexity is the first answer engine. The adapt
 engine answers NOT_CONNECTED and the service starts exactly as before. With a key and no budget it is connected but
 asks nothing. Andre installs the key and the budgets on Railway (W4-6).
 
-W4-1. **The Perplexity API, verified on Oct 24 2026** (docs.perplexity.ai, read through the web; nothing was called):
+W4-1. **The Perplexity API, verified on Oct 24 2026** (docs.perplexity.ai, read through the web; nothing was called).
+   The adapter's default is now the Agent API (W4-8, migration built Oct 24 2026 on `golive-pplx-agent`); the
+   facts it is built on come first, then the Sonar facts, which still govern the rollback protocol.
+
+   **Agent API, re-verified for the migration on Oct 24 2026.** Read with a web-fetch tool that returns a model's
+   reading of each page, not the raw page; the sandbox's egress refused a direct download of the pages and of
+   `openapi.json`, so field lists below are as that tool reported them from the API reference's schema. Nothing
+   was called.
+   - Index: <https://docs.perplexity.ai/llms.txt> lists the Agent API reference (`POST /v1/agent`, "Create Agent
+     Response"), its quickstart, models, effort, output control, the Sonar migration pages, rate limits and pricing.
+     It lists no Agent API error-code page.
+   - Endpoint and auth (<https://docs.perplexity.ai/docs/agent-api/quickstart>,
+     <https://docs.perplexity.ai/api-reference/agent-post>): "The Agent API is available at `POST
+     https://api.perplexity.ai/v1/agent`" (`POST /v1/responses` is an alias, not used here); server
+     `https://api.perplexity.ai`; HTTP Bearer security, and the quickstart's example sends
+     `Authorization: Bearer $PERPLEXITY_API_KEY`.
+   - Request (`ResponsesRequest`, the reference): `input` is required (a string, or an array of input items: `type:
+     "message"`, `role` one of `user`, `assistant`, `system`, `developer`, `content`); `model` or `effort` must be
+     given; `instructions` is a string ("System instructions for the model"); `stream` is a boolean whose default is
+     labelled `false`; `store` is a boolean (false hides the response from later retrieval). Other fields
+     (`tools`, `max_steps`, `max_output_tokens`, `models`, `reasoning`, `response_format`, `background`, ...) are not
+     sent. The how-to (<https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/how-to>): "For simple
+     single-turn prompts, pass a plain string."
+   - Effort (<https://docs.perplexity.ai/docs/agent-api/effort>): `fast`, `low`, `medium`, `high`, `xhigh`; "Any
+     field you pass alongside the effort level overrides that default", including the model ("Override the model
+     while keeping everything else from the effort"). The page's current `fast` values: model `openai/gpt-6-luna`,
+     max steps 1, no reasoning, 8192 output tokens, `web_search` with the fast search type and 10 results, and the
+     `priority` service tier in its cURL example. The response's `effort` holds "the effort level and the version
+     that ran the request, for example `fast@2026-10-16.0`". The migration pages map `sonar` and `sonar-pro` to
+     `fast` (the how-to, and <https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview>).
+   - Models (<https://docs.perplexity.ai/docs/agent-api/models>): `perplexity/sonar`, "Perplexity's grounded search
+     model", USD 0.25 input, 2.50 output and 0.0625 cache read per million tokens. The page does not say whether a
+     response's `model` echoes the requested id (its sample does).
+   - Response (`ResponsesResponse`, the reference, `stream: false`, `application/json`): required `id`, `object`
+     (enum `"response"`), `created_at` (int64), `status` (`completed`, `failed`, `incomplete`, `in_progress`,
+     `queued`, `cancelled`), `model` (string), `output`; optional `error` (`message` required, `code`, `type`),
+     `effort`, `usage`. There is no top-level `output_text`: "Both Python and Typescript SDKs provide an
+     `output_text` property that aggregates all text content from response outputs" (the quickstart), and the
+     how-to's "read the answer text from `response.output_text`" refers to that SDK property. `output` items are
+     discriminated by `type`: `message`, `search_results`, `image_search_results`, `fetch_url_results`,
+     `finance_results`, `people_search_results`, `function_call`, `sandbox_results`, `mcp_list_tools`, `mcp_call`,
+     `mcp_approval_request`, `tool_search_output`.
+     - `message`: `type`, `id`, `status`, `role` (`"assistant"`), `content[]`, all required; a content part has
+       `type` (`"output_text"`, the only value) and `text`, required, and optional `annotations[]` (a "URL
+       citation": `type` `url_citation`, `url`, `title`, `start_index`, `end_index`, none required).
+     - `search_results`: `type` and `results[]` required, `queries[]` optional; a result has `id` (int64), `url`,
+       `title`, `snippet` required and `date`, `last_updated`, `source` (`"web"`) optional. The tools page
+       (<https://docs.perplexity.ai/docs/agent-api/tools>): "treat the `id` and `url` fields of each
+       `search_results` entry as the source of truth for citations"; the how-to: each `[n]` marker in the text
+       "maps to the result whose `id` is `n`".
+     - `usage`: `input_tokens`, `output_tokens`, `total_tokens` (int64) required; optional `cost`,
+       `input_tokens_details`, `output_tokens_details`, `tool_calls_details`. `usage.cost`: `currency` (`"USD"`
+       only), `input_cost`, `output_cost`, `total_cost` required, all numbers; optional cache and tool-call costs.
+       The pricing page (<https://docs.perplexity.ai/docs/getting-started/pricing>): "`usage.cost.total_cost`
+       reports the calculated request cost"; web search costs $0.0025 per invocation, fast search $0.001.
+   - **`citations` is gone.** The Agent API schema has no `citations` field; the changelog
+     (<https://docs.perplexity.ai/docs/resources/changelog>, May 2025 entry, updated): "The `citations` field has
+     been fully deprecated and removed", use `search_results`. Its July 2026 entry: "Sonar Chat Completions is now
+     Agent API"; its Oct 2026 entry: "`preset` is still accepted as a deprecated alias, and responses return both
+     fields".
+   - **End of Sonar support** (the migration overview, re-read Oct 24 2026): "Sonar Chat Completions support ended on
+     September 27, 2026." "Synchronous and streaming requests keep working: they are being reformulated as Agent
+     API requests, rolling out gradually by model." "Asynchronous Sonar requests are not reformulated and are no
+     longer supported." No page documents the response shape of a reformulated request.
+   - Errors: the reference documents only 400 (an `error` object). The SDK error guide
+     (<https://docs.perplexity.ai/guides/perplexity-sdk-error-handling>) lists "400 (Bad Request), 401
+     (Authentication), 403 (Permission Denied), 404 (Not Found), 429 (Rate Limit), 500+ (Server Error)" and advises
+     retrying rate limits and connection errors with backoff. 402 is not documented anywhere read (still this
+     service's assumption: an account that cannot pay, ENGINE_AUTH_REFUSED).
+   - Rate limits (<https://docs.perplexity.ai/docs/admin/rate-limits-usage-tiers>): a limited request gets 429 with
+     `Retry-After` in seconds and no `x-ratelimit-*` headers (successful Agent API responses carry
+     `x-ratelimit-limit`, `-remaining`, `-used`, `-reset`, not read here); `error.type` is
+     `request_rate_limit_exceeded`, `token_rate_limit_exceeded` or `overloaded`; Agent API QPS per organization by
+     tier 0..5: 1, 3, 8, 17, 33, 33; "retry with exponential backoff and jitter"; requests rejected with a 429 are
+     not billed (this service still charges every sent request at least its reserve: conservative).
+
+   **Sonar (the rollback protocol), as verified earlier on Oct 24 2026:**
    - Request: `POST https://api.perplexity.ai/v1/sonar` with `Authorization: Bearer <key>` and
      `Content-Type: application/json`; body `model` and `messages` (`role`, `content`)
      (<https://docs.perplexity.ai/docs/sonar/quickstart>). The other request fields include `stream`, `max_tokens`,
@@ -657,7 +733,7 @@ W4-1. **The Perplexity API, verified on Oct 24 2026** (docs.perplexity.ai, read 
    - **Sonar Chat Completions support ended on September 27, 2026.** Synchronous and streaming requests still work:
      Perplexity reformulates them as Agent API requests (`POST https://api.perplexity.ai/v1/agent`). Asynchronous Sonar
      requests are no longer supported (<https://docs.perplexity.ai/docs/sonar/overview>). This adapter makes
-     synchronous requests only. Moving to the Agent API is follow-up work (W4-8).
+     synchronous requests only. It has since moved to the Agent API (W4-8); this request is the rollback.
    - Models: `sonar`, `sonar-pro`, `sonar-reasoning-pro`, `sonar-deep-research` (the how-to above). The allowlist here
      is closed: `sonar` (the general model, the default) and `sonar-pro`.
    - Response: `id`, `model`, `created`, `object` (`"chat.completion"`), `choices[]` (`message.role`,
@@ -680,8 +756,9 @@ W4-1. **The Perplexity API, verified on Oct 24 2026** (docs.perplexity.ai, read 
      example still posts to `https://api.perplexity.ai/v1/sonar`; no page says that endpoint stops answering, and
      none documents the response shape of a reformulated request
      (<https://docs.perplexity.ai/api-reference/chat-completions-post>,
-     <https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/how-to>). The current endpoint is therefore still
-     usable, and this adapter stays on it.
+     <https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/how-to>). The endpoint was therefore still
+     usable when Wave 4 was built; the adapter has since moved to the Agent API (W4-8) and keeps this one as the
+     rollback.
    - Model names: the Sonar examples show `sonar`. `perplexity/sonar` appears on none of the pages read (the
      changelog shows the `perplexity/` prefix only for the Decisions API's `perplexity/pplx-decider-*`), so it is
      not accepted: an answer reporting any model outside the allowlist stays ENGINE_PROTOCOL_ERROR
@@ -719,7 +796,25 @@ W4-1. **The Perplexity API, verified on Oct 24 2026** (docs.perplexity.ai, read 
      **No expiry and no scope are documented**. Perplexity suggests rotating keys, for example every 90 days.
 
 W4-2. **The adapter** (`src/perplexity.py`) and its runs (`src/svc_engines.py`):
-   - Calls are fixed: one base URL, one path, one method. Redirects are never followed, and no proxy is taken from
+   - **The Agent API is the default** (`SEO_PERPLEXITY_PROTOCOL=agent`). The request is `POST /v1/agent` with
+     exactly `model` (`perplexity/sonar`), `effort: "fast"`, `instructions` (the one fixed line), `input` (the
+     prompt as a plain string), `stream: false` and `store: false`. The parser requires `object == "response"`,
+     the documented types of `id`, `created_at`, `status`, `model` and `output`, and `status == "completed"`; any
+     other status is ENGINE_PROTOCOL_ERROR with detail `RESPONSE_<STATUS>` (e.g. `RESPONSE_FAILED`,
+     `RESPONSE_INCOMPLETE`), because the docs do not say what a partial answer means. The answer is every
+     `output_text` part of every `message` item, in order (what the SDKs' `output_text` aggregates); no text is
+     `NO_ANSWER_TEXT`. Sources are the `search_results` items' `results[].url` in output order, then any
+     `url_citation` annotation URL not yet listed; no source at all is a zero-source answer (never an error, never
+     invented). `usage` needs its three token counts; `usage.cost` is optional, and when present needs `currency`
+     `USD` and its three numbers. Output item types the parser does not read (`fetch_url_results`, `function_call`,
+     ...) are ignored and reported by name for drift as `output.<type>`; `error`, `store` and `preset` are documented
+     and not drift. The response's `effort` (e.g. `fast@2026-10-16.0`) becomes the recorded model version, so a
+     run's `model_versions` reads `perplexity/sonar@fast@2026-10-16.0`.
+   - **Rollback:** `SEO_PERPLEXITY_PROTOCOL=sonar` sends the old `POST /v1/sonar` request and uses the Sonar parser
+     (models `sonar`, `sonar-pro`; `citations` optional). Everything below applies to both protocols.
+     `SEO_PERPLEXITY_MODEL=sonar` on the Agent API means `perplexity/sonar`; `sonar-pro` there refuses start (no
+     Agent API model is documented for it).
+   - Calls are fixed: one base URL, one path per protocol, one method. Redirects are never followed, and no proxy is taken from
      the environment (`trust_env=False`). An answer from a model outside the allowlist is ENGINE_PROTOCOL_ERROR.
    - Each question has one HARD overall deadline, `SEO_PERPLEXITY_TIMEOUT_SECONDS` (default 30), covering every
      attempt. The production transport routes DNS, connect, TLS and every read and write through
@@ -881,20 +976,25 @@ W4-6. **How Andre installs the key on Railway** (his steps; nothing here is auto
       - `SEO_PERPLEXITY_TENANT_DAILY_CALLS=100`
       - `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD=3`
 
-      Leave `SEO_PERPLEXITY_MODEL` unset (`sonar`) and `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` unset ($0.05) unless he
+      Leave `SEO_PERPLEXITY_PROTOCOL` unset (`agent`), `SEO_PERPLEXITY_MODEL` unset (`perplexity/sonar`) and `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` unset ($0.05) unless he
       decides otherwise.
    4. Redeploy. On the dashboard, `GET /seo/v1/status` must show `answer_engines.perplexity.state = "connected"`,
       `key_source = "env"` and `budget.state = "on"`. Any configuration error refuses start, with a message that never
       contains the key.
    5a. **First real call, before any budget above the cautious start** (AEGIS H2). The parser has never seen a real
-      response (W4-8), and Perplexity is reformulating Sonar requests as Agent API requests model by model. So the
-      first contact is ONE request, by hand: on a machine (or a Railway shell) with the key, run
+      response (W4-8), and the Agent API parser is built from the documented schema only. So the first contact is
+      ONE request, by hand: on a machine (or a Railway shell) with the key, run
       `python3 devtools/smoke_one_call.py --one-real-call` from `services/seo-py`. It makes exactly one request (one
       attempt, a meter that allows one, the usual deadline), prints the outcome, the model reported, the answer's
       length and hash (never its text), the number of citation URLs and their first hosts, and the usage and cost, and
-      never prints the key. `ANSWER` with citations > 0 and a plausible cost: go on to step 5. `ENGINE_PROTOCOL_ERROR`
-      (or `MODEL_NOT_ALLOWED`): the response shape or model changed; keep the budgets where they are (or at 0),
-      do not raise them, and have the parser updated from the docs first. Any other code: fix that first (key,
+      never prints the key. It also prints the protocol and endpoint (`agent`, `/v1/agent`), the effort version
+      (`model_version`) and `unmodelled_keys`. `ANSWER` with citations > 0 and a plausible cost: go on to step 5.
+      `ENGINE_PROTOCOL_ERROR`: the response shape or model differs from the docs; keep the budgets where they are
+      (or at 0), do not raise them, and have the parser updated from the docs first. The detail says what:
+      `MODEL_NOT_ALLOWED` (the response reported another model than `perplexity/sonar`), `RESPONSE_<STATUS>`,
+      `NO_ANSWER_TEXT`, or none (a relied-on field had another shape). Rolling back to the Sonar request
+      (`SEO_PERPLEXITY_PROTOCOL=sonar`) is possible, but Perplexity serves it by reformulating it as an Agent API
+      request, so run the smoke again with that setting before relying on it. Any other code: fix that first (key,
       account, rate). Alternatively, start with every budget at its smallest useful value (e.g. 9 calls and $1 per
       day, global and tenant) and run step 5 once with a one-prompt set.
    5. First run: create a prompt set for `zbm` with `"engines": ["perplexity"]` (generic market questions, no names
@@ -908,7 +1008,21 @@ W4-6. **How Andre installs the key on Railway** (his steps; nothing here is auto
       a new key.
 
 W4-7. **Proof.**
-   - `tests/test_perplexity.py` uses no network: a fake Perplexity behind `httpx.MockTransport`, and, for the socket
+   - `tests/test_perplexity_agent.py` (the Agent API, the default; Oct 24 2026) uses no network and no key. Its
+     response fixtures (`tests/fixtures/perplexity_agent/`) are built from the documented schema, NOT captured from
+     the real API. It covers: the exact request; the completed response (text, source order, annotations, usage,
+     cost, effort version, no drift); missing sources and no `citations` field (a zero-source answer); unread output
+     items and fields (ignored, named for drift); every non-completed status; malformed shapes (including the Sonar
+     shape sent to the Agent parser, a wrong currency, a cost as a string, NaN, duplicate keys, too many items);
+     `MODEL_NOT_ALLOWED`, `NO_ANSWER_TEXT` and `TOO_LARGE`; no cost and zero cost charged at the reserve; unbounded,
+     encoded and non-JSON bodies; 4xx not retried, 429 and 5xx retried within the deadline, transport errors and the
+     hard deadline; a socket drip, a switch mid-request and a private resolver answer through the guarded backend;
+     the settings (default, alias, rollback, refusals that never echo a value) and `/status`; through the service:
+     citation positions, cost and settlement, no body or key stored, lookalikes, the prompt guard,
+     `COST_ABOVE_RESERVE`, unknown cost charged at the reserve, `REPEATED_PROTOCOL_ERRORS` from failed, incomplete
+     and unreadable responses, kill switches before and during a run, a run crossing UTC midnight and its replay,
+     the zero-source drift finding; and the one-call smoke on the Agent API.
+   - `tests/test_perplexity.py` (now the Sonar rollback protocol) uses no network: a fake Perplexity behind `httpx.MockTransport`, and, for the socket
      layer, a fake network backend under httpcore's real connection pool. All deadlines run on an injected clock. It
      covers:
      - the documented request;
@@ -954,14 +1068,27 @@ W4-8. **Limitations (honest).**
      response model follows the documented examples, which elide fields. Fields not modelled are ignored; a field
      the adapter relies on with another shape is ENGINE_PROTOCOL_ERROR, and two in a row stop the run. Andre's
      single smoke call (W4-6 step 5a) is the first real contact.
-   - Sonar Chat Completions are past Perplexity's end-of-support date and are served by reformulating them as Agent
-     API requests. Their behaviour may change. **Next step (planned, not built): migrate to `POST /v1/agent`.** The
-     how-to (<https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/how-to>) maps `sonar` and `sonar-pro` to
-     `effort: "fast"`, the answer to `output_text`, and citations to the `output` item of `type: "search_results"`
-     (each result with an `id` that the text's `[n]` markers refer to). The work: a second request kind on the same
-     fixed host (`/v1/agent`, `input` messages, `effort`), a strict model of `output_text` and the `search_results`
-     output item, the usage and cost fields once the docs show them, the same deadline, budget and switch rules, and
-     a new first-real-call smoke. It is not built now because the docs keep the current endpoint usable (W4-1).
+   - **Migrated to the Agent API (built Oct 24 2026 on `golive-pplx-agent`).** The default request is `POST
+     /v1/agent` (W4-1, W4-2); the Sonar request stays only as the rollback `SEO_PERPLEXITY_PROTOCOL=sonar`, which
+     Perplexity serves by reformulation and which may change or stop. The war room's hostile Perplexity now serves
+     the Agent API shape. What the docs do NOT confirm, and how the adapter fails closed on each:
+     1. whether a response's `model` echoes the requested `perplexity/sonar` (the models page's sample does; no rule
+        is stated): any other value is `MODEL_NOT_ALLOWED`, so the first real call shows it;
+     2. what `incomplete` or `failed` mean for a partial answer: never counted (`RESPONSE_<STATUS>`), and two in a
+        row stop the run;
+     3. the error statuses: the reference documents only 400; 401, 403, 429 and 5xx come from the SDK guide and the
+        rate-limit page; 402 is still an assumption;
+     4. whether `perplexity/sonar` under effort `fast` returns `search_results` items, annotations, or both: either
+        is read, neither is required, and answers without any source are drift-visible
+        (`ENGINE_ANSWERS_WITHOUT_SOURCES`);
+     5. the cost of `fast` with this model: its example uses the `priority` tier (2x token rates for models that list
+        tiers; the models page lists none for `perplexity/sonar`), and `usage.cost` is optional. The reported
+        `total_cost` is used when present, the reserve otherwise; $0.05 per request remains far above the documented
+        rates (about $0.0013 for a short answer plus $0.001 for a fast search), and the 4x cost guard still applies;
+     6. the response shape of a reformulated Sonar request (the rollback) is undocumented;
+     7. the field lists come from a web-fetch tool's reading of the reference, not from the raw OpenAPI document
+        (the sandbox could not download it). The fields relied on are few and strict, so a misreading is
+        ENGINE_PROTOCOL_ERROR, never a guessed answer.
    - Spend here is Perplexity's reported cost, or the reserve where none is reported. Perplexity's invoice is
      authoritative, and nothing reconciles the two.
    - A prompt's reservation is the upper bound (samples x attempts), so a run near the day's limit can be refused even
@@ -975,11 +1102,13 @@ W4-8. **Limitations (honest).**
 
 Founder-pending defaults added by Wave 4 (numbered after the Search Console build's (17)-(19)):
 - (20) every budget defaults to 0 (off);
-- (21) the model is `sonar`;
+- (21) the model is `perplexity/sonar` on the Agent API (`sonar` on the rollback protocol);
 - (22) the reserve per request is $0.05;
 - (23) after exhausted 429 retries, the run stops asking Perplexity for that audit;
 - (24) a plain environment variable is accepted for the key on Railway;
-- (25) `sonar-reasoning-pro` and `sonar-deep-research` are not on the allowlist.
+- (25) `sonar-reasoning-pro` and `sonar-deep-research` are not on the allowlist;
+- (26) the protocol is the Agent API with effort `fast` (the migration guide's replacement for `sonar`), and the
+  Sonar request is kept as a rollback setting rather than removed.
 
 ## Unlock list
 
