@@ -1,4 +1,4 @@
-"""launch_guard section 3: the IPv6 wildcard is bound dual-stack (golive-combined, CI railway-images).
+"""src/dual_stack.py: the IPv6 wildcard is bound dual-stack (golive-combined, CI railway-images).
 
 The Railway images bind ``::``. uvicorn.run binds through asyncio's create_server, which sets IPV6_V6ONLY, so an
 IPv4 connection (Docker's port mapping; on Railway an IPv4 health check or private-network peer) was reset. The
@@ -19,7 +19,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import launch_guard  # noqa: E402
+import dual_stack  # noqa: E402
 
 
 class FakeSocket:
@@ -67,19 +67,19 @@ class FakeUvicorn:
 @pytest.fixture
 def fake_socket(monkeypatch):
     FakeSocket.instances = []
-    monkeypatch.setattr(launch_guard.socket, "socket", lambda fam, kind: FakeSocket(fam, kind))
+    monkeypatch.setattr(dual_stack.socket, "socket", lambda fam, kind: FakeSocket(fam, kind))
     return FakeSocket
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0", "::1", "localhost", "10.0.0.5", "[::1]"])
 def test_any_other_host_is_not_bound_here(host, fake_socket):
-    assert launch_guard.dual_stack_socket(host, 0) is None
+    assert dual_stack.dual_stack_socket(host, 0) is None
     assert fake_socket.instances == []
 
 
 @pytest.mark.parametrize("host", ["::", "[::]", " :: "])
 def test_the_wildcard_is_bound_ipv6_with_v6only_cleared_before_bind(host, fake_socket):
-    s = launch_guard.dual_stack_socket(host, 0)
+    s = dual_stack.dual_stack_socket(host, 0)
     assert s.family == socket.AF_INET6 and s.kind == socket.SOCK_STREAM and not s.closed
     v6only = ("setsockopt", socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
     assert v6only in s.calls and s.calls[-1] == ("bind", ("::", 0))
@@ -89,18 +89,18 @@ def test_the_wildcard_is_bound_ipv6_with_v6only_cleared_before_bind(host, fake_s
 
 def test_a_failed_bind_closes_the_socket_and_the_launcher_exits_1(monkeypatch, capsys):
     FakeSocket.instances = []
-    monkeypatch.setattr(launch_guard.socket, "socket", lambda fam, kind: FakeSocket(fam, kind, fail_bind=True))
+    monkeypatch.setattr(dual_stack.socket, "socket", lambda fam, kind: FakeSocket(fam, kind, fail_bind=True))
     uv = FakeUvicorn()
     with pytest.raises(SystemExit) as e:
-        launch_guard.serve(uv, "api:app", "::", 0, "svc")
-    assert e.value.code == launch_guard.BIND_FAILURE == 1
+        dual_stack.serve(uv, "api:app", "::", 0, "svc")
+    assert e.value.code == dual_stack.BIND_FAILURE == 1
     assert FakeSocket.instances[0].closed and uv.ran is None and uv.sockets is None
     assert "svc: cannot bind [::]:0" in capsys.readouterr().err
 
 
 def test_the_wildcard_is_served_on_that_socket_with_the_same_configuration(fake_socket, capsys):
     uv = FakeUvicorn(started=True)
-    launch_guard.serve(uv, "api:app", "::", 0, "svc", http="H", timeout_keep_alive=5, limit_concurrency=128)
+    dual_stack.serve(uv, "api:app", "::", 0, "svc", http="H", timeout_keep_alive=5, limit_concurrency=128)
     sock = fake_socket.instances[0]
     assert uv.ran is None and uv.sockets == [sock] and sock.closed
     assert uv.config == ("api:app", {"host": "::", "port": 0, "http": "H", "timeout_keep_alive": 5,
@@ -111,40 +111,47 @@ def test_the_wildcard_is_served_on_that_socket_with_the_same_configuration(fake_
 def test_a_server_that_did_not_start_exits_like_uvicorn(fake_socket):
     uv = FakeUvicorn(started=False)
     with pytest.raises(SystemExit) as e:
-        launch_guard.serve(uv, "api:app", "[::]", 0, "svc")
-    assert e.value.code == launch_guard.STARTUP_FAILURE == 3 and fake_socket.instances[0].closed
+        dual_stack.serve(uv, "api:app", "[::]", 0, "svc")
+    assert e.value.code == dual_stack.STARTUP_FAILURE == 3 and fake_socket.instances[0].closed
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])
 def test_any_other_host_goes_to_uvicorn_run_unchanged(host, fake_socket):
     uv = FakeUvicorn()
-    launch_guard.serve(uv, "api:app", host, 0, "svc", http="H")
+    dual_stack.serve(uv, "api:app", host, 0, "svc", http="H")
     assert uv.ran == ("api:app", {"host": host, "port": 0, "http": "H"}) and uv.sockets is None
     assert fake_socket.instances == []
 
 
-def test_the_launcher_serves_through_launch_guard():
+def test_the_launcher_serves_through_dual_stack():
     src = (SRC / "serve.py").read_text()
-    assert "launch_guard.serve(" in src and "uvicorn.run(" not in src
+    assert "dual_stack.serve(" in src and "uvicorn.run(" not in src
+
+
+def test_the_four_railway_services_carry_the_same_dual_stack_module():
+    here = (SRC / "dual_stack.py").read_bytes()
+    services = SRC.parents[1]
+    for svc in ("detection-py", "finance-py", "legal-py", "seo-py"):
+        assert (services / svc / "src" / "dual_stack.py").read_bytes() == here, svc
 
 
 # Run in a child process: the services' conftests refuse every socket connect inside a test (no network), and this
-# check needs one loopback connect to the real socket. The child imports this service's launch_guard and nothing else.
+# check needs one loopback connect to the real socket. The child imports this service's dual_stack and nothing else.
 _REAL_SOCKET_CHILD = """
 import socket, sys
 sys.path.insert(0, sys.argv[1])
-import launch_guard
+import dual_stack
 try:
     socket.socket(socket.AF_INET6, socket.SOCK_STREAM).close()
 except OSError:
     try:
-        launch_guard.dual_stack_socket("::", 0)
+        dual_stack.dual_stack_socket("::", 0)
     except OSError:
         print("no-ipv6 bind-refused")
     else:
         print("no-ipv6 bind-accepted")
     sys.exit(0)
-s = launch_guard.dual_stack_socket("::", 0)
+s = dual_stack.dual_stack_socket("::", 0)
 v6only = s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
 s.listen(1)
 c = socket.create_connection(("127.0.0.1", s.getsockname()[1]), timeout=5)
@@ -157,7 +164,7 @@ conn.close(); c.close(); s.close()
 def test_ipv4_reaches_the_real_wildcard_socket_or_the_launcher_refuses_without_ipv6():
     import subprocess
 
-    r = subprocess.run([sys.executable, "-I", "-c", _REAL_SOCKET_CHILD, str(SRC)], capture_output=True, text=True,
+    r = subprocess.run([sys.executable, "-I", "-B", "-c", _REAL_SOCKET_CHILD, str(SRC)], capture_output=True, text=True,
                        timeout=60)
     assert r.returncode == 0, r.stderr[-2000:]
     out = r.stdout.split()

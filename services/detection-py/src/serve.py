@@ -21,6 +21,7 @@ import sys
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import dual_stack
 import launch_guard
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
@@ -163,9 +164,9 @@ def main() -> None:
     # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
     # normal exit (status 143) and exit handlers run.
     with launch_guard.sigterm_exits():
-        # golive-combined: the IPv6 wildcard (Railway's production bind) is bound dual-stack by launch_guard.serve
+        # golive-combined: the IPv6 wildcard (Railway's production bind) is bound dual-stack by dual_stack.serve
         # (asyncio would bind it IPv6-only); any other host goes to uvicorn.run unchanged
-        launch_guard.serve(
+        dual_stack.serve(
             uvicorn,
             "api:app",
             args.host,
