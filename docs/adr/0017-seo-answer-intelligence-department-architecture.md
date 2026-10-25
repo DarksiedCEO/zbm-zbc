@@ -1207,7 +1207,7 @@ CR-6. **The route and the evidence.** `POST /seo/v1/tenants/{tid}/audits/{aid}/c
    tenant's audit answers the same 404 `AUDIT_NOT_FOUND` as a missing one; an audit that did not complete is 409
    `AUDIT_NOT_COMPLETED`. Kill switches: global, write, the tenant's, the new `capability:reports`, and
    `capability:audit`. Record-first: `client_report_rendered` (report id, tenant, audit, format, renderer version
-   `seo-client-report/1`, the audit report's SHA-256, the document's SHA-256 and size, the branding's SHA-256; no
+   `seo-client-report/2` since CR-11, the audit report's SHA-256, the document's SHA-256 and size, the branding's SHA-256; no
    document, domain or time) is on the ledger and the log before the answer; if the ledger cannot record it, no document
    is returned (503). The answer is JSON (`content`, `media_type`, the hashes), so the API never serves HTML from its own
    origin. Idempotent by request id; a replay whose document no longer matches the recorded hash (the Search Console
@@ -1280,6 +1280,18 @@ CR-8. **Limitations (honest).**
    - The document is as good as the audit: the agents' own limits (one location, one time, no
      rendering, Search Console and Perplexity NOT_CONNECTED until Andre's steps) is carried into the appendix, not fixed.
    - An unknown future rule renders with its code and no detail until it is added to the rule table.
+
+CR-11. **Integration with the Agent API migration (golive-wave2, Oct 25 2026).** The AI visibility section now
+   states the citation definition the Perplexity adapter measures since W4-8 and AEGIS pplx-agent M1/L2: cited =
+   returned by search (a page of the client's site that the engine's search returned for the answer, `http`/`https`
+   only), not a link in the answer's text. The sentence is in the section's introduction (always shown) and in
+   Callum's methodology (`agents/probes.py`), which the appendix prints. Because the document's text changed, the
+   renderer is `seo-client-report/2` (the golden files changed only in that sentence and the version line). Found
+   while checking this: Callum's methodology names the prompt set's 16-hex hash, and a hash with a run of seven or more
+   digits made the personal-data check withhold the whole method; the document now drops `(sha256 <16 hex>)` before
+   the check (removal only; the hash stays in the audit record). Tests: a real audit on the Agent API fake (an
+   annotation-only and an `ftp:` tenant URL are not cited; the report shows "Mentioned but not cited", the competitor
+   cited instead, and the definition twice), and the hash case, each mutation-checked.
 
 ## Unlock list
 

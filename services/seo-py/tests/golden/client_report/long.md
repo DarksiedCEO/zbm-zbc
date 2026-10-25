@@ -95,7 +95,7 @@ This audit did not include this check. Nothing is reported here because this are
 
 ## AI visibility (answer engines)
 
-**Status: NOT COVERED.** Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market questions, sampled several times each.
+**Status: NOT COVERED.** Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market questions, sampled several times each. Cited means the engine's search returned a page of your site for the answer (cited = returned by search); it does not mean the answer's text linked to that page.
 
 Data freshness: not observed in this audit.
 
@@ -146,7 +146,7 @@ Prompt volume: **NOT COVERED**. How often real people ask these questions is not
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/1 `
+- report renderer: ` seo-client-report/2 `
 
 ---
 

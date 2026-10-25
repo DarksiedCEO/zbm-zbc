@@ -904,3 +904,49 @@ def test_cli_fetch_writes_0600_also_over_an_existing_file_and_never_through_a_sy
     capsys.readouterr()
     assert cli.main(_fetch_args(tmp_path, link), client=_FakeService(b"<p>doc</p>", ok)) == 2
     assert target.read_text() == "keep" and "cannot write --out" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------------------------- golive-wave2
+
+def test_ai_visibility_renders_the_search_based_citation_definition_from_a_real_agent_api_audit(tmp_path):
+    """A real audit through the Perplexity adapter on the Agent API (a fake Perplexity, no network): the tenant URL
+    only in an annotation (search never returned it) and the tenant URL with a non-web scheme are NOT cited, so the
+    report shows "Mentioned but not cited" with the competitor cited instead, and both the AI visibility section and
+    Callum's methodology state the definition: cited = returned by search."""
+    import test_perplexity_agent as pa
+    body = pa.agent_body(text="Z Best Media recovers marketplace revenue.",
+                         urls=("https://competitor.test/a", "ftp://site.test/files"))
+    body["output"][1]["content"][0]["annotations"] = [
+        {"type": "url_citation", "url": "https://site.test/never-searched"}]
+    f = pa.FakePerplexity(pa.ok(body))
+    h = pa.agent_harness(tmp_path, f)
+    aid = pa.run_audit(h, pa.setup_zbm(h))["audit_id"]
+    c = pa.callum(h.ok(h.get(f"/tenants/zbm/audits/{aid}")))
+    p = c["facts"]["engines"]["perplexity"]["prompts"][0]
+    assert p["class"] == "MENTIONED_NOT_CITED" and p["cited"] == 0 and len(f.requests) == 3
+    assert "cited = returned by search" in c["methodology"]
+    md = h.ok(_report(h, "zbm", aid, fmt="markdown"))["content"]
+    html = h.ok(_report(h, "zbm", aid, fmt="html"))["content"]
+    ai = md[md.index("## AI visibility (answer engines)"):md.index("## Methodology and limits")]
+    method = md[md.index("### AI visibility (answer engines)", md.index("## Methodology and limits")):]
+    assert "cited = returned by search" in ai and "it does not mean the answer's text linked" in ai
+    assert "cited = returned by search" in method and "Whether the answer's text points at that page is not " \
+        "measured" in method
+    assert "Mentioned but not cited" in ai and "competitor.test" in ai
+    for doc in (md, html):
+        assert "never-searched" not in doc and "ftp://" not in doc and "Cited in at least half" not in doc
+    assert html.count("cited = returned by search") == 2 and md.count("cited = returned by search") == 2
+
+
+def test_callum_methodology_is_shown_even_when_the_prompt_set_hash_has_a_digit_run():
+    """The prompt set's 16-hex hash in Callum's methodology (here with the digit run 07408562) used to make the
+    personal-data check withhold the whole method; the client document drops the hash and shows the method."""
+    from agents import probes
+    method = probes.METHODOLOGY.format(ps="core", ver=1, sha="4e07408562bedb8b", n=3, domain="site.test",
+                                       m=probes.MIN_USABLE)
+    assert cr.safe_text(method, 1500) == cr.WITHHELD                         # the old behaviour, for the record
+    shown = cr.safe_text(cr._PS_HASH.sub("", method), 1500)
+    assert shown != cr.WITHHELD and "4e07408562bedb8b" not in shown and "prompt set core v1 sent 3 times" in shown
+    assert "cited = returned by search" in shown
+    # removal only: a phone number elsewhere in the text is still withheld
+    assert cr.safe_text(cr._PS_HASH.sub("", method + " Call 562 248 6617."), 1500) == cr.WITHHELD

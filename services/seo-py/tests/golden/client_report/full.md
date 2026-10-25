@@ -195,7 +195,7 @@ No findings in this area.
 
 ## AI visibility (answer engines)
 
-**Status: CHECKED.** Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market questions, sampled several times each.
+**Status: CHECKED.** Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market questions, sampled several times each. Cited means the engine's search returned a page of your site for the answer (cited = returned by search); it does not mean the answer's text linked to that page.
 
 Data freshness: observed during the run; refresh recommended by 2026-10-31.
 
@@ -289,7 +289,7 @@ Malformed or unsafe inputs were set aside unread (never parsed further):
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/1 `
+- report renderer: ` seo-client-report/2 `
 
 ---
 

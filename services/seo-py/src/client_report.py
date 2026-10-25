@@ -40,7 +40,7 @@ from agents import search_performance as sp
 from agents import split_url
 from agents.prompt_guard import personal_data
 
-RENDERER_VERSION = "seo-client-report/1"
+RENDERER_VERSION = "seo-client-report/2"        # 2: the "cited = returned by search" definition
 SUPPORTED_REPORT_VERSIONS = ("seo-audit-report/1",)
 FORMATS = {"markdown": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8"}
 
@@ -66,6 +66,12 @@ _ID = re.compile(r"seo-[a-z]{2,5}-[0-9a-f]{40}")
 # the personal-data check (whose digit-run rule would otherwise withhold every methodology naming a version)
 _DATES = re.compile(r"(?<![0-9])(?:19|20)[0-9]{2}-[01][0-9]-[0-3][0-9](?:T[0-9]{2}:[0-9]{2}(?::[0-9]{2})?Z?)?"
                     r"(?:\.[0-9]{1,3})?(?![0-9])")
+
+
+# Callum's methodology names the prompt set's hash ("(sha256 4e07408562bedb8b)"); a hash prefix with a run of seven or
+# more digits made the personal-data check withhold the whole method (golive-wave2). The hash is in the audit record;
+# the client document drops it before the check. Removal only: the rest of the text is still judged as before.
+_PS_HASH = re.compile(r" ?\(sha256 [0-9a-f]{16}\)")
 
 
 class ReportInputError(ValueError):
@@ -112,7 +118,8 @@ SECTIONS = (
      "connected."),
     ("ai", "AI visibility (answer engines)", ("callum", "citation_sources"),
      "Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market "
-     "questions, sampled several times each."),
+     "questions, sampled several times each. Cited means the engine's search returned a page of your site for the "
+     "answer (cited = returned by search); it does not mean the answer's text linked to that page."),
 )
 
 EVIDENCE = {
@@ -763,7 +770,8 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
         if key == "ai" and sec["ai"] and any(not e["sampling"].startswith("Each of") for e in sec["ai"]["engines"]):
             notes.append("The method above is the plan. Not every engine was asked every question that many times; "
                          "the per-engine lines in the AI visibility section state what was actually asked.")
-        methods.append({"title": title, "method": safe_text(env.get("methodology") or "", 1500),
+        method = env.get("methodology") if isinstance(env.get("methodology"), str) else ""
+        methods.append({"title": title, "method": safe_text(_PS_HASH.sub("", method), 1500),
                         "limits": [safe_text(x, 600) for x in lims[:20] if isinstance(x, str)] + notes})
     quarantined = hygiene.get("quarantined") if isinstance(hygiene.get("quarantined"), list) else []
     q_counts: dict = {}
