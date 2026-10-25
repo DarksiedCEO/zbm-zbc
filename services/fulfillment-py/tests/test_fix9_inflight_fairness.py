@@ -485,6 +485,38 @@ def test_live_q2_max_body_boundary_rate(server):
         assert took < http_limits.BODY_READ_TIMEOUT_S / 2, (name, "refused late", summary)
 
 
+# golive-combined CI (macos-26, Oct 25 2026): large [200, 200, 503, 503]. The test kept only the status, so the run
+# could not say WHICH refusal it was. Each large answer's refusal is now classified by the server's own text: the
+# in-flight budget's 503 is the documented residual of this attack (ADR 0002, F-5: "reduced by the priority cover,
+# not eliminated", 4 of 51 and 2 of 38 measured; the test admits one per run); any other refusal of a legit large
+# batch (the large lane's byte-rate 503, a 408, a reset) is not documented and fails on its own, every time.
+INFLIGHT_503 = b"share an in-flight budget"
+
+
+def _large_outcome(code, raw: bytes) -> str:
+    """'200', 'inflight-503' (the documented F-5 refusal) or the undocumented outcome, named."""
+    if code == 200:
+        return "200"
+    if code == 503 and INFLIGHT_503 in raw:
+        return "inflight-503"
+    return f"{code}: {raw[raw.find(b'{'):][:160]!r}" if isinstance(code, int) else str(code)
+
+
+def test_large_outcome_names_the_documented_refusal_and_nothing_else():
+    """Deterministic (no server): the in-flight budget's own 503 text is the documented F-5 refusal; the large lane's
+    byte-rate 503, a 408 and a connection error are named as what they are."""
+    import api as api_mod
+
+    inflight = api_mod._inflight_refused().detail.encode()
+    lane = api_mod._large_refused().detail.encode()
+    assert INFLIGHT_503 in inflight and INFLIGHT_503 not in lane
+    assert _large_outcome(200, b"") == "200"
+    assert _large_outcome(503, b'HTTP/1.1 503\r\n\r\n{"detail":"' + inflight + b'"}') == "inflight-503"
+    assert _large_outcome(503, b'HTTP/1.1 503\r\n\r\n{"detail":"' + lane + b'"}').startswith("503: ")
+    assert _large_outcome(408, b'HTTP/1.1 408\r\n\r\n{"detail":"x"}').startswith("408: ")
+    assert _large_outcome("ConnectionResetError", b"") == "ConnectionResetError"
+
+
 def _legit_probe(port: int, stop: float, small: list, large: list) -> None:
     small_body = _event()
     large_body = json.dumps(MAX_BATCHES[ORCHESTRATE]).encode()  # 3.57 MB
@@ -502,10 +534,10 @@ def _legit_probe(port: int, stop: float, small: list, large: list) -> None:
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=20) as s:
                     s.sendall(_head(ORCHESTRATE, len(large_body)) + large_body)
-                    code, _ = _status_of(s)
+                    code, raw = _status_of(s)
             except OSError as exc:
-                code = type(exc).__name__
-            large.append(code)
+                code, raw = type(exc).__name__, b""
+            large.append(_large_outcome(code, raw))
             next_large = time.monotonic() + 1.0
         time.sleep(0.1)
 
@@ -577,4 +609,6 @@ def test_live_q1_slow_senders_above_the_floor_do_not_starve_legit_clients(server
           f"large {large}; senders {counts}")
     assert len(ok) == len(small), [c for c, _ in small if c != 200][:10]
     assert p99 < 500, p99
-    assert large and large.count(200) >= len(large) - 1, large
+    undocumented = [o for o in large if o not in ("200", "inflight-503")]
+    assert large and not undocumented, (undocumented, large)
+    assert large.count("200") >= len(large) - 1, large      # at most one documented F-5 refusal per run (unchanged)
