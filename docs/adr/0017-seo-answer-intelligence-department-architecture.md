@@ -1102,6 +1102,15 @@ CR-9. **AEGIS review of 3abca49 (CERTIFIED WITH CONDITIONS), findings closed.**
    - Out of scope here: O-1 (`tests/test_dual_stack_listener.py`'s `python -I` child writing `src/__pycache__`) is
      being fixed on the combined branch.
 
+CR-10. **AEGIS re-review of d525a5d (CERTIFIED WITH CONDITIONS), findings closed.**
+   - N-1: the "N more findings are in the audit record" line is printed only under an area that was checked.
+   - N-2: CLI tests now cover both checks. A render missing from the recorded list (wrong id, wrong hash, empty list
+     or a non-list) exits 2 and writes nothing. The written file is 0600 whether it is new or already existed
+     (`fchmod` after opening), and the CLI refuses to write through a symlink (`O_NOFOLLOW`). Mutation-checked.
+   - N-3: `--api` must be printable ASCII without spaces (control characters are refused before `urlsplit` or httpx
+     see them). Any `?`, `#` or `@` is refused, empty ones included.
+   - N-4: a request path is also judged after percent-decoding, so `/u/555%2D010%2D0199` is templated and unlinked.
+
 CR-8. **Limitations (honest).**
    - The fixes are generic, per rule; they are not tailored to the client's platform (CMS, CDN) and nobody has yet
      reviewed them with a real client. Titles and fixes are English only.

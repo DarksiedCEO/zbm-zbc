@@ -33,6 +33,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from urllib.parse import unquote
 
 from agents import logs as logs_mod
 from agents import search_performance as sp
@@ -381,7 +382,8 @@ def shown_path(p: str) -> tuple[str, bool]:
     """(what is shown, whether it may be a link) for a path the audit request named: the query string and fragment
     are never shown (AEGIS L-4), and a path that still looks like personal data is shown as its template, unlinked."""
     base = re.split(r"[?#]", p, maxsplit=1)[0] or "/"
-    if personal_data(_DATES.sub(" ", base)) is not None:
+    # judged decoded too (AEGIS N-4: /u/555%2D010%2D0199)
+    if any(personal_data(_DATES.sub(" ", x)) is not None for x in (base, unquote(base))):
         return _templated(base), False
     return base, True
 
@@ -916,7 +918,7 @@ def _md_section(s: dict) -> list:
         L += ["Notes from the run are listed under Methodology and limits.", ""]
     if st["checked"] and not s["groups"]:
         L += [md(_no_findings(st)), ""]
-    if s["dropped"]:
+    if s["dropped"] and st["checked"]:                 # AEGIS N-1: never under an area that was not checked
         L += [f"{md(s['dropped'])} more findings are in the audit record (the list is bounded).", ""]
     for g in s["groups"]:
         L += [f"### {md(g['title'])}", "",
@@ -1144,7 +1146,7 @@ def _h_section(s: dict, pages: dict) -> list:
         o.append("<p>Notes from the run are listed under Methodology and limits.</p>")
     if st["checked"] and not s["groups"]:
         o.append(f"<p>{h(_no_findings(st))}</p>")
-    if s["dropped"]:
+    if s["dropped"] and st["checked"]:                 # AEGIS N-1
         o.append(f"<p>{h(s['dropped'])} more findings are in the audit record (the list is bounded).</p>")
     for g in s["groups"]:
         o += ['<div class="finding">', f"<h4>{h(g['title'])}</h4>",

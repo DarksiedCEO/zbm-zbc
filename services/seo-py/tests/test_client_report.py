@@ -809,3 +809,98 @@ def test_route_global_and_write_switches(tmp_path, srv, switch, code):
     assert len(h.ledger.of_type("client_report_rendered")) == 1
     h.ok(h.switch(switch, engaged=False, andre=True))
     assert h.ok(_report(h, "zbm", aid, request_id=req)) == first
+
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS d525a5d
+
+@pytest.mark.parametrize("fmt", ["markdown", "html"])
+@pytest.mark.parametrize("outcome", ["BLOCKED", "FAILED", "INSUFFICIENT_EVIDENCE", "KILLED", "NOT_CONNECTED"])
+def test_dropped_findings_line_only_under_a_checked_area(outcome, fmt):
+    """AEGIS N-1."""
+    v = _with_crawl(outcome)
+    v["report"]["agents"][0]["findings_dropped"] = 7
+    body = _section(cr.render(v, "acme", fmt)[0].decode(), "Crawlability", fmt == "markdown")
+    assert "more findings are in the audit record" not in body and "7" not in body
+    ok = _with_crawl("OK")
+    ok["report"]["agents"][0]["findings_dropped"] = 7
+    assert "7 more findings are in the audit record" in _section(cr.render(ok, "acme", fmt)[0].decode(),
+                                                                 "Crawlability", fmt == "markdown")
+
+
+def test_percent_encoded_personal_data_in_a_request_path_is_templated():
+    """AEGIS N-4."""
+    v = fx.fresh("full")
+    v["report"]["paths"] = ["/", "/u/555%2D010%2D0199"]
+    t = cr.render(v, "acme", "html")[0].decode()
+    assert "555%2D010%2D0199" not in t and "https://acme.test/u/" not in t
+
+
+def test_cli_api_base_refuses_empty_query_fragment_userinfo_and_control_characters():
+    """AEGIS N-3."""
+    cli = _cli()
+    for bad in ("https://seo.internal?", "https://seo.internal#", "http://@127.0.0.1", "https://@seo.internal",
+                "https://seo.in\tternal", "https://seo.internal\n", "https://seo.internal\r/x", "https://se o.internal",
+                "https://höst.example", "https://seo.internal\x00", ""):
+        with pytest.raises(ValueError):
+            cli.api_base(bad)
+
+
+class _FakeService:
+    """The two calls the CLI makes, answered from a fixed render; ``listed`` is what the recorded list returns."""
+
+    def __init__(self, content: bytes, listed):
+        import httpx
+        self.httpx = httpx
+        self.rep = {"report_id": "seo-rpt-" + "1" * 40, "audit_id": "seo-aud-" + "0" * 40, "format": "html",
+                    "document_sha256": hashlib.sha256(content).hexdigest(), "audit_report_sha256": "b" * 64,
+                    "renderer_version": cr.RENDERER_VERSION, "bytes": len(content), "content": content.decode()}
+        self.listed = listed(self.rep) if callable(listed) else listed
+
+    def post(self, url, **k):
+        return self.httpx.Response(200, json=self.rep)
+
+    def get(self, url, **k):
+        return self.httpx.Response(200, json=self.listed)
+
+
+def _fetch_args(tmp_path, out):
+    tok = tmp_path / "t.tok"
+    tok.write_text("x" * 40)
+    return ["fetch", "--api", "https://seo.internal", "--tenant", "zbm", "--audit", "seo-aud-" + "0" * 40,
+            "--format", "html", "--out", str(out), "--service-token-file", str(tok), "--caller-token-file", str(tok),
+            "--andre-token-file", str(tok)]
+
+
+@pytest.mark.parametrize("listed", [
+    [], [{"report_id": "seo-rpt-" + "2" * 40, "document_sha256": "0" * 64}],
+    lambda r: [{"report_id": r["report_id"], "document_sha256": "0" * 64}],
+    lambda r: [{"report_id": "seo-rpt-" + "2" * 40, "document_sha256": r["document_sha256"]}],
+    {"detail": "x"}])
+def test_cli_fetch_refuses_a_render_the_service_has_not_recorded(tmp_path, capsys, listed):
+    """AEGIS N-2: the document is written only when the recorded-renders list holds its id AND hash."""
+    out = tmp_path / "r.html"
+    cli = _cli()
+    assert cli.main(_fetch_args(tmp_path, out), client=_FakeService(b"<p>doc</p>", listed)) == 2
+    assert not out.exists() and "recorded renders do not list" in capsys.readouterr().err
+
+
+def test_cli_fetch_writes_0600_also_over_an_existing_file_and_never_through_a_symlink(tmp_path, capsys):
+    """AEGIS N-2."""
+    cli = _cli()
+    ok = lambda r: [{"report_id": r["report_id"], "document_sha256": r["document_sha256"]}]  # noqa: E731
+    new = tmp_path / "new.html"
+    assert cli.main(_fetch_args(tmp_path, new), client=_FakeService(b"<p>doc</p>", ok)) == 0
+    assert new.read_bytes() == b"<p>doc</p>" and new.stat().st_mode & 0o777 == 0o600
+    old = tmp_path / "old.html"
+    old.write_text("previous")
+    old.chmod(0o644)
+    assert cli.main(_fetch_args(tmp_path, old), client=_FakeService(b"<p>doc</p>", ok)) == 0
+    assert old.read_bytes() == b"<p>doc</p>" and old.stat().st_mode & 0o777 == 0o600
+    target = tmp_path / "target.txt"
+    target.write_text("keep")
+    link = tmp_path / "link.html"
+    link.symlink_to(target)
+    capsys.readouterr()
+    assert cli.main(_fetch_args(tmp_path, link), client=_FakeService(b"<p>doc</p>", ok)) == 2
+    assert target.read_text() == "keep" and "cannot write --out" in capsys.readouterr().err

@@ -9,13 +9,13 @@ usage:
 
 ``fetch`` is the delivery path: it asks the service (``POST /seo/v1/tenants/{tid}/audits/{aid}/client-report``, the
 dashboard caller with Andre's approval token), which records the render on the ledger BEFORE answering. The document
-is written (mode 0600) only when (1) its SHA-256 and size match the answer's own ``document_sha256`` / ``bytes`` (a
-truncated or altered transfer) and (2) the service's list of recorded renders
-(``GET .../client-reports``, which holds a render only after the ledger accepted its event) has this ``report_id``
-with the same ``document_sha256``. It does not read the ledger itself. ``--api`` must be https, except for a loopback
-host (127.0.0.0/8, ::1, localhost): the request carries the service, caller and approval tokens. Re-running with the
-same ``--request-id`` returns the same document (or REPORT_CHANGED when the retained view changed since). Tokens are
-read from files (0600 recommended), never from the command line.
+is written (mode 0600, also when the file existed; never through a symlink) only when (1) its SHA-256 and size match
+the answer's own ``document_sha256`` / ``bytes`` (a truncated or altered transfer) and (2) the service's list of
+recorded renders (``GET .../client-reports``, which holds a render only after the ledger accepted its event) has this
+``report_id`` with the same ``document_sha256``. It does not read the ledger itself. ``--api`` must be https, except
+for a loopback host (127.0.0.0/8, ::1, localhost): the request carries the service, caller and approval tokens.
+Re-running with the same ``--request-id`` returns the same document (or REPORT_CHANGED when the retained view changed
+since). Tokens are read from files (0600 recommended), never from the command line.
 
 ``preview`` renders offline from a saved audit view (the body of ``GET /seo/v1/tenants/{tid}/audits/{aid}``). Nothing
 is recorded, so the document carries a PREVIEW banner and is not for delivery. Exit 2 when the audit cannot be
@@ -54,12 +54,15 @@ def api_base(url: str) -> str:
     """The service's base URL: https, or http only to a loopback host (AEGIS M-3: the request carries three secrets).
     No credentials, query or fragment."""
     from urllib.parse import urlsplit
+    if not isinstance(url, str) or not re.fullmatch(r"[\x21-\x7e]{1,2048}", url):
+        # AEGIS N-3: control characters, spaces and non-ASCII refused here, before urlsplit strips or httpx trips
+        raise ValueError("--api must be printable ASCII without spaces")
     try:
         u = urlsplit(url)
         host, _port = (u.hostname or ""), u.port
     except ValueError:
         raise ValueError("--api is not a URL") from None
-    if u.username or u.password or u.query or u.fragment or not host:
+    if "?" in url or "#" in url or "@" in u.netloc or not host:
         raise ValueError("--api must be scheme://host[:port][/path] without credentials, query or fragment")
     if u.scheme == "https":
         return url.rstrip("/")
@@ -145,8 +148,15 @@ def main(argv: Optional[list] = None, client=None) -> int:
     except (client_report.ReportInputError, PermissionError, ValueError, KeyError, TypeError, OSError) as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2
-    fd = os.open(a.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        # AEGIS N-2: never through a symlink, and 0600 even when the file already existed (O_CREAT's mode applies
+        # only to a new file)
+        fd = os.open(a.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError as e:
+        print(f"refused: cannot write --out ({e.strerror})", file=sys.stderr)
+        return 2
     with os.fdopen(fd, "wb") as fh:
+        os.fchmod(fh.fileno(), 0o600)
         fh.write(data)
     print(json.dumps({**meta, "out": a.out, "bytes": len(data)}, sort_keys=True))
     return 0
