@@ -128,26 +128,40 @@ def test_the_launcher_serves_through_launch_guard():
     assert "launch_guard.serve(" in src and "uvicorn.run(" not in src
 
 
-def test_ipv4_reaches_the_real_wildcard_socket_or_the_launcher_refuses_without_ipv6():
+# Run in a child process: the services' conftests refuse every socket connect inside a test (no network), and this
+# check needs one loopback connect to the real socket. The child imports this service's launch_guard and nothing else.
+_REAL_SOCKET_CHILD = """
+import socket, sys
+sys.path.insert(0, sys.argv[1])
+import launch_guard
+try:
+    socket.socket(socket.AF_INET6, socket.SOCK_STREAM).close()
+except OSError:
     try:
-        probe = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        probe.close()
-        has_v6 = True
+        launch_guard.dual_stack_socket("::", 0)
     except OSError:
-        has_v6 = False
-    if not has_v6:                          # no IPv6 in this kernel: binding :: fails, so the service would not start
-        with pytest.raises(OSError):
-            launch_guard.dual_stack_socket("::", 0)
-        return
-    s = launch_guard.dual_stack_socket("::", 0)
-    try:
-        assert s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY) == 0
-        s.listen(1)
-        port = s.getsockname()[1]
-        c = socket.create_connection(("127.0.0.1", port), timeout=5)      # IPv4 to the IPv6 wildcard
-        conn, peer = s.accept()
-        assert peer[0] == "::ffff:127.0.0.1"
-        conn.close()
-        c.close()
-    finally:
-        s.close()
+        print("no-ipv6 bind-refused")
+    else:
+        print("no-ipv6 bind-accepted")
+    sys.exit(0)
+s = launch_guard.dual_stack_socket("::", 0)
+v6only = s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
+s.listen(1)
+c = socket.create_connection(("127.0.0.1", s.getsockname()[1]), timeout=5)
+conn, peer = s.accept()
+print("ipv6", v6only, peer[0])
+conn.close(); c.close(); s.close()
+"""
+
+
+def test_ipv4_reaches_the_real_wildcard_socket_or_the_launcher_refuses_without_ipv6():
+    import subprocess
+
+    r = subprocess.run([sys.executable, "-I", "-c", _REAL_SOCKET_CHILD, str(SRC)], capture_output=True, text=True,
+                       timeout=60)
+    assert r.returncode == 0, r.stderr[-2000:]
+    out = r.stdout.split()
+    if out[0] == "no-ipv6":              # no IPv6 in this kernel: binding :: fails, so the service would not start
+        assert out == ["no-ipv6", "bind-refused"], out
+    else:                                # IPv4 to the IPv6 wildcard: accepted, as a v4-mapped peer, V6ONLY off
+        assert out == ["ipv6", "0", "::ffff:127.0.0.1"], out
