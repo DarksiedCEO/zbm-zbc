@@ -138,9 +138,20 @@ refuses.
 | `SEO_LOG_HASH_KEY` | `SEO_LOG_HASH_KEY_FILE` | seo |
 | `LEDGER_CALLERS` | `LEDGER_CALLERS_FILE` | ledger |
 
-Every other `*_FILE` setting the code reads (`SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`,
-`SEO_GOOGLE_API_KEY_FILE`, `SEO_PERPLEXITY_API_KEY_FILE`, `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`,
-`SEO_BING_WEBMASTER_KEY_FILE`) belongs to a port that is not built: setting it refuses the start. Leave them unset.
+`SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`,
+`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed to `SEO_GSC_SERVICE_ACCOUNT_FILE`) and `SEO_BING_WEBMASTER_KEY_FILE`
+belong to a port that is not built (or a retired name): setting one refuses the start. Leave them unset.
+
+Three built settings are `*_FILE` settings this deploy does **not** map (no `--secret-file` in their image), so on
+Railway they stay unset and their feature stays off, fail closed:
+
+- `SEO_PERPLEXITY_API_KEY_FILE`: not needed on Railway. seo reads the same key from the plain variable
+  `SEO_PERPLEXITY_API_KEY` (ADR 0017 W4; setting both refuses the start).
+- `SEO_GSC_SERVICE_ACCOUNT_FILE` (the Search Console service-account JSON key): unmapped, so Search Console is
+  `NOT_CONNECTED` on Railway until the seo image maps it (open item below).
+- `DETECTION_LEDGER_TOKEN_FILE` (with `DETECTION_LEDGER_URL`; the Revenue Recovery store connector's ledger, ADR
+  0020): unmapped, and detection does not run as root, so every store read fails closed (`LEDGER_UNAVAILABLE`) on
+  Railway until it is wired (open item below).
 
 ## Secrets
 
@@ -168,6 +179,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
 | `SEO_LOG_HASH_KEY` | `openssl rand -hex 32` | seo | — (becomes `SEO_LOG_HASH_KEY_FILE`) |
+| `SEO_PERPLEXITY_API_KEY` (optional) | Perplexity → API settings (only when you turn the engine on; set the four budgets too) | seo | — |
 | `FIN_STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys → create a **restricted** key (test mode first: `rk_test_...`) with write on Checkout Sessions and read on PaymentIntents, Charges, Disputes, Payouts and Balance | finance | — (becomes `FIN_STRIPE_SECRET_KEY_FILE`) |
 | `FIN_STRIPE_WEBHOOK_SECRET` | Stripe, when you register the webhook endpoint (step 7): the endpoint's signing secret, `whsec_...` | finance | — (becomes `FIN_STRIPE_WEBHOOK_SECRET_FILE`) |
 | `DASHBOARD_SESSION_SECRET` | `openssl rand -hex 32` | Vercel | — |
@@ -236,6 +248,7 @@ otherwise. Examples are never real values.
 | `ZBM_SERVICE_TOKEN` | yes | yes | (you) | the token the orchestrator presents; refuses to start without it |
 | `DETECTION_SWITCH_INTERVAL_SECONDS` | no | no | `0.001` | launcher tuning, 0.0001..0.05 |
 | `DETECTION_DRAINS_MAX` | no | no | `512` | concurrent graceful-close drains |
+| `DETECTION_LEDGER_URL`, `DETECTION_LEDGER_TOKEN_FILE` | no | token yes | unset | the Revenue Recovery store connector's evidence ledger (ADR 0020; `*_FILE` rules). Unset: every store read fails closed (record-first). Not mapped by this deploy (see "How `*_FILE` secrets map onto Railway") |
 
 ### orchestrator (orchestrator-go `cmd/orchestrator`)
 
@@ -366,7 +379,16 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_LOG_MAX_BYTES`, `SEO_LOG_RETENTION_DAYS`, `SEO_LOG_MAX_OPEN_INGESTS`, `SEO_LOG_MAX_INGESTS`, `SEO_LOG_TENANT_BYTES` | no | no | 256 MiB, `90`, `2`, `30`, 1 GiB | log ingests |
 | `SEO_BOT_VERIFY_DNS`, `SEO_BOT_VERIFY_MAX` | no | no | `0`, `200` | |
 | `SEO_SCHEDULE_BUDGET_RUNS`, `SEO_SCHEDULE_PERIOD_DAYS`, `SEO_FINANCE_TIMEOUT_SECONDS` | no | no | `8`, `30`, `5` | |
-| `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_PERPLEXITY_API_KEY_FILE`, `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`, `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL` | no | — | unset | not built: setting any refuses to start |
+| `SEO_GSC_SERVICE_ACCOUNT_FILE` | no | yes | unset | Search Console: the Google service-account JSON key file (owner-only, ≤ 16 KiB). Unset = `NOT_CONNECTED`, no call ever made. Not mapped by this deploy (see "How `*_FILE` secrets map onto Railway") |
+| `SEO_GSC_WINDOW_DAYS`, `SEO_GSC_PAGE_ROWS`, `SEO_GSC_MAX_PAGES`, `SEO_GSC_MAX_ROWS` | no | no | `28`, `5000`, `10`, `50000` | Search Console read window and pagination caps (seo-py README) |
+| `SEO_GSC_MAX_REQUESTS`, `SEO_GSC_TIMEOUT_SECONDS`, `SEO_GSC_DEADLINE_SECONDS` | no | no | `30`, `10`, `60` | requests per read (must cover the page caps, else start is refused), per-attempt timeout, whole-read deadline |
+| `SEO_GSC_READS_PER_DAY`, `SEO_GSC_RETENTION_DAYS` | no | no | `4`, `90` | reads per tenant per 24 h; days before breakdowns are served as totals only |
+| `SEO_PERPLEXITY_API_KEY` | no | yes | unset | the Perplexity key as a plain variable (the Railway form; ADR 0017 W4). Unset = the engine is `NOT_CONNECTED`. Must differ from every seo token |
+| `SEO_PERPLEXITY_API_KEY_FILE` | no | — | unset | the same key as a file; not used on Railway (setting both refuses start) |
+| `SEO_PERPLEXITY_MODEL`, `SEO_PERPLEXITY_TIMEOUT_SECONDS`, `SEO_PERPLEXITY_MAX_ATTEMPTS` | no | no | `sonar`, `30`, `3` | closed model list (`sonar`, `sonar-pro`); hard deadline per question; requests per question |
+| `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD`, `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | no | no | `0` each | daily budgets (UTC day). **0 = OFF: nothing is asked**; all four must be above 0 |
+| `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | no | no | `0.05` | reserved per request before it is sent (0.001..5) |
+| `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`, `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL` | no | — | unset | not built (`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`: renamed): setting any refuses to start |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | no | no | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
 
 ### dashboard (apps/dashboard-ts, on Vercel)
@@ -509,7 +531,14 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   the only defence (use `openssl rand -hex 32`). Anyone holding it can also start a scan.
 - **No scheduler is deployed.** Finance's daily reconciliation and Stripe-session job, Legal's daily jobs and seo's
   schedule tick need a `scheduler` caller (and a cron service) that this deploy does not include.
-- **Detection scans only the fixture pool** (ADR 0001): there is no real-store data source yet.
+- **Detection's store connector is not wired on Railway** (ADR 0020, golive-rr): the orchestrator's scans still use
+  the fixture pool; the Shopify store connector needs `DETECTION_LEDGER_URL` and `DETECTION_LEDGER_TOKEN_FILE`, which
+  this deploy does not set (detection runs non-root and maps no secret file), so every store read fails closed with
+  `LEDGER_UNAVAILABLE`. Wiring it needs a ledger caller for detection in `LEDGER_CALLERS`, a `--secret-file` in the
+  detection image and `RAILWAY_RUN_UID=0` for it.
+- **Search Console is NOT_CONNECTED on Railway** (golive-gsc): the seo image maps no `SEO_GSC_SERVICE_ACCOUNT_FILE`.
+  Turning it on needs `--secret-file SEO_GSC_SERVICE_ACCOUNT_FILE` in the seo image (the value variable would be
+  `SEO_GSC_SERVICE_ACCOUNT`, the JSON key) and Andre's steps in ADR 0017 "Search Console".
 - **Dashboard login limiter** depends on `DASHBOARD_TRUSTED_PROXY_HOPS` and an unverified Vercel behaviour (above).
 - **Version skew.** CI installs each service's `requirements.txt`, whose transitive dependencies float; the images
   install the hash lock. They can differ (the lock already takes certifi 2026.10.19 for PYSEC-2026-4320). `audit-python`
