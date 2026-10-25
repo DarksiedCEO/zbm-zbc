@@ -181,10 +181,11 @@ def perplexity_engine(settings):
     """The Perplexity port for these settings: the adapter when a key is configured, NOT_CONNECTED otherwise."""
     import perplexity
     key = getattr(settings, "perplexity_key", None)
+    protocol = getattr(settings, "perplexity_protocol", perplexity.DEFAULT_PROTOCOL)
     if key is None:
-        return perplexity.NotConnectedPerplexity()
+        return perplexity.NotConnectedPerplexity(protocol)
     return perplexity.PerplexityEngine(key, model=settings.perplexity_model, timeout_s=settings.perplexity_timeout_s,
-                                       attempts=settings.perplexity_attempts)
+                                       attempts=settings.perplexity_attempts, protocol=protocol)
 
 
 @dataclass

@@ -1,0 +1,13 @@
+{
+  "id": "resp_fixture_failed",
+  "object": "response",
+  "created_at": 1761300000,
+  "status": "failed",
+  "model": "perplexity/sonar",
+  "output": [],
+  "error": {
+    "code": "internal_error",
+    "message": "upstream failure",
+    "type": "server_error"
+  }
+}

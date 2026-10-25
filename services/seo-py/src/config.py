@@ -159,7 +159,8 @@ class Settings:
     gsc_reads_per_day: int = 4
     gsc_retention_days: int = 90
     perplexity_key: Optional[object] = field(default=None, repr=False)     # perplexity.ApiKey (masked repr)
-    perplexity_model: str = "sonar"
+    perplexity_protocol: str = "agent"
+    perplexity_model: str = "perplexity/sonar"
     perplexity_timeout_s: int = 30
     perplexity_attempts: int = 3
     perplexity_budget: dict = field(default_factory=lambda: dict(PERPLEXITY_BUDGET_OFF))
@@ -360,9 +361,15 @@ def _perplexity(env, s: "Settings") -> None:
     if path and plain:
         raise RuntimeError("SEO_PERPLEXITY_API_KEY_FILE and SEO_PERPLEXITY_API_KEY are both set; set one (the file "
                            "where the platform has secret files, the variable on Railway)")
-    model = (env.get("SEO_PERPLEXITY_MODEL") or perplexity.DEFAULT_MODEL).strip()
-    if model not in perplexity.MODELS:
-        raise RuntimeError(f"SEO_PERPLEXITY_MODEL must be one of {', '.join(perplexity.MODELS)} (a closed list)")
+    # the Agent API is the default (ADR 0017 W4-8); `sonar` is the rollback to the legacy chat-completions request
+    protocol = (env.get("SEO_PERPLEXITY_PROTOCOL") or perplexity.DEFAULT_PROTOCOL).strip()
+    if protocol not in perplexity.PROTOCOLS:
+        raise RuntimeError(f"SEO_PERPLEXITY_PROTOCOL must be one of {', '.join(perplexity.PROTOCOLS)}")
+    try:
+        model = perplexity.resolve_model(protocol, env.get("SEO_PERPLEXITY_MODEL"))
+    except ValueError as exc:                    # names the allowed values, never echoes the setting
+        raise RuntimeError(f"SEO_PERPLEXITY_MODEL {exc} (a closed list)") from None
+    s.perplexity_protocol = protocol
     s.perplexity_model = model
     s.perplexity_timeout_s = _int(env, "SEO_PERPLEXITY_TIMEOUT_SECONDS", 30, 5, 120)
     s.perplexity_attempts = _int(env, "SEO_PERPLEXITY_MAX_ATTEMPTS", 3, 1, 3)

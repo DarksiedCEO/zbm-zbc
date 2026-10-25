@@ -1,0 +1,41 @@
+{
+  "id": "resp_fixture_no_sources",
+  "object": "response",
+  "created_at": 1761300000,
+  "status": "completed",
+  "model": "perplexity/sonar",
+  "effort": "fast@2026-10-16.0",
+  "preset": "fast@2026-10-16.0",
+  "store": false,
+  "error": null,
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 120,
+    "total_tokens": 132,
+    "input_tokens_details": {
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "cost": {
+      "currency": "USD",
+      "input_cost": 3e-06,
+      "output_cost": 0.0003,
+      "total_cost": 0.001303,
+      "tool_calls_cost": 0.001
+    }
+  },
+  "output": [
+    {
+      "type": "message",
+      "id": "msg_fixture_2",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "An answer with no sources at all."
+        }
+      ]
+    }
+  ]
+}

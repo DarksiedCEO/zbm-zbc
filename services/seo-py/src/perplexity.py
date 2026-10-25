@@ -1,12 +1,21 @@
 """
 The Perplexity answer-engine adapter (ADR 0017 Wave 4; flag 1: Perplexity included, founder-chosen Oct 2026).
 
-One request kind only: ``POST https://api.perplexity.ai/v1/sonar`` (the Sonar chat-completions request, verified
-against docs.perplexity.ai on Oct 24 2026; the facts and their URLs are in ADR 0017 W4-1). Nothing else is ever
-called: no other host, path or method, no redirects followed, no proxy from the environment.
+One request kind per protocol, and the Agent API is the default (ADR 0017 W4-1 and W4-8, docs re-read on Oct 24
+2026):
+
+  - ``agent`` (default): ``POST https://api.perplexity.ai/v1/agent`` with ``model`` (closed allowlist, default
+    ``perplexity/sonar``), ``effort: "fast"`` (the migration guide's replacement for ``sonar``; the model field
+    overrides the effort's model), ``instructions`` (one fixed line), ``input`` (the prompt as a plain string),
+    ``stream: false`` and ``store: false``;
+  - ``sonar`` (rollback only, ``SEO_PERPLEXITY_PROTOCOL=sonar``): the old ``POST /v1/sonar`` chat-completions
+    request, past Perplexity's end of support (Sep 27 2026) and served by reformulating it as an Agent API request.
+
+Nothing else is ever called: no other host, path or method, no redirects followed, no proxy from the environment.
 
 Rules:
-  - fixed base URL and a CLOSED model allowlist (``MODELS``; default ``sonar``, the general Sonar model);
+  - fixed base URL and a CLOSED model allowlist per protocol (``MODELS`` / ``SONAR_MODELS``); a response reporting
+    any other model than the one asked is ENGINE_PROTOCOL_ERROR (``MODEL_NOT_ALLOWED``);
   - one HARD overall deadline per question, over DNS, connect, TLS, every read and write and the body loop
     (``_GuardedDeadlineBackend``: the Finance client's deadline backend pattern, plus the kill-switch guard before
     every socket operation and again after the response, every read waiting at most ``READ_SLICE_S`` between guard
@@ -14,18 +23,20 @@ Rules:
   - a bounded response (``MAX_RESPONSE_BYTES``, identity coding only, JSON only, duplicate keys refused);
   - bounded retries ONLY on 429, 5xx and transport errors; ``Retry-After`` (whole seconds) honoured when it fits in
     the time left, otherwise the answer is ENGINE_RATE_LIMITED at once (never a sleep past the deadline);
-  - STRICT parsing of what we rely on (pydantic, strict types): the answer text, the model, the citation URLs and
-    the usage/cost numbers must have the documented shape, or the answer is ENGINE_PROTOCOL_ERROR, never a guessed
-    answer. Fields we do not read (documented optional ones such as ``images``, ``related_questions``, a choice's
-    ``delta``, a search result's ``id``, ``usage.tool_calls_details``) are ignored and dropped, never stored: the API
-    adds fields over time and a known-but-irrelevant field must not stop the run (AEGIS H2);
-  - citations come from ``search_results[].url`` first (the field Perplexity says to use since May 2025, when it
-    announced ``citations`` removed) and from ``citations`` when present (the Sonar reference examples still show it);
-  - usage and cost (``usage.cost.total_cost``) captured as Decimal strings for the spend budgets;
+  - STRICT parsing of what we rely on (pydantic, strict types). Agent API: ``object == "response"``, ``status ==
+    "completed"`` (any other status is ENGINE_PROTOCOL_ERROR with detail ``RESPONSE_<STATUS>``), the ``message``
+    output items' ``output_text`` parts (the answer), the ``search_results`` output items' ``results[].url`` (the
+    sources), ``url_citation`` annotation URLs, the model and ``usage`` / ``usage.cost`` (``currency`` must be USD).
+    Output item types we do not read (``fetch_url_results``, ``function_call``, ...) and fields we do not read are
+    ignored and dropped, never stored; their NAMES are reported for drift (``unmodelled_keys``);
+  - Sonar (rollback): citations from ``search_results[].url`` first and from ``citations`` when present (removed per
+    the changelog; the parser tolerates its absence);
+  - usage and cost (``usage.cost.total_cost``) captured as Decimal strings for the spend budgets; no cost means the
+    request is charged at the reserve (svc_engines.py);
   - the API key is held in ``ApiKey`` (its repr is masked; ``reveal()`` is called in exactly one place, the request
     header) and never reaches a log line, an exception, a report, the log or the ledger;
   - the answer is DATA: its text is returned to the probe framework to be scanned, hashed and dropped; citations
-    come only from the structured ``search_results`` / ``citations`` fields, never from URLs in the text.
+    come only from structured fields, never from URLs in the text.
 
 Closed reason codes (``CODES``): ENGINE_AUTH_REFUSED, ENGINE_RATE_LIMITED, ENGINE_UNAVAILABLE, ENGINE_PROTOCOL_ERROR,
 ENGINE_BUDGET_EXHAUSTED, ENGINE_KILLED, ENGINE_NOT_CONNECTED.
@@ -52,10 +63,28 @@ from ports import ProviderAnswer
 
 ENGINE = "perplexity"
 BASE_URL = "https://api.perplexity.ai"
-PATH = "/v1/sonar"
 HOST = "api.perplexity.ai"
-MODELS = ("sonar", "sonar-pro")             # closed: the general model and the pro model; no deep research
-DEFAULT_MODEL = "sonar"
+# the Agent API (default since Oct 24 2026, ADR 0017 W4-8) and the legacy Sonar request (rollback only)
+AGENT, SONAR = "agent", "sonar"
+PROTOCOLS = (AGENT, SONAR)
+DEFAULT_PROTOCOL = AGENT
+PATHS = {AGENT: "/v1/agent", SONAR: "/v1/sonar"}
+PATH = PATHS[DEFAULT_PROTOCOL]
+# closed: Perplexity's own grounded search model on the Agent API (docs: Agent API Models lists `perplexity/sonar`)
+MODELS = ("perplexity/sonar",)
+DEFAULT_MODEL = "perplexity/sonar"
+SONAR_MODELS = ("sonar", "sonar-pro")       # the rollback protocol's allowlist; no deep research
+SONAR_DEFAULT_MODEL = "sonar"
+MODELS_BY_PROTOCOL = {AGENT: MODELS, SONAR: SONAR_MODELS}
+DEFAULT_MODEL_BY_PROTOCOL = {AGENT: DEFAULT_MODEL, SONAR: SONAR_DEFAULT_MODEL}
+# a setting written for the Sonar request keeps its meaning on the Agent API (only this one: `sonar-pro` has no
+# documented Agent API model and refuses start)
+MODEL_ALIASES = {AGENT: {"sonar": "perplexity/sonar"}, SONAR: {}}
+# the migration guide's replacement for `sonar` ("sonar -> fast"); the request's model overrides the effort's model
+AGENT_EFFORT = "fast"
+MAX_OUTPUT_ITEMS = 64
+MAX_CONTENT_PARTS = 64
+MAX_ANNOTATIONS = 200
 MAX_RESPONSE_BYTES = 512 * 1024
 MAX_ANSWER_CHARS = 100_000
 MAX_SOURCES = 100
@@ -226,8 +255,8 @@ def unmodelled_keys(obj: dict) -> tuple:
     return tuple(sorted(names)[:MAX_UNMODELLED_KEYS])
 
 
-def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
-    """The documented Sonar response -> a ProviderAnswer. A field we rely on with any other shape is
+def parse_response(body: bytes, allowed_models: tuple = SONAR_MODELS) -> ProviderAnswer:
+    """The documented Sonar response (the rollback protocol) -> a ProviderAnswer. A field we rely on with any other shape is
     ENGINE_PROTOCOL_ERROR. Sources: ``search_results[].url`` in order (primary), then any ``citations`` URL not
     already listed."""
     try:
@@ -260,6 +289,171 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
 
 def cost_of(ans: ProviderAnswer) -> Optional[str]:
     return (ans.usage or {}).get("total_cost_usd")
+
+
+def resolve_model(protocol: str, raw: Optional[str]) -> str:
+    """A configured model name -> the one sent, for this protocol: the protocol's default when unset, the documented
+    alias (``sonar`` -> ``perplexity/sonar`` on the Agent API), otherwise it must be on the protocol's closed list.
+    Raises ValueError naming the allowed values (never echoing the value: a mistyped value could be the key)."""
+    if protocol not in PROTOCOLS:
+        raise ValueError(f"the protocol must be one of {', '.join(PROTOCOLS)}")
+    name = (raw or "").strip() or DEFAULT_MODEL_BY_PROTOCOL[protocol]
+    name = MODEL_ALIASES[protocol].get(name, name)
+    if name not in MODELS_BY_PROTOCOL[protocol]:
+        raise ValueError(f"must be one of {', '.join(MODELS_BY_PROTOCOL[protocol])} with the {protocol} protocol")
+    return name
+
+
+# ------------------------------------------------------------------------------- the Agent API response (default)
+#
+# POST /v1/agent, 200, `stream: false`: `ResponsesResponse` in the API reference (docs.perplexity.ai/api-reference/
+# agent-post, read Oct 24 2026). Required there: id, object ("response"), created_at (int64), status, model, output.
+# `output` is a list of items discriminated by `type`; we read `message` (role "assistant", content parts of type
+# "output_text" with `text` and optional `annotations`) and `search_results` (`results[]`: id, url, title, snippet
+# required; date, last_updated, source optional). `usage`: input_tokens, output_tokens, total_tokens required; `cost`
+# optional with currency ("USD"), input_cost, output_cost, total_cost required (numbers).
+
+AGENT_STATUSES = ("completed", "failed", "incomplete", "in_progress", "queued", "cancelled")
+
+
+class _AgentAnnotation(_Strict):
+    # every field optional in the reference ("URL citation"); only `type == "url_citation"` with a url is used
+    type: Optional[Annotated[StrictStr, Field(max_length=40)]] = None
+    url: Optional[Annotated[StrictStr, Field(min_length=1, max_length=2048)]] = None
+    title: Optional[Bounded] = None
+    start_index: Optional[Annotated[StrictInt, Field(ge=0, le=10**7)]] = None
+    end_index: Optional[Annotated[StrictInt, Field(ge=0, le=10**7)]] = None
+
+
+class _AgentPart(_Strict):
+    type: Literal["output_text"]                      # the reference's ContentPartType has this one value
+    text: Annotated[StrictStr, Field(max_length=MAX_ANSWER_CHARS)]
+    annotations: Optional[Annotated[list[_AgentAnnotation], Field(max_length=MAX_ANNOTATIONS)]] = None
+
+
+class _AgentMessage(_Strict):
+    type: Literal["message"]
+    id: Annotated[StrictStr, Field(min_length=1, max_length=200)]
+    status: Literal[AGENT_STATUSES]
+    role: Literal["assistant"]
+    content: Annotated[list[_AgentPart], Field(max_length=MAX_CONTENT_PARTS)]
+
+
+class _AgentResult(_Strict):
+    id: Annotated[StrictInt, Field(ge=0, le=10**9)]
+    url: Annotated[StrictStr, Field(min_length=1, max_length=2048)]
+    title: Annotated[StrictStr, Field(max_length=2000)]
+    snippet: Annotated[StrictStr, Field(max_length=20_000)]
+    date: Optional[Annotated[StrictStr, Field(max_length=40)]] = None
+    last_updated: Optional[Annotated[StrictStr, Field(max_length=40)]] = None
+    source: Optional[Annotated[StrictStr, Field(max_length=100)]] = None
+
+
+class _AgentSearchResults(_Strict):
+    type: Literal["search_results"]
+    results: Annotated[list[_AgentResult], Field(max_length=MAX_SOURCES)]
+    queries: Optional[Annotated[list[Annotated[StrictStr, Field(max_length=2000)]], Field(max_length=50)]] = None
+
+
+class _AgentCost(_Strict):
+    currency: Literal["USD"]
+    input_cost: Money
+    output_cost: Money
+    total_cost: Money
+
+
+class _AgentUsage(_Strict):
+    input_tokens: Count
+    output_tokens: Count
+    total_tokens: Count
+    cost: Optional[_AgentCost] = None
+
+
+class _AgentItem(_Strict):
+    # every output item: only its discriminator is read here; the two item kinds we use are validated in full below
+    type: Annotated[StrictStr, Field(min_length=1, max_length=60)]
+
+
+class _AgentResponse(_Strict):
+    id: Annotated[StrictStr, Field(min_length=1, max_length=200)]
+    object: Literal["response"]
+    created_at: Annotated[StrictInt, Field(ge=0, le=10**11)]
+    status: Literal[AGENT_STATUSES]
+    model: Annotated[StrictStr, Field(min_length=1, max_length=100)]
+    output: Annotated[list[dict], Field(max_length=MAX_OUTPUT_ITEMS)]
+    effort: Optional[Annotated[StrictStr, Field(max_length=80)]] = None
+    usage: Optional[_AgentUsage] = None
+
+
+# documented top-level fields this parser does not read, so they are not drift: `error` (ErrorInfo, in the reference),
+# `store` (echoed, the reference's `store` description) and `preset` (the changelog, Oct 2026: "`preset` is still
+# accepted as a deprecated alias, and responses return both fields")
+_AGENT_KNOWN_UNREAD = frozenset({"error", "store", "preset"})
+_EFFORT_RX = re.compile(r"[a-z]{1,10}(@[A-Za-z0-9._-]{1,40})?")
+
+
+def _agent_drift(obj: dict, item_types: list) -> tuple:
+    """Top-level keys the Agent parser does not model, plus ``output.<type>`` for every output item type it does not
+    read (NAMES only, sorted and bounded; a name that is not a plain identifier is "<other>")."""
+    names = set()
+    for k in obj:
+        if k not in _AgentResponse.model_fields and k not in _AGENT_KNOWN_UNREAD:
+            names.add(k if re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", k) else "<other>")
+    for t in item_types:
+        if t not in ("message", "search_results"):
+            names.add("output." + t if re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", t) else "output.<other>")
+    return tuple(sorted(names)[:MAX_UNMODELLED_KEYS])
+
+
+def parse_agent_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
+    """The documented Agent API response -> a ProviderAnswer. A field we rely on with any other shape is
+    ENGINE_PROTOCOL_ERROR; a status other than ``completed`` is ENGINE_PROTOCOL_ERROR with detail
+    ``RESPONSE_<STATUS>`` (the docs do not say what a partial answer means, so none is counted); no assistant text is
+    ENGINE_PROTOCOL_ERROR ``NO_ANSWER_TEXT``. The answer is every ``output_text`` part of every ``message`` item in
+    order (what the SDKs' ``output_text`` aggregates). Sources: ``search_results`` items' ``results[].url`` in output
+    order (the docs: "treat the id and url fields of each search_results entry as the source of truth for
+    citations"), then any ``url_citation`` annotation URL not already listed. No source at all is allowed (counted as
+    a zero-source answer, drift-visible), never invented."""
+    try:
+        obj = json.loads(body.decode("utf-8"), object_pairs_hook=_no_duplicates,
+                         parse_constant=lambda c: (_ for _ in ()).throw(ValueError("NaN")))
+        r = _AgentResponse.model_validate(obj)
+        types, messages, results = [], [], []
+        for raw_item in r.output:
+            t = _AgentItem.model_validate(raw_item).type
+            types.append(t)
+            if t == "message":
+                messages.append(_AgentMessage.model_validate(raw_item))
+            elif t == "search_results":
+                results.append(_AgentSearchResults.model_validate(raw_item))
+    except (UnicodeDecodeError, ValueError, RecursionError, ValidationError, TypeError):
+        raise EngineError("ENGINE_PROTOCOL_ERROR") from None
+    if r.status != "completed":
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "RESPONSE_" + r.status.upper())
+    if r.model not in allowed_models:
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED")
+    parts = [p for m in messages for p in m.content]
+    text = "".join(p.text for p in parts)
+    if not text.strip():
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT")
+    if len(text) > MAX_ANSWER_CHARS:
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "TOO_LARGE")
+    sources: list = []
+    annotated = [a.url for p in parts for a in (p.annotations or ()) if a.type == "url_citation" and a.url]
+    for u in [x.url for sr in results for x in sr.results] + annotated:
+        if u not in sources:
+            sources.append(u)
+    usage = None
+    if r.usage is not None:
+        u = r.usage
+        usage = {"input_tokens": u.input_tokens, "output_tokens": u.output_tokens, "total_tokens": u.total_tokens,
+                 "total_cost_usd": money(u.cost.total_cost) if u.cost is not None else None}
+    version = r.effort if r.effort is not None and _EFFORT_RX.fullmatch(r.effort) else None
+    ans = ProviderAnswer("ANSWER", text, sources[:MAX_SOURCES], r.model, version, cite_from_text=False,
+                         usage=usage, answer_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
+                         finish_reason=r.status)
+    ans.unmodelled_keys = _agent_drift(obj, types)
+    return ans
 
 
 # ---------------------------------------------------------------------------------------------- the network layer
@@ -366,6 +560,24 @@ def _retry_after(value: Optional[str]) -> Optional[float]:
     return float(int(value))
 
 
+def request_body(protocol: str, model: str, prompt: str) -> bytes:
+    """The one request body per protocol. Agent API: ``model``, ``effort`` (the migration guide's ``fast``; "any field
+    you pass alongside the effort level overrides that default", so the model is ours), ``instructions`` (the one
+    fixed line; "System instructions for the model"), ``input`` (a plain string: "For simple single-turn prompts,
+    pass a plain string"), ``stream: false`` and ``store: false`` (the response is not kept for later retrieval).
+    Sonar (rollback): ``model``, ``messages`` and ``stream: false``. Nothing else: no tenant, brand, domain or user
+    identifier, no tools beyond the effort's own."""
+    if protocol == AGENT:
+        doc = {"model": model, "effort": AGENT_EFFORT, "instructions": SYSTEM_PROMPT, "input": prompt,
+               "stream": False, "store": False}
+    elif protocol == SONAR:
+        doc = {"model": model, "messages": [{"role": "system", "content": SYSTEM_PROMPT},
+                                            {"role": "user", "content": prompt}], "stream": False}
+    else:
+        raise ValueError("protocol")
+    return json.dumps(doc).encode("utf-8")
+
+
 class PerplexityEngine:
     """The answer-engine port for Perplexity. ``ask(prompt, guard=..., meter=...)`` returns a ProviderAnswer or raises
     EngineError (and nothing else for any network or protocol outcome)."""
@@ -375,21 +587,27 @@ class PerplexityEngine:
     accepts_guard = True
     name = ENGINE
 
-    def __init__(self, key: ApiKey, model: str = DEFAULT_MODEL, timeout_s: float = 30.0, attempts: int = 3,
+    def __init__(self, key: ApiKey, model: Optional[str] = None, timeout_s: float = 30.0, attempts: int = 3,
                  backoff_s: tuple = (0.5, 1.5), transport: Optional[httpx.BaseTransport] = None,
                  network_backend=None, monotonic: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep, resolve: Callable[[str, int], list] = _system_resolve,
                  dns_gate: Optional[_DnsGate] = None, rand: Callable[[], float] = random.random,
-                 public: Optional[Callable[[str], bool]] = None):
+                 public: Optional[Callable[[str], bool]] = None, protocol: str = DEFAULT_PROTOCOL):
         if not isinstance(key, ApiKey):
             raise TypeError("the key must be an ApiKey")
-        if model not in MODELS:
+        if protocol not in PROTOCOLS:
+            raise ValueError("protocol must be agent or sonar")
+        model = DEFAULT_MODEL_BY_PROTOCOL[protocol] if model is None else model
+        if model not in MODELS_BY_PROTOCOL[protocol]:
             raise ValueError("model not in the allowlist")
         if not 1 <= attempts <= 3:
             raise ValueError("attempts must be 1..3")
         if not 1 <= timeout_s <= 120:
             raise ValueError("timeout must be 1..120 s")
         self._key = key
+        self.protocol = protocol
+        self.path = PATHS[protocol]
+        self.models = MODELS_BY_PROTOCOL[protocol]
         self.model = model
         self.timeout_s = float(timeout_s)
         self.attempts = attempts
@@ -401,11 +619,13 @@ class PerplexityEngine:
         self._public = public
 
     def __repr__(self) -> str:
-        return f"PerplexityEngine(model={self.model!r}, timeout_s={self.timeout_s}, attempts={self.attempts})"
+        return (f"PerplexityEngine(protocol={self.protocol!r}, model={self.model!r}, timeout_s={self.timeout_s}, "
+                f"attempts={self.attempts})")
 
     def describe(self) -> dict:
-        return {"state": "connected", "base_url": BASE_URL, "path": PATH, "model": self.model,
-                "models_allowed": list(MODELS), "timeout_s": self.timeout_s, "attempts": self.attempts,
+        return {"state": "connected", "base_url": BASE_URL, "protocol": self.protocol, "path": self.path,
+                "model": self.model, "effort": AGENT_EFFORT if self.protocol == AGENT else None,
+                "models_allowed": list(self.models), "timeout_s": self.timeout_s, "attempts": self.attempts,
                 "key_source": self._key.source, "max_response_bytes": MAX_RESPONSE_BYTES}
 
     # ------------------------------------------------------------------ public
@@ -416,11 +636,10 @@ class PerplexityEngine:
         check (raises to stop); ``meter`` charges every request against the run's budget reservation
         (``before()`` raises ENGINE_BUDGET_EXHAUSTED; ``after(cost)``)."""
         model = model or self.model
-        if model not in MODELS or not isinstance(prompt, str) or not 1 <= len(prompt) <= 2000:
+        if model not in self.models or not isinstance(prompt, str) or not 1 <= len(prompt) <= 2000:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
-        body = json.dumps({"model": model, "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                                                         {"role": "user", "content": prompt}],
-                           "stream": False}).encode("utf-8")
+        body = request_body(self.protocol, model, prompt)
+        parse = parse_agent_response if self.protocol == AGENT else parse_response
         end = self._mono() + self.timeout_s
         last = "ENGINE_UNAVAILABLE"
         for attempt in range(self.attempts):
@@ -434,7 +653,7 @@ class PerplexityEngine:
                 status, headers, raw = self._post(body, end, guard)
                 self._check(guard)                   # a switch engaged during the last read: drop the answer
                 if status == 200:
-                    ans = parse_response(raw, (model,))
+                    ans = parse(raw, (model,))
                     if meter is not None:
                         meter.after(cost_of(ans))
                         charged = True
@@ -502,7 +721,7 @@ class PerplexityEngine:
         try:
             with httpx.Client(timeout=httpx.Timeout(left), transport=transport, follow_redirects=False,
                               trust_env=False) as client:
-                with client.stream("POST", BASE_URL + PATH, headers=headers, content=body) as resp:
+                with client.stream("POST", BASE_URL + self.path, headers=headers, content=body) as resp:
                     status = resp.status_code
                     kept = {"retry-after": resp.headers.get("retry-after")}
                     if status != 200:
@@ -546,11 +765,14 @@ class NotConnectedPerplexity:
     metered = False
     name = ENGINE
 
+    def __init__(self, protocol: str = DEFAULT_PROTOCOL):
+        self.protocol = protocol if protocol in PROTOCOLS else DEFAULT_PROTOCOL
+
     def ask(self, prompt: str, model: Optional[str] = None, **_kw) -> ProviderAnswer:
         from ports import NOT_CONNECTED
         return ProviderAnswer(NOT_CONNECTED)
 
     def describe(self) -> dict:
-        return {"state": "NOT_CONNECTED", "base_url": BASE_URL, "path": PATH, "model": None,
-                "models_allowed": list(MODELS),
+        return {"state": "NOT_CONNECTED", "base_url": BASE_URL, "protocol": self.protocol, "path": PATHS[self.protocol],
+                "model": None, "models_allowed": list(MODELS_BY_PROTOCOL[self.protocol]),
                 "why": "no API key: set SEO_PERPLEXITY_API_KEY_FILE (or SEO_PERPLEXITY_API_KEY on Railway)"}

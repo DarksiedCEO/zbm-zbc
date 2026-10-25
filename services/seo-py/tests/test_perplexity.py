@@ -3,7 +3,12 @@
 
 No network: the adapter is driven through ``httpx.MockTransport`` (a fake Perplexity) or, for the socket layer,
 through a fake network backend under the real httpcore connection pool. Every deadline runs on an injected clock;
-nothing asserts wall-clock time. The API key is DERIVED at run time (never a literal)."""
+nothing asserts wall-clock time. The API key is DERIVED at run time (never a literal).
+
+Since the Agent API migration (ADR 0017 W4-8, Oct 24 2026) the adapters built here use the legacy Sonar request
+(``protocol="sonar"``, the rollback setting ``SEO_PERPLEXITY_PROTOCOL=sonar``), so the whole Sonar suite keeps
+proving the rollback path; the Agent API (the default) is proven in tests/test_perplexity_agent.py, which reuses the
+fakes below."""
 
 from __future__ import annotations
 
@@ -92,6 +97,7 @@ class FakePerplexity:
 
 def engine(fake: FakePerplexity, clock: Clock = None, **kw) -> px.PerplexityEngine:
     clock = clock or Clock()
+    kw.setdefault("protocol", "sonar")
     return px.PerplexityEngine(px.ApiKey(KEY, "env"), transport=httpx.MockTransport(fake.handler),
                                monotonic=clock, sleep=clock.sleep, rand=lambda: 0.0, **kw)
 
@@ -318,7 +324,8 @@ def _http(body: bytes, status: str = "200 OK", ctype: str = "application/json") 
 
 def socket_engine(clock, backend, resolve=lambda h, p: ["104.18.26.48"], **kw):
     return px.PerplexityEngine(px.ApiKey(KEY, "file"), network_backend=backend, monotonic=clock, sleep=clock.sleep,
-                               resolve=resolve, dns_gate=px._DnsGate(2), rand=lambda: 0.0, **kw)
+                               resolve=resolve, dns_gate=px._DnsGate(2), rand=lambda: 0.0,
+                               **{"protocol": "sonar", **kw})
 
 
 def test_https_goes_to_the_resolved_public_address_with_sni_and_host_of_the_fixed_name():
@@ -366,9 +373,11 @@ def test_the_production_transport_installs_the_guarded_deadline_backend(monkeypa
             return httpx.Response(503)
 
     monkeypatch.setattr(px.httpx, "HTTPTransport", Probe)
-    e = px.PerplexityEngine(px.ApiKey(KEY, "env"), attempts=1, sleep=lambda s: None)
-    assert code_of(lambda: e.ask("q?")) == "ENGINE_UNAVAILABLE"
-    assert seen == {"backend": "_GuardedDeadlineBackend", "url": "https://api.perplexity.ai/v1/sonar"}
+    for protocol in ("sonar", "agent"):
+        e = px.PerplexityEngine(px.ApiKey(KEY, "env"), attempts=1, sleep=lambda s: None, protocol=protocol)
+        assert code_of(lambda: e.ask("q?")) == "ENGINE_UNAVAILABLE"
+        assert seen["url"] == "https://api.perplexity.ai" + px.PATHS[protocol]
+    assert seen == {"backend": "_GuardedDeadlineBackend", "url": "https://api.perplexity.ai/v1/agent"}
 
 
 def test_a_kill_switch_engaged_mid_request_stops_at_the_next_socket_operation():
@@ -476,7 +485,8 @@ def test_env_key_for_railway_and_budget_settings(tmp_path):
     h = Harness(tmp_path, SEO_PERPLEXITY_API_KEY=KEY, **BUDGET)
     st = h.ok(h.get("/status"))
     d = st["answer_engines"]["perplexity"]
-    assert d["state"] == "connected" and d["key_source"] == "env" and d["model"] == "sonar"
+    assert d["state"] == "connected" and d["key_source"] == "env" and d["model"] == "perplexity/sonar"
+    assert d["protocol"] == "agent" and d["path"] == "/v1/agent" and d["effort"] == "fast"
     assert d["budget"]["state"] == "on" and st["ports"]["answer_engines"]["perplexity"] == "connected"
     assert KEY not in json.dumps(st)
 
@@ -1207,7 +1217,7 @@ def _cycling_engine(script):
         return httpx.Response(item.status_code, headers=item.headers, stream=httpx.ByteStream(item.content))
     clock = Clock()
     return sent, px.PerplexityEngine(px.ApiKey(KEY, "env"), transport=httpx.MockTransport(handler), monotonic=clock,
-                                     sleep=clock.sleep, rand=lambda: 0.0)
+                                     sleep=clock.sleep, rand=lambda: 0.0, protocol="sonar")
 
 
 def test_r2_protocol_errors_between_503s_still_stop_the_run():
