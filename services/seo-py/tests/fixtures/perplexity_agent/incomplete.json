@@ -7,6 +7,22 @@
   "effort": "fast@2026-10-16.0",
   "preset": "fast@2026-10-16.0",
   "store": false,
+  "background": false,
+  "completed_at": 1761300003,
+  "instructions": "Answer the question concisely and cite your sources.",
+  "max_output_tokens": 8192,
+  "service_tier": "default",
+  "temperature": 1.0,
+  "top_p": 1.0,
+  "tools": [
+    {
+      "type": "web_search"
+    }
+  ],
+  "tool_choice": "auto",
+  "metadata": {},
+  "incomplete_details": null,
+  "previous_response_id": null,
   "error": null,
   "output": [
     {

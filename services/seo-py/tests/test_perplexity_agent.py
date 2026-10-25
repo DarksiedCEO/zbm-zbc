@@ -2,8 +2,10 @@
 
 The response fixtures in tests/fixtures/perplexity_agent/ are built from the documented shape (the API reference's
 ``ResponsesResponse``, docs.perplexity.ai/api-reference/agent-post, read Oct 24 2026); they are NOT captures of a real
-response (no key, no network here). Their ``fetch_url_results`` item's inner fields are placeholders: the adapter
-ignores that item type, and the test proves it is ignored. The fakes, the clock and the service harness come from
+response (no key, no network here). Their ``fetch_url_results`` item uses the reference's ``UrlContent`` fields
+(``url``, ``title``, ``snippet``); the adapter ignores that item type, and the test proves it is ignored. The
+completed fixture also carries the top-level keys of the quickstart's example responses (request settings echoed
+back), which are documented and so are not drift. The fakes, the clock and the service harness come from
 tests/test_perplexity.py (the Sonar suite, which now proves the rollback protocol)."""
 
 from __future__ import annotations
@@ -102,7 +104,8 @@ def test_protocol_and_model_allowlists_are_closed():
     assert px.resolve_model("agent", None) == "perplexity/sonar"
     assert px.resolve_model("agent", "sonar") == "perplexity/sonar"         # a Sonar-era setting keeps its meaning
     assert px.resolve_model("sonar", "") == "sonar" and px.resolve_model("sonar", "sonar-pro") == "sonar-pro"
-    for proto, raw in (("agent", "sonar-pro"), ("agent", KEY), ("sonar", "perplexity/sonar"), ("x", None)):
+    assert px.resolve_model("sonar", "perplexity/sonar") == "sonar"         # the rollback keeps the setting (L1)
+    for proto, raw in (("agent", "sonar-pro"), ("agent", KEY), ("sonar", "openai/gpt-6-luna"), ("x", None)):
         with pytest.raises(ValueError) as e:
             px.resolve_model(proto, raw)
         assert KEY not in str(e.value)
@@ -116,9 +119,9 @@ def test_the_completed_fixture_parses_text_sources_usage_cost_and_effort_version
     text = body["output"][1]["content"][0]["text"]
     assert a.status == "ANSWER" and a.text == text and a.finish_reason == "completed"
     assert a.answer_sha256 == hashlib.sha256(text.encode()).hexdigest()
-    # search_results in output order first (Perplexity's own order), then url_citation annotations not yet listed
-    assert a.citations == ["https://competitor.test/a", "https://www.site.test/services", "https://news.test/x",
-                           "https://annotated.test/only"]
+    # search_results in output order (Perplexity's own order); the annotation that search never returned is NOT a
+    # citation (AEGIS M1: search_results are the source of truth)
+    assert a.citations == ["https://competitor.test/a", "https://www.site.test/services", "https://news.test/x"]
     assert a.model == "perplexity/sonar" and a.model_version == "fast@2026-10-16.0"
     assert a.usage == {"input_tokens": 12, "output_tokens": 120, "total_tokens": 132, "total_cost_usd": "0.001303"}
     assert a.unmodelled_keys == ()                     # error, store and preset are documented, not drift
@@ -141,10 +144,10 @@ def test_output_items_and_fields_we_do_not_read_are_ignored_and_reported_by_name
     a = parse(fixture("other_output_items.json"))
     assert a.status == "ANSWER" and "https://fetched.test/" not in a.citations
     assert a.unmodelled_keys == ("output.fetch_url_results",)
-    b = agent_body(service_tier="priority", **{"weird key!": 1})
+    b = agent_body(sources_moved=["https://site.test/"], **{"weird key!": 1})
     b["output"].append({"type": "Bad Type!"})
     b["output"][1]["phase"] = "final"                               # an extra field on a read item: dropped
-    assert parse(b).unmodelled_keys == ("<other>", "output.<other>", "service_tier")
+    assert parse(b).unmodelled_keys == ("<other>", "output.<other>", "sources_moved")
     many = agent_body(**{f"k{i:02d}": i for i in range(30)})
     assert len(parse(many).unmodelled_keys) == px.MAX_UNMODELLED_KEYS
 
@@ -336,12 +339,16 @@ def test_settings_default_to_the_agent_api_and_sonar_is_only_a_rollback():
     assert s.perplexity_protocol == "sonar" and s.perplexity_model == "sonar"
     s = base.Harness_env(SEO_PERPLEXITY_PROTOCOL="sonar", SEO_PERPLEXITY_MODEL="sonar-pro")
     assert s.perplexity_model == "sonar-pro" and s.perplexity_key is None
-    for bad in ({"SEO_PERPLEXITY_MODEL": "sonar-pro"}, {"SEO_PERPLEXITY_MODEL": KEY},
-                {"SEO_PERPLEXITY_PROTOCOL": KEY}, {"SEO_PERPLEXITY_PROTOCOL": "sonar",
-                                                   "SEO_PERPLEXITY_MODEL": "perplexity/sonar"}):
-        with pytest.raises(RuntimeError) as e:
-            base.Harness_env(**bad)
-        assert KEY not in str(e.value) and "SEO_PERPLEXITY_" in str(e.value)
+    s = base.Harness_env(SEO_PERPLEXITY_PROTOCOL="sonar", SEO_PERPLEXITY_MODEL="perplexity/sonar")     # L1
+    assert s.perplexity_protocol == "sonar" and s.perplexity_model == "sonar" and s.perplexity_unavailable is None
+    # a protocol or model the adapter cannot use: the SERVICE starts, only the engine is NOT_CONNECTED (AEGIS L1)
+    for bad, reason in (({"SEO_PERPLEXITY_MODEL": "sonar-pro"}, "MODEL_NOT_SUPPORTED"),
+                        ({"SEO_PERPLEXITY_MODEL": KEY}, "MODEL_NOT_SUPPORTED"),
+                        ({"SEO_PERPLEXITY_PROTOCOL": KEY}, "PROTOCOL_INVALID"),
+                        ({"SEO_PERPLEXITY_PROTOCOL": "sonar", "SEO_PERPLEXITY_MODEL": "openai/gpt-6-luna"},
+                         "MODEL_NOT_SUPPORTED")):
+        s = base.Harness_env(SEO_PERPLEXITY_API_KEY=KEY, **bad)
+        assert s.perplexity_unavailable == reason and s.perplexity_model in px.MODELS + px.SONAR_MODELS
 
 
 def test_status_shows_the_protocol_path_and_effort_and_not_connected_says_the_same(tmp_path):
@@ -499,7 +506,7 @@ def test_smoke_one_call_on_the_agent_api_makes_one_request_and_prints_no_key_or_
         assert KEY not in out.getvalue() and "SECRET-ANSWER-TEXT" not in out.getvalue()
         if want == "ANSWER":
             assert rep["model_version"] == "fast@2026-10-16.0" and rep["finish_reason"] == "completed"
-            assert rep["citations"] == 4 and rep["zero_sources"] is False and rep["unmodelled_keys"] == []
+            assert rep["citations"] == 3 and rep["zero_sources"] is False and rep["unmodelled_keys"] == []
             assert rep["usage"]["total_cost_usd"] == "0.001303"
         else:
             assert rep["detail"] == detail
@@ -516,3 +523,121 @@ def test_smoke_builds_the_adapter_from_the_service_settings_without_any_request(
         out = io.StringIO()
         assert m.main([m.FLAG], env, out=out) == 2
         assert KEY not in out.getvalue() and "configuration error: SEO_PERPLEXITY_" in out.getvalue()
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS pplx-agent fixes
+
+def test_m1_an_annotation_url_search_never_returned_is_never_a_citation():
+    b = agent_body(urls=("https://competitor.test/a",))
+    b["output"][1]["content"][0]["annotations"] = [
+        {"type": "url_citation", "url": "https://site.test/never-searched", "title": "x"},
+        {"type": "url_citation", "url": "https://competitor.test/a"}]          # searched: already listed, once
+    a = parse(b)
+    assert a.citations == ["https://competitor.test/a"]
+    assert [c["host"] for c in probes.extract_citations(a)] == ["competitor.test"]
+
+
+def test_m1_through_the_service_an_annotation_only_tenant_url_is_not_cited(tmp_path):
+    b = agent_body(text="Z Best Media is the answer [1].", urls=("https://competitor.test/a",))
+    b["output"][1]["content"][0]["annotations"] = [{"type": "url_citation", "url": "https://site.test/never-searched"}]
+    f = FakePerplexity(ok(b))
+    h = agent_harness(tmp_path, f)
+    p = callum(run_audit(h, setup_zbm(h)))["facts"]["engines"]["perplexity"]["prompts"][0]
+    assert p["cited"] == 0 and p["best_position"] is None and p["cited_positions"] == [None, None, None]
+    assert {s["host"] for s in p["other_sources"]} == {"competitor.test"}
+
+
+def test_l1_a_rollback_or_an_unsupported_model_never_stops_the_service(tmp_path):
+    f = FakePerplexity(ok(fixture("completed.json")))
+    h = Harness(tmp_path, SEO_PERPLEXITY_API_KEY=KEY, SEO_PERPLEXITY_MODEL="sonar-pro", SEO_PROBE_SAMPLES="3", **BUDGET)
+    h.ports.fetcher = None
+    d = h.ok(h.get("/status"))["answer_engines"]["perplexity"]
+    assert d["state"] == "NOT_CONNECTED" and d["reason"] == "MODEL_NOT_SUPPORTED" and "sonar-pro" not in json.dumps(d)
+    c = callum(run_audit(h, setup_zbm(h)))
+    assert "answer_engine:perplexity" in c["not_connected"] and f.requests == [] and not h.svc.engine_runs
+    h2 = Harness(tmp_path / "b", SEO_PERPLEXITY_API_KEY=KEY, SEO_PERPLEXITY_PROTOCOL="rollback", **BUDGET)
+    d2 = h2.ok(h2.get("/status"))["answer_engines"]["perplexity"]
+    assert d2["state"] == "NOT_CONNECTED" and d2["reason"] == "PROTOCOL_INVALID" and "rollback" not in json.dumps(d2)
+    h3 = Harness(tmp_path / "c", SEO_PERPLEXITY_API_KEY=KEY, SEO_PERPLEXITY_PROTOCOL="sonar",
+                 SEO_PERPLEXITY_MODEL="perplexity/sonar", **BUDGET)
+    d3 = h3.ok(h3.get("/status"))["answer_engines"]["perplexity"]
+    assert d3["state"] == "connected" and d3["protocol"] == "sonar" and d3["model"] == "sonar"
+    assert px.NotConnectedPerplexity().describe()["reason"] is None
+
+
+@pytest.mark.parametrize("url", ["javascript://site.test/%0aalert(1)", "ftp://site.test/x", "data://site.test/",
+                                 "file://site.test/etc", "//site.test/x", "site.test/x"])
+def test_l2_only_http_and_https_urls_are_credited_as_citations(url):
+    a = parse(agent_body(urls=(url, "https://competitor.test/a")))
+    assert [c["url"] for c in probes.extract_citations(a)] == ["https://competitor.test/a"]
+
+
+def test_l2_through_the_service_a_non_web_tenant_url_is_not_cited(tmp_path):
+    f = FakePerplexity(ok(agent_body(urls=("ftp://site.test/x", "javascript://www.site.test/", "HTTPS://site.test/ok"))))
+    h = agent_harness(tmp_path, f)
+    p = callum(run_audit(h, setup_zbm(h)))["facts"]["engines"]["perplexity"]["prompts"][0]
+    assert p["cited"] == 3 and p["cited_positions"] == [1, 1, 1]            # only the https URL, at position 1
+
+
+def _cost(body, total):
+    body.setdefault("usage", {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+    body["usage"]["cost"] = {"currency": "USD", "input_cost": 0.0, "output_cost": 0.0, "total_cost": total}
+    return body
+
+
+def test_l4_a_failed_or_refused_response_is_charged_its_reported_cost_when_above_the_reserve():
+    from decimal import Decimal
+    from svc_engines import _Meter
+    cases = ((_cost(fixture("failed.json"), 0.3), "0.300000"),                  # above the reserve: what it cost
+             (_cost(fixture("incomplete.json"), 0.07), "0.070000"),
+             (agent_body(model="openai/gpt-6-luna", cost=0.2), "0.200000"),
+             (_cost(fixture("failed.json"), 0.01), "0.05"),                       # below: never less than the reserve
+             (fixture("failed.json"), "0.05"))                                    # no cost: the reserve
+    for body, want in cases:
+        m = _Meter(1, Decimal("0.05"))
+        f = FakePerplexity(ok(body))
+        with pytest.raises(px.EngineError) as e:
+            agent_engine(f, attempts=1).ask("q?", meter=m)
+        assert e.value.code == "ENGINE_PROTOCOL_ERROR" and m.calls == 1
+        assert m.spent() == Decimal(want), (body.get("status"), m.spent())
+    # the Sonar rollback: an answer from another model, with its reported cost
+    m = _Meter(1, Decimal("0.05"))
+    body = base.sonar(model="sonar-reasoning-pro")
+    body["usage"]["cost"]["total_cost"] = 0.12
+    with pytest.raises(px.EngineError):
+        base.engine(FakePerplexity(ok(body)), attempts=1).ask("q?", meter=m)
+    assert m.spent() == Decimal("0.120000")
+    # a meter without a reserve figure (a test double) is charged as before: unknown
+    with pytest.raises(px.EngineError) as e:
+        agent_engine(FakePerplexity(ok(_cost(fixture("failed.json"), 0.3))), attempts=1).ask("q?")
+    assert e.value.cost == "0.300000" and KEY not in repr(e.value)
+
+
+def test_l4_through_the_service_a_costly_failed_response_is_settled_at_its_cost(tmp_path):
+    f = FakePerplexity(ok(_cost(fixture("failed.json"), 0.3)))
+    h = agent_harness(tmp_path, f, SEO_PERPLEXITY_RESERVE_USD_PER_CALL="0.05")
+    e = callum(run_audit(h, setup_zbm(h, prompts=("q one about seo", "q two about seo"))))["facts"]["engines"][
+        "perplexity"]
+    assert len(f.requests) == 1 and e["reason_detail"] == "COST_ABOVE_RESERVE"          # 0.3 > 4 x 0.05: stops
+    assert h.ledger.of_type("engine_run_settled")[-1]["_payload"]["spend_usd"] == "0.300000"
+
+
+def test_l6_duplicate_keys_and_nan_anywhere_are_refused_even_where_validation_would_pass():
+    good = json.dumps(fixture("completed.json"))
+    assert parse(good.encode()).status == "ANSWER"
+    dup = good.replace('"model": "perplexity/sonar"', '"model": "perplexity/sonar", "model": "perplexity/sonar"', 1)
+    assert dup != good and detail_of(dup.encode()) == ("ENGINE_PROTOCOL_ERROR", None)
+    flip = good.replace('"status": "completed"', '"status": "failed", "status": "completed"', 1)
+    assert flip != good and detail_of(flip.encode()) == ("ENGINE_PROTOCOL_ERROR", None)
+    nan = good.replace('"temperature": 1.0', '"temperature": NaN', 1)          # an unread field: still refused
+    assert nan != good and detail_of(nan.encode()) == ("ENGINE_PROTOCOL_ERROR", None)
+    inf = good.replace('"top_p": 1.0', '"top_p": Infinity', 1)
+    assert inf != good and detail_of(inf.encode()) == ("ENGINE_PROTOCOL_ERROR", None)
+
+
+def test_l5_the_documented_echoed_settings_are_not_drift():
+    a = parse(fixture("completed.json"))
+    assert a.unmodelled_keys == ()
+    for k in ("tools", "temperature", "service_tier", "top_p", "store", "instructions", "metadata", "preset"):
+        assert k in fixture("completed.json") or k in px._AGENT_KNOWN_UNREAD
+        assert k in px._AGENT_KNOWN_UNREAD

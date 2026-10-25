@@ -9,7 +9,9 @@ port list and the limitations: `docs/adr/0017-seo-answer-intelligence-department
 fetcher and, once Andre installs a key and budgets (ADR 0017 Wave 4), the Perplexity answer engine, which asks
 Perplexity's Agent API (`POST /v1/agent`, model `perplexity/sonar`, effort `fast`; the legacy Sonar request is kept
 only as a rollback, `SEO_PERPLEXITY_PROTOCOL=sonar`; ADR 0017 W4-8). Before any budget is raised, one hand-run
-request checks the real response shape: `python3 devtools/smoke_one_call.py --one-real-call` (W4-6 step 5a). Rendering, the
+request checks the real response shape: `python3 devtools/smoke_one_call.py --one-real-call` (W4-6 step 5a).
+Methodology: cited = returned by search (a URL counts as a citation when Perplexity's search returned it for the
+answer, in search order, and only `http`/`https` URLs count). Rendering, the
 other answer engines (OpenAI, Anthropic, Google), prompt volume, all first-party
 sources (Search Console, Bing Webmaster Tools, logs, analytics, CRM), Zero-Day, ORCA Publish and Department 28
 clientfix are `NOT_CONNECTED` ports: they answer `NOT_CONNECTED`, never invented data, and setting any of their
@@ -98,8 +100,8 @@ MUST failure or ERROR.
 | `SEO_GSC_RETENTION_DAYS` | `90` | after this a report's search-performance breakdowns are served as window totals only (1..480) |
 | `SEO_PERPLEXITY_API_KEY_FILE` | unset | Wave 4: the Perplexity API key in a file (regular file owned by the service user, mode 0600/0400, no symlink). Unset (and no `SEO_PERPLEXITY_API_KEY`): the Perplexity engine is `NOT_CONNECTED` and the service starts as before |
 | `SEO_PERPLEXITY_API_KEY` | unset | the same key as a plain variable, for platforms without secret files (Railway service variables). Setting both refuses start. The key is never logged, shown, recorded or reported (`/status` shows only `key_source`: `file` or `env`) |
-| `SEO_PERPLEXITY_PROTOCOL` | `agent` | the request kind: `agent` (Perplexity's Agent API, `POST /v1/agent`, effort `fast`; the default since the Sonar Chat Completions end of support, ADR 0017 W4-8) or `sonar` (the legacy `POST /v1/sonar` request, a ROLLBACK only: Perplexity serves it by reformulating it as an Agent API request); anything else refuses start |
-| `SEO_PERPLEXITY_MODEL` | `perplexity/sonar` (agent), `sonar` (sonar) | closed allowlist per protocol: `perplexity/sonar` on the Agent API (`sonar` is accepted there as the same model); `sonar` or `sonar-pro` on the rollback protocol; anything else refuses start. An answer reporting another model is `ENGINE_PROTOCOL_ERROR` (`MODEL_NOT_ALLOWED`) |
+| `SEO_PERPLEXITY_PROTOCOL` | `agent` | the request kind: `agent` (Perplexity's Agent API, `POST /v1/agent`, effort `fast`; the default since the Sonar Chat Completions end of support, ADR 0017 W4-8) or `sonar` (the legacy `POST /v1/sonar` request, a ROLLBACK only: Perplexity serves it by reformulating it as an Agent API request); anything else leaves the engine `NOT_CONNECTED` (reason `PROTOCOL_INVALID`), the service still starts |
+| `SEO_PERPLEXITY_MODEL` | `perplexity/sonar` (agent), `sonar` (sonar) | closed allowlist per protocol: `perplexity/sonar` on the Agent API (`sonar` is accepted there as the same model); `sonar` or `sonar-pro` on the rollback protocol (`perplexity/sonar` is accepted there as `sonar`). Anything else leaves the service running with the Perplexity engine `NOT_CONNECTED` (`/status` reason `MODEL_NOT_SUPPORTED`). An answer reporting another model is `ENGINE_PROTOCOL_ERROR` (`MODEL_NOT_ALLOWED`) |
 | `SEO_PERPLEXITY_TIMEOUT_SECONDS` | `30` | the hard overall deadline of one question (5..120): DNS, connect, TLS, every read and write, the body, and every retry |
 | `SEO_PERPLEXITY_MAX_ATTEMPTS` | `3` | requests per question (1..3); retries only on 429, 5xx and transport errors, `Retry-After` honoured within the deadline |
 | `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD` | `0`, `0` | the global daily budget (UTC day) in requests and US dollars. **0 = OFF: no request is made** (fail closed) |

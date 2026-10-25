@@ -77,9 +77,9 @@ SONAR_MODELS = ("sonar", "sonar-pro")       # the rollback protocol's allowlist;
 SONAR_DEFAULT_MODEL = "sonar"
 MODELS_BY_PROTOCOL = {AGENT: MODELS, SONAR: SONAR_MODELS}
 DEFAULT_MODEL_BY_PROTOCOL = {AGENT: DEFAULT_MODEL, SONAR: SONAR_DEFAULT_MODEL}
-# a setting written for the Sonar request keeps its meaning on the Agent API (only this one: `sonar-pro` has no
-# documented Agent API model and refuses start)
-MODEL_ALIASES = {AGENT: {"sonar": "perplexity/sonar"}, SONAR: {}}
+# the same model under either protocol's name, so flipping the protocol never strands a setting (AEGIS L1);
+# `sonar-pro` has no documented Agent API model: under `agent` the engine is NOT_CONNECTED (the service still starts)
+MODEL_ALIASES = {AGENT: {"sonar": "perplexity/sonar"}, SONAR: {"perplexity/sonar": "sonar"}}
 # the migration guide's replacement for `sonar` ("sonar -> fast"); the request's model overrides the effort's model
 AGENT_EFFORT = "fast"
 MAX_OUTPUT_ITEMS = 64
@@ -113,12 +113,15 @@ class EngineError(Exception):
     """An answer-engine outcome that is not an answer. ``code`` is one of CODES; nothing else is carried (no body,
     no header, no key, no URL)."""
 
-    def __init__(self, code: str, detail: Optional[str] = None):
+    def __init__(self, code: str, detail: Optional[str] = None, cost: Optional[str] = None):
         if code not in CODES:
             raise AssertionError(f"not an engine code: {code}")
         super().__init__(code)
         self.code = code
         self.detail = detail if detail is None or re.fullmatch(r"[A-Z_]{1,40}", detail) else None
+        # the cost the provider reported on a response that is not an answer (failed, incomplete, another model):
+        # a micro-dollar Decimal string or None; the adapter charges it when it exceeds the reserve (AEGIS L4)
+        self.cost = cost if cost is None or re.fullmatch(r"[0-9]{1,6}\.[0-9]{6}", cost) else None
 
     def __repr__(self) -> str:
         return f"EngineError({self.code!r})"
@@ -266,7 +269,8 @@ def parse_response(body: bytes, allowed_models: tuple = SONAR_MODELS) -> Provide
     except (UnicodeDecodeError, ValueError, RecursionError, ValidationError, TypeError):
         raise EngineError("ENGINE_PROTOCOL_ERROR") from None
     if r.model not in allowed_models:
-        raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED")
+        cost = money(r.usage.cost.total_cost) if r.usage is not None and r.usage.cost is not None else None
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED", cost)
     first = min(r.choices, key=lambda c: 0 if c.index is None else c.index)
     sources: list = []
     for u in [s.url for s in (r.search_results or ())] + list(r.citations or ()):
@@ -385,10 +389,16 @@ class _AgentResponse(_Strict):
     usage: Optional[_AgentUsage] = None
 
 
-# documented top-level fields this parser does not read, so they are not drift: `error` (ErrorInfo, in the reference),
-# `store` (echoed, the reference's `store` description) and `preset` (the changelog, Oct 2026: "`preset` is still
-# accepted as a deprecated alias, and responses return both fields")
-_AGENT_KNOWN_UNREAD = frozenset({"error", "store", "preset"})
+# documented top-level fields this parser does not read, so they are not drift (AEGIS L5): `error` (ErrorInfo, in the
+# reference schema); every other top-level key of the quickstart's example responses
+# (docs.perplexity.ai/docs/agent-api/quickstart, read Oct 25 2026: request settings echoed back, timestamps, ...);
+# and `preset` (the changelog, Oct 2026: "`preset` is still accepted as a deprecated alias, and responses return both
+# fields")
+_AGENT_KNOWN_UNREAD = frozenset({
+    "error", "preset", "background", "completed_at", "frequency_penalty", "incomplete_details", "instructions",
+    "max_output_tokens", "max_tool_calls", "metadata", "parallel_tool_calls", "presence_penalty",
+    "previous_response_id", "prompt_cache_key", "reasoning", "safety_identifier", "service_tier", "store",
+    "temperature", "text", "tool_choice", "tools", "top_logprobs", "top_p", "truncation", "user"})
 _EFFORT_RX = re.compile(r"[a-z]{1,10}(@[A-Za-z0-9._-]{1,40})?")
 
 
@@ -428,19 +438,24 @@ def parse_agent_response(body: bytes, allowed_models: tuple = MODELS) -> Provide
                 results.append(_AgentSearchResults.model_validate(raw_item))
     except (UnicodeDecodeError, ValueError, RecursionError, ValidationError, TypeError):
         raise EngineError("ENGINE_PROTOCOL_ERROR") from None
+    # the reported cost, read before any refusal below, so a response that is not an answer is still charged what it
+    # cost when that is above the reserve (AEGIS L4)
+    cost = money(r.usage.cost.total_cost) if r.usage is not None and r.usage.cost is not None else None
     if r.status != "completed":
-        raise EngineError("ENGINE_PROTOCOL_ERROR", "RESPONSE_" + r.status.upper())
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "RESPONSE_" + r.status.upper(), cost)
     if r.model not in allowed_models:
-        raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED")
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED", cost)
     parts = [p for m in messages for p in m.content]
     text = "".join(p.text for p in parts)
     if not text.strip():
-        raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT")
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT", cost)
     if len(text) > MAX_ANSWER_CHARS:
-        raise EngineError("ENGINE_PROTOCOL_ERROR", "TOO_LARGE")
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "TOO_LARGE", cost)
+    # Sources: search_results only ("treat the id and url fields of each search_results entry as the source of truth
+    # for citations"). An annotation never adds a URL: one that search did not return (a hallucination, or a page
+    # that talked the model into it) is not a citation (AEGIS M1). Cited therefore means "returned by search".
     sources: list = []
-    annotated = [a.url for p in parts for a in (p.annotations or ()) if a.type == "url_citation" and a.url]
-    for u in [x.url for sr in results for x in sr.results] + annotated:
+    for u in [x.url for sr in results for x in sr.results]:
         if u not in sources:
             sources.append(u)
     usage = None
@@ -668,6 +683,19 @@ class PerplexityEngine:
             except _Retry as r:
                 last = r.code
                 pause = r.retry_after
+            except EngineError as e:
+                if meter is not None and not charged and e.cost is not None:
+                    # a response that is not an answer: charged what it reported when that is above the reserve,
+                    # never less than the reserve (the finally below charges the reserve otherwise)
+                    per_call = getattr(meter, "per_call", None)
+                    try:
+                        above = per_call is not None and Decimal(e.cost) > Decimal(str(per_call))
+                    except (InvalidOperation, ValueError):
+                        above = False
+                    if above:
+                        meter.after(e.cost)
+                        charged = True
+                raise
             finally:
                 if meter is not None and not charged:
                     meter.after(None)                 # sent, cost unknown: the reservation stays charged
@@ -765,14 +793,21 @@ class NotConnectedPerplexity:
     metered = False
     name = ENGINE
 
-    def __init__(self, protocol: str = DEFAULT_PROTOCOL):
+    def __init__(self, protocol: str = DEFAULT_PROTOCOL, reason: Optional[str] = None):
         self.protocol = protocol if protocol in PROTOCOLS else DEFAULT_PROTOCOL
+        # why a configured engine is not connected (a closed code, never a setting's value): MODEL_NOT_SUPPORTED,
+        # PROTOCOL_INVALID; None when simply no key is configured
+        self.reason = reason if reason is None or re.fullmatch(r"[A-Z_]{1,40}", reason) else None
 
     def ask(self, prompt: str, model: Optional[str] = None, **_kw) -> ProviderAnswer:
         from ports import NOT_CONNECTED
         return ProviderAnswer(NOT_CONNECTED)
 
     def describe(self) -> dict:
+        why = {None: "no API key: set SEO_PERPLEXITY_API_KEY_FILE (or SEO_PERPLEXITY_API_KEY on Railway)",
+               "MODEL_NOT_SUPPORTED": "SEO_PERPLEXITY_MODEL is not on this protocol's closed list; unset it (or set "
+                                      "one of models_allowed) and redeploy",
+               "PROTOCOL_INVALID": "SEO_PERPLEXITY_PROTOCOL must be agent or sonar; unset it and redeploy"}
         return {"state": "NOT_CONNECTED", "base_url": BASE_URL, "protocol": self.protocol, "path": PATHS[self.protocol],
-                "model": None, "models_allowed": list(MODELS_BY_PROTOCOL[self.protocol]),
-                "why": "no API key: set SEO_PERPLEXITY_API_KEY_FILE (or SEO_PERPLEXITY_API_KEY on Railway)"}
+                "model": None, "models_allowed": list(MODELS_BY_PROTOCOL[self.protocol]), "reason": self.reason,
+                "why": why.get(self.reason, why[None])}

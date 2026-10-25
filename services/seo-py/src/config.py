@@ -160,6 +160,7 @@ class Settings:
     gsc_retention_days: int = 90
     perplexity_key: Optional[object] = field(default=None, repr=False)     # perplexity.ApiKey (masked repr)
     perplexity_protocol: str = "agent"
+    perplexity_unavailable: Optional[str] = None      # MODEL_NOT_SUPPORTED / PROTOCOL_INVALID: engine-only, never start
     perplexity_model: str = "perplexity/sonar"
     perplexity_timeout_s: int = 30
     perplexity_attempts: int = 3
@@ -362,13 +363,17 @@ def _perplexity(env, s: "Settings") -> None:
         raise RuntimeError("SEO_PERPLEXITY_API_KEY_FILE and SEO_PERPLEXITY_API_KEY are both set; set one (the file "
                            "where the platform has secret files, the variable on Railway)")
     # the Agent API is the default (ADR 0017 W4-8); `sonar` is the rollback to the legacy chat-completions request
+    # A protocol or model this adapter cannot use makes only the ENGINE not connected (with a closed reason on
+    # /status), never the whole service: flipping the protocol during an incident must not stop seo-py (AEGIS L1).
     protocol = (env.get("SEO_PERPLEXITY_PROTOCOL") or perplexity.DEFAULT_PROTOCOL).strip()
+    s.perplexity_unavailable = None
     if protocol not in perplexity.PROTOCOLS:
-        raise RuntimeError(f"SEO_PERPLEXITY_PROTOCOL must be one of {', '.join(perplexity.PROTOCOLS)}")
+        protocol, s.perplexity_unavailable = perplexity.DEFAULT_PROTOCOL, "PROTOCOL_INVALID"
     try:
         model = perplexity.resolve_model(protocol, env.get("SEO_PERPLEXITY_MODEL"))
-    except ValueError as exc:                    # names the allowed values, never echoes the setting
-        raise RuntimeError(f"SEO_PERPLEXITY_MODEL {exc} (a closed list)") from None
+    except ValueError:                           # never echoes the setting
+        model = perplexity.DEFAULT_MODEL_BY_PROTOCOL[protocol]
+        s.perplexity_unavailable = s.perplexity_unavailable or "MODEL_NOT_SUPPORTED"
     s.perplexity_protocol = protocol
     s.perplexity_model = model
     s.perplexity_timeout_s = _int(env, "SEO_PERPLEXITY_TIMEOUT_SECONDS", 30, 5, 120)

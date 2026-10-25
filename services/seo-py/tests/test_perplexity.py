@@ -137,8 +137,9 @@ def test_the_model_allowlist_is_closed():
         px.PerplexityEngine(px.ApiKey(KEY, "env"), model="sonar-deep-research")
     f = FakePerplexity(ok(sonar(model="sonar-reasoning-pro")))
     assert code_of(lambda: engine(f).ask("q?")) == "ENGINE_PROTOCOL_ERROR"     # an answer from another model
-    with pytest.raises(RuntimeError, match="SEO_PERPLEXITY_MODEL"):
-        Harness_env(SEO_PERPLEXITY_MODEL="gpt-4")
+    # a model off the list makes only the engine NOT_CONNECTED, never the whole service (AEGIS pplx-agent L1)
+    s = Harness_env(SEO_PERPLEXITY_MODEL="gpt-4")
+    assert s.perplexity_unavailable == "MODEL_NOT_SUPPORTED" and "gpt-4" not in repr(s)
 
 
 # ---------------------------------------------------------------------------------------------- strict parsing

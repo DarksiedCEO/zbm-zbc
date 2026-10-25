@@ -803,17 +803,31 @@ W4-2. **The adapter** (`src/perplexity.py`) and its runs (`src/svc_engines.py`):
      other status is ENGINE_PROTOCOL_ERROR with detail `RESPONSE_<STATUS>` (e.g. `RESPONSE_FAILED`,
      `RESPONSE_INCOMPLETE`), because the docs do not say what a partial answer means. The answer is every
      `output_text` part of every `message` item, in order (what the SDKs' `output_text` aggregates); no text is
-     `NO_ANSWER_TEXT`. Sources are the `search_results` items' `results[].url` in output order, then any
-     `url_citation` annotation URL not yet listed; no source at all is a zero-source answer (never an error, never
-     invented). `usage` needs its three token counts; `usage.cost` is optional, and when present needs `currency`
+     `NO_ANSWER_TEXT`. Sources are the `search_results` items' `results[].url` in output order, and nothing else: a
+     `url_citation` annotation never adds a URL, because one that search did not return may be a hallucination or
+     planted by a crawled page, and the docs make `search_results` the source of truth (AEGIS pplx-agent M1). No
+     source at all is a zero-source answer (never an error, never invented). **Methodology: cited = returned by
+     search.** A URL is a citation of the answer when Perplexity's search returned it for that answer, in search
+     order; whether the text's `[n]` markers point at it is not measured. `usage` needs its three token counts; `usage.cost` is optional, and when present needs `currency`
      `USD` and its three numbers. Output item types the parser does not read (`fetch_url_results`, `function_call`,
-     ...) are ignored and reported by name for drift as `output.<type>`; `error`, `store` and `preset` are documented
-     and not drift. The response's `effort` (e.g. `fast@2026-10-16.0`) becomes the recorded model version, so a
+     ...) are ignored and reported by name for drift as `output.<type>`. Not drift: `error` (the reference schema),
+     `preset` (the changelog) and every other top-level key of the quickstart's example responses (the request
+     settings echoed back: `tools`, `temperature`, `top_p`, `store`, `service_tier`, `instructions`,
+     `max_output_tokens`, `metadata`, `completed_at`, ...; re-read Oct 25 2026, AEGIS pplx-agent L5).
+   - **A response that is not an answer is charged what it cost** when it reports a `usage.cost.total_cost` above the
+     reserve (failed, incomplete, another model, no text: AEGIS pplx-agent L4); otherwise it is charged the reserve,
+     never less. A reported cost above 4x the reserve stops the run (`COST_ABOVE_RESERVE`) on these responses too.
+   - **Only web URLs are citations** (AEGIS pplx-agent L2, both protocols): Callum credits a structured citation to
+     a host only for an `http` or `https` URL; `javascript:`, `data:`, `ftp:`, `file:` and scheme-less URLs are
+     dropped. The response's `effort` (e.g. `fast@2026-10-16.0`) becomes the recorded model version, so a
      run's `model_versions` reads `perplexity/sonar@fast@2026-10-16.0`.
    - **Rollback:** `SEO_PERPLEXITY_PROTOCOL=sonar` sends the old `POST /v1/sonar` request and uses the Sonar parser
      (models `sonar`, `sonar-pro`; `citations` optional). Everything below applies to both protocols.
-     `SEO_PERPLEXITY_MODEL=sonar` on the Agent API means `perplexity/sonar`; `sonar-pro` there refuses start (no
-     Agent API model is documented for it).
+     `SEO_PERPLEXITY_MODEL=sonar` on the Agent API means `perplexity/sonar`, and `perplexity/sonar` on the rollback
+     means `sonar`, so flipping the protocol never strands the model setting. A protocol or model the adapter cannot
+     use (`sonar-pro` on the Agent API, which documents no model for it, or a typo) does NOT stop the service: only
+     the engine is `NOT_CONNECTED`, and `/status` shows `reason` `MODEL_NOT_SUPPORTED` or `PROTOCOL_INVALID`, never
+     the value (AEGIS pplx-agent L1). A bad key setting still refuses start, as before.
    - Calls are fixed: one base URL, one path per protocol, one method. Redirects are never followed, and no proxy is taken from
      the environment (`trust_env=False`). An answer from a model outside the allowlist is ENGINE_PROTOCOL_ERROR.
    - Each question has one HARD overall deadline, `SEO_PERPLEXITY_TIMEOUT_SECONDS` (default 30), covering every
@@ -885,8 +899,10 @@ W4-3. **What is stored, and what is sent.**
      - the cited hosts (the top 10, with counts);
      - whether the tenant was cited, and at which 1-based position in Perplexity's own citation order;
      - lookalike counts, `errors_by_reason`, usage and cost.
-   - Citations come only from `citations` and `search_results`. A URL that the model wrote into its text is not a
-     citation, because a crawled page could have talked the model into writing it.
+   - Citations come only from `search_results` (and, on the Sonar rollback, `citations`): cited = returned by
+     search. A URL that the model wrote into its text, or into an Agent API annotation that search did not return,
+     is not a citation, because a crawled page could have talked the model into writing it (AEGIS pplx-agent M1).
+     Only `http`/`https` URLs are credited (L2).
    - Domain matching (`agents/domain_match.py`) compares IDNA A-labels by exact host, the `www.` twin or a subdomain,
      never by substring: `evilsite.test` and `site.test.evil.test` are not `site.test`. A host whose Unicode form folds
      to the tenant's domain on the shared lookalike table (`lookalikes.py`, e.g. a Cyrillic `і`) is counted as a
@@ -1021,7 +1037,12 @@ W4-7. **Proof.**
      citation positions, cost and settlement, no body or key stored, lookalikes, the prompt guard,
      `COST_ABOVE_RESERVE`, unknown cost charged at the reserve, `REPEATED_PROTOCOL_ERRORS` from failed, incomplete
      and unreadable responses, kill switches before and during a run, a run crossing UTC midnight and its replay,
-     the zero-source drift finding; and the one-call smoke on the Agent API.
+     the zero-source drift finding; and the one-call smoke on the Agent API. After AEGIS pplx-agent (Oct 25 2026):
+     an annotation URL that search never returned is not cited (parser and service), the rollback alias and an
+     unsupported protocol or model leaving the service up with the engine `NOT_CONNECTED`, non-web URL schemes never
+     credited, failed and refused responses charged their reported cost above the reserve (and stopping the run
+     above 4x), duplicate keys and NaN/Infinity refused where validation alone would pass, and the documented echoed
+     settings not counted as drift; each fix was mutation-checked (a mutant of each guard fails the suite).
    - `tests/test_perplexity.py` (now the Sonar rollback protocol) uses no network: a fake Perplexity behind `httpx.MockTransport`, and, for the socket
      layer, a fake network backend under httpcore's real connection pool. All deadlines run on an injected clock. It
      covers:
@@ -1078,9 +1099,9 @@ W4-8. **Limitations (honest).**
         row stop the run;
      3. the error statuses: the reference documents only 400; 401, 403, 429 and 5xx come from the SDK guide and the
         rate-limit page; 402 is still an assumption;
-     4. whether `perplexity/sonar` under effort `fast` returns `search_results` items, annotations, or both: either
-        is read, neither is required, and answers without any source are drift-visible
-        (`ENGINE_ANSWERS_WITHOUT_SOURCES`);
+     4. whether `perplexity/sonar` under effort `fast` returns `search_results` items: they are the only source of
+        citations (annotations are validated but add nothing), neither is required, and answers without any source
+        are drift-visible (`ENGINE_ANSWERS_WITHOUT_SOURCES`);
      5. the cost of `fast` with this model: its example uses the `priority` tier (2x token rates for models that list
         tiers; the models page lists none for `perplexity/sonar`), and `usage.cost` is optional. The reported
         `total_cost` is used when present, the reserve otherwise; $0.05 per request remains far above the documented
@@ -1089,6 +1110,13 @@ W4-8. **Limitations (honest).**
      7. the field lists come from a web-fetch tool's reading of the reference, not from the raw OpenAPI document
         (the sandbox could not download it). The fields relied on are few and strict, so a misreading is
         ENGINE_PROTOCOL_ERROR, never a guessed answer.
+   - **Known, not fixed (AEGIS pplx-agent L3, older than the migration):** spend above the reserve but below the 4x
+     guard is seen by the prompt's own meter at once (`spent()` counts the reported cost before the next request),
+     but other runs' budget checks see only the reservations until the run settles, and one prompt can overshoot its
+     reservation by up to about 3x the reserve on its last request. It is not fixed here: refusing a request on the
+     highest cost seen so far would change certified behaviour (the exactly-4x case). The documented
+     `perplexity/sonar` costs are about $0.002-0.003 per request against the $0.05 reserve, so the overshoot is
+     theoretical today; revisit when budgets rise or the reserve is lowered.
    - Spend here is Perplexity's reported cost, or the reserve where none is reported. Perplexity's invoice is
      authoritative, and nothing reconciles the two.
    - A prompt's reservation is the upper bound (samples x attempts), so a run near the day's limit can be refused even

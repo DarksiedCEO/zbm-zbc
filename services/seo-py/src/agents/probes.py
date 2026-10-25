@@ -83,8 +83,12 @@ def extract_citations(ans: ProviderAnswer) -> list:
                 continue
             u = u.rstrip(".,;:")
             try:
-                host = (urlsplit(u).hostname or "").lower()
+                parts = urlsplit(u)
+                host = (parts.hostname or "").lower()
             except ValueError:
+                continue
+            # only a web page is a citation: javascript:, data:, ftp: ... are never credited to a host (AEGIS L2)
+            if parts.scheme.lower() not in ("http", "https"):
                 continue
             if host and u not in seen:
                 seen.add(u)
@@ -174,6 +178,11 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                     errors_by[e.code] = errors_by.get(e.code, 0) + 1
                     if e.code == "ENGINE_KILLED":
                         raise Killed(_switch_code(e)) from None
+                    if meter is not None and getattr(meter, "over_reserve", False):
+                        # a response that was not an answer but reported a cost far above the reserve (AEGIS
+                        # pplx-agent L4): the same guard as for an answer
+                        stop, stop_detail = "ENGINE_BUDGET_EXHAUSTED", "COST_ABOVE_RESERVE"
+                        break
                     if e.code == "ENGINE_PROTOCOL_ERROR":
                         osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
                         protocol_run += 1
