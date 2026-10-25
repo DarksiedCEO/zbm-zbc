@@ -269,6 +269,7 @@ otherwise. Examples are never real values.
 | `LEDGER_SERVICE_URL` | yes | no | `http://ledger.railway.internal:8090` (IaC) | → ledger |
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | the orchestrator's own ledger caller token |
 | `ORCHESTRATOR_PORT_FILE` | no | no | unset | test harness only |
+| `ORCHESTRATOR_ALLOW_FIXTURE_SCANS` | no | no | unset (**never set it on Railway**) | `1` allows a scan of the fixture tenant (`client_id` omitted or `fixture-pool`); unset or `0` refuses it with 403 `FIXTURE_SCAN_DISABLED` before the ledger or detection is called, so fixture findings cannot reach the production ledger (AEGIS final go-live L-2). Any other value stops the start-up. Dev, tests and live runs only |
 
 ### stripe-gateway (orchestrator-go `cmd/stripe-gateway`)
 
@@ -548,8 +549,10 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' https://$ORCH/revenue-recovery/findings` → `401` (no token).
 - [ ] `curl -sS -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" https://$ORCH/revenue-recovery/findings` → 200,
       `"ledger_verify": {"valid": true, ...}`.
-- [ ] Do **not** run `POST /revenue-recovery/scan` against production as a test: it writes the fixture pool's findings
-      into the production evidence ledger, which is append-only.
+- [ ] `curl -sS -X POST -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" https://$ORCH/revenue-recovery/scan` →
+      `403` with `"reason":"FIXTURE_SCAN_DISABLED"` (a fixture scan is refused before anything is written; any other
+      answer means `ORCHESTRATOR_ALLOW_FIXTURE_SCANS` is set: remove it and redeploy). Never run a scan with a
+      `client_id` against production as a test: the ledger is append-only.
 - [ ] `curl -sS https://$GW/health` → 200.
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$GW/webhooks/stripe -d '{}'` → `400` (no signature).
 - [ ] Stripe CLI, test mode: `stripe trigger payment_intent.succeeded` → Stripe dashboard → the webhook endpoint shows
@@ -610,7 +613,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   L8 for one named host on the private network: `http://<STRIPE_GATEWAY_FINANCE_PRIVATE_NAME>.railway.internal[:port]`
   (IaC: `finance`; AEGIS L1). It needs AEGIS review before merge.
 - **Two public services.** The orchestrator's token has no minimum-length check and no rate limit, so its entropy is
-  the only defence (use `openssl rand -hex 32`). Anyone holding it can also start a scan.
+  the only defence (use `openssl rand -hex 32`). Anyone holding it can also start a scan of a connected
+  tenant; a fixture scan is refused unless `ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1` (never set here; L-2).
 - **No scheduler is deployed.** Finance's daily reconciliation and Stripe-session job, Legal's daily jobs and seo's
   schedule tick need a `scheduler` caller (and a cron service) that this deploy does not include.
 - **Detection's store connector is not wired on Railway** (ADR 0020, golive-rr): the orchestrator's scans still use

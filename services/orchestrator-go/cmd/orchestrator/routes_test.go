@@ -99,7 +99,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *recorder, *recorder) {
 	t.Helper()
 	ledgerRec, detRec := &recorder{}, &recorder{}
 	orch := orchestrator.New(noDetection(t, detRec).URL, "d", readOnlyLedger(t, ledgerRec).URL, "l")
-	srv := httptest.NewServer(newMux(orch, routeTestToken))
+	srv := httptest.NewServer(newMux(orch, routeTestToken, true))
 	t.Cleanup(srv.Close)
 	return srv, ledgerRec, detRec
 }

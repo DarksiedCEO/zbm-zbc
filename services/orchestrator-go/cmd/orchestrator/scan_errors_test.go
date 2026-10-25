@@ -79,7 +79,7 @@ func captureLog(t *testing.T) *bytes.Buffer {
 func scanServer(t *testing.T, detectionURL, ledgerURL string) *httptest.Server {
 	t.Helper()
 	orch := orchestrator.New(detectionURL, "d", ledgerURL, "l")
-	srv := httptest.NewServer(newMux(orch, routeTestToken))
+	srv := httptest.NewServer(newMux(orch, routeTestToken, true))
 	t.Cleanup(srv.Close)
 	return srv
 }

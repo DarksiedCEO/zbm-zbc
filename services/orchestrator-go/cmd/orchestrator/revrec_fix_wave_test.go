@@ -21,7 +21,7 @@ import (
 func fixWaveServer(t *testing.T, det *fakeDetection, led *memLedger) *httptest.Server {
 	t.Helper()
 	orch := orchestrator.New(det.server(t).URL, "d", led.server(t).URL, "l")
-	srv := httptest.NewServer(newMux(orch, routeTestToken))
+	srv := httptest.NewServer(newMux(orch, routeTestToken, true))
 	t.Cleanup(srv.Close)
 	return srv
 }

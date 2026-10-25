@@ -75,7 +75,10 @@ orchestrator-go ──POST /stores/snapshot──▶ detection-py (no outbound) 
 | `POST /stores/sync` `{"client_id"}` | only this route, only after every gate in section 5 | 200 `{sync_id, snapshot_id, orders_read, orders_analysed, orders_excluded, truncated_by, pages, cost_points, throttle_waits}` or a reason code |
 | `POST /stores/snapshot` `{"client_id"}` | never | the held snapshot (orders + coverage) or a reason code |
 
-orchestrator-go `POST /revenue-recovery/scan?client_id=<tenant>`: the fixture tenant is unchanged; any other tenant
+orchestrator-go `POST /revenue-recovery/scan?client_id=<tenant>`: the fixture tenant (also the default when `client_id`
+is omitted) is refused with 403 `FIXTURE_SCAN_DISABLED`, before the ledger or detection is called, unless
+`ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1` (dev, tests and live runs; never on Railway; AEGIS final go-live L-2), and is
+otherwise unchanged; any other tenant
 asks `/stores/snapshot` FIRST and, on a refusal, answers 409 (`NOT_CONNECTED`, `NOT_SYNCED`, `SNAPSHOT_STALE`, ...),
 429 (budget) or 503 (kill switch, config) with `{"error", "reason"}`, having run no agent and written nothing (it
 used to answer 422 "no live data source"). With a snapshot, every agent runs (the store feeds the order agents; the

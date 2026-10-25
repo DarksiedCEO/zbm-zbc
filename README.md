@@ -210,7 +210,8 @@ Details and the full before/after money table: ADR 0001 "Revenue Recovery fix wa
   events with deterministic ids on the idempotent `POST /ledger/events`; retries never duplicate; only completed
   scans count in `GET /revenue-recovery/findings`; one scan at a time (409 + `Retry-After`).
 - **Tenant and identity:** `?client_id=` on the scan route (default: the fixture tenant `fixture-pool`, recorded as
-  defaulted; any other tenant is scanned from its connected store's snapshot or refused with the store connector's
+  defaulted, and refused with 403 `FIXTURE_SCAN_DISABLED` unless `ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1`, which only dev,
+  tests and live runs set (AEGIS final go-live L-2); any other tenant is scanned from its connected store's snapshot or refused with the store connector's
   reason code, e.g. 409 `NOT_CONNECTED` — ADR 0020). `finding_id` is a hash of (client, agent,
   entity type, entity, period); overlaps need two distinct agents on (client, entity type, entity).
 - **Quote-affecting amounts:** discount stacking claims only the excess over the best single code; affiliate claims
@@ -285,6 +286,7 @@ cd services/orchestrator-go
 export DETECTION_SERVICE_TOKEN=<same value as ZBM_SERVICE_TOKEN above>
 export LEDGER_SERVICE_TOKEN=<same value as LEDGER_SERVICE_TOKEN above>
 export ORCHESTRATOR_SERVICE_TOKEN=<your-shared-secret, for callers of THIS service>
+export ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1   # local dev only: allows the fixture-pool scan below (refused without it)
 go run ./cmd/orchestrator  # DETECTION_SERVICE_URL, LEDGER_SERVICE_URL, ORCHESTRATOR_PORT
 #   (ORCHESTRATOR_PORT=0 + ORCHESTRATOR_PORT_FILE=<path>: the kernel picks the port and the
 #   orchestrator writes it there, atomically; removed on SIGINT/SIGTERM, not on SIGKILL — a hint,

@@ -37,7 +37,9 @@ func countingLedger(t *testing.T) (*httptest.Server, *atomic.Int64) {
 func startLimitedOrchestrator(t *testing.T) (port string, ledgerCalls *atomic.Int64) {
 	t.Helper()
 	ledger, calls := countingLedger(t)
-	port, _ = startOrchestrator(t, "", "LEDGER_SERVICE_URL="+ledger.URL, "DETECTION_SERVICE_URL="+deadURL(t))
+	// The "normal scan" below is a fixture scan, so this dev/test instance allows them (L-2).
+	port, _ = startOrchestrator(t, "", "LEDGER_SERVICE_URL="+ledger.URL, "DETECTION_SERVICE_URL="+deadURL(t),
+		"ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1")
 	return port, calls
 }
 

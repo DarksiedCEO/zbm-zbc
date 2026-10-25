@@ -159,7 +159,10 @@ def main() -> int:
         orch_env = {**base_env, "DETECTION_SERVICE_URL": durl, "DETECTION_SERVICE_TOKEN": DETECTION_TOKEN,
                     "LEDGER_SERVICE_URL": lurl, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
                     "ORCHESTRATOR_SERVICE_TOKEN": ORCH_TOKEN, "ORCHESTRATOR_PORT": str(op),
-                    "ORCHESTRATOR_BIND_ADDR": "127.0.0.1"}
+                    "ORCHESTRATOR_BIND_ADDR": "127.0.0.1",
+                    # L-2 (final go-live AEGIS): fixture scans are refused unless this dev/test flag is set; step 5
+                    # runs one.
+                    "ORCHESTRATOR_ALLOW_FIXTURE_SCANS": "1"}
         orch = start([str(orch_bin)], orch_env, work, work / "orch.log")
         ourl = f"http://127.0.0.1:{op}"
         wait_health(f"{ourl}/health", orch, "orchestrator-go")

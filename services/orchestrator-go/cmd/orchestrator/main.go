@@ -164,7 +164,15 @@ func limitRequests(next http.Handler) http.Handler {
 // Both require the orchestrator bearer token; /health stays open.
 // Method-qualified patterns (Go 1.22+) make the mux answer 405 for a wrong
 // method before any handler (or upstream call) runs; "GET" also matches HEAD.
-func newMux(orch *orchestrator.Orchestrator, orchestratorToken string) *http.ServeMux {
+//
+// AEGIS final go-live L-2: a scan of the fixture tenant (client_id omitted,
+// which defaults to it, or client_id=fixture-pool) writes the fixture pool's
+// findings into the append-only ledger. It is refused (403
+// FIXTURE_SCAN_DISABLED, before the ledger or detection is called) unless
+// allowFixtureScans is set, which main takes from
+// ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1 (dev, test and the live runs only; the
+// Railway deploy never sets it).
+func newMux(orch *orchestrator.Orchestrator, orchestratorToken string, allowFixtureScans bool) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// /health is intentionally open (no auth) — needed for basic
@@ -190,6 +198,14 @@ func newMux(orch *orchestrator.Orchestrator, orchestratorToken string) *http.Ser
 		req := orchestrator.ScanRequest{ClientID: q.Get("client_id")}
 		if q.Has("client_id") && req.ClientID == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "client_id must not be empty"})
+			return
+		}
+		if !allowFixtureScans && (req.ClientID == "" || req.ClientID == orchestrator.FixtureClientID) {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "fixture scans are disabled on this deployment (they would write fixture findings to the " +
+					"production ledger); give the client_id of a connected store",
+				"reason": "FIXTURE_SCAN_DISABLED",
+			})
 			return
 		}
 		if v := q.Get("as_of"); v != "" {
@@ -287,9 +303,17 @@ func main() {
 		)
 	}
 
+	allowFixtureScans, err := fixtureScansFromEnv(os.Getenv("ORCHESTRATOR_ALLOW_FIXTURE_SCANS"))
+	if err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
+	if allowFixtureScans {
+		log.Printf("orchestrator-go: ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1 — fixture scans write fixture findings to the ledger (dev/test only)")
+	}
+
 	orch := orchestrator.New(detectionURL, detectionToken, ledgerURL, ledgerToken)
 
-	srv := newServer(bindAddr+":"+port, newMux(orch, orchestratorToken))
+	srv := newServer(bindAddr+":"+port, newMux(orch, orchestratorToken, allowFixtureScans))
 	// Bind first, then announce: ORCHESTRATOR_PORT=0 lets the kernel pick a free port, and ORCHESTRATOR_PORT_FILE
 	// (optional) receives the port actually bound, so a caller (the tests) never has to guess a free port and race
 	// another process for it (fix wave 25, scout C2-1 — the ledger-rust LEDGER_PORT_FILE pattern, ADR 0003 §11).
@@ -306,6 +330,19 @@ func main() {
 	}
 	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, bound, detectionURL, ledgerURL)
 	log.Fatal(srv.Serve(ln))
+}
+
+// fixtureScansFromEnv reads ORCHESTRATOR_ALLOW_FIXTURE_SCANS: unset, empty or
+// "0" = refused (the production default), "1" = allowed. Anything else stops
+// the start-up, so a typo cannot quietly leave fixture scans on or off.
+func fixtureScansFromEnv(v string) (bool, error) {
+	switch v {
+	case "", "0":
+		return false, nil
+	case "1":
+		return true, nil
+	}
+	return false, fmt.Errorf("ORCHESTRATOR_ALLOW_FIXTURE_SCANS must be unset, 0 or 1")
 }
 
 // publishPortFile writes the bound port to path atomically (a temp file in the same directory, then rename), so a
