@@ -462,6 +462,21 @@ def _main(work: Path) -> int:
               "answer_engine:openai" in rep.get("not_connected", []) and "render" in rep.get("not_connected", [])
               and all(f.get("effect_class") is None for e in rep.get("agents", []) for f in e["findings"]))
         own_aid = au.json()["audit_id"]
+        # --- the client report: Andre's, recorded on the real ledger before the document is returned --------------
+        cr_body = {"request_id": rid(), "format": "html"}
+        cr_off = a.post(f"/tenants/zbm/audits/{own_aid}/client-report", cr_body, caller="dashboard")
+        cr = a.post(f"/tenants/zbm/audits/{own_aid}/client-report", cr_body, andre=True)
+        crj = cr.json() if cr.status_code == 200 else {}
+        doc = (crj.get("content") or "").encode()
+        ents = httpx.get(L + "/ledger/entries", headers=lh, timeout=60).json()
+        cr_ev = [x for x in ents if x.get("event_type") == "client_report_rendered"]
+        check("the client report is Andre's, recorded on the ledger (client_report_rendered) with the document's "
+              "SHA-256, and states the KILLED crawl as not checked, never clean",
+              cr_off.status_code == 403 and cr.status_code == 200 and len(cr_ev) == 1
+              and hashlib.sha256(doc).hexdigest() == crj.get("document_sha256")
+              and crj.get("audit_report_sha256") == au.json().get("report_sha256")
+              and "NOT CHECKED (stopped)" in crj.get("content", "") and "<script" not in crj.get("content", "")
+              and OWN_DOMAIN not in json.dumps(cr_ev))
 
         # --- Search Console: NOT_CONNECTED, no outbound call --------------------------------------------------------
         gsc_st = st["search_console"]
