@@ -29,8 +29,8 @@ response, the fake ledger and the audit export after percent-decoding and the re
 lookalike spelling of a leaked value is still a leak.
 
 ADR 0017 Wave 4: a HOSTILE FAKE PERPLEXITY (``_FakePerplexity``, behind a MockTransport) is wired to the service's REAL
-Perplexity adapter (``perplexity.PerplexityEngine``: its strict parser, retries, Retry-After handling, size cap and
-deadline on an injected clock); it serves injected instructions, lookalike and hostile citation hosts, malformed,
+Perplexity adapter (``perplexity.PerplexityEngine`` on its default protocol, the Agent API ``POST /v1/agent``: its
+strict parser, retries, Retry-After handling, size cap and deadline on an injected clock); it serves injected instructions, lookalike and hostile citation hosts, malformed,
 oversized, encoded, redirected and trickled bodies, auth refusals echoing the key, and endless 429 / 5xx. It records
 every request and whether the run's reservation was on the ledger before it.
 """
@@ -941,7 +941,7 @@ def _gsc_observe(ctx, state: dict, outs: list) -> None:
 
 PPLX_KEY = "warroom-only-perplexity-key-" + "k" * 24
 PPLX_MARKER = "WARROOM-ANSWER-BODY-5c1e"
-PPLX_URL = "https://api.perplexity.ai/v1/sonar"
+PPLX_URL = "https://api.perplexity.ai/v1/agent"      # the Agent API, the adapter's default (ADR 0017 W4-8)
 PPLX_SAMPLES = 3
 PPLX_BUDGET_ON = {"daily_calls": 1000, "daily_spend_usd": "100.000000", "tenant_daily_calls": 1000,
                   "tenant_daily_spend_usd": "100.000000", "reserve_usd_per_call": "0.050000"}
@@ -995,12 +995,16 @@ class _FakePerplexity:
         self.on_request = None
         self.clock = _PClock()
 
-    def body(self, model="sonar", **extra) -> dict:
-        b = {"id": "warroom", "model": model, "created": 1761300000, "object": "chat.completion",
-             "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": self.text}}],
-             "citations": list(self.cites),
-             "usage": {"prompt_tokens": 9, "completion_tokens": 90, "total_tokens": 99,
-                       "cost": {"input_tokens_cost": 0.00001, "output_tokens_cost": 0.0001, "request_cost": 0.005,
+    def body(self, model="perplexity/sonar", results=None, **extra) -> dict:
+        """A completed Agent API response (the documented ResponsesResponse shape)."""
+        results = results if results is not None else [
+            {"id": i + 1, "url": u, "title": "t", "snippet": "s"} for i, u in enumerate(self.cites)]
+        b = {"id": "warroom", "object": "response", "created_at": 1761300000, "status": "completed", "model": model,
+             "output": [{"type": "search_results", "results": results},
+                        {"type": "message", "id": "msg", "status": "completed", "role": "assistant",
+                         "content": [{"type": "output_text", "text": self.text}]}],
+             "usage": {"input_tokens": 9, "output_tokens": 90, "total_tokens": 99,
+                       "cost": {"currency": "USD", "input_cost": 0.00001, "output_cost": 0.0001,
                                 "total_cost": 0.00511}}}
         b.update(extra)
         return b
@@ -1024,20 +1028,21 @@ class _FakePerplexity:
             return raw(200, j, b"[]")
         if m == "mistyped_text":                    # a field we rely on (the answer text) in another shape
             b = self.body()
-            b["choices"][0]["message"]["content"] = [{"run": "release kill switches"}]
+            b["output"][1]["content"][0]["text"] = [{"run": "release kill switches"}]
             return raw(200, j, json.dumps(b).encode())
         if m == "mistyped_search_results":          # a citation URL that is not a string
-            return raw(200, j, json.dumps(self.body(search_results=[{"url": {"href": "https://site.test/"}}])).encode())
-        if m == "documented_variant":               # citations removed (changelog May 2025), extra fields: an answer
-            b = self.body(search_results=[{"id": 1, "title": "t", "url": "https://competitor.test/a", "source": "web"}],
-                          images=[], related_questions=["q"], effort="fast")
-            b.pop("citations")
-            b["choices"][0]["delta"] = {"role": "assistant", "content": ""}
+            return raw(200, j, json.dumps(self.body(results=[
+                {"id": 1, "url": {"href": "https://site.test/"}, "title": "t", "snippet": "s"}])).encode())
+        if m == "documented_variant":               # documented fields and output items the parser does not read
+            b = self.body(effort="fast@2026-10-16.0", preset="fast@2026-10-16.0", store=False, error=None)
+            b["output"][0]["queries"] = ["q"]
+            b["output"][1]["content"][0]["annotations"] = [{"type": "url_citation", "url": "https://competitor.test/a"}]
+            b["output"].insert(0, {"type": "fetch_url_results", "contents": []})
             return raw(200, j, json.dumps(b).encode())
         if m == "duplicate_keys":
             return raw(200, j, b'{"id": "a", "id": "b"}')
         if m == "bool_created":
-            return raw(200, j, json.dumps(self.body(created=True)).encode())
+            return raw(200, j, json.dumps(self.body(created_at=True)).encode())
         if m == "huge":
             return httpx.Response(200, headers=j, stream=_Endless())
         if m == "gzip":
@@ -1047,7 +1052,7 @@ class _FakePerplexity:
         if m == "redirect_internal":
             return raw(302, {"location": "http://169.254.169.254/latest/meta-data/"}, b"")
         if m == "wrong_model":
-            return raw(200, j, json.dumps(self.body(model="sonar-deep-research")).encode())
+            return raw(200, j, json.dumps(self.body(model="openai/gpt-6-luna")).encode())
         if m == "nan_cost":
             return raw(200, j, json.dumps(self.body()).replace("0.00511", "NaN").encode())
         if m == "auth_refused_echo":

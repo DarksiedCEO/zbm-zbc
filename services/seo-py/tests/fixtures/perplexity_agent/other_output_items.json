@@ -1,0 +1,113 @@
+{
+  "id": "resp_fixture_other_items",
+  "object": "response",
+  "created_at": 1761300000,
+  "status": "completed",
+  "model": "perplexity/sonar",
+  "effort": "fast@2026-10-16.0",
+  "preset": "fast@2026-10-16.0",
+  "store": false,
+  "background": false,
+  "completed_at": 1761300003,
+  "instructions": "Answer the question concisely and cite your sources.",
+  "max_output_tokens": 8192,
+  "service_tier": "default",
+  "temperature": 1.0,
+  "top_p": 1.0,
+  "tools": [
+    {
+      "type": "web_search"
+    }
+  ],
+  "tool_choice": "auto",
+  "metadata": {},
+  "incomplete_details": null,
+  "previous_response_id": null,
+  "error": null,
+  "output": [
+    {
+      "type": "fetch_url_results",
+      "contents": [
+        {
+          "url": "https://fetched.test/",
+          "title": "Fetched",
+          "snippet": "fetched content"
+        }
+      ]
+    },
+    {
+      "type": "search_results",
+      "queries": [
+        "revenue recovery long beach"
+      ],
+      "results": [
+        {
+          "id": 1,
+          "url": "https://competitor.test/a",
+          "title": "Competitor",
+          "snippet": "s1",
+          "date": "2026-10-01",
+          "last_updated": "2026-10-02",
+          "source": "web"
+        },
+        {
+          "id": 2,
+          "url": "https://www.site.test/services",
+          "title": "Site",
+          "snippet": "s2",
+          "source": "web"
+        },
+        {
+          "id": 3,
+          "url": "https://news.test/x",
+          "title": "News",
+          "snippet": "s3"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "id": "msg_fixture_1",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Z Best Media and Competitor are cited for revenue recovery [1][2].",
+          "annotations": [
+            {
+              "type": "url_citation",
+              "url": "https://competitor.test/a",
+              "title": "Competitor",
+              "start_index": 55,
+              "end_index": 58
+            },
+            {
+              "type": "url_citation",
+              "url": "https://annotated.test/only",
+              "title": "Only",
+              "start_index": 58,
+              "end_index": 61
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 120,
+    "total_tokens": 132,
+    "input_tokens_details": {
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "cost": {
+      "currency": "USD",
+      "input_cost": 3e-06,
+      "output_cost": 0.0003,
+      "total_cost": 0.001303,
+      "tool_calls_cost": 0.001
+    }
+  }
+}

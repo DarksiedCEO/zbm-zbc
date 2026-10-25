@@ -9,16 +9,21 @@ usage (Andre, on a machine with the key; never in CI):
 What it does: builds the production adapter (src/perplexity.py: fixed host and path, the guarded deadline backend,
 public-address check) with ONE attempt (no retry), a meter that allows ONE request, and the usual hard deadline
 (SEO_PERPLEXITY_TIMEOUT_SECONDS, default 30), and asks one fixed generic question that carries no personal data.
+The request is the service's own: the Agent API (``POST /v1/agent``, model ``perplexity/sonar``, effort ``fast``) by
+default, or the legacy Sonar request when SEO_PERPLEXITY_PROTOCOL=sonar (the rollback; ADR 0017 W4-8).
 
-What it prints (JSON, one object): the outcome (``ANSWER`` or the closed engine code and detail), the model the API
-reported, the finish reason, the answer's length and SHA-256 (never its text), how many citation URLs were parsed and
+What it prints (JSON, one object): the protocol and endpoint, the outcome (``ANSWER`` or the closed engine code and
+detail), the model the API reported, the effort version (``model_version``, Agent API only), the finish reason (the
+Agent API's ``status``), the answer's length and SHA-256 (never its text), how many citation URLs were parsed and
 their first hosts, ``zero_sources`` and the NAMES of top-level response keys the parser does not model
 (``unmodelled_keys``: a moved citations field shows up here), the usage and reported cost, and ``requests_sent``
 (0 or 1). It never prints the key, and it touches
 no ledger, no data directory and no budget: it is a protocol check before budgets are raised, not an audit.
 
 Exit 0 when the API answered and the answer parsed; 1 for any engine code (ENGINE_PROTOCOL_ERROR means the response
-shape changed: do NOT raise budgets, see ADR 0017 W4-1); 2 for a usage or configuration error.
+shape changed: do NOT raise budgets, see ADR 0017 W4-1 and W4-8; the detail says what: ``MODEL_NOT_ALLOWED``,
+``RESPONSE_<STATUS>``, ``NO_ANSWER_TEXT``, ``TOO_LARGE`` or none for a shape the parser refused); 2 for a usage or
+configuration error.
 """
 
 from __future__ import annotations
@@ -64,10 +69,14 @@ def _engine(env: dict):
     import perplexity
     from config import _int
     timeout = _int(env, "SEO_PERPLEXITY_TIMEOUT_SECONDS", 30, 5, 120)
-    model = (env.get("SEO_PERPLEXITY_MODEL") or perplexity.DEFAULT_MODEL).strip()
-    if model not in perplexity.MODELS:
-        raise RuntimeError(f"SEO_PERPLEXITY_MODEL must be one of {', '.join(perplexity.MODELS)}")
-    return perplexity.PerplexityEngine(_key(env), model=model, timeout_s=timeout, attempts=1)
+    protocol = (env.get("SEO_PERPLEXITY_PROTOCOL") or perplexity.DEFAULT_PROTOCOL).strip()
+    if protocol not in perplexity.PROTOCOLS:
+        raise RuntimeError(f"SEO_PERPLEXITY_PROTOCOL must be one of {', '.join(perplexity.PROTOCOLS)}")
+    try:
+        model = perplexity.resolve_model(protocol, env.get("SEO_PERPLEXITY_MODEL"))
+    except ValueError as exc:                             # names the allowed values, never the setting
+        raise RuntimeError(f"SEO_PERPLEXITY_MODEL {exc}") from None
+    return perplexity.PerplexityEngine(_key(env), model=model, timeout_s=timeout, attempts=1, protocol=protocol)
 
 
 def main(argv=None, env=None, engine_factory=None, out=None) -> int:
@@ -91,7 +100,9 @@ def main(argv=None, env=None, engine_factory=None, out=None) -> int:
         return 2
     eng.attempts = 1                                      # one attempt, whatever the factory set
     meter = _Meter(1, Decimal("5"))                       # and the meter refuses a second request regardless
-    report: dict = {"engine": perplexity.ENGINE, "endpoint": perplexity.BASE_URL + perplexity.PATH}
+    protocol = getattr(eng, "protocol", perplexity.DEFAULT_PROTOCOL)
+    report: dict = {"engine": perplexity.ENGINE, "protocol": protocol,
+                    "endpoint": perplexity.BASE_URL + perplexity.PATHS.get(protocol, perplexity.PATH)}
     try:
         a = eng.ask(PROMPT, meter=meter)
     except perplexity.EngineError as e:
@@ -104,7 +115,7 @@ def main(argv=None, env=None, engine_factory=None, out=None) -> int:
             hosts.append((urlsplit(u).hostname or "?")[:100])
         except ValueError:
             hosts.append("?")
-    report.update(outcome=a.status, model=a.model, finish_reason=a.finish_reason, answer_chars=len(a.text),
+    report.update(outcome=a.status, model=a.model, model_version=a.model_version, finish_reason=a.finish_reason, answer_chars=len(a.text),
                   answer_sha256=a.answer_sha256, citations=len(a.citations), first_hosts=hosts, usage=a.usage,
                   zero_sources=not a.citations, unmodelled_keys=list(getattr(a, "unmodelled_keys", ()) or ()),
                   requests_sent=meter.calls)
