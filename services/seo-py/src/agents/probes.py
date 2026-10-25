@@ -51,9 +51,9 @@ METHODOLOGY = ("Each prompt of prompt set {ps} v{ver} (sha256 {sha}) sent {n} ti
                "'mentioned' when a brand term appears (case-insensitive, whole words) and 'cited' when the engine's "
                "search returned a web page (http or https) on {domain} or a subdomain for that answer: cited = "
                "returned by search (IDNA-aware; lookalike hosts are counted apart, never as {domain}). Whether the "
-               "answer's text points at that page is not measured. A URL written in an answer's text, or one the "
-               "model attached that its search did not return, is not a citation, except for an engine that returns "
-               "no structured citations (Perplexity returns them). Rates exclude "
+               "answer's text points at that page is not measured. A URL written in an answer's text is not a citation, "
+               "nor is one the model attached that its search did not return, except for an engine that returns no "
+               "structured citations (Perplexity returns them). Rates exclude "
                "refusals and errors; intervals are 95% Wilson score intervals over usable answers. Classes: "
                "STRENGTH (cited in >= half), MENTIONED_NOT_CITED, OPPORTUNITY (others cited, not us), ABSENT, "
                "INSUFFICIENT_EVIDENCE (< {m} usable answers).")
