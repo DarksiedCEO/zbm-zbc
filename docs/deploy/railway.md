@@ -523,8 +523,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   peer: Railway's docs say private DNS in environments created after Oct 16 2025 resolves to IPv4 and IPv6 (legacy
   environments: IPv6 only), and do not state the health check's address family (a Railway community report shows
   uvicorn on `::` failing the health check where `0.0.0.0` passed). The launchers now bind `::` themselves with
-  `IPV6_V6ONLY` cleared (`launch_guard.serve`, shared by every Python service; only the IPv6 wildcard takes the new
-  path) and hand uvicorn that socket, so one socket serves IPv4 and IPv6. This box's kernel has no IPv6; the CI job
+  `IPV6_V6ONLY` cleared (`src/dual_stack.py`, the same file in the four Railway Python services; only the IPv6
+  wildcard takes the new path) and hand uvicorn that socket, so one socket serves IPv4 and IPv6. This box's kernel has no IPv6; the CI job
   runs the production values. If a service on Railway fails with "Address family not supported", set its bind
   variable to `0.0.0.0`.
 - **Railway behaviours taken from the docs or the SDK types, not observed:** `preserve()` on a variable that does not
