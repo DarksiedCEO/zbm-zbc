@@ -86,7 +86,11 @@ RESULTS: list[tuple[str, bool, str]] = []
 
 def check(name: str, ok: bool, detail: str = "") -> None:
     RESULTS.append((name, ok, detail))
-    print(("PASS " if ok else "FAIL ") + name + (f" -- {detail}" if detail else ""), flush=True)
+    # "CHECK PASS: " / "CHECK FAIL: " (one line each; a failure's detail with its newlines folded): the live-run format
+    # devtools/ci_annotate.py turns into one annotation per failure, so a red railway-images job can be read from its
+    # check-run annotations (docs/ci.md "Reading a red job"; the job log itself is not readable from the team's box)
+    shown = detail if ok else " | ".join(x for x in detail.splitlines() if x.strip())
+    print(("CHECK PASS: " if ok else "CHECK FAIL: ") + name + (f" -- {shown}" if shown else ""), flush=True)
 
 
 def docker(*args: str, timeout: float = 120, check_rc: bool = False) -> subprocess.CompletedProcess:
@@ -206,7 +210,8 @@ def secret_file_root_path(img: str, port: int, env: dict[str, str], tag: str) ->
     docker("rm", "-f", name)
     r = docker("run", "-d", "--name", name, "--network", NETWORK, *user_args(img), "-p", f"127.0.0.1::{port}",
                "-e", f"PORT={port}", *env_args(env), tag)
-    if r.returncode == 0 and wait_health(name, port)[0]:
+    healthy, why = wait_health(name, port) if r.returncode == 0 else (False, r.stderr)
+    if healthy:
         target = "/run/zbm-secrets/" + f"{value_var}_FILE".lower().replace("_", "-")
         st = docker("exec", name, "stat", "-c", "%u %a", target).stdout.strip()
         check(f"{img}: the {value_var} secret file is owned by 10001, mode 600", st == "10001 600", st)
@@ -218,7 +223,7 @@ def secret_file_root_path(img: str, port: int, env: dict[str, str], tag: str) ->
         check(f"{img}: {value_var} is not in the service's environment and uid 10001 cannot read PID 1's",
               out == ["done"], " ".join(out))
     else:
-        check(f"{img}: starts as root for the secret-file check", False, (r.stderr or logs(name))[-800:])
+        check(f"{img}: starts as root for the secret-file check", False, why[-1200:])
     docker("rm", "-f", name)
     name = f"{PREFIX}-{img}-secret-nonroot"
     docker("rm", "-f", name)
@@ -298,7 +303,7 @@ def main() -> int:
         docker("network", "rm", NETWORK)
     failed = [r for r in RESULTS if not r[1]]
     print(json.dumps({"checks": len(RESULTS), "failed": [r[0] for r in failed]}))
-    print(f"railway_smoke: {len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
+    print(f"{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed (railway_smoke)")
     return 1 if failed else 0
 
 
