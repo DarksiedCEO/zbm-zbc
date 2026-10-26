@@ -446,28 +446,31 @@ fn write_big_log(path: &Path, n: usize) {
 /// blocking pool readers could fill, so an append queued behind every reader
 /// in front of it. Now an append goes ahead of the next reader chunk.
 ///
-/// Order, not wall-clock, and both ends of the order are pinned:
-/// - all 25 connections are opened first; then ONE thread writes the 24 full
-///   reads and, immediately after them, the append. No sleep, no thread
-///   scheduling between the requests: every read is in front of the append
-///   when the append is sent, on any machine speed. (The old version slept
-///   200 ms after starting the readers and counted reads that had finished
-///   before the append was even sent, so a fast runner failed it: CI run
-///   40160863537, macos-26, "answered only after 9 of 24".)
-/// - which reads the append overtook is read off the server's own
-///   linearization, not a client clock: a read whose body contains the
-///   appended entry took its snapshot after the append committed; a read
-///   without it was served ahead of the append.
+/// Order, not wall-clock. Each round opens 25 connections, then ONE thread
+/// writes 24 full reads and, immediately after them, an append: no sleep, so
+/// every read is in front of the append on the wire on any machine speed.
+/// (The old version slept 200 ms after starting the readers and counted reads
+/// that had finished before the append was even sent, so a fast runner failed
+/// it: CI run 40160863537, macos-26, "answered only after 9 of 24".) Which
+/// reads the append overtook is read off the server's own linearization, not
+/// a client clock: a full read takes its length under the lock before its
+/// first chunk, so a body that contains the round's appended entry took its
+/// snapshot after the append committed, and one without it was served ahead.
 ///
-/// At most 8 of the 24 reads that were in front may be served ahead (a
-/// reader takes no new chunk or snapshot while a writer waits, so only reads
-/// already holding a read slot — at most MAX_READ_SLOTS = 4 — can be).
+/// Tokio does not poll the 25 accepted connections in wire order, so in one
+/// round the append can reach the server before most reads and a regression
+/// would go unseen (AEGIS 2026-10-25: a single round let an append that waits
+/// for a read slot pass ~30% of the time). So ROUNDS rounds, each held to the
+/// bound: at most 8 of the 24 reads served ahead of the append (a reader takes
+/// no new chunk or snapshot while a writer waits, so only reads already in a
+/// read slot, at most MAX_READ_SLOTS = 4, can be).
 #[test]
 fn f2_an_append_is_not_queued_behind_concurrent_full_reads() {
     const READERS: usize = 24;
-    const APPEND_ID: &str = "after-readers";
+    const ROUNDS: usize = 4;
+    const BIG: u64 = 5_000;
     let log = Scratch::new("f2_starve");
-    write_big_log(&log.0, 5_000);
+    write_big_log(&log.0, BIG as usize);
     let s = start(&log, &[]);
     let port = s.port;
     let connect = || {
@@ -476,49 +479,53 @@ fn f2_an_append_is_not_queued_behind_concurrent_full_reads() {
         c.set_nodelay(true).unwrap();
         c
     };
-    let mut reads: Vec<_> = (0..READERS).map(|_| connect()).collect();
-    let mut append = connect();
     let read_raw = common::raw_request("GET", "/ledger/entries", Some(&format!("Bearer {TOKEN}")), "");
-    let append_raw = common::raw_request(
-        "POST",
-        "/ledger/events",
-        Some(&format!("Bearer {TOKEN}")),
-        &event_body(APPEND_ID, "sales", "note"),
-    );
-    for c in &mut reads {
-        c.write_all(&read_raw).expect("send read");
-    }
-    append.write_all(&append_raw).expect("send append");
-
-    let readers: Vec<_> = reads
-        .into_iter()
-        .map(|mut c| {
-            // A reader still queued at REQUEST_DEADLINE on a slow machine is dropped by the server (by design);
-            // that is not what this test is about, so it is not a failure here, and a dropped read was never
-            // served, so it was not served ahead of the append either.
-            std::thread::spawn(move || common::read_response(&mut c).ok().map(|r| (r.status, r.text())))
-        })
-        .collect();
-    let answer = common::read_response(&mut append).expect("append response");
-    assert_eq!(answer.status, 201, "{}", answer.text());
-    assert_eq!(serde_json::from_str::<Value>(&answer.text()).unwrap()["seq"], 5_000);
-
-    let marker = format!("\"event_id\":\"{APPEND_ID}\"");
-    let mut served_ahead = 0;
-    let mut served_after = 0;
-    for r in readers {
-        match r.join().unwrap() {
-            None => {}
-            Some((200, body)) if body.contains(&marker) => served_after += 1,
-            Some((200, _)) => served_ahead += 1,
-            Some((st, body)) => panic!("full read answered {st}: {body:.200}"),
+    let mut ahead_per_round = Vec::new();
+    for round in 0..ROUNDS {
+        let append_id = format!("after-readers-{round}");
+        let mut reads: Vec<_> = (0..READERS).map(|_| connect()).collect();
+        let mut append = connect();
+        let append_raw = common::raw_request(
+            "POST",
+            "/ledger/events",
+            Some(&format!("Bearer {TOKEN}")),
+            &event_body(&append_id, "sales", "note"),
+        );
+        for c in &mut reads {
+            c.write_all(&read_raw).expect("send read");
         }
+        append.write_all(&append_raw).expect("send append");
+
+        let readers: Vec<_> = reads
+            .into_iter()
+            .map(|mut c| {
+                // A reader still queued at REQUEST_DEADLINE on a slow machine is dropped by the server (by
+                // design); that is not what this test is about, so it is not a failure here, and a dropped read
+                // was never served, so it was not served ahead of the append either.
+                std::thread::spawn(move || common::read_response(&mut c).ok().map(|r| (r.status, r.text())))
+            })
+            .collect();
+        let answer = common::read_response(&mut append).expect("append response");
+        assert_eq!(answer.status, 201, "round {round}: {}", answer.text());
+        assert_eq!(serde_json::from_str::<Value>(&answer.text()).unwrap()["seq"], BIG + round as u64);
+
+        let marker = format!("\"event_id\":\"{append_id}\"");
+        let (mut served_ahead, mut served_after) = (0, 0);
+        for r in readers {
+            match r.join().unwrap() {
+                None => {}
+                Some((200, body)) if body.contains(&marker) => served_after += 1,
+                Some((200, _)) => served_ahead += 1,
+                Some((st, body)) => panic!("round {round}: full read answered {st}: {body:.200}"),
+            }
+        }
+        ahead_per_round.push(served_ahead);
+        assert!(
+            served_ahead <= 8,
+            "round {round}: the append was overtaken by {served_ahead} of {READERS} full reads sent before it \
+             ({served_after} saw the appended entry); rounds so far {ahead_per_round:?}"
+        );
     }
-    assert!(
-        served_ahead <= 8,
-        "the append was overtaken by {served_ahead} of {READERS} full reads sent before it \
-         ({served_after} saw the appended entry)"
-    );
 }
 
 // --- F-4: per-caller tokens with department scopes -------------------------------
