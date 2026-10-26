@@ -329,24 +329,26 @@ def test_front_loaded_body_that_then_stalls_is_408_after_the_grace_period(monkey
 
 def test_a_body_arriving_at_or_above_the_minimum_rate_is_not_cut(monkeypatch):
     # Fix 2026-10-25 (CI run 40160863537, macos-26: 408 "stalled for 0.2s or slower than 1024 bytes/s", passing on
-    # every other run): the sender put 500 B every 0.1 s, a gap of HALF the 0.2 s stall grace, on the same event loop
-    # as the server. LoopLag forgives a late loop only past LOOP_LAG_SLACK_S (0.05 s) per tick, by design, so loop
-    # delays at or under the slack inside one gap (the sender's wake-up, the server's) are charged to the client:
-    # 0.1 + 2 x 0.05 is the grace. Measured on Linux with a co-resident task blocking the loop 0.049 s every other
-    # pass: the server's largest lag-adjusted wait per run had median 0.198 s, p90 0.200 s against the 0.2 s grace.
-    # The test was measuring runner jitter, not the client. Now the same 500 B chunks go out every 0.02 s on an
-    # absolute schedule (a late wake-up shortens the next sleep instead of delaying every later chunk): a gap is a
-    # tenth of the grace (same injection: median 0.099 s, p90 0.100 s), and the bytes per chunk, which pay for each
-    # chunk's loop passes against the 1 KiB/s floor, are unchanged (100 B chunks at the same cadence were cut by
-    # the floor under 0.06 s stalls: smaller chunks would trade one flake for another). Rule and thresholds unchanged:
-    # grace 0.2 s, 1 KiB/s; the body takes ~1.2 s (six graces, asserted), so the floor is in force for most of it.
+    # every other run): the sender put 500 B every 0.1 s (~4.9x the floor), a gap of HALF the 0.2 s stall grace, on
+    # the same event loop as the server. LoopLag forgives a late loop only past LOOP_LAG_SLACK_S (0.05 s) per tick, by
+    # design, so loop delays at or under the slack inside one gap (the sender's wake-up, the server's) are charged to
+    # the client: 0.1 + 2 x 0.05 is the grace. The test was measuring runner jitter, not the client. Now 150 B every
+    # 0.02 s on an absolute schedule (a late wake-up shortens the next sleep instead of delaying every later chunk):
+    # gaps are a tenth of the grace, and ~7.3 KB/s (~7.3x the floor) leaves each chunk's bytes enough to pay for its
+    # loop passes against the floor under stalls. Rule and thresholds unchanged: grace 0.2 s, 1 KiB/s; the body takes
+    # ~1.2 s (six graces, asserted), so the floor is in force for most of it.
+    # Detection limit: this catches a floor at least ~8x too strict, NOT one 2-4x too strict (that needs a
+    # virtual-clock test of the floor arithmetic). Evidence, the chunk-size grid of the fix-flaky-ci-2026-10-25 AEGIS
+    # round (Linux, py3.13, scratch mutation `due = max(grace, received / (rate * k))`): 150 B caught k=8 5/5, missed
+    # k=2 and k=4; 0 false fails idle (20) and with the loop blocked 45/49/60 ms every other pass or randomly <= 120 ms
+    # (15 each). 100 B (the old ~4.9x) was cut 14/15 under 60 ms stalls; 200 B (~9.8x) caught no k <= 8.
     grace, rate = 0.2, 1024
     monkeypatch.setattr(api, "_BODY_MIN_RATE_GRACE_S", grace)
     monkeypatch.setattr(api, "_BODY_MIN_BYTES_PER_S", rate)
-    step, every = 500, 0.02  # 25 KB/s; gaps of grace / 10
+    step, every = 150, 0.02  # ~7.3 KB/s, ~7.3x the floor; gaps of grace / 10
 
     async def scenario():
-        payload = b'{"call_events":[]' + b" " * 30_000 + b"}"  # ~30 KB over ~1.2 s
+        payload = b'{"call_events":[]' + b" " * 9_000 + b"}"  # ~9 KB over ~1.2 s
         c = _Client(content_length=len(payload))
         task = asyncio.ensure_future(c.run())
         loop = asyncio.get_running_loop()
