@@ -328,21 +328,39 @@ def test_front_loaded_body_that_then_stalls_is_408_after_the_grace_period(monkey
 
 
 def test_a_body_arriving_at_or_above_the_minimum_rate_is_not_cut(monkeypatch):
-    monkeypatch.setattr(api, "_BODY_MIN_RATE_GRACE_S", 0.2)
-    monkeypatch.setattr(api, "_BODY_MIN_BYTES_PER_S", 1024)
+    # Fix 2026-10-25 (CI run 40160863537, macos-26: 408 "stalled for 0.2s or slower than 1024 bytes/s", passing on
+    # every other run): the sender put 500 B every 0.1 s, a gap of HALF the 0.2 s stall grace, on the same event loop
+    # as the server. LoopLag forgives a late loop only past LOOP_LAG_SLACK_S (0.05 s) per tick, by design, so loop
+    # delays at or under the slack inside one gap (the sender's wake-up, the server's) are charged to the client:
+    # 0.1 + 2 x 0.05 is the grace. Measured on Linux with a co-resident task blocking the loop 0.049 s every other
+    # pass: the server's largest lag-adjusted wait per run had median 0.198 s, p90 0.200 s against the 0.2 s grace.
+    # The test was measuring runner jitter, not the client. Now the same 500 B chunks go out every 0.02 s on an
+    # absolute schedule (a late wake-up shortens the next sleep instead of delaying every later chunk): a gap is a
+    # tenth of the grace (same injection: median 0.099 s, p90 0.100 s), and the bytes per chunk, which pay for each
+    # chunk's loop passes against the 1 KiB/s floor, are unchanged (100 B chunks at the same cadence were cut by
+    # the floor under 0.06 s stalls: smaller chunks would trade one flake for another). Rule and thresholds unchanged:
+    # grace 0.2 s, 1 KiB/s; the body takes ~1.2 s (six graces, asserted), so the floor is in force for most of it.
+    grace, rate = 0.2, 1024
+    monkeypatch.setattr(api, "_BODY_MIN_RATE_GRACE_S", grace)
+    monkeypatch.setattr(api, "_BODY_MIN_BYTES_PER_S", rate)
+    step, every = 500, 0.02  # 25 KB/s; gaps of grace / 10
 
     async def scenario():
-        payload = b'{"call_events":[]' + b" " * 6000 + b"}"  # ~6 KB over ~1.2 s = ~5 KiB/s
+        payload = b'{"call_events":[]' + b" " * 30_000 + b"}"  # ~30 KB over ~1.2 s
         c = _Client(content_length=len(payload))
         task = asyncio.ensure_future(c.run())
-        for i in range(0, len(payload), 500):
-            await c.feed(payload[i:i + 500])
-            await asyncio.sleep(0.1)
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        for n, i in enumerate(range(0, len(payload), step)):
+            await asyncio.sleep(max(0.0, t0 + n * every - loop.time()))
+            await c.feed(payload[i:i + step])
         await c.finish()
-        return await task
+        await task
+        return c, loop.time() - t0
 
-    c = asyncio.run(scenario())
+    c, took = asyncio.run(scenario())
     assert c.status == 200, (c.status, c.body[:200])
+    assert took > 5 * grace, f"the body took {took:.2f}s: too short to exercise the throughput floor"
 
 
 def test_time_spent_waiting_for_the_inflight_budget_is_not_charged_to_the_client(monkeypatch):

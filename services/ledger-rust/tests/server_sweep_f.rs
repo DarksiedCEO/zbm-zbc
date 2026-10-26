@@ -13,8 +13,6 @@ use std::io::Write as _;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
 use common::PortFile;
@@ -446,42 +444,81 @@ fn write_big_log(path: &Path, n: usize) {
 
 /// Probe P6/scale: full reads held the one mutex while serializing, on a
 /// blocking pool readers could fill, so an append queued behind every reader
-/// in front of it. Now an append goes ahead of the next reader chunk. Order,
-/// not wall-clock: 24 full reads are started first, and the append must be
-/// answered before most of them are.
+/// in front of it. Now an append goes ahead of the next reader chunk.
+///
+/// Order, not wall-clock, and both ends of the order are pinned:
+/// - all 25 connections are opened first; then ONE thread writes the 24 full
+///   reads and, immediately after them, the append. No sleep, no thread
+///   scheduling between the requests: every read is in front of the append
+///   when the append is sent, on any machine speed. (The old version slept
+///   200 ms after starting the readers and counted reads that had finished
+///   before the append was even sent, so a fast runner failed it: CI run
+///   40160863537, macos-26, "answered only after 9 of 24".)
+/// - which reads the append overtook is read off the server's own
+///   linearization, not a client clock: a read whose body contains the
+///   appended entry took its snapshot after the append committed; a read
+///   without it was served ahead of the append.
+///
+/// At most 8 of the 24 reads that were in front may be served ahead (a
+/// reader takes no new chunk or snapshot while a writer waits, so only reads
+/// already holding a read slot — at most MAX_READ_SLOTS = 4 — can be).
 #[test]
 fn f2_an_append_is_not_queued_behind_concurrent_full_reads() {
+    const READERS: usize = 24;
+    const APPEND_ID: &str = "after-readers";
     let log = Scratch::new("f2_starve");
     write_big_log(&log.0, 5_000);
     let s = start(&log, &[]);
     let port = s.port;
-    let done = Arc::new(AtomicUsize::new(0));
-    let readers: Vec<_> = (0..24)
-        .map(|_| {
-            let done = Arc::clone(&done);
-            std::thread::spawn(move || {
-                // Raw exchange: a reader still queued at REQUEST_DEADLINE on a slow machine is dropped by the
-                // server (by design); that is not what this test is about, so it is not a failure here.
-                let raw = common::raw_request("GET", "/ledger/entries", Some(&format!("Bearer {TOKEN}")), "");
-                let status = common::exchange(port, &raw, Duration::from_secs(60)).ok().map(|r| r.status);
-                done.fetch_add(1, Ordering::SeqCst);
-                status
-            })
+    let connect = || {
+        let c = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+        c.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+        c.set_nodelay(true).unwrap();
+        c
+    };
+    let mut reads: Vec<_> = (0..READERS).map(|_| connect()).collect();
+    let mut append = connect();
+    let read_raw = common::raw_request("GET", "/ledger/entries", Some(&format!("Bearer {TOKEN}")), "");
+    let append_raw = common::raw_request(
+        "POST",
+        "/ledger/events",
+        Some(&format!("Bearer {TOKEN}")),
+        &event_body(APPEND_ID, "sales", "note"),
+    );
+    for c in &mut reads {
+        c.write_all(&read_raw).expect("send read");
+    }
+    append.write_all(&append_raw).expect("send append");
+
+    let readers: Vec<_> = reads
+        .into_iter()
+        .map(|mut c| {
+            // A reader still queued at REQUEST_DEADLINE on a slow machine is dropped by the server (by design);
+            // that is not what this test is about, so it is not a failure here, and a dropped read was never
+            // served, so it was not served ahead of the append either.
+            std::thread::spawn(move || common::read_response(&mut c).ok().map(|r| (r.status, r.text())))
         })
         .collect();
-    std::thread::sleep(Duration::from_millis(200)); // let the reads get going (not an assertion)
-    let (st, body) = post_event(port, TOKEN, &event_body("after-readers", "sales", "note"));
-    let finished_before_append = done.load(Ordering::SeqCst);
-    assert_eq!(st, 201, "{body}");
+    let answer = common::read_response(&mut append).expect("append response");
+    assert_eq!(answer.status, 201, "{}", answer.text());
+    assert_eq!(serde_json::from_str::<Value>(&answer.text()).unwrap()["seq"], 5_000);
+
+    let marker = format!("\"event_id\":\"{APPEND_ID}\"");
+    let mut served_ahead = 0;
+    let mut served_after = 0;
     for r in readers {
-        let status = r.join().unwrap();
-        assert!(status.is_none() || status == Some(200), "{status:?}");
+        match r.join().unwrap() {
+            None => {}
+            Some((200, body)) if body.contains(&marker) => served_after += 1,
+            Some((200, _)) => served_ahead += 1,
+            Some((st, body)) => panic!("full read answered {st}: {body:.200}"),
+        }
     }
     assert!(
-        finished_before_append <= 8,
-        "the append was answered only after {finished_before_append} of 24 full reads"
+        served_ahead <= 8,
+        "the append was overtaken by {served_ahead} of {READERS} full reads sent before it \
+         ({served_after} saw the appended entry)"
     );
-    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["seq"], 5_000);
 }
 
 // --- F-4: per-caller tokens with department scopes -------------------------------
