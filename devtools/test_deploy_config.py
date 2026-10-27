@@ -236,6 +236,28 @@ class RailwayIac(unittest.TestCase):
                         self.assertTrue(secret_value_ok(value), f"{value}: a secret must be preserve(), a reference, "
                                         "or a JSON map whose every value is one ${{service.VARIABLE}}")
 
+    def test_every_dashboard_set_secret_is_declared_so_apply_cannot_delete_it(self):
+        # `railway config plan` reports Railway as owning every variable of a service: one set in the dashboard but
+        # absent from that service's block is deleted by the next `railway config apply`. Every row of the runbook's
+        # Secrets table whose owner is a Railway service must therefore be declared in that service's block.
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        table = runbook.split("\n## Secrets\n", 1)[1].split("\n## ", 1)[0]
+        rows = re.findall(r"^\| `([A-Z][A-Z0-9_]+)`[^|]*\|[^|]*\| ([a-z-]+) \|", table, re.M)
+        self.assertGreaterEqual(len(rows), 20, "the Secrets table was not parsed")
+        for name, owner in rows:
+            if owner not in self.blocks:      # Vercel-only rows
+                continue
+            with self.subTest(service=owner, variable=name):
+                self.assertRegex(self.blocks[owner], re.compile(rf"^\s+{name}:\s*preserve\(\)", re.M))
+
+    def test_perplexity_budgets_are_declared_so_apply_cannot_reset_them(self):
+        # The four budgets are set by hand with the key (runbook, Secrets table); a plan that dropped them would turn
+        # the engine back OFF (0 = OFF) after the first real smoke call proved it.
+        for name in ("SEO_PERPLEXITY_DAILY_CALLS", "SEO_PERPLEXITY_DAILY_SPEND_USD",
+                     "SEO_PERPLEXITY_TENANT_DAILY_CALLS", "SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD"):
+            with self.subTest(variable=name):
+                self.assertRegex(self.blocks["seo"], re.compile(rf"^\s+{name}:\s*preserve\(\)", re.M))
+
     def test_the_secret_check_refuses_a_literal_inside_a_reference_map(self):
         q = lambda body: "'" + body + "'"   # noqa: E731  the map as it appears in railway.ts, single-quoted
         good = ["preserve()", "finance.env.FIN_SERVICE_TOKEN",

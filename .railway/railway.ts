@@ -195,6 +195,13 @@ export default defineRailway(() => {
       SEO_FINANCE_URL: PRIVATE("finance", 8410),
       SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       SEO_FINANCE_CALLER_TOKEN: preserve(),
+      // Set by hand in the dashboard (runbook, Secrets table): declared so a later apply cannot delete them. Unset or
+      // 0 keeps the engine NOT_CONNECTED / OFF, exactly as before (seo-py config, ADR 0017 W4).
+      SEO_PERPLEXITY_API_KEY: preserve(),
+      SEO_PERPLEXITY_DAILY_CALLS: preserve(),
+      SEO_PERPLEXITY_DAILY_SPEND_USD: preserve(),
+      SEO_PERPLEXITY_TENANT_DAILY_CALLS: preserve(),
+      SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD: preserve(),
     },
   }));
 
