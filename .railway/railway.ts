@@ -89,6 +89,10 @@ export default defineRailway(() => {
       PORT: "8000",
       DETECTION_BIND_ADDR: "::",
       ZBM_SERVICE_TOKEN: preserve(),
+      // Revenue Recovery store kill switches (runbook env table): set by hand to stop store reads; declared so a later
+      // apply cannot release them. Unset/empty = off.
+      RR_STORE_READS_DISABLED: preserve(),
+      RR_STORE_KILL_SWITCH_FILE: preserve(),
     },
   });
 
@@ -202,6 +206,14 @@ export default defineRailway(() => {
       SEO_PERPLEXITY_DAILY_SPEND_USD: preserve(),
       SEO_PERPLEXITY_TENANT_DAILY_CALLS: preserve(),
       SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD: preserve(),
+      // Operator settings changed by hand during an incident (ADR 0017 W4-8 rollback; sticky kill switches): declared so
+      // a later apply cannot silently undo them. Unset/empty = the documented default.
+      SEO_PERPLEXITY_PROTOCOL: preserve(),
+      SEO_PERPLEXITY_MODEL: preserve(),
+      SEO_PERPLEXITY_RESERVE_USD_PER_CALL: preserve(),
+      SEO_KILL_GLOBAL: preserve(),
+      SEO_KILLED_CAPABILITIES: preserve(),
+      SEO_KILLED_PROVIDERS: preserve(),
     },
   }));
 
