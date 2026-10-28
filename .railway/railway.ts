@@ -11,7 +11,7 @@
 // (`finance.env.FIN_SERVICE_TOKEN`), or interpolated with Railway's `${{service.VARIABLE}}` syntax inside a JSON map.
 // Never use ctx.randomString for a secret: it is a hash of the environment name and a label, not random.
 import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
-import type { ServiceNode, VolumeMount } from "railway/iac";
+import type { ServiceNode, VolumeConfig, VolumeMount } from "railway/iac";
 
 const REPO = "DarksiedCEO/zbm-zbc";
 const BRANCH = "main"; // the branch Railway deploys from
@@ -48,6 +48,9 @@ const deploy = (healthcheckPath: string, withVolume: boolean) => ({
 // takes no schedule there, so it is set on the attachment it built; a service passed here without a volume
 // attachment fails the evaluation rather than silently having no backup.
 const DAILY_BACKUPS: VolumeMount["backupSchedules"] = ["DAILY"];
+
+// The live data volumes as deployed (railway config plan, 2026-10-27). Changing either is a destructive volume change.
+const VOLUME_AS_DEPLOYED: VolumeConfig = { region: "us-west2", sizeMB: 5000 };
 const withDailyBackups = <T extends ServiceNode>(svc: T): T => {
   const attachments = Object.values(svc.volumeAttachments ?? {});
   if (attachments.length === 0) throw new Error(`${svc.name}: no volume attachment to give a backup schedule`);
@@ -59,11 +62,12 @@ const PRIVATE = (name: string, port: number) => `http://${name}.railway.internal
 
 export default defineRailway(() => {
   // One volume per stateful service, mounted at /data (each service keeps its state in its own subdirectory).
-  // Size: the plan's default (shrinking a volume is destructive, so it is not set lower here).
-  const ledgerData = volume("ledger-data");
-  const legalData = volume("legal-data");
-  const financeData = volume("finance-data");
-  const seoData = volume("seo-data");
+  // Region and size state exactly what is deployed: left unset, `railway config plan` showed region "us-west2" -> null
+  // and sizeMB 5000 -> null on all four as destructive changes. Never set sizeMB lower (shrinking is destructive).
+  const ledgerData = volume("ledger-data", VOLUME_AS_DEPLOYED);
+  const legalData = volume("legal-data", VOLUME_AS_DEPLOYED);
+  const financeData = volume("finance-data", VOLUME_AS_DEPLOYED);
+  const seoData = volume("seo-data", VOLUME_AS_DEPLOYED);
 
   // ------------------------------------------------------------------------------------------------ ledger (first)
   const ledger = withDailyBackups(service("ledger", {

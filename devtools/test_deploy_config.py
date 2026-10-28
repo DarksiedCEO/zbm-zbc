@@ -222,6 +222,17 @@ class RailwayIac(unittest.TestCase):
             with self.subTest(service=svc):
                 self.assertEqual(f'withDailyBackups(service("{svc}", ' in self.text, has_volume)
 
+    def test_every_volume_states_its_live_region_and_size_so_apply_cannot_null_them(self):
+        # `railway config plan` (2026-10-27, railway 3.13.1) on the four volumes declared without a config:
+        # `config.region ("us-west2" -> null)`, `config.sizeMB (5000 -> null)`, "4 destructive change(s)". The data
+        # volumes must state what is deployed, so a plan shows no change to them.
+        self.assertIn('const VOLUME_AS_DEPLOYED: VolumeConfig = { region: "us-west2", sizeMB: 5000 };', self.text)
+        calls = re.findall(r'\bvolume\(("[^"]+")([^)]*)\)', self.text)
+        self.assertEqual(sorted(n for n, _ in calls), sorted(f'"{s}-data"' for s, (*_r, v) in SERVICES.items() if v))
+        for name, rest in calls:
+            with self.subTest(volume=name):
+                self.assertEqual(rest.strip(), ", VOLUME_AS_DEPLOYED")
+
     def test_one_replica_and_restart_on_failure(self):
         self.assertIn("numReplicas: 1,", self.text)
         self.assertIn('restartPolicyType: "ON_FAILURE"', self.text)
