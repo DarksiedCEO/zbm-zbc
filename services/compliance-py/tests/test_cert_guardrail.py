@@ -22,7 +22,7 @@ from store import StoreCorrupt
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 # Seed v2 (ADR 0024, the founder decisions of Oct 30, 2026); v1 (the spec's) was 4e3821d0...584d.
-SPEC_SHA = "93f6fe1fe95f3683ebd255fdebe45043faaca6cfd71dee3a47b2417fb6b0b018"
+SPEC_SHA = "bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5"
 MONEY_WORDS = ("amount", "usd", "price", "rate", "balance", "money", "fee", "payment", "cents", "currency")
 
 
