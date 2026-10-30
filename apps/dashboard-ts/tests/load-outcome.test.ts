@@ -143,3 +143,19 @@ test("handoff round-trips and rejects anything malformed", async () => {
     assert.equal(decodeHandoff(v), null, String(v));
   }
 });
+
+// AEGIS A2 M-1 / ADR 0021: the orchestrator refuses a findings request that
+// names no tenant scope. The dashboard is the operator's every-tenant view
+// and must ask for it explicitly, with its bearer token.
+test("asks the orchestrator for every tenant explicitly (scope=all), with the token", async () => {
+  const seen: { url: string; auth: string | null }[] = [];
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    seen.push({ url: String(input), auth: new Headers(init?.headers).get("authorization") });
+    return new Response(JSON.stringify(OK_BODY), { status: 200 });
+  }) as typeof fetch;
+  const o = await loadRecordedFindings(ENV, fetchImpl);
+  assert.equal(o.ok, true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url, "http://127.0.0.1:1/revenue-recovery/findings?scope=all");
+  assert.equal(seen[0].auth, "Bearer t");
+});

@@ -112,7 +112,7 @@ func TestL1_CommissionBaseIsRecordedAndServed(t *testing.T) {
 		basis["subject_id"] != findingID(tenant, "affiliate-coupon-extension-v1", "order", "o0", "") {
 		t.Fatalf("value basis event: %v", basis)
 	}
-	_, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings", routeTestToken)
+	_, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings?scope=all", routeTestToken)
 	var fb struct {
 		Findings []struct {
 			ValueBasis *struct {

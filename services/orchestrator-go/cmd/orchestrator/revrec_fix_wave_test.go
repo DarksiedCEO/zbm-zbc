@@ -56,7 +56,7 @@ func scan(t *testing.T, srv *httptest.Server, query string) (int, scanBody, stri
 
 func recorded(t *testing.T, srv *httptest.Server) findingsBody {
 	t.Helper()
-	code, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings", routeTestToken)
+	code, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings?scope=all", routeTestToken)
 	if code != http.StatusOK {
 		t.Fatalf("GET findings = %d: %s", code, body)
 	}

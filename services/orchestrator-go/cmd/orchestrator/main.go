@@ -160,6 +160,8 @@ func limitRequests(next http.Handler) http.Handler {
 //     already recorded in the ledger (GET /ledger/entries, kind "finding")
 //     with the ledger's verify verdict. It never calls a ledger write
 //     endpoint and never calls detection-py. The dashboard uses this.
+//     It is per tenant (AEGIS A2 M-1, ADR 0021): ?client_id=<tenant>, or
+//     ?scope=all (operator only) — see findingsHandler.
 //
 // Both require the orchestrator bearer token; /health stays open.
 // Method-qualified patterns (Go 1.22+) make the mux answer 405 for a wrong
@@ -235,16 +237,71 @@ func newMux(orch *orchestrator.Orchestrator, orchestratorToken string, allowFixt
 		}
 	}))
 
-	mux.HandleFunc("GET /revenue-recovery/findings", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {
-		result, err := orch.RecordedFindings(r.Context())
+	// The orchestrator token is the operator's credential (the dashboard,
+	// Andre only), so it may ask for every tenant. ADR 0021.
+	mux.HandleFunc("GET /revenue-recovery/findings", requireAuth(orchestratorToken, findingsHandler(orch, true)))
+
+	return mux
+}
+
+// findingsHandler serves GET /revenue-recovery/findings?client_id=<tenant>
+// or ?scope=all (AEGIS A2 M-1, ADR 0021). Exactly one of the two must be
+// given, once: a request naming neither is refused 400
+// FINDINGS_SCOPE_REQUIRED before the ledger is read — every tenant is never
+// the default. client_id must pass orchestrator.ValidClientID (the same
+// rule the scan route's tenants are recorded under). scope=all is refused
+// 403 ALL_TENANTS_FORBIDDEN unless allowAllTenants: only the operator
+// credential's route sets it, and any future tenant-bound credential must
+// mount this handler with false (and pin client_id to its own tenant).
+func findingsHandler(orch *orchestrator.Orchestrator, allowAllTenants bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for k, vs := range q {
+			if (k != "client_id" && k != "scope") || len(vs) != 1 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only client_id or scope may be given, once each"})
+				return
+			}
+		}
+		var scope orchestrator.FindingsScope
+		switch {
+		case q.Has("client_id") && q.Has("scope"):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "give client_id or scope=all, not both"})
+			return
+		case q.Has("client_id"):
+			scope.ClientID = q.Get("client_id")
+			if !orchestrator.ValidClientID(scope.ClientID) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "client_id must be 1-64 characters: letters, digits and . _ : - (starting with a letter or digit)",
+				})
+				return
+			}
+		case q.Has("scope"):
+			if q.Get("scope") != "all" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope must be all"})
+				return
+			}
+			if !allowAllTenants {
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error":  "this credential may not read every tenant's findings; give its client_id",
+					"reason": "ALL_TENANTS_FORBIDDEN",
+				})
+				return
+			}
+			scope.AllTenants = true
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":  "findings are per tenant: give client_id=<tenant>, or scope=all for every tenant (operator only)",
+				"reason": "FINDINGS_SCOPE_REQUIRED",
+			})
+			return
+		}
+		result, err := orch.RecordedFindings(r.Context(), scope)
 		if err != nil {
 			writeUpstreamError(w, "GET /revenue-recovery/findings", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
-	}))
-
-	return mux
+	}
 }
 
 func main() {

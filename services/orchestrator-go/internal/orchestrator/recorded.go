@@ -133,10 +133,44 @@ const (
 	ScanStatusUnsupportedFormat = "unsupported_format"
 )
 
+// FindingsScope selects whose findings RecordedFindings returns (AEGIS A2
+// M-1, ADR 0021). Exactly one of ClientID or AllTenants must be set; the
+// zero value is refused, so no caller gets every tenant by omission.
+// AllTenants is the operator's view (the dashboard, Andre only): the HTTP
+// layer grants it only to the operator credential.
+type FindingsScope struct {
+	ClientID   string
+	AllTenants bool
+}
+
+// ErrInvalidScope: a FindingsScope that names neither or both of a tenant
+// and every tenant, or a client id outside ValidClientID.
+var ErrInvalidScope = errors.New("findings scope must name exactly one valid client_id, or all tenants")
+
+func (s FindingsScope) check() error {
+	if s.AllTenants == (s.ClientID != "") || (!s.AllTenants && !ValidClientID(s.ClientID)) {
+		return ErrInvalidScope
+	}
+	return nil
+}
+
+// Values of RecordedFindingsResult.Scope.
+const (
+	FindingsScopeClient     = "client"
+	FindingsScopeAllTenants = "all_tenants"
+)
+
 // RecordedFindingsResult is the read-only view served by
 // GET /revenue-recovery/findings.
 type RecordedFindingsResult struct {
-	Findings []RecordedFinding `json:"findings"`
+	// Scope (ADR 0021): "client" — every per-tenant field below holds only
+	// ScopeClientID's scans, findings and claims, and legacy (tenant-less)
+	// findings are omitted; "all_tenants" — every tenant (operator only).
+	// The ledger-wide fields (ledger_entries_total, ledger_total_source,
+	// ledger_entries_read, ledger_verify) describe the whole ledger in both.
+	Scope         string            `json:"scope"`
+	ScopeClientID *string           `json:"scope_client_id"`
+	Findings      []RecordedFinding `json:"findings"`
 	// Entities ("client_id|entity_type|entity_id") claimed by MORE THAN ONE
 	// distinct agent (Decision 3 / Failure Mode #2) among the distinct
 	// recorded findings. The same agent re-recording a finding on a later
@@ -392,7 +426,67 @@ func sameAmount(a, b *client.Money) bool {
 // A verify verdict of valid=false is returned to the caller, not turned into
 // an error: the caller must be able to SEE that the chain failed
 // verification. A failed request to the ledger is an error.
-func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsResult, error) {
+//
+// scope (ADR 0021) is checked before the ledger is read. Every scan is
+// validated and every per-client rule (latest scan, backdating, N1) is
+// applied over the whole ledger exactly as before — each is already per
+// client — and only then is the result narrowed to the scope's tenant, so a
+// tenant's view is the same rows the operator's view shows for that tenant.
+func (o *Orchestrator) RecordedFindings(ctx context.Context, scope FindingsScope) (*RecordedFindingsResult, error) {
+	if err := scope.check(); err != nil {
+		return nil, err
+	}
+	res, err := o.recordedFindingsAllTenants(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if scope.AllTenants {
+		res.Scope = FindingsScopeAllTenants
+		return res, nil
+	}
+	return res.forClient(scope.ClientID), nil
+}
+
+// forClient narrows an all-tenants result to one tenant. Legacy findings
+// carry no tenant, so a tenant's view never includes them.
+func (r *RecordedFindingsResult) forClient(id string) *RecordedFindingsResult {
+	out := *r
+	out.Scope, out.ScopeClientID = FindingsScopeClient, &id
+	out.Findings = []RecordedFinding{}
+	for _, f := range r.Findings {
+		if f.ClientID == id {
+			out.Findings = append(out.Findings, f)
+		}
+	}
+	out.OverlappingClaims = map[string][]RecordedFinding{}
+	for k, fs := range r.OverlappingClaims {
+		if len(fs) > 0 && fs[0].ClientID == id {
+			out.OverlappingClaims[k] = fs
+		}
+	}
+	out.Scans, out.FindingEntriesTotal = []ScanSummary{}, 0
+	for _, s := range r.Scans {
+		if s.ClientID == id {
+			out.Scans = append(out.Scans, s)
+			out.FindingEntriesTotal += s.Findings
+		}
+	}
+	out.ExcludedScans = []ExcludedScan{}
+	for _, s := range r.ExcludedScans {
+		if s.ClientID == id {
+			out.ExcludedScans = append(out.ExcludedScans, s)
+		}
+	}
+	out.LatestScanUncounted = map[string]string{}
+	if v, ok := r.LatestScanUncounted[id]; ok {
+		out.LatestScanUncounted[id] = v
+	}
+	out.LegacyFindingEntriesIgnored, out.LegacyFindings = 0, []client.LegacyFindingEntry{}
+	out.NonLiveDataSource = nonLive(out.Scans)
+	return &out
+}
+
+func (o *Orchestrator) recordedFindingsAllTenants(ctx context.Context) (*RecordedFindingsResult, error) {
 	fold := &ledgerFold{scans: map[string]*scanEvents{}, legacyRows: []client.LegacyFindingEntry{}}
 	if err := o.entryPages(ctx, fold.add); err != nil {
 		return nil, stepErr("ledger entries", err)

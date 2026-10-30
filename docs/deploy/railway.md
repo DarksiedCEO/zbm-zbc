@@ -553,8 +553,9 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
       `curl -sS http://127.0.0.1:18500/health` → 200 `{"status":"ok"}`, then close it.
 - [ ] `curl -sS https://$ORCH/health` → 200 `{"status":"ok","service":"orchestrator-go"}`.
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' https://$ORCH/revenue-recovery/findings` → `401` (no token).
-- [ ] `curl -sS -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" https://$ORCH/revenue-recovery/findings` → 200,
-      `"ledger_verify": {"valid": true, ...}`.
+- [ ] `curl -sS -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" "https://$ORCH/revenue-recovery/findings?scope=all"`
+      → 200, `"scope": "all_tenants"`, `"ledger_verify": {"valid": true, ...}`. Without `?scope=all` or `?client_id=`
+      the answer is `400` `"reason":"FINDINGS_SCOPE_REQUIRED"` (ADR 0021).
 - [ ] `curl -sS -X POST -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" https://$ORCH/revenue-recovery/scan` →
       `403` with `"reason":"FIXTURE_SCAN_DISABLED"` (a fixture scan is refused before anything is written; any other
       answer means `ORCHESTRATOR_ALLOW_FIXTURE_SCANS` is set: remove it and redeploy). Never run a scan with a
