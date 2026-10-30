@@ -11,7 +11,7 @@
 // (`finance.env.FIN_SERVICE_TOKEN`), or interpolated with Railway's `${{service.VARIABLE}}` syntax inside a JSON map.
 // Never use ctx.randomString for a secret: it is a hash of the environment name and a label, not random.
 import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
-import type { ServiceNode, VolumeMount } from "railway/iac";
+import type { ServiceNode, VolumeConfig, VolumeMount } from "railway/iac";
 
 const REPO = "DarksiedCEO/zbm-zbc";
 const BRANCH = "main"; // the branch Railway deploys from
@@ -48,6 +48,9 @@ const deploy = (healthcheckPath: string, withVolume: boolean) => ({
 // takes no schedule there, so it is set on the attachment it built; a service passed here without a volume
 // attachment fails the evaluation rather than silently having no backup.
 const DAILY_BACKUPS: VolumeMount["backupSchedules"] = ["DAILY"];
+
+// The live data volumes as deployed (railway config plan, 2026-10-27). Changing either is a destructive volume change.
+const VOLUME_AS_DEPLOYED: VolumeConfig = { region: "us-west2", sizeMB: 5000 };
 const withDailyBackups = <T extends ServiceNode>(svc: T): T => {
   const attachments = Object.values(svc.volumeAttachments ?? {});
   if (attachments.length === 0) throw new Error(`${svc.name}: no volume attachment to give a backup schedule`);
@@ -59,11 +62,12 @@ const PRIVATE = (name: string, port: number) => `http://${name}.railway.internal
 
 export default defineRailway(() => {
   // One volume per stateful service, mounted at /data (each service keeps its state in its own subdirectory).
-  // Size: the plan's default (shrinking a volume is destructive, so it is not set lower here).
-  const ledgerData = volume("ledger-data");
-  const legalData = volume("legal-data");
-  const financeData = volume("finance-data");
-  const seoData = volume("seo-data");
+  // Region and size state exactly what is deployed: left unset, `railway config plan` showed region "us-west2" -> null
+  // and sizeMB 5000 -> null on all four as destructive changes. Never set sizeMB lower (shrinking is destructive).
+  const ledgerData = volume("ledger-data", VOLUME_AS_DEPLOYED);
+  const legalData = volume("legal-data", VOLUME_AS_DEPLOYED);
+  const financeData = volume("finance-data", VOLUME_AS_DEPLOYED);
+  const seoData = volume("seo-data", VOLUME_AS_DEPLOYED);
 
   // ------------------------------------------------------------------------------------------------ ledger (first)
   const ledger = withDailyBackups(service("ledger", {
@@ -89,6 +93,10 @@ export default defineRailway(() => {
       PORT: "8000",
       DETECTION_BIND_ADDR: "::",
       ZBM_SERVICE_TOKEN: preserve(),
+      // Revenue Recovery store kill switches (runbook env table): set by hand to stop store reads; declared so a later
+      // apply cannot release them. Unset/empty = off.
+      RR_STORE_READS_DISABLED: preserve(),
+      RR_STORE_KILL_SWITCH_FILE: preserve(),
     },
   });
 
@@ -195,6 +203,21 @@ export default defineRailway(() => {
       SEO_FINANCE_URL: PRIVATE("finance", 8410),
       SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       SEO_FINANCE_CALLER_TOKEN: preserve(),
+      // Set by hand in the dashboard (runbook, Secrets table): declared so a later apply cannot delete them. Unset or
+      // 0 keeps the engine NOT_CONNECTED / OFF, exactly as before (seo-py config, ADR 0017 W4).
+      SEO_PERPLEXITY_API_KEY: preserve(),
+      SEO_PERPLEXITY_DAILY_CALLS: preserve(),
+      SEO_PERPLEXITY_DAILY_SPEND_USD: preserve(),
+      SEO_PERPLEXITY_TENANT_DAILY_CALLS: preserve(),
+      SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD: preserve(),
+      // Operator settings changed by hand during an incident (ADR 0017 W4-8 rollback; sticky kill switches): declared so
+      // a later apply cannot silently undo them. Unset/empty = the documented default.
+      SEO_PERPLEXITY_PROTOCOL: preserve(),
+      SEO_PERPLEXITY_MODEL: preserve(),
+      SEO_PERPLEXITY_RESERVE_USD_PER_CALL: preserve(),
+      SEO_KILL_GLOBAL: preserve(),
+      SEO_KILLED_CAPABILITIES: preserve(),
+      SEO_KILLED_PROVIDERS: preserve(),
     },
   }));
 
