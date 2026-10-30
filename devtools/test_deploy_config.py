@@ -180,7 +180,8 @@ class Dockerfiles(unittest.TestCase):
         self.assertTrue(ENTRY.stat().st_mode & 0o111, "deploy/docker/zbm-entrypoint.sh must be executable")
 
 
-REF = re.compile(r"\$\{\{[a-z][a-z0-9-]*\.[A-Z][A-Z0-9_]*\}\}")
+# `${{service.VARIABLE}}` (another service's variable) or `${{VARIABLE}}` (the same service's; docs.railway.com/variables)
+REF = re.compile(r"\$\{\{(?:[a-z][a-z0-9-]*\.)?[A-Z][A-Z0-9_]*\}\}")
 
 
 def secret_value_ok(value: str) -> bool:
@@ -297,15 +298,55 @@ class RailwayIac(unittest.TestCase):
     def test_the_secret_check_refuses_a_literal_inside_a_reference_map(self):
         q = lambda body: "'" + body + "'"   # noqa: E731  the map as it appears in railway.ts, single-quoted
         good = ["preserve()", "finance.env.FIN_SERVICE_TOKEN",
-                q('{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_X}}"}')]
+                q('{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_X}}"}'),
+                q('{"finance_31": "${{finance.FIN_X}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}"}')]
         bad = [q('{"a": "${{x.Y}}", "b": "a-literal-secret-value"}'), q('{"a": "prefix-${{x.Y}}"}'),
                q('{"a": "${{x.Y}}${{x.Z}}"}'), q("{}"), q('{"a": "${{x.Y}}", "b": {"c": "literal"}}'),
                q("{... ${{x.Y}} ...}"), '"a-literal-secret"', "ctx.randomString('x')",
-               q('{"a": "${{x.Y}}"}') + " + secret"]
+               q('{"a": "${{x.Y}}"}') + " + secret", q('{"a": "${{lower_case}}"}'), q('{"a": "${{ Y }}"}')]
         for v in good:
             self.assertTrue(secret_value_ok(v), v)
         for v in bad:
             self.assertFalse(secret_value_ok(v), v)
+
+
+    def _caller_map(self, svc: str, name: str) -> dict:
+        m = re.search(rf"^\s+{name}:\s*'(\{{[^']*\}})',", self.blocks[svc], re.M)
+        self.assertIsNotNone(m, f"{name} on {svc} is not a single-quoted JSON map literal")
+        return json.loads(m.group(1))   # the services' parsers need a JSON object (a ValueError fails the test)
+
+    def test_caller_maps_resolve_and_use_only_names_the_service_accepts(self):
+        # A map entry whose reference points nowhere would reach the service as the literal "${{...}}" text, and a
+        # name outside the service's CALLER_NAMES makes it refuse to start (config._tokens). Each reference must name
+        # a variable declared in the service it points at (the same service for `${{VARIABLE}}`).
+        maps = {"finance": ("FIN_CALLER_TOKENS", "services/finance-py/src/config.py"),
+                "legal": ("LEGAL_CALLER_TOKENS", "services/legal-py/src/config.py")}
+        for svc, (name, config_py) in maps.items():
+            tree = ast.parse((REPO / config_py).read_text())
+            accepted = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                            and any(getattr(t, "id", None) == "CALLER_NAMES" for t in n.targets))
+            mapping = self._caller_map(svc, name)
+            refs = list(mapping.values())
+            self.assertEqual(len(set(refs)), len(refs), f"{name}: two callers would share one token (refused)")
+            for caller, ref in mapping.items():
+                with self.subTest(service=svc, caller=caller):
+                    self.assertIn(caller, accepted, f"{svc} refuses to start on caller name {caller!r}")
+                    target, _, var = ref[3:-2].rpartition(".")
+                    target = target or svc
+                    self.assertIn(target, self.blocks, f"{ref}: no Railway service {target!r}")
+                    self.assertTrue(self._declared_preserved(target, var), f"{ref}: {var} is not preserve() on {target}")
+
+    def test_onboarding_caller_is_wired_with_one_operator_held_token_per_service(self):
+        # AEGIS A1 C1: POST /fin/v1/invoices needs `onboarding` (or `scheduler`) and POST /legal/v1/acceptances needs
+        # `onboarding` (or hub / clipper_network); without them no invoice can be drafted on Railway. Until an
+        # onboarding service exists Andre holds the two tokens; each lives on the service that checks it.
+        for svc, name, var in (("finance", "FIN_CALLER_TOKENS", "FIN_ONBOARDING_CALLER_TOKEN"),
+                               ("legal", "LEGAL_CALLER_TOKENS", "LEGAL_ONBOARDING_CALLER_TOKEN")):
+            with self.subTest(service=svc):
+                self.assertEqual(self._caller_map(svc, name).get("onboarding"), "${{" + var + "}}")
+                self.assertTrue(self._declared_preserved(svc, var), f"{var} is not preserve() on {svc}")
+        self.assertNotIn("scheduler", self._caller_map("finance", "FIN_CALLER_TOKENS"),
+                         "scheduler reaches payout runs, releases, refunds and sweeps: not for a hand-held token")
 
 
 class CiAndSmoke(unittest.TestCase):

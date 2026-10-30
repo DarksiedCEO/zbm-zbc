@@ -115,7 +115,11 @@ export default defineRailway(() => {
       LEDGER_SERVICE_TOKEN: preserve(), // legal's own ledger caller token
       LEGAL_SERVICE_TOKEN: preserve(),
       LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
-      LEGAL_CALLER_TOKENS: '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}"}',
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (records a client's clickwrap
+      // acceptance, POST /legal/v1/acceptances); `${{VARIABLE}}` is Railway's same-service reference
+      LEGAL_CALLER_TOKENS:
+        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}"}',
+      LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
     },
   }));
 
@@ -134,8 +138,11 @@ export default defineRailway(() => {
       LEDGER_SERVICE_TOKEN: preserve(), // finance's own ledger caller token
       FIN_SERVICE_TOKEN: preserve(),
       FIN_ANDRE_APPROVAL_TOKEN: preserve(),
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (drafts invoices,
+      // POST /fin/v1/invoices); `${{VARIABLE}}` is Railway's same-service reference
       FIN_CALLER_TOKENS:
-        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}"}',
+        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}"}',
+      FIN_ONBOARDING_CALLER_TOKEN: preserve(),
       FIN_LEGAL_URL: PRIVATE("legal", 8420),
       FIN_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
       FIN_LEGAL_CALLER_TOKEN: preserve(),
