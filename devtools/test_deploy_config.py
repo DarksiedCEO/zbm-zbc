@@ -324,11 +324,24 @@ class RailwayIac(unittest.TestCase):
                     "SEO_KILL_GLOBAL", "SEO_KILLED_CAPABILITIES", "SEO_KILLED_PROVIDERS"),
             "finance": ("FIN_STRIPE_SUCCESS_URL", "FIN_STRIPE_CANCEL_URL"),
             "detection": ("RR_STORE_READS_DISABLED", "RR_STORE_KILL_SWITCH_FILE"),
+            # ADR 0023: public edge overrides, kill switch and limits
+            "stripe-gateway": ("STRIPE_GATEWAY_ALLOWED_IPS", "STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED",
+                               "STRIPE_GATEWAY_RATE_PER_MIN", "STRIPE_GATEWAY_RATE_BURST"),
+            "orchestrator": ("ORCHESTRATOR_RATE_PER_MIN", "ORCHESTRATOR_RATE_BURST", "ORCHESTRATOR_AUTH_FAIL_MAX",
+                             "ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS"),
         }
         for svc, names in hand_set.items():
             for name in names:
                 with self.subTest(service=svc, variable=name):
                     self.assertTrue(self._declared_preserved(svc, name), f"{name} is not preserve() on {svc}")
+
+    def test_public_services_take_the_client_address_from_railways_edge(self):
+        # ADR 0023: behind Railway's edge the TCP peer is the edge itself; remote-addr there would put every client in
+        # one bucket and refuse every Stripe delivery. The IaC pins the edge header on both public services.
+        for svc, name in (("orchestrator", "ORCHESTRATOR_CLIENT_IP_SOURCE"),
+                          ("stripe-gateway", "STRIPE_GATEWAY_CLIENT_IP_SOURCE")):
+            with self.subTest(service=svc):
+                self.assertRegex(self.blocks[svc], rf'(?m)^\s+{name}:\s*"x-real-ip",')
 
     def test_the_preserve_check_ignores_comments(self):
         saved = self.blocks
