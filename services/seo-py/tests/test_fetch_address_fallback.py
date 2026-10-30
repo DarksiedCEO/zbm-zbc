@@ -289,6 +289,10 @@ class _RawListener:
                 self._held.append(conn)
 
     def close(self):
+        try:  # wake the blocked accept() so the thread ends now (AEGIS follow-up L-1)
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self.sock.close()
         self._thread.join(2)
         for c in self._held:
