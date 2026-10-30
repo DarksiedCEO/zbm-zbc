@@ -282,3 +282,72 @@ def test_hr07_text_names_every_region_it_refuses():
             assert f"{code}" in hr07["obligation"], code
     for name in ("Cuba", "Iran", "North Korea", "Crimea", "Sevastopol", "DNR/LNR", "Zaporizhzhia", "Kherson"):
         assert name in hr07["obligation"], name
+
+
+# --- F-4 (coordinator decision): a dead thread exits the process; stale controls never do ----------------------------
+
+class _Fatal(BaseException):
+    """Something no `except Exception` catches (the only way the loop can still end)."""
+
+
+def test_a_dead_scheduler_thread_exits_the_process_non_zero(monkeypatch):
+    import threading
+
+    import scheduler
+    h = harness()
+    lines: list[str] = []
+    exited = threading.Event()
+    codes: list[int] = []
+
+    def on_dead(code):
+        codes.append(code)
+        exited.set()
+
+    s = scheduler.Scheduler(h.svc, interval_s=21600, watcher=False, clock=h.clock, out=lines.append,
+                            on_thread_death=on_dead)
+    monkeypatch.setattr(s, "tick", lambda: (_ for _ in ()).throw(_Fatal("boom")))
+    s.start()
+    assert exited.wait(5), lines
+    assert codes == [1]
+    assert any("scheduler thread stopped unexpectedly" in x and "_Fatal" in x for x in lines), lines
+
+
+def test_a_stopped_scheduler_does_not_exit_the_process(monkeypatch):
+    import scheduler
+    h = harness()
+    codes: list[int] = []
+    monkeypatch.setattr(scheduler, "TICK_S", 0.01)
+    s = scheduler.Scheduler(h.svc, interval_s=21600, watcher=False, clock=h.clock, out=lambda _x: None,
+                            on_thread_death=codes.append)
+    s.start()
+    s.stop()
+    s._thread.join(5)
+    assert not s.alive() and codes == []
+
+
+def test_stale_controls_never_exit_the_process_they_turn_health_503(monkeypatch):
+    """Ledger down: controls fail on every tick. No restart loop: the thread stays up, /health is 503, C-11 closes gates."""
+    import threading
+    from datetime import timedelta
+
+    import scheduler
+    h = harness()
+    codes: list[int] = []
+    monkeypatch.setattr(scheduler, "TICK_S", 0.01)
+    h.svc.run_internal_controls = lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("ledger down"))
+    s = scheduler.Scheduler(h.svc, interval_s=21600, watcher=False, clock=h.clock, out=lambda _x: None,
+                            on_thread_death=codes.append)
+    h.svc.scheduler = s
+    s.start()
+    try:
+        h.clock.at = h.clock.at + timedelta(hours=12, seconds=1)
+        ok = threading.Event()
+        for _ in range(500):
+            if s.last_error and s.last_error["where"] == "controls" and h.client.get("/health").status_code == 503:
+                ok.set()
+                break
+            threading.Event().wait(0.01)
+        assert ok.is_set()
+        assert s.alive() and codes == []
+    finally:
+        s.stop()

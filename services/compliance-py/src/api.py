@@ -593,8 +593,11 @@ def main() -> None:
     for line in readiness_mod.summary_lines(svc.readiness()):
         print(line, flush=True)
     if settings.scheduler_enabled:
+        # AEGIS F-4: a dead scheduler thread ends the process non-zero (Railway ON_FAILURE restarts it); os._exit,
+        # because sys.exit in a thread ends only that thread
         svc.scheduler = scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s,
-                                            watcher=settings.watcher_enabled, clock=svc.clock).start()
+                                            watcher=settings.watcher_enabled, clock=svc.clock,
+                                            on_thread_death=os._exit).start()
     host = os.environ.get("COMPLIANCE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("COMPLIANCE_PORT", "8380"))
     serve.run(app, host=host, port=port)

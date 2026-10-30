@@ -20,7 +20,7 @@ the check.
 | `node:dashboard-ts` | 54 | node --test | — |
 | `python:bizdev-py` | 358 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
-| `python:compliance-py` | 729 | pytest collection | — |
+| `python:compliance-py` | 732 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 736 | pytest collection | — |
 | `python:detection-py` | 845 | pytest collection | — |
