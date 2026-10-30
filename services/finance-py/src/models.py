@@ -501,6 +501,13 @@ class BreakResolution(Strict):
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)
 
 
+class ComplianceHoldRelease(Strict):
+    """AEGIS r4 R4-2: release a payment held by Compliance: by its refund (the F7r entry) or a current ALLOW."""
+    request_id: Id
+    basis: Literal["refund", "compliance_allow"]
+    entry_id: Optional[Id] = None
+
+
 class RefundRepay(Strict):
     """Andre pays a refund again after its payment was settled ``not_moved`` (AEGIS c0869c4 H-N1)."""
     request_id: Id

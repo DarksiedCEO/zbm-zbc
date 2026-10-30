@@ -229,3 +229,20 @@ def test_the_status_route_shows_compliance(tmp_path, srv):
     st = h.ok(h.get("/status"))
     assert "compliance" in json.dumps(st)
     assert isinstance(h.ports.compliance, PassingCompliance)
+
+
+# --- AEGIS r4 (ADR 0024): Finance's invoice status says when a paid invoice is held by Compliance -----------------------
+
+def test_a_paid_invoice_held_by_compliance_never_releases_a_run():
+    import finance_client as fc
+    from test_invoice_verification import CLIENT, finance_invoice, invoice_id
+    iid = invoice_id(7)
+    assert fc.assess(fc.parse_invoice(finance_invoice(iid, held=True), iid), CLIENT) == "INVOICE_HELD"
+    assert fc.assess(fc.parse_invoice(finance_invoice(iid, held=False), iid), CLIENT) == fc.PAID
+    assert fc.assess(fc.parse_invoice(finance_invoice(iid), iid), CLIENT) == fc.PAID      # an older Finance: no field
+    assert "INVOICE_HELD" in fc.DEFINITIVE
+    for bad in ("yes", 1, None):
+        with pytest.raises(fc.FinanceLookupError):
+            fc.parse_invoice(finance_invoice(iid, held=bad), iid)
+    with pytest.raises(fc.FinanceLookupError):
+        fc.parse_invoice(finance_invoice(iid, something_else=True), iid)
