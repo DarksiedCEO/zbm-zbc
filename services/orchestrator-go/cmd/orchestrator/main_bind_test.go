@@ -89,6 +89,9 @@ func buildOrchestratorBinary(t *testing.T) string {
 // C2-1): the kernel picks the port, the child writes the port it bound, and the harness trusts that port only while
 // ITS child is alive — no pick-close-then-bind race, no fixed range, and a server some other run left on a port can
 // never be the one under test. The child is killed and reaped in t.Cleanup.
+// bindTestOrchToken passes the start-up token hygiene (ADR 0023): >= 32 characters, >= 10 different ones.
+var bindTestOrchToken = "bind-test-orchestrator-" + strings.Repeat("abcdefghij", 2)
+
 func startOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (port string, waitForExit func()) {
 	t.Helper()
 	port, err := tryStartOrchestrator(t, bindAddr, extraEnv...)
@@ -106,7 +109,7 @@ func tryStartOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (st
 	cmd := exec.Command(binPath)
 	cmd.Env = append(os.Environ(),
 		"DETECTION_SERVICE_TOKEN=test-detection-token",
-		"ORCHESTRATOR_SERVICE_TOKEN=test-orchestrator-token",
+		"ORCHESTRATOR_SERVICE_TOKEN="+bindTestOrchToken,
 		"LEDGER_SERVICE_TOKEN=test-ledger-token",
 		"ORCHESTRATOR_PORT=0",
 		"ORCHESTRATOR_PORT_FILE="+portFile,
@@ -242,7 +245,7 @@ func TestPortFileNamesTheBoundPortAndIsRemovedOnSIGTERM(t *testing.T) {
 	binPath := buildOrchestratorBinary(t)
 	portFile := filepath.Join(t.TempDir(), "o.port")
 	cmd := exec.Command(binPath)
-	cmd.Env = append(os.Environ(), "DETECTION_SERVICE_TOKEN=d", "ORCHESTRATOR_SERVICE_TOKEN=o", "LEDGER_SERVICE_TOKEN=l",
+	cmd.Env = append(os.Environ(), "DETECTION_SERVICE_TOKEN=d", "ORCHESTRATOR_SERVICE_TOKEN="+bindTestOrchToken, "LEDGER_SERVICE_TOKEN=l",
 		"ORCHESTRATOR_PORT=0", "ORCHESTRATOR_PORT_FILE="+portFile)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

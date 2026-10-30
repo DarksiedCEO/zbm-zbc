@@ -346,6 +346,13 @@ func main() {
 				"dashboard) must present to reach /revenue-recovery/scan and /revenue-recovery/findings.",
 		)
 	}
+	// ADR 0023: the token guards a public domain, so it must be a real secret, not a placeholder.
+	if err := checkInboundToken(orchestratorToken, detectionToken, os.Getenv("LEDGER_SERVICE_TOKEN")); err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
+	if err := checkRef("DETECTION_SERVICE_TOKEN", detectionToken); err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
 	// Independent review, Sep 22 2026 (CONFIRMED): ledger-rust had zero
 	// authentication and has now been fixed to fail closed on its own
 	// LEDGER_SERVICE_TOKEN. This process must present that same token on
@@ -359,6 +366,9 @@ func main() {
 				"without it (fail closed, not open) — ledger-rust requires this exact " +
 				"value, or every ledger write/read will fail with 401.",
 		)
+	}
+	if err := checkRef("LEDGER_SERVICE_TOKEN", ledgerToken); err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
 	}
 
 	allowFixtureScans, err := fixtureScansFromEnv(os.Getenv("ORCHESTRATOR_ALLOW_FIXTURE_SCANS"))
@@ -393,6 +403,70 @@ func main() {
 	}
 	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, bound, detectionURL, ledgerURL)
 	log.Fatal(srv.Serve(ln))
+}
+
+// Token hygiene (ADR 0023; AEGIS A2 M-2). The orchestrator's bearer is the only thing between its public domain and
+// the Revenue Recovery routes, so at start-up it must be: at least minTokenLen printable ASCII characters (the runbook
+// makes it with `openssl rand -hex 32`, 64 characters), at least minDistinctChars different characters, not a
+// placeholder, not an unresolved Railway reference, and different from the two tokens this process SENDS upstream
+// (a compromised upstream must not learn the inbound token). The value never appears in a message.
+const (
+	minTokenLen      = 32
+	minDistinctChars = 10
+)
+
+// unresolvedRefMarkers: a Railway variable reference that did not resolve reaches the process as its literal text,
+// e.g. "${{FIN_ONBOARDING_CALLER_TOKEN}}" (finance-py config._check_ref, AEGIS night review M-2).
+var unresolvedRefMarkers = []string{"${{", "{{", "}}"}
+
+// placeholderWords: text a human types into a token field instead of a generated secret.
+var placeholderWords = []string{"changeme", "change-me", "change_me", "placeholder", "replaceme", "replace-me",
+	"replace_me", "your-token", "your_token", "yourtoken", "example", "dummy", "openssl", "<", ">"}
+
+// checkRef refuses a value holding an unresolved Railway reference (names the setting only).
+func checkRef(name, v string) error {
+	for _, m := range unresolvedRefMarkers {
+		if strings.Contains(v, m) {
+			return fmt.Errorf("%s holds an unresolved Railway reference (a '${{...}}' placeholder), not a token: "+
+				"set the referenced variable in Railway, then redeploy", name)
+		}
+	}
+	return nil
+}
+
+// checkInboundToken applies every rule above to ORCHESTRATOR_SERVICE_TOKEN.
+func checkInboundToken(tok string, outbound ...string) error {
+	const name = "ORCHESTRATOR_SERVICE_TOKEN"
+	if err := checkRef(name, tok); err != nil {
+		return err
+	}
+	if len(tok) < minTokenLen {
+		return fmt.Errorf("%s must be at least %d characters (make it with `openssl rand -hex 32`)", name, minTokenLen)
+	}
+	distinct := map[rune]bool{}
+	for _, r := range tok {
+		if r < 0x21 || r > 0x7e {
+			return fmt.Errorf("%s must be printable ASCII without spaces", name)
+		}
+		distinct[r] = true
+	}
+	if len(distinct) < minDistinctChars {
+		return fmt.Errorf("%s has fewer than %d different characters: not a generated secret (`openssl rand -hex "+
+			"32`)", name, minDistinctChars)
+	}
+	low := strings.ToLower(tok)
+	for _, w := range placeholderWords {
+		if strings.Contains(low, w) {
+			return fmt.Errorf("%s looks like a placeholder, not a generated secret (`openssl rand -hex 32`)", name)
+		}
+	}
+	for _, o := range outbound {
+		if o != "" && subtle.ConstantTimeCompare([]byte(o), []byte(tok)) == 1 {
+			return fmt.Errorf("%s must differ from DETECTION_SERVICE_TOKEN and LEDGER_SERVICE_TOKEN (tokens this "+
+				"process sends upstream)", name)
+		}
+	}
+	return nil
 }
 
 // fixtureScansFromEnv reads ORCHESTRATOR_ALLOW_FIXTURE_SCANS: unset, empty or

@@ -140,7 +140,7 @@ func TestRealBinaryDefaultRefusesWithoutXRealIP(t *testing.T) {
 	port, _ := startOrchestrator(t, "", "LEDGER_SERVICE_URL="+ledger.URL, "DETECTION_SERVICE_URL="+deadURL(t),
 		"ORCHESTRATOR_CLIENT_IP_SOURCE=")
 	base := "http://127.0.0.1:" + port
-	if r := call(t, "GET", base+"/revenue-recovery/findings", "test-orchestrator-token", ""); r.StatusCode != 403 {
+	if r := call(t, "GET", base+"/revenue-recovery/findings", bindTestOrchToken, ""); r.StatusCode != 403 {
 		t.Fatalf("no X-Real-IP: %d", r.StatusCode)
 	}
 	if r := call(t, "GET", base+"/health", "", ""); r.StatusCode != 200 {
