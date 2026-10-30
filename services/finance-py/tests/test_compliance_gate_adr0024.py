@@ -286,3 +286,84 @@ def test_territories_without_a_verified_threshold_get_a_check_not_a_number():
         assert j["threshold"] is None and j["trailing_12_months"]["sales_ratio"] is None
         assert j["flagged"] is True and j["flag_reasons"] == ["local gross receipts/business tax - check before first client"]
     assert sorted(r["flagged"]) == ["AS", "VI"]
+
+
+# --- AEGIS F-5: a page already open stops being payable when the activation lapses -----------------------------------
+
+def _stripe_hr(tmp_path):
+    """The Stripe-incoming harness (real adapter, simulated Stripe) of test_stripe_incoming, with card prepayments."""
+    import os
+
+    from test_stripe_incoming import make
+
+    def secret(name, value):
+        p = tmp_path / name
+        p.write_text(value + "\n")
+        os.chmod(p, 0o600)
+        return str(p)
+    from stripe_sim import TEST_KEY, TEST_WHSEC
+    from test_stripe_incoming import CANCEL, SUCCESS
+    return make({"FIN_STRIPE_INCOMING": "1", "FIN_STRIPE_SECRET_KEY_FILE": secret("sk", TEST_KEY),
+                 "FIN_STRIPE_WEBHOOK_SECRET_FILE": secret("wh", TEST_WHSEC),
+                 "FIN_STRIPE_SUCCESS_URL": SUCCESS, "FIN_STRIPE_CANCEL_URL": CANCEL}, FIN_CARD_PREPAYMENTS="1")
+
+
+def test_an_ofac_hit_after_the_page_is_made_closes_it_and_no_replay_hands_it_back(tmp_path):
+    from test_stripe_incoming import rr_invoice
+    hr = _stripe_hr(tmp_path)
+    inv = rr_invoice(hr)
+    other = rr_invoice(hr, "300.00")                       # a second open page of the same client
+    req = {"request_id": rid()}
+    cs = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", req, caller="onboarding"))["checkout"]
+    cs2 = hr.ok(hr.post(f"/fin/v1/invoices/{other['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                        caller="onboarding"))["checkout"]
+    assert hr.sim.sessions[cs["session_id"]]["status"] == "open"
+    # Andre records an OFAC potential match: Compliance now answers REFUSE for this client
+    hr.f["compliance"].activations = {"zbm-client-7": {"allowed": False, "jurisdiction": "US-CA",
+                                                       "reasons": ["hold open: sanctions_match (hold-x)"]}}
+    # the SAME request (idempotent replay) is gated first: refused, never the cached page
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", req, caller="onboarding")
+    assert r.status_code == 409 and "COMPLIANCE_NOT_ACTIVATED" in r.text, r.text
+    # every open page of the client is closed at Stripe and recorded expired here
+    for sid in (cs["session_id"], cs2["session_id"]):
+        assert hr.sim.sessions[sid]["status"] == "expired", sid
+        assert hr.svc.db["stripe_sessions"][sid]["status"] == "expired", sid
+    # a new request is refused too, and the client cannot pay on the closed page
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()}, caller="onboarding")
+    assert r.status_code == 409 and "COMPLIANCE_NOT_ACTIVATED" in r.text
+    with pytest.raises(Exception):
+        hr.sim.pay(cs["session_id"])
+
+
+def test_compliance_unreachable_on_replay_refuses_without_closing_pages(tmp_path):
+    """Unknown is not REFUSE: the page is not handed back, but nothing is closed on an outage."""
+    from test_stripe_incoming import rr_invoice
+    hr = _stripe_hr(tmp_path)
+    inv = rr_invoice(hr)
+    req = {"request_id": rid()}
+    cs = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", req, caller="onboarding"))["checkout"]
+    hr.f["compliance"].activation_available = False
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", req, caller="onboarding")
+    assert r.status_code == 409 and "DEPENDENCY_UNAVAILABLE:compliance_38" in r.text
+    assert hr.sim.sessions[cs["session_id"]]["status"] == "open"
+
+
+def test_the_hourly_stripe_sessions_job_closes_pages_of_clients_no_longer_allowed(tmp_path):
+    from test_stripe_incoming import rr_invoice
+    hr = _stripe_hr(tmp_path)
+    inv = rr_invoice(hr)
+    cs = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                       caller="onboarding"))["checkout"]
+    run = lambda: hr.ok(hr.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))
+    assert run()["summary"]["closed"] == 0                       # still ALLOW: the page stays
+    hr.f["compliance"].activation_available = False              # an outage is not a REFUSE: nothing is closed
+    s = run()["summary"]
+    assert s["closed"] == 0 and s["activation_unknown"] == 1
+    assert hr.sim.sessions[cs["session_id"]]["status"] == "open"
+    hr.f["compliance"].activation_available = True
+    hr.f["compliance"].activations = {"zbm-client-7": {"allowed": False, "reasons": ["jurisdiction US-CA is refuse"]}}
+    s = run()["summary"]
+    assert s["closed"] == 1 and s["refused_clients"] == 1, s
+    assert hr.sim.sessions[cs["session_id"]]["status"] == "expired"
+    assert hr.svc.db["stripe_sessions"][cs["session_id"]]["status"] == "expired"
+

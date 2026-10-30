@@ -148,21 +148,56 @@ class StripeMixin:
         return g.call("stripe", "expire_session", (session_id,), lambda: port.expire_session(session_id),
                       StripeSession(False))
 
+    def _close_client_pages(self, g: Gather, op_id: str, client_id: str) -> list[str]:
+        """AEGIS F-5: Compliance answered REFUSE for this client, so no page of theirs may stay payable: every open
+        page of every invoice of the client is expired at Stripe and recorded expired here. A page Stripe does not
+        confirm closed is left as it is (and reported); a page already paid on stays for the webhook to book."""
+        with self.lock:
+            invs = {i for i, inv in self.db["invoices"].items() if inv.get("client_id") == client_id}
+            open_ = [dict(s) for s in self.db["stripe_sessions"].values()
+                     if s["invoice_id"] in invs and s["status"] == "open"]
+        closed, not_closed = [], []
+        for s in sorted(open_, key=lambda x: x["session_id"]):
+            a = self._expire_page(g, s["session_id"])
+            (closed if a.available and a.found and a.status == "expired" else not_closed).append(s["session_id"])
+        if closed:
+            with self.lock:
+                op = Op(self, op_id, ACTOR, client_id, g)
+                for sid in closed:
+                    op.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "expired",
+                                                    "expired_at": iso(self._now())})
+                self._commit(op)
+        return not_closed
+
+    def _checkout_gate(self, principal: str, request_id: str, invoice_id: str) -> None:
+        """ADR 0024 + AEGIS F-5: a client is paid from only while Compliance's activation is a current ALLOW. Checked
+        on EVERY request, before the idempotent replay and before an open page is handed back. On a REFUSE the
+        client's open pages are closed; on an outage (unknown) nothing is closed, but no page is handed back."""
+        with self.lock:
+            inv0 = self.db["invoices"].get(invoice_id)
+        if inv0 is None:
+            return
+        ga = Gather(self, f"chk-act|{principal}|{request_id}|{iso(self._now())}", ACTOR, invoice_id)
+        act = self._activation(ga, inv0["client_id"])
+        act_reasons = self._activation_reasons(act)
+        if not act_reasons:
+            return
+        if act.available:
+            not_closed = self._close_client_pages(ga, f"chk-close|{principal}|{request_id}|{iso(self._now())}",
+                                                  inv0["client_id"])
+            if not_closed:
+                act_reasons = [*act_reasons, R.item(STRIPE_DEP, f"Stripe did not confirm {len(not_closed)} open "
+                                                                "page(s) of this client closed; retry")]
+        raise Refused("no Stripe checkout for this invoice", act_reasons, ledger_event_ids=ga.events)
+
     def stripe_checkout(self, principal: str, request_id: str, invoice_id: str) -> dict:
         key, h, ent = self._idem(principal, request_id, f"stripe-checkout/{invoice_id}", invoice_id)
+        with self._stripe_turn("checkout"):
+            self._checkout_gate(principal, request_id, invoice_id)
         if ent:
             return ent["response"]
         self.require_rules()
         with self._stripe_turn("checkout"):
-            with self.lock:
-                inv0 = self.db["invoices"].get(invoice_id)
-            if inv0 is not None:
-                # ADR 0024: a client is paid from only while Compliance's activation is a current ALLOW (checked
-                # before any page is made or handed back; a client whose activation lapsed cannot pay)
-                ga = Gather(self, f"chk-act|{principal}|{request_id}", ACTOR, invoice_id)
-                act_reasons = self._activation_reasons(self._activation(ga, inv0["client_id"]))
-                if act_reasons:
-                    raise Refused("no Stripe checkout for this invoice", act_reasons, ledger_event_ids=ga.events)
             now = self._now()
             with self.lock:
                 inv = self.db["invoices"].get(invoice_id)
@@ -276,10 +311,31 @@ class StripeMixin:
         no longer take money -- its invoice is no longer issued, its amount changed, or it offers a method the invoice
         may no longer be paid with (a card after FIN_CARD_PREPAYMENTS was turned off). At most MAX_JOB_CLOSES pages a
         run; a page that cannot be closed is tried again on the next run. A card payment that still lands on such a
-        page is re-checked when it arrives (unapplied + a break, never applied)."""
+        page is re-checked when it arrives (unapplied + a break, never applied).
+
+        AEGIS F-5: also every open page of a client whose Compliance activation is now REFUSE (an OFAC hit, a service
+        area change, a lapsed screening...). Compliance is asked once per client with an open page; an outage
+        (unknown) closes nothing and is counted ``activation_unknown`` (the checkout itself refuses meanwhile)."""
         if not self.cfg.stripe_incoming:
-            return {"closed": 0, "failed": 0, "checked": 0}
+            return {"closed": 0, "failed": 0, "checked": 0, "refused_clients": 0, "activation_unknown": 0}
         with self._stripe_turn("stripe-sessions job"):
+            with self.lock:
+                open_by_client: dict[str, list[dict]] = {}
+                for s in self.db["stripe_sessions"].values():
+                    if s["status"] == "open":
+                        cid = (self.db["invoices"].get(s["invoice_id"]) or {}).get("client_id")
+                        if cid:
+                            open_by_client.setdefault(cid, []).append(dict(s))
+            ga = Gather(self, f"{prefix}|activation", ACTOR, "stripe-sessions")
+            refused_ids: set[str] = set()
+            refused_clients = unknown = 0
+            for cid in sorted(open_by_client):
+                act = self._activation(ga, cid)
+                if not act.available:
+                    unknown += 1
+                elif not act.allowed:
+                    refused_clients += 1
+                    refused_ids.update(s["session_id"] for s in open_by_client[cid])
             with self.lock:
                 todo = []
                 for s in self.db["stripe_sessions"].values():
@@ -288,7 +344,7 @@ class StripeMixin:
                     inv = self.db["invoices"].get(s["invoice_id"]) or {}
                     methods = self._stripe_methods(inv)[0] if inv.get("status") == "issued" else ()
                     if inv.get("status") != "issued" or inv.get("total") != s["total"] \
-                            or any(m not in methods for m in s["methods"]):
+                            or any(m not in methods for m in s["methods"]) or s["session_id"] in refused_ids:
                         todo.append(dict(s))
                 todo = sorted(todo, key=lambda s: s["created_at"])[:MAX_JOB_CLOSES]
             g = Gather(self, f"{prefix}|stripe", ACTOR, "stripe-sessions")
@@ -306,7 +362,8 @@ class StripeMixin:
                     else:
                         failed += 1
                 self._commit(op)
-            return {"closed": closed, "failed": failed, "checked": len(todo)}
+            return {"closed": closed, "failed": failed, "checked": len(todo), "refused_clients": refused_clients,
+                    "activation_unknown": unknown}
 
     # ================================================================== webhook events
 
