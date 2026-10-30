@@ -161,9 +161,18 @@ every `COMPLIANCE_SCHEDULER_INTERVAL_SECONDS` (default 6 h, inside C-11's 24 h S
 printed and retried on the next 60 s tick (not at the next interval). Any other error in a tick is caught, recorded
 and printed: the thread does not die of an exception (AEGIS F-4). `/health` carries the scheduler's liveness (`alive`,
 last successful controls and watcher runs, `last_error`) and answers **503** when the thread is dead or the last
-successful controls run (or the start) is older than two intervals. Railway runs the healthcheck when a deployment
-starts, not afterwards, so a 503 later on is for a monitor or the operator to see; meanwhile C-11 closes every gate
-after 24 h without a run (fail closed). Why not a Railway cron service: a second service would need its own image,
+successful controls run (or the start) is older than two intervals. Two failure kinds, two responses:
+
+- **The thread is dead** (it ended without `stop()`; only something `except Exception` does not catch can end it): it
+  prints `compliance scheduler: scheduler thread stopped unexpectedly (...)` and `api.main`'s hook ends the process with
+  exit code 1 (`os._exit`), so Railway's ON_FAILURE policy restarts compliance (at most 10 times), and the new
+  process's first tick re-runs the controls.
+- **Controls fail or are stale** (ledger down, a 409 during a watcher cycle) while the thread is alive: no exit, since
+  a restart would not fix the cause and would loop. The thread retries every 60 s, C-11 closes every gate after 24 h
+  without a successful run (fail closed), and `/health` answers 503.
+
+Railway runs the healthcheck only when a deployment starts, so the 503 needs a monitor (runbook: a private check on
+the internal network that pings an outside heartbeat monitor only while `/health` is 200). Why not a Railway cron service: a second service would need its own image,
 healthcheck exemption and a `scheduler` token held somewhere; in process there is no token to leak. C-11 still blocks
 every gate until it has passed once (it is `never_run` until the first run) and whenever it is older than 24 h.
 
@@ -198,6 +207,7 @@ Evaluated with the pinned SDK (railway 3.13.1) against the base commit: 2 resour
 - No accessibility provider and no sanctions provider: site publish (HR-09) and creator payouts stay refused (H3).
 - Guam's business privilege tax and the gross receipts/business taxes of the US Virgin Islands, American Samoa and the
   Northern Mariana Islands are not researched; `US-SALESTAX-NEXUS` is unverified.
-- No external monitor polls compliance's `/health` yet; Railway does not restart a running service on a 503.
+- No monitor polls compliance's `/health` yet (compliance has no public domain; the runbook's private check plus
+  heartbeat is Andre's step). Railway does not restart a running service on a 503; only the dead-thread exit restarts.
 - The images were not built and the smoke was not run here (no Docker daemon); `railway config plan` was not run (no
   Railway access). Both are in Andre's steps.

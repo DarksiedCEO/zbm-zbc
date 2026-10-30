@@ -17,8 +17,13 @@ thread never dies of an exception (AEGIS F-4).
 
 Liveness (``liveness()``, reported in ``GET /health``): alive (the thread runs), the last successful controls and
 watcher runs, the last error. Unhealthy when the thread is dead, or when the last successful controls run (or the
-start, before the first one) is older than two intervals: ``/health`` then answers 503. Nothing here can open a gate:
-it only produces the evidence the gates require.
+start, before the first one) is older than two intervals: ``/health`` then answers 503.
+
+A thread that ends without ``stop()`` (only something ``except Exception`` does not catch can end it) prints one line
+and calls ``on_thread_death(1)``; ``api.main`` passes a hook that exits the process non-zero, so Railway's ON_FAILURE
+policy restarts the service (and its first tick re-runs the controls). Failing or stale controls (ledger down) never
+exit: that would restart in a loop; they stay fail closed through C-11 and show as the 503. Nothing here can open a
+gate: it only produces the evidence the gates require.
 """
 
 from __future__ import annotations
@@ -36,13 +41,15 @@ WATCHER_EVERY = timedelta(hours=24)
 
 class Scheduler:
     def __init__(self, svc, interval_s: int = 21600, watcher: bool = False, clock: Optional[Clock] = None,
-                 out: Callable[[str], None] = lambda line: print(line, flush=True)):
+                 out: Callable[[str], None] = lambda line: print(line, flush=True),
+                 on_thread_death: Optional[Callable[[int], None]] = None):
         self.svc, self.interval = svc, timedelta(seconds=interval_s)
         self.watcher, self.clock, self.out = watcher, clock or SystemClock(), out
         self.last_controls: Optional[datetime] = None
         self.last_watcher: Optional[datetime] = None
         self.started_at: Optional[datetime] = None
         self.last_error: Optional[dict] = None
+        self.on_thread_death = on_thread_death
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -93,9 +100,19 @@ class Scheduler:
                 self.out(line)
 
     def _loop(self) -> None:
-        while not self._stop.is_set():
-            self.tick()
-            self._stop.wait(TICK_S)
+        cause = "the loop returned"
+        try:
+            while not self._stop.is_set():
+                self.tick()
+                self._stop.wait(TICK_S)
+        except BaseException as exc:  # noqa: BLE001 - reported below; the process is then ended by the hook
+            cause = type(exc).__name__
+        finally:
+            if not self._stop.is_set():
+                self.out(f"compliance scheduler: scheduler thread stopped unexpectedly ({cause}) at "
+                         f"{iso(self._now())}; exiting non-zero so the platform restarts the service")
+                if self.on_thread_death is not None:
+                    self.on_thread_death(1)
 
     def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()

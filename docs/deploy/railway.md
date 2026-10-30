@@ -888,11 +888,36 @@ curl -sS -H @auth.hdr -H @andre.hdr -H 'Content-Type: application/json' --data @
 curl -sS $C/health                                             # register_version_in_force: 1, seed_pinned: true
 ```
 
-`/health` also shows `scheduler`: `alive: true` and `last_controls_ok_at` (the start's run). It answers **503** when the
-scheduler thread has stopped or no controls run has succeeded for two intervals (12 h): look at compliance's log
-(`compliance scheduler: ... failed`, with the error type) and redeploy compliance. Railway checks `/health` only while
-a deployment starts, so look at it when you check readiness (step F), or point an uptime monitor at it through the
-tunnel or a private check.
+`/health` also shows `scheduler`: `alive: true` and `last_controls_ok_at` (the start's run).
+
+- If the scheduler thread itself dies, compliance logs `compliance scheduler: scheduler thread stopped unexpectedly`
+  and exits with code 1; Railway restarts it by itself (ON_FAILURE, at most 10 times). A run of restarts in the
+  deployment's history means look at that log line.
+- If the controls keep failing (most often the ledger is down), compliance does **not** restart: `/health` answers
+  **503** after 12 h without a successful controls run, and after 24 h C-11 closes every gate. Look at compliance's
+  log (`compliance scheduler: controls run failed`, with the error type), fix the cause (usually: get the ledger
+  Active again); the next 60 s tick runs the controls. Redeploying compliance does not help while the cause is there.
+
+Railway checks `/health` only while a deployment starts, and compliance has no public domain, so an outside uptime
+monitor cannot reach it directly. Set up a **private check with a heartbeat** (once, about 20 minutes):
+
+1. At an uptime service that offers heartbeat (dead-man) monitors (for example Better Stack or Healthchecks.io), make a
+   heartbeat monitor with a 15-minute period and a 15-minute grace, alerting your phone/email. Copy its ping URL
+   (treat it as a secret).
+2. In the Railway project, add a service from the public `curlimages/curl` image (pin its digest), no domain, no volume,
+   with a cron schedule `*/10 * * * *` and the start command
+
+   ```sh
+   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
+   ```
+
+   and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance over the private network (`/health`
+   needs no token) and pings the monitor only while `/health` answers 200: a 503, a dead or unreachable compliance, or
+   the check itself failing all stop the pings, and the monitor alerts you.
+3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
+   existing, not created twice), or leave it as the one hand-made service and note it in your Railway checklist.
+
+Until it exists, check `/health` through the tunnel whenever you check readiness (step F).
 
 ```sh
 ```
