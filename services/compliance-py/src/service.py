@@ -89,6 +89,17 @@ def _sha(obj: Any) -> str:
     return sha256_text(canonical(obj))
 
 
+# AEGIS F-1: what a rule SAYS (and therefore what an activation relied on). A re-verification moves only
+# verified_at / expires_at / status and the source bookkeeping, so it keeps the fingerprint; an amendment of the
+# obligation, its gates, its conditions, its check or its parameters (HR-05 operate, HR-07 refuse...) changes it.
+RULE_FINGERPRINT_FIELDS = ("id", "jurisdiction", "obligation", "gates", "applies_when", "check", "parameters",
+                           "effective_date")
+
+
+def rule_fingerprint(row: dict) -> str:
+    return _sha({k: row.get(k) for k in RULE_FINGERPRINT_FIELDS})
+
+
 class PortCalls:
     """Record-first proxy to the ports for one operation. Each distinct call is
     recorded as ``crossing_<port>_requested`` BEFORE it is made (payload: ids
@@ -903,7 +914,10 @@ class ComplianceService:
                       "subject_kind": subject_kind, "allowed": allowed, "unmet": unmet, "unmet_lines": lines,
                       "register_version": self.version_number, "evaluated_at": iso(now), "facts_sha256": facts_sha,
                       "caller_context_sha256": _sha(caller_context) if caller_context is not None else None,
-                      "row_ids_evaluated": sorted(set(ctx.evaluated)), "ledger_event_id": ruling_id,
+                      "row_ids_evaluated": sorted(set(ctx.evaluated)),
+                      "rule_fingerprints": {oid: rule_fingerprint(rows[oid]) for oid in sorted(set(ctx.evaluated))
+                                            if oid in rows},
+                      "ledger_event_id": ruling_id,
                       "ledger_event_ids": list(events), "principal": principal, "request_id": request_id,
                       "request_sha256": h, "outcome_sha256": outcome_sha,
                       "first_used_at": iso(ent["at"]) if ent is not None else iso(now),
@@ -1172,10 +1186,28 @@ class ComplianceService:
                 out.append(f"control_red:{cid}: {d['title']} ({st['reason']})")
         return out
 
+    @staticmethod
+    def _area_now(prof: dict, rows: dict) -> list[str]:
+        """AEGIS F-1(b): the client's recorded jurisdiction and campaign targets against the service area IN FORCE
+        NOW (HR-05 operate, HR-07 refuse, sanctions regions), independent of the fingerprints: anything but operate
+        refuses."""
+        params = i07_jurisdiction.Params.from_rows(rows)
+        out = []
+        res = i07_jurisdiction.resolve_person(prof.get("jurisdiction"), params, "client")
+        if res.cls != "operate":
+            out.append(f"jurisdiction {res.code} is {res.cls} under the service area in force: {res.reason}")
+        for t in prof.get("target_jurisdictions") or []:
+            tr = i07_jurisdiction.resolve_target(t, params)
+            if tr.cls != "operate":
+                out.append(f"campaign target {tr.code} is {tr.cls} under the service area in force: {tr.reason}")
+        return out
+
     def activation_status(self, client_id: str, lane: str = "client") -> dict:
         """ADR 0024: the client's CURRENT activation decision, for Finance, SEO and Revenue Recovery (read-only).
         ALLOW only when every one holds now: the latest activation ruling for (lane, client) allowed it; every rule
-        it evaluated is still verified in the register in force (an expired rule is never extended); the register
+        it evaluated is still verified in the register in force (an expired rule is never extended) and says what it
+        said then (its fingerprint, AEGIS F-1); the client's jurisdiction and targets are operate under the service
+        area in force now; the register
         gained no activation rule since that ruling; no control that blocks activation is red (C-11); no hold is
         open on the client; its recorded OFAC search is within HR-14 ``rescreen_after_days``. Anything else is
         REFUSE with the reasons."""
@@ -1201,12 +1233,19 @@ class ComplianceService:
             if not r["allowed"]:
                 reasons.append("the latest activation ruling refused this client: fix the unmet items and re-activate")
                 return out
+            prints = r.get("rule_fingerprints")
+            if not isinstance(prints, dict):
+                reasons.append("the ruling carries no rule fingerprints (it predates them): re-activate")
+                prints = None
             for oid in r.get("row_ids_evaluated") or []:
                 row = rows.get(oid)
                 st = "removed" if row is None else effective_status(row, today)
                 if st != "verified":
                     reasons.append(f"{oid} is {st} since the ruling: it must be re-verified and approved, then the "
                                    "client re-activated")
+                elif prints is not None and prints.get(oid) != rule_fingerprint(row):
+                    reasons.append(f"{oid} changed since the ruling (approved amendment): re-activate")
+            reasons += self._area_now(prof, rows)
             old = next((v for v in self.versions if v.version == r["register_version"]), None)
             old_ids = {x["id"] for x in old.rows} if old else set()
             gained = sorted(oid for oid, row in rows.items() if "activation" in row["gates"] and oid not in old_ids
@@ -1222,7 +1261,8 @@ class ComplianceService:
             if hr14 is not None and hr14["status"] != "superseded" and "HR-14" in (r.get("row_ids_evaluated") or []):
                 params = hr14.get("parameters") or {}
                 att = self.attestations.get(prof.get("sanctions_attestation_id") or "")
-                problem = i08_sanctions.attestation_problem(att, client_id, now, params, age_key="rescreen_after_days")
+                problem = i08_sanctions.attestation_problem(att, client_id, now, params, lane=lane,
+                                                            age_key="rescreen_after_days")
                 if problem:
                     reasons.append(f"HR-14: {problem}")
                 elif att is not None:

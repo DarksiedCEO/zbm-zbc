@@ -337,7 +337,7 @@ def test_activation_status_needs_a_caller_and_bearer():
     assert h.client.get("/compliance/v1/clients/c/activation").status_code == 401
     assert h.client.get("/compliance/v1/clients/c/activation",
                         headers={"Authorization": f"Bearer {H.SERVICE_TOKEN}"}).status_code == 403
-    assert h.get("/compliance/v1/clients/bad%20id/activation").status_code == 422
+    assert h.get("/compliance/v1/clients/bad%20id/activation", caller="finance_31").status_code == 422
 
 
 # --- readiness: exactly which rules are expired and which gates they affect -----------------------------------------------

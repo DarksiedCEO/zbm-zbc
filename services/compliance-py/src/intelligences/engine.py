@@ -609,7 +609,7 @@ def c_client_sanctions_attested(row, ctx):
     if not sid:
         return [ctx.missing(row["id"], "sanctions_attestation_id")]
     p = i08_sanctions.attestation_problem(ctx.env.attestation(sid), ctx.subject_id, ctx.now,
-                                          row.get("parameters") or {})
+                                          row.get("parameters") or {}, lane=ctx.lane)
     return [ctx.u(row["id"], "client_sanctions_attested", p)] if p else []
 
 
