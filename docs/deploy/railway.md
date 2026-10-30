@@ -517,11 +517,11 @@ otherwise. Examples are never real values.
 | `PORT` | yes | no | `8080` (IaC) | copied to `ORCHESTRATOR_PORT` |
 | `ORCHESTRATOR_PORT` | — | no | (from `PORT`) | |
 | `ORCHESTRATOR_BIND_ADDR` | yes | no | `[::]` (IaC) | default `127.0.0.1` |
-| `ORCHESTRATOR_SERVICE_TOKEN` | yes | yes | (you) | callers (the dashboard) present it; refuses to start without it, or when it is shorter than 32 characters, has fewer than 10 different characters, is estimated under 128 bits (4 bits a character for hex, 6 for base64), repeats a 10-character block, holds a 10-character run like `0123456789`, holds placeholder text (`changeme`, `password`, `placeholder`, `example`, `<…>`) or an unresolved `${{…}}` reference, or equals `DETECTION_SERVICE_TOKEN` / `LEDGER_SERVICE_TOKEN` (ADR 0023). Make it with `openssl rand -hex 32` |
+| `ORCHESTRATOR_SERVICE_TOKEN` | yes | yes | (you) | callers (the dashboard) present it; refuses to start without it, and accepts **only a generated token**: exactly 64 lowercase hex characters (`openssl rand -hex 32`, the one to use) or 43+ base64url characters `[A-Za-z0-9_-]` without padding. On top: fewer than 10 different characters, a repeated 10-character block, a 10-character run like `0123456789`, a placeholder word, an unresolved `${{…}}` reference, or equal to `DETECTION_SERVICE_TOKEN` / `LEDGER_SERVICE_TOKEN` refuses the start (ADR 0023). **The token's strength is the only thing that stops guessing**: the failed-auth lockout does not slow it (below) |
 | `ORCHESTRATOR_CLIENT_IP_SOURCE` | yes on Railway | no | `x-real-ip` (IaC; also the default) | where the client address comes from (ADR 0023): `x-real-ip` = the header Railway's edge sets; `remote-addr` = the TCP peer (local runs only; on Railway it is the edge itself). A request without a usable `X-Real-IP` is refused 403 (except `GET /health`). Any other value stops the start-up |
 | `ORCHESTRATOR_RATE_PER_MIN` | no | no | unset = `30` | per client address (IPv6: per /64): requests a minute after the burst; over it → 429 + `Retry-After`. 1..6000 |
 | `ORCHESTRATOR_RATE_BURST` | no | no | unset = `30` | requests a client may make at once. 1..6000 |
-| `ORCHESTRATOR_AUTH_FAIL_MAX` | no | no | unset = `10` | answers of 401 (missing or wrong token) a client may get inside the window; then its requests WITHOUT the valid token are 429 + `Retry-After` until the window ends. A request with the valid token is never refused by the lockout and is counted in its own rate-limit table, which unauthenticated traffic cannot fill or drain (AEGIS edge review H-1/M-1). 1..1000 |
+| `ORCHESTRATOR_AUTH_FAIL_MAX` | no | no | unset = `10` | answers of 401 (missing or wrong token) a client may get inside the window; then its requests WITHOUT the valid token are 429 + `Retry-After` until the window ends. A request with the valid token is never refused by the lockout and is counted in its own rate-limit table, which unauthenticated traffic cannot fill or drain (AEGIS edge review H-1/M-1). **It does not slow token guessing**: every request is compared against the token before any limit, so a wrong guess just gets 429 instead of 401 (AEGIS r2 NEW-1); the generated token is the control. 1..1000 |
 | `ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS` | no | no | unset = `600` | that window, from the client's first failure. 1..86400 |
 | `DETECTION_SERVICE_URL` | yes | no | `http://detection.railway.internal:8000` (IaC) | → detection |
 | `DETECTION_SERVICE_TOKEN` | yes | yes | ref `detection.ZBM_SERVICE_TOKEN` (IaC) | |
@@ -1013,8 +1013,12 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
       2. The same with the header twice: `-H 'X-Real-IP: 3.18.12.63' -H 'X-Real-IP: 3.18.12.63'` → `403`, log
          `client=<your real IP>` (the edge replaced both) or `reason=no_client_address detail="X-Real-IP repeated"`
          (it kept them; also fail closed, but report it).
-      3. On the orchestrator: `curl -sS -o /dev/null -w '%{http_code}\n' -H 'X-Real-IP: 3.18.12.63' https://$ORCH/revenue-recovery/findings`
-         → `401` (not 403/429).
+      3. On the orchestrator: `curl -sS -o /dev/null -w '%{http_code}\n' -H 'X-Real-IP: not-an-ip' https://$ORCH/revenue-recovery/findings`
+         → `401` (the edge replaced the header with your real address). `403` means the edge passed `not-an-ip`
+         through and the service could not parse it (`reason=no_client_address` in its log): same stop as step 1.
+      The same three probes, scriptable: `python3 devtools/railway_smoke.py --live-spoof-probe --gateway-url
+      https://$GW --orchestrator-url https://$ORCH` (off by default; exit 0 only if all three pass). Railway can change
+      its edge without a deploy of ours, so also schedule it (daily is enough).
 - [ ] Six `curl` calls with a wrong token to `https://$ORCH/revenue-recovery/findings` all answer `401`. A lockout
       (10 failures in 10 minutes) refuses only requests without the valid token, so it cannot lock the dashboard out.
 - [ ] Stripe webhook, **no money**: resend one existing **`checkout.session.*`** event, and only that type, to this
@@ -1064,7 +1068,7 @@ over `*.railway.internal` do not pass the edge; neither public service is called
 | Rate limit per client | stripe-gateway | 60/min, burst 60 per Stripe address | `STRIPE_GATEWAY_RATE_PER_MIN`, `STRIPE_GATEWAY_RATE_BURST` |
 | Rate limit per client | orchestrator | 30/min, burst 30 | `ORCHESTRATOR_RATE_PER_MIN`, `ORCHESTRATOR_RATE_BURST` |
 | Failed-auth lockout | orchestrator | 10 × 401 in 600 s → requests **without** the valid token get 429 until the window ends; the valid token always passes (own rate-limit table) | `ORCHESTRATOR_AUTH_FAIL_MAX`, `ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS` |
-| Token hygiene | orchestrator | ≥ 32 chars, ≥ 10 distinct, ≥ 128 bits estimated, no repeated 10-char block or 10-char run, no placeholder / `${{`, ≠ outbound tokens | (none: a weak token refuses the start) |
+| Token hygiene | orchestrator | only 64 lowercase hex or ≥ 43 base64url; plus ≥ 10 distinct, no repeated 10-char block or 10-char run, no placeholder / `${{`, ≠ outbound tokens | (none: any other token refuses the start) |
 | Cloudflare-address warning | both | a derived client address in Cloudflare's published ranges logs `reason=client_in_cloudflare_range` (once a minute) | (code: `internal/edge/cloudflare.go`) |
 | Body / header / time limits | both | unchanged: 64 KiB (orch) / 256 KiB (gateway) body, 16 KiB headers, 5 s header, 15 s request | (code constants, ADR 0001) |
 | Finance route allowlist for `rail_gateway` | finance | only `POST /fin/v1/stripe/events` + `/health` | (code: `api.NAMED_ROUTES`) |

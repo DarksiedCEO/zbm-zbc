@@ -44,13 +44,19 @@ with TLS, not a WAF: nothing filters by source, rate or reputation. Findings thi
    the lockout and the anonymous bucket and is counted in its own per-client table (same rate), which unauthenticated
    traffic can neither fill nor drain. The first version also refused the right token ("a lucky guess is not
    rewarded"); with a ≥ 128-bit token that bought nothing and let anyone on a shared egress address (Vercel's) lock
-   the dashboard out. The lockout stays because it costs a valid caller nothing and cuts unauthenticated noise.
-5. **Orchestrator token hygiene at start**: ≥ 32 printable ASCII, ≥ 10 distinct characters, estimated ≥ 128 bits
-   (4 bits a character for hex, 6 for base64/base64url, 6.5 otherwise), no 10-character block repeated, no
-   10-character run of consecutive characters, no placeholder text (words of ≥ 7 letters only: a shorter word turns
-   up in random base64), no unresolved `${{` / `{{` / `}}` reference (mirrors finance-py `_check_ref`), different from
-   the two outbound tokens. 0 refusals in 200,000 each of `openssl rand -hex 32`-shaped, base64 and base64url tokens
-   (`TestGeneratedTokensAreNeverRefused`, `TOKEN_HYGIENE_SAMPLES=200000`). The constant-time compare is unchanged.
+   the dashboard out. The lockout stays because it costs a valid caller nothing and cuts the requests that reach the
+   handler without the token.
+   **The lockout does not slow guessing** (AEGIS r2 NEW-1): every request is compared against the token before any
+   limit, so a wrong guess from a locked-out address just gets 429 instead of 401 (the reviewer measured 20,000
+   guesses in 0.68 s from one address). Token strength is the control, hence decision 5.
+5. **Orchestrator token: generator-shaped only, at start** (revised after AEGIS r2 NEW-1/L-1): exactly 64 lowercase
+   hex characters (`openssl rand -hex 32`) or ≥ 43 base64url characters `[A-Za-z0-9_-]` without padding (≥ 256 bits
+   either way); anything else, human passphrases included, refuses the start with a message saying so. On top, each
+   with its own message and its own test: < 10 distinct characters, a 10-character block repeated, a 10-character
+   run of consecutive characters, a placeholder word, an unresolved `${{` / `{{` / `}}` reference (mirrors finance-py
+   `_check_ref`), equal to an outbound token. 0 refusals in 200,000 each of hex (32 bytes), base64url (32 bytes) and
+   base64url (48 bytes) generated tokens (`TestGeneratedTokensAreNeverRefused`, `TOKEN_HYGIENE_SAMPLES=200000`; the
+   default draw is 20,000). The constant-time compare is unchanged.
 6. **Least privilege at Finance**: `api.NAMED_ROUTES` gives each narrow caller an exact route list enforced in a
    middleware before routing: `seo_02` → `GET /fin/v1/invoices/{id}/status`; `rail_gateway` → `POST
    /fin/v1/stripe/events`; new `payout_rail_gateway` → `POST /fin/v1/rails/{stripe|trolley}/events` (payout-rail
@@ -62,23 +68,24 @@ with TLS, not a WAF: nothing filters by source, rate or reputation. Findings thi
    16 KiB, idle and write timeouts; bodies 64 KiB (orchestrator, read before routing) and 256 KiB (gateway); the gateway
    also caps deliveries in flight at 32.
 
-Every limiter is in memory (one replica per service, `numReplicas: 1`) and bounded to 16 384 clients. A full table
-evicts its least recently used entry (revised after AEGIS H-1: the first version refused new clients when full, so a
-sweep of 16 384 IPv6 /64s from one /48 locked every new client out for 10 minutes). Eviction only ever gives a client
-a fresh bucket or forgets failures; the token is the access control.
-
-8. **Logs** (AEGIS M-2, M-3, L-4): each service logs one `event=edge_config` line at start naming the client-address
+8. **Bounded tables that evict**: every limiter is in memory (one replica per service, `numReplicas: 1`) and bounded
+   to 16 384 clients. A full table evicts its least recently used entry (revised after AEGIS H-1: the first version
+   refused new clients when full, so a sweep of 16 384 IPv6 /64s from one /48 locked every new client out for 10
+   minutes). Eviction only ever gives a client a fresh bucket or forgets failures; the token is the access control.
+9. **Logs** (AEGIS M-2, M-3, L-4): each service logs one `event=edge_config` line at start naming the client-address
    source and limits. Every refusal is a structured line (`event=… level=… reason=… client=…`), at most one a second per
    reason; a refused Stripe delivery is `event=stripe_delivery_refused level=ALERT` for a log alert. A derived client
    address inside Cloudflare's published ranges (`internal/edge/cloudflare.go`, cloudflare.com/ips retrieved
    2026-10-30) is logged once a minute as `reason=client_in_cloudflare_range`: it means Cloudflare is in front and its
    client address was not passed through.
-9. **Finance allowlist matches the routed path** (AEGIS L-2): `scope["path"]`, never `request.url.path`, and any
+10. **Finance allowlist matches the routed path** (AEGIS L-2): `scope["path"]`, never `request.url.path`, and any
    percent-encoding or `?`/`#` in a narrow caller's path is refused. The route-level caller check is worded apart
    from the middleware's, and tests exercise each layer alone (AEGIS L-3).
-10. **Post-deploy spoof probe** (AEGIS M-2): after every deploy, a request with a forged `X-Real-IP: 3.18.12.63` (and
-    one with the header twice) must be refused 403 with the caller's real address in the log
-    (docs/deploy/railway.md, Smoke-test checklist).
+11. **Spoof probe after every deploy and on a schedule** (AEGIS M-2, r2 D-2/D-3): a forged `X-Real-IP: 3.18.12.63`
+    (and the header twice) to the gateway must be refused 403 with the caller's real address in the log, and
+    `X-Real-IP: not-an-ip` to the orchestrator must answer 401 (403 = passed through). Scripted as
+    `devtools/railway_smoke.py --live-spoof-probe` (off by default, never run by CI; tested against local stand-ins
+    of both edge behaviours) so it can be scheduled (docs/deploy/railway.md, Smoke-test checklist).
 
 ## Cloudflare (the next layer; Andre's steps)
 
