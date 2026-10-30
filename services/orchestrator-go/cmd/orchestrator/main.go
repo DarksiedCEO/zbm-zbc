@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/edge"
 	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/orchestrator"
 )
 
@@ -145,6 +146,63 @@ func limitRequests(next http.Handler) http.Handler {
 		defer cancel()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// Perimeter settings (ADR 0023 "Public edge hardening"). The orchestrator's Railway domain is public; Railway's edge
+// is a reverse proxy, not a WAF, so the limits are enforced here, per client address (Railway's X-Real-IP).
+const (
+	clientIPSourceEnv   = "ORCHESTRATOR_CLIENT_IP_SOURCE"
+	ratePerMinEnv       = "ORCHESTRATOR_RATE_PER_MIN"
+	rateBurstEnv        = "ORCHESTRATOR_RATE_BURST"
+	authFailMaxEnv      = "ORCHESTRATOR_AUTH_FAIL_MAX"
+	authFailWindowEnv   = "ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS"
+	defaultRatePerMin   = 30
+	defaultRateBurst    = 30
+	defaultAuthFailMax  = 10
+	defaultAuthFailSecs = 600
+)
+
+// isHealth: the one request that passes without a client address (Railway's health check reaches the container
+// directly, without the edge's X-Real-IP); it answers a constant.
+func isHealth(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/health"
+}
+
+// loadGuard reads the perimeter settings: per client, a token bucket (ORCHESTRATOR_RATE_PER_MIN requests a minute,
+// bursts of ORCHESTRATOR_RATE_BURST) and a failed-authentication limit (ORCHESTRATOR_AUTH_FAIL_MAX answers of 401
+// inside ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS, then 429 until the window ends). A request whose client address
+// cannot be determined is refused 403 (except GET /health). Any malformed value refuses the start.
+func loadGuard(getenv func(string) string) (*edge.Guard, error) {
+	src, err := edge.ParseIPSource(clientIPSourceEnv, getenv(clientIPSourceEnv))
+	if err != nil {
+		return nil, err
+	}
+	perMin, err := edge.IntEnv(getenv, ratePerMinEnv, defaultRatePerMin, 1, 6000)
+	if err != nil {
+		return nil, err
+	}
+	burst, err := edge.IntEnv(getenv, rateBurstEnv, defaultRateBurst, 1, 6000)
+	if err != nil {
+		return nil, err
+	}
+	failMax, err := edge.IntEnv(getenv, authFailMaxEnv, defaultAuthFailMax, 1, 1000)
+	if err != nil {
+		return nil, err
+	}
+	failSecs, err := edge.IntEnv(getenv, authFailWindowEnv, defaultAuthFailSecs, 1, 86400)
+	if err != nil {
+		return nil, err
+	}
+	return &edge.Guard{Name: "orchestrator-go", Source: src, Open: isHealth,
+		Limit:    edge.NewLimiter(perMin, burst, edge.DefaultMaxKeys),
+		AuthFail: edge.NewFailureLimiter(failMax, time.Duration(failSecs)*time.Second, edge.DefaultMaxKeys)}, nil
+}
+
+// guardServer puts the guard in front of everything the server runs, so a refused client is answered before its
+// body is read (limitRequests) and before any route or auth check.
+func guardServer(srv *http.Server, g *edge.Guard) *http.Server {
+	srv.Handler = g.Wrap(srv.Handler)
+	return srv
 }
 
 // newMux builds the orchestrator's routes.
@@ -311,9 +369,14 @@ func main() {
 		log.Printf("orchestrator-go: ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1 — fixture scans write fixture findings to the ledger (dev/test only)")
 	}
 
+	guard, err := loadGuard(os.Getenv)
+	if err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
+
 	orch := orchestrator.New(detectionURL, detectionToken, ledgerURL, ledgerToken)
 
-	srv := newServer(bindAddr+":"+port, newMux(orch, orchestratorToken, allowFixtureScans))
+	srv := guardServer(newServer(bindAddr+":"+port, newMux(orch, orchestratorToken, allowFixtureScans)), guard)
 	// Bind first, then announce: ORCHESTRATOR_PORT=0 lets the kernel pick a free port, and ORCHESTRATOR_PORT_FILE
 	// (optional) receives the port actually bound, so a caller (the tests) never has to guess a free port and race
 	// another process for it (fix wave 25, scout C2-1 — the ledger-rust LEDGER_PORT_FILE pattern, ADR 0003 §11).

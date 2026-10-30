@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/edge"
 )
@@ -188,5 +189,46 @@ func TestAllowlistSettingsFailClosed(t *testing.T) {
 		if _, err := loadConfig(edgeEnv(env)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestPerAddressRateLimitAnswers429BeforeFinance(t *testing.T) {
+	var s seen
+	fin := financeStub(t, 200, &s)
+	defer fin.Close()
+	g := guardedGW(t, fin.URL, map[string]string{ratePerMinEnv: "60", rateBurstEnv: "2"})
+	defer g.Close()
+	postFrom(t, g.URL, "3.18.12.63")
+	postFrom(t, g.URL, "3.18.12.63")
+	r := postFrom(t, g.URL, "3.18.12.63")
+	if r.StatusCode != http.StatusTooManyRequests || r.Header.Get("Retry-After") != "1" {
+		t.Fatalf("%d %q", r.StatusCode, r.Header.Get("Retry-After"))
+	}
+	if s.calls.Load() != 2 {
+		t.Fatalf("Finance calls: %d", s.calls.Load())
+	}
+	if r := postFrom(t, g.URL, "3.130.192.231"); r.StatusCode != 200 {
+		t.Fatalf("another Stripe address: %d", r.StatusCode)
+	}
+}
+
+func TestRateDefaultsAndBounds(t *testing.T) {
+	cfg, err := loadConfig(edgeEnv(nil))
+	if err != nil || cfg.ratePerMin != 60 || cfg.rateBurst != 60 {
+		t.Fatalf("%v %d %d", err, cfg.ratePerMin, cfg.rateBurst)
+	}
+	for _, env := range []map[string]string{{ratePerMinEnv: "0"}, {ratePerMinEnv: "6001"}, {rateBurstEnv: "x"}} {
+		if _, err := loadConfig(edgeEnv(env)); err == nil {
+			t.Errorf("%v accepted", env)
+		}
+	}
+}
+
+// Body and time limits are unchanged and still enforced (ADR 0023 confirms them).
+func TestServerLimitsStillSet(t *testing.T) {
+	srv := newServer("127.0.0.1:0", http.NotFoundHandler())
+	if srv.ReadHeaderTimeout != 5*time.Second || srv.ReadTimeout != 15*time.Second || srv.MaxHeaderBytes != 16<<10 ||
+		srv.IdleTimeout <= 0 || srv.WriteTimeout <= upstreamTimeout || maxBodyBytes != 256<<10 {
+		t.Fatalf("%+v", srv)
 	}
 }

@@ -110,6 +110,12 @@ func tryStartOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (st
 		"LEDGER_SERVICE_TOKEN=test-ledger-token",
 		"ORCHESTRATOR_PORT=0",
 		"ORCHESTRATOR_PORT_FILE="+portFile,
+		// ADR 0023: the harness talks to the binary directly (no Railway edge, so no X-Real-IP): the client address
+		// is the TCP peer. The x-real-ip default is covered by TestRealBinaryDefaultRefusesWithoutXRealIP.
+		"ORCHESTRATOR_CLIENT_IP_SOURCE=remote-addr",
+		// every harness request comes from 127.0.0.1, and the slow-client tests poll /health in a loop: the per-client
+		// limit (covered by edge_test.go) is raised to its maximum here so it never decides those tests
+		"ORCHESTRATOR_RATE_PER_MIN=6000", "ORCHESTRATOR_RATE_BURST=6000",
 	)
 	if bindAddr != "" {
 		cmd.Env = append(cmd.Env, "ORCHESTRATOR_BIND_ADDR="+bindAddr)

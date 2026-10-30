@@ -77,6 +77,8 @@ type config struct {
 	allow *edge.Allowlist
 	// allowFrom says which list is in force (the embedded Stripe list or the override), for the startup log
 	allowFrom string
+	// ratePerMin / rateBurst: the per-client token bucket (STRIPE_GATEWAY_RATE_PER_MIN / _BURST; ADR 0023)
+	ratePerMin, rateBurst int
 }
 
 // Source-IP allowlist settings (ADR 0023). The check is ON unless the kill switch is set to exactly "1"; any value
@@ -85,6 +87,13 @@ const (
 	clientIPSourceEnv    = "STRIPE_GATEWAY_CLIENT_IP_SOURCE"
 	allowedIPsEnv        = "STRIPE_GATEWAY_ALLOWED_IPS"
 	allowlistDisabledEnv = "STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED"
+	ratePerMinEnv        = "STRIPE_GATEWAY_RATE_PER_MIN"
+	rateBurstEnv         = "STRIPE_GATEWAY_RATE_BURST"
+	// Stripe delivers from 15 addresses; 60 a minute per address (900 a minute in all) is far above this business's
+	// volume. A delivery over the limit is answered 429 and Stripe retries it later (with backoff, for up to 3 days
+	// in live mode), so the limit delays a burst, it never loses an event.
+	defaultRatePerMin = 60
+	defaultRateBurst  = 60
 )
 
 func loadAllowlist(getenv func(string) string) (*edge.Allowlist, string, error) {
@@ -231,6 +240,12 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if c.allow, c.allowFrom, err = loadAllowlist(getenv); err != nil {
 		return c, err
 	}
+	if c.ratePerMin, err = edge.IntEnv(getenv, ratePerMinEnv, defaultRatePerMin, 1, 6000); err != nil {
+		return c, err
+	}
+	if c.rateBurst, err = edge.IntEnv(getenv, rateBurstEnv, defaultRateBurst, 1, 6000); err != nil {
+		return c, err
+	}
 	return c, nil
 }
 
@@ -349,9 +364,11 @@ func isHealth(r *http.Request) bool {
 }
 
 // newGuard: the perimeter in front of every route (ADR 0023). A delivery from an address outside the allowlist, or
-// whose address cannot be determined, is answered 403 before its body is read and before Finance is called.
+// whose address cannot be determined, is answered 403, and one over its address's rate limit 429 + Retry-After,
+// before its body is read and before Finance is called.
 func newGuard(cfg config) *edge.Guard {
-	return &edge.Guard{Name: "stripe-gateway", Source: cfg.ipSource, Allow: cfg.allow, Open: isHealth}
+	return &edge.Guard{Name: "stripe-gateway", Source: cfg.ipSource, Allow: cfg.allow, Open: isHealth,
+		Limit: edge.NewLimiter(cfg.ratePerMin, cfg.rateBurst, edge.DefaultMaxKeys)}
 }
 
 // newHandler is what the server runs: the guard, then the routes.
