@@ -64,10 +64,12 @@ def _param_int(params: dict, key: str) -> Optional[int]:
     return v if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 3650 else None
 
 
-def attestation_problem(att: Optional[dict], subject_id: str, now: datetime, params: dict, *,
+def attestation_problem(att: Optional[dict], subject_id: str, now: datetime, params: dict, *, lane: Optional[str],
                         age_key: str = "max_age_days") -> Optional[str]:
-    """None when the recorded OFAC search lets ``subject_id`` pass now; otherwise why not (fail closed).
-    ``age_key``: ``max_age_days`` at activation, ``rescreen_after_days`` for a current activation."""
+    """None when the recorded OFAC search lets ``subject_id`` pass now on ``lane``; otherwise why not (fail closed).
+    ``age_key``: ``max_age_days`` at activation, ``rescreen_after_days`` for a current activation. The record is
+    tied to the subject AND the lane it was recorded for (AEGIS F-7): a ZBC brand search does not activate a ZBM
+    client, and the other way round."""
     days = _param_int(params, age_key)
     lists = params.get("lists")
     if days is None or not isinstance(lists, list) or not lists:
@@ -76,6 +78,8 @@ def attestation_problem(att: Optional[dict], subject_id: str, now: datetime, par
         return "no OFAC search is recorded under this id"
     if att.get("subject_id") != subject_id:
         return "the OFAC search on record is for another subject"
+    if lane is None or att.get("lane") != lane:
+        return f"the OFAC search on record was recorded for lane {att.get('lane')}, not {lane}"
     missing = [x for x in lists if x not in (att.get("lists") or [])]
     if missing:
         return f"the OFAC search did not cover: {', '.join(missing)}"

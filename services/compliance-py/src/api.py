@@ -366,10 +366,12 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         return svc.record_attestation(req.request_id, req.model_dump())
 
     @app.get("/compliance/v1/clients/{client_id}/activation", dependencies=auth)
-    def client_activation(client_id: str, _: str = Depends(caller()),
+    def client_activation(client_id: str,
+                          _: str = Depends(caller("finance_31", "seo_02", "revenue_recovery", "onboarding")),
                           lane: str = Query(default="client", pattern=r"^(client|zbc_brand)$")) -> dict:
         """ADR 0024: the client's current activation decision (ALLOW / REFUSE with reasons), for Finance, SEO and
-        Revenue Recovery. Read-only; anything but a current ALLOW is a refusal for the caller."""
+        Revenue Recovery (detection-py reads as revenue_recovery) and onboarding. Read-only; anything but a current
+        ALLOW is a refusal for the caller. Other callers get 403 (AEGIS F-9)."""
         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", client_id):
             raise Invalid("client id format")
         return svc.activation_status(client_id, lane)
