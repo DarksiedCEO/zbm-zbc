@@ -100,7 +100,8 @@ def build(lane: str, subject_id: str, raw_facts: dict, rows: dict, fallback: dic
             flags["entity_payee"] = f["payee_type"] == "entity"
         country = get(f, "jurisdiction.declared_country")
         if country:
-            flags["foreign_payee"] = country != "US"
+            # ADR 0024: Puerto Rico and Guam (declared PR / GU) are in the service area and are not foreign payees
+            flags["foreign_payee"] = country not in ("US", "PR", "GU")
         if "es_special_relevance" in f:
             flags["es_special_relevance"] = f["es_special_relevance"]
     flags.update(LANE_FIXED_FLAGS[lane])
@@ -125,4 +126,6 @@ def profile(lane: str, f: dict, owner_subject_ids: list[str]) -> dict:
     return {"jurisdiction": f.get("jurisdiction"), "target_jurisdictions": f.get("target_jurisdictions"),
             "platforms": f.get("platforms"), "client_category": f.get("client_category"), "claims": f.get("claims"),
             "flags": f.get("flags"), "pay_basis": f.get("pay_basis"), "sentiment_conditions": f.get("sentiment_conditions"),
-            "eu_kit_version_acknowledged": f.get("eu_kit_version_acknowledged"), "msa_eu_clause": f.get("msa_eu_clause")}
+            "eu_kit_version_acknowledged": f.get("eu_kit_version_acknowledged"), "msa_eu_clause": f.get("msa_eu_clause"),
+            # ADR 0024: what the activation status re-checks (HR-14 rescreen window) and reports (jurisdiction)
+            "sanctions_attestation_id": f.get("sanctions_attestation_id")}

@@ -55,6 +55,21 @@ class ReviewRequest(Strict):
     caller_context: Annotated[Optional[dict[str, Any]], AfterValidator(_bounded_json)] = None
 
 
+class SanctionsAttestationRequest(Strict):
+    """ADR 0024 (HR-14): Andre's recorded OFAC Sanctions List Search for a client. No name: its SHA-256 only."""
+
+    request_id: Id
+    subject_id: Id
+    lane: Literal["client", "zbc_brand"]
+    searched_at: Annotated[str, Field(min_length=20, max_length=40)]
+    list_version: Annotated[str, Field(min_length=1, max_length=64), AfterValidator(_no_control)]
+    lists: list[Literal["SDN", "Consolidated"]] = Field(min_length=1, max_length=2)
+    tool: Literal["ofac_sanctions_list_search"]
+    result: Literal["no_match", "potential_match", "match"]
+    evidence_sha256: Sha
+    searched_name_sha256: Sha
+
+
 class ScreenRequest(Strict):
     request_id: Id
     subject_id: Id

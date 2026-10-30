@@ -21,7 +21,8 @@ from register import SHELF_LIFE_DAYS, seed_checks
 from store import StoreCorrupt
 
 SRC = Path(__file__).resolve().parents[1] / "src"
-SPEC_SHA = "4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d"
+# Seed v2 (ADR 0024, the founder decisions of Oct 30, 2026); v1 (the spec's) was 4e3821d0...584d.
+SPEC_SHA = "037cf8030e0a91cb050dad586e88bb99af5a069216a95f88eeebe0927381cf0b"
 MONEY_WORDS = ("amount", "usd", "price", "rate", "balance", "money", "fee", "payment", "cents", "currency")
 
 
@@ -238,12 +239,17 @@ def test_h31_seed_rows_source_urls_and_expiry_arithmetic():
             life = SHELF_LIFE_DAYS[r["source_kind"]]
             expect = None if life is None else (date.fromisoformat(r["verified_at"]) + timedelta(days=life)).isoformat()
             assert r["expires_at"] == expect, r["id"]
-    assert len(rows) == 118
-    assert sum(r["status"] == "verified" for r in rows) == 59
-    assert sum(r["source_kind"] == "house-rule" for r in rows) == 13
+    # seed v2 (ADR 0024): v1's 118 rows, 17 superseded (outside the service area), plus HR-14, HR-15 and
+    # US-SALESTAX-NEXUS
+    assert len(rows) == 121
+    assert sum(r["status"] == "verified" for r in rows) == 54
+    assert sum(r["status"] == "superseded" for r in rows) == 17
+    assert sum(r["source_kind"] == "house-rule" for r in rows) == 15
     assert sum(r["counsel_flag"] for r in rows) == 14
     assert {r["id"] for r in rows if r["counsel_flag"]} == {f"CQ-{i:02d}" for i in range(1, 15)}
-    assert all(r["check"] == "counsel_memo" and r["status"] == "unverified" for r in rows if r["counsel_flag"])
+    assert all(r["check"] == "counsel_memo" and r["status"] in ("unverified", "superseded")
+               for r in rows if r["counsel_flag"])
+    assert {r["id"] for r in rows if r["counsel_flag"] and r["status"] == "superseded"} == {"CQ-05", "CQ-06", "CQ-14"}
 
 
 def test_h31_base_env_helper_is_test_only():
