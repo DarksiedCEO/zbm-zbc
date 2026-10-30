@@ -14,7 +14,10 @@ it in the `hygiene-static` job, and `python -m pytest devtools/` collects it:
   preserve() or references);
 - the CI job builds every one of them and the smoke script covers every one;
 - docs/deploy/railway.md names every environment variable the deployed code reads (Python, Go, Rust and the
-  dashboard), every variable the IaC sets, and every Dockerfile.
+  dashboard), every variable the IaC sets, and every Dockerfile;
+- the runbook's store credential paths (per JSON field) and its kill-file path (variable table, step 8, Stop) agree
+  with the entrypoint and with each other, and its LEDGER_CALLERS steps use devtools/ledger_callers.py with that
+  script's grants (devtools/test_ledger_callers.py tests the script itself).
 """
 from __future__ import annotations
 
@@ -416,6 +419,67 @@ class Runbook(unittest.TestCase):
             with self.subTest(slot=slot):
                 self.assertIn(f'"{entrypoint_secret_path(slot)}"', section)
         self.assertIn(entrypoint_secret_path("RR_STORE_CONNECTIONS_FILE"), self.doc)
+
+    def store_section(self) -> str:
+        return self.doc.split("### Revenue Recovery: connecting a real store\n", 1)[1].split("\n## ", 1)[0]
+
+    def test_every_store_credential_path_in_the_runbook_json_is_its_slots(self):
+        # AEGIS detection-branch M-4 (mutants M4, M11): each path is checked where it is used, per field, so one right
+        # occurrence elsewhere cannot hide a wrong one
+        blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", self.store_section(), re.S)]
+        creds = [b["connections"][0]["credential"] if "connections" in b else b for b in blocks]
+        kinds = sorted(c["kind"] for c in creds)
+        self.assertEqual(kinds, ["client_credentials", "static_token"], "the step-9 JSON and the static-token example")
+        want = {"client_id_file": entrypoint_secret_path("RR_STORE_SECRET_1_FILE"),
+                "client_secret_file": entrypoint_secret_path("RR_STORE_SECRET_2_FILE"),
+                "token_file": entrypoint_secret_path("RR_STORE_SECRET_1_FILE")}
+        for c in creds:
+            for field, path in c.items():
+                if field != "kind":
+                    with self.subTest(kind=c["kind"], field=field):
+                        self.assertEqual(path, want[field])
+        self.assertNotRegex(self.store_section(), r'"kind": "static_token", "token_file":\s*\n',
+                            "every static-token credential is in a JSON block (checked above), none inline")
+
+    def test_the_kill_file_path_is_one_path_everywhere(self):
+        # AEGIS detection-branch M-4 (mutants M9, M10) and L-7: the variable table, step 8 (required) and the Stop
+        # section name the same file; otherwise the at-once stop touches a file detection never checks
+        table = re.search(r"^\| `RR_STORE_KILL_SWITCH_FILE` \|[^\n]*set it to `([^`]+)`[^\n]*`touch ([^`]+)`", self.doc, re.M)
+        self.assertIsNotNone(table, "the detection variable table row")
+        section = self.store_section()
+        step8 = re.search(r"^8\. .*?(?=^9\. )", section, re.M | re.S).group(0)
+        self.assertIn("**Required,\n   not optional:**", step8)
+        in_step8 = re.findall(r"`RR_STORE_KILL_SWITCH_FILE` = `([^`]+)`", step8)
+        stop = section.split("**Stop / disconnect.**", 1)[1]
+        in_stop = re.findall(r"`touch ([^`]+)`", stop.split("\n\n", 1)[0])
+        paths = {table.group(1), table.group(2), *in_step8, *in_stop}
+        self.assertEqual(len(in_step8), 1)
+        self.assertEqual(len(in_stop), 1)
+        self.assertEqual(len(paths), 1, f"kill-file paths differ: {sorted(paths)}")
+        anywhere = set(re.findall(r"/[A-Za-z0-9_./-]*\.kill\b", self.doc, re.I))
+        self.assertEqual(anywhere, paths, "every kill-file path in the runbook")
+
+    def test_ledger_callers_come_from_the_script_with_its_grants(self):
+        # AEGIS detection-branch M-2 / M-4: the runbook runs devtools/ledger_callers.py (no inline copy that could
+        # drift), and what it tells Andre each caller may do is the script's table
+        import sys
+        sys.path.insert(0, str(REPO / "devtools"))
+        import ledger_callers as lc
+        self.assertNotIn("hashlib.sha256(", self.doc, "no inline LEDGER_CALLERS generator")
+        for cmd in ("devtools/ledger_callers.py new --out ~/zbm/ledger-callers.json",
+                    "devtools/ledger_callers.py check --current ~/zbm/ledger-callers.json",
+                    "ledger_callers.py add\n   detection-py --current ~/zbm/ledger-callers.json --out",
+                    "devtools/ledger_callers.py add detection-py --current ~/zbm/ledger-callers.json --out"):
+            self.assertIn(cmd, self.doc)
+        for caller, (dept, _where) in lc.CALLERS.items():
+            with self.subTest(caller=caller):
+                self.assertRegex(self.doc, rf"\n- {re.escape(caller)} writes `{dept}`[;,]")
+        self.assertIn("(caller `detection-py`, department `rr_store`)", self.doc)
+        smoke = re.search(r"the callers listed \(([^)]*), each with its one department\)", self.doc).group(1)
+        self.assertEqual([c.strip() for c in smoke.split(",")], list(lc.CALLERS))
+        probe_rows = re.findall(r"^\| [a-z-]+ \| `([a-z_]+)` \|$", self.doc, re.M)
+        self.assertEqual(sorted(probe_rows), sorted(lc.KNOWN_DEPARTMENTS), "the per-department check covers each one")
+        self.assertIn(f'open("{entrypoint_secret_path("DETECTION_LEDGER_TOKEN_FILE")}")', self.doc)
 
     def test_every_dockerfile_and_the_unverified_xff_note(self):
         for df, *_r in SERVICES.values():

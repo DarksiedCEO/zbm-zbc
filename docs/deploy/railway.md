@@ -176,7 +176,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEDGER_SERVICE_TOKEN` (legal's) | `openssl rand -hex 32` | legal | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (seo's) | `openssl rand -hex 32` | seo | its SHA-256 goes in `LEDGER_CALLERS` |
 | `DETECTION_LEDGER_TOKEN` | `openssl rand -hex 32` | detection | its SHA-256 goes in `LEDGER_CALLERS` (caller `detection-py`, department `rr_store`); becomes `DETECTION_LEDGER_TOKEN_FILE` |
-| `LEDGER_CALLERS` | the script below (hashes only, no token) | ledger | — |
+| `LEDGER_CALLERS` | `devtools/ledger_callers.py` (below; hashes only, no token) | ledger | you: keep the file it writes (`~/zbm/ledger-callers.json`), your record of the value |
 | `FIN_SERVICE_TOKEN` | `openssl rand -hex 32` | finance | stripe-gateway `STRIPE_GATEWAY_FINANCE_TOKEN`, seo `SEO_FINANCE_TOKEN` (references) |
 | `FIN_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | finance | you (keep it in your password manager) |
 | `STRIPE_GATEWAY_CALLER_TOKEN` | `openssl rand -hex 32` | stripe-gateway | finance `FIN_CALLER_TOKENS` (`rail_gateway`, interpolated) |
@@ -201,32 +201,143 @@ be a different value: several services refuse to start when two of their tokens 
 the ledger and the orchestrator cannot rate-limit guesses, so the token's entropy is the defence.
 
 **`LEDGER_CALLERS`** (per-caller ledger tokens with department scopes; services/ledger-rust/README.md). It holds the
-SHA-256 of each caller's token, never a token. Run this on your machine; it asks for the five ledger tokens without
-echoing them and prints the JSON to paste into the ledger's `LEDGER_CALLERS`:
+SHA-256 of each caller's token, never a token. `devtools/ledger_callers.py` builds it. Run it on your machine from a
+checkout (Python 3.9 or newer, standard library only). It asks for each token without echoing it, twice, and refuses:
+
+- an empty token, whitespace in a token, or a token under the ledger's 32 bytes;
+- the same token for two callers (the ledger would refuse the start; a hand-made map would silently drop one);
+- a caller or department it does not know, so a typo cannot cut a department off;
+- anything else the ledger refuses at start.
+
+Its table is the only place that sets what each caller may do:
+
+- orchestrator-go writes `revenue_recovery`;
+- finance-py writes `finance`;
+- legal-py writes `legal`;
+- seo-py writes `seo`;
+- detection-py writes `rr_store`, its store-read evidence (ADR 0020 section 7). It neither writes nor reads
+  `revenue_recovery` (the orchestrator's findings).
+
+Each caller reads only its own department: no `read_departments`, no `read_all`. Every command prints one line per
+caller: its name, what it writes and what it reads. It never prints a token, and never a hash outside the value it
+writes.
+
+First time (step 5), after the five ledger tokens are set on their services:
 
 ```bash
-python3 - <<'PY'
-import getpass, hashlib, json
-callers = [("orchestrator-go", "revenue_recovery", "LEDGER_SERVICE_TOKEN you set on orchestrator"),
-           ("finance-py", "finance", "LEDGER_SERVICE_TOKEN you set on finance"),
-           ("legal-py", "legal", "LEDGER_SERVICE_TOKEN you set on legal"),
-           ("seo-py", "seo", "LEDGER_SERVICE_TOKEN you set on seo"),
-           ("detection-py", "rr_store", "DETECTION_LEDGER_TOKEN you set on detection")]
-out = {}
-for name, department, prompt in callers:
-    token = getpass.getpass(prompt + ": ")
-    out[hashlib.sha256(token.encode()).hexdigest()] = {"caller": name, "departments": [department], "scope": "write"}
-print(json.dumps(out))
+mkdir -p ~/zbm && chmod 700 ~/zbm
+python3 devtools/ledger_callers.py new --out ~/zbm/ledger-callers.json
+```
+
+Paste that file's content into `LEDGER_CALLERS` on the ledger (macOS: `pbcopy < ~/zbm/ledger-callers.json`). **Keep
+the file.** It is your record of the value. Railway never shows a Sealed variable again ("Sealed variables cannot be
+un-sealed"; not shown by the dashboard, the API, `railway variables` or `railway run`). The file holds hashes only:
+with it, adding or rotating one caller needs only that caller's new token, never the others (which are Sealed too).
+
+With `LEDGER_CALLERS` set and no `LEDGER_SERVICE_TOKEN` on the ledger, there is no shared token: each service can
+write and read only its own department.
+
+#### Changing `LEDGER_CALLERS` (adding a caller, rotating one token)
+
+Every change replaces the whole value and needs a ledger redeploy. A wrong value either stops the ledger (every
+department's ledger writes then fail closed) or quietly cuts one department off. So:
+
+1. **Record the current value.** It is `~/zbm/ledger-callers.json` if you kept it.
+   - Run `python3 devtools/ledger_callers.py check --current ~/zbm/ledger-callers.json`.
+   - Compare its summary with the ledger's last start log line `per-caller tokens from ...`: same callers, same
+     departments.
+   - **No copy?** (The first version of this page did not ask you to keep one.) `railway ssh` into the ledger and run
+     `cat /run/zbm-secrets/ledger-callers-file`. If that is refused, try `printenv LEDGER_CALLERS`. Both are
+     UNVERIFIED: whether the `railway ssh` user can read that file (mode 0600, owner uid 10001), and whether ssh
+     sessions get the service's variables. The value holds hashes only, so it reveals no token on your screen. Save it
+     as `~/zbm/ledger-callers.json` (`chmod 600`) and run `check` on it.
+   - **Neither works?** Then the only way is a fresh value: new tokens for all five callers, `new`, each new token set
+     on its service, then the ledger and every service redeployed. Ledger writes fail until each service runs with its
+     new token.
+2. **Build the new value from the record.** It is written to a new file; the record stays as it is for rollback.
+   - Add detection: `python3 devtools/ledger_callers.py add detection-py --current ~/zbm/ledger-callers.json --out
+     ~/zbm/ledger-callers.next.json`. It asks only for `DETECTION_LEDGER_TOKEN`; the other four entries are copied,
+     not re-typed.
+   - Rotate one (generate its new token first): `python3 devtools/ledger_callers.py rotate seo-py --current
+     ~/zbm/ledger-callers.json --out ~/zbm/ledger-callers.next.json`.
+   - Read the summary: every caller listed, each with its one department.
+3. **Set the new token on its service** (detection's `DETECTION_LEDGER_TOKEN`, or the rotated service's
+   `LEDGER_SERVICE_TOKEN`, Sealed). Do not deploy that service yet. For a rotation, that department's ledger writes
+   fail closed from the ledger redeploy until its own redeploy (step 5), so do it when nothing of that department is
+   running.
+4. **Replace `LEDGER_CALLERS`** on the ledger with the content of `~/zbm/ledger-callers.next.json` and redeploy the
+   ledger. Wait for it to be Active. Its log must show:
+   - `listening on [::]:8090`;
+   - no `REFUSING TO START`;
+   - `per-caller tokens from /run/zbm-secrets/ledger-callers-file:` listing the same callers and departments as the
+     summary from step 2.
+5. **Check every department still reaches the ledger** (next paragraph). Then deploy the service whose token changed,
+   and check that one again.
+6. **Make the new value the record**, only after step 5 passes:
+   `mv ~/zbm/ledger-callers.json ~/zbm/ledger-callers.prev.json && mv ~/zbm/ledger-callers.next.json
+   ~/zbm/ledger-callers.json`.
+
+**Per-department check** (read-only; it writes nothing to the append-only ledger). `railway ssh` into each service in
+turn and paste this with that service's department as `D`:
+
+| service | `D` |
+|---|---|
+| orchestrator | `revenue_recovery` |
+| finance | `finance` |
+| legal | `legal` |
+| seo | `seo` |
+| detection | `rr_store` |
+
+```sh
+D=finance python3 - <<'PY'
+import os, urllib.error, urllib.request
+d = os.environ["D"]
+if d == "rr_store":
+    url = os.environ["DETECTION_LEDGER_URL"]
+    tok = os.environ.get("DETECTION_LEDGER_TOKEN") or open("/run/zbm-secrets/detection-ledger-token-file").read().strip()
+else:
+    url, tok = os.environ["LEDGER_SERVICE_URL"], os.environ["LEDGER_SERVICE_TOKEN"]
+req = urllib.request.Request(f"{url}/ledger/entries?department={d}&limit=1", headers={"Authorization": "Bearer " + tok})
+try:
+    print(d, urllib.request.urlopen(req, timeout=15).status)
+except urllib.error.HTTPError as e:
+    print(d, e.code)
 PY
 ```
 
-detection-py's caller writes **only** `rr_store` (its store-read evidence, ADR 0020 section 7); it neither writes nor
-reads `revenue_recovery` (the orchestrator's findings). Adding it to a ledger already running: re-run the script with
-all five tokens, replace `LEDGER_CALLERS`, redeploy the ledger, then detection.
+It prints the department and an HTTP status, never the token:
 
-With `LEDGER_CALLERS` set and no `LEDGER_SERVICE_TOKEN` on the ledger, there is no shared token: each service can
-write and read only its own department. Rotating one: new token on the service, re-run the script, update
-`LEDGER_CALLERS`, redeploy the ledger, then the service.
+- `200`: the service's own token is in `LEDGER_CALLERS` with that department. In the script's table each department
+  is readable only by its one write caller, so this is that caller's write grant.
+- `401`: its token is not in the value (a typo, or the caller was dropped). Roll back.
+- `403`: the token is there, but with another department. Roll back.
+- `KeyError`: the ssh session does not have the service's variables (UNVERIFIED Railway behaviour). Fall back:
+  - orchestrator: the smoke check `GET /revenue-recovery/findings` → 200 with `"ledger_verify": {"valid": true}`;
+  - finance, legal, seo: no `ledger refused` / `HTTP 401` line in their log at their next recorded operation;
+  - detection: a store sync that does not answer `LEDGER_UNAVAILABLE`.
+
+**Rollback.** Paste `~/zbm/ledger-callers.json` (the record, unchanged) back into `LEDGER_CALLERS` and redeploy the
+ledger. A caller you were adding then fails closed on the ledger until you try again (detection: `LEDGER_UNAVAILABLE`).
+Railway's Rollback on an earlier ledger deployment may also work. UNVERIFIED: whether it restores that deployment's
+variables. Re-pasting the record is the rollback this page relies on.
+
+**If the new ledger deployment fails its healthcheck.** The ledger has a volume. Railway's healthcheck docs say three
+things:
+
+- a new deployment is made active only after its healthcheck passes;
+- "we prevent multiple deployments from being active and mounted to the same service";
+- "there will be a small amount of downtime when re-deploying a service that has a volume attached".
+
+UNVERIFIED: whether the old ledger deployment is still running when the new one fails, or was already stopped. Assume
+the ledger is down until you see it Active. While it is down:
+
+- the other services keep running (nothing restarts them), but every ledger write fails closed;
+- orchestrator scans, and the finance, legal and seo operations that are recorded first, are refused;
+- detection syncs answer `LEDGER_UNAVAILABLE`;
+- nothing is written half-way and nothing on the ledger is lost.
+
+Roll back at once. Do not redeploy finance, legal or seo while the ledger is down: they refuse to start without a
+reachable ledger (their local log is checked against it).
 
 **Interpolated maps.** `FIN_CALLER_TOKENS` and `LEGAL_CALLER_TOKENS` are JSON maps built by `.railway/railway.ts`
 from other services' variables with Railway's reference syntax, e.g.
@@ -250,7 +361,7 @@ otherwise. Examples are never real values.
 | `LEDGER_BIND_ADDR` | yes | no | `[::]` (IaC) | default `127.0.0.1` |
 | `LEDGER_LOG_PATH` | yes | no | `/data/ledger/ledger.jsonl` (IaC; image default) | on the volume; `<log>.lock`, `<log>.head` next to it |
 | `RAILWAY_RUN_UID` | yes | no | `0` (IaC) | entrypoint starts as root to hand `/data/ledger` to uid 10001 |
-| `LEDGER_CALLERS` | yes | yes | (you; script above) | becomes `LEDGER_CALLERS_FILE` |
+| `LEDGER_CALLERS` | yes | yes | (you; `devtools/ledger_callers.py`, see Secrets) | becomes `LEDGER_CALLERS_FILE`; changing it: "Changing `LEDGER_CALLERS`" |
 | `LEDGER_CALLERS_FILE` | — | — | (set by the entrypoint) | do not set yourself |
 | `LEDGER_SERVICE_TOKEN` | no | yes | **leave unset** | the shared token; unset = only per-caller tokens work |
 | `LEDGER_ALLOW_SHARED_TOKEN` | no | no | unset | `1` would accept the shared token next to the callers file; not needed |
@@ -462,7 +573,7 @@ Do these in order. Nothing in the repository creates anything; each step is your
    bring the exact message back.
 5. **Secrets.** Generate each value from [Secrets](#secrets) on your machine and set it in the Railway dashboard on the
    service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the five ledger tokens first, then
-   `LEDGER_CALLERS` on the ledger with the script. When Railway offers to deploy the changes, wait until step 8.
+   `LEDGER_CALLERS` on the ledger with `devtools/ledger_callers.py new` (keep the file it writes). When Railway offers to deploy the changes, wait until step 8.
 6. **Public domains.** orchestrator → Settings → Networking → Generate Domain (port 8080). stripe-gateway → Generate
    Domain (port 8470). No other service gets a public domain.
 7. **Stripe (test mode).** Create the restricted key and set `FIN_STRIPE_SECRET_KEY` on finance; set
@@ -583,9 +694,12 @@ runs the agents and records the findings on the ledger; the dashboard's Revenue 
 `GET /revenue-recovery/findings`. That route returns **every** client's findings (AEGIS A2 M-1): the dashboard must
 stay Andre-only.
 
-**Shopify side (your own store; a client's store follows ADR 0020 section 9).** Admin-created ("legacy") custom apps
-can no longer be created (shopify.dev, "Generate access tokens for custom apps in the Shopify admin": "You can no longer
-create new admin-created custom apps"; existing ones keep working). The documented path for your own store is a Dev
+**Shopify side (your own store; a client's store follows ADR 0020 section 9).** Read this first: the documented
+path below works only if the store is in the same Shopify organization as the app (step 4). Whether a live merchant
+store such as PCA can be is UNVERIFIED. If it cannot, use the fallback after step 5 (a custom-distribution app and a
+static token). Admin-created ("legacy") custom apps
+can no longer be created (shopify.dev, "Generate access tokens for admin-created custom apps": "You can no longer create
+new admin-created custom apps"; existing ones keep working). The documented path for your own store is a Dev
 Dashboard app with the client credentials grant (shopify.dev, "Create apps using the Dev Dashboard" and "Authenticate
 an app for stores in your organization"):
 
@@ -598,22 +712,63 @@ an app for stores in your organization"):
 4. Check that the store is in the **same organization** as the app: Dev Dashboard → the store must be listed there.
    Shopify: "Owning a store or having it installed doesn't automatically place it in your org"; if it is not, the token
    exchange fails (`shop_not_permitted`) and detection answers `STORE_AUTH_REFUSED`. UNVERIFIED how a live merchant
-   store (not a dev store) is placed in the app's organization; if this check fails, stop and bring it back.
+   store (not a dev store) is placed in the app's organization; if this check fails, use the fallback below.
 5. App settings → copy the **Client ID** and **Client secret** into your password manager. Never into chat or email.
 
-(An existing legacy custom app with **only** `read_orders` also works: its Admin API access token goes in
-`RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` stays unset, and the credential is `{"kind": "static_token", "token_file":
-"/run/zbm-secrets/rr-store-secret-1-file"}`. Do not reuse an app that has any other scope.)
+**If step 4 fails (fallback, AEGIS detection-branch M-3).** This is the case when the store is not in the app's
+organization: no store listed, or `STORE_AUTH_REFUSED` at step 12. A live store such as PCA may well land here. Do not
+try to force the client credentials grant. Shopify's documented route for such a store (shopify.dev, "Authenticate an
+app for stores in your organization"): "The client credentials grant can't reach a store outside your organization,
+including a client's store", so "Distribute your app to that store with custom distribution so that a merchant
+installs it", then "the authorization code grant if it runs outside" the Shopify admin.
+
+- a. **Partner organization.** Custom distribution needs one. shopify.dev, "Select a distribution method": "The
+  Distribution card appears only for apps that belong to a Partner organization". UNVERIFIED: whether you already
+  have a Partner account, and what creating one involves.
+- b. **Install.** In the app: Distribution → **Custom distribution** → enter the store's `*.myshopify.com` domain →
+  **Generate link**. Open the link as the store owner and install, approving `read_orders` only.
+- c. **Token.** Get an offline access token with the authorization code grant. Leave `expiring` at its default `0`,
+  which gives a non-expiring token. shopify.dev, "Offline access tokens": "Non-expiring offline tokens grant permanent
+  access until the app is uninstalled or the secret is revoked". The rule that public apps must use expiring tokens
+  "doesn't apply to custom apps or apps created by merchants". Detection never refreshes a token, so an expiring
+  (1 hour) token would work for one hour only. UNVERIFIED: the exact manual steps of that grant for an app with no
+  server of its own (redirect URL, `state`, the HMAC check). Do it with someone who has done it before, and never
+  paste the code or the token into a chat.
+- d. **Railway.** Put the token in `RR_STORE_SECRET_1` (Sealed) and leave `RR_STORE_SECRET_2` unset. In step 9, use
+  the static-token credential below in place of the `client_credentials` one, and skip the Client ID/secret in step 8.
+  Keep `RR_STORE_KILL_SWITCH_FILE` in step 8: it is required here too.
+
+The static-token credential (detection's `StaticTokenRef`, services/detection-py/src/store_connector/config.py):
+
+```json
+{"kind": "static_token", "token_file": "/run/zbm-secrets/rr-store-secret-1-file"}
+```
+
+What detection does with it, as for the client credentials token:
+
+- reads it from that file (owner-only, uid 10001);
+- checks its scopes against the store before reading any order: `read_orders` / `read_all_orders` only, no `write_`
+  (`STORE_TOKEN_EXCESS_SCOPE` / `STORE_TOKEN_HAS_WRITE_SCOPE`);
+- never stores or logs it.
+
+The token does not expire. To revoke it, uninstall the app from the store or rotate the app's client secret.
+
+An existing legacy custom app with **only** `read_orders` also works the same way: its Admin API access token goes in
+`RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` stays unset, and the credential is the static-token one above. Do not reuse
+an app that has any other scope.
 
 **Railway side.** Merge first: `railway config plan` must show on `detection` the new `RAILWAY_RUN_UID=0`,
 `DETECTION_LEDGER_URL` and the preserved `DETECTION_LEDGER_TOKEN`, `RR_STORE_CONNECTIONS`, `RR_STORE_SECRET_1`,
 `RR_STORE_SECRET_2`; then `railway config apply`.
 
 6. Generate `DETECTION_LEDGER_TOKEN` (`openssl rand -hex 32`) and set it on **detection** (Sealed).
-7. Re-run the `LEDGER_CALLERS` script (five tokens) and replace `LEDGER_CALLERS` on the **ledger**; redeploy the ledger
-   and wait for it to be Active.
-8. On **detection** set (Sealed): `RR_STORE_SECRET_1` = Client ID, `RR_STORE_SECRET_2` = Client secret, and
-   `RR_STORE_KILL_SWITCH_FILE` = `/tmp/rr-store.KILL`.
+7. Add detection's caller with "Changing `LEDGER_CALLERS`" (Secrets): `python3 devtools/ledger_callers.py add
+   detection-py --current ~/zbm/ledger-callers.json --out ~/zbm/ledger-callers.next.json` (asks only for the token
+   from step 6; the four Sealed tokens are not needed). Replace `LEDGER_CALLERS` on the **ledger**, redeploy it, wait
+   for Active, and run that section's log and per-department checks before going on.
+8. On **detection** set (Sealed): `RR_STORE_SECRET_1` = Client ID, `RR_STORE_SECRET_2` = Client secret. **Required,
+   not optional:** also set `RR_STORE_KILL_SWITCH_FILE` = `/tmp/rr-store.KILL` (not a secret). Without it the
+   at-once stop below does nothing (nothing defaults it).
 9. On **detection** set `RR_STORE_CONNECTIONS` (this is your approval; `shop` is the store's `*.myshopify.com` handle,
    not its custom domain; `client_id` is the id you will scan under):
    ```json
@@ -635,7 +790,7 @@ an app for stores in your organization"):
 12. Sync (the only call that reaches Shopify): `curl -sS -X POST -H @$HOME/zbm/det.hdr -H 'Content-Type:
     application/json' -d '{"client_id": "pca"}' http://127.0.0.1:18000/stores/sync` → 200 with `snapshot_id`,
     `orders_read`, `orders_analysed`. A reason code instead: `LEDGER_UNAVAILABLE` (step 6/7), `STORE_AUTH_REFUSED`
-    (step 4/5), `STORE_SCOPE_MISSING` / `STORE_TOKEN_EXCESS_SCOPE` (step 2), `STORE_CONFIG_INVALID` (step 9 JSON),
+    (step 4/5; the store is not in the app's organization: the fallback after step 5), `STORE_SCOPE_MISSING` / `STORE_TOKEN_EXCESS_SCOPE` (step 2), `STORE_CONFIG_INVALID` (step 9 JSON),
     `STORE_CREDENTIAL_UNREADABLE` (step 8).
 13. Scan, within 24 hours of the sync and with no detection redeploy in between (the snapshot lives in memory):
     with `Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>` in `~/zbm/orch.hdr`,
@@ -660,7 +815,7 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 
 - [ ] Every service is Active and passed its healthcheck (`/health`).
 - [ ] ledger log: `ledger_created` on the first deploy, the callers listed (orchestrator-go, finance-py, legal-py,
-      seo-py, each with its one department), no shared-token warning.
+      seo-py, detection-py, each with its one department), no shared-token warning.
 - [ ] finance, legal, seo logs: no `REFUSING TO START` / `refusing to start`.
 - [ ] SEO report delivery path: open the seo tunnel (steps 1-2 of "Delivering an SEO client report from Railway"),
       `curl -sS http://127.0.0.1:18500/health` → 200 `{"status":"ok"}`, then close it.
