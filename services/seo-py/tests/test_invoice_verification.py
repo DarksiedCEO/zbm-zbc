@@ -111,7 +111,8 @@ def test_paid_invoice_keeps_only_the_minimal_facts_and_sends_both_tokens():
     iid = f.add()
     facts = f.client().lookup(iid)
     assert facts == {"invoice_id": iid, "status": "paid", "entity": "zbm", "client_id": CLIENT, "kind": "service",
-                     "currency": "USD", "refunded": False, "charged_back": False, "paid_at": "2026-10-02T17:00:00Z"}
+                     "currency": "USD", "refunded": False, "charged_back": False, "paid_at": "2026-10-02T17:00:00Z",
+                     "held": False}
     assert fc.assess(facts, CLIENT) == fc.PAID
     (req,) = f.calls
     assert req.method == "GET" and str(req.url) == f"{BASE}/fin/v1/invoices/{iid}/status"

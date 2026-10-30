@@ -508,6 +508,7 @@ def test_a_payment_from_a_client_refused_at_booking_is_booked_and_held(tmp_path)
 
 
 def test_a_payment_booked_while_compliance_is_down_opens_a_break_for_andre(tmp_path):
+    """AEGIS r4 R4-1: unreachable is held like a refusal until the job (or Andre) settles it."""
     from test_stripe_incoming import rr_invoice, sent
     hr = _stripe_hr(tmp_path)
     inv = rr_invoice(hr)
@@ -516,10 +517,9 @@ def test_a_payment_booked_while_compliance_is_down_opens_a_break_for_andre(tmp_p
     hr.sim.pay(cs["session_id"])
     hr.f["compliance"].activation_available = False
     assert sent(hr, "checkout.session.completed", {"id": cs["session_id"], "object": "checkout.session"})["status"] \
-        == "matched"
-    assert "held_compliance" not in hr.svc.db["invoices"][inv["invoice_id"]]
+        == "matched_held_unverified"
+    assert hr.svc.db["invoices"][inv["invoice_id"]]["held_compliance"]["kind"] == "unverified"
     assert any(b["leg"] == "compliance_unverified" and b["status"] == "open" for b in hr.svc.db["breaks"].values())
-
 
 def test_a_held_media_prepayment_never_pays_the_vendor(tmp_path):
     from test_media_billing import buy, create, issue, pay_vendor

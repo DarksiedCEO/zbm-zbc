@@ -589,7 +589,9 @@ class BooksMixin:
                     "kind": inv["kind"], "status": inv["status"], "currency": inv.get("currency", "USD"),
                     "paid_at": inv.get("paid_at"),
                     "refunded": bool(inv.get("refunded")) and M.D(inv["refunded"]) > 0,
-                    "charged_back": bool(inv.get("charged_back")) and M.D(inv["charged_back"]) > 0}
+                    "charged_back": bool(inv.get("charged_back")) and M.D(inv["charged_back"]) > 0,
+                    # AEGIS r4: a payment held by Compliance is not releasable for delivery (seo-py: INVOICE_HELD)
+                    "held": bool(inv.get("held_compliance"))}
 
     # ================================================================== bank statement lines (receipts)
 

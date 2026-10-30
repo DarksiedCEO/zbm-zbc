@@ -240,6 +240,10 @@ class ReconMixin:
             b = self.db["breaks"].get(break_id)
             if b is None:
                 raise NotFound("no such break")
+            if b.get("leg") in self.COMPLIANCE_LEGS:
+                # AEGIS r4 R4-2: a Compliance hold is released only on its own grounds (a refund, or a current ALLOW)
+                raise Conflict("a Compliance hold is released only through POST "
+                               "/fin/v1/invoices/{invoice_id}/compliance-hold/release")
             if b["status"] == "resolved":
                 raise Conflict("break already resolved")
             now = self._now()

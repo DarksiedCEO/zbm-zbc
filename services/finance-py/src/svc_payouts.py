@@ -136,10 +136,16 @@ class PayoutsMixin:
         return t is not None and timedelta(0) <= self._now() - t <= timedelta(hours=max_h) or \
             (t is not None and self._now() - t < timedelta(0) and t - self._now() <= timedelta(minutes=5))
 
+    # AEGIS r4 INFO-3: a Compliance hold is enforced on the client's own invoice (no receipt, no vendor payment, held
+    # status); it is not a reconciliation break, so it does not turn FC-02 red and freeze every payout
+    COMPLIANCE_LEGS = ("compliance_hold", "compliance_unverified")
+
     def _open_breaks(self) -> list[dict]:
         out = []
         today = self._today_la()
         for b in self.db["breaks"].values():
+            if b.get("leg") in self.COMPLIANCE_LEGS:
+                continue
             if b["status"] == "open":
                 out.append(b)
             elif b["status"] == "explained" and (b.get("clears_by") or "") < today.isoformat():
