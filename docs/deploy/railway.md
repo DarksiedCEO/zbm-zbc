@@ -173,8 +173,10 @@ be a different value: several services refuse to start when two of their tokens 
 | `STRIPE_GATEWAY_CALLER_TOKEN` | `openssl rand -hex 32` | stripe-gateway | finance `FIN_CALLER_TOKENS` (`rail_gateway`, interpolated) |
 | `SEO_FINANCE_CALLER_TOKEN` | `openssl rand -hex 32` | seo | finance `FIN_CALLER_TOKENS` (`seo_02`, interpolated) |
 | `FIN_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | finance | legal `LEGAL_CALLER_TOKENS` (`finance_31`, interpolated) |
+| `FIN_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` | finance | finance `FIN_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-FIN-Caller-Token` (keep it in your password manager) |
 | `LEGAL_SERVICE_TOKEN` | `openssl rand -hex 32` | legal | finance `FIN_LEGAL_TOKEN` (reference) |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | legal | you |
+| `LEGAL_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` (a different value from `FIN_ONBOARDING_CALLER_TOKEN`) | legal | legal `LEGAL_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-LEGAL-Caller-Token` |
 | `SEO_SERVICE_TOKEN` | `openssl rand -hex 32` | seo | — |
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
@@ -210,8 +212,42 @@ write and read only its own department. Rotating one: new token on the service, 
 
 **Interpolated maps.** `FIN_CALLER_TOKENS` and `LEGAL_CALLER_TOKENS` are JSON maps built by `.railway/railway.ts`
 from other services' variables with Railway's reference syntax, e.g.
-`{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}"}`.
-You never type those two; you set the tokens they point at.
+`{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}"}`
+(`${{VARIABLE}}` with no service name is the same service's variable). You never type those two; you set the tokens
+they point at. Finance and Legal refuse to start when a token value still holds `${{` or `{{` (a reference Railway
+did not resolve, left as literal text): the error names the setting, never the value (AEGIS night review M-2).
+
+**The `onboarding` caller is you, for now** (AEGIS A1 C1). Drafting an invoice (`POST /fin/v1/invoices`) needs the
+`onboarding` (or `scheduler`) caller, and recording a client's acceptance (`POST /legal/v1/acceptances`) needs
+`onboarding` (or `hub` / `clipper_network`); none of those services is deployed. Until an onboarding service exists
+you hold `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN` yourself: generate each on your own
+machine with `openssl rand -hex 32` (two different values; each service refuses to start when a caller token is under
+32 printable characters or equals another of its tokens), paste it into the variable on its service, mark it
+**Sealed**, and keep it in your password manager. Two tokens, not one, so either can be revoked alone and a leaked
+Finance token does not record contract acceptances.
+
+> **Warning: set BOTH tokens BEFORE `railway config apply`** (AEGIS night review M-1). `FIN_CALLER_TOKENS` and
+> `LEGAL_CALLER_TOKENS` reference `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN`. If either is
+> missing when the IaC is applied, that map's `onboarding` entry is empty or unresolved and **finance and legal refuse
+> to start** on their next deploy. On a project that is already running, that is an outage of both services, not a
+> first-deploy hiccup. So: set `FIN_ONBOARDING_CALLER_TOKEN` on finance and `LEGAL_ONBOARDING_CALLER_TOKEN` on legal
+> (both Sealed) first; then run `railway config plan` and read it; only then `railway config apply`.
+
+What it means:
+- **You become maker and checker.** You draft the invoice with the onboarding token and approve it with
+  `FIN_ANDRE_APPROVAL_TOKEN`: the code still needs two different tokens and pins the approval to the draft's
+  `content_sha256`, but one person holds both, so it is a self-review step, not an independent check (FIN-19's
+  separation of duties is nominal until an onboarding service holds the token). Finance's audit trail records the
+  draft as `onboarding`, not as you.
+- **An acceptance is a claim that the client clicked.** Legal's acceptance route takes only
+  `method: clickwrap_unticked_box` with the exact text shown and an affirmative act. Record one only for an
+  acceptance the client actually made, with its evidence; never to unblock an invoice.
+- **More than the two routes.** `onboarding` also reaches, at Finance, `POST /fin/v1/payees`, `GET
+  .../billing-readiness`, `GET /fin/v1/media-buys/{id}`, the Stripe checkout create/view (which your approval token
+  already reaches) and every read open to any caller (treasury, journal, audit export, ...); at Legal,
+  `PUT /legal/v1/contracts/{client_id}/terms`, `POST .../obligations/{id}/done`, `POST .../playbooks/{type}/reviews`,
+  `POST /legal/v1/requests` and every read open to any caller. Do not use it for those. It is still the narrowest
+  caller that can draft or record: `scheduler` reaches payout runs, releases, refunds and sweeps.
 
 ## Environment variables
 
@@ -299,7 +335,8 @@ Set by IaC or by you:
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | finance's own ledger caller token |
 | `FIN_SERVICE_TOKEN` | yes | yes | (you) | ≥ 32 printable characters |
 | `FIN_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | header `X-Andre-Approval-Token` |
-| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02` | other callers (`scheduler`, `onboarding`, ...) are not deployed yet |
+| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02`, `onboarding` | `onboarding` is your operator-held token (Secrets); other callers (`scheduler`, ...) are not deployed yet |
+| `FIN_ONBOARDING_CALLER_TOKEN` | yes to draft invoices | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
 | `FIN_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal. Without Legal no invoice can issue |
 | `FIN_LEGAL_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
 | `FIN_LEGAL_CALLER_TOKEN` | yes | yes | (you) | Finance's `finance_31` caller token at Legal |
@@ -350,7 +387,8 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | legal's own ledger caller token |
 | `LEGAL_SERVICE_TOKEN` | yes | yes | (you) | |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | |
-| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31` | |
+| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding` | `onboarding` is your operator-held token (Secrets) |
+| `LEGAL_ONBOARDING_CALLER_TOKEN` | yes to record acceptances | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
 | `LEGAL_COMPLIANCE_URL` / `LEGAL_COMPLIANCE_TOKEN` / `LEGAL_COMPLIANCE_CALLER_TOKEN` | no | — | unset | Compliance is not deployed: the stand-in (proposals stay `pending_delivery`) |
 | `LEGAL_COUNSEL_CHANNEL`, `LEGAL_ESIGN_PROVIDER` | no | — | unset | not built: setting either refuses to start |
 | `LEGAL_PORTAL_FAQ` | no | no | `0` | `1` refuses to start |
@@ -426,6 +464,16 @@ Do these in order. Nothing in the repository creates anything; each step is your
 3. **Project.** In the Railway dashboard create an empty project (name `zbm-zbc`) and give Railway's GitHub app access
    to `DarksiedCEO/zbm-zbc`. In your checkout: `railway link` (pick the project and the `production` environment).
 4. **Plan and apply the infrastructure.**
+
+   > **Warning — on a project that already exists** (finance and legal already deployed), set BOTH
+   > `FIN_ONBOARDING_CALLER_TOKEN` (on finance) and `LEGAL_ONBOARDING_CALLER_TOKEN` (on legal) in Railway **before**
+   > `railway config apply`: a service whose onboarding token is missing refuses to start on its next deploy (finance
+   > without the first, legal without the second; their caller maps reference those variables; see [Secrets](#secrets)).
+   > Finance also refuses to start when any reference to another service's token (e.g. `FIN_LEGAL_TOKEN`) is
+   > unresolved. Generate every token with `openssl rand -hex 32` (a hand-made token containing `{{` is refused).
+   > Always run `railway config plan` first and read it;
+   > never `apply` without a plan you have read. The same holds for every later re-apply (step 13 included).
+
    ```bash
    cd .railway && npm ci && cd ..
    railway config plan      # read it: 7 services, 4 volumes, every variable; secrets show as preserved
@@ -466,8 +514,8 @@ Do these in order. Nothing in the repository creates anything; each step is your
 12. **Smoke test** — the checklist below.
 13. **Going live with Stripe** (later, after the test-mode smoke passes): live restricted key into
     `FIN_STRIPE_SECRET_KEY`, a new live-mode webhook endpoint (same URL, same events) and its secret into
-    `FIN_STRIPE_WEBHOOK_SECRET`, `FIN_STRIPE_LIVE=1` (in `.railway/railway.ts`, then `railway config apply`), redeploy
-    finance.
+    `FIN_STRIPE_WEBHOOK_SECRET`, `FIN_STRIPE_LIVE=1` (in `.railway/railway.ts`, then `railway config plan`, read it,
+    then `railway config apply`; both onboarding caller tokens must already be set, see step 4), redeploy finance.
 
 Operating the private services (your approval routes on finance, legal and seo) goes through `railway ssh` into that
 service and a request to `127.0.0.1:<port>` from inside it; there is deliberately no public route to them.
@@ -611,7 +659,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   variable to `0.0.0.0`.
 - **Railway behaviours taken from the docs or the SDK types, not observed:** `preserve()` on a variable that does not
   exist yet (first apply); `${{service.VARIABLE}}` interpolation inside the two JSON maps, including the hyphen in
-  `stripe-gateway`; `requiredMountPath` (an SDK field, not described in the docs); `RAILWAY_RUN_UID=0`;
+  `stripe-gateway`, and the same-service `${{VARIABLE}}` form for the two `onboarding` entries (and the reference
+  resolving to a Sealed variable); `requiredMountPath` (an SDK field, not described in the docs); `RAILWAY_RUN_UID=0`;
   `checkSuites: true` (wait for CI); `railway ssh` sessions having the service's variables; the CLI applying
   `backupSchedules` from a volume attachment (the SDK types it and emits it in the graph; checked by evaluating the
   file, not by a plan).
