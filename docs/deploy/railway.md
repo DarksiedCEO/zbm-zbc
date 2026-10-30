@@ -997,12 +997,35 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    A checkout request repeated with the same `request_id` after a client is re-activated returns its earlier answer
    (a page now expired); use a new `request_id` for a new page.
 
-   **A payment from a refused client.** If a client pays while Compliance refuses it (for example an OFAC hit after
-   the page was opened), Finance still books the payment (the money arrived), marks the invoice `held_compliance`,
-   sends no receipt, pays no media vendor for it, and opens a break owned by you (`compliance_hold`). Refund the
-   payment in the Stripe Dashboard; Finance books the refund from Stripe's event; then resolve the break with that
-   refund's journal entry id (`POST /fin/v1/breaks/{break_id}/resolution`). A `compliance_unverified` break means the
-   payment was booked while Compliance was unreachable: check the client's activation and resolve it.
+   **A payment Compliance holds.** When a client's payment is booked, Finance asks Compliance first. If the answer is
+   REFUSE (for example an OFAC hit after the page was opened), or Compliance cannot be reached, Finance still books
+   the payment (the money arrived) but holds it: the invoice carries `held_compliance` (`kind` `refused` or
+   `unverified`), no receipt goes to the client, no media vendor is paid for it, the invoice status seo reads says
+   `held: true` (seo refuses the run with `INVOICE_HELD`), and a break opens for you (`compliance_hold` or
+   `compliance_unverified`). These breaks do not turn FC-02 red: they hold this client's money only, not everyone's
+   payouts. See them through the finance tunnel of step I:
+   `curl -sS -H @fin-auth.hdr -H @fin-onboarding.hdr http://127.0.0.1:18410/fin/v1/breaks`.
+
+   - `unverified`: the hourly `stripe-sessions` job asks Compliance again. A current ALLOW releases the hold and the
+     receipt goes out; a REFUSE turns it into a `refused` hold. Nothing to do unless Compliance stays down.
+   - `refused`: refund the payment in the Stripe Dashboard. Finance books the refund from Stripe's event (an `F7r`
+     journal entry). Then release the hold with that entry, with a header file for your Finance approval token made
+     as in step E (`read -rs T && printf 'X-Andre-Approval-Token: %s\n' "$T" > fin-andre.hdr && unset T`, paste
+     `FIN_ANDRE_APPROVAL_TOKEN`):
+
+     ```sh
+     curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
+       --data '{"request_id": "rel-<invoice>-1", "basis": "refund", "entry_id": "<the F7r entry id>"}' \
+       http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold/release
+     ```
+
+     It is refused unless the entry is a refund of this very payment, booked after it, and the refunds cover the held
+     amount. After the refund the invoice is `issued` again (the client owes it on paper): there is no void for an
+     issued invoice yet, so note it for your accountant until that exists.
+   - If the client is re-activated at Compliance and you decide to keep the payment, release with
+     `{"basis": "compliance_allow"}` instead: it is refused unless Compliance answers a current ALLOW now, and the
+     held receipt then goes out.
+   - `POST /fin/v1/breaks/{break_id}/resolution` refuses these breaks; only the release above clears a hold.
 5. Close the tunnel (Ctrl-C) when done; delete `~/.zbm-cmp/*.hdr` if you do not activate another client today.
 
 **H. Re-verify before rules expire (nothing is extended by itself).** The readiness answer lists every expired rule and
