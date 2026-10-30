@@ -434,3 +434,19 @@ def test_every_house_rule_has_no_source_url_so_andre_can_amend_it():
     for r in H.SEED_ROWS:
         if r["source_kind"] == "house-rule":
             assert r["source_quality"] == "founder" and r["source_url"] is None, r["id"]
+
+
+# --- AEGIS r3 N-11: main() starts the scheduler -------------------------------------------------------------------------
+
+def test_main_starts_the_scheduler_before_serving(monkeypatch):
+    import api
+    import serve
+    h = harness()
+    order: list = []
+    h.app.state.settings = h.settings          # what _app_from_env sets on the deployed app
+    monkeypatch.setattr(api, "app", h.app)
+    monkeypatch.setattr(api, "start_scheduler", lambda svc, settings: order.append(("start", svc, settings)))
+    monkeypatch.setattr(serve, "run", lambda app, host, port: order.append(("serve", app)))
+    api.main()
+    assert [x[0] for x in order] == ["start", "serve"]
+    assert order[0][1] is h.svc and order[0][2] is h.settings

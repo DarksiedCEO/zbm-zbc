@@ -132,7 +132,7 @@ jurisdiction as a refusal, and an unreachable or malformed answer as unavailable
 
 | Caller | Where | Refusal |
 |---|---|---|
-| finance-py (`finance_31`) | invoice approval (`decide_invoice`, approve only), billing readiness, every Stripe checkout request, before the idempotent replay and before an open page is handed back; on a REFUSE every open page of the client is expired at Stripe, and the hourly `stripe-sessions` job closes the open pages of any client now refused (an outage closes nothing) (AEGIS F-5) | `COMPLIANCE_NOT_ACTIVATED` / `DEPENDENCY_UNAVAILABLE:compliance_38`, both rule FIN-08 ("an absent, stale or stand-in input fails its gate"; no Finance seed change) |
+| finance-py (`finance_31`) | invoice approval (`decide_invoice`, approve only), billing readiness, every Stripe checkout request, before the idempotent replay and before an open page is handed back; on a REFUSE every open page of the client is expired at Stripe, and the hourly `stripe-sessions` job closes the open pages of any client now refused (an outage closes nothing) (AEGIS F-5); Compliance is read again after a page is made, and anything but ALLOW (an outage included) expires that page and refuses (AEGIS r3 N-9); a Stripe payment is booked after a fresh read: from a refused client it is booked as received but the invoice is `held_compliance` (no client receipt, no media vendor payment, a `compliance_hold` break for Andre to refund), and while Compliance is unreachable it is booked normally with a `compliance_unverified` break | `COMPLIANCE_NOT_ACTIVATED` / `DEPENDENCY_UNAVAILABLE:compliance_38`, both rule FIN-08 ("an absent, stale or stand-in input fails its gate"; no Finance seed change) |
 | seo-py (`seo_02`) | a client tenant's paid audit, its schedule, every scheduled slot, every client report; before the invoice check; **no override** | `COMPLIANCE_NOT_ACTIVATED` 409; `COMPLIANCE_NOT_CONFIGURED` / `_UNAVAILABLE` / `_AUTH_REFUSED` / `_RESPONSE_INVALID` 503 (a slot waits) |
 | detection-py (`revenue_recovery`) | every store sync and every snapshot handed to the scan path | `COMPLIANCE_NOT_ACTIVATED` 409 / `COMPLIANCE_UNAVAILABLE` 503, no store call made |
 
@@ -203,8 +203,9 @@ Evaluated with the pinned SDK (railway 3.13.1) against the base commit: 2 resour
   (re-activation needs a new OFAC search for any client whose last one is over 30 days old), and the hourly job then
   closes their open Stripe pages. The exception: an amendment of only HR-05's or HR-07's `parameters` (the service
   area) refuses exactly the clients it takes out; a widening or a re-ordering refuses nobody.
-- Finance's sweep is bounded (AEGIS r2 N-4): a refused checkout closes at most 25 of the client's pages per request,
-  and the job reads Compliance for at most 25 clients per run (rotating) outside the Stripe turn. The rotation cursor is
+- Finance's sweep is bounded (AEGIS r2 N-4): a refused checkout closes at most 25 of the client's pages per request
+  (the rest are reported "not attempted (cap)", AEGIS r3 N-13), and the job reads Compliance for at most 25 clients per
+  run (rotating) outside the Stripe turn. The rotation cursor is
   in memory, so after a restart it starts again from the first client.
 - On 2026-12-25 every client turns REFUSE unless US-OFAC-04 has been re-verified and approved (runbook checklist).
 - The EU-kit and local-label mechanics stay in the engine but no seed v2 row reaches them; their tests now exercise the
