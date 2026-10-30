@@ -146,7 +146,7 @@ def test_h08_under_18_attestation_is_a_hard_block_and_no_guardian_field_exists()
     ("CA", None, {"HR-07"}),
     ("CA", "CA-ON", {"HR-07"}),
     ("GB", None, {"HR-07"}),
-    ("US", "US-VI", {"HR-07"}),
+    ("US", "US-UM", {"HR-07"}),
     ("IR", None, {"HR-07", "US-OFAC-04"}),
     ("UA", "UA-43", {"HR-07", "US-OFAC-04"}),
     ("BR", None, {"HR-07"}),

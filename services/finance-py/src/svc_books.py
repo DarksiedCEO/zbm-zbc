@@ -338,7 +338,11 @@ class BooksMixin:
             overrides = {k: one(v) for k, v in (params.get("overrides") or {}).items()}
             if not (0 < ratio <= 1):
                 raise ValueError("ratio")
-            return {"alert_ratio": ratio, "default": default, "overrides": overrides}
+            checks = params.get("check_before_first_client") or {}
+            if not isinstance(checks, dict) or not all(isinstance(k, str) and isinstance(v, str) and v
+                                                       for k, v in checks.items()):
+                raise ValueError("checks")
+            return {"alert_ratio": ratio, "default": default, "overrides": overrides, "checks": checks}
         except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError, M.MoneyError):
             return None
 
@@ -373,7 +377,9 @@ class BooksMixin:
             rows, flagged = [], []
             for code in sorted(buckets):
                 b = buckets[code]
-                t = (th["overrides"].get(code) or th["default"]) if th else None
+                check = th["checks"].get(code) if th else None
+                # ADR 0024 (12:51 update): a territory with no verified threshold gets no number, only its check
+                t = None if check else ((th["overrides"].get(code) or th["default"]) if th else None)
                 item = {"jurisdiction": code, "threshold": None if t is None else
                         {"sales_usd": M.fmt(t["sales_usd"]), "transactions": t["transactions"], "source": t["source"]},
                         "flag_reasons": []}
@@ -392,10 +398,12 @@ class BooksMixin:
                                 item["flag_reasons"].append(f"{period}: {v['transactions']} transactions, at "
                                                             f"{rec['transactions_ratio']} of the threshold")
                     item[period] = rec
+                if check:
+                    item["flag_reasons"].append(check)
                 if code == "unknown":
                     item["flag_reasons"].append("invoices with no recorded client jurisdiction (issued before ADR 0024"
                                                 " or without a Compliance activation): assign them by hand")
-                elif t is None and any(b[p]["transactions"] for p in starts):
+                elif t is None and not check and any(b[p]["transactions"] for p in starts):
                     item["flag_reasons"].append("thresholds unavailable from Compliance: review by hand")
                 item["flagged"] = bool(item["flag_reasons"])
                 if item["flagged"]:
@@ -405,7 +413,9 @@ class BooksMixin:
                 "thresholds": {"available": th is not None, "obligation_id": self.NEXUS_ROW,
                                "row_status": ans.effective_status if isinstance(ans, RegisterParameters) else "unknown",
                                "source_url": ans.source_url if isinstance(ans, RegisterParameters) else None,
-                               "alert_ratio": f"{th['alert_ratio']:f}" if th else None},
+                               "alert_ratio": f"{th['alert_ratio']:f}" if th else None,
+                               # jurisdictions with no verified threshold: what to check before the first client there
+                               "check_before_first_client": dict(sorted(th["checks"].items())) if th else None},
                 "periods": {p: {"from": d.isoformat(), "to": today.isoformat()} for p, d in starts.items()},
                 "jurisdictions": rows, "flagged": flagged, "ledger_event_ids": g.events}
 

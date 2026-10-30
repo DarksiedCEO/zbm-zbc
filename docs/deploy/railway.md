@@ -802,7 +802,8 @@ service and a request to `127.0.0.1:<port>` from inside it; there is deliberatel
 From the day this is applied, Compliance decides whether a client may be served. Finance refuses to approve an
 invoice, report billing readiness or make a Stripe page, seo refuses a client's paid audit, scheduled slot or client
 report, and detection refuses to read a client's store, unless Compliance answers a **current ALLOW** for that client.
-ALLOW needs: the client in the service area (the 50 states, DC, Puerto Rico, Guam), your recorded OFAC search (no
+ALLOW needs: the client in the service area (the 50 states, DC, Puerto Rico, Guam, the US Virgin Islands, American
+Samoa, the Northern Mariana Islands), your recorded OFAC search (no
 match, at most 30 days old at activation, 90 days of validity), the client's MSA current and accepted at Legal, every
 rule it ran through still verified, and control C-11 green. Compliance has no public domain.
 
@@ -918,7 +919,7 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
 3. The client's MSA acceptance at Legal (the acceptance you record today with `LEGAL_ONBOARDING_CALLER_TOKEN`): note
    its `acceptance_id`, the `version` and the document's `doc_sha256`.
 4. Run the activation (edit the values in `<...>`; the state is the client's ISO 3166-2 code: `US-CA`, `US-NY`;
-   Puerto Rico `PR`, Guam `GU`; set a flag `true` only if it is true of the client):
+   a territory `PR`, `GU`, `VI`, `AS` or `MP`; set a flag `true` only if it is true of the client):
 
    ```sh
    cat > rule.json <<JSON
@@ -939,8 +940,8 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    curl -sS -H @auth.hdr -H @caller.hdr $C/compliance/v1/clients/$CLIENT/activation
    ```
 
-   For Puerto Rico or Guam use `"declared_country": "PR"` (or `"GU"`), `"declared_region": null` and
-   `"target_jurisdictions": ["PR"]`. `allowed: false` lists every unmet item with the rule it cites; fix it and run
+   For a territory use `"declared_country": "PR"` (or `"GU"`, `"VI"`, `"AS"`, `"MP"`), `"declared_region": null` and
+   `"target_jurisdictions": ["PR"]` (the same code). `allowed: false` lists every unmet item with the rule it cites; fix it and run
    the rule again with a new `request_id`. The status must say `"decision": "ALLOW"`. Only then: invoice it at
    Finance, run its SEO audit, or connect its store. Re-run the search and the activation every 90 days
    (`valid_until`).
@@ -989,6 +990,9 @@ curl -sS -H @fin-auth.hdr -H @fin-onboarding.hdr http://127.0.0.1:18410/fin/v1/r
 `flagged` lists every state or territory at 75% or more of its economic-nexus threshold (trailing 12 months or the
 calendar year; Hawaii, Nevada and Puerto Rico also by transactions): register there before the threshold is crossed
 (memo MEMO-FIN-CQ-11-2026-10-30). `unknown` holds invoices issued before this change (no recorded jurisdiction).
+Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands have no threshold number: the report lists
+them under `thresholds.check_before_first_client` ("local gross receipts/business tax — check before first client")
+and flags any of them with a sale. Do that check before the first client there.
 
 ### Connecting Search Console (optional)
 

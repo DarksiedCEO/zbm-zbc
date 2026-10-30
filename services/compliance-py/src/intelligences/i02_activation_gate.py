@@ -100,8 +100,8 @@ def build(lane: str, subject_id: str, raw_facts: dict, rows: dict, fallback: dic
             flags["entity_payee"] = f["payee_type"] == "entity"
         country = get(f, "jurisdiction.declared_country")
         if country:
-            # ADR 0024: Puerto Rico and Guam (declared PR / GU) are in the service area and are not foreign payees
-            flags["foreign_payee"] = country not in ("US", "PR", "GU")
+            # ADR 0024: the US territories (declared PR, GU, VI, AS, MP) are in the service area, not foreign payees
+            flags["foreign_payee"] = country not in ("US", "PR", "GU", "VI", "AS", "MP")
         if "es_special_relevance" in f:
             flags["es_special_relevance"] = f["es_special_relevance"]
     flags.update(LANE_FIXED_FLAGS[lane])

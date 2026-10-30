@@ -1,4 +1,4 @@
-# ADR 0024 — Compliance (38) deployed as the hard gate, with the US + PR + GU service area
+# ADR 0024 — Compliance (38) deployed as the hard gate, with the US service area
 
 Status: **WIP, not merged** (branch `feat/compliance-gate-deploy` from `golive-next-2026-10-30` `8d20e83`). Founder
 decisions of Oct 30, 2026, approved by Andre for this build. Amends ADR 0006 (Compliance architecture), ADR 0009
@@ -14,9 +14,11 @@ guidance rows expire on Dec 25 with nothing scheduled to notice (H2); the suite 
 
 Andre's decisions (Oct 30, 2026):
 
-1. **Service area.** ZBM and ZBC do business only with clients located in the 50 US states, the District of Columbia,
-   Puerto Rico and Guam. Everything else is refused, including the other US territories (USVI, American Samoa,
-   Northern Mariana Islands) until Andre adds them. Plus OFAC: refuse anyone on the SDN/consolidated lists.
+1. **Service area.** ZBM and ZBC do business only with clients located in a US jurisdiction: the 50 states, the
+   District of Columbia, Puerto Rico, Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands
+   (founder update of 12:51 the same day, which widened the morning's 50 states + DC + PR + GU). The US Minor Outlying
+   Islands (uninhabited) are left out: the model does not need them for completeness. Everything else is refused
+   (Canada, the UK, France, the EU, every other country). Plus OFAC: refuse anyone on the SDN/consolidated lists.
 2. Compliance deployed on Railway as a **private** service, with its volume (daily backups), ledger connection and
    tokens declared but never stored; a daily scheduled job; gates closed until C-11 has passed.
 3. **Gates, fail closed.** Client activation for SEO paid audits and Revenue Recovery store connections needs a current
@@ -29,9 +31,10 @@ Andre's decisions (Oct 30, 2026):
 
 ### 1. The allowed set is one reviewed rule parameter (seed v2)
 
-`HR-05 parameters.operate` lists the allowed codes one by one: `US-AL` … `US-WY` (50), `US-DC`, `US-PR`, `US-GU`, and
-`PR`, `GU` (Puerto Rico and Guam may be declared either way). `US` itself is not in the list, so a subdivision is never
-admitted by its country prefix (`US-VI` is refused although `US-CA` is operate); a bare `US` person still needs a state
+`HR-05 parameters.operate` lists the allowed codes one by one: `US-AL` … `US-WY` (50), `US-DC`, `US-PR`, `US-GU`,
+`US-VI`, `US-AS`, `US-MP`, and `PR`, `GU`, `VI`, `AS`, `MP` (a territory may be declared either way; Compliance reports
+it by its own two-letter code). `US` itself is not in the list, so a subdivision is never admitted by its country
+prefix (`US-UM` is refused although `US-CA` is operate); a bare `US` person still needs a state
 (`region_required`). A campaign *target* may be the bare country `US` (`HR-05 parameters.target_countries`), meaning the
 allowed states. `HR-07 parameters.refuse` names the OFAC comprehensively sanctioned jurisdictions (cited with
 US-OFAC-04) and `unlisted: refuse` refuses everything else. The resolver ignores the parameters of a `superseded` row.
@@ -39,17 +42,18 @@ US-OFAC-04) and `unlisted: refuse` refuses everything else. The resolver ignores
 Changing the area is a register amendment of HR-05 that only Andre approves (test:
 `test_payout_for_foreign_and_entity_payees` adds `GB` by an approved amendment). The area applies to every lane:
 clients, ZBC brands, campaign targets **and creators** (clippers). That is the fail-closed reading of "everything else
-is refused"; ZBC payouts are blocked anyway. A Puerto Rico or Guam creator is not a foreign payee.
+is refused"; ZBC payouts are blocked anyway. A creator in any of the five territories is not a foreign payee.
 
 **Seed v2 instead of an amendment proposal.** The register's only path to a rule in force is Andre's approval of a
 proposal; the seed is the first proposal, and it has never been approved on any deployment (Compliance was never
 deployed). So the decisions are written into the seed itself (`seed_version: 2`, generated Oct 30, 2026) and its new
 SHA-256 is pinned (`config.PINNED_SEED_SHA256`, `service.SPEC_SEED_SHA256`, test H.29); `source_report` records seed
 v1's hash (`4e3821d0…584d`), and v1 stays in git. Andre still approves it, as one decision, before anything is in
-force. Built from v1 by a script (row changes only):
+force. Built from v1 by `services/compliance-py/devtools/make_seed_v2.py` (row changes only; it reproduces the
+pinned file byte for byte):
 
 - **HR-05, HR-07** rewritten as above (`verified_at` 2026-10-30, `effective_date` null: in force from the approval).
-- **17 rows superseded, unchanged otherwise, with a note** ("Superseded Oct 30, 2026: outside the US + PR + GU service
+- **17 rows superseded, unchanged otherwise, with a note** ("Superseded Oct 30, 2026: outside the US service
   area (HR-05, founder decision). Kept for history."): HR-06 (the EU kit), EU-GDPR-27, EU-AIACT-50, EU-EAA,
   FR-LOI-2023-451, IT-AGCOM, ES-RD444, ES-LABEL, DE-UWG-5A, NL-CVDM, IE-LABEL, UK-HIDDEN-ADS, CA-COMPBUREAU,
   CA-QC-LAW25, CQ-05, CQ-06, CQ-14. They described serving those markets; nothing is deleted. Kept as they were: rows
@@ -63,7 +67,10 @@ force. Built from v1 by a script (row changes only):
 - **US-SALESTAX-NEXUS** (guidance, `control` gate only, **unverified**: the threshold table is a vendor's): the
   thresholds as parameters with their sources — default `$100,000.00`; California `$500,000.00` (CDTFA); Hawaii,
   Nevada, Puerto Rico also 200 transactions; alert ratio `0.75`. Other states' own thresholds are not individually
-  verified (stated in the row).
+  verified (stated in the row). Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands get **no
+  number**: no verifiable threshold source was found for them, so `parameters.check_before_first_client` records
+  "local gross receipts/business tax — check before first client" and Finance's report shows that check (and flags the
+  territory) instead of a ratio.
 
 HR-14 and HR-15 take effect on 2026-10-30 (`effective_date`), the decision date: the suite's older scenarios, pinned to
 Sep 26, keep testing the engine as it stood, and every new test runs on or after Oct 30.
@@ -94,7 +101,7 @@ all hold now**: the latest activation ruling for the client allowed it; every ru
 the register in force (an expired rule is never extended: on Dec 25, US-OFAC-04 turns every client to REFUSE until it
 is re-verified); the register gained no activation rule since the ruling; no control blocking activation is red (C-11;
 C-04 blocks creators only, ADR 0006 choice 8); no hold is open on the client; its OFAC search is within
-`rescreen_after_days`. `jurisdiction` is the recorded code (`US-CA`, `US-DC`; `PR`, `GU` however declared).
+`rescreen_after_days`. `jurisdiction` is the recorded code (`US-CA`, `US-DC`; `PR`, `GU`, `VI`, `AS`, `MP` however declared).
 
 Callers treat anything but `decision == ALLOW`, `current == true`, `seed_pinned == true` with a ruling id and a
 jurisdiction as a refusal, and an unreachable or malformed answer as unavailable (refused too):
@@ -158,6 +165,7 @@ Evaluated with the pinned SDK (railway 3.13.1) against the base commit: 2 resour
 ## Not done / open
 
 - No accessibility provider and no sanctions provider: site publish (HR-09) and creator payouts stay refused (H3).
-- Guam's business privilege tax is not researched (memo section 4); `US-SALESTAX-NEXUS` is unverified.
+- Guam's business privilege tax and the gross receipts/business taxes of the US Virgin Islands, American Samoa and the
+  Northern Mariana Islands are not researched; `US-SALESTAX-NEXUS` is unverified.
 - The images were not built and the smoke was not run here (no Docker daemon); `railway config plan` was not run (no
   Railway access). Both are in Andre's steps.

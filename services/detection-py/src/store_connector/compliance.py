@@ -32,7 +32,7 @@ MAX_RESPONSE_BYTES = 64 * 1024
 _URL = re.compile(r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|http://[a-z0-9-]{1,63}\.railway\.internal(:[0-9]{1,5})?"
                   r"|http://(127\.0\.0\.1|localhost)(:[0-9]{1,5})?")
 _RULING = re.compile(r"[A-Za-z0-9._:-]{1,128}")
-_JURIS = re.compile(r"US-[A-Z]{2}|PR|GU")
+_JURIS = re.compile(r"US-[A-Z]{2}|PR|GU|VI|AS|MP")
 
 
 class NotConfiguredCompliance:

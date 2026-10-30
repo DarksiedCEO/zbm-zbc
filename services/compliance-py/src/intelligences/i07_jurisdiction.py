@@ -11,8 +11,8 @@ region + attestation, never IP alone) or a campaign target. Rules, in order:
   5. in HR-06 ``conditional`` -> conditional;
   6. otherwise refuse (HR-07 ``unlisted: refuse``, default deny).
 ADR 0024 (founder service area, Oct 30, 2026): HR-05 ``operate`` lists the allowed codes one by one (the 50
-states, US-DC, US-PR/PR, US-GU/GU), so a code is operate only when it, or (for a bare country code) the country
-itself, is listed: US-VI is refused although US-CA is operate (``US`` alone is not in the list). A bare-country
+states, US-DC, and each inhabited territory as US-PR/PR, US-GU/GU, US-VI/VI, US-AS/AS, US-MP/MP), so a code is operate only when it, or (for a bare country code) the country
+itself, is listed: US-UM is refused although US-CA is operate (``US`` alone is not in the list). A bare-country
 campaign TARGET is operate when HR-05 ``target_countries`` lists it (bare ``US``: the allowed states). A row whose
 status is ``superseded`` (HR-06, the EU kit) contributes no parameters.
 Before any of that, a code that is not on the shipped ISO 3166-1 / 3166-2
@@ -106,7 +106,7 @@ def classify(code: str, p: Params, who: str) -> Resolution:
         if code == "CA-QC":
             cites.append("HR-05")  # operate_excludes names CA-QC too
         return Resolution(who, code, "refuse", "refused jurisdiction", tuple(["HR-07", *cites]))
-    # ADR 0024: HR-05 lists subdivisions one by one (not "US"), so US-VI is not operate because US-CA is
+    # ADR 0024: HR-05 lists subdivisions one by one (not "US"), so US-UM is not operate because US-CA is
     if (code in p.operate or country in p.operate) and code not in p.operate_excludes:
         return Resolution(who, code, "operate", "operate jurisdiction", ("HR-05", *cites))
     if code in p.operate_excludes:

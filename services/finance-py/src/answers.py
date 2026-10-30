@@ -135,7 +135,7 @@ class ClientActivationM(_S):
     available: Literal[True]
     allowed: bool
     ruling_id: Optional[IdS] = None
-    jurisdiction: Optional[Annotated[str, StringConstraints(pattern=r"^(US-[A-Z]{2}|PR|GU)$")]] = None
+    jurisdiction: Optional[Annotated[str, StringConstraints(pattern=r"^(US-[A-Z]{2}|PR|GU|VI|AS|MP)$")]] = None
     reasons: tuple[Annotated[str, StringConstraints(max_length=200)], ...] = Field(default=(), max_length=21)
     reason: Reason = ""
 

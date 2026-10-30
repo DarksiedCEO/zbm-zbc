@@ -21,7 +21,7 @@ CALLER_TOKEN_MIN = 32
 UNRESOLVED_REF_MARKERS = ("${{", "{{")
 # The pinned seed hash; service.SPEC_SEED_SHA256 is the same value. Seed v2 (ADR 0024: the founder decisions of Oct
 # 30, 2026); seed v1, the spec's ("SHA-256 at generation"), was 4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d.
-PINNED_SEED_SHA256 = "037cf8030e0a91cb050dad586e88bb99af5a069216a95f88eeebe0927381cf0b"
+PINNED_SEED_SHA256 = "f1080e6a54a4f916bb74aa836631a0a2a145fdfc0ea99b2bf52cb7290c37020a"
 DEFAULT_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "seed",
                                  "compliance_obligations_seed.json")
 

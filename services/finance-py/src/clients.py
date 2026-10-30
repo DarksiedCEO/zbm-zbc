@@ -42,7 +42,7 @@ _LEGAL_DOC = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _LEGAL_VERSION = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}")
 _LEGAL_ACC = re.compile(r"lg-[a-z]{3}-[0-9A-Z]{26}")
 _SHA = re.compile(r"[0-9a-f]{64}")
-_JURIS = re.compile(r"US-[A-Z]{2}|PR|GU")      # ADR 0024: the service area's codes as Compliance reports them
+_JURIS = re.compile(r"US-[A-Z]{2}|PR|GU|VI|AS|MP")      # ADR 0024: the service area's codes as Compliance reports them
 
 
 def _run_bounded(fn, seconds: float):

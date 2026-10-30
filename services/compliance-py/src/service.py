@@ -47,7 +47,7 @@ from register import Version, effective_status, rows_sha256, sha256_text
 from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
-SPEC_SEED_SHA256 = "037cf8030e0a91cb050dad586e88bb99af5a069216a95f88eeebe0927381cf0b"   # seed v2 (ADR 0024)
+SPEC_SEED_SHA256 = "f1080e6a54a4f916bb74aa836631a0a2a145fdfc0ea99b2bf52cb7290c37020a"   # seed v2 (ADR 0024)
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
 REGISTER_PAGE = 100
@@ -1773,12 +1773,13 @@ class ComplianceService:
 
 
 def canonical_jurisdiction(j: Optional[dict]) -> Optional[str]:
-    """The client's recorded place as ONE code (ADR 0024): the state (US-CA, US-DC), or PR / GU for Puerto Rico and
-    Guam however they were declared (US-PR or PR; US-GU or GU)."""
+    """The client's recorded place as ONE code (ADR 0024): the state (US-CA, US-DC), or the territory's own ISO 3166-1
+    code however it was declared (US-PR or PR -> PR; likewise GU, VI, AS, MP)."""
     if not isinstance(j, dict):
         return None
     code = j.get("declared_region") or j.get("declared_country")
-    return {"US-PR": "PR", "US-GU": "GU"}.get(code, code) if isinstance(code, str) else None
+    territories = {"US-PR": "PR", "US-GU": "GU", "US-VI": "VI", "US-AS": "AS", "US-MP": "MP"}
+    return territories.get(code, code) if isinstance(code, str) else None
 
 
 def review_reason(r: dict) -> str:

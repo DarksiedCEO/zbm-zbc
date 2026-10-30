@@ -63,8 +63,9 @@ round 14"):
 
 ## Deployed gate and service area (ADR 0024, Oct 30, 2026)
 
-- **Service area**: clients (and every other lane) only in the 50 US states, DC, Puerto Rico and Guam —
-  `HR-05 parameters.operate`, the one allowed set (`US-CA` … , `US-DC`, `US-PR`/`PR`, `US-GU`/`GU`); a campaign target
+- **Service area**: clients (and every other lane) only in a US jurisdiction: the 50 states, DC, Puerto Rico, Guam,
+  the US Virgin Islands, American Samoa, the Northern Mariana Islands — `HR-05 parameters.operate`, the one allowed set
+  (`US-CA` … , `US-DC`, each territory as `US-PR`/`PR`, `US-GU`/`GU`, `US-VI`/`VI`, `US-AS`/`AS`, `US-MP`/`MP`); a campaign target
   may also be the bare `US`. Everything else is refused by HR-07 (OFAC jurisdictions cite US-OFAC-04). 17 rows about
   other markets (HR-06 the EU kit, EU/FR/IT/ES/DE/NL/IE/UK/Canada-Quebec rows and their counsel questions) are
   `superseded`, kept for history.
@@ -110,7 +111,7 @@ round 14"):
 
 `seed/compliance_obligations_seed.json` — seed v2 (ADR 0024: the founder decisions of
 Oct 30, 2026 written into the spec's seed v1, whose SHA-256 `4e3821d0…584d` it records), SHA-256
-`037cf8030e0a91cb050dad586e88bb99af5a069216a95f88eeebe0927381cf0b`, checked at every start.
+`f1080e6a54a4f916bb74aa836631a0a2a145fdfc0ea99b2bf52cb7290c37020a`, checked at every start.
 
 ## Routes
 
