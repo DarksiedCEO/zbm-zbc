@@ -57,6 +57,11 @@ MAX_CHARGE = Decimal("999999.99")                 # eight digits of cents
 MAX_PAYLOAD = 256 * 1024
 STRIPE_WAIT_S = 30                                # longest a Stripe request waits for its turn before a 503 (AEGIS N3)
 MAX_JOB_CLOSES = 25                               # pages one job run closes (bounds how long it holds the turn)
+# AEGIS r2 N-4: bounds for the activation sweep. A refused checkout closes at most this many of the client's pages in
+# one request (the rest: the next request or the hourly job); a job run reads Compliance for at most this many clients
+# (rotating, so every client with an open page is reached), outside the Stripe turn.
+MAX_REQUEST_CLOSES = 25
+MAX_JOB_ACTIVATION_CHECKS = 25
 _SID = re.compile(r"[a-z]{2,8}_[A-Za-z0-9_]{1,120}")
 METHOD_LABEL = {"card": "card (Stripe)", "us_bank_account": "ACH bank debit (Stripe)"}
 DONE_DISPUTE = ("won", "lost", "warning_closed", "prevented")
@@ -154,10 +159,10 @@ class StripeMixin:
         confirm closed is left as it is (and reported); a page already paid on stays for the webhook to book."""
         with self.lock:
             invs = {i for i, inv in self.db["invoices"].items() if inv.get("client_id") == client_id}
-            open_ = [dict(s) for s in self.db["stripe_sessions"].values()
-                     if s["invoice_id"] in invs and s["status"] == "open"]
-        closed, not_closed = [], []
-        for s in sorted(open_, key=lambda x: x["session_id"]):
+            open_ = sorted((dict(s) for s in self.db["stripe_sessions"].values()
+                            if s["invoice_id"] in invs and s["status"] == "open"), key=lambda x: x["session_id"])
+        closed, not_closed = [], [s["session_id"] for s in open_[MAX_REQUEST_CLOSES:]]   # left for the job (N-4)
+        for s in open_[:MAX_REQUEST_CLOSES]:
             a = self._expire_page(g, s["session_id"])
             (closed if a.available and a.found and a.status == "expired" else not_closed).append(s["session_id"])
         if closed:
@@ -172,7 +177,8 @@ class StripeMixin:
     def _checkout_gate(self, principal: str, request_id: str, invoice_id: str) -> None:
         """ADR 0024 + AEGIS F-5: a client is paid from only while Compliance's activation is a current ALLOW. Checked
         on EVERY request, before the idempotent replay and before an open page is handed back. On a REFUSE the
-        client's open pages are closed; on an outage (unknown) nothing is closed, but no page is handed back."""
+        client's open pages are closed; on an outage (unknown) nothing is closed, but no page is handed back.
+        Compliance is read outside the Stripe turn; the turn is taken only to close pages (AEGIS r2 N-4)."""
         with self.lock:
             inv0 = self.db["invoices"].get(invoice_id)
         if inv0 is None:
@@ -183,8 +189,9 @@ class StripeMixin:
         if not act_reasons:
             return
         if act.available:
-            not_closed = self._close_client_pages(ga, f"chk-close|{principal}|{request_id}|{iso(self._now())}",
-                                                  inv0["client_id"])
+            with self._stripe_turn("checkout: close a refused client's pages"):
+                not_closed = self._close_client_pages(ga, f"chk-close|{principal}|{request_id}|{iso(self._now())}",
+                                                      inv0["client_id"])
             if not_closed:
                 act_reasons = [*act_reasons, R.item(STRIPE_DEP, f"Stripe did not confirm {len(not_closed)} open "
                                                                 "page(s) of this client closed; retry")]
@@ -192,8 +199,7 @@ class StripeMixin:
 
     def stripe_checkout(self, principal: str, request_id: str, invoice_id: str) -> dict:
         key, h, ent = self._idem(principal, request_id, f"stripe-checkout/{invoice_id}", invoice_id)
-        with self._stripe_turn("checkout"):
-            self._checkout_gate(principal, request_id, invoice_id)
+        self._checkout_gate(principal, request_id, invoice_id)
         if ent:
             return ent["response"]
         self.require_rules()
@@ -317,25 +323,33 @@ class StripeMixin:
         area change, a lapsed screening...). Compliance is asked once per client with an open page; an outage
         (unknown) closes nothing and is counted ``activation_unknown`` (the checkout itself refuses meanwhile)."""
         if not self.cfg.stripe_incoming:
-            return {"closed": 0, "failed": 0, "checked": 0, "refused_clients": 0, "activation_unknown": 0}
+            return {"closed": 0, "failed": 0, "checked": 0, "refused_clients": 0, "activation_unknown": 0,
+                    "activation_checked": 0}
+        # AEGIS r2 N-4: Compliance is read OUTSIDE the Stripe turn, for at most MAX_JOB_ACTIVATION_CHECKS clients per
+        # run, rotating through the clients with an open page (a cursor after the last one checked)
+        with self.lock:
+            open_by_client: dict[str, list[dict]] = {}
+            for s in self.db["stripe_sessions"].values():
+                if s["status"] == "open":
+                    cid = (self.db["invoices"].get(s["invoice_id"]) or {}).get("client_id")
+                    if cid:
+                        open_by_client.setdefault(cid, []).append(dict(s))
+        clients = sorted(open_by_client)
+        cursor = getattr(self, "_activation_sweep_cursor", "")
+        clients = ([c for c in clients if c > cursor] + [c for c in clients if c <= cursor])[:MAX_JOB_ACTIVATION_CHECKS]
+        ga = Gather(self, f"{prefix}|activation", ACTOR, "stripe-sessions")
+        refused_ids: set[str] = set()
+        refused_clients = unknown = 0
+        for cid in clients:
+            act = self._activation(ga, cid)
+            if not act.available:
+                unknown += 1
+            elif not act.allowed:
+                refused_clients += 1
+                refused_ids.update(s["session_id"] for s in open_by_client[cid])
+        if clients:
+            self._activation_sweep_cursor = clients[-1]
         with self._stripe_turn("stripe-sessions job"):
-            with self.lock:
-                open_by_client: dict[str, list[dict]] = {}
-                for s in self.db["stripe_sessions"].values():
-                    if s["status"] == "open":
-                        cid = (self.db["invoices"].get(s["invoice_id"]) or {}).get("client_id")
-                        if cid:
-                            open_by_client.setdefault(cid, []).append(dict(s))
-            ga = Gather(self, f"{prefix}|activation", ACTOR, "stripe-sessions")
-            refused_ids: set[str] = set()
-            refused_clients = unknown = 0
-            for cid in sorted(open_by_client):
-                act = self._activation(ga, cid)
-                if not act.available:
-                    unknown += 1
-                elif not act.allowed:
-                    refused_clients += 1
-                    refused_ids.update(s["session_id"] for s in open_by_client[cid])
             with self.lock:
                 todo = []
                 for s in self.db["stripe_sessions"].values():
@@ -363,7 +377,7 @@ class StripeMixin:
                         failed += 1
                 self._commit(op)
             return {"closed": closed, "failed": failed, "checked": len(todo), "refused_clients": refused_clients,
-                    "activation_unknown": unknown}
+                    "activation_unknown": unknown, "activation_checked": len(clients)}
 
     # ================================================================== webhook events
 

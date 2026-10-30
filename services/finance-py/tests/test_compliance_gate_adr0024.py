@@ -382,3 +382,67 @@ def test_nexus_reports_the_previous_calendar_year_too():
     assert tx["trailing_12_months"]["sales_usd"] == "0.00" and tx["calendar_year"]["sales_usd"] == "0.00"
     assert tx["previous_calendar_year"]["sales_usd"] == "76000.00" and tx["flagged"] is True
     assert any(x.startswith("previous_calendar_year:") for x in tx["flag_reasons"])
+
+
+# --- AEGIS r2 N-2: a page is recorded expired only when Stripe confirms it ----------------------------------------------
+
+def test_a_page_stripe_does_not_confirm_closed_stays_open_and_the_refusal_says_so(tmp_path):
+    from test_stripe_incoming import rr_invoice
+    hr = _stripe_hr(tmp_path)
+    inv = rr_invoice(hr)
+    cs = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                       caller="onboarding"))["checkout"]
+    hr.f["compliance"].activations = {"zbm-client-7": {"allowed": False, "reasons": ["hold open: sanctions_match"]}}
+    hr.sim.fail_next = [500] * 10                                  # Stripe cannot expire the page
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()}, caller="onboarding")
+    assert r.status_code == 409 and "Stripe did not confirm 1 open page(s)" in r.text, r.text
+    assert hr.svc.db["stripe_sessions"][cs["session_id"]]["status"] == "open"
+    assert hr.sim.sessions[cs["session_id"]]["status"] == "open"
+    hr.sim.fail_next = []
+    s = hr.ok(hr.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))["summary"]
+    assert s["closed"] == 1 and hr.svc.db["stripe_sessions"][cs["session_id"]]["status"] == "expired"
+
+
+# --- AEGIS r2 N-4: bounded work per request and per job run ------------------------------------------------------------
+
+def test_a_refused_checkout_closes_at_most_the_cap_and_the_job_closes_the_rest(tmp_path, monkeypatch):
+    import svc_stripe
+    from test_stripe_incoming import rr_invoice
+    monkeypatch.setattr(svc_stripe, "MAX_REQUEST_CLOSES", 2)
+    hr = _stripe_hr(tmp_path)
+    invs = [rr_invoice(hr, f"{100 + i}.00") for i in range(3)]
+    pages = [hr.ok(hr.post(f"/fin/v1/invoices/{i['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                           caller="onboarding"))["checkout"]["session_id"] for i in invs]
+    hr.f["compliance"].activations = {"zbm-client-7": {"allowed": False, "reasons": ["x"]}}
+    calls_before = sum(1 for c in hr.f["compliance"].calls if c[0] == "client_activation")
+    r = hr.post(f"/fin/v1/invoices/{invs[0]['invoice_id']}/stripe-checkout", {"request_id": rid()}, caller="onboarding")
+    assert r.status_code == 409 and "Stripe did not confirm 1 open page(s)" in r.text
+    assert sum(1 for c in hr.f["compliance"].calls if c[0] == "client_activation") == calls_before + 1
+    statuses = [hr.svc.db["stripe_sessions"][p]["status"] for p in pages]
+    assert statuses.count("expired") == 2 and statuses.count("open") == 1
+    hr.ok(hr.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))
+    assert all(hr.svc.db["stripe_sessions"][p]["status"] == "expired" for p in pages)
+
+
+def test_the_job_reads_compliance_for_at_most_the_cap_rotating_through_clients(tmp_path, monkeypatch):
+    import svc_stripe
+    from test_stripe_incoming import rr_invoice
+    monkeypatch.setattr(svc_stripe, "MAX_JOB_ACTIVATION_CHECKS", 2)
+    hr = _stripe_hr(tmp_path)
+    for cid in ("c-a", "c-b", "c-c"):
+        hr.f["compliance"].activations = {**(hr.f["compliance"].activations or {}),
+                                          cid: {"allowed": True, "jurisdiction": "US-CA"}}
+    pages = {}
+    for cid in ("c-a", "c-b", "c-c"):
+        inv = rr_invoice(hr)
+        hr.svc.db["invoices"][inv["invoice_id"]] = {**hr.svc.db["invoices"][inv["invoice_id"]], "client_id": cid}
+        pages[cid] = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                                   caller="onboarding"))["checkout"]["session_id"]
+    run = lambda: hr.ok(hr.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))["summary"]
+    hr.f["compliance"].calls.clear()
+    assert run()["activation_checked"] == 2
+    first = [c[1] for c in hr.f["compliance"].calls if c[0] == "client_activation"]
+    assert first == ["c-a", "c-b"]
+    hr.f["compliance"].calls.clear()
+    run()
+    assert [c[1] for c in hr.f["compliance"].calls if c[0] == "client_activation"] == ["c-c", "c-a"]
