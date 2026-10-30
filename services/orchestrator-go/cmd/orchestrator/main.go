@@ -176,8 +176,10 @@ func isHealth(r *http.Request) bool {
 // AEGIS edge review H-1/M-1: a request carrying the valid bearer token (constant-time compare, bearerIs) is never
 // refused by the lockout or by anything an unauthenticated client did; it is counted in its own bucket table
 // (same per-client rate), which unauthenticated traffic can neither fill nor drain. The lockout is kept because it
-// is cheap and cuts unauthenticated noise to 10 tries per window per client, but with a >= 128-bit token it is not
-// what stops guessing (the token is), so it may never cost a valid caller anything.
+// is cheap and cuts the requests that reach the handler without the token to 10 per window per client. It does NOT
+// slow guessing: every request is compared against the token before any limit (so a valid one always passes), and a
+// wrong guess merely gets 429 instead of 401 (AEGIS r2 NEW-1). Token strength is the control: start-up accepts only
+// generator-shaped tokens (checkInboundToken).
 func loadGuard(getenv func(string) string, token string) (*edge.Guard, error) {
 	src, err := edge.ParseIPSource(clientIPSourceEnv, getenv(clientIPSourceEnv))
 	if err != nil {
@@ -442,54 +444,71 @@ func main() {
 	log.Fatal(srv.Serve(ln))
 }
 
-// Token hygiene (ADR 0023; AEGIS A2 M-2). The orchestrator's bearer is the only thing between its public domain and
-// the Revenue Recovery routes, so at start-up it must be: at least minTokenLen printable ASCII characters (the runbook
-// makes it with `openssl rand -hex 32`, 64 characters), at least minDistinctChars different characters, not a
-// placeholder, not an unresolved Railway reference, and different from the two tokens this process SENDS upstream
-// (a compromised upstream must not learn the inbound token). The value never appears in a message.
+// Token hygiene (ADR 0023; AEGIS A2 M-2, edge review L-1 and r2 NEW-1). The orchestrator's bearer is the only thing
+// between its public domain and the Revenue Recovery routes, and the failed-auth lockout does NOT slow guessing of it
+// (a request is compared against the token before any limit, so a valid token always passes; ADR 0023 §4). Token
+// strength is therefore the control, and only generator-shaped tokens are accepted at start-up:
+//   - exactly 64 lowercase hex characters (`openssl rand -hex 32`, 256 bits), or
+//   - 43 or more base64url characters, [A-Za-z0-9_-], no padding (>= 256 bits; e.g.
+//     `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`).
+//
+// On top of the shape, a token that a generator would practically never produce is refused (each rule's false-refusal
+// rate on generated tokens is far below 1 in 10^8; TestGeneratedTokensAreNeverRefused): fewer than minDistinctChars
+// different characters, a repeatWindow-character block occurring twice, a runWindow-character run of consecutive
+// characters (0123456789...), a placeholder word, an unresolved Railway reference. It must also differ from the two
+// tokens this process SENDS upstream (a compromised upstream must not learn the inbound token). The value never
+// appears in a message.
 const (
-	minTokenLen      = 32
+	hexTokenLen      = 64
+	minBase64URLLen  = 43
 	minDistinctChars = 10
+	repeatWindow     = 10
+	runWindow        = 10
+	tokenMakeAdvice  = "make it with `openssl rand -hex 32`"
+	inboundTokenName = "ORCHESTRATOR_SERVICE_TOKEN"
 )
 
 // unresolvedRefMarkers: a Railway variable reference that did not resolve reaches the process as its literal text,
 // e.g. "${{FIN_ONBOARDING_CALLER_TOKEN}}" (finance-py config._check_ref, AEGIS night review M-2).
 var unresolvedRefMarkers = []string{"${{", "{{", "}}"}
 
-// placeholderWords: text a human types into a token field instead of a generated secret. Only words of 7 or more
-// letters (or characters no generator emits): a shorter word turns up by chance in random base64 often enough to
-// refuse a real token (a 5-letter word, case-insensitive, is in about 1 in 800,000 base64 tokens).
+// placeholderWords: text a human types instead of a generated secret, spelled in the base64url alphabet (the only
+// shape a word can appear in; hex holds none). Only words of 7 or more letters: a shorter word turns up by chance in
+// random base64url often enough to refuse a real token.
 var placeholderWords = []string{"changeme", "change-me", "change_me", "placeholder", "replaceme", "replace-me",
-	"replace_me", "your-token", "your_token", "yourtoken", "example", "openssl", "password", "passw0rd",
-	"orchestrator", "qwertyuiop", "<", ">", " "}
+	"replace_me", "your-token", "your_token", "yourtoken", "example", "password", "passw0rd", "orchestrator",
+	"qwertyuiop"}
 
-// Entropy rules (AEGIS edge review L-1), each with a false-refusal rate on generated tokens far below 1 in 10^8
-// (TestGeneratedTokensAreNeverRefused draws 200,000 hex and 200,000 base64 tokens):
-//   - estimated strength >= minTokenBits: length x bits per character of the alphabet the token is drawn from
-//     (4 for hex only, 6 for base64/base64url, 6.5 otherwise);
-//   - no substring of repeatWindow characters occurs twice (a repeated block or a short period);
-//   - no run of runWindow characters that each step up or down by one (0123456789..., abcdefghij...).
-const (
-	minTokenBits = 128
-	repeatWindow = 10
-	runWindow    = 10
-)
-
-func tokenBits(tok string) float64 {
-	hex, b64 := true, true
+// generatorShaped: 64 lowercase hex, or >= 43 base64url characters.
+func generatorShaped(tok string) bool {
+	if len(tok) == hexTokenLen {
+		hex := true
+		for i := 0; i < len(tok); i++ {
+			c := tok[i]
+			hex = hex && (c >= '0' && c <= '9' || c >= 'a' && c <= 'f')
+		}
+		if hex {
+			return true
+		}
+	}
+	if len(tok) < minBase64URLLen {
+		return false
+	}
 	for i := 0; i < len(tok); i++ {
 		c := tok[i]
-		isHex := c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
-		isB64 := isHex || c >= 'g' && c <= 'z' || c >= 'G' && c <= 'Z' || strings.IndexByte("+/=_-", c) >= 0
-		hex, b64 = hex && isHex, b64 && isB64
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-' || c == '_') {
+			return false
+		}
 	}
-	switch {
-	case hex:
-		return 4 * float64(len(tok))
-	case b64:
-		return 6 * float64(len(tok))
+	return true
+}
+
+func distinctChars(tok string) int {
+	seen := map[byte]bool{}
+	for i := 0; i < len(tok); i++ {
+		seen[tok[i]] = true
 	}
-	return 6.5 * float64(len(tok))
+	return len(seen)
 }
 
 func hasRepeatedBlock(tok string) bool {
@@ -525,6 +544,16 @@ func hasSequentialRun(tok string) bool {
 	return false
 }
 
+func hasPlaceholderWord(tok string) bool {
+	low := strings.ToLower(tok)
+	for _, w := range placeholderWords {
+		if strings.Contains(low, w) {
+			return true
+		}
+	}
+	return false
+}
+
 // checkRef refuses a value holding an unresolved Railway reference (names the setting only).
 func checkRef(name, v string) error {
 	for _, m := range unresolvedRefMarkers {
@@ -536,35 +565,31 @@ func checkRef(name, v string) error {
 	return nil
 }
 
-// checkInboundToken applies every rule above to ORCHESTRATOR_SERVICE_TOKEN.
+// checkInboundToken applies every rule above to ORCHESTRATOR_SERVICE_TOKEN; each rule has its own message.
 func checkInboundToken(tok string, outbound ...string) error {
-	const name = "ORCHESTRATOR_SERVICE_TOKEN"
+	const name = inboundTokenName
 	if err := checkRef(name, tok); err != nil {
 		return err
 	}
-	if len(tok) < minTokenLen {
-		return fmt.Errorf("%s must be at least %d characters (make it with `openssl rand -hex 32`)", name, minTokenLen)
+	if !generatorShaped(tok) {
+		return fmt.Errorf("%s must be exactly 64 lowercase hex characters (`openssl rand -hex 32`) or at least 43 "+
+			"base64url characters [A-Za-z0-9_-] without padding; a hand-made token is refused because the lockout "+
+			"does not slow guessing (ADR 0023 §4)", name)
 	}
-	distinct := map[rune]bool{}
-	for _, r := range tok {
-		if r < 0x21 || r > 0x7e {
-			return fmt.Errorf("%s must be printable ASCII without spaces", name)
-		}
-		distinct[r] = true
+	if distinctChars(tok) < minDistinctChars {
+		return fmt.Errorf("%s has fewer than %d different characters: not a generated secret; %s", name,
+			minDistinctChars, tokenMakeAdvice)
 	}
-	if len(distinct) < minDistinctChars {
-		return fmt.Errorf("%s has fewer than %d different characters: not a generated secret (`openssl rand -hex "+
-			"32`)", name, minDistinctChars)
+	if hasRepeatedBlock(tok) {
+		return fmt.Errorf("%s repeats a %d-character block: not a generated secret; %s", name, repeatWindow,
+			tokenMakeAdvice)
 	}
-	if tokenBits(tok) < minTokenBits || hasRepeatedBlock(tok) || hasSequentialRun(tok) {
-		return fmt.Errorf("%s is too predictable (a repeated block, a run like 0123456789, or under %d bits): "+
-			"make it with `openssl rand -hex 32`", name, minTokenBits)
+	if hasSequentialRun(tok) {
+		return fmt.Errorf("%s holds a run of %d consecutive characters (like 0123456789): not a generated secret; %s",
+			name, runWindow, tokenMakeAdvice)
 	}
-	low := strings.ToLower(tok)
-	for _, w := range placeholderWords {
-		if strings.Contains(low, w) {
-			return fmt.Errorf("%s looks like a placeholder, not a generated secret (`openssl rand -hex 32`)", name)
-		}
+	if hasPlaceholderWord(tok) {
+		return fmt.Errorf("%s looks like a placeholder, not a generated secret; %s", name, tokenMakeAdvice)
 	}
 	for _, o := range outbound {
 		if o != "" && subtle.ConstantTimeCompare([]byte(o), []byte(tok)) == 1 {
