@@ -987,6 +987,15 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    since the ruling: re-activate`), and when Legal publishes a new MSA version that must bind existing clients (the
    documents are checked at activation, not on every read). A ZBC brand needs its own search with `"lane":
    "zbc_brand"`: a search recorded for one lane does not count for the other.
+
+   **Which register changes force re-activating clients.** Approving an amendment of any of HR-03, HR-05 or HR-07
+   (other than their `parameters`), HR-08, HR-14, HR-15, US-FTC-465-07 or US-OFAC-04 (other than a re-verification),
+   or a new rule on the activation gate, turns **every** client to REFUSE until each is re-activated (a new OFAC search
+   first for any client whose last one is over 30 days old); the hourly job then closes their open Stripe pages.
+   Changing only the service area (HR-05 `operate`, HR-07 `refuse`) refuses exactly the clients it takes out: adding a
+   state or territory refuses nobody. Plan such an amendment for a day you can re-activate every client.
+   A checkout request repeated with the same `request_id` after a client is re-activated returns its earlier answer
+   (a page now expired); use a new `request_id` for a new page.
 5. Close the tunnel (Ctrl-C) when done; delete `~/.zbm-cmp/*.hdr` if you do not activate another client today.
 
 **H. Re-verify before rules expire (nothing is extended by itself).** The readiness answer lists every expired rule and
