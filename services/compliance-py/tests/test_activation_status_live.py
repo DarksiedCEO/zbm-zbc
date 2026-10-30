@@ -41,7 +41,8 @@ def test_a_client_removed_from_the_service_area_is_refused_at_once():
     s = status(h, "client-tx")
     assert s["decision"] == "REFUSE" and s["current"] is False
     assert any(x.startswith("jurisdiction US-TX is refuse") for x in s["reasons"]), s["reasons"]
-    assert any(x.startswith("HR-05 changed since the ruling") for x in s["reasons"]), s["reasons"]
+    # AEGIS r2 N-1: the live area check refuses; HR-05's parameters are not in the fingerprint
+    assert not any(x.startswith("HR-05 changed since the ruling") for x in s["reasons"]), s["reasons"]
 
 
 def test_a_client_in_a_newly_refused_region_is_refused_at_once():
@@ -51,10 +52,7 @@ def test_a_client_in_a_newly_refused_region_is_refused_at_once():
     s = status(h, "client-fl")
     assert s["decision"] == "REFUSE"
     assert any(x.startswith("jurisdiction US-FL is refuse") for x in s["reasons"]), s["reasons"]
-    assert any(x.startswith("HR-07 changed since the ruling") for x in s["reasons"]), s["reasons"]
-    # a client elsewhere relied on HR-07 too: its content changed, so it re-activates (and is allowed again)
-    assert activate(h, "client-ca2")["allowed"] is True
-    assert status(h, "client-ca2")["decision"] == "ALLOW"
+    assert not any(x.startswith("HR-07 changed since the ruling") for x in s["reasons"]), s["reasons"]
 
 
 def test_a_campaign_target_removed_from_the_service_area_refuses():
@@ -227,7 +225,7 @@ def test_an_error_outside_the_run_does_not_kill_the_scheduler_thread(monkeypatch
         assert ticks.wait(5), lines
         assert s.alive() is True
         assert any("tick failed" in x and "RuntimeError" in x for x in lines), lines
-        assert s.last_error and s.last_error["error"].startswith("RuntimeError")
+        assert s.last_error and s.last_error["error"] == "RuntimeError"
     finally:
         s.stop()
 
@@ -351,3 +349,88 @@ def test_stale_controls_never_exit_the_process_they_turn_health_503(monkeypatch)
         assert s.alive() and codes == []
     finally:
         s.stop()
+
+
+# --- AEGIS r2 N-1: a service-area amendment refuses only the clients it takes out --------------------------------------
+
+def test_widening_or_reordering_the_service_area_keeps_existing_clients_allowed():
+    h = harness()
+    activate(h, "client-ca")
+    activate(h, "client-fl", region="US-FL")
+    _amend(h, "HR-05", operate=[*_row(h, "HR-05")["parameters"]["operate"], "GB"])          # a widening
+    assert status(h, "client-ca")["decision"] == "ALLOW", status(h, "client-ca")["reasons"]
+    _amend(h, "HR-05", operate=list(reversed(_row(h, "HR-05")["parameters"]["operate"])))  # same set, other order
+    _amend(h, "HR-07", refuse=[*_row(h, "HR-07")["parameters"]["refuse"], "US-TX"])        # refuses someone else
+    for c in ("client-ca", "client-fl"):
+        assert status(h, c)["decision"] == "ALLOW", status(h, c)["reasons"]
+
+
+def test_a_change_to_the_area_rows_text_or_to_another_rule_still_forces_re_activation():
+    from service import rule_fingerprint
+    for oid in ("HR-05", "HR-07"):
+        row = next(r for r in H.SEED_ROWS if r["id"] == oid)
+        fp = rule_fingerprint(row)
+        assert rule_fingerprint({**row, "parameters": {}}) == fp                  # parameters: the live check's job
+        assert rule_fingerprint({**row, "obligation": row["obligation"] + " x"}) != fp
+        assert rule_fingerprint({**row, "gates": ["activation"]}) != fp
+    other = next(r for r in H.SEED_ROWS if r["id"] == "HR-14")
+    assert rule_fingerprint({**other, "parameters": {}}) != rule_fingerprint(other)
+    h2 = harness()
+    activate(h2, "client-ca")
+    _amend(h2, "HR-14", rescreen_after_days=60)
+    s = status(h2, "client-ca")
+    assert s["decision"] == "REFUSE" and any(x.startswith("HR-14 changed since the ruling") for x in s["reasons"])
+
+
+# --- AEGIS r2 N-3: api.main's scheduler wiring ------------------------------------------------------------------------
+
+def test_main_wires_os_exit_as_the_hook_and_attaches_the_scheduler(monkeypatch):
+    import os
+
+    import api
+    import scheduler
+    h = harness()
+    started: list = []
+    monkeypatch.setattr(scheduler.Scheduler, "start", lambda self: started.append(self) or self)
+
+    class S:
+        scheduler_enabled, scheduler_interval_s, watcher_enabled = True, 21600, False
+
+    s = api.start_scheduler(h.svc, S())
+    assert started == [s] and h.svc.scheduler is s
+    assert s.on_thread_death is os._exit
+    S.scheduler_enabled = False
+    h.svc.scheduler = None
+    assert api.start_scheduler(h.svc, S()) is None and h.svc.scheduler is None
+
+
+# --- AEGIS r2 N-8: /health shows the error class only ------------------------------------------------------------------
+
+def test_health_never_shows_exception_text(monkeypatch):
+    h = harness()
+    s = _sched(h)
+    s.started_at = h.clock.at
+    s._thread = _FakeThread(True)
+    monkeypatch.setattr(h.svc, "readiness", lambda: (_ for _ in ()).throw(RuntimeError("secret-detail /data/x")))
+    s.tick()
+    h.svc.run_internal_controls = lambda *_a, **_k: (_ for _ in ()).throw(ValueError("token=abc123"))
+    s.last_controls = None
+    s.tick()
+    body = h.client.get("/health").text
+    assert "secret-detail" not in body and "token=abc123" not in body and "/data/x" not in body
+    assert h.client.get("/health").json()["scheduler"]["last_error"]["error"] == "ValueError"
+
+
+# --- AEGIS r2 N-7 and follow-up: HR-07's wording; every house rule can be amended by Andre -----------------------------
+
+def test_hr07_cites_us_ofac_04s_reading_for_ua23_and_ua65():
+    hr07 = next(r for r in H.SEED_ROWS if r["id"] == "HR-07")
+    assert "founder choice" not in hr07["obligation"]
+    assert "included under US-OFAC-04's \"other occupied regions\" reading, pending Andre's approval of seed v2" \
+        in hr07["obligation"]
+
+
+def test_every_house_rule_has_no_source_url_so_andre_can_amend_it():
+    for r in H.SEED_ROWS:
+        if r["source_kind"] == "house-rule":
+            assert r["source_quality"] == "founder" and r["source_url"] is None, r["id"]

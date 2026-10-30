@@ -73,8 +73,9 @@ class Scheduler:
         return True
 
     def _failed(self, where: str, now: datetime, exc: BaseException) -> None:
+        # AEGIS r2 N-8: /health (no auth) carries the error CLASS only; the log line adds the service's own reason
         err = f"{type(exc).__name__}: {str(getattr(exc, 'reason', '') or '')[:200]}".rstrip(": ")
-        self.last_error = {"at": iso(now), "where": where, "error": err}
+        self.last_error = {"at": iso(now), "where": where, "error": type(exc).__name__}
         self.out(f"compliance scheduler: {where} run failed at {iso(now)} ({err}); retried at the next tick")
 
     def tick(self) -> None:
@@ -83,8 +84,8 @@ class Scheduler:
             self._tick()
         except Exception as exc:  # noqa: BLE001
             now = self._now()
-            err = f"{type(exc).__name__}: {str(getattr(exc, 'reason', '') or exc)[:200]}"
-            self.last_error = {"at": iso(now), "where": "tick", "error": err}
+            err = f"{type(exc).__name__}: {str(getattr(exc, 'reason', '') or '')[:200]}".rstrip(": ")
+            self.last_error = {"at": iso(now), "where": "tick", "error": type(exc).__name__}
             self.out(f"compliance scheduler: tick failed at {iso(now)} ({err}); retried at the next tick")
 
     def _tick(self) -> None:

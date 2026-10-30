@@ -306,7 +306,7 @@
       "jurisdiction": "ALL",
       "domain": "house_rule",
       "title": "Jurisdictions: refuse everything outside the service area",
-      "obligation": "Refuse every jurisdiction that is not in HR-05's service area (default deny, parameters.unlisted), and in every case the OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, Crimea incl. Sevastopol (UA-43, UA-40) and the so-called DNR/LNR regions (UA-14, UA-09)) and, by founder choice as in US-OFAC-04, the other occupied regions of Ukraine, Zaporizhzhia (UA-23) and Kherson (UA-65); all are listed in parameters.refuse. Canada, the United Kingdom, France, every EU member and every other country are refused.",
+      "obligation": "Refuse every jurisdiction that is not in HR-05's service area (default deny, parameters.unlisted), and in every case the OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, Crimea incl. Sevastopol (UA-43, UA-40) and the so-called DNR/LNR regions (UA-14, UA-09)); Zaporizhzhia (UA-23) and Kherson (UA-65) are included under US-OFAC-04's \"other occupied regions\" reading, pending Andre's approval of seed v2. All are listed in parameters.refuse. Canada, the United Kingdom, France, every EU member and every other country are refused.",
       "source_url": null,
       "additional_sources": [],
       "source_kind": "house-rule",
@@ -3756,8 +3756,9 @@
       "domain": "sanctions",
       "title": "Client sanctions screening recorded before activation",
       "obligation": "Before a client (or ZBC brand) is activated, Andre searches the client's legal name on OFAC's Sanctions List Search (SDN and Consolidated lists) and records the search: date, list version, lists searched, result and a hash of the saved evidence. Activation needs a no-match record for that subject no older than parameters.max_age_days; an activation stays current for parameters.rescreen_after_days after the search. Any potential match or match refuses (never investigated around). Basis: US-OFAC-01 (strict liability, screen before onboarding) and OFAC's risk-based Framework.",
-      "source_url": "https://sanctionssearch.ofac.treas.gov/",
+      "source_url": null,
       "additional_sources": [
+        "https://sanctionssearch.ofac.treas.gov/",
         "https://ofac.treasury.gov/faqs/topic/1501",
         "https://ofac.treasury.gov/media/16331/download?inline"
       ],
