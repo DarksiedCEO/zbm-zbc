@@ -17,6 +17,8 @@ package main
 // the ledger-rust integration tests do for the equivalent Rust binary.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -89,8 +91,11 @@ func buildOrchestratorBinary(t *testing.T) string {
 // C2-1): the kernel picks the port, the child writes the port it bound, and the harness trusts that port only while
 // ITS child is alive — no pick-close-then-bind race, no fixed range, and a server some other run left on a port can
 // never be the one under test. The child is killed and reaped in t.Cleanup.
-// bindTestOrchToken passes the start-up token hygiene (ADR 0023): >= 32 characters, >= 10 different ones.
-var bindTestOrchToken = "bind-test-orchestrator-" + strings.Repeat("abcdefghij", 2)
+// bindTestOrchToken passes the start-up token hygiene (ADR 0023): 64 hex characters, like `openssl rand -hex 32`.
+var bindTestOrchToken = func() string {
+	sum := sha256.Sum256([]byte("orchestrator-go main_bind_test token"))
+	return hex.EncodeToString(sum[:])
+}()
 
 func startOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (port string, waitForExit func()) {
 	t.Helper()

@@ -172,7 +172,13 @@ func isHealth(r *http.Request) bool {
 // bursts of ORCHESTRATOR_RATE_BURST) and a failed-authentication limit (ORCHESTRATOR_AUTH_FAIL_MAX answers of 401
 // inside ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS, then 429 until the window ends). A request whose client address
 // cannot be determined is refused 403 (except GET /health). Any malformed value refuses the start.
-func loadGuard(getenv func(string) string) (*edge.Guard, error) {
+//
+// AEGIS edge review H-1/M-1: a request carrying the valid bearer token (constant-time compare, bearerIs) is never
+// refused by the lockout or by anything an unauthenticated client did; it is counted in its own bucket table
+// (same per-client rate), which unauthenticated traffic can neither fill nor drain. The lockout is kept because it
+// is cheap and cuts unauthenticated noise to 10 tries per window per client, but with a >= 128-bit token it is not
+// what stops guessing (the token is), so it may never cost a valid caller anything.
+func loadGuard(getenv func(string) string, token string) (*edge.Guard, error) {
 	src, err := edge.ParseIPSource(clientIPSourceEnv, getenv(clientIPSourceEnv))
 	if err != nil {
 		return nil, err
@@ -193,9 +199,34 @@ func loadGuard(getenv func(string) string) (*edge.Guard, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &edge.Guard{Name: "orchestrator-go", Source: src, Open: isHealth,
-		Limit:    edge.NewLimiter(perMin, burst, edge.DefaultMaxKeys),
-		AuthFail: edge.NewFailureLimiter(failMax, time.Duration(failSecs)*time.Second, edge.DefaultMaxKeys)}, nil
+	cf, _ := edge.CloudflareRanges()
+	return &edge.Guard{Name: "orchestrator-go", Source: src, Open: isHealth, WarnRanges: cf,
+		Limit:        edge.NewLimiter(perMin, burst, edge.DefaultMaxKeys),
+		AuthFail:     edge.NewFailureLimiter(failMax, time.Duration(failSecs)*time.Second, edge.DefaultMaxKeys),
+		Trusted:      bearerIs(token),
+		TrustedLimit: edge.NewLimiter(perMin, burst, edge.DefaultMaxKeys)}, nil
+}
+
+// bearerIs reports whether a request carries `Authorization: Bearer <token>`, compared in constant time (the same
+// comparison requireAuth makes). An empty token trusts nothing.
+func bearerIs(token string) func(*http.Request) bool {
+	want := []byte(token)
+	return func(r *http.Request) bool {
+		const prefix = "Bearer "
+		auth := r.Header.Get("Authorization")
+		if token == "" || !strings.HasPrefix(auth, prefix) {
+			return false
+		}
+		return subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, prefix)), want) == 1
+	}
+}
+
+// envOr: the setting as given, or its default (for the startup line only; loadGuard has validated it).
+func envOr(name string, def int) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return strconv.Itoa(def)
 }
 
 // guardServer puts the guard in front of everything the server runs, so a refused client is answered before its
@@ -379,10 +410,16 @@ func main() {
 		log.Printf("orchestrator-go: ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1 — fixture scans write fixture findings to the ledger (dev/test only)")
 	}
 
-	guard, err := loadGuard(os.Getenv)
+	guard, err := loadGuard(os.Getenv, orchestratorToken)
 	if err != nil {
 		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
 	}
+	_, cfVersion := edge.CloudflareRanges()
+	// AEGIS edge review M-2: say at start where the client address comes from (and the limits), in one parseable line
+	log.Printf("orchestrator-go edge event=edge_config client_ip_source=%s rate_per_min=%s rate_burst=%s "+
+		"auth_fail_max=%s auth_fail_window_s=%s valid_token_bypasses_lockout=true cloudflare_ranges=%q",
+		guard.Source, envOr(ratePerMinEnv, defaultRatePerMin), envOr(rateBurstEnv, defaultRateBurst),
+		envOr(authFailMaxEnv, defaultAuthFailMax), envOr(authFailWindowEnv, defaultAuthFailSecs), cfVersion)
 
 	orch := orchestrator.New(detectionURL, detectionToken, ledgerURL, ledgerToken)
 
@@ -419,9 +456,74 @@ const (
 // e.g. "${{FIN_ONBOARDING_CALLER_TOKEN}}" (finance-py config._check_ref, AEGIS night review M-2).
 var unresolvedRefMarkers = []string{"${{", "{{", "}}"}
 
-// placeholderWords: text a human types into a token field instead of a generated secret.
+// placeholderWords: text a human types into a token field instead of a generated secret. Only words of 7 or more
+// letters (or characters no generator emits): a shorter word turns up by chance in random base64 often enough to
+// refuse a real token (a 5-letter word, case-insensitive, is in about 1 in 800,000 base64 tokens).
 var placeholderWords = []string{"changeme", "change-me", "change_me", "placeholder", "replaceme", "replace-me",
-	"replace_me", "your-token", "your_token", "yourtoken", "example", "dummy", "openssl", "<", ">"}
+	"replace_me", "your-token", "your_token", "yourtoken", "example", "openssl", "password", "passw0rd",
+	"orchestrator", "qwertyuiop", "<", ">", " "}
+
+// Entropy rules (AEGIS edge review L-1), each with a false-refusal rate on generated tokens far below 1 in 10^8
+// (TestGeneratedTokensAreNeverRefused draws 200,000 hex and 200,000 base64 tokens):
+//   - estimated strength >= minTokenBits: length x bits per character of the alphabet the token is drawn from
+//     (4 for hex only, 6 for base64/base64url, 6.5 otherwise);
+//   - no substring of repeatWindow characters occurs twice (a repeated block or a short period);
+//   - no run of runWindow characters that each step up or down by one (0123456789..., abcdefghij...).
+const (
+	minTokenBits = 128
+	repeatWindow = 10
+	runWindow    = 10
+)
+
+func tokenBits(tok string) float64 {
+	hex, b64 := true, true
+	for i := 0; i < len(tok); i++ {
+		c := tok[i]
+		isHex := c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+		isB64 := isHex || c >= 'g' && c <= 'z' || c >= 'G' && c <= 'Z' || strings.IndexByte("+/=_-", c) >= 0
+		hex, b64 = hex && isHex, b64 && isB64
+	}
+	switch {
+	case hex:
+		return 4 * float64(len(tok))
+	case b64:
+		return 6 * float64(len(tok))
+	}
+	return 6.5 * float64(len(tok))
+}
+
+func hasRepeatedBlock(tok string) bool {
+	seen := map[string]bool{}
+	for i := 0; i+repeatWindow <= len(tok); i++ {
+		w := tok[i : i+repeatWindow]
+		if seen[w] {
+			return true
+		}
+		seen[w] = true
+	}
+	return false
+}
+
+func hasSequentialRun(tok string) bool {
+	up, down := 1, 1
+	for i := 1; i < len(tok); i++ {
+		d := int(tok[i]) - int(tok[i-1])
+		if d == 1 {
+			up++
+		} else {
+			up = 1
+		}
+		if d == -1 {
+			down++
+		} else {
+			down = 1
+		}
+		if up >= runWindow || down >= runWindow {
+			return true
+		}
+	}
+	return false
+}
 
 // checkRef refuses a value holding an unresolved Railway reference (names the setting only).
 func checkRef(name, v string) error {
@@ -453,6 +555,10 @@ func checkInboundToken(tok string, outbound ...string) error {
 	if len(distinct) < minDistinctChars {
 		return fmt.Errorf("%s has fewer than %d different characters: not a generated secret (`openssl rand -hex "+
 			"32`)", name, minDistinctChars)
+	}
+	if tokenBits(tok) < minTokenBits || hasRepeatedBlock(tok) || hasSequentialRun(tok) {
+		return fmt.Errorf("%s is too predictable (a repeated block, a run like 0123456789, or under %d bits): "+
+			"make it with `openssl rand -hex 32`", name, minTokenBits)
 	}
 	low := strings.ToLower(tok)
 	for _, w := range placeholderWords {

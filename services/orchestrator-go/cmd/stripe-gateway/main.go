@@ -367,8 +367,13 @@ func isHealth(r *http.Request) bool {
 // whose address cannot be determined, is answered 403, and one over its address's rate limit 429 + Retry-After,
 // before its body is read and before Finance is called.
 func newGuard(cfg config) *edge.Guard {
+	cf, _ := edge.CloudflareRanges()
+	// a refused delivery is alert-worthy (AEGIS edge review L-4): `event=stripe_delivery_refused level=ALERT` is the
+	// line a Railway log alert matches (docs/deploy/railway.md); a Cloudflare address as the client is a WARN of its
+	// own (M-3)
 	return &edge.Guard{Name: "stripe-gateway", Source: cfg.ipSource, Allow: cfg.allow, Open: isHealth,
-		Limit: edge.NewLimiter(cfg.ratePerMin, cfg.rateBurst, edge.DefaultMaxKeys)}
+		Limit:      edge.NewLimiter(cfg.ratePerMin, cfg.rateBurst, edge.DefaultMaxKeys),
+		WarnRanges: cf, Event: "stripe_delivery_refused", AlertOn403: true}
 }
 
 // newHandler is what the server runs: the guard, then the routes.
@@ -424,6 +429,10 @@ func main() {
 	} else {
 		log.Printf("stripe-gateway: source-IP allowlist ON: %s; client address from %s", cfg.allowFrom, cfg.ipSource)
 	}
+	_, cfVersion := edge.CloudflareRanges()
+	// AEGIS edge review M-2: one parseable line naming where the client address comes from and every limit
+	log.Printf("stripe-gateway edge event=edge_config client_ip_source=%s allowlist=%t rate_per_min=%d "+
+		"rate_burst=%d cloudflare_ranges=%q", cfg.ipSource, cfg.allow != nil, cfg.ratePerMin, cfg.rateBurst, cfVersion)
 	if cfg.privateHTTP {
 		log.Printf("stripe-gateway: %s=1 — Finance is reached over plain http on Railway's private network",
 			allowRailwayPrivateHTTPEnv)

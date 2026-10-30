@@ -16,7 +16,7 @@ func envOf(m map[string]string) func(string) string { return func(k string) stri
 
 func guardedOrchestrator(t *testing.T, env map[string]string) (*httptest.Server, *recorder) {
 	t.Helper()
-	g, err := loadGuard(envOf(env))
+	g, err := loadGuard(envOf(env), routeTestToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func call(t *testing.T, method, url, token, realIP string) *http.Response {
 }
 
 func TestGuardDefaults(t *testing.T) {
-	g, err := loadGuard(envOf(nil))
+	g, err := loadGuard(envOf(nil), routeTestToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +60,13 @@ func TestGuardSettingsFailClosed(t *testing.T) {
 		{clientIPSourceEnv: "xff"}, {ratePerMinEnv: "0"}, {ratePerMinEnv: "lots"}, {rateBurstEnv: "-1"},
 		{authFailMaxEnv: "0"}, {authFailWindowEnv: "10m"}, {authFailWindowEnv: "999999"},
 	} {
-		if _, err := loadGuard(envOf(env)); err == nil {
+		if _, err := loadGuard(envOf(env), routeTestToken); err == nil {
 			t.Errorf("%v accepted", env)
 		}
 	}
 }
 
-func TestTenFailedAuthsThen429EvenWithTheRightToken(t *testing.T) {
+func TestTenFailedAuthsLockOutUnauthenticatedRequestsOnly(t *testing.T) {
 	srv, _ := guardedOrchestrator(t, nil)
 	url := srv.URL + "/revenue-recovery/findings"
 	for i := 0; i < 10; i++ {
@@ -74,18 +74,13 @@ func TestTenFailedAuthsThen429EvenWithTheRightToken(t *testing.T) {
 			t.Fatalf("attempt %d: %d", i, r.StatusCode)
 		}
 	}
-	r := call(t, "GET", url, routeTestToken, "198.51.100.4")
+	r := call(t, "GET", url, "wrong-token", "198.51.100.4")
 	if r.StatusCode != http.StatusTooManyRequests || r.Header.Get("Retry-After") != "600" {
-		t.Fatalf("11th from the same client: %d Retry-After %q", r.StatusCode, r.Header.Get("Retry-After"))
+		t.Fatalf("11th bad token from the same client: %d Retry-After %q", r.StatusCode, r.Header.Get("Retry-After"))
 	}
-	// a missing Authorization header counts too (it is also a 401)
+	// a missing Authorization header is locked out too (it is also a 401)
 	if r := call(t, "GET", url, "", "198.51.100.4"); r.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("%d", r.StatusCode)
-	}
-	// another client is not affected
-	if r := call(t, "GET", url, routeTestToken, "198.51.100.5"); r.StatusCode == http.StatusTooManyRequests ||
-		r.StatusCode == http.StatusUnauthorized {
-		t.Fatalf("other client: %d", r.StatusCode)
 	}
 }
 
@@ -96,12 +91,26 @@ func TestPerClientRateLimit(t *testing.T) {
 			t.Fatalf("%d: %d", i, r.StatusCode)
 		}
 	}
-	r := call(t, "POST", srv.URL+"/revenue-recovery/scan?client_id=acme", routeTestToken, "192.0.2.10")
+	r := call(t, "POST", srv.URL+"/revenue-recovery/scan?client_id=acme", "wrong", "192.0.2.10")
 	if r.StatusCode != http.StatusTooManyRequests || r.Header.Get("Retry-After") != "2" {
 		t.Fatalf("%d %q", r.StatusCode, r.Header.Get("Retry-After"))
 	}
 	if r := call(t, "GET", srv.URL+"/health", "", "192.0.2.11"); r.StatusCode != 200 {
 		t.Fatal("another client was limited")
+	}
+	// the valid token has its own bucket table: the anonymous traffic above did not drain it
+	if r := call(t, "GET", srv.URL+"/revenue-recovery/findings", routeTestToken, "192.0.2.10"); r.StatusCode == 429 {
+		t.Fatal("anonymous traffic drained the authenticated bucket")
+	}
+}
+
+func TestAuthenticatedTrafficIsStillRateLimited(t *testing.T) {
+	srv, _ := guardedOrchestrator(t, map[string]string{ratePerMinEnv: "30", rateBurstEnv: "2"})
+	url := srv.URL + "/revenue-recovery/findings"
+	call(t, "GET", url, routeTestToken, "192.0.2.20")
+	call(t, "GET", url, routeTestToken, "192.0.2.20")
+	if r := call(t, "GET", url, routeTestToken, "192.0.2.20"); r.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("3rd authenticated request in the burst of 2: %d", r.StatusCode)
 	}
 }
 

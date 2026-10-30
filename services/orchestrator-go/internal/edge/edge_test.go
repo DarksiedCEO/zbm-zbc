@@ -1,10 +1,13 @@
 package edge
 
 import (
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -94,7 +97,7 @@ func TestParseAllowlist(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{"", " ", "1.2.3.4,", ",1.2.3.4", "1.2.3", "0.0.0.0/0", "10.0.0.0/8", "::/0",
-		"2001:db8::/16", "fe80::1%eth0", "1.2.3.4/33", "host.example"} {
+		"2001:db8::/16", "2001:db8::/47", "fe80::1%eth0", "1.2.3.4/33", "host.example"} {
 		if _, err := ParseAllowlist(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
@@ -140,21 +143,27 @@ func TestLimiterCountsAnIPv6Slash64AsOneClient(t *testing.T) {
 	}
 }
 
-func TestLimiterTableIsBoundedAndFailsClosed(t *testing.T) {
+// AEGIS edge review H-1: a full table evicts its least recently used entry; it never refuses a client it has not
+// seen (that let anyone lock every new client out by filling it).
+func TestLimiterTableIsBoundedAndEvictsLeastRecentlyUsed(t *testing.T) {
 	c := &clock{time.Unix(1_700_000_000, 0)}
-	l := NewLimiter(60, 5, 2)
+	l := NewLimiter(60, 1, 2)
 	l.now = c.now
-	l.Allow(netip.MustParseAddr("192.0.2.1"))
-	l.Allow(netip.MustParseAddr("192.0.2.2"))
-	if ok, _ := l.Allow(netip.MustParseAddr("192.0.2.3")); ok {
-		t.Fatal("a full table admitted a new client")
+	a, b, n := netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2"), netip.MustParseAddr("192.0.2.3")
+	l.Allow(a)
+	l.Allow(b) // both buckets now empty
+	l.Allow(a) // a used most recently (refused, but touched)
+	if ok, _ := l.Allow(n); !ok {
+		t.Fatal("a full table refused a new client")
 	}
-	if len(l.buckets) != 2 {
-		t.Fatalf("table grew to %d", len(l.buckets))
+	if l.buckets.len() != 2 {
+		t.Fatalf("table grew to %d", l.buckets.len())
 	}
-	c.t = c.t.Add(time.Hour) // every bucket idle long enough to be full again: swept
-	if ok, _ := l.Allow(netip.MustParseAddr("192.0.2.3")); !ok {
-		t.Fatal("idle entries were not swept")
+	if ok, _ := l.Allow(a); ok {
+		t.Fatal("the most recently used entry was evicted (a got a fresh burst)")
+	}
+	if ok, _ := l.Allow(b); !ok {
+		t.Fatal("the least recently used entry (b) was not the one evicted")
 	}
 }
 
@@ -183,11 +192,23 @@ func TestFailureLimiterBlocksForTheRestOfTheWindow(t *testing.T) {
 	}
 }
 
-func TestFailureLimiterFullTableFailsClosed(t *testing.T) {
-	f := NewFailureLimiter(3, time.Minute, 1)
-	f.Fail(netip.MustParseAddr("192.0.2.1"))
-	if b, _ := f.Blocked(netip.MustParseAddr("192.0.2.2")); !b {
-		t.Fatal("an untracked client passed while the table was full")
+func TestFailureLimiterFullTableEvictsAndNeverBlocksAnUntrackedClient(t *testing.T) {
+	f := NewFailureLimiter(1, time.Minute, 2)
+	x, y := netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")
+	f.Fail(x)
+	f.Fail(y)
+	if b, _ := f.Blocked(netip.MustParseAddr("192.0.2.9")); b {
+		t.Fatal("an untracked client was blocked while the table was full")
+	}
+	f.Fail(netip.MustParseAddr("192.0.2.9")) // evicts x, the least recently used
+	if b, _ := f.Blocked(x); b {
+		t.Fatal("x should have been evicted")
+	}
+	if b, _ := f.Blocked(y); !b {
+		t.Fatal("y should still be blocked")
+	}
+	if f.entries.len() != 2 {
+		t.Fatalf("table grew to %d", f.entries.len())
 	}
 }
 
@@ -321,3 +342,95 @@ func TestGuardDoesNotCountSuccessOrOtherErrorsAsAuthFailures(t *testing.T) {
 		srv.Close()
 	}
 }
+
+// H-1/M-1: a trusted request (the valid credential) passes a lockout and a drained anonymous bucket, and is counted
+// in its own table.
+func TestGuardTrustedRequestsBypassTheLockoutButNotTheirOwnLimit(t *testing.T) {
+	var calls atomic.Int32
+	g := &Guard{Name: "t", Source: SourceXRealIP, Limit: NewLimiter(60, 1, 100),
+		AuthFail:     NewFailureLimiter(1, 10*time.Minute, 100),
+		Trusted:      func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer good" },
+		TrustedLimit: NewLimiter(60, 2, 100)}
+	srv := httptest.NewServer(g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Authorization") != "Bearer good" {
+			w.WriteHeader(401)
+		}
+	})))
+	defer srv.Close()
+	get := func(auth string) int {
+		r, _ := http.NewRequest("GET", srv.URL, nil)
+		r.Header.Set("X-Real-IP", "198.51.100.1")
+		if auth != "" {
+			r.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := get("Bearer bad"); c != 401 {
+		t.Fatal(c)
+	}
+	if c := get("Bearer bad"); c != 429 {
+		t.Fatalf("locked out: %d", c)
+	}
+	if c := get("Bearer good"); c != 200 {
+		t.Fatalf("valid credential while the address is locked out: %d", c)
+	}
+	if c := get("Bearer good"); c != 200 {
+		t.Fatalf("2nd valid: %d", c)
+	}
+	if c := get("Bearer good"); c != 429 {
+		t.Fatalf("3rd valid over its own burst of 2: %d", c)
+	}
+}
+
+// M-3: an address in Cloudflare's ranges is logged as a distinct warning (and the request is otherwise unchanged);
+// L-4: refusals are structured lines, ALERT level where configured.
+func TestGuardLogsCloudflareAddressesAndStructuredRefusals(t *testing.T) {
+	var buf strings.Builder
+	var mu sync.Mutex
+	log.SetOutput(writerFunc(func(p []byte) (int, error) { mu.Lock(); defer mu.Unlock(); return buf.Write(p) }))
+	log.SetFlags(0)
+	defer func() { log.SetOutput(os.Stderr); log.SetFlags(log.LstdFlags) }()
+	cf, ver := CloudflareRanges()
+	if !strings.Contains(ver, "cloudflare.com/ips") || !strings.Contains(ver, "2026-10-30") {
+		t.Fatal(ver)
+	}
+	allow := MustParseAllowlist("3.18.12.63")
+	var calls atomic.Int32
+	g := &Guard{Name: "gw", Source: SourceXRealIP, Allow: &allow, WarnRanges: cf, Event: "stripe_delivery_refused",
+		AlertOn403: true}
+	srv := guarded(g, 200, &calls)
+	defer srv.Close()
+	do(t, srv.URL, "POST", "104.16.0.9")   // Cloudflare (IPv4) -> warning, then refused: not on the allowlist
+	do(t, srv.URL, "POST", "2606:4700::1") // Cloudflare (IPv6): same reason, inside the 1-minute throttle
+	do(t, srv.URL, "POST", "3.18.12.63")   // allowed, no warning
+	mu.Lock()
+	out := buf.String()
+	mu.Unlock()
+	for _, want := range []string{
+		"gw edge event=gw_client_address_suspect level=WARN reason=client_in_cloudflare_range client=104.16.0.9",
+		"gw edge event=stripe_delivery_refused level=ALERT reason=not_allowlisted client=",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Count(out, "client_in_cloudflare_range") != 1 {
+		t.Errorf("the Cloudflare warning is not throttled:\n%s", out)
+	}
+	if strings.Contains(out, "client=3.18.12.63") {
+		t.Errorf("an allowed request was logged:\n%s", out)
+	}
+	if !cf.Contains(netip.MustParseAddr("172.64.1.1")) || cf.Contains(netip.MustParseAddr("3.18.12.63")) {
+		t.Fatal("Cloudflare ranges wrong")
+	}
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -33,6 +34,45 @@ func guardedGW(t *testing.T, financeURL string, extra map[string]string) *httpte
 		t.Fatal(err)
 	}
 	return httptest.NewServer(newHandler(cfg, newGateway(cfg)))
+}
+
+// postBody posts like postFrom and returns the refusal text, so a test can tell WHICH layer answered (AEGIS edge
+// review L-3): the guard's "source address not allowed" / "client address could not be determined" / "rate limit
+// exceeded", or the gateway's own answers.
+func postBody(t *testing.T, url, realIP string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url+"/webhooks/stripe", strings.NewReader(`{"id":"evt_1"}`))
+	req.Header.Set("Stripe-Signature", "t=1700000000,v1="+strings.Repeat("a", 64))
+	if realIP != "" {
+		req.Header.Set("X-Real-IP", realIP)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode, string(b)
+}
+
+func TestRefusalsNameTheirLayer(t *testing.T) {
+	var s seen
+	fin := financeStub(t, 200, &s)
+	defer fin.Close()
+	g := guardedGW(t, fin.URL, map[string]string{rateBurstEnv: "1"})
+	defer g.Close()
+	if c, b := postBody(t, g.URL, ""); c != 403 || !strings.Contains(b, "client address could not be determined") {
+		t.Fatalf("no address: %d %s", c, b)
+	}
+	if c, b := postBody(t, g.URL, "1.2.3.4"); c != 403 || !strings.Contains(b, "source address not allowed") {
+		t.Fatalf("not allowlisted: %d %s", c, b)
+	}
+	if c, b := postBody(t, g.URL, "3.18.12.63"); c != 200 || !strings.Contains(b, "received") {
+		t.Fatalf("allowed: %d %s", c, b)
+	}
+	if c, b := postBody(t, g.URL, "3.18.12.63"); c != 429 || !strings.Contains(b, "rate limit exceeded") {
+		t.Fatalf("over the burst: %d %s", c, b)
+	}
 }
 
 func postFrom(t *testing.T, url, realIP string) *http.Response {

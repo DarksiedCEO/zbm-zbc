@@ -13,16 +13,21 @@ type Allowlist struct {
 }
 
 // Narrowest a network entry may be widened to: an override is a list of a provider's addresses, never a way to
-// allow "everyone" (that is what each service's kill switch is for, and it says so in the log).
+// allow "everyone" (that is what each service's kill switch is for, and it says so in the log). IPv6: /48 at the
+// widest (AEGIS edge review L-5; Stripe publishes no IPv6 webhook source at all).
 const (
 	minPrefixV4 = 16
-	minPrefixV6 = 32
+	minPrefixV6 = 48
 	maxEntries  = 1024
 )
 
 // ParseAllowlist reads a comma-separated list of IP addresses and CIDR networks. Every item must parse; empty items,
-// zones, and networks wider than /16 (IPv4) or /32 (IPv6) are refused.
+// zones, and networks wider than /16 (IPv4) or /48 (IPv6) are refused.
 func ParseAllowlist(raw string) (Allowlist, error) {
+	return parseList(raw, minPrefixV4, minPrefixV6)
+}
+
+func parseList(raw string, minV4, minV6 int) (Allowlist, error) {
 	var a Allowlist
 	items := strings.Split(raw, ",")
 	if strings.TrimSpace(raw) == "" {
@@ -56,9 +61,9 @@ func ParseAllowlist(raw string) (Allowlist, error) {
 		if p.Addr().Is4In6() {
 			p = netip.PrefixFrom(p.Addr().Unmap(), max(p.Bits()-96, 0))
 		}
-		if (p.Addr().Is4() && p.Bits() < minPrefixV4) || (p.Addr().Is6() && p.Bits() < minPrefixV6) {
+		if (p.Addr().Is4() && p.Bits() < minV4) || (p.Addr().Is6() && p.Bits() < minV6) {
 			return a, fmt.Errorf("allowlist entry %d is wider than /%d (IPv4) or /%d (IPv6); use the kill switch to "+
-				"turn the check off instead", i+1, minPrefixV4, minPrefixV6)
+				"turn the check off instead", i+1, minV4, minV6)
 		}
 		a.prefixes = append(a.prefixes, p.Masked())
 	}
