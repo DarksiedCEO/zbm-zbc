@@ -348,7 +348,7 @@ class BooksMixin:
 
     def sales_tax_nexus(self) -> dict:
         """Invoiced totals per client state/territory (as Compliance recorded it at invoice approval) for the trailing
-        12 months and the calendar year, each against its economic-nexus threshold from Compliance's register row
+        12 months, the calendar year and the previous calendar year, each against its economic-nexus threshold from Compliance's register row
         US-SALESTAX-NEXUS; a jurisdiction at or above ``alert_ratio`` (75%) of either limit is FLAGGED (memo
         MEMO-FIN-CQ-11-2026-10-30: register before the threshold is crossed). Counted: invoices issued, paid or
         returned (never drafts or voids), by ``issued_at``. Thresholds unreadable -> every jurisdiction with sales is
@@ -363,15 +363,19 @@ class BooksMixin:
         with self.lock:
             invoices = [dict(v) for v in self.db["invoices"].values()
                         if v["status"] in ("issued", "paid", "returned") and v.get("issued_at")]
-        starts = {"trailing_12_months": today - timedelta(days=365), "calendar_year": date(today.year, 1, 1)}
+        # AEGIS F-11: the previous calendar year too (most states test the current OR the previous year)
+        windows = {"trailing_12_months": (today - timedelta(days=365), today),
+                   "calendar_year": (date(today.year, 1, 1), today),
+                   "previous_calendar_year": (date(today.year - 1, 1, 1), date(today.year - 1, 12, 31))}
+        starts = windows
         buckets: dict[str, dict] = {}
         with M.money_context():
             for inv in invoices:
                 day = parse_iso(inv["issued_at"]).date()
                 code = inv.get("client_jurisdiction") or "unknown"
                 b = buckets.setdefault(code, {p: {"sales": M.D("0.00"), "transactions": 0} for p in starts})
-                for period, start in starts.items():
-                    if start <= day <= today:
+                for period, (start, end) in windows.items():
+                    if start <= day <= end:
                         b[period]["sales"] += M.D(inv["total"])
                         b[period]["transactions"] += 1
             rows, flagged = [], []
@@ -416,7 +420,7 @@ class BooksMixin:
                                "alert_ratio": f"{th['alert_ratio']:f}" if th else None,
                                # jurisdictions with no verified threshold: what to check before the first client there
                                "check_before_first_client": dict(sorted(th["checks"].items())) if th else None},
-                "periods": {p: {"from": d.isoformat(), "to": today.isoformat()} for p, d in starts.items()},
+                "periods": {p: {"from": a.isoformat(), "to": b.isoformat()} for p, (a, b) in windows.items()},
                 "jurisdictions": rows, "flagged": flagged, "ledger_event_ids": g.events}
 
     def budget_view(self, campaign_id: str) -> dict:

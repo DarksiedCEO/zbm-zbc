@@ -367,3 +367,18 @@ def test_the_hourly_stripe_sessions_job_closes_pages_of_clients_no_longer_allowe
     assert hr.sim.sessions[cs["session_id"]]["status"] == "expired"
     assert hr.svc.db["stripe_sessions"][cs["session_id"]]["status"] == "expired"
 
+
+def test_nexus_reports_the_previous_calendar_year_too():
+    """AEGIS F-11: most states test the current OR the previous calendar year; a year-old peak still flags."""
+    from datetime import datetime, timezone
+    hr = Harness().ready()
+    hr.f["compliance"].nexus_params = NEXUS
+    hr.f["compliance"].activations = {"tx-1": {"allowed": True, "jurisdiction": "US-TX"}}
+    issue(hr, draft(hr, "tx-1", "76000.00"))                          # 2026
+    hr.clock.at = datetime(2027, 11, 15, 12, 0, tzinfo=timezone.utc)
+    r = nexus(hr)
+    assert r["periods"]["previous_calendar_year"] == {"from": "2026-01-01", "to": "2026-12-31"}
+    tx = next(j for j in r["jurisdictions"] if j["jurisdiction"] == "US-TX")
+    assert tx["trailing_12_months"]["sales_usd"] == "0.00" and tx["calendar_year"]["sales_usd"] == "0.00"
+    assert tx["previous_calendar_year"]["sales_usd"] == "76000.00" and tx["flagged"] is True
+    assert any(x.startswith("previous_calendar_year:") for x in tx["flag_reasons"])
