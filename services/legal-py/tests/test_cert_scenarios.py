@@ -98,6 +98,9 @@ def test_s4_clickwrap_insufficient_until_cq19_then_sufficient_for_new_acceptance
     assert old["evidence_sufficient"] is False          # a record never changes after the fact
     assert set(old) == {"acceptance_id", "doc_id", "version", "doc_sha256", "accepted_at", "method",
                         "evidence_sufficient", "party_ref", "rules_pinned"}
+    # ADR 0024 (HR-15): Compliance reads the same answer to confirm a client's acceptance at activation
+    assert he.ok(he.get(f"/legal/v1/acceptances/{a2['acceptance_id']}", caller="compliance_38")) == \
+        he.ok(he.get(f"/legal/v1/acceptances/{a2['acceptance_id']}", caller="finance_31"))
 
 
 # --- S5 ------------------------------------------------------------------------------------------------------------

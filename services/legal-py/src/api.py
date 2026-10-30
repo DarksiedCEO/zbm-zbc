@@ -406,7 +406,8 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/legal/v1/acceptances/{acceptance_id}", dependencies=auth)
     def acceptance_get(acceptance_id: str, _: str = Depends(caller("clipper_network", "finance_31", "onboarding",
-                                                                   andre_ok=True))) -> dict:
+                                                                   "compliance_38", andre_ok=True))) -> dict:
+        # compliance_38 (ADR 0024, HR-15): a client's activation needs Legal to confirm the client's own acceptance
         return svc.get_acceptance(_id(acceptance_id, LG_ID))
 
     @app.post("/legal/v1/envelopes", dependencies=auth)
