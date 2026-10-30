@@ -274,3 +274,50 @@ func TestForClient_EveryResultFieldIsClassified(t *testing.T) {
 		t.Errorf("scope fields not set from the request")
 	}
 }
+
+// AEGIS tenant r2 L-A: tenant ids are matched exactly, never by prefix. "acme"
+// is a prefix of "acme2"; each tenant's view holds only its own rows, scans and
+// excluded scans (one of acme2's scans never completed).
+func TestForClient_ATenantWhoseIdIsAPrefixOfAnotherSeesOnlyItsOwnRows(t *testing.T) {
+	acmeF := tenantFinding("acme", "discount-misuse-v1", "order", "o1", "", "4.50")
+	acme2F := tenantFinding("acme2", "discount-misuse-v1", "order", "o2", "", "7.00")
+	acme2Lost := tenantFinding("acme2", "discount-misuse-v1", "order", "o3", "", "8.00")
+	c := &chain{}
+	for _, scan := range [][]client.EventInput{
+		buildScan(t, scanID(11), "acme", []client.Finding{acmeF}, nil),
+		buildScan(t, scanID(12), "acme2", []client.Finding{acme2F}, nil),
+		buildScan(t, scanID(13), "acme2", []client.Finding{acme2Lost}, func(evs []client.EventInput) []client.EventInput {
+			return evs[:2] // never completed
+		}),
+	} {
+		for _, ev := range scan {
+			c.event(ev)
+		}
+	}
+	entries := c.json(t)
+
+	for _, tc := range []struct {
+		tenant, finding, scan, excluded string
+		foreign                         []string
+	}{
+		{"acme", acmeF.FindingID, scanID(11), "", []string{scanID(12), scanID(13), acme2F.FindingID, acme2Lost.FindingID}},
+		{"acme2", acme2F.FindingID, scanID(12), "acme2:" + scanID(13), []string{scanID(11), acmeF.FindingID}},
+	} {
+		res := readScoped(t, entries, FindingsScope{ClientID: tc.tenant})
+		if len(res.Findings) != 1 || res.Findings[0].FindingID != tc.finding {
+			t.Errorf("%s's findings: %+v", tc.tenant, res.Findings)
+		}
+		if len(res.Scans) != 1 || res.Scans[0].ScanID != tc.scan {
+			t.Errorf("%s's scans: %+v", tc.tenant, res.Scans)
+		}
+		if got := excludedIDs(res); got != tc.excluded {
+			t.Errorf("%s's excluded scans: %q", tc.tenant, got)
+		}
+		b, _ := json.Marshal(res)
+		for _, f := range tc.foreign {
+			if strings.Contains(string(b), f) {
+				t.Errorf("%s's view holds %s", tc.tenant, f)
+			}
+		}
+	}
+}
