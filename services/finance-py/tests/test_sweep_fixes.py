@@ -247,9 +247,9 @@ def test_bf2_paid_event_for_a_submitting_item_is_held_and_booked_by_our_own_reco
     assert it["status"] == "submitting"
     hr.stripe.paid(it["idempotency_key"])
     ev = {"event_id": "evt-paid-1", "type": "paid", "signature": fakes.RAIL_SIG, "item_id": iid}
-    r = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="rail_gateway"))
+    r = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="payout_rail_gateway"))
     assert r["results"][0]["status"] == "held_submitting"
-    r = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="rail_gateway"))
+    r = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="payout_rail_gateway"))
     assert r["results"][0]["status"] == "held_submitting"
     down["on"] = False
     hr.ok(hr.post("/fin/v1/jobs/rail-sync/run", {"request_id": rid()}, caller="scheduler"))
@@ -277,11 +277,11 @@ def test_bf2_held_paid_event_is_booked_by_the_rails_redelivery(hr):
     hr.stripe.paid(it["idempotency_key"])
     ev = {"event_id": "evt-paid-2", "type": "paid", "signature": fakes.RAIL_SIG, "item_id": iid}
     assert hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]},
-                         caller="rail_gateway"))["results"][0]["status"] == "held_submitting"
+                         caller="payout_rail_gateway"))["results"][0]["status"] == "held_submitting"
     state["f4d"] = False
     hr.release(b["batch_id"])                                    # drives the item: F4d booked, the replay fails
     assert hr.svc.db["items"][iid]["status"] == "submitted"
-    r = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="rail_gateway"))
+    r = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="payout_rail_gateway"))
     assert r["results"][0]["status"] == "paid"
     assert hr.svc.db["items"][iid]["status"] == "paid"
 

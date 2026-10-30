@@ -20,9 +20,10 @@ import money
 from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 # seo_02: Search & Answer Intelligence (2) reads one invoice (GET /fin/v1/invoices/{id}) to verify a paid audit's
-# invoice before the run (ADR 0017 W3-2); like every caller it can reach only the routes open to any caller.
+# invoice before the run (ADR 0017 W3-2). seo_02, rail_gateway (the stripe-gateway: POST /fin/v1/stripe/events only)
+# and payout_rail_gateway (payout-rail webhooks only) reach ONLY their own routes (api.NAMED_ROUTES, ADR 0023).
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
-                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02")
+                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02", "payout_rail_gateway")
 TOKEN_MIN = 32
 # AEGIS night review M-2: a Railway variable reference that was not resolved reaches the service as its literal text.
 # "${{FIN_ONBOARDING_CALLER_TOKEN}}" is exactly 32 printable characters and is public in the repo (.railway/railway.ts),

@@ -15,7 +15,7 @@ cd services/finance-py/src
 FIN_SERVICE_TOKEN=... FIN_ANDRE_APPROVAL_TOKEN=... \
 FIN_CALLER_TOKENS='{"scheduler":"...","creative_production":"...","onboarding":"...","clipper_network":"...",
                     "compliance_38":"...","verification_integrity":"...","rail_gateway":"...","bank_feed":"...",
-                    "seo_02":"..."}' \
+                    "seo_02":"...","payout_rail_gateway":"..."}' \
 LEDGER_SERVICE_URL=http://127.0.0.1:8080 LEDGER_SERVICE_TOKEN=... FIN_DATA_DIR=/var/lib/zbc/finance \
 python3 -m api                                   # 127.0.0.1:8410 (FIN_BIND_ADDR, FIN_PORT)
 ```
@@ -63,8 +63,9 @@ every variable it reads is also named here (wave 25: 35 were not, `tests/test_en
 `content_sha256`) → Andre `POST /fin/v1/payout-batches/{id}/decision` (checker; above `FIN_DUAL_HUMAN_THRESHOLD` the
 second approver sends its OWN request, `POST /fin/v1/payout-batches/{id}/second-approval` with only its token) → scheduler
 `POST /fin/v1/treasury/funding` + Andre's funding decision (F4a) → after `FIN_RELEASE_DELAY_H` (12 h) the scheduler
-`POST /fin/v1/payout-batches/{id}/release` (every gate re-runs per item) → rail webhooks via `rail_gateway`
-(`paid` / `failed` / `returned` / `destination_changed`). Andre's token on the release route is refused (403); no
+`POST /fin/v1/payout-batches/{id}/release` (every gate re-runs per item) → rail webhooks via `payout_rail_gateway`
+(`paid` / `failed` / `returned` / `destination_changed`; `POST /fin/v1/rails/{stripe|trolley}/events`, the only route
+that caller reaches, ADR 0023). Andre's token on the release route is refused (403); no
 caller token can approve.
 
 ## Search & Answer Intelligence (2): one read
@@ -73,6 +74,15 @@ caller token can approve.
 paid time and whether anything was refunded or charged back — no amounts, lines or legal references. `seo_02`
 reaches no other route but the token-free `GET /health` (403 everywhere else, `tests/test_seo_route_allowlist.py`; ADR 0009 decision 2, ADR 0017
 W3-2 / W3-5).
+
+## Gateway callers: one route each (ADR 0023)
+
+`rail_gateway` (the internet-facing `stripe-gateway`'s caller) reaches exactly `POST /fin/v1/stripe/events`;
+`payout_rail_gateway` (payout-rail webhooks; no deployed service holds it yet) reaches exactly
+`POST /fin/v1/rails/{stripe|trolley}/events`. Both get the token-free `GET /health` like anyone else and 403
+everywhere else (`api.NAMED_ROUTES`, enforced before any route; `tests/test_gateway_route_allowlist.py`). Until ADR
+0023 the gateway's token read every route open to any caller (invoices, treasury, breaks, audit export) and could post
+payout-rail events (AEGIS A1 M1); on Railway, read `GET /fin/v1/rules` with your `onboarding` token instead.
 
 ## Money that comes back, and sweeps (AEGIS round 17, ADR 0009 amendment)
 

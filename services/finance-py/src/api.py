@@ -245,9 +245,34 @@ def _sanitize(errors: list[dict]) -> dict:
 
 
 ID_RE = m.ID_RE
-# Callers that reach only routes naming them explicitly (``caller()`` with no names does not admit them).
-NAMED_ONLY = frozenset({"seo_02"})
 SEO_STATUS_ROUTE = re.compile(r"/fin/v1/invoices/[A-Za-z0-9._:-]{1,128}/status")
+STRIPE_EVENTS_ROUTE = re.compile(r"/fin/v1/stripe/events")
+PAYOUT_RAIL_EVENTS_ROUTE = re.compile(r"/fin/v1/rails/(?:%s)/events" % "|".join(config_mod.RAILS))
+# Route allowlist per narrow caller: each reaches EXACTLY these (method, path) pairs, plus GET /health (open to anyone
+# without any token), and nothing else, enforced before any route, dependency or body parsing. ``caller()`` with no
+# names does not admit them, so no route that forgot to name its callers and no Andre-only route can answer them
+# anything but 403.
+#   - seo_02 (AEGIS SEO Wave 3 M2): the narrow invoice status read.
+#   - rail_gateway (ADR 0023, AEGIS A1 M1): the internet-facing stripe-gateway's caller; Stripe webhooks only. It
+#     used to reach every ``caller()`` route (invoices, treasury, breaks, audit export, payables) and the dispute
+#     opener.
+#   - payout_rail_gateway (ADR 0023): payout-rail webhooks (paid/failed/returned/destination_changed, each one
+#     signature-verified by the rail adapter). Split from rail_gateway so the Stripe gateway's token cannot post them;
+#     no deployed service holds it yet.
+NAMED_ROUTES: dict[str, tuple[tuple[str, re.Pattern], ...]] = {
+    "seo_02": (("GET", SEO_STATUS_ROUTE),),
+    "rail_gateway": (("POST", STRIPE_EVENTS_ROUTE),),
+    "payout_rail_gateway": (("POST", PAYOUT_RAIL_EVENTS_ROUTE),),
+}
+# Callers that reach only routes naming them explicitly.
+NAMED_ONLY = frozenset(NAMED_ROUTES)
+
+
+def named_route_allowed(name: str, method: str, path: str) -> bool:
+    """For a NAMED_ONLY caller: is (method, path) one of its routes (or GET /health)? Exact matches only."""
+    if method == "GET" and path == "/health":
+        return True
+    return any(method == mth and rx.fullmatch(path) for mth, rx in NAMED_ROUTES.get(name, ()))
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -356,15 +381,14 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             R.item("AMOUNT_OUT_OF_RANGE", str(exc)[:120])]})
 
     @app.middleware("http")
-    async def _seo_allowlist(request: Request, call_next):
-        # AEGIS SEO Wave 3 M2: Search & Answer Intelligence (seo_02) reaches exactly ONE route, the narrow invoice
-        # status read. Enforced before any route, dependency or body parsing, so no route that forgot to name its
-        # callers (``caller()`` admits any caller) and no Andre-only route can answer it anything but 403.
-        # /health is open to anyone without any token (no bearer, no caller), so refusing it to seo_02 would protect
-        # nothing; it answers seo_02 exactly what it answers an anonymous caller (AEGIS SEO Wave 3 round 2)
-        if callers.identify(request.headers.get(CALLER_HEADER)) in NAMED_ONLY and not (
-                request.method == "GET" and (SEO_STATUS_ROUTE.fullmatch(request.url.path)
-                                             or request.url.path == "/health")):
+    async def _named_route_allowlist(request: Request, call_next):
+        # NAMED_ROUTES: seo_02 (AEGIS SEO Wave 3 M2), rail_gateway and payout_rail_gateway (ADR 0023) reach exactly
+        # their routes. Enforced before any route, dependency or body parsing, so no route that forgot to name its
+        # callers (``caller()`` admits any caller) and no Andre-only route can answer them anything but 403.
+        # /health is open to anyone without any token (no bearer, no caller), so refusing it to them would protect
+        # nothing; it answers them exactly what it answers an anonymous caller (AEGIS SEO Wave 3 round 2)
+        name = callers.identify(request.headers.get(CALLER_HEADER))
+        if name in NAMED_ONLY and not named_route_allowed(name, request.method, request.url.path):
             return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
                                                                    "name it"})
         return await call_next(request)
@@ -550,7 +574,7 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.deposit_return(who, req.request_id, _id(receipt_id), dump(req))
 
     @app.post("/fin/v1/rails/{rail}/events", dependencies=auth)
-    def rail_events(rail: str, who: str = Depends(caller("rail_gateway")),
+    def rail_events(rail: str, who: str = Depends(caller("payout_rail_gateway")),
                     req: m.RailEvents = Depends(body(m.RailEvents))) -> dict:
         return svc.rail_events(who, req.request_id, _id(rail), [e.model_dump(mode="python") for e in req.events])
 
@@ -582,7 +606,9 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.stripe_event(who, req.request_id, req.payload, req.signature)
 
     @app.post("/fin/v1/disputes", dependencies=auth, status_code=201)
-    def dispute(who: str = Depends(andre_or_caller("disputes", "rail_gateway")),
+    # Andre only: a card chargeback is never opened by hand (it arrives as a Stripe event), so no caller opens one
+    # (ADR 0023 removed rail_gateway, which the service refused anyway)
+    def dispute(who: str = Depends(andre_or_caller("disputes")),
                 req: m.DisputeOpen = Depends(body(m.DisputeOpen))) -> dict:
         return svc.open_dispute(who, req.request_id, dump(req))
 
