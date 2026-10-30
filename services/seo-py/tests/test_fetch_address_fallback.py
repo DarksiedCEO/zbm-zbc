@@ -246,3 +246,124 @@ def test_at_most_max_address_attempts_in_alternating_order():
     assert fetch_mod.MAX_ADDRESS_ATTEMPTS == 4
     assert r.state == "CONNECT_FAILED"
     assert seen == ["93.184.216.34", "2606:4700::1", "93.184.216.35", "2606:4700::2"]
+
+
+# --------------------------------------------------------------------- (7) TLS phase: connected, so no fallback
+# AEGIS night review M-1: the MockTransport tests above never reach the real backend, so the ``connected`` flag (set by
+# ``_DeadlineBackend.connect_tcp`` once TCP is up) was never exercised: falling back after a TLS-phase ConnectError or
+# ConnectTimeout, or never setting the flag, all went unnoticed. These use the real socket backend against a raw TCP
+# listener on 127.0.0.1 (OS-assigned port) that accepts the connection and then never completes the TLS handshake. The
+# first vetted address is connected to, the ClientHello is sent: the request ends there with the state it had before
+# the fallback existed, and the second vetted address is never connected to.
+
+class _RawListener:
+    """Accepts TCP on 127.0.0.1 and never answers TLS. ``mode="stall"`` holds the connection open silently;
+    ``mode="reset"`` reads the ClientHello, then aborts the connection with a TCP RST (SO_LINGER 0)."""
+
+    def __init__(self, mode: str):
+        import struct
+        import threading
+        self.mode, self.accepted, self._held = mode, 0, []
+        self._linger = struct.pack("ii", 1, 0)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:                       # the listener was closed
+                return
+            self.accepted += 1
+            if self.mode == "reset":
+                try:
+                    conn.recv(4096)               # the ClientHello: the TLS phase has begun
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, self._linger)
+                finally:
+                    conn.close()
+            else:
+                self._held.append(conn)
+
+    def close(self):
+        self.sock.close()
+        self._thread.join(2)
+        for c in self._held:
+            c.close()
+
+
+@pytest.fixture
+def raw_listener():
+    made = []
+
+    def make(mode: str) -> _RawListener:
+        made.append(_RawListener(mode))
+        return made[-1]
+    try:
+        yield make
+    finally:
+        for listener in made:
+            listener.close()
+
+
+def _tls_fetcher(port: int, timeout_s: float = 0.3) -> fetch_mod.Fetcher:
+    """Two vetted addresses: the loopback listener first (the resolver's order, both IPv4), then a public IPv4 address
+    that must never be tried (``_unreachable_except_loopback`` makes it fail as ENETUNREACH if it ever is)."""
+    return fetch_mod.Fetcher(timeout_s=timeout_s, resolver=lambda h, p: ["127.0.0.1", V4],
+                             policy=lambda h, ip, p: ip in ("127.0.0.1", V4), ports=(port,))
+
+
+def _unreachable_except_loopback(monkeypatch):
+    """Every address but 127.0.0.1 is unreachable (ENETUNREACH: nothing sent). A wrongly taken fallback is therefore
+    recorded in ``tried`` and fails cleanly as a connect error rather than hitting the conftest's network guard."""
+    inner, tried = socket.create_connection, []
+
+    def create_connection(address, *a, **k):
+        tried.append(address[0])
+        if address[0] != "127.0.0.1":
+            raise OSError(errno.ENETUNREACH, "Network is unreachable")
+        return inner(address, *a, **k)
+    monkeypatch.setattr(socket, "create_connection", create_connection)
+    return tried
+
+
+def test_tls_handshake_stall_after_connect_times_out_without_trying_the_next_address(raw_listener, monkeypatch):
+    """TCP is up, the ClientHello is sent, the server never answers: httpcore raises ConnectTimeout from start_tls.
+    That is a post-connect failure (``connected`` is set), so it is TIMEOUT, exactly as with one address, and the
+    second vetted address is never connected to. Kills: fallback on a post-connect ConnectTimeout; ``connected`` never
+    set. The handshake waits only the fetcher's short connect timeout; nothing here sleeps."""
+    listener = raw_listener("stall")
+    tried = _unreachable_except_loopback(monkeypatch)
+    r = _tls_fetcher(listener.port).fetch(f"https://site.test:{listener.port}/", honor_robots=False)
+    assert (r.state, r.detail) == ("TIMEOUT", "timed out")
+    assert tried == ["127.0.0.1"] and listener.accepted == 1
+
+
+def test_tls_handshake_reset_after_connect_is_connect_failed_without_trying_the_next_address(raw_listener,
+                                                                                            monkeypatch):
+    """TCP is up, the server reads the ClientHello and resets the connection: httpcore raises ConnectError (an OSError,
+    ECONNRESET, not an SSL error) from start_tls. Post-connect, so it is CONNECT_FAILED, as with one address, and the
+    second vetted address is never connected to. Kills: fallback on a post-connect ConnectError; ``connected`` never
+    set."""
+    listener = raw_listener("reset")
+    tried = _unreachable_except_loopback(monkeypatch)
+    r = _tls_fetcher(listener.port).fetch(f"https://site.test:{listener.port}/", honor_robots=False)
+    assert (r.state, r.detail) == ("CONNECT_FAILED", "connection failed")
+    assert tried == ["127.0.0.1"] and listener.accepted == 1
+
+
+def test_tls_stall_reached_only_after_a_pre_connect_failure_still_falls_back_once(raw_listener, monkeypatch):
+    """The control: the first address is unreachable (no connection: ``connected`` stays False, the fallback is
+    taken), the second accepts TCP and stalls the handshake (``connected`` is set: the request ends TIMEOUT). The flag
+    is reset per attempt, so the pre-connect failure of one address never makes the next one's TLS failure retryable
+    and never stops the fallback itself."""
+    listener = raw_listener("stall")
+    tried = _unreachable_except_loopback(monkeypatch)
+    f = fetch_mod.Fetcher(timeout_s=0.3, resolver=lambda h, p: [V4, "127.0.0.1"],
+                          policy=lambda h, ip, p: ip in ("127.0.0.1", V4), ports=(listener.port,))
+    r = f.fetch(f"https://site.test:{listener.port}/", honor_robots=False)
+    assert (r.state, r.detail) == ("TIMEOUT", "timed out")
+    assert tried == [V4, "127.0.0.1"] and listener.accepted == 1
