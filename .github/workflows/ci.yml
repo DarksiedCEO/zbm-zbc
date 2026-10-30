@@ -885,6 +885,15 @@ jobs:
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-deploy-config.log" --code "$code" \
             --suite "devtools:test_deploy_config"
           exit "$code"
+      - name: The LEDGER_CALLERS generator refuses bad tokens and pins each caller's grant (devtools/ledger_callers.py)
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest devtools/test_ledger_callers.py -v 2>&1 | tee "$RUNNER_TEMP/test-ledger-callers.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-ledger-callers.log" --code "$code" \
+            --suite "devtools:test_ledger_callers"
+          exit "$code"
       - name: The annotation converter's own self-test (every log format, escaping, caps, redaction, ci.yml wiring)
         shell: bash
         run: |
