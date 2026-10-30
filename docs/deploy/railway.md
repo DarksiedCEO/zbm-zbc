@@ -214,7 +214,8 @@ write and read only its own department. Rotating one: new token on the service, 
 from other services' variables with Railway's reference syntax, e.g.
 `{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}"}`
 (`${{VARIABLE}}` with no service name is the same service's variable). You never type those two; you set the tokens
-they point at.
+they point at. Finance and Legal refuse to start when a token value still holds `${{` or `{{` (a reference Railway
+did not resolve, left as literal text): the error names the setting, never the value (AEGIS night review M-2).
 
 **The `onboarding` caller is you, for now** (AEGIS A1 C1). Drafting an invoice (`POST /fin/v1/invoices`) needs the
 `onboarding` (or `scheduler`) caller, and recording a client's acceptance (`POST /legal/v1/acceptances`) needs
@@ -223,7 +224,16 @@ you hold `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN` yours
 machine with `openssl rand -hex 32` (two different values; each service refuses to start when a caller token is under
 32 printable characters or equals another of its tokens), paste it into the variable on its service, mark it
 **Sealed**, and keep it in your password manager. Two tokens, not one, so either can be revoked alone and a leaked
-Finance token does not record contract acceptances. What it means:
+Finance token does not record contract acceptances.
+
+> **Warning: set BOTH tokens BEFORE `railway config apply`** (AEGIS night review M-1). `FIN_CALLER_TOKENS` and
+> `LEGAL_CALLER_TOKENS` reference `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN`. If either is
+> missing when the IaC is applied, that map's `onboarding` entry is empty or unresolved and **finance and legal refuse
+> to start** on their next deploy. On a project that is already running, that is an outage of both services, not a
+> first-deploy hiccup. So: set `FIN_ONBOARDING_CALLER_TOKEN` on finance and `LEGAL_ONBOARDING_CALLER_TOKEN` on legal
+> (both Sealed) first; then run `railway config plan` and read it; only then `railway config apply`.
+
+What it means:
 - **You become maker and checker.** You draft the invoice with the onboarding token and approve it with
   `FIN_ANDRE_APPROVAL_TOKEN`: the code still needs two different tokens and pins the approval to the draft's
   `content_sha256`, but one person holds both, so it is a self-review step, not an independent check (FIN-19's
@@ -454,6 +464,13 @@ Do these in order. Nothing in the repository creates anything; each step is your
 3. **Project.** In the Railway dashboard create an empty project (name `zbm-zbc`) and give Railway's GitHub app access
    to `DarksiedCEO/zbm-zbc`. In your checkout: `railway link` (pick the project and the `production` environment).
 4. **Plan and apply the infrastructure.**
+
+   > **Warning — on a project that already exists** (finance and legal already deployed), set BOTH
+   > `FIN_ONBOARDING_CALLER_TOKEN` (on finance) and `LEGAL_ONBOARDING_CALLER_TOKEN` (on legal) in Railway **before**
+   > `railway config apply`, otherwise finance and legal refuse to start on their next deploy (their caller maps
+   > reference those two variables; see [Secrets](#secrets)). Always run `railway config plan` first and read it;
+   > never `apply` without a plan you have read. The same holds for every later re-apply (step 13 included).
+
    ```bash
    cd .railway && npm ci && cd ..
    railway config plan      # read it: 7 services, 4 volumes, every variable; secrets show as preserved
@@ -494,8 +511,8 @@ Do these in order. Nothing in the repository creates anything; each step is your
 12. **Smoke test** — the checklist below.
 13. **Going live with Stripe** (later, after the test-mode smoke passes): live restricted key into
     `FIN_STRIPE_SECRET_KEY`, a new live-mode webhook endpoint (same URL, same events) and its secret into
-    `FIN_STRIPE_WEBHOOK_SECRET`, `FIN_STRIPE_LIVE=1` (in `.railway/railway.ts`, then `railway config apply`), redeploy
-    finance.
+    `FIN_STRIPE_WEBHOOK_SECRET`, `FIN_STRIPE_LIVE=1` (in `.railway/railway.ts`, then `railway config plan`, read it,
+    then `railway config apply`; both onboarding caller tokens must already be set, see step 4), redeploy finance.
 
 Operating the private services (your approval routes on finance, legal and seo) goes through `railway ssh` into that
 service and a request to `127.0.0.1:<port>` from inside it; there is deliberately no public route to them.
