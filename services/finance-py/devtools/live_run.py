@@ -460,7 +460,11 @@ def _main(work: Path) -> int:
             start([str(gw_bin)], {"STRIPE_GATEWAY_FINANCE_URL": f"http://127.0.0.1:{pfb}",
                                   "STRIPE_GATEWAY_FINANCE_TOKEN": FIN_TOKEN,
                                   "STRIPE_GATEWAY_CALLER_TOKEN": CALLERS["rail_gateway"],
-                                  "STRIPE_GATEWAY_PORT": str(gw_port)}, str(work), "stripe_gateway", work)
+                                  "STRIPE_GATEWAY_PORT": str(gw_port),
+                                  # ADR 0023: no proxy here, so the client address is the TCP peer, and the source
+                                  # allowlist (kept ON) holds the loopback address this run posts from
+                                  "STRIPE_GATEWAY_CLIENT_IP_SOURCE": "remote-addr",
+                                  "STRIPE_GATEWAY_ALLOWED_IPS": "127.0.0.1"}, str(work), "stripe_gateway", work)
             wait_up(f"http://127.0.0.1:{gw_port}/health")
             gurl = f"http://127.0.0.1:{gw_port}/webhooks/stripe"
             forged = httpx.post(gurl, content=ev["payload"].replace("checkout.session", "checkout.sessionX").encode(),

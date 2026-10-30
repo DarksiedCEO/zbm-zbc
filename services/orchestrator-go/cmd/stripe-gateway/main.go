@@ -12,6 +12,11 @@
 //
 // Nothing from Finance's answer is passed back to the internet, and nothing from the body or the signature is
 // logged: a refused delivery is logged by status and a random correlation id only.
+//
+// Perimeter (ADR 0023 "Public edge hardening"): before any route runs, a delivery whose client address (Railway's
+// X-Real-IP) is not one of Stripe's published webhook addresses, or cannot be determined, is answered 403 without its
+// body being read or Finance being called (stripe_ips.go; STRIPE_GATEWAY_ALLOWED_IPS overrides the list,
+// STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED=1 turns the check off). GET /health stays open for Railway's health check.
 package main
 
 import (
@@ -32,6 +37,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/edge"
 )
 
 const (
@@ -64,6 +71,43 @@ type config struct {
 	addr            string
 	// privateHTTP: Finance is reached over plain http on Railway's private network (the opt-in was used)
 	privateHTTP bool
+	// ipSource: where the client address comes from (STRIPE_GATEWAY_CLIENT_IP_SOURCE; ADR 0023)
+	ipSource edge.IPSource
+	// allow: the source addresses deliveries are accepted from; nil only when the kill switch turned the check off
+	allow *edge.Allowlist
+	// allowFrom says which list is in force (the embedded Stripe list or the override), for the startup log
+	allowFrom string
+}
+
+// Source-IP allowlist settings (ADR 0023). The check is ON unless the kill switch is set to exactly "1"; any value
+// other than unset, "0" or "1" refuses the start (a typo never silently turns the check off).
+const (
+	clientIPSourceEnv    = "STRIPE_GATEWAY_CLIENT_IP_SOURCE"
+	allowedIPsEnv        = "STRIPE_GATEWAY_ALLOWED_IPS"
+	allowlistDisabledEnv = "STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED"
+)
+
+func loadAllowlist(getenv func(string) string) (*edge.Allowlist, string, error) {
+	switch getenv(allowlistDisabledEnv) {
+	case "", "0":
+	case "1":
+		if getenv(allowedIPsEnv) != "" {
+			return nil, "", fmt.Errorf("%s=1 and %s are both set: turn the check off OR override the list, "+
+				"not both", allowlistDisabledEnv, allowedIPsEnv)
+		}
+		return nil, "", nil
+	default:
+		return nil, "", fmt.Errorf("%s must be 1 (check off) or 0/unset (check on)", allowlistDisabledEnv)
+	}
+	if raw := getenv(allowedIPsEnv); raw != "" {
+		a, err := edge.ParseAllowlist(raw)
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: %v", allowedIPsEnv, err)
+		}
+		return &a, fmt.Sprintf("%s override (%d entries)", allowedIPsEnv, a.Len()), nil
+	}
+	a := edge.MustParseAllowlist(stripeWebhookIPs)
+	return &a, fmt.Sprintf("Stripe webhook IPs, %s (%d entries)", stripeWebhookIPsVersion, a.Len()), nil
 }
 
 // allowRailwayPrivateHTTPEnv is the opt-in for plain http to Finance on Railway's private network. Only "1" turns it
@@ -181,6 +225,12 @@ func loadConfig(getenv func(string) string) (config, error) {
 		port = defaultPort
 	}
 	c.addr = net.JoinHostPort(bind, port)
+	if c.ipSource, err = edge.ParseIPSource(clientIPSourceEnv, getenv(clientIPSourceEnv)); err != nil {
+		return c, err
+	}
+	if c.allow, c.allowFrom, err = loadAllowlist(getenv); err != nil {
+		return c, err
+	}
 	return c, nil
 }
 
@@ -292,6 +342,23 @@ func newMux(g *gateway) *http.ServeMux {
 	return mux
 }
 
+// isHealth: the one request that passes without a client address (Railway's health check reaches the container
+// directly, without the edge's X-Real-IP) and from outside the allowlist; it answers a constant.
+func isHealth(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/health"
+}
+
+// newGuard: the perimeter in front of every route (ADR 0023). A delivery from an address outside the allowlist, or
+// whose address cannot be determined, is answered 403 before its body is read and before Finance is called.
+func newGuard(cfg config) *edge.Guard {
+	return &edge.Guard{Name: "stripe-gateway", Source: cfg.ipSource, Allow: cfg.allow, Open: isHealth}
+}
+
+// newHandler is what the server runs: the guard, then the routes.
+func newHandler(cfg config, g *gateway) http.Handler {
+	return newGuard(cfg).Wrap(newMux(g))
+}
+
 func newGateway(cfg config) *gateway {
 	return &gateway{cfg: cfg, slots: make(chan struct{}, maxInFlight), client: &http.Client{
 		Timeout: upstreamTimeout,
@@ -333,7 +400,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("stripe-gateway: REFUSING TO START — %v", err)
 	}
-	srv := newServer(cfg.addr, newMux(newGateway(cfg)))
+	srv := newServer(cfg.addr, newHandler(cfg, newGateway(cfg)))
+	if cfg.allow == nil {
+		log.Printf("stripe-gateway: WARNING %s=1 — the Stripe source-IP allowlist is OFF; deliveries from any "+
+			"address reach Finance (which still verifies every signature)", allowlistDisabledEnv)
+	} else {
+		log.Printf("stripe-gateway: source-IP allowlist ON: %s; client address from %s", cfg.allowFrom, cfg.ipSource)
+	}
 	if cfg.privateHTTP {
 		log.Printf("stripe-gateway: %s=1 — Finance is reached over plain http on Railway's private network",
 			allowRailwayPrivateHTTPEnv)
