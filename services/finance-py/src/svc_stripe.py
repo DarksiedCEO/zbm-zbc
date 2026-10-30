@@ -153,7 +153,7 @@ class StripeMixin:
         return g.call("stripe", "expire_session", (session_id,), lambda: port.expire_session(session_id),
                       StripeSession(False))
 
-    def _close_client_pages(self, g: Gather, op_id: str, client_id: str) -> list[str]:
+    def _close_client_pages(self, g: Gather, op_id: str, client_id: str) -> tuple[list[str], int]:
         """AEGIS F-5: Compliance answered REFUSE for this client, so no page of theirs may stay payable: every open
         page of every invoice of the client is expired at Stripe and recorded expired here. A page Stripe does not
         confirm closed is left as it is (and reported); a page already paid on stays for the webhook to book."""
@@ -161,7 +161,8 @@ class StripeMixin:
             invs = {i for i, inv in self.db["invoices"].items() if inv.get("client_id") == client_id}
             open_ = sorted((dict(s) for s in self.db["stripe_sessions"].values()
                             if s["invoice_id"] in invs and s["status"] == "open"), key=lambda x: x["session_id"])
-        closed, not_closed = [], [s["session_id"] for s in open_[MAX_REQUEST_CLOSES:]]   # left for the job (N-4)
+        closed, not_closed = [], []
+        not_attempted = len(open_[MAX_REQUEST_CLOSES:])    # over the cap: left for the job (AEGIS r2 N-4, r3 N-13)
         for s in open_[:MAX_REQUEST_CLOSES]:
             a = self._expire_page(g, s["session_id"])
             (closed if a.available and a.found and a.status == "expired" else not_closed).append(s["session_id"])
@@ -172,7 +173,7 @@ class StripeMixin:
                     op.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "expired",
                                                     "expired_at": iso(self._now())})
                 self._commit(op)
-        return not_closed
+        return not_closed, not_attempted
 
     def _checkout_gate(self, principal: str, request_id: str, invoice_id: str) -> None:
         """ADR 0024 + AEGIS F-5: a client is paid from only while Compliance's activation is a current ALLOW. Checked
@@ -190,11 +191,15 @@ class StripeMixin:
             return
         if act.available:
             with self._stripe_turn("checkout: close a refused client's pages"):
-                not_closed = self._close_client_pages(ga, f"chk-close|{principal}|{request_id}|{iso(self._now())}",
-                                                      inv0["client_id"])
+                not_closed, skipped = self._close_client_pages(
+                    ga, f"chk-close|{principal}|{request_id}|{iso(self._now())}", inv0["client_id"])
             if not_closed:
                 act_reasons = [*act_reasons, R.item(STRIPE_DEP, f"Stripe did not confirm {len(not_closed)} open "
                                                                 "page(s) of this client closed; retry")]
+            if skipped:
+                act_reasons = [*act_reasons, R.item(STRIPE_DEP, f"{skipped} open page(s) of this client not attempted "
+                                                                f"(cap of {MAX_REQUEST_CLOSES} per request); the next "
+                                                                "request or the hourly job closes them")]
         raise Refused("no Stripe checkout for this invoice", act_reasons, ledger_event_ids=ga.events)
 
     def stripe_checkout(self, principal: str, request_id: str, invoice_id: str) -> dict:
@@ -202,6 +207,40 @@ class StripeMixin:
         self._checkout_gate(principal, request_id, invoice_id)
         if ent:
             return ent["response"]
+        resp = self._stripe_checkout_make(principal, request_id, invoice_id, key, h)
+        self._checkout_recheck(principal, request_id, invoice_id, resp)
+        return resp
+
+    def _checkout_recheck(self, principal: str, request_id: str, invoice_id: str, resp: dict) -> None:
+        """AEGIS r3 N-9: Compliance is read again AFTER the page is made or handed back (the gate's read and the
+        page's creation are two Stripe turns apart, up to tens of seconds). Anything but a current ALLOW, an outage
+        included, expires that page at once and refuses; the page is recorded expired only when Stripe confirms."""
+        page = (resp or {}).get("checkout") or {}
+        sid = page.get("session_id")
+        if not sid or page.get("status") != "open":
+            return
+        with self.lock:
+            inv = self.db["invoices"].get(invoice_id)
+        if inv is None:
+            return
+        g = Gather(self, f"chk-recheck|{principal}|{request_id}|{iso(self._now())}", ACTOR, invoice_id)
+        reasons = self._activation_reasons(self._activation(g, inv["client_id"]))
+        if not reasons:
+            return
+        with self._stripe_turn("checkout: close the page just made"):
+            a = self._expire_page(g, sid)
+            if a.available and a.found and a.status == "expired":
+                with self.lock:
+                    op = Op(self, f"chk-recheck|{principal}|{request_id}", ACTOR, invoice_id, g)
+                    op.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "expired",
+                                                    "expired_at": iso(self._now())})
+                    self._commit(op)
+            else:
+                reasons = [*reasons, R.item(STRIPE_DEP, "Stripe did not confirm the page just made is closed; the "
+                                                        "hourly job retries")]
+        raise Refused("no Stripe checkout for this invoice", reasons, ledger_event_ids=g.events)
+
+    def _stripe_checkout_make(self, principal: str, request_id: str, invoice_id: str, key: tuple, h: str) -> dict:
         self.require_rules()
         with self._stripe_turn("checkout"):
             now = self._now()
@@ -438,6 +477,7 @@ class StripeMixin:
             raise Unavailable("Stripe could not be read back; the event will be retried", ledger_event_ids=g.events)
         if any(a.found and a.livemode != self.cfg.stripe_livemode for a in truth.values()):
             raise Invalid("Stripe answered from the other mode (test vs live)")
+        check = self._payment_activation(g, truth.get("payment"))
         with self.lock:
             if ev["event_id"] in self.db["stripe_events"]:
                 return {"event_id": ev["event_id"], "status": "duplicate", "ledger_event_ids": g.events}
@@ -446,6 +486,7 @@ class StripeMixin:
                 # AEGIS N1: the payment is booked and COMMITTED on its own first; a dispute step that then refuses can
                 # never leave the payment's ledger events without their local record
                 op_p = Op(self, f"sev|{ev['event_id']}|payment", ACTOR, ev["event_id"], g)
+                op_p.compliance_check = check
                 try:
                     self._stripe_payment(op_p, truth["payment"])
                 except PostingRefused as exc:
@@ -454,6 +495,7 @@ class StripeMixin:
                              if rec["status"] == "invoice_paid"]
                 self._commit(op_p)
             op = Op(self, f"sev|{ev['event_id']}", ACTOR, ev["event_id"], g)
+            op.compliance_check = check
             try:
                 if ev["livemode"] != self.cfg.stripe_livemode:
                     status = "ignored_other_mode"
@@ -563,6 +605,36 @@ class StripeMixin:
                   {"break_id": bid, "leg": "unapplied_cash", "difference": M.fmt(amount)},
                   f"Break opened: Stripe payment {M.fmt(amount)} not applied ({why})"[:200])
 
+    def _payment_activation(self, g: Gather, p: Optional[StripePayment]) -> Optional[tuple]:
+        """AEGIS r3 N-9: before a client's Stripe payment is booked, Compliance is asked (outside the lock) whether the
+        client is still activated. None when there is nothing to book or the client is ALLOW; otherwise
+        ("refused" | "unverified", reason)."""
+        if p is None or not p.found or not p.invoice_id or not p.payment_intent:
+            return None
+        with self.lock:
+            inv = self.db["invoices"].get(p.invoice_id)
+            booked = rid("rct", "stripe", p.payment_intent) in self.db["receipts"]
+        if inv is None or booked:
+            return None
+        act = self._activation(g, inv["client_id"])
+        if not act.available:
+            return ("unverified", "Compliance (38) could not confirm the client's activation when the payment was booked")
+        if not act.allowed:
+            return ("refused", self._activation_reasons(act)[0]["message"])
+        return None
+
+    def _compliance_break(self, op: Op, leg: str, inv: dict, rct: str, amount: str, note: str) -> str:
+        bid = rid("brk", leg, rct)
+        if bid not in self.db["breaks"]:
+            op.put("breaks", bid, {"break_id": bid, "leg": leg, "subject": f"zbm:invoice:{inv['invoice_id']}",
+                                   "difference": amount, "opened_at": iso(self._now()),
+                                   "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                   "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                                   "resolution": None, "note": note[:200]})
+            op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                      {"break_id": bid, "leg": leg, "difference": amount}, f"Break opened: {note}"[:200])
+        return bid
+
     def _stripe_payment(self, op: Op, p: StripePayment) -> str:
         if not p.found:
             return "unknown_payment"
@@ -627,7 +699,23 @@ class StripeMixin:
             for s in self.db["stripe_sessions"].values():
                 if s["invoice_id"] == inv["invoice_id"] and s["status"] == "open":
                     op.put("stripe_sessions", s["session_id"], {**s, "status": "invoice_paid"})
-            self._client_receipt(op, rct, inv, M.fmt(gross), value_date, METHOD_LABEL.get(p.method, "Stripe"))
+            check = getattr(op, "compliance_check", None)
+            if check and check[0] == "refused":
+                # AEGIS r3 N-9: the money is booked as received (truthfully), but nothing follows from it: the
+                # invoice is held, no client receipt goes out, a media buy's vendor is not paid, and Andre refunds
+                bid = self._compliance_break(op, "compliance_hold", inv, rct, M.fmt(gross),
+                                             "payment from a client Compliance refuses: refund it at Stripe, then "
+                                             "resolve this break with the refund's journal entry")
+                cur = op.get("invoices", inv["invoice_id"])
+                op.put("invoices", inv["invoice_id"], {**cur, "held_compliance": {
+                    "reason": check[1][:200], "break_id": bid, "since": iso(self._now())}})
+                status = "matched_held_compliance"
+            else:
+                if check and check[0] == "unverified":
+                    self._compliance_break(op, "compliance_unverified", inv, rct, M.fmt(gross),
+                                           "payment booked while Compliance was unreachable: confirm the client's "
+                                           "activation is ALLOW")
+                self._client_receipt(op, rct, inv, M.fmt(gross), value_date, METHOD_LABEL.get(p.method, "Stripe"))
         return self._stripe_refund(op, rct, p) or status
 
     def _stripe_refund(self, op: Op, rct: str, p: StripePayment) -> Optional[str]:
