@@ -34,15 +34,23 @@ with TLS, not a WAF: nothing filters by source, rate or reputation. Findings thi
    checks it. Shared code: `services/orchestrator-go/internal/edge`.
 2. **Stripe source-IP allowlist at the gateway, default ON**, compiled in with source and retrieval date
    (`cmd/stripe-gateway/stripe_ips.go`), checked before the body is read or Finance is called; 403 otherwise.
-   `STRIPE_GATEWAY_ALLOWED_IPS` replaces the list (no network wider than /16 or IPv6 /32);
+   `STRIPE_GATEWAY_ALLOWED_IPS` replaces the list (no network wider than IPv4 /16 or IPv6 /48);
    `STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED=1` is the kill switch (logged at start). Typos refuse the start.
 3. **Per-client token buckets** (IPv4 address, IPv6 /64): gateway 60/min burst 60 (per Stripe address; a 429 is
    retried by Stripe, so a burst is delayed, not lost); orchestrator 30/min burst 30. 429 + `Retry-After`.
-4. **Failed-auth lockout on the orchestrator**: 10 answers of 401 inside 600 s from one client → every request from it
-   is 429 until the window ends, the right token included (a lucky guess is not rewarded).
-5. **Orchestrator token hygiene at start**: ≥ 32 printable ASCII, ≥ 10 distinct characters, no placeholder text, no
-   unresolved `${{` / `{{` / `}}` reference (mirrors finance-py `_check_ref`), different from the two outbound tokens.
-   The constant-time compare is unchanged.
+4. **Failed-auth lockout on the orchestrator, which never blocks the valid token** (revised after AEGIS edge review
+   H-1/M-1): 10 answers of 401 inside 600 s from one client → its requests *without* the valid token are 429 until
+   the window ends. A request carrying the valid bearer (constant-time compare in the guard, `Guard.Trusted`) skips
+   the lockout and the anonymous bucket and is counted in its own per-client table (same rate), which unauthenticated
+   traffic can neither fill nor drain. The first version also refused the right token ("a lucky guess is not
+   rewarded"); with a ≥ 128-bit token that bought nothing and let anyone on a shared egress address (Vercel's) lock
+   the dashboard out. The lockout stays because it costs a valid caller nothing and cuts unauthenticated noise.
+5. **Orchestrator token hygiene at start**: ≥ 32 printable ASCII, ≥ 10 distinct characters, estimated ≥ 128 bits
+   (4 bits a character for hex, 6 for base64/base64url, 6.5 otherwise), no 10-character block repeated, no
+   10-character run of consecutive characters, no placeholder text (words of ≥ 7 letters only: a shorter word turns
+   up in random base64), no unresolved `${{` / `{{` / `}}` reference (mirrors finance-py `_check_ref`), different from
+   the two outbound tokens. 0 refusals in 200,000 each of `openssl rand -hex 32`-shaped, base64 and base64url tokens
+   (`TestGeneratedTokensAreNeverRefused`, `TOKEN_HYGIENE_SAMPLES=200000`). The constant-time compare is unchanged.
 6. **Least privilege at Finance**: `api.NAMED_ROUTES` gives each narrow caller an exact route list enforced in a
    middleware before routing: `seo_02` → `GET /fin/v1/invoices/{id}/status`; `rail_gateway` → `POST
    /fin/v1/stripe/events`; new `payout_rail_gateway` → `POST /fin/v1/rails/{stripe|trolley}/events` (payout-rail
@@ -54,8 +62,23 @@ with TLS, not a WAF: nothing filters by source, rate or reputation. Findings thi
    16 KiB, idle and write timeouts; bodies 64 KiB (orchestrator, read before routing) and 256 KiB (gateway); the gateway
    also caps deliveries in flight at 32.
 
-Every limiter is in memory (one replica per service, `numReplicas: 1`), bounded to 16 384 clients, and answers 429 when
-full rather than growing. Refusal log lines are throttled to one a second with a count of the rest.
+Every limiter is in memory (one replica per service, `numReplicas: 1`) and bounded to 16 384 clients. A full table
+evicts its least recently used entry (revised after AEGIS H-1: the first version refused new clients when full, so a
+sweep of 16 384 IPv6 /64s from one /48 locked every new client out for 10 minutes). Eviction only ever gives a client
+a fresh bucket or forgets failures; the token is the access control.
+
+8. **Logs** (AEGIS M-2, M-3, L-4): each service logs one `event=edge_config` line at start naming the client-address
+   source and limits. Every refusal is a structured line (`event=… level=… reason=… client=…`), at most one a second per
+   reason; a refused Stripe delivery is `event=stripe_delivery_refused level=ALERT` for a log alert. A derived client
+   address inside Cloudflare's published ranges (`internal/edge/cloudflare.go`, cloudflare.com/ips retrieved
+   2026-10-30) is logged once a minute as `reason=client_in_cloudflare_range`: it means Cloudflare is in front and its
+   client address was not passed through.
+9. **Finance allowlist matches the routed path** (AEGIS L-2): `scope["path"]`, never `request.url.path`, and any
+   percent-encoding or `?`/`#` in a narrow caller's path is refused. The route-level caller check is worded apart
+   from the middleware's, and tests exercise each layer alone (AEGIS L-3).
+10. **Post-deploy spoof probe** (AEGIS M-2): after every deploy, a request with a forged `X-Real-IP: 3.18.12.63` (and
+    one with the header twice) must be refused 403 with the caller's real address in the log
+    (docs/deploy/railway.md, Smoke-test checklist).
 
 ## Cloudflare (the next layer; Andre's steps)
 
@@ -70,7 +93,11 @@ roll, and Vercel Firewall rules for `/api/lead`: the operator note written along
 - A Stripe IP change not yet reflected here refuses deliveries (403) until the override or a code update; Stripe
   retries for up to three days in live mode. Mitigation: the api-announce subscription, the override variable, the
   kill switch.
-- If Railway ever stops setting `X-Real-IP`, both services refuse everything but `/health` (fail closed, loud).
+- If Railway ever stops setting `X-Real-IP`, both services refuse everything but `/health` (fail closed, loud). If it
+  ever passes a client's own `X-Real-IP` through, the allowlist and rate limits can be bypassed (the signature check
+  still holds); only the post-deploy spoof probe detects that.
+- An attacker evicting table entries resets their own buckets and failure counts; per-client limits are a speed bump,
+  not the access control.
 - The dashboard's calls come from Vercel's addresses, so they share Vercel's bucket; fine at an operator's volume.
 - `stripe listen --forward-to` the Railway domain is refused (it comes from the operator's address).
 - A restart clears every bucket and lockout.
@@ -78,6 +105,8 @@ roll, and Vercel Firewall rules for `/api/lead`: the operator note written along
 ## Tests
 
 `internal/edge/edge_test.go`, `cmd/stripe-gateway/edge_test.go`, `cmd/orchestrator/edge_test.go`,
-`cmd/orchestrator/token_hygiene_test.go` (including real-binary runs), `services/finance-py/tests/
+`cmd/orchestrator/token_hygiene_test.go` (including real-binary runs), `cmd/orchestrator/edge_probe_test.go`
+(the AEGIS H-1/M-1 probes: an IPv6 /48 sweep of 16 384 /64s and 10 bad tokens from the dashboard's address must not
+block the valid token), `services/finance-py/tests/
 test_gateway_route_allowlist.py` (every app route enumerated per caller), `devtools/test_deploy_config.py` (IaC pins
 the client-address source and preserves the operator settings).
