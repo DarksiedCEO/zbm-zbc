@@ -987,10 +987,22 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
       `client_id` against production as a test: the ledger is append-only.
 - [ ] `curl -sS https://$GW/health` → 200.
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$GW/webhooks/stripe -d '{}'` → `400` (no signature).
-- [ ] Stripe CLI, test mode: `stripe trigger payment_intent.succeeded` → Stripe dashboard → the webhook endpoint shows
-      the delivery answered `200`. (A `400` means Finance refused the signature: re-check `FIN_STRIPE_WEBHOOK_SECRET`.
-      A `503` means Finance could not read Stripe back or was unreachable: check finance's log and the key's
-      permissions.)
+- [ ] Stripe webhook, **no money**: resend one existing **`checkout.session.*`** event, and only that type, to this
+      endpoint: `stripe events resend evt_… --webhook-endpoint we_…` (the `we_…` id is on the endpoint's page; the
+      flag syntax is unverified, so the fallback is the **Resend** button on that event under the endpoint's Event
+      deliveries) → the delivery answers `200` `{"result":"received"}`. Finance answers it `unknown_session`: it reads
+      the session and its PaymentIntent back with the restricted key and writes only a `stripe_event_applied` evidence
+      event, no journal entry and no break. (A `400` means the Finance rules are not approved yet or Finance refused the
+      signature: re-check `FIN_STRIPE_WEBHOOK_SECRET`. A `503` means Finance could not read Stripe back or was
+      unreachable: check finance's log and the key's permissions.) If the sandbox has no `checkout.session.*` event
+      yet, skip this line; the unsigned `400` check above and finance's `/health` below still prove the wiring.
+      **Never run `stripe trigger` (or resend a `payment_intent.*` / `charge.*` event) against the sandbox production
+      uses.** Finance has one journal per volume and no test/live split: once the Finance rules are approved, a
+      triggered `payment_intent.succeeded` has no Finance invoice, so it books unapplied cash into the production
+      books for good (Dr 1060 / Cr 2070, the fee, and an open `unapplied_cash` break that blocks payouts), and the
+      ledger is append-only. Every enabled endpoint in a sandbox receives that sandbox's events, so a `stripe trigger`
+      that should exercise the whole payment path belongs in a staging environment wired to its **own** separate
+      Stripe sandbox, with the Stripe CLI logged in to that sandbox.
 - [ ] finance `/health` from inside (`railway ssh` → `python3 -c "import urllib.request as u;
       print(u.urlopen('http://127.0.0.1:8410/health').read())"`): `"in_memory": false`,
       `"stripe_incoming": {"wired": true, "livemode": false}`.
