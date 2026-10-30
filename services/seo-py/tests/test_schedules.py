@@ -56,6 +56,7 @@ def test_paying_client_needs_andre_and_invoice(tmp_path, srv):
     install_site(srv)
     h = harness(tmp_path, srv)
     h.tenant("acme", domains=("site.test",))
+    h.ok(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "acme-party-1"}, andre=True))  # ADR 0024
     h.refused(schedule(h, "acme"), 409, "INVOICE_REQUIRED")
     h.refused(schedule(h, "acme", invoice_id=invoice_id()), 403, "ANDRE_APPROVAL_REQUIRED")
     s = h.ok(schedule(h, "acme", caller="dashboard", andre=True, invoice_id=invoice_id()), 201)
