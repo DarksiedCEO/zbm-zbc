@@ -181,3 +181,93 @@ def test_only_the_departments_that_act_on_it_read_the_activation_status():
         assert status(h, caller=caller)["decision"] == "ALLOW"
     for caller in sorted(set(H.CALLERS) - {"finance_31", "seo_02", "revenue_recovery", "onboarding"}):
         assert h.get("/compliance/v1/clients/client-web/activation", caller=caller).status_code == 403, caller
+
+
+# --- F-4: the scheduler survives any error and its liveness is in /health ----------------------------------------------
+
+def _sched(h, lines=None):
+    import scheduler
+    s = scheduler.Scheduler(h.svc, interval_s=21600, watcher=False, clock=h.clock,
+                            out=(lines.append if lines is not None else (lambda _x: None)))
+    h.svc.scheduler = s
+    return s
+
+
+def test_an_error_outside_the_run_does_not_kill_the_scheduler_thread(monkeypatch):
+    import threading
+
+    import scheduler
+    h = harness()
+    lines: list[str] = []
+    s = _sched(h, lines)
+    calls = {"n": 0}
+    real = h.svc.readiness
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("readiness exploded")
+        return real()
+
+    monkeypatch.setattr(h.svc, "readiness", flaky)
+    monkeypatch.setattr(scheduler, "TICK_S", 0.01)
+    ticks = threading.Event()
+    orig_tick = s.tick
+
+    def counted():
+        orig_tick()
+        if calls["n"] >= 1:
+            s.last_controls = None          # force another controls run so readiness is called again
+        if calls["n"] >= 2:
+            ticks.set()
+
+    monkeypatch.setattr(s, "tick", counted)
+    s.start()
+    try:
+        assert ticks.wait(5), lines
+        assert s.alive() is True
+        assert any("tick failed" in x and "RuntimeError" in x for x in lines), lines
+        assert s.last_error and s.last_error["error"].startswith("RuntimeError")
+    finally:
+        s.stop()
+
+
+def test_health_reports_scheduler_liveness_and_turns_503_when_controls_are_stale():
+    from datetime import timedelta
+    h = harness()
+    assert h.client.get("/health").json()["scheduler"] == {"enabled": False}
+    s = _sched(h)
+    s.started_at = h.clock.at
+    s._thread = _FakeThread(True)                        # no real thread in this test
+    s.tick()
+    r = h.client.get("/health")
+    assert r.status_code == 200, r.text
+    sch = r.json()["scheduler"]
+    assert sch["enabled"] is True and sch["healthy"] is True and sch["last_controls_ok_at"] == iso_(h.clock.at)
+    # controls keep failing for more than two intervals: unhealthy (503) so the platform / a monitor sees it
+    h.svc.run_internal_controls = lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("ledger down"))
+    h.clock.at = h.clock.at + timedelta(hours=12, seconds=1)
+    s.tick()
+    r = h.client.get("/health")
+    assert r.status_code == 503 and r.json()["status"] == "unhealthy"
+    sch = r.json()["scheduler"]
+    assert sch["healthy"] is False and "controls" in sch["reason"] and sch["last_error"]["where"] == "controls"
+    # a dead thread is unhealthy at once
+    h2 = harness()
+    s2 = _sched(h2)
+    s2.started_at = h2.clock.at
+    s2._thread = _FakeThread(False)
+    assert h2.client.get("/health").status_code == 503
+
+
+class _FakeThread:
+    def __init__(self, alive):
+        self._alive = alive
+
+    def is_alive(self):
+        return self._alive
+
+
+def iso_(dt):
+    from clock import iso
+    return iso(dt)

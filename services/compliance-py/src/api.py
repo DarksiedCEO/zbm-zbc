@@ -303,8 +303,10 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
     app.add_middleware(InputLimits)
 
     @app.get("/health")
-    async def health() -> dict:
-        return svc.health()
+    async def health():
+        h = svc.health()
+        # AEGIS F-4: a dead or stalled scheduler (no successful controls run for two intervals) is a 503
+        return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)
 
     @app.get("/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(caller())) -> list[dict]:
@@ -591,8 +593,8 @@ def main() -> None:
     for line in readiness_mod.summary_lines(svc.readiness()):
         print(line, flush=True)
     if settings.scheduler_enabled:
-        scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s, watcher=settings.watcher_enabled,
-                            clock=svc.clock).start()
+        svc.scheduler = scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s,
+                                            watcher=settings.watcher_enabled, clock=svc.clock).start()
     host = os.environ.get("COMPLIANCE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("COMPLIANCE_PORT", "8380"))
     serve.run(app, host=host, port=port)
