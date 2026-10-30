@@ -72,9 +72,11 @@ round 14"):
 - **Client activation** also needs HR-14 (Andre's recorded OFAC search: `POST /compliance/v1/sanctions/attestations`,
   Andre only; fact `sanctions_attestation_id`) and HR-15 (Legal confirms the accepted `client_msa` is current and the
   client's; fact `legal_documents`; `src/legal_client.py`, `COMPLIANCE_LEGAL_*`).
-- **`GET /compliance/v1/clients/{client_id}/activation`** (any caller): the client's CURRENT decision, ALLOW or
-  REFUSE with reasons and the recorded jurisdiction. Finance (invoices, billing readiness, Stripe pages), seo (client
-  runs and reports) and detection (store reads) refuse anything but a current ALLOW.
+- **`GET /compliance/v1/clients/{client_id}/activation`** (`finance_31`, `seo_02`, `revenue_recovery`, `onboarding`):
+  the client's CURRENT decision, ALLOW or REFUSE with reasons and the recorded jurisdiction, re-evaluated on every call
+  (rule fingerprints, the service area in force now, holds, C-11, the OFAC search's age and lane). Finance (invoices,
+  billing readiness, Stripe pages), seo (client runs and reports) and detection (store reads) refuse anything but a
+  current ALLOW.
 - **`GET /compliance/v1/readiness`** (any caller) and the lines printed at start: expired rules and the gates they
   affect, what closes every gate, and a plain US web client's rule set with its expiry dates (`src/readiness.py`).
 - **`GET /compliance/v1/sanctions/status`** (`finance_31`, `onboarding`): a payee's latest screen and its freshness.
@@ -122,7 +124,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 
 | Route | Who | Purpose |
 |---|---|---|
-| `GET /health` | none | `{status, service, register_version_in_force, in_memory, seed_pinned, production, reconcile_mode, reconcile_required}` |
+| `GET /health` | none | `{status, service, register_version_in_force, in_memory, seed_pinned, production, reconcile_mode, reconcile_required, log_write_fault, scheduler}`; 503 with `status: unhealthy` when the scheduler thread is dead or no controls run succeeded for two intervals |
 | `POST /compliance/v1/rule` | onboarding | activation (onboarding protocol) |
 | `POST /compliance/v1/review` | creative_production | payout (`zbc_clip`) / publish (`zbm_work`) (creative protocol) |
 | `POST /compliance/v1/gates/{activation,payout,publish}` | same | native form, same bodies |
@@ -130,7 +132,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `POST /compliance/v1/sanctions/screen` | onboarding, finance_31 | screen a payee or owner (DOB goes to the provider, never stored) |
 | `POST /compliance/v1/sanctions/attestations` | Andre only | ADR 0024: record his OFAC search for a client (HR-14); a hit opens a permanent hold |
 | `GET /compliance/v1/sanctions/status` | finance_31, onboarding | ADR 0024: a payee's latest screen and its freshness |
-| `GET /compliance/v1/clients/{client_id}/activation` | any caller | ADR 0024: the client's current activation decision |
+| `GET /compliance/v1/clients/{client_id}/activation` | `finance_31`, `seo_02`, `revenue_recovery`, `onboarding` | ADR 0024: the client's current activation decision |
 | `GET /compliance/v1/readiness` | any caller | ADR 0024: expired rules and the gates they affect |
 | `POST /compliance/v1/accessibility/checks` | creative_production | run the checker for an exact content hash |
 | `POST /compliance/v1/jurisdictions/resolve` | any caller | resolver answer (recorded) |

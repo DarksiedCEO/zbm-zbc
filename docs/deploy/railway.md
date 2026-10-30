@@ -805,7 +805,10 @@ report, and detection refuses to read a client's store, unless Compliance answer
 ALLOW needs: the client in the service area (the 50 states, DC, Puerto Rico, Guam, the US Virgin Islands, American
 Samoa, the Northern Mariana Islands), your recorded OFAC search (no
 match, at most 30 days old at activation, 90 days of validity), the client's MSA current and accepted at Legal, every
-rule it ran through still verified, and control C-11 green. Compliance has no public domain.
+rule it ran through still verified and unchanged, and control C-11 green. The service area is re-checked on every
+read: change HR-05 or HR-07 and a client outside the new area is refused at once. When a client turns REFUSE (an OFAC
+hit, an area change, a lapsed search) Finance closes its open Stripe pages (at the next checkout request, and in the
+hourly `stripe-sessions` job). Compliance has no public domain.
 
 **A. Tokens.** Generate each on your machine with `openssl rand -hex 32` and set it, Sealed, on the service named
 ([Secrets](#secrets)). All nine before step C: Compliance refuses to start while any token its caller map references
@@ -885,6 +888,15 @@ curl -sS -H @auth.hdr -H @andre.hdr -H 'Content-Type: application/json' --data @
 curl -sS $C/health                                             # register_version_in_force: 1, seed_pinned: true
 ```
 
+`/health` also shows `scheduler`: `alive: true` and `last_controls_ok_at` (the start's run). It answers **503** when the
+scheduler thread has stopped or no controls run has succeeded for two intervals (12 h): look at compliance's log
+(`compliance scheduler: ... failed`, with the error type) and redeploy compliance. Railway checks `/health` only while
+a deployment starts, so look at it when you check readiness (step F), or point an uptime monitor at it through the
+tunnel or a private check.
+
+```sh
+```
+
 **F. Readiness.** C-11 passed at start (the scheduler's first run); check that nothing closes the gates:
 
 ```sh
@@ -899,7 +911,9 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
 
 1. OFAC search: open https://sanctionssearch.ofac.treas.gov/, search the client's exact legal name with the SDN and
    the Consolidated (non-SDN) lists both selected, and save the result page (or its export) as a file. Note the list
-   date the page shows. Any hit: stop, do not serve the client, do not look for a way around it.
+   date the page shows. Any hit: stop, do not serve the client, do not look for a way around it. Keep the saved file
+   (your evidence folder, named after the client and the date): the record stores only its SHA-256, so the file is what
+   proves the search later.
 2. Record it (the name is stored only as a hash):
 
    ```sh
@@ -944,7 +958,10 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    `"target_jurisdictions": ["PR"]` (the same code). `allowed: false` lists every unmet item with the rule it cites; fix it and run
    the rule again with a new `request_id`. The status must say `"decision": "ALLOW"`. Only then: invoice it at
    Finance, run its SEO audit, or connect its store. Re-run the search and the activation every 90 days
-   (`valid_until`).
+   (`valid_until`), after you approve an amendment of a rule the client ran through (the status says `<rule> changed
+   since the ruling: re-activate`), and when Legal publishes a new MSA version that must bind existing clients (the
+   documents are checked at activation, not on every read). A ZBC brand needs its own search with `"lane":
+   "zbc_brand"`: a search recorded for one lane does not count for the other.
 5. Close the tunnel (Ctrl-C) when done; delete `~/.zbm-cmp/*.hdr` if you do not activate another client today.
 
 **H. Re-verify before rules expire (nothing is extended by itself).** The readiness answer lists every expired rule and
@@ -987,8 +1004,8 @@ read -rs T && printf 'X-FIN-Caller-Token: %s\n' "$T" > fin-onboarding.hdr && uns
 curl -sS -H @fin-auth.hdr -H @fin-onboarding.hdr http://127.0.0.1:18410/fin/v1/readiness/sales-tax-nexus | python3 -m json.tool
 ```
 
-`flagged` lists every state or territory at 75% or more of its economic-nexus threshold (trailing 12 months or the
-calendar year; Hawaii, Nevada and Puerto Rico also by transactions): register there before the threshold is crossed
+`flagged` lists every state or territory at 75% or more of its economic-nexus threshold (trailing 12 months, the
+calendar year or the previous calendar year; Hawaii, Nevada and Puerto Rico also by transactions): register there before the threshold is crossed
 (memo MEMO-FIN-CQ-11-2026-10-30). `unknown` holds invoices issued before this change (no recorded jurisdiction).
 Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands have no threshold number: the report lists
 them under `thresholds.check_before_first_client` ("local gross receipts/business tax — check before first client")
