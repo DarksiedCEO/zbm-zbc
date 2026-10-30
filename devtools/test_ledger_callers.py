@@ -9,12 +9,14 @@ Every token here is generated at run time (secrets.token_hex); none is real.
 from __future__ import annotations
 
 import hashlib
+import contextlib
 import io
 import json
 import os
 import re
 import secrets
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -57,8 +59,11 @@ def value_for(callers_tokens: dict[str, str]) -> str:
 
 
 def run(argv, prompt=None):
+    """main() with the given prompt. What it prints to the streams it is given AND anything written straight to
+    sys.stdout / sys.stderr both land in the returned out / err (AEGIS ledger-callers L-1)."""
     out, err = io.StringIO(), io.StringIO()
-    code = lc.main(argv, prompt=prompt or Prompt([]), stdout=out, stderr=err)
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = lc.main(argv, prompt=prompt or Prompt([]), stdout=out, stderr=err)
     return code, out.getvalue(), err.getvalue()
 
 
@@ -155,6 +160,9 @@ class AddAndRotate(unittest.TestCase):
         self.tokens = {c: tok() for c in FOUR}
         self.current = self.dir / "ledger-callers.json"
         self.current.write_text(value_for(self.tokens))
+        self.deployed = self.dir / "ledger-callers.deployed.json"
+        self.deployed.write_text(self.current.read_text())
+        self.cd = ["--current", str(self.current), "--deployed", str(self.deployed)]
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -162,7 +170,7 @@ class AddAndRotate(unittest.TestCase):
     def test_adds_detection_with_only_its_own_token(self):
         det = tok()
         p = Prompt([det, det])
-        code, out, err = run(["add", "detection-py", "--current", str(self.current)], p)
+        code, out, err = run(["add", "detection-py", *self.cd], p)
         self.assertEqual(code, 0, err)
         self.assertEqual(len(p.asked), 2)
         self.assertTrue(all(q.startswith("detection-py:") for q in p.asked))
@@ -178,30 +186,30 @@ class AddAndRotate(unittest.TestCase):
     def test_refuses_an_unknown_caller(self):
         for name in ("detection", "Detection-py", "detection-py ", "dashboard", ""):
             with self.subTest(name=name):
-                code, out, err = run(["add", name, "--current", str(self.current)], Prompt([tok(), tok()]))
+                code, out, err = run(["add", name, *self.cd], Prompt([tok(), tok()]))
                 self.assertEqual((code, out), (1, ""))
                 self.assertIn("unknown caller", err)
 
     def test_refuses_adding_a_caller_already_there(self):
         t = tok()
-        code, out, err = run(["add", "seo-py", "--current", str(self.current)], Prompt([t, t]))
+        code, out, err = run(["add", "seo-py", *self.cd], Prompt([t, t]))
         self.assertEqual((code, out), (1, ""))
         self.assertIn("use `rotate seo-py`", err)
 
     def test_refuses_another_callers_token_and_a_pasted_hash(self):
-        code, _out, err = run(["add", "detection-py", "--current", str(self.current)],
+        code, _out, err = run(["add", "detection-py", *self.cd],
                               Prompt(twice(self.tokens["finance-py"])))
         self.assertEqual(code, 1)
         self.assertIn("already finance-py's", err)
         h = sha(self.tokens["legal-py"])
-        code, _out, err = run(["add", "detection-py", "--current", str(self.current)], Prompt([h, h]))
+        code, _out, err = run(["add", "detection-py", *self.cd], Prompt([h, h]))
         self.assertEqual(code, 1)
         self.assertIn("a hash from the current value, not a token", err)
         self.assertNotIn(h, err)
 
     def test_rotates_one_caller_and_keeps_the_rest(self):
         new_seo = tok()
-        code, out, err = run(["rotate", "seo-py", "--current", str(self.current)], Prompt([new_seo, new_seo]))
+        code, out, err = run(["rotate", "seo-py", *self.cd], Prompt([new_seo, new_seo]))
         self.assertEqual(code, 0, err)
         new = json.loads(out)
         self.assertNotIn(sha(self.tokens["seo-py"]), new)
@@ -212,33 +220,35 @@ class AddAndRotate(unittest.TestCase):
 
     def test_rotate_refuses_the_same_token_another_callers_token_and_a_missing_caller(self):
         same = self.tokens["seo-py"]
-        code, _o, err = run(["rotate", "seo-py", "--current", str(self.current)], Prompt([same, same]))
+        code, _o, err = run(["rotate", "seo-py", *self.cd], Prompt([same, same]))
         self.assertEqual(code, 1)
         self.assertIn("the token it already has", err)
         other = self.tokens["legal-py"]
-        code, _o, err = run(["rotate", "seo-py", "--current", str(self.current)], Prompt([other, other]))
+        code, _o, err = run(["rotate", "seo-py", *self.cd], Prompt([other, other]))
         self.assertEqual(code, 1)
         self.assertIn("already legal-py's", err)
+        self.assertNotIn(other, err)
+        self.assertNotIn(sha(other), err)
         t = tok()
-        code, _o, err = run(["rotate", "detection-py", "--current", str(self.current)], Prompt([t, t]))
+        code, _o, err = run(["rotate", "detection-py", *self.cd], Prompt([t, t]))
         self.assertEqual(code, 1)
         self.assertIn("use `add detection-py`", err)
 
     def test_out_writes_a_new_owner_only_file_and_never_overwrites(self):
         det = tok()
         out_path = self.dir / "ledger-callers.next.json"
-        code, out, err = run(["add", "detection-py", "--current", str(self.current), "--out", str(out_path)],
+        code, out, err = run(["add", "detection-py", *self.cd, "--out", str(out_path)],
                              Prompt([det, det]))
         self.assertEqual((code, out), (0, ""), err)
         self.assertEqual(stat.S_IMODE(os.stat(out_path).st_mode), 0o600)
         self.assertIn(sha(det), json.loads(out_path.read_text()))
         before = out_path.read_text()
-        code, _o, err = run(["add", "detection-py", "--current", str(self.current), "--out", str(out_path)],
+        code, _o, err = run(["add", "detection-py", *self.cd, "--out", str(out_path)],
                             Prompt([det, det]))
         self.assertEqual(code, 1)
         self.assertIn("already exists", err)
         self.assertEqual(out_path.read_text(), before)
-        code, _o, err = run(["add", "detection-py", "--current", str(self.current), "--out", str(self.current)],
+        code, _o, err = run(["add", "detection-py", *self.cd, "--out", str(self.current)],
                             Prompt([det, det]))
         self.assertEqual(code, 1)
         self.assertIn("--out is the --current file", err)
@@ -319,6 +329,120 @@ class TheCurrentValue(unittest.TestCase):
         self.assertIsNone(re.search(r"[0-9a-f]{32}", err), "no hash or token fragment in the summary")
 
 
+class RecordMatchesDeployed(unittest.TestCase):
+    """AEGIS ledger-callers N-M1: the deployed value is the source of truth. A record that is not the deployed value
+    is refused by `compare`, and by `add` and `rotate` before any token is asked for, so a stale record can neither
+    drop a live caller nor become a rollback that does not restore service."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.tokens = {c: tok() for c in FOUR}
+        self.record = self.dir / "ledger-callers.json"
+        self.record.write_text(value_for(self.tokens))
+        self.deployed = self.dir / "ledger-callers.deployed.json"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def deploy(self, tokens: dict[str, str], text: str = None):
+        self.deployed.write_text(text if text is not None else value_for(tokens))
+
+    def cmp(self):
+        return run(["compare", "--current", str(self.record), "--deployed", str(self.deployed)])
+
+    def assert_no_secret(self, text: str, *tokens: str):
+        for t in list(self.tokens.values()) + list(tokens):
+            self.assertNotIn(t, text)
+            self.assertNotIn(sha(t), text)
+        self.assertIsNone(re.search(r"[0-9a-f]{32}", text), "no hash or token fragment")
+
+    def test_equal_values_pass_whatever_their_order_and_formatting(self):
+        reordered = dict(reversed(list(json.loads(self.record.read_text()).items())))
+        for text in (self.record.read_text(), self.record.read_text() + "\n",
+                     json.dumps(reordered, indent=2) + "\n"):
+            with self.subTest(text=text[:20]):
+                self.deploy({}, text)
+                code, out, err = self.cmp()
+                self.assertEqual((code, out), (0, ""), err)
+                self.assertIn("the record is the deployed value", err)
+                self.assert_no_secret(err)
+
+    def test_a_stale_hash_is_refused_and_named_by_caller(self):
+        self.deploy({**self.tokens, "seo-py": tok()})          # seo rotated another way; the record never learned
+        code, out, err = self.cmp()
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("seo-py: its token hash differs", err)
+        for c in ("orchestrator-go", "finance-py", "legal-py"):
+            self.assertNotIn(c + ":", err)
+        self.assertIn("source of truth", err)
+        self.assert_no_secret(err)
+
+    def test_a_caller_only_on_one_side_is_refused(self):
+        self.deploy({**self.tokens, "detection-py": tok()})
+        code, _o, err = self.cmp()
+        self.assertEqual(code, 1)
+        self.assertIn("detection-py: in the deployed value, not in the record", err)
+        self.deploy({c: t for c, t in self.tokens.items() if c != "legal-py"})
+        code, _o, err = self.cmp()
+        self.assertEqual(code, 1)
+        self.assertIn("legal-py: in the record, not in the deployed value", err)
+        self.assert_no_secret(err)
+
+    def test_an_invalid_deployed_value_is_refused_as_the_deployed_one(self):
+        h = sha(tok())
+        self.deploy({}, json.dumps({h: {**lc.entry("seo-py"), "read_all": True}}))
+        code, _o, err = self.cmp()
+        self.assertEqual(code, 1)
+        self.assertIn("REFUSED: --deployed", err)
+        self.assertNotIn(h, err)
+        code, _o, err = run(["compare", "--current", str(self.record), "--deployed", str(self.dir / "nope.json")])
+        self.assertEqual(code, 1)
+        self.assertIn("REFUSED: --deployed", err)
+
+    def test_add_and_rotate_refuse_a_stale_record_before_asking_for_a_token(self):
+        live_seo = tok()
+        self.deploy({**self.tokens, "seo-py": live_seo})
+        out_path = self.dir / "next.json"
+        for argv in (["add", "detection-py"], ["rotate", "legal-py"]):
+            with self.subTest(argv=argv):
+                p = Prompt([tok(), tok()])
+                code, out, err = run(argv + ["--current", str(self.record), "--deployed", str(self.deployed),
+                                             "--out", str(out_path)], p)
+                self.assertEqual((code, out), (1, ""))
+                self.assertEqual(p.asked, [], "no token is asked for")
+                self.assertFalse(out_path.exists(), "nothing is written")
+                self.assertIn("seo-py: its token hash differs", err)
+                self.assert_no_secret(err, live_seo)
+
+    def test_add_and_rotate_require_the_deployed_value(self):
+        for argv in (["add", "detection-py"], ["rotate", "seo-py"]):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()) as e:
+                with self.assertRaises(SystemExit) as cm:
+                    lc.main(argv + ["--current", str(self.record)], prompt=Prompt([]))
+                self.assertEqual(cm.exception.code, 2)
+                self.assertIn("--deployed", e.getvalue())
+
+    def test_add_from_a_matching_record_keeps_every_live_hash(self):
+        self.deploy(self.tokens)
+        det = tok()
+        code, out, err = run(["add", "detection-py", "--current", str(self.record), "--deployed", str(self.deployed)],
+                             Prompt([det, det]))
+        self.assertEqual(code, 0, err)
+        new = json.loads(out)
+        self.assertEqual(set(new), {sha(t) for t in self.tokens.values()} | {sha(det)})
+
+    def test_out_may_not_be_the_deployed_file(self):
+        self.deploy(self.tokens)
+        before = self.deployed.read_text()
+        det = tok()
+        code, _o, err = run(["add", "detection-py", "--current", str(self.record), "--deployed", str(self.deployed),
+                             "--out", str(self.deployed)], Prompt([det, det]))
+        self.assertEqual(code, 1)
+        self.assertIn("--out is the --deployed file", err)
+        self.assertEqual(self.deployed.read_text(), before)
+
+
 class Secrecy(unittest.TestCase):
     def test_no_command_prints_a_token_and_only_the_value_holds_hashes(self):
         tokens = {c: tok() for c in lc.CALLERS}
@@ -338,6 +462,45 @@ class Secrecy(unittest.TestCase):
             self.assertEqual((code, out), (1, ""))
             self.assertNotIn(a, err)
             self.assertNotIn(sha(a), err)
+
+    def test_the_real_entry_point_writes_no_token_to_fd_1_or_2_or_the_out_file(self):
+        # AEGIS ledger-callers L-1: run the script as Andre does (its own process, main()'s default prompt, the real
+        # sys.stdout / sys.stderr and file descriptors), with getpass.getpass replaced before the import, so a token
+        # written anywhere on fd 1 or 2 (print, sys.stderr, os.write) is caught, not only what goes to injected streams.
+        helper = ("import getpass, json, sys\n"
+                  "answers = json.loads(sys.stdin.readline())\n"
+                  "getpass.getpass = lambda prompt='', stream=None: answers.pop(0)\n"
+                  f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+                  "import ledger_callers\n"
+                  "sys.exit(ledger_callers.main(sys.argv[1:]))\n")
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            four = {c: tok() for c in FOUR}
+            (d / "rec.json").write_text(value_for(four))
+            (d / "dep.json").write_text(value_for(four))
+            det, everyone = tok(), {c: tok() for c in lc.CALLERS}
+            cases = [(["new"], twice(*everyone.values()), list(everyone.values()), True),
+                     (["new", "--out", str(d / "new.json")], twice(*everyone.values()), list(everyone.values()), False),
+                     (["add", "detection-py", "--current", str(d / "rec.json"), "--deployed", str(d / "dep.json"),
+                       "--out", str(d / "next.json")], [det, det], [det], False),
+                     (["new"], [det, det + "x"], [det], False)]            # a refusal after the token was typed
+            for argv, answers, secret, value_on_stdout in cases:
+                with self.subTest(argv=argv[:2]):
+                    r = subprocess.run([sys.executable, "-B", "-c", helper, *argv], input=json.dumps(answers) + "\n",
+                                       capture_output=True, text=True, timeout=60, cwd=d)
+                    for t in secret:
+                        self.assertNotIn(t, r.stdout)
+                        self.assertNotIn(t, r.stderr)
+                    if value_on_stdout:
+                        self.assertEqual(r.returncode, 0, r.stderr)
+                        self.assertEqual(set(json.loads(r.stdout)), {sha(t) for t in secret})
+                    else:
+                        self.assertEqual(r.stdout, "")
+            for name in ("new.json", "next.json"):
+                text = (d / name).read_text()
+                for t in list(everyone.values()) + [det]:
+                    self.assertNotIn(t, text)
+            self.assertIn(sha(det), (d / "next.json").read_text())
 
 
 if __name__ == "__main__":

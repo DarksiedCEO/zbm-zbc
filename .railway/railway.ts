@@ -80,7 +80,7 @@ export default defineRailway(() => {
       LEDGER_BIND_ADDR: "[::]",
       LEDGER_LOG_PATH: "/data/ledger/ledger.jsonl",
       RAILWAY_RUN_UID: "0", // the entrypoint hands /data/ledger to uid 10001, then runs the ledger as 10001
-      LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope; written to LEDGER_CALLERS_FILE
+      LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope (hashes only, set NOT Sealed); written to LEDGER_CALLERS_FILE
     },
   }));
 

@@ -3,13 +3,20 @@ Andre runs it on his own machine from a checkout. It never prints a token, and n
 it writes with --out (or to stdout without --out).
 
     python3 devtools/ledger_callers.py new                     --out ~/zbm/ledger-callers.json
-    python3 devtools/ledger_callers.py add CALLER    --current ~/zbm/ledger-callers.json --out ~/zbm/ledger-callers.next.json
-    python3 devtools/ledger_callers.py rotate CALLER --current ~/zbm/ledger-callers.json --out ~/zbm/ledger-callers.next.json
+    python3 devtools/ledger_callers.py compare       --current ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json
+    python3 devtools/ledger_callers.py add CALLER    --current ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json
+    python3 devtools/ledger_callers.py rotate CALLER --current ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json
     python3 devtools/ledger_callers.py check         --current ~/zbm/ledger-callers.json
 
 The value maps the lowercase hex SHA-256 of each caller's token to its grant (services/ledger-rust/README.md). It
 holds hashes only, so `add` and `rotate` need the current value and the ONE new token: the other callers' tokens
 (Sealed in Railway, not readable back) are never asked for, and their entries are copied, not re-typed.
+
+The deployed value is the source of truth (AEGIS ledger-callers N-M1): a record that no longer equals it would make
+`add` or `rotate` silently drop a live caller, and would make the record a rollback that does not restore service.
+So `add` and `rotate` also take --deployed, a file holding the value copied from Railway just now (LEDGER_CALLERS is
+hashes only and is NOT Sealed, so it can be read back), and refuse unless the record holds exactly the same callers,
+hashes and grants. `compare` runs that check alone. Neither prints a hash: a difference is named by caller.
 
 CALLERS below is the one place that sets each deployed caller's ledger rights (AEGIS detection-branch M-2, M-4): every
 caller writes exactly one department, and nothing reads more (no read_departments, no read_all). A current value whose
@@ -215,7 +222,50 @@ def render(pairs: list[tuple[str, dict]]) -> str:
     return json.dumps(dict(pairs))
 
 
-def write_out(path: str, text: str, current_path: Optional[str]) -> None:
+def compare(record: list[tuple[str, dict]], deployed: list[tuple[str, dict]]) -> list[str]:
+    """How the record differs from the deployed value, one line per caller, empty when they hold the same entries.
+    Order and formatting do not matter to the ledger (it loads a JSON object), so they are not compared. Names
+    callers only, never a hash."""
+    rec = {e["caller"]: h for h, e in record}
+    dep = {e["caller"]: h for h, e in deployed}
+    diffs = []
+    for caller in CALLERS:
+        if caller in rec and caller in dep and rec[caller] != dep[caller]:
+            diffs.append(f"{caller}: its token hash differs (the record is stale, or the deployed value was changed "
+                         "another way)")
+        elif caller in dep and caller not in rec:
+            diffs.append(f"{caller}: in the deployed value, not in the record")
+        elif caller in rec and caller not in dep:
+            diffs.append(f"{caller}: in the record, not in the deployed value")
+    if not diffs and dict(record) != dict(deployed):      # parse_current pins each grant to CALLERS; belt and braces
+        diffs.append("the entries differ")
+    return diffs
+
+
+def require_same(record: list[tuple[str, dict]], deployed: list[tuple[str, dict]]) -> None:
+    diffs = compare(record, deployed)
+    if diffs:
+        raise Refused("the record (--current) is not the deployed value (--deployed):\n  " + "\n  ".join(diffs) +
+                      "\nThe deployed value is the source of truth: see docs/deploy/railway.md, \"Changing "
+                      "`LEDGER_CALLERS`\", step 1. Nothing was asked for and nothing was written")
+
+
+def read_value(flag: str, path: str) -> list[tuple[str, dict]]:
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        raise Refused(f"{flag} {path}: {e.strerror}") from None
+    try:
+        return parse_current(text)
+    except Refused as e:
+        raise Refused(f"{flag} {path}: {e}") from None
+
+
+def write_out(path: str, text: str, current_path: Optional[str], deployed_path: Optional[str] = None) -> None:
+    same = os.path.abspath(os.path.expanduser(path))
+    if deployed_path and same == os.path.abspath(os.path.expanduser(deployed_path)):
+        raise Refused("--out is the --deployed file; write the new value to a new file")
     if current_path and os.path.abspath(os.path.expanduser(path)) == os.path.abspath(os.path.expanduser(current_path)):
         raise Refused("--out is the --current file; write the new value to a new file and keep the current one for "
                       "rollback")
@@ -239,21 +289,28 @@ def main(argv: Optional[list[str]] = None, prompt: Callable[[str], str] = getpas
                            ("rotate", "give one caller of the current value a new token (asks for it only)")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("caller")
-        p.add_argument("--current", required=True, help="a file holding the current LEDGER_CALLERS value")
+        p.add_argument("--current", required=True, help="a file holding your record of the LEDGER_CALLERS value")
+        p.add_argument("--deployed", required=True, help="a file holding the LEDGER_CALLERS value copied from Railway "
+                                                         "just now; the record must equal it")
         p.add_argument("--out")
     p_check = sub.add_parser("check", help="check a value and print its summary")
     p_check.add_argument("--current", required=True)
+    p_cmp = sub.add_parser("compare", help="check that the record equals the deployed value (by caller, no hash shown)")
+    p_cmp.add_argument("--current", required=True, help="your record")
+    p_cmp.add_argument("--deployed", required=True, help="the value copied from Railway just now")
     args = ap.parse_args(argv)
     try:
         current = None
         if args.cmd != "new":
-            try:
-                with open(os.path.expanduser(args.current), encoding="utf-8") as f:
-                    current = parse_current(f.read())
-            except OSError as e:
-                raise Refused(f"--current {args.current}: {e.strerror}") from None
+            current = read_value("--current", args.current)
         if args.cmd == "check":
             print("LEDGER_CALLERS is valid:\n" + summary(current), file=stderr)
+            return 0
+        if args.cmd in ("compare", "add", "rotate"):
+            require_same(current, read_value("--deployed", args.deployed))
+        if args.cmd == "compare":
+            print("the record is the deployed value (same callers, hashes and grants):\n" + summary(current),
+                  file=stderr)
             return 0
         if args.cmd == "new":
             pairs = build_new(prompt)
@@ -263,7 +320,7 @@ def main(argv: Optional[list[str]] = None, prompt: Callable[[str], str] = getpas
             pairs = build_rotate(current, args.caller, prompt)
         parse_current(render(pairs))          # what is written passes the same check as what is read
         if args.out:
-            write_out(args.out, render(pairs), getattr(args, "current", None))
+            write_out(args.out, render(pairs), getattr(args, "current", None), getattr(args, "deployed", None))
             print(f"wrote the new LEDGER_CALLERS value to {args.out} (mode 0600):\n" + summary(pairs), file=stderr)
         else:
             print(render(pairs), file=stdout)

@@ -164,7 +164,8 @@ Railway they stay unset and their feature stays off, fail closed:
 ## Secrets
 
 Generate every token on your own machine and paste it straight into Railway (or Vercel). Never commit one, never put
-one in a chat or a ticket. Mark each one **Sealed** in Railway (its value is then hidden after it is set). Each must
+one in a chat or a ticket. Mark each one **Sealed** in Railway (its value is then hidden after it is set), except
+`LEDGER_CALLERS`: it holds hashes only and is set **not** Sealed, so it can be read back (see below). Each must
 be a different value: several services refuse to start when two of their tokens are equal.
 
 | Secret | Generate with | Set on (owner) | Also used by (references, not copies) |
@@ -176,7 +177,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEDGER_SERVICE_TOKEN` (legal's) | `openssl rand -hex 32` | legal | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (seo's) | `openssl rand -hex 32` | seo | its SHA-256 goes in `LEDGER_CALLERS` |
 | `DETECTION_LEDGER_TOKEN` | `openssl rand -hex 32` | detection | its SHA-256 goes in `LEDGER_CALLERS` (caller `detection-py`, department `rr_store`); becomes `DETECTION_LEDGER_TOKEN_FILE` |
-| `LEDGER_CALLERS` | `devtools/ledger_callers.py` (below; hashes only, no token) | ledger | you: keep the file it writes (`~/zbm/ledger-callers.json`), your record of the value |
+| `LEDGER_CALLERS` | `devtools/ledger_callers.py` (below; hashes only, no token; **not Sealed**) | ledger | you: keep the file it writes (`~/zbm/ledger-callers.json`), your record of the value |
 | `FIN_SERVICE_TOKEN` | `openssl rand -hex 32` | finance | stripe-gateway `STRIPE_GATEWAY_FINANCE_TOKEN`, seo `SEO_FINANCE_TOKEN` (references) |
 | `FIN_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | finance | you (keep it in your password manager) |
 | `STRIPE_GATEWAY_CALLER_TOKEN` | `openssl rand -hex 32` | stripe-gateway | finance `FIN_CALLER_TOKENS` (`rail_gateway`, interpolated) |
@@ -202,7 +203,10 @@ the ledger and the orchestrator cannot rate-limit guesses, so the token's entrop
 
 **`LEDGER_CALLERS`** (per-caller ledger tokens with department scopes; services/ledger-rust/README.md). It holds the
 SHA-256 of each caller's token, never a token. `devtools/ledger_callers.py` builds it. Run it on your machine from a
-checkout (Python 3.9 or newer, standard library only). It asks for each token without echoing it, twice, and refuses:
+checkout (Python 3.9 or newer, standard library only; its tests pass on 3.9 to 3.13). Run it in a real terminal
+window (Terminal, iTerm), not piped or in an editor's output pane: Python's `getpass` shows what you type when it is
+not attached to a terminal (it warns `GetPassWarning: Can not control echo`; if you see that, stop and close the
+window). It asks for each token without echoing it, twice, and refuses:
 
 - an empty token, whitespace in a token, or a token under the ledger's 32 bytes;
 - the same token for two callers (the ledger would refuse the start; a hand-made map would silently drop one);
@@ -229,10 +233,44 @@ mkdir -p ~/zbm && chmod 700 ~/zbm
 python3 devtools/ledger_callers.py new --out ~/zbm/ledger-callers.json
 ```
 
-Paste that file's content into `LEDGER_CALLERS` on the ledger (macOS: `pbcopy < ~/zbm/ledger-callers.json`). **Keep
-the file.** It is your record of the value. Railway never shows a Sealed variable again ("Sealed variables cannot be
-un-sealed"; not shown by the dashboard, the API, `railway variables` or `railway run`). The file holds hashes only:
-with it, adding or rotating one caller needs only that caller's new token, never the others (which are Sealed too).
+Check it with `python3 devtools/ledger_callers.py check --current ~/zbm/ledger-callers.json`, then paste the file's
+content into `LEDGER_CALLERS` on the ledger (macOS: `pbcopy < ~/zbm/ledger-callers.json`) and **do not mark it
+Sealed**. **Keep the file.** It is your record of the value and your rollback. It holds hashes only: with it, adding
+or rotating one caller needs only that caller's new token, never the others (which stay Sealed on their services).
+
+Why `LEDGER_CALLERS` is not Sealed (AEGIS ledger-callers N-M1):
+
+- It holds no secret. Each key is the SHA-256 of a 256-bit random token, which cannot be reversed or guessed, and the
+  ledger hashes whatever it is given, so a key presented as a token is refused (401). The rest is caller names and
+  departments, which this page already lists. People who can see the ledger's variables can also change them.
+- Sealing it only made the deployed value unreadable ("Sealed variables cannot be un-sealed"; not shown by the
+  dashboard, the API, `railway variables` or `railway run`). A record that no longer equals the deployed value could
+  then not be caught: `add` or `rotate` would drop a live caller's hash and cut that department off, and pasting the
+  record back would not restore it. Read back, the deployed value is the source of truth: every change starts by
+  copying it and checking the record against it.
+- Nothing else changes: the image still writes it to `/run/zbm-secrets/ledger-callers-file` (0600) and removes it
+  from the ledger's environment, as it does for `RR_STORE_CONNECTIONS`, which holds no secret either.
+
+**Already Sealed?** (Earlier versions of this page said to seal it.) Railway cannot unseal a variable. Recreate it,
+not Sealed, with the same value, and only with a value you know is the deployed one:
+
+1. `railway ssh` into the ledger and run `cat /run/zbm-secrets/ledger-callers-file`. UNVERIFIED: whether the
+   `railway ssh` user can read that file (mode 0600, owner uid 10001). Save what it prints as
+   `~/zbm/ledger-callers.deployed.json` (`chmod 600`). It is hashes only, so it shows no token on your screen.
+2. Run `python3 devtools/ledger_callers.py compare --current ~/zbm/ledger-callers.json --deployed
+   ~/zbm/ledger-callers.deployed.json`. If it is refused, or you have no record, the deployed file is the value: run
+   `check` on it and copy it over the record (`cp ~/zbm/ledger-callers.deployed.json ~/zbm/ledger-callers.json`).
+3. Run the baseline per-department check ("Changing `LEDGER_CALLERS`", step 2): every caller 200.
+4. On the ledger's Variables tab, delete `LEDGER_CALLERS` and add it again, not Sealed, with exactly the content of
+   `~/zbm/ledger-callers.json`, both before you deploy. Then redeploy the ledger and run the log check ("Changing
+   `LEDGER_CALLERS`", step 5) and the per-department check for every caller: all `200`. Anything else: stop and bring
+   the output back (the value is the one that was deployed, so the cause is elsewhere). If Railway deploys between
+   the delete and the add, the ledger refuses to start (no callers file and no shared token): it fails closed. Add
+   the variable and redeploy.
+5. **Cannot read the file?** Do not recreate it from a record you cannot prove is current. A stale record would cut a
+   department off with no way back to the Sealed value. Rotate every caller instead: new tokens for all five, `new`,
+   the value set not Sealed, each new token set on its service, then the ledger and every service redeployed. Ledger
+   writes fail until each service runs with its new token.
 
 With `LEDGER_CALLERS` set and no `LEDGER_SERVICE_TOKEN` on the ledger, there is no shared token: each service can
 write and read only its own department.
@@ -240,42 +278,71 @@ write and read only its own department.
 #### Changing `LEDGER_CALLERS` (adding a caller, rotating one token)
 
 Every change replaces the whole value and needs a ledger redeploy. A wrong value either stops the ledger (every
-department's ledger writes then fail closed) or quietly cuts one department off. So:
+department's ledger writes then fail closed) or quietly cuts one department off. The value the ledger runs on is the
+source of truth, not your file. So:
 
-1. **Record the current value.** It is `~/zbm/ledger-callers.json` if you kept it.
-   - Run `python3 devtools/ledger_callers.py check --current ~/zbm/ledger-callers.json`.
-   - Compare its summary with the ledger's last start log line `per-caller tokens from ...`: same callers, same
-     departments.
-   - **No copy?** (The first version of this page did not ask you to keep one.) `railway ssh` into the ledger and run
-     `cat /run/zbm-secrets/ledger-callers-file`. If that is refused, try `printenv LEDGER_CALLERS`. Both are
-     UNVERIFIED: whether the `railway ssh` user can read that file (mode 0600, owner uid 10001), and whether ssh
-     sessions get the service's variables. The value holds hashes only, so it reveals no token on your screen. Save it
-     as `~/zbm/ledger-callers.json` (`chmod 600`) and run `check` on it.
-   - **Neither works?** Then the only way is a fresh value: new tokens for all five callers, `new`, each new token set
-     on its service, then the ledger and every service redeployed. Ledger writes fail until each service runs with its
-     new token.
-2. **Build the new value from the record.** It is written to a new file; the record stays as it is for rollback.
-   - Add detection: `python3 devtools/ledger_callers.py add detection-py --current ~/zbm/ledger-callers.json --out
-     ~/zbm/ledger-callers.next.json`. It asks only for `DETECTION_LEDGER_TOKEN`; the other four entries are copied,
-     not re-typed.
+1. **Copy the deployed value and compare your record with it.** Copy it now, in this session; never reuse an old copy.
+   - Dashboard: ledger → Variables → `LEDGER_CALLERS` → copy the value. Then, on macOS:
+     `(umask 077; pbpaste > ~/zbm/ledger-callers.deployed.json)`.
+   - Or the CLI, with the project linked to production: `(umask 077; railway variables --service ledger --json |
+     python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["LEDGER_CALLERS"])' >
+     ~/zbm/ledger-callers.deployed.json)`. UNVERIFIED: that `--json` prints one flat object of name → value. Nothing
+     reaches your screen either way.
+   - Run `python3 devtools/ledger_callers.py compare --current ~/zbm/ledger-callers.json --deployed
+     ~/zbm/ledger-callers.deployed.json`. It checks that both hold the same callers, the same hashes and the same
+     grants (order and spacing do not matter to the ledger). It never prints a hash: a difference is named by caller.
+   - **Refused** (or no record): the deployed value wins, because it is what the ledger runs on. Run `check` on the
+     deployed file and do step 2 against it. If every caller answers 200, make it the record:
+     `mv ~/zbm/ledger-callers.json ~/zbm/ledger-callers.stale.json; cp ~/zbm/ledger-callers.deployed.json
+     ~/zbm/ledger-callers.json`. Then run `compare` again. Find out how the two drifted (a hand edit in Railway, a
+     rotation done another way, an old copy of the file) before you go on.
+   - **The value is empty or hidden** (still Sealed): see "Already Sealed?" above first.
+   - `add` and `rotate` (step 3) run the same comparison themselves and refuse, before asking for any token, unless
+     the record equals the deployed copy.
+2. **Baseline: every caller in the deployed value reaches the ledger now.** Run the per-department check (below) on
+   each service whose caller the `compare` summary lists (to add detection: the other four). Every one must print
+   `200`. Anything else: **stop**. Something is already wrong before you changed anything, and a change now would
+   hide it. Bring the output back.
+3. **Build the new value from the record.** It is written to a new file; the record stays as it is for rollback.
+   - Add detection: `python3 devtools/ledger_callers.py add detection-py --current ~/zbm/ledger-callers.json
+     --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json`. It asks only for
+     `DETECTION_LEDGER_TOKEN`; the other four entries are copied, not re-typed.
    - Rotate one (generate its new token first): `python3 devtools/ledger_callers.py rotate seo-py --current
-     ~/zbm/ledger-callers.json --out ~/zbm/ledger-callers.next.json`.
+     ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json`.
    - Read the summary: every caller listed, each with its one department.
-3. **Set the new token on its service** (detection's `DETECTION_LEDGER_TOKEN`, or the rotated service's
+4. **Set the new token on its service** (detection's `DETECTION_LEDGER_TOKEN`, or the rotated service's
    `LEDGER_SERVICE_TOKEN`, Sealed). Do not deploy that service yet. For a rotation, that department's ledger writes
-   fail closed from the ledger redeploy until its own redeploy (step 5), so do it when nothing of that department is
-   running.
-4. **Replace `LEDGER_CALLERS`** on the ledger with the content of `~/zbm/ledger-callers.next.json` and redeploy the
-   ledger. Wait for it to be Active. Its log must show:
+   fail closed from the ledger redeploy (step 5) until its own redeploy (step 8), so do it when nothing of that
+   department is running.
+5. **Replace `LEDGER_CALLERS`** on the ledger (not Sealed) with the content of `~/zbm/ledger-callers.next.json` and
+   redeploy the ledger. Wait for it to be Active. Its log must show:
    - `listening on [::]:8090`;
    - no `REFUSING TO START`;
    - `per-caller tokens from /run/zbm-secrets/ledger-callers-file:` listing the same callers and departments as the
-     summary from step 2.
-5. **Check every department still reaches the ledger** (next paragraph). Then deploy the service whose token changed,
-   and check that one again.
-6. **Make the new value the record**, only after step 5 passes:
+     summary from step 3.
+6. **Check the unchanged departments.** Run the per-department check on every service whose token you did *not*
+   change. Each must print `200`. Any `401` or `403`: **roll back** (below). The service you are changing is expected
+   to fail this check now, and that is not a reason to roll back. A rotated service prints `401`, because it still
+   runs with its old token. Detection, being added, prints `rr_store no-token` (or `401`), or is not running yet.
+7. **Make the new value the record.** The ledger now runs it, so it is the deployed value:
    `mv ~/zbm/ledger-callers.json ~/zbm/ledger-callers.prev.json && mv ~/zbm/ledger-callers.next.json
-   ~/zbm/ledger-callers.json`.
+   ~/zbm/ledger-callers.json`, then `rm ~/zbm/ledger-callers.deployed.json` (out of date now; step 1 always copies a
+   fresh one).
+8. **Deploy the changed service and check it.** It must print `200`.
+   - `401`: the token on that service is not the one you gave the script. Fix **that service's token**, **not** with a
+     ledger rollback: the ledger value is right, and step 6 showed every other department still works. Set on the
+     service exactly the token you gave the script, and redeploy it. If you no longer have that token, start again at
+     step 1 with `rotate` for that caller (a fresh token).
+   - `403`: the token is there with another department. That cannot come from the script's table: roll back (paste
+     `~/zbm/ledger-callers.prev.json`) and bring the output back.
+
+What each check must print:
+
+| when | unchanged callers | rotated caller | added caller (detection) |
+|---|---|---|---|
+| step 2, before any change | `200`, else stop | `200`, else stop | not checked (not in the value yet) |
+| step 6, after the ledger redeploy | `200`, else roll back | `401` expected (old token): not a rollback | `rr_store no-token` or `401` expected: not a rollback |
+| step 8, after its own redeploy | — | `200`; `401` → fix its token, not the ledger | `200`; `401` → fix its token, not the ledger |
 
 **Per-department check** (read-only; it writes nothing to the append-only ledger). `railway ssh` into each service in
 turn and paste this with that service's department as `D`:
@@ -294,7 +361,10 @@ import os, urllib.error, urllib.request
 d = os.environ["D"]
 if d == "rr_store":
     url = os.environ["DETECTION_LEDGER_URL"]
-    tok = os.environ.get("DETECTION_LEDGER_TOKEN") or open("/run/zbm-secrets/detection-ledger-token-file").read().strip()
+    try:
+        tok = os.environ.get("DETECTION_LEDGER_TOKEN") or open("/run/zbm-secrets/detection-ledger-token-file").read().strip()
+    except FileNotFoundError:
+        raise SystemExit(d + " no-token")
 else:
     url, tok = os.environ["LEDGER_SERVICE_URL"], os.environ["LEDGER_SERVICE_TOKEN"]
 req = urllib.request.Request(f"{url}/ledger/entries?department={d}&limit=1", headers={"Authorization": "Bearer " + tok})
@@ -309,17 +379,22 @@ It prints the department and an HTTP status, never the token:
 
 - `200`: the service's own token is in `LEDGER_CALLERS` with that department. In the script's table each department
   is readable only by its one write caller, so this is that caller's write grant.
-- `401`: its token is not in the value (a typo, or the caller was dropped). Roll back.
+- `401`: its token is not in the value. For a service you did not change: a typo, or the caller was dropped; roll
+  back. For the service you are changing: expected until it is redeployed (step 6); after that, fix its token (step 8).
 - `403`: the token is there, but with another department. Roll back.
+- `rr_store no-token`: detection runs without a ledger token file. Expected while detection is being added (step 6);
+  at any other time, set `DETECTION_LEDGER_TOKEN` on detection and redeploy it.
 - `KeyError`: the ssh session does not have the service's variables (UNVERIFIED Railway behaviour). Fall back:
   - orchestrator: the smoke check `GET /revenue-recovery/findings` → 200 with `"ledger_verify": {"valid": true}`;
   - finance, legal, seo: no `ledger refused` / `HTTP 401` line in their log at their next recorded operation;
   - detection: a store sync that does not answer `LEDGER_UNAVAILABLE`.
 
-**Rollback.** Paste `~/zbm/ledger-callers.json` (the record, unchanged) back into `LEDGER_CALLERS` and redeploy the
-ledger. A caller you were adding then fails closed on the ledger until you try again (detection: `LEDGER_UNAVAILABLE`).
-Railway's Rollback on an earlier ledger deployment may also work. UNVERIFIED: whether it restores that deployment's
-variables. Re-pasting the record is the rollback this page relies on.
+**Rollback** (step 6 only, before step 7). Paste `~/zbm/ledger-callers.json` (the record, unchanged, which step 1
+proved equal to the value the ledger ran on) back into `LEDGER_CALLERS` and redeploy the ledger. Then run the
+per-department check again: every caller from step 2 must print `200`. A caller you were adding then fails closed on
+the ledger until you try again (detection: `LEDGER_UNAVAILABLE`). Railway's Rollback on an earlier ledger deployment
+may also work. UNVERIFIED: whether it restores that deployment's variables. Re-pasting the record is the rollback
+this page relies on.
 
 **If the new ledger deployment fails its healthcheck.** The ledger has a volume. Railway's healthcheck docs say three
 things:
@@ -361,7 +436,7 @@ otherwise. Examples are never real values.
 | `LEDGER_BIND_ADDR` | yes | no | `[::]` (IaC) | default `127.0.0.1` |
 | `LEDGER_LOG_PATH` | yes | no | `/data/ledger/ledger.jsonl` (IaC; image default) | on the volume; `<log>.lock`, `<log>.head` next to it |
 | `RAILWAY_RUN_UID` | yes | no | `0` (IaC) | entrypoint starts as root to hand `/data/ledger` to uid 10001 |
-| `LEDGER_CALLERS` | yes | yes | (you; `devtools/ledger_callers.py`, see Secrets) | becomes `LEDGER_CALLERS_FILE`; changing it: "Changing `LEDGER_CALLERS`" |
+| `LEDGER_CALLERS` | yes | no (hashes only; set **not** Sealed) | (you; `devtools/ledger_callers.py`, see Secrets) | becomes `LEDGER_CALLERS_FILE`; changing it: "Changing `LEDGER_CALLERS`" |
 | `LEDGER_CALLERS_FILE` | — | — | (set by the entrypoint) | do not set yourself |
 | `LEDGER_SERVICE_TOKEN` | no | yes | **leave unset** | the shared token; unset = only per-caller tokens work |
 | `LEDGER_ALLOW_SHARED_TOKEN` | no | no | unset | `1` would accept the shared token next to the callers file; not needed |
@@ -573,7 +648,8 @@ Do these in order. Nothing in the repository creates anything; each step is your
    bring the exact message back.
 5. **Secrets.** Generate each value from [Secrets](#secrets) on your machine and set it in the Railway dashboard on the
    service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the five ledger tokens first, then
-   `LEDGER_CALLERS` on the ledger with `devtools/ledger_callers.py new` (keep the file it writes). When Railway offers to deploy the changes, wait until step 8.
+   `LEDGER_CALLERS` on the ledger with `devtools/ledger_callers.py new` (keep the file it writes; **not** Sealed: it
+   holds hashes only). When Railway offers to deploy the changes, wait until step 8.
 6. **Public domains.** orchestrator → Settings → Networking → Generate Domain (port 8080). stripe-gateway → Generate
    Domain (port 8470). No other service gets a public domain.
 7. **Stripe (test mode).** Create the restricted key and set `FIN_STRIPE_SECRET_KEY` on finance; set
@@ -762,10 +838,13 @@ an app that has any other scope.
 `RR_STORE_SECRET_2`; then `railway config apply`.
 
 6. Generate `DETECTION_LEDGER_TOKEN` (`openssl rand -hex 32`) and set it on **detection** (Sealed).
-7. Add detection's caller with "Changing `LEDGER_CALLERS`" (Secrets): `python3 devtools/ledger_callers.py add
-   detection-py --current ~/zbm/ledger-callers.json --out ~/zbm/ledger-callers.next.json` (asks only for the token
-   from step 6; the four Sealed tokens are not needed). Replace `LEDGER_CALLERS` on the **ledger**, redeploy it, wait
-   for Active, and run that section's log and per-department checks before going on.
+7. Add detection's caller with "Changing `LEDGER_CALLERS`" (Secrets), its steps 1 to 7: copy the deployed value and
+   compare, the baseline check on the other four, then `python3 devtools/ledger_callers.py add detection-py --current
+   ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json`
+   (asks only for the token from step 6; the four Sealed tokens are not needed). Replace `LEDGER_CALLERS` on the
+   **ledger**, redeploy it, wait for Active, run the log check and the four unchanged departments' checks, and make
+   the new value the record. Detection's own check (that section's step 8: `rr_store 200`) comes after it is deployed
+   in step 9.
 8. On **detection** set (Sealed): `RR_STORE_SECRET_1` = Client ID, `RR_STORE_SECRET_2` = Client secret. **Required,
    not optional:** also set `RR_STORE_KILL_SWITCH_FILE` = `/tmp/rr-store.KILL` (not a secret). Without it the
    at-once stop below does nothing (nothing defaults it).
@@ -780,7 +859,9 @@ an app that has any other scope.
      "approval": {"approved_by": "andre", "approved_on": "<YYYY-MM-DD>", "approval_ref": "pca-rr-test-1"},
      "budget": {"syncs_per_day": 4, "max_orders": 1000, "lookback_days": 60, "snapshot_max_age_hours": 24}}]}
    ```
-   Deploy detection. Its log must show it listening, and no `REFUSING TO START` line.
+   Deploy detection. Its log must show it listening, and no `REFUSING TO START` line. Then run the per-department
+   check on detection ("Changing `LEDGER_CALLERS`", step 8): `rr_store 200`. A `401` there means detection's token
+   is not the one you gave the script: fix detection's `DETECTION_LEDGER_TOKEN`, not the ledger.
 10. Open a tunnel to detection (as for seo above) and leave it running:
     `ssh -N -L 127.0.0.1:18000:127.0.0.1:8000 <detection-service-instance-id>@ssh.railway.com`.
     Put `Authorization: Bearer <ZBM_SERVICE_TOKEN>` in a file only you can read (`chmod 600`), e.g. `~/zbm/det.hdr`,

@@ -466,11 +466,16 @@ class Runbook(unittest.TestCase):
         sys.path.insert(0, str(REPO / "devtools"))
         import ledger_callers as lc
         self.assertNotIn("hashlib.sha256(", self.doc, "no inline LEDGER_CALLERS generator")
+        flat = " ".join(self.doc.split())
+        rec_dep = "--current ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json"
         for cmd in ("devtools/ledger_callers.py new --out ~/zbm/ledger-callers.json",
                     "devtools/ledger_callers.py check --current ~/zbm/ledger-callers.json",
-                    "ledger_callers.py add\n   detection-py --current ~/zbm/ledger-callers.json --out",
-                    "devtools/ledger_callers.py add detection-py --current ~/zbm/ledger-callers.json --out"):
-            self.assertIn(cmd, self.doc)
+                    f"devtools/ledger_callers.py compare {rec_dep}",
+                    f"devtools/ledger_callers.py rotate seo-py {rec_dep} --out ~/zbm/ledger-callers.next.json"):
+            self.assertIn(cmd, flat)
+        adds = re.findall(r"ledger_callers\.py add detection-py (--[^`]*?)(?=`)", flat)
+        self.assertEqual(adds, [f"{rec_dep} --out ~/zbm/ledger-callers.next.json"] * 2,
+                         "both add commands pass the record AND the deployed copy (N-M1)")
         for caller, (dept, _where) in lc.CALLERS.items():
             with self.subTest(caller=caller):
                 self.assertRegex(self.doc, rf"\n- {re.escape(caller)} writes `{dept}`[;,]")
@@ -480,6 +485,56 @@ class Runbook(unittest.TestCase):
         probe_rows = re.findall(r"^\| [a-z-]+ \| `([a-z_]+)` \|$", self.doc, re.M)
         self.assertEqual(sorted(probe_rows), sorted(lc.KNOWN_DEPARTMENTS), "the per-department check covers each one")
         self.assertIn(f'open("{entrypoint_secret_path("DETECTION_LEDGER_TOKEN_FILE")}")', self.doc)
+
+    def test_ledger_callers_is_not_sealed_and_the_deployed_value_is_the_truth(self):
+        # AEGIS ledger-callers N-M1: LEDGER_CALLERS holds hashes only, so it is set NOT Sealed and read back; every
+        # change starts by copying the deployed value and comparing the record with it
+        flat = " ".join(self.doc.split())
+        self.assertIn("except `LEDGER_CALLERS`: it holds hashes only and is set **not** Sealed", flat)
+        self.assertIn("| `LEDGER_CALLERS` | yes | no (hashes only; set **not** Sealed) |", self.doc)
+        self.assertIn("(keep the file it writes; **not** Sealed: it holds hashes only)", flat)
+        self.assertIn("**Already Sealed?**", self.doc)
+        self.assertIn("Railway cannot unseal a variable", flat)
+        self.assertIn("Do not recreate it from a record you cannot prove is current", flat)
+        change = self.doc.split("#### Changing `LEDGER_CALLERS`", 1)[1].split("**If the new ledger deployment", 1)[0]
+        steps = re.findall(r"^(\d)\. \*\*([^*]+)\*\*", change, re.M)
+        self.assertEqual([n for n, _t in steps], list("12345678"))
+        self.assertTrue(steps[0][1].startswith("Copy the deployed value and compare"), steps[0])
+        self.assertTrue(steps[1][1].startswith("Baseline"), steps[1])
+        cflat = " ".join(change.split())
+        self.assertIn("the deployed value wins", cflat)
+        self.assertIn("refuse, before asking for any token, unless the record equals the deployed copy", cflat)
+        self.assertIn("Copy it now, in this session; never reuse an old copy", cflat)
+
+    def test_post_change_checks_do_not_roll_back_a_correct_change(self):
+        # AEGIS ledger-callers N-M2: a baseline before any change; after the ledger redeploy only the UNCHANGED callers
+        # decide a rollback; the changed caller's 401 / no-token is expected until its own redeploy, and a 401 after
+        # that is fixed on that service, never by a ledger rollback
+        change = self.doc.split("#### Changing `LEDGER_CALLERS`", 1)[1].split("**If the new ledger deployment", 1)[0]
+        cflat = " ".join(change.split())
+        step = {n: " ".join(body.split()) for n, body in
+                re.findall(r"^(\d)\. (.*?)(?=^\d\. |^What each check must print)", change, re.M | re.S)}
+        self.assertIn("Every one must print `200`. Anything else: **stop**", step["2"])
+        self.assertIn("whose token you did *not* change", step["6"])
+        self.assertIn("Any `401` or `403`: **roll back**", step["6"])
+        self.assertIn("that is not a reason to roll back", step["6"])
+        self.assertIn("A rotated service prints `401`", step["6"])
+        self.assertIn("`rr_store no-token`", step["6"])
+        self.assertIn("Make the new value the record", step["7"])
+        self.assertIn("Fix **that service's token**, **not** with a ledger rollback", step["8"])
+        self.assertNotIn("roll back", step["8"].split("`403`")[0].lower(), "a 401 after its redeploy is not a rollback")
+        rows = {r[0]: r for r in re.findall(r"^\| (step \d[^|]*) \| ([^|]*) \| ([^|]*) \| ([^|]*) \|$", change, re.M)}
+        self.assertEqual(len(rows), 3)
+        base, after_ledger, after_service = (rows[k] for k in sorted(rows))
+        self.assertIn("else stop", base[1])
+        self.assertIn("else roll back", after_ledger[1])
+        self.assertIn("not a rollback", after_ledger[2])
+        self.assertIn("not a rollback", after_ledger[3])
+        self.assertIn("fix its token, not the ledger", after_service[2])
+        self.assertIn('raise SystemExit(d + " no-token")', self.doc, "no traceback for a missing token file")
+        self.assertIn("**Rollback** (step 6 only, before step 7)", cflat)
+        self.assertIn("pass on 3.9 to 3.13", " ".join(self.doc.split()))
+        self.assertIn("`getpass` shows what you type when it is not attached to a terminal", " ".join(self.doc.split()))
 
     def test_every_dockerfile_and_the_unverified_xff_note(self):
         for df, *_r in SERVICES.values():
