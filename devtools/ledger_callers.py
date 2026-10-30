@@ -167,10 +167,19 @@ def summary(pairs: list[tuple[str, dict]]) -> str:
     return "\n".join(lines)
 
 
-def ask_token(caller: str, prompt: Callable[[str], str]) -> str:
+FRESH_TOKEN = re.compile(r"[0-9a-f]{64}")   # what `openssl rand -hex 32` prints
+
+
+def ask_token(caller: str, prompt: Callable[[str], str], fresh: bool = False) -> str:
+    """fresh: a token made for this change (add, rotate) must look like `openssl rand -hex 32` output. LEDGER_CALLERS
+    is no longer Sealed, so its hashes can be read; only a random 256-bit token keeps an offline guess hopeless
+    (AEGIS ledger-callers r2 L-8). `new` re-enters tokens that already exist, so it keeps the ledger's own rule."""
     where = CALLERS[caller][1]
     token = prompt(f"{caller}: paste the {where} (not shown): ")
     check_token(caller, token)
+    if fresh and not FRESH_TOKEN.fullmatch(token):
+        raise Refused(f"{caller}: a new token must be 64 lowercase hex characters; generate it with "
+                      "`openssl rand -hex 32` (a hand-made token could be guessed from its readable hash)")
     if prompt(f"{caller}: paste it again to confirm: ") != token:
         raise Refused(f"{caller}: the two entries differ; nothing was written")
     return token
@@ -195,7 +204,7 @@ def build_add(current: list[tuple[str, dict]], caller: str, prompt: Callable[[st
     known_caller(caller)
     if any(e["caller"] == caller for _h, e in current):
         raise Refused(f"{caller} is already in the current value; use `rotate {caller}` to give it a new token")
-    token = ask_token(caller, prompt)
+    token = ask_token(caller, prompt, fresh=True)
     if token in {h for h, _e in current}:
         raise Refused(f"{caller}: that is a hash from the current value, not a token")
     h = token_hash(token)
@@ -207,7 +216,7 @@ def build_rotate(current: list[tuple[str, dict]], caller: str, prompt: Callable[
     known_caller(caller)
     if not any(e["caller"] == caller for _h, e in current):
         raise Refused(f"{caller} is not in the current value; use `add {caller}`")
-    token = ask_token(caller, prompt)
+    token = ask_token(caller, prompt, fresh=True)
     if token in {h for h, _e in current}:
         raise Refused(f"{caller}: that is a hash from the current value, not a token")
     h = token_hash(token)
@@ -248,6 +257,13 @@ def require_same(record: list[tuple[str, dict]], deployed: list[tuple[str, dict]
         raise Refused("the record (--current) is not the deployed value (--deployed):\n  " + "\n  ".join(diffs) +
                       "\nThe deployed value is the source of truth: see docs/deploy/railway.md, \"Changing "
                       "`LEDGER_CALLERS`\", step 1. Nothing was asked for and nothing was written")
+
+
+def _same_file(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(os.path.expanduser(a), os.path.expanduser(b))
+    except OSError:
+        return False
 
 
 def read_value(flag: str, path: str) -> list[tuple[str, dict]]:
@@ -307,6 +323,10 @@ def main(argv: Optional[list[str]] = None, prompt: Callable[[str], str] = getpas
             print("LEDGER_CALLERS is valid:\n" + summary(current), file=stderr)
             return 0
         if args.cmd in ("compare", "add", "rotate"):
+            if os.path.abspath(os.path.expanduser(args.current)) == os.path.abspath(os.path.expanduser(args.deployed)) \
+                    or _same_file(args.current, args.deployed):
+                raise Refused("--current and --deployed are the same file; --deployed must be a fresh copy of the "
+                              "value on Railway (AEGIS ledger-callers r2 L-5)")
             require_same(current, read_value("--deployed", args.deployed))
         if args.cmd == "compare":
             print("the record is the deployed value (same callers, hashes and grants):\n" + summary(current),

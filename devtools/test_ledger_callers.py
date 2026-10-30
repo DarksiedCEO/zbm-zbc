@@ -443,6 +443,50 @@ class RecordMatchesDeployed(unittest.TestCase):
         self.assertEqual(self.deployed.read_text(), before)
 
 
+class R2Lows(unittest.TestCase):
+    """AEGIS ledger-callers r2 L-5 (a record compared with itself) and L-8 (a new token must be random hex)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.tokens = {c: tok() for c in FOUR}
+        self.record = self.dir / "ledger-callers.json"
+        self.record.write_text(value_for(self.tokens))
+        self.deployed = self.dir / "ledger-callers.deployed.json"
+        self.deployed.write_text(self.record.read_text())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_current_and_deployed_may_not_be_the_same_file(self):
+        link = self.dir / "link.json"
+        link.symlink_to(self.record)
+        for dep in (self.record, link):
+            for argv in (["compare"], ["add", "detection-py"], ["rotate", "seo-py"]):
+                with self.subTest(dep=dep.name, argv=argv):
+                    p = Prompt([tok(), tok()])
+                    code, out, err = run(argv + ["--current", str(self.record), "--deployed", str(dep)], p)
+                    self.assertEqual((code, out), (1, ""))
+                    self.assertIn("same file", err)
+                    self.assertEqual(p.asked, [], "no token is asked for")
+
+    def test_add_and_rotate_refuse_a_token_that_is_not_64_lowercase_hex(self):
+        bad = ["x" * 40, secrets.token_hex(16), secrets.token_hex(32).upper(), secrets.token_urlsafe(48)]
+        for argv in (["add", "detection-py"], ["rotate", "seo-py"]):
+            for t in bad:
+                with self.subTest(argv=argv, kind=t[:3]):
+                    code, out, err = run(argv + ["--current", str(self.record), "--deployed", str(self.deployed)],
+                                         Prompt([t, t]))
+                    self.assertEqual((code, out), (1, ""))
+                    self.assertIn("64 lowercase hex", err)
+                    self.assertNotIn(t, err)
+
+    def test_new_still_accepts_an_existing_32_byte_token(self):
+        tokens = [secrets.token_hex(16) for _ in lc.CALLERS]
+        code, _o, err = run(["new"], Prompt([x for t in tokens for x in (t, t)]))
+        self.assertEqual(code, 0, err)
+
+
 class Secrecy(unittest.TestCase):
     def test_no_command_prints_a_token_and_only_the_value_holds_hashes(self):
         tokens = {c: tok() for c in lc.CALLERS}
