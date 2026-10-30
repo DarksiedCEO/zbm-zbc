@@ -92,7 +92,9 @@ MUTANTS = [
     ("activation", "age_18_plus", "minor_creator", ("HR-02", "age_18_plus")),
     ("activation", "jurisdiction_class", "fr_client", ("HR-07", "jurisdiction_class")),
     ("activation", "no_cold_outbound_ca", "cold_ca_client", ("HR-08", "no_cold_outbound_ca")),
-    ("activation", "eu_kit", "it_client_no_kit", ("HR-06", "eu_kit")),
+    # ADR 0024 (HR-06 superseded: no EU kit any more): the two client activation checks of Oct 30, 2026
+    ("activation", "client_sanctions_attested", "client_stale_ofac_search", ("HR-14", "client_sanctions_attested")),
+    ("activation", "client_docs_current", "client_msa_not_current", ("HR-15", "client_docs_current")),
     ("payout", "platform_toggle", "clip_no_toggle", ("PLT-YT-01", "platform_toggle")),
     ("payout", "label_vocabulary", "clip_collab", ("US-FTC-D101-02", "label_vocabulary")),
     ("payout", "verified_views_attested", "clip_unverified_views", ("HR-13", "verified_views_attested")),
@@ -103,7 +105,41 @@ MUTANTS = [
 ]
 
 
+def _run_oct30(case):
+    """ADR 0024 cases: HR-14 / HR-15 take effect on Oct 30, 2026."""
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+
+    from clock import FixedClock, iso
+    from fakes import PassingLegal
+    from helpers import ANDRE_TOKEN, passing_ports
+    from ports import ClientDocument
+
+    class Legal(PassingLegal):
+        def client_document(self, *a):
+            return ClientDocument(True, case != "client_msa_not_current", True)
+    at = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+    clock = FixedClock(at)
+    ports = passing_ports(clock)
+    ports.legal = Legal()
+    x = Harness(ports=ports, clock=clock)
+    x.approve_seed()
+    x.run_controls()
+    searched = at - timedelta(days=40 if case == "client_stale_ofac_search" else 0)
+    a = x.post("/compliance/v1/sanctions/attestations", {
+        "request_id": rid("att"), "subject_id": "c", "lane": "client", "searched_at": iso(searched),
+        "list_version": "SDN 2026-10-29", "lists": ["SDN", "Consolidated"], "tool": "ofac_sanctions_list_search",
+        "result": "no_match", "evidence_sha256": hashlib.sha256(b"e").hexdigest(),
+        "searched_name_sha256": hashlib.sha256(b"n").hexdigest()}, andre=ANDRE_TOKEN).json()
+    f = client_facts(platforms=("web",), sanctions_attestation_id=a["attestation_id"],
+                     legal_documents=[{"doc_id": "client_msa", "version": "1.0", "doc_sha256": "e" * 64,
+                                       "acceptance_id": "lg-acc-01J0000000000000000000000A"}])
+    return x.rule("c", "client", f).json()
+
+
 def _run(case):
+    if case in ("client_stale_ofac_search", "client_msa_not_current"):
+        return _run_oct30(case)
     x = Harness()
     x.approve_seed()
     x.run_controls()
@@ -116,9 +152,6 @@ def _run(case):
         return x.rule("c", "client", client_facts(country="GB", region=None, targets=("GB", "FR"))).json()
     if case == "cold_ca_client":
         return x.rule("c", "client", client_facts(outbound_cold_contact_countries=["CA"])).json()
-    if case == "it_client_no_kit":
-        return x.rule("c", "client", client_facts(country="IT", region=None, targets=("IT",),
-                                                  eu_kit_version_acknowledged=0, msa_eu_clause=True)).json()
     x.activate_creator()
     x.activate_brand()
     if case == "clip_no_toggle":

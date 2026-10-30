@@ -6,10 +6,11 @@ Andre can change. Built Sep 26, 2026 from the locked Compliance spec (rev 1).
 Architecture and every choice made where the spec was silent:
 `docs/adr/0006-compliance-department-architecture.md`.
 
-**Not certified for real use.** Verification and Integrity, Finance (31),
-Legal (37), the OFAC screening provider and the accessibility checker are
-fail-closed stand-ins, so on day one almost everything is blocked — that is
-the spec's stated day-one effect (§D), not a bug. No LLM calls; every rule is
+**Client activation is live-wired; the rest stays fail closed.** Since ADR 0024 a client's activation
+(service area, Andre's recorded OFAC search, Legal (37)'s current documents) can pass when Legal is wired
+(`COMPLIANCE_LEGAL_*`). Verification and Integrity, Finance (31)'s tax and rail reads, the OFAC screening
+provider and the accessibility checker are still fail-closed stand-ins, so creator activation, payouts and
+site publish stay blocked — the spec's stated day-one effect (§D), not a bug. No LLM calls; every rule is
 deterministic.
 
 ## What it decides
@@ -60,6 +61,29 @@ round 14"):
 - a replayed `request_id` returns the stored ruling only if re-evaluation
   gives the same outcome; otherwise a new ruling is issued.
 
+## Deployed gate and service area (ADR 0024, Oct 30, 2026)
+
+- **Service area**: clients (and every other lane) only in the 50 US states, DC, Puerto Rico and Guam —
+  `HR-05 parameters.operate`, the one allowed set (`US-CA` … , `US-DC`, `US-PR`/`PR`, `US-GU`/`GU`); a campaign target
+  may also be the bare `US`. Everything else is refused by HR-07 (OFAC jurisdictions cite US-OFAC-04). 17 rows about
+  other markets (HR-06 the EU kit, EU/FR/IT/ES/DE/NL/IE/UK/Canada-Quebec rows and their counsel questions) are
+  `superseded`, kept for history.
+- **Client activation** also needs HR-14 (Andre's recorded OFAC search: `POST /compliance/v1/sanctions/attestations`,
+  Andre only; fact `sanctions_attestation_id`) and HR-15 (Legal confirms the accepted `client_msa` is current and the
+  client's; fact `legal_documents`; `src/legal_client.py`, `COMPLIANCE_LEGAL_*`).
+- **`GET /compliance/v1/clients/{client_id}/activation`** (any caller): the client's CURRENT decision, ALLOW or
+  REFUSE with reasons and the recorded jurisdiction. Finance (invoices, billing readiness, Stripe pages), seo (client
+  runs and reports) and detection (store reads) refuse anything but a current ALLOW.
+- **`GET /compliance/v1/readiness`** (any caller) and the lines printed at start: expired rules and the gates they
+  affect, what closes every gate, and a plain US web client's rule set with its expiry dates (`src/readiness.py`).
+- **`GET /compliance/v1/sanctions/status`** (`finance_31`, `onboarding`): a payee's latest screen and its freshness.
+- **Scheduler** (`src/scheduler.py`, `COMPLIANCE_SCHEDULER_ENABLED=1`, `COMPLIANCE_SCHEDULER_INTERVAL_SECONDS`):
+  internal controls at start and every 6 h, the Change Watcher daily; in process, no `scheduler` token.
+- **Callers** `seo_02` and `revenue_recovery` added. A caller token that is an unresolved Railway reference refuses
+  the start.
+- **Deploy**: `Dockerfile`, Railway service `compliance` (private), runbook "Compliance (38): the hard gate";
+  `devtools/reverify_proposal.py` builds a re-verification proposal from a saved page.
+
 ## Module map (`src/`)
 
 | Module | Role |
@@ -78,12 +102,15 @@ round 14"):
 | `founder.py` | Andre approval token gate |
 | `textguard.py` | Control-character, normalization and injection-pattern helpers |
 | `models.py` | Request models (strict; no money fields) |
+| `readiness.py` | ADR 0024: expired rules, the gates they affect, a US web client's rule set |
+| `scheduler.py` | ADR 0024: the in-process scheduler (controls, Change Watcher) |
+| `legal_client.py` | ADR 0024: the Legal (37) thin client (current version, a client's acceptance) |
 | `intelligences/i01…i11` | The 11 intelligences (register keeper, three gates, control monitor, change watcher, jurisdiction resolver, sanctions, disclosure, accessibility, evidence/audit) |
 | `intelligences/engine.py` | The shared gate algorithm (C.2) and all C.10 checks |
 
-`seed/compliance_obligations_seed.json` — the spec's seed, unchanged
-(SHA-256 `4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d`,
-checked at every start).
+`seed/compliance_obligations_seed.json` — seed v2 (ADR 0024: the founder decisions of
+Oct 30, 2026 written into the spec's seed v1, whose SHA-256 `4e3821d0…584d` it records), SHA-256
+`037cf8030e0a91cb050dad586e88bb99af5a069216a95f88eeebe0927381cf0b`, checked at every start.
 
 ## Routes
 
@@ -100,6 +127,10 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `POST /compliance/v1/gates/{activation,payout,publish}` | same | native form, same bodies |
 | `GET /compliance/v1/rulings/{id}` | any caller | one ruling |
 | `POST /compliance/v1/sanctions/screen` | onboarding, finance_31 | screen a payee or owner (DOB goes to the provider, never stored) |
+| `POST /compliance/v1/sanctions/attestations` | Andre only | ADR 0024: record his OFAC search for a client (HR-14); a hit opens a permanent hold |
+| `GET /compliance/v1/sanctions/status` | finance_31, onboarding | ADR 0024: a payee's latest screen and its freshness |
+| `GET /compliance/v1/clients/{client_id}/activation` | any caller | ADR 0024: the client's current activation decision |
+| `GET /compliance/v1/readiness` | any caller | ADR 0024: expired rules and the gates they affect |
 | `POST /compliance/v1/accessibility/checks` | creative_production | run the checker for an exact content hash |
 | `POST /compliance/v1/jurisdictions/resolve` | any caller | resolver answer (recorded) |
 | `GET /compliance/v1/register` | any caller | rows in force + effective status; `gate`, `jurisdiction`, `status`, `domain`, `page` (100/page) |

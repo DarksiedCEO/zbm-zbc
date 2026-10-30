@@ -145,14 +145,20 @@ def _main(work: Path) -> int:
                                          "attestation_ref": "att-1"},
                         "flags": {k: False for k in ("political_content", "child_directed", "health_data_shared",
                                                      "biz_opp_client", "audience_data_sale", "marketplace", "pooled_client_funds")},
-                        "target_jurisdictions": ["US", "GB"], "platforms": ["youtube"], "client_category": "general",
+                        "target_jurisdictions": ["US"], "platforms": ["youtube"], "client_category": "general",
                         "claims": {"claims_present": False, "health_or_earnings_claim": False, "claim_file_id": None,
                                    "claim_file_approved": False},
                         "services_include_review_suppression": False, "outbound_cold_contact_countries": [],
                         "hbnr_clause_signed": False}
         r = c.post(A + "/compliance/v1/rule", headers=h("onboarding"),
                    json={"request_id": rid(), "subject_id": "client-live", "lane": "client", "facts": client_facts}).json()
-        say(f"GATE activation (client, US->US/GB): allowed={r['allowed']} ruling={r['ruling_id']} ledger_event={r['ledger_event_id']}")
+        say(f"GATE activation (client, US->US): allowed={r['allowed']} ruling={r['ruling_id']} ledger_event={r['ledger_event_id']}")
+        # ADR 0024: from Oct 30, 2026 a client also needs Andre's recorded OFAC search (HR-14) and Legal's current
+        # documents (HR-15, Legal not wired here): refused, and the status every caller reads says REFUSE
+        st = c.get(A + "/compliance/v1/clients/client-live/activation", headers=h("finance_31")).json()
+        say(f"client activation status (finance_31): decision={st['decision']} reasons={st['reasons'][:2]}")
+        rd = c.get(A + "/compliance/v1/readiness", headers=h("scheduler")).json()
+        say(f"readiness: expired={[e['id'] for e in rd['expired']]} gate_blockers={rd['gate_blockers']}")
         # thin clients against the live server
         sys.path[:0] = [str(SERVICES / "onboarding-py" / "src"), str(SERVICES / "creative-py" / "src")]
         from integrations.compliance38 import HttpComplianceDepartment

@@ -352,6 +352,33 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
                who: str = Depends(caller("onboarding", "finance_31"))) -> dict:
         return svc.screen(who, req.request_id, req.model_dump())
 
+    @app.get("/compliance/v1/sanctions/status", dependencies=auth)
+    def sanctions_status(_: str = Depends(caller("finance_31", "onboarding")),
+                         subject_id: str = Query(pattern=r"^[A-Za-z0-9._:-]{1,128}$"),
+                         role: str = Query(pattern=r"^(payee|owner)$")) -> dict:
+        """ADR 0024: the latest screen of a payee/owner and its freshness (Finance's payout OFAC gate)."""
+        return svc.sanctions_status(subject_id, role)
+
+    @app.post("/compliance/v1/sanctions/attestations", dependencies=auth)
+    def attestation(req: m.SanctionsAttestationRequest = Depends(body(m.SanctionsAttestationRequest)),
+                    _: str = Depends(andre("sanctions/attestations"))) -> dict:
+        """ADR 0024 (HR-14): Andre records the OFAC search he made for a client (date, list version, result)."""
+        return svc.record_attestation(req.request_id, req.model_dump())
+
+    @app.get("/compliance/v1/clients/{client_id}/activation", dependencies=auth)
+    def client_activation(client_id: str, _: str = Depends(caller()),
+                          lane: str = Query(default="client", pattern=r"^(client|zbc_brand)$")) -> dict:
+        """ADR 0024: the client's current activation decision (ALLOW / REFUSE with reasons), for Finance, SEO and
+        Revenue Recovery. Read-only; anything but a current ALLOW is a refusal for the caller."""
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", client_id):
+            raise Invalid("client id format")
+        return svc.activation_status(client_id, lane)
+
+    @app.get("/compliance/v1/readiness", dependencies=auth)
+    def readiness(_: str = Depends(caller())) -> dict:
+        """ADR 0024: expired rules and the gates they affect; what a US web client's activation runs through."""
+        return svc.readiness()
+
     @app.post("/compliance/v1/accessibility/checks", dependencies=auth)
     def a11y(req: m.A11yRequest = Depends(body(m.A11yRequest)), who: str = Depends(caller("creative_production"))) -> dict:
         return svc.accessibility_check(who, req.request_id, req.model_dump())
@@ -516,6 +543,9 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
     with open(settings.seed_path, "rb") as fh:
         seed_bytes = fh.read()
     ports = ports or Ports()
+    if settings.legal_url and ports.legal.__class__.__name__ == "NotBuiltLegal37":
+        from legal_client import HttpLegal37     # ADR 0024: Legal (37) wired only with all three COMPLIANCE_LEGAL_*
+        ports.legal = HttpLegal37(settings.legal_url, settings.legal_token, settings.legal_caller_token)
     if settings.watcher_enabled and ports.fetcher.__class__.__name__ == "NotWiredFetcher":
         rows = json.loads(seed_bytes)["rows"]
         ports.fetcher = HttpFeedFetcher(watcher_allowlist(rows), clock)
@@ -540,15 +570,27 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
 
 def _app_from_env() -> FastAPI:
     settings = config_mod.load()
-    return create_app(build_service(settings), settings)
+    application = create_app(build_service(settings), settings)
+    application.state.settings = settings
+    return application
 
 
 app = _app_from_env()
 
 
 def main() -> None:
+    import readiness as readiness_mod
+    import scheduler
     import serve
 
+    svc: ComplianceService = app.state.service
+    settings: config_mod.Settings = app.state.settings
+    # ADR 0024: the operator sees, at every start, exactly which rules are expired and which gates they affect
+    for line in readiness_mod.summary_lines(svc.readiness()):
+        print(line, flush=True)
+    if settings.scheduler_enabled:
+        scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s, watcher=settings.watcher_enabled,
+                            clock=svc.clock).start()
     host = os.environ.get("COMPLIANCE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("COMPLIANCE_PORT", "8380"))
     serve.run(app, host=host, port=port)

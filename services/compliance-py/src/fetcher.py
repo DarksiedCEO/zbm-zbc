@@ -174,8 +174,9 @@ def seeded_sources() -> list[Source]:
                           ("ftc-blog-business", "https://www.ftc.gov/feeds/blog-business.xml", "blog"),
                           ("ftc-press", "https://www.ftc.gov/feeds/press-release.xml", "press_release")):
         out.append(Source(sid, url, "feed", "federal-trade-commission", typ, ("US",)))
-    out.append(Source("uk-legislation-new", "https://www.legislation.gov.uk/new/data.feed", "feed", "legislation-gov-uk",
-                      "legislation", ("GB",)))
+    # ADR 0024: no UK legislation feed. The United Kingdom is outside the service area and its only row
+    # (UK-HIDDEN-ADS) is superseded, so nothing could be drafted from it. The Canada Gazette stays: CA-CASL (consent for
+    # messages read in Canada) still applies to recipients whatever the client's location.
     out.append(Source("ca-gazette-p1", "https://www.gazette.gc.ca/rss/p1-eng.xml", "feed", "canada-gazette", "part1", ("CA",)))
     out.append(Source("ca-gazette-p2", "https://www.gazette.gc.ca/rss/p2-eng.xml", "feed", "canada-gazette", "part2", ("CA",)))
     out.append(Source("cppa-updates", "https://cppa.ca.gov/regulations/ccpa_updates.html", "page",

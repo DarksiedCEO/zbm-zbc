@@ -1,8 +1,8 @@
 {
   "register": "ZBM/ZBC Compliance (38) obligation register — seed",
-  "seed_version": 1,
-  "generated_on": "2026-09-26",
-  "source_report": "World class compliance department map (verified 2026-09-26) plus its research notes",
+  "seed_version": 2,
+  "generated_on": "2026-10-30",
+  "source_report": "World class compliance department map (verified 2026-09-26) plus its research notes; amended by the founder decisions of Oct 30, 2026 (service area US + DC + PR + GU, client sanctions screening and legal documents at activation, economic-nexus thresholds); seed v1 SHA-256 4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d",
   "shelf_life_days": {
     "statute": 180,
     "reg": 180,
@@ -16,11 +16,12 @@
   "in_force": false,
   "in_force_note": "The seed takes force only when Andre approves its SHA-256 (proposal kind 'seed'). Until then every gate is blocked.",
   "counts": {
-    "rows": 118,
-    "verified": 59,
-    "unverified": 59,
-    "house_rules": 13,
-    "counsel": 14
+    "rows": 121,
+    "verified": 54,
+    "unverified": 50,
+    "house_rules": 15,
+    "counsel": 14,
+    "superseded": 17
   },
   "rows": [
     {
@@ -141,15 +142,15 @@
       "id": "HR-05",
       "jurisdiction": "ALL",
       "domain": "house_rule",
-      "title": "Jurisdictions: operate",
-      "obligation": "Operate in the United States (US), the United Kingdom (GB) and Canada outside Quebec (CA except CA-QC). Canadian targets must be given at province level; bare 'CA' counts as including CA-QC.",
+      "title": "Service area: clients in the 50 US states, DC, Puerto Rico and Guam",
+      "obligation": "ZBM and ZBC do business only with clients located in the 50 US states, the District of Columbia, Puerto Rico and Guam: the codes in parameters.operate, the one allowed set. A person is placed by a declared and attested ISO 3166-2 code (US-CA, US-DC; Puerto Rico US-PR or PR; Guam US-GU or GU); a bare US needs its state. A campaign target may also be the bare country US (parameters.target_countries). Every other code is refused (HR-07), including US-VI, US-AS, US-MP and US-UM until Andre adds them by a register decision.",
       "source_url": null,
       "additional_sources": [],
       "source_kind": "house-rule",
       "source_quality": "founder",
-      "effective_date": "2026-09-26",
-      "effective_note": "Jurisdiction ruling, Sep 26, 2026",
-      "verified_at": "2026-09-26",
+      "effective_date": null,
+      "effective_note": "Founder service-area decision, Oct 30, 2026; replaces the Sep 26, 2026 jurisdiction ruling (US, GB, CA outside Quebec). In force from Andre's approval of this seed.",
+      "verified_at": "2026-10-30",
       "expires_at": null,
       "status": "verified",
       "owner_intelligence": "i07_jurisdiction",
@@ -165,17 +166,68 @@
       "report_ref": null,
       "parameters": {
         "operate": [
-          "US",
-          "GB",
-          "CA"
+          "US-AK",
+          "US-AL",
+          "US-AR",
+          "US-AZ",
+          "US-CA",
+          "US-CO",
+          "US-CT",
+          "US-DE",
+          "US-FL",
+          "US-GA",
+          "US-HI",
+          "US-IA",
+          "US-ID",
+          "US-IL",
+          "US-IN",
+          "US-KS",
+          "US-KY",
+          "US-LA",
+          "US-MA",
+          "US-MD",
+          "US-ME",
+          "US-MI",
+          "US-MN",
+          "US-MO",
+          "US-MS",
+          "US-MT",
+          "US-NC",
+          "US-ND",
+          "US-NE",
+          "US-NH",
+          "US-NJ",
+          "US-NM",
+          "US-NV",
+          "US-NY",
+          "US-OH",
+          "US-OK",
+          "US-OR",
+          "US-PA",
+          "US-RI",
+          "US-SC",
+          "US-SD",
+          "US-TN",
+          "US-TX",
+          "US-UT",
+          "US-VA",
+          "US-VT",
+          "US-WA",
+          "US-WI",
+          "US-WV",
+          "US-WY",
+          "US-DC",
+          "US-PR",
+          "US-GU",
+          "PR",
+          "GU"
         ],
-        "operate_excludes": [
-          "CA-QC"
-        ],
+        "operate_excludes": [],
         "region_required": [
-          "US",
-          "CA",
-          "UA"
+          "US"
+        ],
+        "target_countries": [
+          "US"
         ]
       }
     },
@@ -190,10 +242,10 @@
       "source_kind": "house-rule",
       "source_quality": "founder",
       "effective_date": "2026-09-26",
-      "effective_note": "Jurisdiction ruling, Sep 26, 2026",
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history. Was: Jurisdiction ruling, Sep 26, 2026",
       "verified_at": "2026-09-26",
       "expires_at": null,
-      "status": "verified",
+      "status": "superseded",
       "owner_intelligence": "i07_jurisdiction",
       "gates": [
         "activation",
@@ -247,15 +299,15 @@
       "id": "HR-07",
       "jurisdiction": "ALL",
       "domain": "house_rule",
-      "title": "Jurisdictions: refuse",
-      "obligation": "Refuse France (including French-language campaigns aimed at France), Quebec (CA-QC), and OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, Crimea incl. Sevastopol, and the so-called DNR/LNR regions). Any jurisdiction not on the operate or conditional list is refused by default.",
+      "title": "Jurisdictions: refuse everything outside the service area",
+      "obligation": "Refuse every jurisdiction that is not in HR-05's service area (default deny, parameters.unlisted), and in every case the OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, Crimea incl. Sevastopol, and the so-called DNR/LNR regions), listed in parameters.refuse. Canada, the United Kingdom, France, every EU member and every other country are refused.",
       "source_url": null,
       "additional_sources": [],
       "source_kind": "house-rule",
       "source_quality": "founder",
-      "effective_date": "2026-09-26",
-      "effective_note": "Jurisdiction ruling, Sep 26, 2026; default-deny for unlisted jurisdictions is a spec choice",
-      "verified_at": "2026-09-26",
+      "effective_date": null,
+      "effective_note": "Founder service-area decision, Oct 30, 2026; replaces the Sep 26, 2026 jurisdiction ruling.",
+      "verified_at": "2026-10-30",
       "expires_at": null,
       "status": "verified",
       "owner_intelligence": "i07_jurisdiction",
@@ -271,8 +323,6 @@
       "report_ref": null,
       "parameters": {
         "refuse": [
-          "FR",
-          "CA-QC",
           "CU",
           "IR",
           "KP",
@@ -2804,10 +2854,10 @@
       "source_kind": "guidance",
       "source_quality": "primary",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": "2026-09-26",
       "expires_at": "2026-12-25",
-      "status": "verified",
+      "status": "superseded",
       "owner_intelligence": "i05_control_monitor",
       "gates": [
         "control"
@@ -2832,10 +2882,10 @@
       "source_kind": "reg",
       "source_quality": "secondary",
       "effective_date": "2026-08-02",
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "payout",
@@ -2871,10 +2921,10 @@
       "source_kind": "reg",
       "source_quality": "secondary",
       "effective_date": "2025-06-28",
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i10_accessibility",
       "gates": [
         "publish"
@@ -2908,10 +2958,10 @@
       "source_kind": "guidance",
       "source_quality": "primary",
       "effective_date": null,
-      "effective_note": "Loi of 9 June 2023",
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history. Was: Loi of 9 June 2023",
       "verified_at": "2026-09-26",
       "expires_at": "2026-12-25",
-      "status": "verified",
+      "status": "superseded",
       "owner_intelligence": "i07_jurisdiction",
       "gates": [
         "activation",
@@ -2940,10 +2990,10 @@
       "source_kind": "guidance",
       "source_quality": "primary",
       "effective_date": null,
-      "effective_note": "Delibera 197/25/CONS published 2025-08-05",
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history. Was: Delibera 197/25/CONS published 2025-08-05",
       "verified_at": "2026-09-26",
       "expires_at": "2026-12-25",
-      "status": "verified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "payout",
@@ -2971,10 +3021,10 @@
       "source_kind": "reg",
       "source_quality": "primary",
       "effective_date": "2024-05-02",
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": "2026-09-26",
       "expires_at": "2027-03-25",
-      "status": "verified",
+      "status": "superseded",
       "owner_intelligence": "i02_activation_gate",
       "gates": [
         "activation"
@@ -3007,10 +3057,10 @@
       "source_kind": "guidance",
       "source_quality": "none",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "payout",
@@ -3038,10 +3088,10 @@
       "source_kind": "statute",
       "source_quality": "none",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "payout",
@@ -3069,10 +3119,10 @@
       "source_kind": "reg",
       "source_quality": "secondary",
       "effective_date": "2025-06-16",
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "activation",
@@ -3101,10 +3151,10 @@
       "source_kind": "guidance",
       "source_quality": "none",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "payout",
@@ -3134,10 +3184,10 @@
       "source_kind": "guidance",
       "source_quality": "primary",
       "effective_date": "2025-04-06",
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": "2026-09-26",
       "expires_at": "2026-12-25",
-      "status": "verified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "payout",
@@ -3200,10 +3250,10 @@
       "source_kind": "guidance",
       "source_quality": "primary",
       "effective_date": null,
-      "effective_note": "Page dated 2022-01-19",
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history. Was: Page dated 2022-01-19",
       "verified_at": "2026-09-26",
       "expires_at": "2026-12-25",
-      "status": "verified",
+      "status": "superseded",
       "owner_intelligence": "i09_disclosure",
       "gates": [
         "payout",
@@ -3231,10 +3281,10 @@
       "source_kind": "statute",
       "source_quality": "secondary",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i07_jurisdiction",
       "gates": [
         "activation",
@@ -3412,10 +3462,10 @@
       "source_kind": "counsel-question",
       "source_quality": "none",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i01_register",
       "gates": [
         "control"
@@ -3438,10 +3488,10 @@
       "source_kind": "counsel-question",
       "source_quality": "none",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i01_register",
       "gates": [
         "activation",
@@ -3673,10 +3723,10 @@
       "source_kind": "counsel-question",
       "source_quality": "none",
       "effective_date": null,
-      "effective_note": null,
+      "effective_note": "Superseded Oct 30, 2026: outside the US + PR + GU service area (HR-05, founder decision). Kept for history.",
       "verified_at": null,
       "expires_at": null,
-      "status": "unverified",
+      "status": "superseded",
       "owner_intelligence": "i01_register",
       "gates": [
         "activation",
@@ -3693,6 +3743,143 @@
       "counsel_flag": true,
       "report_ref": "Counsel-only questions",
       "parameters": {}
+    },
+    {
+      "id": "HR-14",
+      "jurisdiction": "US",
+      "domain": "sanctions",
+      "title": "Client sanctions screening recorded before activation",
+      "obligation": "Before a client (or ZBC brand) is activated, Andre searches the client's legal name on OFAC's Sanctions List Search (SDN and Consolidated lists) and records the search: date, list version, lists searched, result and a hash of the saved evidence. Activation needs a no-match record for that subject no older than parameters.max_age_days; an activation stays current for parameters.rescreen_after_days after the search. Any potential match or match refuses (never investigated around). Basis: US-OFAC-01 (strict liability, screen before onboarding) and OFAC's risk-based Framework.",
+      "source_url": "https://sanctionssearch.ofac.treas.gov/",
+      "additional_sources": [
+        "https://ofac.treasury.gov/faqs/topic/1501",
+        "https://ofac.treasury.gov/media/16331/download?inline"
+      ],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-10-30",
+      "effective_note": "Founder decision, Oct 30, 2026 (business register G1).",
+      "verified_at": "2026-10-30",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i08_sanctions",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "lanes": [
+          "client",
+          "zbc_brand"
+        ]
+      },
+      "check": "client_sanctions_attested",
+      "penalty_note": "House rule (founder-locked). The underlying OFAC liability is strict (US-OFAC-01).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {
+        "max_age_days": 30,
+        "rescreen_after_days": 90,
+        "lists": [
+          "SDN",
+          "Consolidated"
+        ],
+        "tool": "ofac_sanctions_list_search"
+      }
+    },
+    {
+      "id": "HR-15",
+      "jurisdiction": "ALL",
+      "domain": "consumer_contracts",
+      "title": "Client legal documents current at activation",
+      "obligation": "A client is activated only when Legal (37) confirms, for each document in parameters.required_doc_ids: the version the client accepted is Legal's current version (same hash), and the acceptance is this client's, for that version and hash, with sufficient evidence. Legal unreachable, a newer current version, or any mismatch refuses.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-10-30",
+      "effective_note": "Founder decision, Oct 30, 2026.",
+      "verified_at": "2026-10-30",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "lanes": [
+          "client"
+        ]
+      },
+      "check": "client_docs_current",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {
+        "required_doc_ids": [
+          "client_msa"
+        ]
+      }
+    },
+    {
+      "id": "US-SALESTAX-NEXUS",
+      "jurisdiction": "US",
+      "domain": "tax",
+      "title": "Economic-nexus thresholds for sales tax (monitoring, 75% alert)",
+      "obligation": "With no office, staff or property outside California, ZBM must register for another state's or territory's sales tax only once its economic-nexus threshold is passed. Finance reports invoiced totals per client state/territory for the trailing 12 months and the calendar year and flags any at or above parameters.alert_ratio of its threshold (memo MEMO-FIN-CQ-11-2026-10-30). Thresholds: parameters.default, with parameters.overrides per code. Other states' own thresholds and measurement periods are not individually verified.",
+      "source_url": "https://trykintsugi.com/sales-tax-guides/usa/economic-nexus",
+      "additional_sources": [
+        "https://www.cdtfa.ca.gov/industry/wayfair.htm"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "vendor",
+      "effective_date": null,
+      "effective_note": "Adopted by founder memo MEMO-FIN-CQ-11-2026-10-30; vendor table, so unverified.",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Unregistered sales tax owed with interest and penalties once a threshold is passed.",
+      "counsel_flag": false,
+      "report_ref": "MEMO-FIN-CQ-11-2026-10-30",
+      "parameters": {
+        "alert_ratio": "0.75",
+        "periods": [
+          "trailing_12_months",
+          "calendar_year"
+        ],
+        "default": {
+          "sales_usd": "100000.00",
+          "transactions": null
+        },
+        "overrides": {
+          "US-CA": {
+            "sales_usd": "500000.00",
+            "transactions": null,
+            "source": "https://www.cdtfa.ca.gov/industry/wayfair.htm"
+          },
+          "US-HI": {
+            "sales_usd": "100000.00",
+            "transactions": 200,
+            "source": "https://trykintsugi.com/sales-tax-guides/usa/economic-nexus"
+          },
+          "US-NV": {
+            "sales_usd": "100000.00",
+            "transactions": 200,
+            "source": "https://trykintsugi.com/sales-tax-guides/usa/economic-nexus"
+          },
+          "PR": {
+            "sales_usd": "100000.00",
+            "transactions": 200,
+            "source": "https://trykintsugi.com/sales-tax-guides/usa/economic-nexus"
+          }
+        },
+        "default_source": "https://trykintsugi.com/sales-tax-guides/usa/economic-nexus"
+      }
     }
   ]
 }

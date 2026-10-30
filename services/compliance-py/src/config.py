@@ -6,6 +6,7 @@ configuration the service cannot honor refuses start-up with a plain message.
 from __future__ import annotations
 
 import json
+import re
 import os
 from dataclasses import dataclass, field
 from typing import Optional
@@ -13,10 +14,14 @@ from typing import Optional
 from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 CALLER_NAMES = ("onboarding", "creative_production", "finance_31", "verification_integrity", "legal_37",
-                "cybersecurity_22", "people_43", "vendor_33", "scheduler")
+                "cybersecurity_22", "people_43", "vendor_33", "scheduler",
+                # ADR 0024: readers of a client's activation status (seo-py; detection-py, Revenue Recovery)
+                "seo_02", "revenue_recovery")
 CALLER_TOKEN_MIN = 32
-# The spec's seed hash (COMPLIANCE_SPEC "SHA-256 at generation"); service.SPEC_SEED_SHA256 is the same value.
-PINNED_SEED_SHA256 = "4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d"
+UNRESOLVED_REF_MARKERS = ("${{", "{{")
+# The pinned seed hash; service.SPEC_SEED_SHA256 is the same value. Seed v2 (ADR 0024: the founder decisions of Oct
+# 30, 2026); seed v1, the spec's ("SHA-256 at generation"), was 4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d.
+PINNED_SEED_SHA256 = "037cf8030e0a91cb050dad586e88bb99af5a069216a95f88eeebe0927381cf0b"
 DEFAULT_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "seed",
                                  "compliance_obligations_seed.json")
 
@@ -41,6 +46,12 @@ class Settings:
     watcher_max_proposals_per_cycle: int = 50
     watcher_max_proposals_per_source: int = 20
     reconcile_mode: bool = False
+    # ADR 0024: the in-process scheduler (internal controls every interval, the Change Watcher daily) and Legal (37)
+    scheduler_enabled: bool = False
+    scheduler_interval_s: int = 21600
+    legal_url: Optional[str] = None
+    legal_token: Optional[str] = field(default=None, repr=False)
+    legal_caller_token: Optional[str] = field(default=None, repr=False)
 
 
 def _int(env, name, default, lo, hi) -> int:
@@ -117,6 +128,10 @@ def load(env: Optional[dict] = None) -> Settings:
         for name, tok in callers.items():
             if name not in CALLER_NAMES:
                 raise RuntimeError(f"COMPLIANCE_CALLER_TOKENS: unknown caller name (allowed: {', '.join(CALLER_NAMES)})")
+            if any(mark in tok for mark in UNRESOLVED_REF_MARKERS):
+                # ADR 0024 (legal-py's AEGIS rule): a Railway reference left unresolved is literal text, not a token
+                raise RuntimeError(f"COMPLIANCE_CALLER_TOKENS: the {name} token is an unresolved Railway reference "
+                                   "(set the referenced variable in Railway, then redeploy); refusing to start")
             if len(tok) < CALLER_TOKEN_MIN or not all(0x21 <= ord(c) <= 0x7e for c in tok):
                 raise RuntimeError(f"COMPLIANCE_CALLER_TOKENS: the {name} token must be >= {CALLER_TOKEN_MIN} printable ASCII characters")
             if tok == token or (andre and tok == andre):
@@ -153,6 +168,21 @@ def load(env: Optional[dict] = None) -> Settings:
     if unpinned == "1" and seed_sha is None:
         raise RuntimeError("COMPLIANCE_ALLOW_UNPINNED_SEED=1 needs COMPLIANCE_SEED_SHA256 (the unpinned seed's own "
                            "hash, stated explicitly)")
+    sched = (env.get("COMPLIANCE_SCHEDULER_ENABLED") or "").strip()
+    if sched not in ("", "0", "1"):
+        raise RuntimeError("COMPLIANCE_SCHEDULER_ENABLED must be 0 or 1")
+    legal = [(env.get(n) or "").strip() or None for n in ("COMPLIANCE_LEGAL_URL", "COMPLIANCE_LEGAL_TOKEN",
+                                                          "COMPLIANCE_LEGAL_CALLER_TOKEN")]
+    if any(v and any(mark in v for mark in UNRESOLVED_REF_MARKERS) for v in legal[1:]):
+        raise RuntimeError("COMPLIANCE_LEGAL_TOKEN / COMPLIANCE_LEGAL_CALLER_TOKEN holds an unresolved Railway "
+                           "reference, not a token; refusing to start")
+    if any(legal) and not all(legal):
+        raise RuntimeError("COMPLIANCE_LEGAL_URL, COMPLIANCE_LEGAL_TOKEN and COMPLIANCE_LEGAL_CALLER_TOKEN are set "
+                           "together or not at all (unset = Legal (37) not wired: client activation refused)")
+    if legal[0] and not re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]{1,5})?|http://[a-z0-9-]+\.railway\.internal(:[0-9]{1,5})?|"
+                                     r"http://(127\.0\.0\.1|localhost)(:[0-9]{1,5})?", legal[0].rstrip("/")):
+        raise RuntimeError("COMPLIANCE_LEGAL_URL must be https://host[:port], http://<service>.railway.internal[:port] "
+                           "or a loopback http URL")
     s = Settings(
         service_token=token, caller_tokens=callers, andre_token=andre,
         seed_path=env.get("COMPLIANCE_SEED_PATH") or DEFAULT_SEED_PATH,
@@ -167,6 +197,9 @@ def load(env: Optional[dict] = None) -> Settings:
         watcher_max_proposals_per_cycle=_int(env, "COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_CYCLE", 50, 1, 10_000),
         watcher_max_proposals_per_source=_int(env, "COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE", 20, 1, 10_000),
         reconcile_mode=reconcile == "1",
+        scheduler_enabled=sched == "1",
+        scheduler_interval_s=_int(env, "COMPLIANCE_SCHEDULER_INTERVAL_SECONDS", 21600, 300, 86400),
+        legal_url=legal[0].rstrip("/") if legal[0] else None, legal_token=legal[1], legal_caller_token=legal[2],
     )
     # bug sweep C (E-5/F-3): the single-writer flock last, so every other refusal above leaves the directory untouched
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None
