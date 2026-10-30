@@ -51,8 +51,10 @@ hr07.update(
     title="Jurisdictions: refuse everything outside the service area",
     obligation=("Refuse every jurisdiction that is not in HR-05's service area (default deny, parameters.unlisted), "
                 "and in every case the OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, "
-                "Crimea incl. Sevastopol, and the so-called DNR/LNR regions), listed in parameters.refuse. Canada, "
-                "the United Kingdom, France, every EU member and every other country are refused."),
+                "Crimea incl. Sevastopol (UA-43, UA-40) and the so-called DNR/LNR regions (UA-14, UA-09)) and, by "
+                "founder choice as in US-OFAC-04, the other occupied regions of Ukraine, Zaporizhzhia (UA-23) and "
+                "Kherson (UA-65); all are listed in parameters.refuse. Canada, the United Kingdom, France, every EU "
+                "member and every other country are refused."),
     effective_date=None,
     effective_note="Founder service-area decision, Oct 30, 2026; replaces the Sep 26, 2026 jurisdiction ruling.",
     verified_at=DECIDED,

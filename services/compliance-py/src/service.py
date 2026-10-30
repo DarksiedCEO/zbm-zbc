@@ -47,7 +47,7 @@ from register import Version, effective_status, rows_sha256, sha256_text
 from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
-SPEC_SEED_SHA256 = "f1080e6a54a4f916bb74aa836631a0a2a145fdfc0ea99b2bf52cb7290c37020a"   # seed v2 (ADR 0024)
+SPEC_SEED_SHA256 = "a15a57922e9e8ab11edb0b21ed2fb22bcab3d5a4db468f6232dabf607ede143c"   # seed v2 (ADR 0024)
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
 REGISTER_PAGE = 100
