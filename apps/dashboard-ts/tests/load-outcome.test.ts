@@ -106,6 +106,22 @@ test("token rejected -> 502 (upstream_auth)", async () => {
   }
 });
 
+test("429 from the orchestrator -> 'rate limited, try again shortly' (ADR 0023), still 502", async () => {
+  const limited = (retryAfter: string | null): typeof fetch =>
+    (async () => new Response(JSON.stringify({ error: "rate limit exceeded" }),
+      { status: 429, headers: retryAfter === null ? {} : { "Retry-After": retryAfter } })) as typeof fetch;
+  for (const [ra, want] of [["7", "rate limited by the orchestrator, try again shortly (in about 7 s)"],
+                            [null, "rate limited by the orchestrator, try again shortly"],
+                            ["soon", "rate limited by the orchestrator, try again shortly"]] as const) {
+    const o = await loadRecordedFindings(ENV, limited(ra));
+    assert.equal(o.ok, false);
+    if (o.ok) return;
+    assert.equal(o.kind, "upstream_error");
+    assert.equal(httpStatusFor(o), 502);
+    assert.equal(o.message, want);
+  }
+});
+
 test("orchestrator error keeps ITS correlation id; body is scrubbed", async () => {
   const o = await loadRecordedFindings(
     ENV,

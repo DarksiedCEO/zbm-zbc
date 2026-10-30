@@ -17,7 +17,7 @@ the check.
 | Suite | Tests | Counted by | Platform-only tests |
 |---|---|---|---|
 | `go:orchestrator-go` | 174 | go test -v | — |
-| `node:dashboard-ts` | 53 | node --test | — |
+| `node:dashboard-ts` | 54 | node --test | — |
 | `python:bizdev-py` | 358 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
 | `python:compliance-py` | 644 | pytest collection | — |
