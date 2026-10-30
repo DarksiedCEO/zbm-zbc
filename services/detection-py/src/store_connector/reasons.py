@@ -19,6 +19,9 @@ REASONS: dict[str, tuple[int, str]] = {
     "LEDGER_UNAVAILABLE": (503, "the evidence ledger did not record the read request; nothing was read"),
     "NOT_SYNCED": (409, "the store is connected but has not been synced yet"),
     "SNAPSHOT_STALE": (409, "the last store snapshot is older than this client's allowed age; sync again"),
+    # ADR 0024: Compliance (38) is the hard gate before a client is served
+    "COMPLIANCE_NOT_ACTIVATED": (409, "Compliance has no current activation for this client; nothing was read"),
+    "COMPLIANCE_UNAVAILABLE": (503, "Compliance could not confirm this client's activation; nothing was read"),
     # an outbound read was attempted and stopped
     "STORE_UNAVAILABLE": (502, "the store could not be reached"),
     "STORE_DEADLINE_EXCEEDED": (502, "the store read did not finish within its deadline"),
@@ -43,7 +46,8 @@ REASONS: dict[str, tuple[int, str]] = {
 
 NO_OUTBOUND = frozenset({"NOT_CONNECTED", "STORE_READS_DISABLED", "STORE_CONFIG_INVALID",
                          "STORE_CREDENTIAL_UNREADABLE", "STORE_BUDGET_EXHAUSTED", "STORE_SYNC_IN_PROGRESS",
-                         "STORE_SYNC_CAPACITY", "LEDGER_UNAVAILABLE", "NOT_SYNCED", "SNAPSHOT_STALE"})
+                         "STORE_SYNC_CAPACITY", "LEDGER_UNAVAILABLE", "NOT_SYNCED", "SNAPSHOT_STALE",
+                         "COMPLIANCE_NOT_ACTIVATED", "COMPLIANCE_UNAVAILABLE"})
 
 
 class StoreError(Exception):
