@@ -37,9 +37,9 @@ it by its own two-letter code). `US` itself is not in the list, so a subdivision
 prefix (`US-UM` is refused although `US-CA` is operate); a bare `US` person still needs a state
 (`region_required`). A campaign *target* may be the bare country `US` (`HR-05 parameters.target_countries`), meaning the
 allowed states. `HR-07 parameters.refuse` names the OFAC comprehensively sanctioned jurisdictions (cited with
-US-OFAC-04: Cuba, Iran, North Korea, Crimea and Sevastopol `UA-43`/`UA-40`, the so-called DNR/LNR `UA-14`/`UA-09`) and,
-by founder choice as in US-OFAC-04's "other occupied regions", Zaporizhzhia `UA-23` and Kherson `UA-65`; HR-07's text
-names each code (AEGIS F-13). `unlisted: refuse` refuses everything else. The resolver ignores the parameters of a `superseded` row.
+US-OFAC-04: Cuba, Iran, North Korea, Crimea and Sevastopol `UA-43`/`UA-40`, the so-called DNR/LNR `UA-14`/`UA-09`);
+Zaporizhzhia `UA-23` and Kherson `UA-65` are included under US-OFAC-04's "other occupied regions" reading, pending
+Andre's approval of seed v2 (they have been in `refuse` since seed v1). HR-07's text names each code (AEGIS F-13, r2 N-7). `unlisted: refuse` refuses everything else. The resolver ignores the parameters of a `superseded` row.
 
 Changing the area is a register amendment of HR-05 that only Andre approves (test:
 `test_payout_for_foreign_and_entity_payees` adds `GB` by an approved amendment). The area applies to every lane:
@@ -62,7 +62,8 @@ pinned file byte for byte):
   about recipients or outreach (HR-08 no cold outbound to Canada, CA-CASL) and CQ-07 (it still blocks a marketplace
   flag).
 - **HR-14** (house rule, activation, lanes `client`, `zbc_brand`): Andre's OFAC search recorded, no match, SDN and
-  Consolidated, no older than `max_age_days` (30); an activation stays current for `rescreen_after_days` (90).
+  Consolidated, no older than `max_age_days` (30); an activation stays current for `rescreen_after_days` (90). Like
+  every house rule it has no `source_url` (the OFAC pages are `additional_sources`), so Andre can amend it.
 - **HR-15** (house rule, activation, lane `client`): Legal (37) confirms each `required_doc_ids` (`client_msa`)
   version the client accepted is Legal's current version with the same hash, and the acceptance is this client's
   (`party_ref client:<id>`, the reference Finance uses) with sufficient evidence.
@@ -109,7 +110,8 @@ detection-py — and `onboarding`; any other caller 403, AEGIS F-9; read-only) a
 all hold now**: the latest activation ruling for the client allowed it; every rule it evaluated is still `verified` in
 the register in force (an expired rule is never extended: on Dec 25, US-OFAC-04 turns every client to REFUSE until it
 is re-verified) **and says what it said then**: the ruling records a fingerprint of each rule it relied on (id,
-jurisdiction, obligation, gates, applies_when, check, parameters, effective_date) and any approved amendment of one of
+jurisdiction, obligation, gates, applies_when, check, parameters, effective_date; for HR-05 and HR-07 everything
+but `parameters`, which the live area check below covers, AEGIS r2 N-1) and any approved amendment of one of
 them refuses until the client is re-activated, while a re-verification (`verified_at`/`expires_at` only) does not; the
 client's recorded jurisdiction and campaign targets are `operate` under the service area **in force now** (HR-05
 `operate`, HR-07 `refuse`), checked on every call independently of the fingerprints (AEGIS F-1: a client in a state
@@ -160,7 +162,7 @@ every `COMPLIANCE_SCHEDULER_INTERVAL_SECONDS` (default 6 h, inside C-11's 24 h S
 `COMPLIANCE_WATCHER_ENABLED=1`. Same service calls as the `scheduler` caller's routes, recorded first; a failed run is
 printed and retried on the next 60 s tick (not at the next interval). Any other error in a tick is caught, recorded
 and printed: the thread does not die of an exception (AEGIS F-4). `/health` carries the scheduler's liveness (`alive`,
-last successful controls and watcher runs, `last_error`) and answers **503** when the thread is dead or the last
+last successful controls and watcher runs, `last_error` with the error class only, AEGIS r2 N-8) and answers **503** when the thread is dead or the last
 successful controls run (or the start) is older than two intervals. Two failure kinds, two responses:
 
 - **The thread is dead** (it ended without `stop()`; only something `except Exception` does not catch can end it): it
@@ -196,8 +198,14 @@ Evaluated with the pinned SDK (railway 3.13.1) against the base commit: 2 resour
 - Day one: every client activation, invoice approval, Stripe page, SEO client run and store read is refused until
   Andre approves seed v2, the scheduler has run C-11, and the client is activated. That is the intent.
 - A register change that adds an activation rule, or amends one a client's ruling relied on, turns that client's status
-  to REFUSE until re-activated; re-verifying an existing rule does not. A change of the service area applies to every
-  existing client at their next status read.
+  to REFUSE until re-activated; re-verifying an existing rule does not. Every client's activation relies on HR-03,
+  HR-05, HR-07, HR-08, HR-14, HR-15, US-FTC-465-07 and US-OFAC-04, so such an amendment refuses **every** client at once
+  (re-activation needs a new OFAC search for any client whose last one is over 30 days old), and the hourly job then
+  closes their open Stripe pages. The exception: an amendment of only HR-05's or HR-07's `parameters` (the service
+  area) refuses exactly the clients it takes out; a widening or a re-ordering refuses nobody.
+- Finance's sweep is bounded (AEGIS r2 N-4): a refused checkout closes at most 25 of the client's pages per request,
+  and the job reads Compliance for at most 25 clients per run (rotating) outside the Stripe turn. The rotation cursor is
+  in memory, so after a restart it starts again from the first client.
 - On 2026-12-25 every client turns REFUSE unless US-OFAC-04 has been re-verified and approved (runbook checklist).
 - The EU-kit and local-label mechanics stay in the engine but no seed v2 row reaches them; their tests now exercise the
   label functions directly and assert the refusal at the gate.
