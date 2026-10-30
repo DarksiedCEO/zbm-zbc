@@ -19,7 +19,11 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -372,6 +376,78 @@ class Runbook(unittest.TestCase):
             self.assertIn(df, self.doc)
         self.assertRegex(self.doc, r"DASHBOARD_TRUSTED_PROXY_HOPS[^\n]*\n?[^\n]*UNVERIFIED")
         self.assertIn("/webhooks/stripe", self.doc)
+
+
+# A fake Search Console key shaped like the real download (multi-line JSON, ~2.3 KB, a PEM with \n escapes) plus the
+# characters a careless write would mangle (%, $, backquote, backslash, quotes). Not a key: the PEM body is a word.
+FAKE_GSC_KEY = (
+    '{\n  "type": "service_account",\n  "project_id": "fake-project",\n'
+    '  "private_key_id": "0123456789abcdef0123456789abcdef01234567",\n'
+    '  "private_key": "-----BEGIN ' + 'PRIVATE KEY-----\\nFAKE-NOT-A-KEY\\n-----END ' + 'PRIVATE KEY-----\\n",\n'
+    '  "client_email": "fake@example.iam.gserviceaccount.com",\n'
+    '  "token_uri": "https://oauth2.googleapis.com/token",\n'
+    '  "note": "%s %d $HOME `id` \\\\ \\" \' -n",\n'
+    '  "padding": "' + "x" * 1900 + '"\n}'
+)
+GSC_CHILD = ('if [ -n "${SEO_GSC_SERVICE_ACCOUNT+x}" ]; then echo VALUE-LEAKED; exit 3; fi; '
+             'if [ -z "${SEO_GSC_SERVICE_ACCOUNT_FILE+x}" ]; then echo NO-FILE-VARIABLE; exit 0; fi; '
+             'stat -c "%u %a" "$SEO_GSC_SERVICE_ACCOUNT_FILE" >&2; cat "$SEO_GSC_SERVICE_ACCOUNT_FILE"')
+
+
+class SeoSearchConsoleKey(unittest.TestCase):
+    """golive-gsc: on Railway the Search Console key is a variable; the seo image has the entrypoint write it to the
+    file seo reads (SEO_GSC_SERVICE_ACCOUNT -> SEO_GSC_SERVICE_ACCOUNT_FILE), and an unset key still starts seo
+    (NOT_CONNECTED). The entrypoint is run for real, with only its secret directory moved into a temporary one."""
+
+    def test_the_seo_image_maps_the_gsc_key_file_and_the_iac_preserves_its_variable(self):
+        args = entrypoint_args(REPO / SERVICES["seo"][0])
+        files = [args[i + 1] for i, a in enumerate(args) if a == "--secret-file"]
+        self.assertIn("SEO_GSC_SERVICE_ACCOUNT_FILE", files)
+        self.assertIn("SEO_LOG_HASH_KEY_FILE", files)
+        self.assertLess(args.index("SEO_GSC_SERVICE_ACCOUNT_FILE"), args.index("--"))
+        block = iac_services()["seo"]
+        self.assertRegex(block, r"(?m)^\s+SEO_GSC_SERVICE_ACCOUNT:\s*preserve\(\)")
+        self.assertNotRegex(block, r"(?m)^\s+SEO_GSC_SERVICE_ACCOUNT_FILE:")  # set by the entrypoint, never Railway
+        self.assertRegex(block, r'(?m)^\s+RAILWAY_RUN_UID:\s*"0"')  # the entrypoint writes secrets only as root
+        doc = DOC.read_text()
+        self.assertIn("| `SEO_GSC_SERVICE_ACCOUNT` (optional) | `SEO_GSC_SERVICE_ACCOUNT_FILE` | seo |", doc)
+        self.assertNotIn("Search Console is NOT_CONNECTED on Railway", doc)  # the open item is closed
+        # seo's own reader: the file is optional and may be up to 16 KiB (a real key is ~2.3 KB)
+        cfg = (REPO / "services" / "seo-py" / "src" / "config.py").read_text()
+        self.assertIn('_secret_file_bytes(env, "SEO_GSC_SERVICE_ACCOUNT_FILE", max_bytes=16 * 1024)', cfg)
+        self.assertIn('if not (env.get("SEO_GSC_SERVICE_ACCOUNT_FILE") or "").strip():\n        return', cfg)
+
+    def run_entrypoint(self, extra_env: dict[str, str]) -> subprocess.CompletedProcess:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp.chmod(0o711)                                   # uid 10001 must reach the secret directory inside
+        secret_dir = tmp / "zbm-secrets"
+        secret_dir.mkdir(mode=0o700)                       # the image creates it (seo Dockerfile)
+        text = ENTRY.read_text()
+        self.assertEqual(text.count("SECRET_DIR=/run/zbm-secrets\n"), 1)
+        script = tmp / "zbm-entrypoint.sh"
+        script.write_text(text.replace("SECRET_DIR=/run/zbm-secrets\n", f"SECRET_DIR={secret_dir}\n"))
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), **extra_env}
+        return subprocess.run(["sh", str(script), "--secret-file", "SEO_GSC_SERVICE_ACCOUNT_FILE", "--",
+                               "sh", "-c", GSC_CHILD], env=env, capture_output=True, timeout=30)
+
+    def test_no_key_set_starts_without_a_file(self):
+        for extra in ({}, {"SEO_GSC_SERVICE_ACCOUNT": ""}):
+            with self.subTest(env=extra):
+                r = self.run_entrypoint(extra)
+                self.assertEqual((r.returncode, r.stdout), (0, b"NO-FILE-VARIABLE\n"), r.stderr)
+
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0 and shutil.which("setpriv"),
+                         "writes a secret only as root (the railway-images smoke covers it in CI)")
+    def test_a_multi_line_json_key_reaches_the_file_byte_exact_owner_only(self):
+        r = self.run_entrypoint({"SEO_GSC_SERVICE_ACCOUNT": FAKE_GSC_KEY})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr.decode().strip(), "10001 600")   # owned by the service user, mode 0600
+        self.assertGreater(len(FAKE_GSC_KEY), 2000)
+        self.assertEqual(r.stdout, FAKE_GSC_KEY.encode())         # byte-identical, value not in the child's env
+        # trailing newlines are dropped (shell command substitution); seo strips the key file's whitespace anyway
+        r = self.run_entrypoint({"SEO_GSC_SERVICE_ACCOUNT": FAKE_GSC_KEY + "\n"})
+        self.assertEqual((r.returncode, r.stdout), (0, FAKE_GSC_KEY.encode()), r.stderr)
 
 
 if __name__ == "__main__":
