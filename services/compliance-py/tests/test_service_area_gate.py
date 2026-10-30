@@ -1,4 +1,5 @@
-"""Founder decisions of Oct 30, 2026 (ADR 0024): the service area (US 50 states + DC + PR + GU), the client
+"""Founder decisions of Oct 30, 2026 (ADR 0024): the service area (every inhabited US jurisdiction: the 50 states, DC,
+PR, GU, VI, AS, MP; update of 12:51), the client
 sanctions screening and legal documents required at activation, the client activation status other departments
 read, the readiness report (expired rules and the gates they affect) and the in-process daily scheduler.
 
@@ -74,11 +75,12 @@ def status(h: Harness, client: str = "client-web", caller: str = "finance_31"):
 
 def test_the_service_area_is_hr05_operate_exactly():
     hr05 = next(r for r in H.SEED_ROWS if r["id"] == "HR-05")
-    want = sorted([f"US-{s}" for s in STATES] + ["US-DC", "US-PR", "US-GU", "PR", "GU"])
+    want = sorted([f"US-{s}" for s in STATES] + ["US-DC", "US-PR", "US-GU", "US-VI", "US-AS", "US-MP",
+                                                  "PR", "GU", "VI", "AS", "MP"])
     assert sorted(hr05["parameters"]["operate"]) == want
     assert hr05["parameters"]["target_countries"] == ["US"]
     assert hr05["status"] == "verified" and hr05["verified_at"] == "2026-10-30"
-    for code in ("US", "GB", "CA", "FR", "US-VI", "VI", "US-AS", "AS", "US-MP", "MP", "US-UM"):
+    for code in ("US", "GB", "CA", "FR", "MX", "US-UM", "UM"):
         assert code not in hr05["parameters"]["operate"]
     hr06 = next(r for r in H.SEED_ROWS if r["id"] == "HR-06")
     assert hr06["status"] == "superseded"           # the EU kit is outside the service area; kept for history
@@ -87,7 +89,7 @@ def test_the_service_area_is_hr05_operate_exactly():
 def test_no_service_area_text_in_the_register_names_uk_or_canada_as_served():
     for r in H.SEED_ROWS:
         if r["status"] == "superseded":
-            assert r["effective_note"].startswith("Superseded Oct 30, 2026: outside the US + PR + GU service area")
+            assert r["effective_note"].startswith("Superseded Oct 30, 2026: outside the US service area")
             continue
         text = (r["title"] + " " + r["obligation"]).lower()
         assert "outside quebec" not in text and "operate in the united kingdom" not in text, r["id"]
@@ -98,8 +100,7 @@ def test_no_service_area_text_in_the_register_names_uk_or_canada_as_served():
 
 @pytest.mark.parametrize("country,region", [("FR", None), ("CA", "CA-ON"), ("CA", "CA-QC"), ("CA", None),
                                             ("GB", None), ("GB", "GB-EDH"), ("DE", None), ("MX", None),
-                                            ("US", "US-VI"), ("VI", None), ("US", "US-AS"), ("AS", None),
-                                            ("US", "US-MP"), ("MP", None), ("US", "US-UM")])
+                                            ("US", "US-UM"), ("UM", None), ("FR", "FR-75C")])
 def test_clients_outside_the_service_area_are_refused(country, region):
     h = harness()
     r = h.rule("client-x", "client", web_client(h, "client-x", country=country, region=region))
@@ -110,17 +111,19 @@ def test_clients_outside_the_service_area_are_refused(country, region):
 
 
 @pytest.mark.parametrize("country,region", [("US", "US-PR"), ("PR", None), ("US", "US-GU"), ("GU", None),
+                                            ("US", "US-VI"), ("VI", None), ("US", "US-AS"), ("AS", None),
+                                            ("US", "US-MP"), ("MP", None),
                                             ("US", "US-DC"), ("US", "US-NY"), ("US", "US-AK"), ("US", "US-HI")])
 def test_clients_in_the_service_area_are_allowed(country, region):
     h = harness()
-    targets = (region or country,) if country in ("PR", "GU") else ("US",)
+    targets = (region or country,) if country in ("PR", "GU", "VI", "AS", "MP") else ("US",)
     j = activate(h, "client-ok", country=country, region=region, targets=targets)
     assert j["allowed"] is True, j["unmet_lines"]
 
 
 def test_a_campaign_target_outside_the_service_area_is_refused():
     h = harness()
-    for target in ("CA-ON", "GB", "FR", "US-VI", "DE"):
+    for target in ("CA-ON", "GB", "FR", "US-UM", "DE", "MX"):
         j = h.rule(f"client-t-{target}", "client", web_client(h, f"client-t-{target}", targets=("US", target))).json()
         assert j["allowed"] is False and "HR-07" in unmet_ids(j), (target, j["unmet_lines"])
 
@@ -538,3 +541,18 @@ def test_legal_client_reads_current_version_and_acceptance():
     assert _ask(_legal(acceptance={"rules_pinned": False})).available is False
     for status in (401, 403, 404, 500, 503):
         assert _ask(_legal(status=status)).available is False
+
+
+def test_territories_report_their_own_code_and_are_not_foreign_payees():
+    """Founder update (12:51): a US Virgin Islands client declared either way is reported as VI; a VI, AS or MP creator
+    is not a foreign payee (no W-8 rows apply)."""
+    h = harness()
+    activate(h, "client-vi", country="US", region="US-VI", targets=("US",))
+    assert status(h, "client-vi")["jurisdiction"] == "VI"
+    activate(h, "client-mp", country="MP", region=None, targets=("MP",))
+    assert status(h, "client-mp")["jurisdiction"] == "MP"
+    from intelligences import i02_activation_gate as i02
+    for c in ("VI", "AS", "MP", "PR", "GU"):
+        ctx, _ = i02.build("zbc_creator", "clipper-x", H.creator_facts("scr-x", country=c, region=None),
+                           h.svc.rows_by_id(), h.svc.seed_by_id, None, OCT30)
+        assert ctx.flags["foreign_payee"] is False, c

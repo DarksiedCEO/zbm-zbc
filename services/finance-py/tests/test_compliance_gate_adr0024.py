@@ -27,7 +27,9 @@ NEXUS = {"alert_ratio": "0.75", "periods": ["trailing_12_months", "calendar_year
                        "US-HI": {"sales_usd": "100000.00", "transactions": 200, "source": "https://k"},
                        "US-NV": {"sales_usd": "100000.00", "transactions": 200, "source": "https://k"},
                        "PR": {"sales_usd": "100000.00", "transactions": 200, "source": "https://k"}},
-         "default_source": "https://k"}
+         "default_source": "https://k",
+         "check_before_first_client": {c: "local gross receipts/business tax - check before first client"
+                                       for c in ("GU", "VI", "AS", "MP")}}
 
 
 def draft(hr, client="zbm-client-1", amount="100.00"):
@@ -266,3 +268,21 @@ def test_nexus_is_andre_or_the_onboarding_caller():
     assert hr.get("/fin/v1/readiness/sales-tax-nexus", caller="seo_02").status_code == 403
     assert hr.client.get("/fin/v1/readiness/sales-tax-nexus",
                          headers={**hr.headers(None), "X-Andre-Approval-Token": ANDRE_TOKEN}).status_code == 200
+
+
+def test_territories_without_a_verified_threshold_get_a_check_not_a_number():
+    """Founder update (12:51, Oct 30): GU, VI, AS and MP are served; no verified threshold source exists for them, so the
+    report names the local gross receipts/business tax check and invents no number."""
+    hr = Harness().ready()
+    hr.f["compliance"].nexus_params = NEXUS
+    hr.f["compliance"].activations = {"vi-1": {"allowed": True, "jurisdiction": "VI"},
+                                      "as-1": {"allowed": True, "jurisdiction": "AS"}}
+    issue(hr, draft(hr, "vi-1", "10.00"))
+    issue(hr, draft(hr, "as-1", "10.00"))
+    r = nexus(hr)
+    assert sorted(r["thresholds"]["check_before_first_client"]) == ["AS", "GU", "MP", "VI"]
+    for code in ("VI", "AS"):
+        j = next(x for x in r["jurisdictions"] if x["jurisdiction"] == code)
+        assert j["threshold"] is None and j["trailing_12_months"]["sales_ratio"] is None
+        assert j["flagged"] is True and j["flag_reasons"] == ["local gross receipts/business tax - check before first client"]
+    assert sorted(r["flagged"]) == ["AS", "VI"]

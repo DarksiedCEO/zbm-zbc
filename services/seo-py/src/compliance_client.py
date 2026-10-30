@@ -28,7 +28,7 @@ from finance_client import RETRY_STATUSES, FinanceClient, _json, _Retry
 CALLER_NAME_AT_COMPLIANCE = "seo_02"
 CMP_CALLER_HEADER = "X-Compliance-Caller-Token"
 CLIENT_ID = re.compile(r"[A-Za-z0-9._-]{1,100}")
-JURISDICTION = re.compile(r"US-[A-Z]{2}|PR|GU")
+JURISDICTION = re.compile(r"US-[A-Z]{2}|PR|GU|VI|AS|MP")
 RULING_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 UNVERIFIABLE = frozenset({"COMPLIANCE_NOT_CONFIGURED", "COMPLIANCE_UNAVAILABLE", "COMPLIANCE_AUTH_REFUSED",
                           "COMPLIANCE_RESPONSE_INVALID"})

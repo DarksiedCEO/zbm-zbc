@@ -254,8 +254,10 @@ def params():
     ({"declared_country": "DE", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
     ({"declared_country": "PR", "declared_region": None, "attested": True, "attestation_ref": "a"}, "operate"),
     ({"declared_country": "US", "declared_region": "US-GU", "attested": True, "attestation_ref": "a"}, "operate"),
-    ({"declared_country": "US", "declared_region": "US-VI", "attested": True, "attestation_ref": "a"}, "refuse"),
-    ({"declared_country": "AS", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
+    ({"declared_country": "US", "declared_region": "US-VI", "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "AS", "declared_region": None, "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "MP", "declared_region": None, "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "US", "declared_region": "US-UM", "attested": True, "attestation_ref": "a"}, "refuse"),
     ({"declared_country": "US", "declared_region": "CA-ON", "attested": True, "attestation_ref": "a"}, "missing"),
     ({"declared_country": "US", "declared_region": "US-CA", "attested": False, "attestation_ref": "a"}, "missing"),
     ({"declared_country": "KP", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
@@ -272,7 +274,8 @@ def test_resolver_targets(params):
     assert resolve_target("IT", params).cls == "refuse"           # ADR 0024: no conditional (EU kit) list
     assert "US-OFAC-04" in resolve_target("CU", params).cites
     assert resolve_target("US", params).cls == "operate" and resolve_target("US", params).cites == ("HR-05",)
-    assert resolve_target("PR", params).cls == "operate" and resolve_target("US-VI", params).cls == "refuse"
+    assert resolve_target("PR", params).cls == "operate" and resolve_target("US-VI", params).cls == "operate"
+    assert resolve_target("US-UM", params).cls == "refuse" and resolve_target("MX", params).cls == "refuse"
 
 
 def test_resolve_route_records_and_notes_signal_mismatch(hs):
