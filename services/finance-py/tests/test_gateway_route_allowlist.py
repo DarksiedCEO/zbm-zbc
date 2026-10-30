@@ -14,6 +14,8 @@ from fastapi.routing import APIRoute
 
 from helpers import ANDRE_TOKEN, Harness, rid
 
+MIDDLEWARE_403 = "this caller reaches only the routes that name it"
+
 OWN = {
     "rail_gateway": {("POST", "/fin/v1/stripe/events")},
     "payout_rail_gateway": {("POST", "/fin/v1/rails/{rail}/events")},
@@ -46,7 +48,9 @@ def test_every_route_but_its_own_is_403(caller):
         elif path == "/health":
             assert r.status_code == 200 and r.json() == h.client.get("/health").json()
         else:
-            assert r.status_code == 403, (caller, method, path, r.status_code, r.text[:200])
+            # the MIDDLEWARE's answer, not a route dependency's (AEGIS edge review L-3: each layer tested on its own)
+            assert r.status_code == 403 and r.json()["detail"] == MIDDLEWARE_403, \
+                (caller, method, path, r.status_code, r.text[:200])
     assert reached == OWN[caller]
     assert seen > 60
 
@@ -91,3 +95,56 @@ def test_other_callers_still_reach_the_routes_open_to_any_caller():
     for caller in ("scheduler", "onboarding", "compliance_38"):
         assert h.get("/fin/v1/integrity", caller=caller).status_code == 200
         assert h.get("/fin/v1/rules", caller=caller).status_code != 403
+
+
+@pytest.mark.parametrize("caller", sorted(OWN) + ["seo_02"])
+@pytest.mark.parametrize("path", ["/fin/v1/stripe/events%3F", "/fin/v1/stripe/events%23", "/fin/v1/stripe/events%3Fx=1",
+                                  "/fin/v1/rails/stripe/events%3F", "/fin/v1/stripe%2Fevents",
+                                  "/fin/v1/invoices/x-1/status%3F"])
+def test_encoded_separators_are_refused_by_the_middleware(caller, path):
+    """AEGIS edge review L-2: the allowlist matches the ROUTED path (scope["path"], percent-decoded), so an encoded
+    '?' or '#' can never make a path look like an allowed one to the middleware and like another to the router."""
+    h = Harness().ready()
+    method = "GET" if caller == "seo_02" else "POST"
+    r = h.client.request(method, path, headers=h.headers(caller=caller),
+                         json={"request_id": rid()} if method == "POST" else None)
+    assert r.status_code == 403 and r.json()["detail"] == MIDDLEWARE_403, (caller, path, r.status_code, r.text[:200])
+
+
+def _caller_deps(route):
+    """The route's own caller checks (``caller(...)`` / ``andre_or_caller(...)`` closures), not the middleware."""
+    for d in route.dependant.dependencies:
+        q = getattr(d.call, "__qualname__", "")
+        if ".caller.<locals>.dep" in q or ".andre_or_caller.<locals>.dep" in q:
+            yield d.call
+
+
+@pytest.mark.parametrize("caller", sorted(OWN) + ["seo_02"])
+def test_route_dependencies_refuse_named_only_callers_on_their_own(caller):
+    """AEGIS edge review L-3 (the surviving mutants F4, F6): with the middleware out of the way, every route's own
+    caller check still refuses a NAMED_ONLY caller everywhere but its own route(s). Calls each dependency directly."""
+    from starlette.requests import Request
+    from helpers import CALLERS
+    import api as api_mod
+    h = Harness().ready()
+    own = {**OWN, "seo_02": {("GET", "/fin/v1/invoices/{invoice_id}/status")}}[caller]
+    token = CALLERS[caller]
+    checked = 0
+    for route in h.app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        for call in _caller_deps(route):
+            allowed = any(path == route.path and method in route.methods for method, path in own)
+            req = Request({"type": "http", "method": "POST", "path": route.path,
+                           "headers": [(api_mod.CALLER_HEADER.lower().encode(), token.encode())]})
+            try:
+                if ".andre_or_caller." in call.__qualname__:
+                    call(req)
+                else:
+                    call(token)
+                refused = False
+            except api_mod.Forbidden:
+                refused = True
+            checked += 1
+            assert refused != allowed, (caller, route.path, sorted(route.methods), "refused" if refused else "admitted")
+    assert checked > 40

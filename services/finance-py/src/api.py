@@ -303,7 +303,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             if name is None:
                 raise Forbidden("caller token missing or not recognised")
             if name in NAMED_ONLY and name not in allowed:
-                raise Forbidden("this caller reaches only the routes that name it")
+                # worded apart from the middleware's refusal so a test can tell which layer answered (AEGIS L-3)
+                raise Forbidden("this route does not name this caller (route check)")
             if allowed and name not in allowed:
                 raise Forbidden("this caller is not authorized for this route (separation of duties, FIN-19)")
             return name
@@ -387,8 +388,13 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         # callers (``caller()`` admits any caller) and no Andre-only route can answer them anything but 403.
         # /health is open to anyone without any token (no bearer, no caller), so refusing it to them would protect
         # nothing; it answers them exactly what it answers an anonymous caller (AEGIS SEO Wave 3 round 2)
+        # AEGIS edge review L-2: match the path the ROUTER uses (scope["path"]), never request.url.path (rebuilt and
+        # parsed again, so "/fin/v1/stripe/events%3F" looked allowed here and routed elsewhere); and refuse any
+        # percent-encoding at all in a narrow caller's path: none of their routes needs one.
         name = callers.identify(request.headers.get(CALLER_HEADER))
-        if name in NAMED_ONLY and not named_route_allowed(name, request.method, request.url.path):
+        raw_path = request.scope.get("raw_path") or b""
+        if name in NAMED_ONLY and (b"%" in raw_path or "?" in request.scope["path"] or "#" in request.scope["path"]
+                                   or not named_route_allowed(name, request.method, request.scope["path"])):
             return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
                                                                    "name it"})
         return await call_next(request)
