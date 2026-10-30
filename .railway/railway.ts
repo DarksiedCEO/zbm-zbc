@@ -207,6 +207,9 @@ export default defineRailway(() => {
       SEO_ANDRE_APPROVAL_TOKEN: preserve(),
       SEO_CALLER_TOKENS: preserve(),
       SEO_LOG_HASH_KEY: preserve(), // written to SEO_LOG_HASH_KEY_FILE by the entrypoint
+      // Optional: the Search Console service-account JSON key, written to SEO_GSC_SERVICE_ACCOUNT_FILE by the entrypoint.
+      // Unset or empty = no file, Search Console NOT_CONNECTED (runbook, Secrets table).
+      SEO_GSC_SERVICE_ACCOUNT: preserve(),
       SEO_FINANCE_URL: PRIVATE("finance", 8410),
       SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       SEO_FINANCE_CALLER_TOKEN: preserve(),

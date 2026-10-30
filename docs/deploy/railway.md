@@ -136,19 +136,24 @@ refuses.
 | `FIN_STRIPE_SECRET_KEY` | `FIN_STRIPE_SECRET_KEY_FILE` | finance |
 | `FIN_STRIPE_WEBHOOK_SECRET` | `FIN_STRIPE_WEBHOOK_SECRET_FILE` | finance |
 | `SEO_LOG_HASH_KEY` | `SEO_LOG_HASH_KEY_FILE` | seo |
+| `SEO_GSC_SERVICE_ACCOUNT` (optional) | `SEO_GSC_SERVICE_ACCOUNT_FILE` | seo |
 | `LEDGER_CALLERS` | `LEDGER_CALLERS_FILE` | ledger |
 
 `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed to `SEO_GSC_SERVICE_ACCOUNT_FILE`) and `SEO_BING_WEBMASTER_KEY_FILE`
 belong to a port that is not built (or a retired name): setting one refuses the start. Leave them unset.
 
-Three built settings are `*_FILE` settings this deploy does **not** map (no `--secret-file` in their image), so on
+A value variable that is unset or empty writes no file and leaves its `*_FILE` setting unset, so the service starts
+exactly as if the feature were never configured (`SEO_GSC_SERVICE_ACCOUNT` relies on this: no key, Search Console
+`NOT_CONNECTED`). The value is written with `printf '%s'`, so a multi-line value (the Search Console JSON key, its
+PEM with `\n` escapes) reaches the file unchanged, except that trailing newlines are dropped (shell command
+substitution); seo strips surrounding whitespace from the key file anyway.
+
+Two built settings are `*_FILE` settings this deploy does **not** map (no `--secret-file` in their image), so on
 Railway they stay unset and their feature stays off, fail closed:
 
 - `SEO_PERPLEXITY_API_KEY_FILE`: not needed on Railway. seo reads the same key from the plain variable
   `SEO_PERPLEXITY_API_KEY` (ADR 0017 W4; setting both refuses the start).
-- `SEO_GSC_SERVICE_ACCOUNT_FILE` (the Search Console service-account JSON key): unmapped, so Search Console is
-  `NOT_CONNECTED` on Railway until the seo image maps it (open item below).
 - `DETECTION_LEDGER_TOKEN_FILE` (with `DETECTION_LEDGER_URL`; the Revenue Recovery store connector's ledger, ADR
   0020): unmapped, and detection does not run as root, so every store read fails closed (`LEDGER_UNAVAILABLE`) on
   Railway until it is wired (open item below).
@@ -182,6 +187,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
 | `SEO_LOG_HASH_KEY` | `openssl rand -hex 32` | seo | — (becomes `SEO_LOG_HASH_KEY_FILE`) |
 | `SEO_PERPLEXITY_API_KEY` (optional) | Perplexity → API settings (only when you turn the engine on; set the four budgets too) | seo | — |
+| `SEO_GSC_SERVICE_ACCOUNT` (optional) | Google Cloud → IAM & Admin → Service accounts → the account → Keys → Add key → JSON (only when you connect Search Console; steps below) | seo | — (becomes `SEO_GSC_SERVICE_ACCOUNT_FILE`) |
 | `FIN_STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys → create a **restricted** key (test mode first: `rk_test_...`) with write on Checkout Sessions and read on PaymentIntents, Charges, Disputes, Payouts and Balance | finance | — (becomes `FIN_STRIPE_SECRET_KEY_FILE`) |
 | `FIN_STRIPE_WEBHOOK_SECRET` | Stripe, when you register the webhook endpoint (step 7): the endpoint's signing secret, `whsec_...` | finance | — (becomes `FIN_STRIPE_WEBHOOK_SECRET_FILE`) |
 | `DASHBOARD_SESSION_SECRET` | `openssl rand -hex 32` | Vercel | — |
@@ -424,7 +430,8 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_LOG_MAX_BYTES`, `SEO_LOG_RETENTION_DAYS`, `SEO_LOG_MAX_OPEN_INGESTS`, `SEO_LOG_MAX_INGESTS`, `SEO_LOG_TENANT_BYTES` | no | no | 256 MiB, `90`, `2`, `30`, 1 GiB | log ingests |
 | `SEO_BOT_VERIFY_DNS`, `SEO_BOT_VERIFY_MAX` | no | no | `0`, `200` | |
 | `SEO_SCHEDULE_BUDGET_RUNS`, `SEO_SCHEDULE_PERIOD_DAYS`, `SEO_FINANCE_TIMEOUT_SECONDS` | no | no | `8`, `30`, `5` | |
-| `SEO_GSC_SERVICE_ACCOUNT_FILE` | no | yes | unset | Search Console: the Google service-account JSON key file (owner-only, ≤ 16 KiB). Unset = `NOT_CONNECTED`, no call ever made. Not mapped by this deploy (see "How `*_FILE` secrets map onto Railway") |
+| `SEO_GSC_SERVICE_ACCOUNT` | no | yes | unset | Search Console: the whole Google service-account JSON key (you). Becomes `SEO_GSC_SERVICE_ACCOUNT_FILE`. Unset = `NOT_CONNECTED`, no call ever made |
+| `SEO_GSC_SERVICE_ACCOUNT_FILE` | — | — | (set by the entrypoint) | the key file (owner-only, ≤ 16 KiB); never set it on Railway (setting it and `SEO_GSC_SERVICE_ACCOUNT` refuses the start) |
 | `SEO_GSC_WINDOW_DAYS`, `SEO_GSC_PAGE_ROWS`, `SEO_GSC_MAX_PAGES`, `SEO_GSC_MAX_ROWS` | no | no | `28`, `5000`, `10`, `50000` | Search Console read window and pagination caps (seo-py README) |
 | `SEO_GSC_MAX_REQUESTS`, `SEO_GSC_TIMEOUT_SECONDS`, `SEO_GSC_DEADLINE_SECONDS` | no | no | `30`, `10`, `60` | requests per read (must cover the page caps, else start is refused), per-attempt timeout, whole-read deadline |
 | `SEO_GSC_READS_PER_DAY`, `SEO_GSC_RETENTION_DAYS` | no | no | `4`, `90` | reads per tenant per 24 h; days before breakdowns are served as totals only |
@@ -519,6 +526,28 @@ Do these in order. Nothing in the repository creates anything; each step is your
 
 Operating the private services (your approval routes on finance, legal and seo) goes through `railway ssh` into that
 service and a request to `127.0.0.1:<port>` from inside it; there is deliberately no public route to them.
+
+### Connecting Search Console (optional)
+
+Search Console stays `NOT_CONNECTED` until you do this; seo starts and runs normally without it.
+
+1. Create the Google Cloud project, enable the Google Search Console API and create the service account and its
+   **JSON** key: ADR 0017 GSC-10 steps 1-3 (docs/adr/0017-seo-answer-intelligence-department-architecture.md).
+2. Railway → `seo` → Variables → New Variable: name **`SEO_GSC_SERVICE_ACCOUNT`**, value: open the downloaded `.json`
+   file in a text editor and paste **the whole file** as it is (from the first `{` to the last `}`; do not
+   base64-encode it, do not edit the `\n` sequences in `private_key`). Mark it **Sealed**. Do not create
+   `SEO_GSC_SERVICE_ACCOUNT_FILE`: the entrypoint sets it (setting both refuses the start). Do not change the start
+   command (ADR 0017 GSC-9's start-command form is superseded: it would bypass the entrypoint that runs seo as uid
+   10001).
+3. Deploy seo. At start the entrypoint writes the key to `/run/zbm-secrets/seo-gsc-service-account-file` (0600, owned
+   by uid 10001) and seo loads it; a key it cannot parse refuses the start with
+   `SEO_GSC_SERVICE_ACCOUNT_FILE: <reason>` (the key itself is never printed).
+4. Check `GET /seo/v1/status` (through `railway ssh`, as in the other approval routes): `search_console.state` is
+   `connected` and `search_console.service_account` is the key's `client_email`.
+5. Delete the downloaded `.json` from your machine; then ADR 0017 GSC-10 steps 6-7 for each client.
+
+To disconnect: delete the variable (or empty it) and redeploy; seo then reports `NOT_CONNECTED` again. To rotate:
+create a new key in Google Cloud, replace the variable's value, redeploy, then delete the old key in Google Cloud.
 
 ### Delivering an SEO client report from Railway (AEGIS final go-live M-1)
 
@@ -681,9 +710,6 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   stops are `RR_STORE_READS_DISABLED=1` (then redeploy detection) and the file named by `RR_STORE_KILL_SWITCH_FILE`
   (takes effect at once; needs a writable path, which detection does not have today). Both are in the detection
   table above.
-- **Search Console is NOT_CONNECTED on Railway** (golive-gsc): the seo image maps no `SEO_GSC_SERVICE_ACCOUNT_FILE`.
-  Turning it on needs `--secret-file SEO_GSC_SERVICE_ACCOUNT_FILE` in the seo image (the value variable would be
-  `SEO_GSC_SERVICE_ACCOUNT`, the JSON key) and Andre's steps in ADR 0017 "Search Console".
 - **Dashboard login limiter** depends on `DASHBOARD_TRUSTED_PROXY_HOPS` and an unverified Vercel behaviour (above).
 - **Version skew.** CI installs each service's `requirements.txt`, whose transitive dependencies float; the images
   install the hash lock. They can differ (the lock already takes certifi 2026.10.19 for PYSEC-2026-4320). `audit-python`
