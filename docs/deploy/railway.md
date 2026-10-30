@@ -42,9 +42,10 @@ calls (`POST /webhooks/stripe`); it holds no Stripe secret and forwards the raw 
 its own Railway service from its own Dockerfile.
 
 **The revenue recovery service is detection-py**, run behind orchestrator-go with ledger-rust as its evidence store
-(root README; ADR 0001 decisions 2-3 and "Scope boundary"). The scan's only data source is the repository's fixture
-pool (`fixtures/*.json`, copied into the detection image); a real-store translation layer is not built (ADR 0001
-decision 5).
+(root README; ADR 0001 decisions 2-3 and "Scope boundary"). A scan's data source is one connected Shopify store's
+snapshot, read by detection's read-only store connector (ADR 0020); the fixture pool (`fixtures/*.json`, copied into
+the detection image) is refused on Railway (`FIXTURE_SCAN_DISABLED`). Connecting a store is Andre's step:
+[Revenue Recovery: connecting a real store](#revenue-recovery-connecting-a-real-store).
 
 **One replica everywhere.** The ledger and the three departments each hold a single-writer lock on their data
 directory (`<log>.lock` for the ledger, an flock in each department's data directory), and Railway does not allow
@@ -124,8 +125,8 @@ What "without the value variable" does and does not cover (AEGIS L3): the servic
 hold the value, but the value stays (1) a Railway variable — visible in the dashboard and to anyone with `railway ssh`
 on the service — and (2) in the entrypoint's own initial environment, `/proc/1/environ`, for the life of the
 container. Only a different uid keeps the service from reading (2): the entrypoint runs as root and the service as
-uid 10001. So the entrypoint writes a secret file only when it runs as root (`RAILWAY_RUN_UID=0`, which the three
-services with these secrets — ledger, finance, seo — already set for their volume); started as any other user with a
+uid 10001. So the entrypoint writes a secret file only when it runs as root (`RAILWAY_RUN_UID=0`, which every service
+with these secrets sets: ledger, finance and seo also for their volume, detection for its secret files only); started as any other user with a
 value variable set, it refuses with `--secret-file <NAME>_FILE: <NAME> is set but this container runs as uid ...,
 not root`. The CI smoke starts seo-py as root for this reason and checks that the file is 0600/10001, that the value
 is not in the service's environment, that uid 10001 cannot read `/proc/1/environ`, and that the non-root start
@@ -137,21 +138,28 @@ refuses.
 | `FIN_STRIPE_WEBHOOK_SECRET` | `FIN_STRIPE_WEBHOOK_SECRET_FILE` | finance |
 | `SEO_LOG_HASH_KEY` | `SEO_LOG_HASH_KEY_FILE` | seo |
 | `LEDGER_CALLERS` | `LEDGER_CALLERS_FILE` | ledger |
+| `DETECTION_LEDGER_TOKEN` | `DETECTION_LEDGER_TOKEN_FILE` | detection |
+| `RR_STORE_CONNECTIONS` | `RR_STORE_CONNECTIONS_FILE` (`/run/zbm-secrets/rr-store-connections-file`) | detection |
+| `RR_STORE_SECRET_1` | `RR_STORE_SECRET_1_FILE` (`/run/zbm-secrets/rr-store-secret-1-file`) | detection, through the connections JSON |
+| `RR_STORE_SECRET_2` | `RR_STORE_SECRET_2_FILE` (`/run/zbm-secrets/rr-store-secret-2-file`) | detection, through the connections JSON |
+
+The written path is fixed: `/run/zbm-secrets/` plus the `*_FILE` name in lower case with `_` as `-`. detection-py does
+not read `RR_STORE_SECRET_1_FILE` / `RR_STORE_SECRET_2_FILE` itself: the connections JSON names those two paths as a
+connection's `token_file` (or `client_id_file` + `client_secret_file`), so the JSON holds references and the
+credential stays a sealed variable. `RR_STORE_CONNECTIONS` holds no secret; it goes through the same mechanism because
+detection-py reads the connections only from a file.
 
 `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed to `SEO_GSC_SERVICE_ACCOUNT_FILE`) and `SEO_BING_WEBMASTER_KEY_FILE`
 belong to a port that is not built (or a retired name): setting one refuses the start. Leave them unset.
 
-Three built settings are `*_FILE` settings this deploy does **not** map (no `--secret-file` in their image), so on
+Two built settings are `*_FILE` settings this deploy does **not** map (no `--secret-file` in their image), so on
 Railway they stay unset and their feature stays off, fail closed:
 
 - `SEO_PERPLEXITY_API_KEY_FILE`: not needed on Railway. seo reads the same key from the plain variable
   `SEO_PERPLEXITY_API_KEY` (ADR 0017 W4; setting both refuses the start).
 - `SEO_GSC_SERVICE_ACCOUNT_FILE` (the Search Console service-account JSON key): unmapped, so Search Console is
   `NOT_CONNECTED` on Railway until the seo image maps it (open item below).
-- `DETECTION_LEDGER_TOKEN_FILE` (with `DETECTION_LEDGER_URL`; the Revenue Recovery store connector's ledger, ADR
-  0020): unmapped, and detection does not run as root, so every store read fails closed (`LEDGER_UNAVAILABLE`) on
-  Railway until it is wired (open item below).
 
 ## Secrets
 
@@ -167,6 +175,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEDGER_SERVICE_TOKEN` (finance's) | `openssl rand -hex 32` | finance | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (legal's) | `openssl rand -hex 32` | legal | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (seo's) | `openssl rand -hex 32` | seo | its SHA-256 goes in `LEDGER_CALLERS` |
+| `DETECTION_LEDGER_TOKEN` | `openssl rand -hex 32` | detection | its SHA-256 goes in `LEDGER_CALLERS` (caller `detection-py`, department `rr_store`); becomes `DETECTION_LEDGER_TOKEN_FILE` |
 | `LEDGER_CALLERS` | the script below (hashes only, no token) | ledger | — |
 | `FIN_SERVICE_TOKEN` | `openssl rand -hex 32` | finance | stripe-gateway `STRIPE_GATEWAY_FINANCE_TOKEN`, seo `SEO_FINANCE_TOKEN` (references) |
 | `FIN_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | finance | you (keep it in your password manager) |
@@ -179,6 +188,9 @@ be a different value: several services refuse to start when two of their tokens 
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
 | `SEO_LOG_HASH_KEY` | `openssl rand -hex 32` | seo | — (becomes `SEO_LOG_HASH_KEY_FILE`) |
+| `RR_STORE_CONNECTIONS` (only to connect a store) | the JSON in [Revenue Recovery: connecting a real store](#revenue-recovery-connecting-a-real-store) (references, no secret; setting it is your approval) | detection | — (becomes `RR_STORE_CONNECTIONS_FILE`) |
+| `RR_STORE_SECRET_1` (only to connect a store) | the store's Dev Dashboard app **Client ID** (or a legacy custom app's Admin API access token) | detection | — (becomes `/run/zbm-secrets/rr-store-secret-1-file`) |
+| `RR_STORE_SECRET_2` (only to connect a store) | the store's Dev Dashboard app **Client secret** (leave unset for a legacy token) | detection | — (becomes `/run/zbm-secrets/rr-store-secret-2-file`) |
 | `SEO_PERPLEXITY_API_KEY` (optional) | Perplexity → API settings (only when you turn the engine on; set the four budgets too) | seo | — |
 | `FIN_STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys → create a **restricted** key (test mode first: `rk_test_...`) with write on Checkout Sessions and read on PaymentIntents, Charges, Disputes, Payouts and Balance | finance | — (becomes `FIN_STRIPE_SECRET_KEY_FILE`) |
 | `FIN_STRIPE_WEBHOOK_SECRET` | Stripe, when you register the webhook endpoint (step 7): the endpoint's signing secret, `whsec_...` | finance | — (becomes `FIN_STRIPE_WEBHOOK_SECRET_FILE`) |
@@ -189,20 +201,28 @@ be a different value: several services refuse to start when two of their tokens 
 the ledger and the orchestrator cannot rate-limit guesses, so the token's entropy is the defence.
 
 **`LEDGER_CALLERS`** (per-caller ledger tokens with department scopes; services/ledger-rust/README.md). It holds the
-SHA-256 of each caller's token, never a token. Run this on your machine; it asks for the four ledger tokens without
+SHA-256 of each caller's token, never a token. Run this on your machine; it asks for the five ledger tokens without
 echoing them and prints the JSON to paste into the ledger's `LEDGER_CALLERS`:
 
 ```bash
 python3 - <<'PY'
 import getpass, hashlib, json
-callers = [("orchestrator-go", "revenue_recovery"), ("finance-py", "finance"), ("legal-py", "legal"), ("seo-py", "seo")]
+callers = [("orchestrator-go", "revenue_recovery", "LEDGER_SERVICE_TOKEN you set on orchestrator"),
+           ("finance-py", "finance", "LEDGER_SERVICE_TOKEN you set on finance"),
+           ("legal-py", "legal", "LEDGER_SERVICE_TOKEN you set on legal"),
+           ("seo-py", "seo", "LEDGER_SERVICE_TOKEN you set on seo"),
+           ("detection-py", "rr_store", "DETECTION_LEDGER_TOKEN you set on detection")]
 out = {}
-for name, department in callers:
-    token = getpass.getpass(f"LEDGER_SERVICE_TOKEN you set on {name.split('-')[0]}: ")
+for name, department, prompt in callers:
+    token = getpass.getpass(prompt + ": ")
     out[hashlib.sha256(token.encode()).hexdigest()] = {"caller": name, "departments": [department], "scope": "write"}
 print(json.dumps(out))
 PY
 ```
+
+detection-py's caller writes **only** `rr_store` (its store-read evidence, ADR 0020 section 7); it neither writes nor
+reads `revenue_recovery` (the orchestrator's findings). Adding it to a ledger already running: re-run the script with
+all five tokens, replace `LEDGER_CALLERS`, redeploy the ledger, then detection.
 
 With `LEDGER_CALLERS` set and no `LEDGER_SERVICE_TOKEN` on the ledger, there is no shared token: each service can
 write and read only its own department. Rotating one: new token on the service, re-run the script, update
@@ -249,10 +269,16 @@ otherwise. Examples are never real values.
 | `ZBM_SERVICE_TOKEN` | yes | yes | (you) | the token the orchestrator presents; refuses to start without it |
 | `DETECTION_SWITCH_INTERVAL_SECONDS` | no | no | `0.001` | launcher tuning, 0.0001..0.05 |
 | `DETECTION_DRAINS_MAX` | no | no | `512` | concurrent graceful-close drains |
-| `DETECTION_LEDGER_URL`, `DETECTION_LEDGER_TOKEN_FILE` | no | token yes | unset | the Revenue Recovery store connector's evidence ledger (ADR 0020; `*_FILE` rules). Unset: every store read fails closed (record-first). Not mapped by this deploy (see "How `*_FILE` secrets map onto Railway") |
-| `RR_STORE_CONNECTIONS_FILE` | no | file holds secret references | unset (**this deploy: unset — the store connector is OFF**) | the approved Shopify connections (ADR 0020 section 3). Unset: no client is registered, every `/stores/*` call answers `NOT_CONNECTED` and no outbound call is made. The store connector is **not wired on Railway yet** (see "Open items and risks") |
-| `RR_STORE_READS_DISABLED` | no | no | unset | Revenue Recovery kill switch 1: `1` stops every store sync and snapshot (`STORE_READS_DISABLED`). Read when detection starts, so changing it needs a redeploy of detection |
-| `RR_STORE_KILL_SWITCH_FILE` | no | no | unset | Revenue Recovery kill switch 2: a path; while a file exists there every sync stops (a running one at its next page) and held snapshots are not served, with no restart. On Railway it needs a path the service can write (a volume, or `railway ssh` + `touch`); detection has no volume in this deploy |
+| `RAILWAY_RUN_UID` | yes | no | `0` (IaC) | the entrypoint starts as root only to write the secret files below, then runs detection as uid 10001 (no volume) |
+| `DETECTION_LEDGER_URL` | for store reads | no | `http://ledger.railway.internal:8090` (IaC) | the Revenue Recovery store connector's evidence ledger (ADR 0020 section 7) |
+| `DETECTION_LEDGER_TOKEN` | for store reads | yes | (you; `openssl rand -hex 32`) | detection's own ledger caller token (`rr_store` in `LEDGER_CALLERS`); becomes `DETECTION_LEDGER_TOKEN_FILE`. Unset: every store read fails closed (`LEDGER_UNAVAILABLE`, record-first). Read once when detection starts |
+| `DETECTION_LEDGER_TOKEN_FILE` | — | — | (set by the entrypoint) | do not set yourself on Railway (setting both refuses the start) |
+| `RR_STORE_CONNECTIONS` | to connect a store | references only | unset (**the store connector is OFF until you set it**) | the approved Shopify connections JSON (ADR 0020 section 3); setting it is your approval. Becomes `RR_STORE_CONNECTIONS_FILE`. Unset: no client is registered, every `/stores/*` call answers `NOT_CONNECTED` and no outbound call is made. Changing it redeploys detection (held snapshots are dropped) |
+| `RR_STORE_CONNECTIONS_FILE` | — | — | (set by the entrypoint) | do not set yourself on Railway (setting both refuses the start); off Railway, the path of the connections file |
+| `RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` | to connect a store | yes | (you) | the two credential slots, written to `/run/zbm-secrets/rr-store-secret-1-file` and `/run/zbm-secrets/rr-store-secret-2-file`, which the connections JSON names. One store at a time on Railway: one Dev Dashboard app's client ID + secret, or one legacy token in slot 1 |
+| `RR_STORE_SECRET_1_FILE`, `RR_STORE_SECRET_2_FILE` | — | — | (set by the entrypoint) | not read by detection-py; the paths are fixed and named in the connections JSON |
+| `RR_STORE_READS_DISABLED` | no | no | unset | Revenue Recovery kill switch 1: `1` stops every store sync and snapshot (`STORE_READS_DISABLED`). Read when detection starts, so changing it needs a redeploy of detection. The stop that survives a restart |
+| `RR_STORE_KILL_SWITCH_FILE` | no | no | unset; set it to `/tmp/rr-store.KILL` | Revenue Recovery kill switch 2: a path; while a file exists there every sync stops (a running one at its next page) and held snapshots are not served, with no restart. Stop at once: `railway ssh` into detection, `touch /tmp/rr-store.KILL`. detection has no volume, so the file is gone after a restart or redeploy: use kill switch 1 for a stop that must survive one |
 | `RR_STORE_MAX_CONCURRENT_SYNCS` | no | no | `2` | store syncs at once across all clients, clamped 1..16 |
 | `RR_STORE_SYNC_DEADLINE_SECONDS` | no | no | `120` | hard deadline per sync, clamped 10..600 |
 
@@ -435,7 +461,7 @@ Do these in order. Nothing in the repository creates anything; each step is your
    because a preserved variable has no value yet (behaviour not documented by Railway; see Open items), stop there and
    bring the exact message back.
 5. **Secrets.** Generate each value from [Secrets](#secrets) on your machine and set it in the Railway dashboard on the
-   service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the four ledger tokens first, then
+   service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the five ledger tokens first, then
    `LEDGER_CALLERS` on the ledger with the script. When Railway offers to deploy the changes, wait until step 8.
 6. **Public domains.** orchestrator → Settings → Networking → Generate Domain (port 8080). stripe-gateway → Generate
    Domain (port 8470). No other service gets a public domain.
@@ -541,6 +567,93 @@ Railway yet. CI covers the command against a loopback service (seo-py tests and 
 Railway's, as documented above. If the tunnel is refused, do not fall back to a hand-made request. Stop, and treat
 delivery as blocked.
 
+### Revenue Recovery: connecting a real store
+
+AEGIS A2 H-2: before this, detection on Railway could not read any store (no ledger credential, no connections file,
+no credential file). The image now maps four `*_FILE` settings from sealed variables (table in "How `*_FILE` secrets
+map onto Railway"), with `RAILWAY_RUN_UID=0` so the entrypoint writes them as root and runs detection as uid 10001.
+Detection keeps no state, so it has **no volume**: the connections JSON and the credentials are sealed Railway
+variables, not files on a backed-up disk. Every one of them unset = the connector stays off (`NOT_CONNECTED`; with
+connections but no ledger token, `LEDGER_UNAVAILABLE` before any byte goes to Shopify).
+
+How the pieces fit (ADR 0020): you call detection's `POST /stores/sync` (private: SSH tunnel), which records
+`rr_store_read_requested` on the ledger, reads the store's orders read-only and keeps a minimised snapshot **in
+memory**; then the orchestrator's `POST /revenue-recovery/scan?client_id=<id>` (public, bearer) takes that snapshot,
+runs the agents and records the findings on the ledger; the dashboard's Revenue Recovery view reads them back through
+`GET /revenue-recovery/findings`. That route returns **every** client's findings (AEGIS A2 M-1): the dashboard must
+stay Andre-only.
+
+**Shopify side (your own store; a client's store follows ADR 0020 section 9).** Admin-created ("legacy") custom apps
+can no longer be created (shopify.dev, "Generate access tokens for custom apps in the Shopify admin": "You can no longer
+create new admin-created custom apps"; existing ones keep working). The documented path for your own store is a Dev
+Dashboard app with the client credentials grant (shopify.dev, "Create apps using the Dev Dashboard" and "Authenticate
+an app for stores in your organization"):
+
+1. Open the Dev Dashboard (dev.shopify.com) and create an app (the "Dev Dashboard" path, not Shopify CLI).
+2. On its **Versions** page create a version: Scopes = **`read_orders` only** (no other scope, no `write_` scope:
+   detection refuses the credential with `STORE_TOKEN_EXCESS_SCOPE` / `STORE_TOKEN_HAS_WRITE_SCOPE`, before reading
+   any order). The App URL can stay the default. Select **Release**. (`read_orders` covers orders from the last 60
+   days, which is the default `lookback_days`.)
+3. **Install** it: Installs card → Install app → pick your store → Install, approving the scope.
+4. Check that the store is in the **same organization** as the app: Dev Dashboard → the store must be listed there.
+   Shopify: "Owning a store or having it installed doesn't automatically place it in your org"; if it is not, the token
+   exchange fails (`shop_not_permitted`) and detection answers `STORE_AUTH_REFUSED`. UNVERIFIED how a live merchant
+   store (not a dev store) is placed in the app's organization; if this check fails, stop and bring it back.
+5. App settings → copy the **Client ID** and **Client secret** into your password manager. Never into chat or email.
+
+(An existing legacy custom app with **only** `read_orders` also works: its Admin API access token goes in
+`RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` stays unset, and the credential is `{"kind": "static_token", "token_file":
+"/run/zbm-secrets/rr-store-secret-1-file"}`. Do not reuse an app that has any other scope.)
+
+**Railway side.** Merge first: `railway config plan` must show on `detection` the new `RAILWAY_RUN_UID=0`,
+`DETECTION_LEDGER_URL` and the preserved `DETECTION_LEDGER_TOKEN`, `RR_STORE_CONNECTIONS`, `RR_STORE_SECRET_1`,
+`RR_STORE_SECRET_2`; then `railway config apply`.
+
+6. Generate `DETECTION_LEDGER_TOKEN` (`openssl rand -hex 32`) and set it on **detection** (Sealed).
+7. Re-run the `LEDGER_CALLERS` script (five tokens) and replace `LEDGER_CALLERS` on the **ledger**; redeploy the ledger
+   and wait for it to be Active.
+8. On **detection** set (Sealed): `RR_STORE_SECRET_1` = Client ID, `RR_STORE_SECRET_2` = Client secret, and
+   `RR_STORE_KILL_SWITCH_FILE` = `/tmp/rr-store.KILL`.
+9. On **detection** set `RR_STORE_CONNECTIONS` (this is your approval; `shop` is the store's `*.myshopify.com` handle,
+   not its custom domain; `client_id` is the id you will scan under):
+   ```json
+   {"version": 1, "connections": [{"client_id": "pca", "platform": "shopify",
+     "shop": "<handle>.myshopify.com",
+     "credential": {"kind": "client_credentials",
+                    "client_id_file": "/run/zbm-secrets/rr-store-secret-1-file",
+                    "client_secret_file": "/run/zbm-secrets/rr-store-secret-2-file"},
+     "approval": {"approved_by": "andre", "approved_on": "<YYYY-MM-DD>", "approval_ref": "pca-rr-test-1"},
+     "budget": {"syncs_per_day": 4, "max_orders": 1000, "lookback_days": 60, "snapshot_max_age_hours": 24}}]}
+   ```
+   Deploy detection. Its log must show it listening, and no `REFUSING TO START` line.
+10. Open a tunnel to detection (as for seo above) and leave it running:
+    `ssh -N -L 127.0.0.1:18000:127.0.0.1:8000 <detection-service-instance-id>@ssh.railway.com`.
+    Put `Authorization: Bearer <ZBM_SERVICE_TOKEN>` in a file only you can read (`chmod 600`), e.g. `~/zbm/det.hdr`,
+    so the token is never on a command line.
+11. Status (no outbound call): `curl -sS -H @$HOME/zbm/det.hdr http://127.0.0.1:18000/stores/pca/status` →
+    `"connected": true`, `"kill_switch": false`.
+12. Sync (the only call that reaches Shopify): `curl -sS -X POST -H @$HOME/zbm/det.hdr -H 'Content-Type:
+    application/json' -d '{"client_id": "pca"}' http://127.0.0.1:18000/stores/sync` → 200 with `snapshot_id`,
+    `orders_read`, `orders_analysed`. A reason code instead: `LEDGER_UNAVAILABLE` (step 6/7), `STORE_AUTH_REFUSED`
+    (step 4/5), `STORE_SCOPE_MISSING` / `STORE_TOKEN_EXCESS_SCOPE` (step 2), `STORE_CONFIG_INVALID` (step 9 JSON),
+    `STORE_CREDENTIAL_UNREADABLE` (step 8).
+13. Scan, within 24 hours of the sync and with no detection redeploy in between (the snapshot lives in memory):
+    with `Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>` in `~/zbm/orch.hdr`,
+    `curl -sS -X POST -H @$HOME/zbm/orch.hdr "https://<orchestrator domain>/revenue-recovery/scan?client_id=pca" -o
+    ~/zbm/scan-pca.json`.
+14. Read it: the dashboard's Revenue Recovery view (findings recorded on the ledger), and the client-style report
+    from a checkout of the commit detection runs: `python3 services/detection-py/devtools/rr_report.py
+    ~/zbm/scan-pca.json --md ~/zbm/report-pca.md`. Review before anyone else sees it.
+
+What the first run can show: only the discount-misuse check is fed by Shopify orders (seven agents are NOT COVERED by
+this source), and orders with automatic discounts or refunds are left out (ADR 0020 Limitations). A store with few or
+no orders in the window gives few or no findings; the run still proves the path (ledger records, scopes, snapshot).
+
+**Stop / disconnect.** At once: `railway ssh` into detection, `touch /tmp/rr-store.KILL` (gone after a restart).
+Durable: `RR_STORE_READS_DISABLED=1` on detection (redeploys it). Disconnect: delete `RR_STORE_CONNECTIONS`,
+`RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` (redeploys detection; snapshots are dropped), then uninstall the app in the
+store or rotate its client secret in the Dev Dashboard.
+
 ## Smoke-test checklist
 
 Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the stripe-gateway's domain.
@@ -623,15 +736,15 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   tenant; a fixture scan is refused unless `ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1` (never set here; L-2).
 - **No scheduler is deployed.** Finance's daily reconciliation and Stripe-session job, Legal's daily jobs and seo's
   schedule tick need a `scheduler` caller (and a cron service) that this deploy does not include.
-- **Detection's store connector is not wired on Railway** (ADR 0020, golive-rr): the orchestrator's scans still use
-  the fixture pool; the Shopify store connector needs `DETECTION_LEDGER_URL` and `DETECTION_LEDGER_TOKEN_FILE`, which
-  this deploy does not set (detection runs non-root and maps no secret file), so every store read fails closed with
-  `LEDGER_UNAVAILABLE`. Wiring it needs a ledger caller for detection in `LEDGER_CALLERS`, a `--secret-file` in the
-  detection image and `RAILWAY_RUN_UID=0` for it. This deploy also sets no `RR_STORE_CONNECTIONS_FILE`, so no store
-  is registered and the connector is **off**: every `/stores/*` call is `NOT_CONNECTED`. When it is wired, the two
-  stops are `RR_STORE_READS_DISABLED=1` (then redeploy detection) and the file named by `RR_STORE_KILL_SWITCH_FILE`
-  (takes effect at once; needs a writable path, which detection does not have today). Both are in the detection
-  table above.
+- **Detection's store connector on Railway: wired, off until Andre connects a store** (AEGIS A2 H-2). The image maps
+  four secret files and detection runs with `RAILWAY_RUN_UID=0` (root only in the entrypoint); the IaC sets
+  `DETECTION_LEDGER_URL`. Not yet observed on Railway: the first real sync is the first end-to-end check of the
+  connector against Shopify (ADR 0020 Limitations), and the detection secret-file start is checked by running the
+  entrypoint locally, not by the CI smoke (which starts detection as uid 10001 with no store values). Residual risks:
+  `GET /revenue-recovery/findings` returns every client's findings (AEGIS A2 M-1), so the dashboard must stay
+  Andre-only; one store at a time (two credential slots); a connections or credential change redeploys detection and
+  drops held snapshots; the per-day sync budget resets on restart (in memory, ADR 0020); the approval is the
+  `RR_STORE_CONNECTIONS` variable itself, so anyone who can edit detection's variables can register a store.
 - **Search Console is NOT_CONNECTED on Railway** (golive-gsc): the seo image maps no `SEO_GSC_SERVICE_ACCOUNT_FILE`.
   Turning it on needs `--secret-file SEO_GSC_SERVICE_ACCOUNT_FILE` in the seo image (the value variable would be
   `SEO_GSC_SERVICE_ACCOUNT`, the JSON key) and Andre's steps in ADR 0017 "Search Console".

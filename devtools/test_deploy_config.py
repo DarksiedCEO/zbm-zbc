@@ -8,9 +8,10 @@ it in the `hygiene-static` job, and `python -m pytest devtools/` collects it:
   variable the service's code actually reads;
 - the Python images install only deploy/python/requirements.lock.txt, with hashes, and its direct pins are the
   services' requirements.txt pins without pytest;
-- .railway/railway.ts deploys exactly these Dockerfiles, one replica each, RAILWAY_RUN_UID=0 on every service with a
-  volume, a daily backup schedule on every volume, a PORT equal to the port the CI smoke uses, and holds no secret
-  value (secrets are preserve() or references);
+- .railway/railway.ts deploys exactly these Dockerfiles, one replica each, RAILWAY_RUN_UID=0 on exactly the services
+  with a volume or a --secret-file in their image, a daily backup schedule on every volume, a PORT equal to the port
+  the CI smoke uses, every --secret-file value variable declared preserve(), and holds no secret value (secrets are
+  preserve() or references);
 - the CI job builds every one of them and the smoke script covers every one;
 - docs/deploy/railway.md names every environment variable the deployed code reads (Python, Go, Rust and the
   dashboard), every variable the IaC sets, and every Dockerfile.
@@ -75,6 +76,17 @@ def instructions(path: Path) -> list[str]:
 def entrypoint_args(path: Path) -> list[str]:
     line = next(i for i in instructions(path) if i.upper().startswith("ENTRYPOINT"))
     return ast.literal_eval(line.split(None, 1)[1])
+
+
+def secret_files(path: Path) -> list[str]:
+    """The *_FILE settings an image's entrypoint writes from Railway variables (--secret-file NAME)."""
+    args = entrypoint_args(path)
+    return [args[i + 1] for i, a in enumerate(args[:args.index("--")]) if a == "--secret-file"]
+
+
+def entrypoint_secret_path(file_var: str) -> str:
+    """Where zbm-entrypoint writes --secret-file NAME: $SECRET_DIR/ + NAME lower-cased with _ as - (write_secret)."""
+    return "/run/zbm-secrets/" + file_var.lower().replace("_", "-")
 
 
 def code_variables() -> dict[str, set[str]]:
@@ -212,8 +224,34 @@ class RailwayIac(unittest.TestCase):
                 self.assertIn(f'dockerfile("{df}"', b)
                 self.assertIn(f'PORT: "{port}"', b)
                 self.assertEqual(f'"/data":' in b, has_volume)
-                self.assertEqual('RAILWAY_RUN_UID: "0"' in b, has_volume, "RAILWAY_RUN_UID=0 exactly with a volume")
+                # root at start is needed to hand a root-owned volume to uid 10001 and to write a secret file the
+                # service cannot read back from /proc/1/environ (AEGIS L3); nowhere else (AEGIS A2 H-2: detection)
+                needs_root = has_volume or bool(secret_files(REPO / df))
+                self.assertEqual('RAILWAY_RUN_UID: "0"' in b, needs_root,
+                                 "RAILWAY_RUN_UID=0 exactly with a volume or a --secret-file")
                 self.assertIn('deploy("/health", ' + ("true" if has_volume else "false") + ")", b)
+
+    def test_every_secret_file_value_variable_is_preserved(self):
+        # an image's --secret-file NAME_FILE is written from the Railway variable NAME; a plan that dropped NAME would
+        # delete the secret on the next apply (and with it the feature: a ledger caller, a Stripe key, a store)
+        for svc, (df, *_r) in SERVICES.items():
+            for file_var in secret_files(REPO / df):
+                with self.subTest(service=svc, variable=file_var):
+                    self.assertTrue(file_var.endswith("_FILE"))
+                    self.assertTrue(self._declared_preserved(svc, file_var[:-len("_FILE")]),
+                                    f"{file_var[:-5]} is not preserve() on {svc}")
+
+    def test_detection_store_connector_is_wired_without_a_volume(self):
+        # AEGIS A2 H-2: the store connector needs its ledger token, the connections JSON and the credential files; the
+        # service keeps no state (snapshots in memory), so no volume and no secret on a backed-up disk
+        want = ["DETECTION_LEDGER_TOKEN_FILE", "RR_STORE_CONNECTIONS_FILE", "RR_STORE_SECRET_1_FILE",
+                "RR_STORE_SECRET_2_FILE"]
+        self.assertEqual(secret_files(REPO / SERVICES["detection"][0]), want)
+        b = self.blocks["detection"]
+        self.assertIn('DETECTION_LEDGER_URL: PRIVATE("ledger", 8090),', b)
+        self.assertNotIn("volumeMounts", b)
+        self.assertNotRegex(re.sub(r"//[^\n]*", "", b), r"\bRR_STORE_CONNECTIONS_FILE\s*:|\bDETECTION_LEDGER_TOKEN_FILE\s*:",
+                            "the *_FILE settings are the entrypoint's; setting one next to its value refuses the start")
 
     def test_every_volume_has_a_daily_backup_schedule(self):
         # AEGIS L6: each service with a volume goes through withDailyBackups (backupSchedules ["DAILY"] on its attachment)
@@ -366,6 +404,18 @@ class Runbook(unittest.TestCase):
             args = entrypoint_args(REPO / df)
             names |= {args[i + 1][:-len("_FILE")] for i, a in enumerate(args) if a == "--secret-file"}
         self.assertEqual(sorted(n for n in names if not self.named(n)), [])
+
+    def test_the_store_credential_paths_in_the_runbook_are_where_the_entrypoint_writes(self):
+        # the connections JSON names the credential files by path; a path that drifted from the entrypoint's naming
+        # rule would make every sync STORE_CREDENTIAL_UNREADABLE
+        entry = ENTRY.read_text()
+        self.assertIn("SECRET_DIR=/run/zbm-secrets\n", entry)
+        self.assertIn("""target="$SECRET_DIR/$(printf '%s' "$file_var" | tr 'A-Z_' 'a-z-')\"""", entry)
+        section = self.doc.split("### Revenue Recovery: connecting a real store\n", 1)[1].split("\n## ", 1)[0]
+        for slot in ("RR_STORE_SECRET_1_FILE", "RR_STORE_SECRET_2_FILE"):
+            with self.subTest(slot=slot):
+                self.assertIn(f'"{entrypoint_secret_path(slot)}"', section)
+        self.assertIn(entrypoint_secret_path("RR_STORE_CONNECTIONS_FILE"), self.doc)
 
     def test_every_dockerfile_and_the_unverified_xff_note(self):
         for df, *_r in SERVICES.values():
