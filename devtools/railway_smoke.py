@@ -10,7 +10,8 @@ each image this starts a container the way Railway does — PORT set, the produc
   - started without its required token, the container exits 1 with the SERVICE's own refusal naming that token
     (fail closed for the right reason: an entrypoint refusal or a crash does not pass).
 
-The ledger starts first and stays up on a private Docker network (alias `ledger`): finance-py, legal-py and seo-py
+The ledger starts first and stays up on a private Docker network (alias `ledger`): finance-py, legal-py, seo-py and
+compliance-py
 refuse to start with a data directory and no reachable ledger (their local log is verified against it), which is also
 the startup order on Railway.
 
@@ -61,6 +62,9 @@ def images() -> dict[str, tuple[int, dict[str, str], str, str]]:
                      "RuntimeError: LEGAL_SERVICE_TOKEN is not set"),
         "seo-py": (8500, {"SEO_BIND_ADDR": "::", "SEO_SERVICE_TOKEN": tok(), "SEO_LOG_HASH_KEY": tok(), **LEDGER_ENV},
                    "SEO_SERVICE_TOKEN", "RuntimeError: SEO_SERVICE_TOKEN must be set"),
+        # ADR 0024: Compliance (38) with its data directory on the image's /data and the ledger reachable
+        "compliance-py": (8380, {"COMPLIANCE_BIND_ADDR": "::", "COMPLIANCE_SERVICE_TOKEN": tok(), **LEDGER_ENV},
+                          "COMPLIANCE_SERVICE_TOKEN", "RuntimeError: COMPLIANCE_SERVICE_TOKEN is not set"),
         "orchestrator": (8080, {"ORCHESTRATOR_BIND_ADDR": "[::]", "ORCHESTRATOR_SERVICE_TOKEN": tok(),
                                 "DETECTION_SERVICE_TOKEN": tok(), "DETECTION_SERVICE_URL": "http://detection.invalid:8000",
                                 **LEDGER_ENV}, "ORCHESTRATOR_SERVICE_TOKEN", "ORCHESTRATOR_SERVICE_TOKEN is not set"),
