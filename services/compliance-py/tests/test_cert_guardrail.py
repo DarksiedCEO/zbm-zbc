@@ -216,7 +216,8 @@ def test_persistence_replays_versions_rulings_and_holds(tmp_path):
     assert y.get("/health").json() == {"status": "ok", "service": "compliance-py", "register_version_in_force": 1,
                                        "in_memory": False, "seed_pinned": True, "production": True,
                                        "reconcile_mode": False, "reconcile_required": False,   # AEGIS N15-1
-                                       "log_write_fault": False}                                # bug sweep C
+                                       "log_write_fault": False,                                 # bug sweep C
+                                       "scheduler": {"enabled": False}}                         # AEGIS F-4
     assert y.get(f"/compliance/v1/rulings/{a['ruling_id']}").json()["allowed"] is True
     assert y.svc.control_state["C-11"]["last_result"] == "pass"
 

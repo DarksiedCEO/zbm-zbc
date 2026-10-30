@@ -1805,11 +1805,17 @@ class ComplianceService:
                 "events": rows[offset:offset + limit], "total": len(rows), "counts": counts, "limit": limit,
                 "offset": offset, "log_lines": len(raw), "epoch": epoch}
 
+    # the in-process scheduler (api.main attaches it when COMPLIANCE_SCHEDULER_ENABLED=1); its liveness is in /health
+    scheduler: Any = None
+
     def health(self) -> dict:
-        return {"status": "ok", "service": "compliance-py", "register_version_in_force": self.version_number,
+        sched = self.scheduler.liveness() if self.scheduler is not None else {"enabled": False}
+        healthy = sched.get("healthy", True)
+        return {"status": "ok" if healthy else "unhealthy", "service": "compliance-py",
+                "register_version_in_force": self.version_number,
                 "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
-                "log_write_fault": bool(self.log.fault)}
+                "log_write_fault": bool(self.log.fault), "scheduler": sched}
 
 
 def canonical_jurisdiction(j: Optional[dict]) -> Optional[str]:

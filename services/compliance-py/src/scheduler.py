@@ -11,8 +11,14 @@ or a ``scheduler`` token held anywhere.
 - After each run the readiness summary is printed (expired rules and the gates they affect).
 
 Each run is the same service call the ``scheduler`` caller would make over HTTP, recorded on the ledger first; a run
-that fails (ledger down, a 409 while a watcher cycle runs) is printed and retried at the next tick. Nothing here can
-open a gate: it only produces the evidence the gates require.
+that fails (ledger down, a 409 while a watcher cycle runs) is printed and retried at the next 60 s tick (not at the
+next interval). Any other error in a tick (the readiness summary, the clock...) is caught and printed too: the
+thread never dies of an exception (AEGIS F-4).
+
+Liveness (``liveness()``, reported in ``GET /health``): alive (the thread runs), the last successful controls and
+watcher runs, the last error. Unhealthy when the thread is dead, or when the last successful controls run (or the
+start, before the first one) is older than two intervals: ``/health`` then answers 503. Nothing here can open a gate:
+it only produces the evidence the gates require.
 """
 
 from __future__ import annotations
@@ -35,6 +41,8 @@ class Scheduler:
         self.watcher, self.clock, self.out = watcher, clock or SystemClock(), out
         self.last_controls: Optional[datetime] = None
         self.last_watcher: Optional[datetime] = None
+        self.started_at: Optional[datetime] = None
+        self.last_error: Optional[dict] = None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -52,13 +60,27 @@ class Scheduler:
         try:
             fn(f"sched-{name}-{now.strftime('%Y%m%dT%H%M%SZ')}")
         except Exception as exc:  # noqa: BLE001 - printed (type and reason only) and retried at the next tick
-            self.out(f"compliance scheduler: {name} run failed at {iso(now)} "
-                     f"({type(exc).__name__}: {str(getattr(exc, 'reason', ''))[:200]}); retried at the next tick")
+            self._failed(name, now, exc)
             return False
         self.out(f"compliance scheduler: {name} run at {iso(now)}")
         return True
 
+    def _failed(self, where: str, now: datetime, exc: BaseException) -> None:
+        err = f"{type(exc).__name__}: {str(getattr(exc, 'reason', '') or '')[:200]}".rstrip(": ")
+        self.last_error = {"at": iso(now), "where": where, "error": err}
+        self.out(f"compliance scheduler: {where} run failed at {iso(now)} ({err}); retried at the next tick")
+
     def tick(self) -> None:
+        """One pass; never raises (AEGIS F-4): an error anywhere is recorded and printed, the thread goes on."""
+        try:
+            self._tick()
+        except Exception as exc:  # noqa: BLE001
+            now = self._now()
+            err = f"{type(exc).__name__}: {str(getattr(exc, 'reason', '') or exc)[:200]}"
+            self.last_error = {"at": iso(now), "where": "tick", "error": err}
+            self.out(f"compliance scheduler: tick failed at {iso(now)} ({err}); retried at the next tick")
+
+    def _tick(self) -> None:
         ran = False
         if self.due_controls() and self._run("controls", self.svc.run_internal_controls):
             self.last_controls = self._now()
@@ -75,7 +97,27 @@ class Scheduler:
             self.tick()
             self._stop.wait(TICK_S)
 
+    def alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def liveness(self) -> dict:
+        now = self._now()
+        ref = self.last_controls or self.started_at
+        reason = None
+        if not self.alive():
+            reason = "scheduler thread is not running"
+        elif ref is not None and now - ref > 2 * self.interval:
+            reason = (f"no successful controls run for more than two intervals "
+                      f"({int(2 * self.interval.total_seconds())} s)")
+        return {"enabled": True, "alive": self.alive(), "healthy": reason is None, "reason": reason,
+                "interval_s": int(self.interval.total_seconds()),
+                "started_at": iso(self.started_at) if self.started_at else None,
+                "last_controls_ok_at": iso(self.last_controls) if self.last_controls else None,
+                "last_watcher_ok_at": iso(self.last_watcher) if self.last_watcher else None,
+                "last_error": self.last_error}
+
     def start(self) -> "Scheduler":
+        self.started_at = self._now()
         self._thread = threading.Thread(target=self._loop, name="compliance-scheduler", daemon=True)
         self._thread.start()
         self.out(f"compliance scheduler: controls every {int(self.interval.total_seconds())} s; Change Watcher "
