@@ -8,6 +8,7 @@ refunds of unspent deposits (F6), Andre's journal corrections, the month-end clo
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Optional
 
 import chart as C
@@ -19,7 +20,7 @@ from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from intelligences import i07_reconciliation as I7
 from ledger import derived_id
-from ports import LegalAnswer
+from ports import ClientActivation, LegalAnswer, RegisterParameters
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha, sha_text
 from textguard import banned_words_in
 
@@ -30,6 +31,9 @@ CLOSE_TASKS = ("preclose_review", "subledgers_closed", "balance_sheet_recs", "re
 def legal_version(v) -> str:
     """Legal (37) numbers versions ``major.minor``; a whole number recorded before Legal was wired means ``n.0``."""
     return f"{v}.0" if isinstance(v, int) else str(v)
+
+
+_RATIO = Decimal("0.0001")
 
 
 class BooksMixin:
@@ -256,6 +260,23 @@ class BooksMixin:
                                                    "client"))
         return out
 
+    def _activation(self, g: Gather, client_id: str) -> ClientActivation:
+        """ADR 0024: Compliance's CURRENT activation decision for the client (fail closed: anything else is a NO)."""
+        cmp_ = self.ports.compliance
+        ans = g.call("compliance_38", "client_activation", (client_id,), lambda: cmp_.client_activation(client_id),
+                     ClientActivation(False))
+        return ans if isinstance(ans, ClientActivation) else ClientActivation(False)
+
+    @staticmethod
+    def _activation_reasons(act: ClientActivation) -> list[dict]:
+        if not act.available:
+            return [R.item("DEPENDENCY_UNAVAILABLE:compliance_38",
+                           "Compliance (38) cannot confirm the client's activation: refused")]
+        if not act.allowed:
+            first = act.reasons[0] if act.reasons else "no current ALLOW"
+            return [R.item("COMPLIANCE_NOT_ACTIVATED", f"no current Compliance activation for this client: {first}")]
+        return []
+
     def _fundable_reasons(self, g: Gather, campaign_id: str) -> list[dict]:
         prof = self.db["profiles"].get(campaign_id)
         if prof is None:
@@ -269,6 +290,7 @@ class BooksMixin:
     def billing_readiness(self, principal: str, client_id: str) -> dict:
         g = Gather(self, f"bready|{client_id}|{iso(self._now())}", "intel_02_receivables", client_id)
         unmet = list(self._rules_reasons())
+        unmet += self._activation_reasons(self._activation(g, client_id))     # ADR 0024: the Compliance hard gate
         prof = self.db["client_profiles"].get(client_id)
         if prof is None:
             unmet.append(R.item("LEGAL_NOT_CURRENT", "no Andre-approved client billing profile (entity, payment method, "
@@ -289,6 +311,103 @@ class BooksMixin:
         return {"client_id": client_id, "allowed": not unmet, "unmet": R.lines(unmet), "reasons": unmet,
                 "detail": "billing ready" if not unmet else f"{len(unmet)} requirement(s) unmet",
                 "rules_pinned": self.rules_pinned, "ledger_event_ids": g.events}
+
+    # ================================================================== ADR 0024: per-jurisdiction sales (nexus)
+
+    NEXUS_ROW = "US-SALESTAX-NEXUS"
+    NEXUS_MEMO = "MEMO-FIN-CQ-11-2026-10-30"
+
+    @staticmethod
+    def _nexus_thresholds(params: Optional[dict]) -> Optional[dict]:
+        """The Compliance row's parameters as {alert_ratio, default, overrides}; None when anything is malformed."""
+        try:
+            if not isinstance(params["alert_ratio"], str):
+                raise ValueError("ratio")
+            ratio = Decimal(params["alert_ratio"])
+
+            def one(t: dict) -> dict:
+                tx = t.get("transactions")
+                if tx is not None and (isinstance(tx, bool) or not isinstance(tx, int) or tx < 1):
+                    raise ValueError("transactions")
+                sales = M.D(t["sales_usd"])
+                if sales <= 0:
+                    raise ValueError("sales")
+                return {"sales_usd": sales, "transactions": tx, "source": t.get("source")}
+            default = one(params["default"])
+            default["source"] = params.get("default_source")
+            overrides = {k: one(v) for k, v in (params.get("overrides") or {}).items()}
+            if not (0 < ratio <= 1):
+                raise ValueError("ratio")
+            return {"alert_ratio": ratio, "default": default, "overrides": overrides}
+        except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError, M.MoneyError):
+            return None
+
+    def sales_tax_nexus(self) -> dict:
+        """Invoiced totals per client state/territory (as Compliance recorded it at invoice approval) for the trailing
+        12 months and the calendar year, each against its economic-nexus threshold from Compliance's register row
+        US-SALESTAX-NEXUS; a jurisdiction at or above ``alert_ratio`` (75%) of either limit is FLAGGED (memo
+        MEMO-FIN-CQ-11-2026-10-30: register before the threshold is crossed). Counted: invoices issued, paid or
+        returned (never drafts or voids), by ``issued_at``. Thresholds unreadable -> every jurisdiction with sales is
+        flagged; invoices with no recorded jurisdiction are their own flagged bucket ``unknown``."""
+        now = self._now()
+        today = now.date()
+        g = Gather(self, f"nexus|{iso(now)}", "intel_02_receivables", "sales-tax-nexus")
+        cmp_ = self.ports.compliance
+        ans = g.call("compliance_38", "row_parameters", (self.NEXUS_ROW,),
+                     lambda: cmp_.row_parameters(self.NEXUS_ROW), RegisterParameters(False, self.NEXUS_ROW))
+        th = self._nexus_thresholds(ans.parameters) if isinstance(ans, RegisterParameters) and ans.available else None
+        with self.lock:
+            invoices = [dict(v) for v in self.db["invoices"].values()
+                        if v["status"] in ("issued", "paid", "returned") and v.get("issued_at")]
+        starts = {"trailing_12_months": today - timedelta(days=365), "calendar_year": date(today.year, 1, 1)}
+        buckets: dict[str, dict] = {}
+        with M.money_context():
+            for inv in invoices:
+                day = parse_iso(inv["issued_at"]).date()
+                code = inv.get("client_jurisdiction") or "unknown"
+                b = buckets.setdefault(code, {p: {"sales": M.D("0.00"), "transactions": 0} for p in starts})
+                for period, start in starts.items():
+                    if start <= day <= today:
+                        b[period]["sales"] += M.D(inv["total"])
+                        b[period]["transactions"] += 1
+            rows, flagged = [], []
+            for code in sorted(buckets):
+                b = buckets[code]
+                t = (th["overrides"].get(code) or th["default"]) if th else None
+                item = {"jurisdiction": code, "threshold": None if t is None else
+                        {"sales_usd": M.fmt(t["sales_usd"]), "transactions": t["transactions"], "source": t["source"]},
+                        "flag_reasons": []}
+                for period in starts:
+                    v = b[period]
+                    rec = {"sales_usd": M.fmt(v["sales"]), "transactions": v["transactions"],
+                           "sales_ratio": None, "transactions_ratio": None}
+                    if t is not None:
+                        rec["sales_ratio"] = f"{(v['sales'] / t['sales_usd']).quantize(_RATIO):f}"
+                        if v["sales"] >= th["alert_ratio"] * t["sales_usd"]:
+                            item["flag_reasons"].append(f"{period}: sales at {rec['sales_ratio']} of the threshold")
+                        if t["transactions"]:
+                            ratio = Decimal(v["transactions"]) / Decimal(t["transactions"])
+                            rec["transactions_ratio"] = f"{ratio.quantize(_RATIO):f}"
+                            if ratio >= th["alert_ratio"]:
+                                item["flag_reasons"].append(f"{period}: {v['transactions']} transactions, at "
+                                                            f"{rec['transactions_ratio']} of the threshold")
+                    item[period] = rec
+                if code == "unknown":
+                    item["flag_reasons"].append("invoices with no recorded client jurisdiction (issued before ADR 0024"
+                                                " or without a Compliance activation): assign them by hand")
+                elif t is None and any(b[p]["transactions"] for p in starts):
+                    item["flag_reasons"].append("thresholds unavailable from Compliance: review by hand")
+                item["flagged"] = bool(item["flag_reasons"])
+                if item["flagged"]:
+                    flagged.append(code)
+                rows.append(item)
+        return {"as_of": iso(now), "memo_ref": self.NEXUS_MEMO,
+                "thresholds": {"available": th is not None, "obligation_id": self.NEXUS_ROW,
+                               "row_status": ans.effective_status if isinstance(ans, RegisterParameters) else "unknown",
+                               "source_url": ans.source_url if isinstance(ans, RegisterParameters) else None,
+                               "alert_ratio": f"{th['alert_ratio']:f}" if th else None},
+                "periods": {p: {"from": d.isoformat(), "to": today.isoformat()} for p, d in starts.items()},
+                "jurisdictions": rows, "flagged": flagged, "ledger_event_ids": g.events}
 
     def budget_view(self, campaign_id: str) -> dict:
         with self.lock:
@@ -373,7 +492,11 @@ class BooksMixin:
             raise NotFound("no such invoice")
         g = Gather(self, f"invdec|{request_id}", "intel_02_receivables", invoice_id)
         reasons = list(self._rules_reasons())
+        act = ClientActivation(False)
         if body["decision"] == "approve" and not reasons:
+            # ADR 0024: no invoice is approved or issued without Compliance's current ALLOW for the client
+            act = self._activation(g, inv["client_id"])
+            reasons += self._activation_reasons(act)
             reasons += self._legal_reasons(g, inv["legal_ref"], "contract (MSA/order form/SOW)", inv["client_id"],
                                            inv["entity"])
             reasons += [R.item("TAX_TREATMENT_UNVERIFIED", "sales-tax treatment (FIN-CQ-11) is unverified",
@@ -403,7 +526,9 @@ class BooksMixin:
                     op.put("media_buys", buy["buy_id"], {**buy, "status": "cancelled", "cancelled_at": iso(now)})
             else:
                 due = (now.date() + timedelta(days=inv["due_days"])).isoformat()
-                new = {**inv, "status": "issued", "approved_by": "andre", "issued_at": iso(now), "due_at": due}
+                new = {**inv, "status": "issued", "approved_by": "andre", "issued_at": iso(now), "due_at": due,
+                       # ADR 0024: where the client is (Compliance's activation), for the per-jurisdiction totals
+                       "client_jurisdiction": act.jurisdiction, "compliance_ruling_id": act.ruling_id}
                 op.record(derived_id("inva", invoice_id), "invoice_approved", "andre", invoice_id,
                           {"invoice_id": invoice_id, "content_sha256": inv["content_sha256"]}, "Andre approved an invoice")
                 op.record(derived_id("invi", invoice_id), "invoice_issued", "intel_02_receivables", invoice_id,

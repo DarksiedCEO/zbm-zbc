@@ -154,6 +154,15 @@ class StripeMixin:
             return ent["response"]
         self.require_rules()
         with self._stripe_turn("checkout"):
+            with self.lock:
+                inv0 = self.db["invoices"].get(invoice_id)
+            if inv0 is not None:
+                # ADR 0024: a client is paid from only while Compliance's activation is a current ALLOW (checked
+                # before any page is made or handed back; a client whose activation lapsed cannot pay)
+                ga = Gather(self, f"chk-act|{principal}|{request_id}", ACTOR, invoice_id)
+                act_reasons = self._activation_reasons(self._activation(ga, inv0["client_id"]))
+                if act_reasons:
+                    raise Refused("no Stripe checkout for this invoice", act_reasons, ledger_event_ids=ga.events)
             now = self._now()
             with self.lock:
                 inv = self.db["invoices"].get(invoice_id)

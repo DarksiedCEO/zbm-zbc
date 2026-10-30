@@ -25,8 +25,8 @@ from pydantic import (AfterValidator, BaseModel, ConfigDict, Field, StringConstr
                       model_validator)
 
 from clock import parse_iso
-from ports import (BankBalance, BankTransfer, Certification, ClawbackPage, ComplianceRuling, GLAnswer, HoldsAnswer,
-                   JurisdictionAnswer, LegalAnswer, RailAccount, RailBalance, RailLookup, RailSubmit, RegisterRow,
+from ports import (BankBalance, BankTransfer, Certification, ClawbackPage, ClientActivation, ComplianceRuling, GLAnswer,
+                   HoldsAnswer, JurisdictionAnswer, LegalAnswer, RegisterParameters, RailAccount, RailBalance, RailLookup, RailSubmit, RegisterRow,
                    SanctionsAnswer, StripeCheckout, StripeDispute, StripePayment, StripePayout, StripeSession,
                    TaxAgentAnswer, TierAnswer)
 
@@ -127,6 +127,26 @@ class RegisterRowM(_S):
 class JurisdictionAnswerM(_S):
     available: Literal[True]
     status: Literal["operate", "conditional", "blocked", "unknown"]
+    reason: Reason = ""
+
+
+class ClientActivationM(_S):
+    """ADR 0024: a client's current activation decision at Compliance."""
+    available: Literal[True]
+    allowed: bool
+    ruling_id: Optional[IdS] = None
+    jurisdiction: Optional[Annotated[str, StringConstraints(pattern=r"^(US-[A-Z]{2}|PR|GU)$")]] = None
+    reasons: tuple[Annotated[str, StringConstraints(max_length=200)], ...] = Field(default=(), max_length=21)
+    reason: Reason = ""
+
+
+class RegisterParametersM(_S):
+    """ADR 0024: one register row's parameters (the economic-nexus thresholds); read, never applied as a pass."""
+    available: Literal[True]
+    obligation_id: OID
+    effective_status: Literal["verified", "unverified", "expired", "superseded"]
+    parameters: Optional[dict] = None
+    source_url: Optional[Annotated[str, StringConstraints(max_length=2048)]] = None
     reason: Reason = ""
 
 
@@ -306,6 +326,7 @@ MODELS: dict[type, type[BaseModel]] = {
     Certification: CertificationM, ClawbackPage: ClawbackPageM, ComplianceRuling: ComplianceRulingM,
     HoldsAnswer: HoldsAnswerM, SanctionsAnswer: SanctionsAnswerM, RegisterRow: RegisterRowM,
     JurisdictionAnswer: JurisdictionAnswerM, TierAnswer: TierAnswerM, LegalAnswer: LegalAnswerM,
+    ClientActivation: ClientActivationM, RegisterParameters: RegisterParametersM,
     RailAccount: RailAccountM, RailSubmit: RailSubmitM, RailLookup: RailLookupM, RailBalance: BalanceM,
     BankBalance: BalanceM, BankTransfer: BankTransferM, TaxAgentAnswer: TaxAgentAnswerM, GLAnswer: GLAnswerM,
     StripeCheckout: StripeCheckoutM, StripeSession: StripeSessionM, StripePayment: StripePaymentM,
