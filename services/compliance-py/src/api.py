@@ -582,9 +582,21 @@ def _app_from_env() -> FastAPI:
 app = _app_from_env()
 
 
+def start_scheduler(svc: ComplianceService, settings) -> Optional["scheduler.Scheduler"]:
+    """ADR 0024 / AEGIS F-4: start the in-process scheduler when enabled and attach it to the service (its liveness is
+    in /health). A dead scheduler thread ends the process non-zero (Railway ON_FAILURE restarts it): ``os._exit``,
+    because sys.exit in a thread ends only that thread."""
+    import scheduler
+    if not settings.scheduler_enabled:
+        return None
+    svc.scheduler = scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s,
+                                        watcher=settings.watcher_enabled, clock=svc.clock,
+                                        on_thread_death=os._exit).start()
+    return svc.scheduler
+
+
 def main() -> None:
     import readiness as readiness_mod
-    import scheduler
     import serve
 
     svc: ComplianceService = app.state.service
@@ -592,12 +604,7 @@ def main() -> None:
     # ADR 0024: the operator sees, at every start, exactly which rules are expired and which gates they affect
     for line in readiness_mod.summary_lines(svc.readiness()):
         print(line, flush=True)
-    if settings.scheduler_enabled:
-        # AEGIS F-4: a dead scheduler thread ends the process non-zero (Railway ON_FAILURE restarts it); os._exit,
-        # because sys.exit in a thread ends only that thread
-        svc.scheduler = scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s,
-                                            watcher=settings.watcher_enabled, clock=svc.clock,
-                                            on_thread_death=os._exit).start()
+    start_scheduler(svc, settings)
     host = os.environ.get("COMPLIANCE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("COMPLIANCE_PORT", "8380"))
     serve.run(app, host=host, port=port)

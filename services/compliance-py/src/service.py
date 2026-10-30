@@ -47,7 +47,7 @@ from register import Version, effective_status, rows_sha256, sha256_text
 from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
-SPEC_SEED_SHA256 = "a15a57922e9e8ab11edb0b21ed2fb22bcab3d5a4db468f6232dabf607ede143c"   # seed v2 (ADR 0024)
+SPEC_SEED_SHA256 = "93f6fe1fe95f3683ebd255fdebe45043faaca6cfd71dee3a47b2417fb6b0b018"   # seed v2 (ADR 0024)
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
 REGISTER_PAGE = 100
@@ -96,8 +96,18 @@ RULE_FINGERPRINT_FIELDS = ("id", "jurisdiction", "obligation", "gates", "applies
                            "effective_date")
 
 
+# AEGIS r2 N-1: the service-area rows' parameters (HR-05 operate..., HR-07 refuse) are left out of the fingerprint:
+# activation_status re-checks the client's jurisdiction and targets against them on every call (_area_now), so a
+# widening or a re-ordering refuses nobody and a narrowing refuses exactly the clients it takes out. Their other
+# fields (the obligation text, gates, check...) stay in.
+AREA_ROWS = ("HR-05", "HR-07")
+
+
 def rule_fingerprint(row: dict) -> str:
-    return _sha({k: row.get(k) for k in RULE_FINGERPRINT_FIELDS})
+    fields = {k: row.get(k) for k in RULE_FINGERPRINT_FIELDS}
+    if row.get("id") in AREA_ROWS:
+        fields.pop("parameters")
+    return _sha(fields)
 
 
 class PortCalls:

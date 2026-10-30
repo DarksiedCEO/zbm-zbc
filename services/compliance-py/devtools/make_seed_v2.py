@@ -51,10 +51,10 @@ hr07.update(
     title="Jurisdictions: refuse everything outside the service area",
     obligation=("Refuse every jurisdiction that is not in HR-05's service area (default deny, parameters.unlisted), "
                 "and in every case the OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, "
-                "Crimea incl. Sevastopol (UA-43, UA-40) and the so-called DNR/LNR regions (UA-14, UA-09)) and, by "
-                "founder choice as in US-OFAC-04, the other occupied regions of Ukraine, Zaporizhzhia (UA-23) and "
-                "Kherson (UA-65); all are listed in parameters.refuse. Canada, the United Kingdom, France, every EU "
-                "member and every other country are refused."),
+                "Crimea incl. Sevastopol (UA-43, UA-40) and the so-called DNR/LNR regions (UA-14, UA-09)); "
+                "Zaporizhzhia (UA-23) and Kherson (UA-65) are included under US-OFAC-04's \"other occupied regions\" "
+                "reading, pending Andre's approval of seed v2. All are listed in parameters.refuse. Canada, the "
+                "United Kingdom, France, every EU member and every other country are refused."),
     effective_date=None,
     effective_note="Founder service-area decision, Oct 30, 2026; replaces the Sep 26, 2026 jurisdiction ruling.",
     verified_at=DECIDED,
@@ -87,8 +87,10 @@ new_rows = [
                        "stays current for parameters.rescreen_after_days after the search. Any potential match or "
                        "match refuses (never investigated around). Basis: US-OFAC-01 (strict liability, screen "
                        "before onboarding) and OFAC's risk-based Framework."),
-        "source_url": "https://sanctionssearch.ofac.treas.gov/",
-        "additional_sources": ["https://ofac.treasury.gov/faqs/topic/1501",
+        # a house rule has no source_url (i01_register: else Andre could never amend it); the OFAC pages it rests
+        # on are kept as additional sources (AEGIS r2 follow-up)
+        "source_url": None,
+        "additional_sources": ["https://sanctionssearch.ofac.treas.gov/", "https://ofac.treasury.gov/faqs/topic/1501",
                                "https://ofac.treasury.gov/media/16331/download?inline"],
         "source_kind": "house-rule",
         "source_quality": "founder",
