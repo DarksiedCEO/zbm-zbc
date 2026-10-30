@@ -32,7 +32,7 @@ the check.
 | `python:ooh-py` | 212 | pytest collection | — |
 | `python:sales-py` | 874 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
-| `python:seo-py` | 1180 | pytest collection | — |
+| `python:seo-py` | 1202 | pytest collection | — |
 | `python:service-py` | 815 | pytest collection | — |
 | `python:verification-py` | 350 | pytest collection | — |
 | `rust:ledger-rust` | 159 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |
