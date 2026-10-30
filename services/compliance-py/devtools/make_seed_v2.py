@@ -49,12 +49,13 @@ hr05.update(
 hr07 = by["HR-07"]
 hr07.update(
     title="Jurisdictions: refuse everything outside the service area",
-    obligation=("Refuse every jurisdiction that is not in HR-05's service area (default deny, parameters.unlisted), "
-                "and in every case the OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, "
-                "Crimea incl. Sevastopol (UA-43, UA-40) and the so-called DNR/LNR regions (UA-14, UA-09)); "
-                "Zaporizhzhia (UA-23) and Kherson (UA-65) are included under US-OFAC-04's \"other occupied regions\" "
-                "reading, pending Andre's approval of seed v2. All are listed in parameters.refuse. Canada, the "
-                "United Kingdom, France, every EU member and every other country are refused."),
+    obligation=("The service area is the United States only: HR-05's allow-list (the 50 states, DC and the five "
+                "inhabited territories); every other place is refused because it is outside the United States "
+                "(default deny, parameters.unlisted), including Canada, the United Kingdom, France and every EU "
+                "member. As defence in depth, parameters.refuse also lists the places under OFAC comprehensive "
+                "sanctions (US-OFAC-04): Cuba, Iran, North Korea, Crimea incl. Sevastopol (UA-43, UA-40), the "
+                "so-called DNR/LNR regions (UA-14, UA-09), and Zaporizhzhia (UA-23) and Kherson (UA-65), included "
+                "under US-OFAC-04's \"other occupied regions\" reading."),
     effective_date=None,
     effective_note="Founder service-area decision, Oct 30, 2026; replaces the Sep 26, 2026 jurisdiction ruling.",
     verified_at=DECIDED,

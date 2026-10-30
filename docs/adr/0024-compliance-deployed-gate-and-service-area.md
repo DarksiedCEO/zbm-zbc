@@ -18,7 +18,8 @@ Andre's decisions (Oct 30, 2026):
    District of Columbia, Puerto Rico, Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands
    (founder update of 12:51 the same day, which widened the morning's 50 states + DC + PR + GU). The US Minor Outlying
    Islands (uninhabited) are left out: the model does not need them for completeness. Everything else is refused
-   (Canada, the UK, France, the EU, every other country). Plus OFAC: refuse anyone on the SDN/consolidated lists.
+   because it is not the US (Canada, the UK, France, the EU, every other country). Plus OFAC: refuse anyone on the
+   SDN/consolidated lists.
 2. Compliance deployed on Railway as a **private** service, with its volume (daily backups), ledger connection and
    tokens declared but never stored; a daily scheduled job; gates closed until C-11 has passed.
 3. **Gates, fail closed.** Client activation for SEO paid audits and Revenue Recovery store connections needs a current
@@ -26,6 +27,9 @@ Andre's decisions (Oct 30, 2026):
    Finance invoice approval/issuance and billing readiness need it too; payouts stay blocked.
 4. The client's jurisdiction is recorded at activation; rule expiry is reported, never silently extended; a
    per-jurisdiction sales report flags 75% of each economic-nexus threshold (memo MEMO-FIN-CQ-11-2026-10-30).
+5. **Re-screen every 90 days** (founder decision of Oct 30, 2026, 16:04): a client's activation stays current for 90
+   days after its recorded OFAC search (HR-14 `rescreen_after_days`); after that the client is re-screened and
+   re-activated before it is served again.
 
 ## Decisions
 
@@ -36,10 +40,12 @@ Andre's decisions (Oct 30, 2026):
 it by its own two-letter code). `US` itself is not in the list, so a subdivision is never admitted by its country
 prefix (`US-UM` is refused although `US-CA` is operate); a bare `US` person still needs a state
 (`region_required`). A campaign *target* may be the bare country `US` (`HR-05 parameters.target_countries`), meaning the
-allowed states. `HR-07 parameters.refuse` names the OFAC comprehensively sanctioned jurisdictions (cited with
-US-OFAC-04: Cuba, Iran, North Korea, Crimea and Sevastopol `UA-43`/`UA-40`, the so-called DNR/LNR `UA-14`/`UA-09`);
-Zaporizhzhia `UA-23` and Kherson `UA-65` are included under US-OFAC-04's "other occupied regions" reading, pending
-Andre's approval of seed v2 (they have been in `refuse` since seed v1). HR-07's text names each code (AEGIS F-13, r2 N-7). `unlisted: refuse` refuses everything else. The resolver ignores the parameters of a `superseded` row.
+allowed states. The service area is the United States only: every place outside it is refused because it is not the
+US (`HR-07 parameters.unlisted: refuse`), not by any further choice. As defence in depth, `HR-07 parameters.refuse`
+also lists the places under OFAC comprehensive sanctions (US-OFAC-04): Cuba, Iran, North Korea, Crimea and Sevastopol
+`UA-43`/`UA-40`, the so-called DNR/LNR `UA-14`/`UA-09`, and Zaporizhzhia `UA-23` and Kherson `UA-65` under
+US-OFAC-04's "other occupied regions" reading. HR-07's text names each code and gives that sanctions basis (AEGIS F-13,
+r2 N-7; founder decision of Oct 30, 2026, 16:04). The resolver ignores the parameters of a `superseded` row.
 
 Changing the area is a register amendment of HR-05 that only Andre approves (test:
 `test_payout_for_foreign_and_entity_payees` adds `GB` by an approved amendment). The area applies to every lane:
@@ -62,7 +68,8 @@ pinned file byte for byte):
   about recipients or outreach (HR-08 no cold outbound to Canada, CA-CASL) and CQ-07 (it still blocks a marketplace
   flag).
 - **HR-14** (house rule, activation, lanes `client`, `zbc_brand`): Andre's OFAC search recorded, no match, SDN and
-  Consolidated, no older than `max_age_days` (30); an activation stays current for `rescreen_after_days` (90). Like
+  Consolidated, no older than `max_age_days` (30); an activation stays current for `rescreen_after_days` (90, Andre's
+  decision 5 above). Like
   every house rule it has no `source_url` (the OFAC pages are `additional_sources`), so Andre can amend it.
 - **HR-15** (house rule, activation, lane `client`): Legal (37) confirms each `required_doc_ids` (`client_msa`)
   version the client accepted is Legal's current version with the same hash, and the acceptance is this client's

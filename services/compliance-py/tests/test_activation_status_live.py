@@ -425,9 +425,11 @@ def test_health_never_shows_exception_text(monkeypatch):
 
 def test_hr07_cites_us_ofac_04s_reading_for_ua23_and_ua65():
     hr07 = next(r for r in H.SEED_ROWS if r["id"] == "HR-07")
-    assert "founder choice" not in hr07["obligation"]
-    assert "included under US-OFAC-04's \"other occupied regions\" reading, pending Andre's approval of seed v2" \
-        in hr07["obligation"]
+    # founder decision, Oct 30 16:04: the service area is the US only; HR-07 is a sanctions refuse list, not a choice
+    text = hr07["obligation"]
+    assert "founder" not in text.lower() and "pending" not in text.lower() and "andre" not in text.lower()
+    assert "United States only" in text and "defence in depth" in text
+    assert "included under US-OFAC-04's \"other occupied regions\" reading" in text
 
 
 def test_every_house_rule_has_no_source_url_so_andre_can_amend_it():

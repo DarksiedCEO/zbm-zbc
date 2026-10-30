@@ -113,7 +113,7 @@ round 14"):
 
 `seed/compliance_obligations_seed.json` — seed v2 (ADR 0024: the founder decisions of
 Oct 30, 2026 written into the spec's seed v1, whose SHA-256 `4e3821d0…584d` it records), SHA-256
-`93f6fe1fe95f3683ebd255fdebe45043faaca6cfd71dee3a47b2417fb6b0b018`, checked at every start.
+`bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5`, checked at every start.
 
 ## Routes
 
