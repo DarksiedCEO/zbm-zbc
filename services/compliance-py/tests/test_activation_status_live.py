@@ -271,3 +271,14 @@ class _FakeThread:
 def iso_(dt):
     from clock import iso
     return iso(dt)
+
+
+# --- F-13: HR-07's text names what its parameters refuse -----------------------------------------------------------------
+
+def test_hr07_text_names_every_region_it_refuses():
+    hr07 = next(r for r in H.SEED_ROWS if r["id"] == "HR-07")
+    for code in hr07["parameters"]["refuse"]:
+        if "-" in code:
+            assert f"{code}" in hr07["obligation"], code
+    for name in ("Cuba", "Iran", "North Korea", "Crimea", "Sevastopol", "DNR/LNR", "Zaporizhzhia", "Kherson"):
+        assert name in hr07["obligation"], name
