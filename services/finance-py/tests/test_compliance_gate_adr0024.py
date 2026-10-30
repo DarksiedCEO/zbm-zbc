@@ -416,7 +416,9 @@ def test_a_refused_checkout_closes_at_most_the_cap_and_the_job_closes_the_rest(t
     hr.f["compliance"].activations = {"zbm-client-7": {"allowed": False, "reasons": ["x"]}}
     calls_before = sum(1 for c in hr.f["compliance"].calls if c[0] == "client_activation")
     r = hr.post(f"/fin/v1/invoices/{invs[0]['invoice_id']}/stripe-checkout", {"request_id": rid()}, caller="onboarding")
-    assert r.status_code == 409 and "Stripe did not confirm 1 open page(s)" in r.text
+    # AEGIS r3 N-13: pages over the cap are "not attempted", never reported as unconfirmed by Stripe
+    assert r.status_code == 409 and "1 open page(s) of this client not attempted (cap of 2 per request)" in r.text
+    assert "Stripe did not confirm" not in r.text
     assert sum(1 for c in hr.f["compliance"].calls if c[0] == "client_activation") == calls_before + 1
     statuses = [hr.svc.db["stripe_sessions"][p]["status"] for p in pages]
     assert statuses.count("expired") == 2 and statuses.count("open") == 1
@@ -446,3 +448,90 @@ def test_the_job_reads_compliance_for_at_most_the_cap_rotating_through_clients(t
     hr.f["compliance"].calls.clear()
     run()
     assert [c[1] for c in hr.f["compliance"].calls if c[0] == "client_activation"] == ["c-c", "c-a"]
+
+
+# --- AEGIS r3 N-9: a page made while the client turned REFUSE is closed at once; a payment from a refused client -----
+# --- is booked truthfully but held ---------------------------------------------------------------------------------
+
+def _flip_after(hr, n_allowed, then):
+    """Compliance answers ALLOW for the first ``n_allowed`` reads, then ``then`` ("refuse" or "down")."""
+    fc = hr.f["compliance"]
+    real = fc.client_activation
+    seen = {"n": 0}
+
+    def answer(client_id):
+        seen["n"] += 1
+        if seen["n"] <= n_allowed:
+            return real(client_id)
+        if then == "down":
+            fc.activation_available = False
+        else:
+            fc.activations = {client_id: {"allowed": False, "reasons": ["hold open: sanctions_match"]}}
+        return real(client_id)
+
+    fc.client_activation = answer
+
+
+@pytest.mark.parametrize("then", ["refuse", "down"])
+def test_a_page_made_while_the_client_turned_refused_or_unknown_is_closed_at_once(tmp_path, then):
+    from test_stripe_incoming import rr_invoice
+    hr = _stripe_hr(tmp_path)
+    inv = rr_invoice(hr)
+    _flip_after(hr, 1, then)                      # the gate read says ALLOW; the read after the page is made does not
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()}, caller="onboarding")
+    assert r.status_code == 409, r.text
+    assert ("COMPLIANCE_NOT_ACTIVATED" if then == "refuse" else "DEPENDENCY_UNAVAILABLE:compliance_38") in r.text
+    sessions = list(hr.svc.db["stripe_sessions"].values())
+    assert len(sessions) == 1 and sessions[0]["status"] == "expired"
+    assert hr.sim.sessions[sessions[0]["session_id"]]["status"] == "expired"
+
+
+def test_a_payment_from_a_client_refused_at_booking_is_booked_and_held(tmp_path):
+    from test_stripe_incoming import rr_invoice, sent
+    hr = _stripe_hr(tmp_path)
+    inv = rr_invoice(hr)
+    cs = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                       caller="onboarding"))["checkout"]
+    pi = hr.sim.pay(cs["session_id"])
+    hr.f["compliance"].activations = {"zbm-client-7": {"allowed": False, "reasons": ["hold open: sanctions_match"]}}
+    assert sent(hr, "checkout.session.completed", {"id": cs["session_id"], "object": "checkout.session"})["status"] \
+        == "matched_held_compliance"
+    i = hr.svc.db["invoices"][inv["invoice_id"]]
+    assert i["status"] == "paid"                                       # the money was received: recorded truthfully
+    assert i["held_compliance"]["reason"].startswith("no current Compliance activation")
+    bid = i["held_compliance"]["break_id"]
+    b = hr.svc.db["breaks"][bid]
+    assert b["owner"] == "andre" and b["leg"] == "compliance_hold" and b["status"] == "open" and "refund" in b["note"]
+    rct = next(r for r in hr.svc.db["receipts"].values() if r["stripe"]["payment_intent"] == pi)
+    assert rct["status"] == "matched"
+    assert not [c for c in hr.svc.db["client_receipts"].values() if c["invoice_id"] == inv["invoice_id"]]
+
+
+def test_a_payment_booked_while_compliance_is_down_opens_a_break_for_andre(tmp_path):
+    from test_stripe_incoming import rr_invoice, sent
+    hr = _stripe_hr(tmp_path)
+    inv = rr_invoice(hr)
+    cs = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                       caller="onboarding"))["checkout"]
+    hr.sim.pay(cs["session_id"])
+    hr.f["compliance"].activation_available = False
+    assert sent(hr, "checkout.session.completed", {"id": cs["session_id"], "object": "checkout.session"})["status"] \
+        == "matched"
+    assert "held_compliance" not in hr.svc.db["invoices"][inv["invoice_id"]]
+    assert any(b["leg"] == "compliance_unverified" and b["status"] == "open" for b in hr.svc.db["breaks"].values())
+
+
+def test_a_held_media_prepayment_never_pays_the_vendor(tmp_path):
+    from test_media_billing import buy, create, issue, pay_vendor
+    from test_stripe_incoming import sent
+    hr = _stripe_hr(tmp_path)
+    m = create(hr)
+    inv = issue(hr, m["invoice"])
+    cs = hr.ok(hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                       caller="onboarding"))["checkout"]
+    hr.sim.pay(cs["session_id"])
+    hr.f["compliance"].activations = {inv["client_id"]: {"allowed": False, "reasons": ["jurisdiction US-CA is refuse"]}}
+    sent(hr, "checkout.session.completed", {"id": cs["session_id"]})
+    hr.clock.advance(days=4)
+    r = pay_vendor(hr, m["media_buy"]["buy_id"], "10000.00", paid_on="2026-10-06")
+    assert r.status_code == 409 and "Compliance" in r.text, r.text

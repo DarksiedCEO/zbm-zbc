@@ -156,6 +156,10 @@ class MediaMixin:
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "part or all of the client's prepayment was refunded at "
                                                             "Stripe; the vendor is not paid until Andre settles it "
                                                             "(founder M3; sweep X-6)"))
+            held = (self.db["invoices"].get(buy.get("invoice_id")) or {}).get("held_compliance")
+            if held and (self.db["breaks"].get(held.get("break_id")) or {}).get("status") != "resolved":
+                reasons.append(R.item("COLLECT_BEFORE_PAY", "the client paid while Compliance (38) refused it; the "
+                                                            "vendor is not paid while that hold is open (AEGIS r3 N-9)"))
             if buy.get("payment_disputed"):
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "the client disputed the prepayment at Stripe; the vendor "
                                                             "is not paid while that dispute is open (founder M3)"))
