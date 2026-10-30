@@ -101,8 +101,23 @@ func scanID(n int) string { return fmt.Sprintf("%032x", n) }
 // before it is appended, to build broken scans.
 func (c *chain) writeScan(t *testing.T, id string, fs []client.Finding, mutate func([]client.EventInput) []client.EventInput) {
 	t.Helper()
-	evs := []client.EventInput{startedEvent(startedPayload{ScanID: id, ClientID: FixtureClientID,
-		AsOf: "2026-10-06T00:00:00Z", DataSource: "fixtures", Fixture: true, TenantDefaulted: true, Agents: []string{"x"}})}
+	for _, ev := range buildScan(t, id, FixtureClientID, fs, mutate) {
+		c.event(ev)
+	}
+}
+
+// buildScan builds one whole scan of tenant (fixture-pool: the fixture
+// store; any other tenant: a connected store) without appending it, so a test
+// can interleave scans; mutate (optional) edits the list to build broken scans.
+func buildScan(t *testing.T, id, tenant string, fs []client.Finding, mutate func([]client.EventInput) []client.EventInput) []client.EventInput {
+	t.Helper()
+	fixture := tenant == FixtureClientID
+	source := "fixtures"
+	if !fixture {
+		source = "store"
+	}
+	evs := []client.EventInput{startedEvent(startedPayload{ScanID: id, ClientID: tenant,
+		AsOf: "2026-10-06T00:00:00Z", DataSource: source, Fixture: fixture, TenantDefaulted: fixture, Agents: []string{"x"}})}
 	var manifest [][3]string
 	for _, f := range fs {
 		ev, err := findingEvent(id, f)
@@ -120,13 +135,11 @@ func (c *chain) writeScan(t *testing.T, id string, fs []client.Finding, mutate f
 			manifest = append(manifest, [3]string{bev.EventID, bev.PayloadSHA256, bev.Summary})
 		}
 	}
-	evs = append(evs, completedEvent(id, FixtureClientID, len(fs), manifest))
+	evs = append(evs, completedEvent(id, tenant, len(fs), manifest))
 	if mutate != nil {
 		evs = mutate(evs)
 	}
-	for _, ev := range evs {
-		c.event(ev)
-	}
+	return evs
 }
 
 // readRecorded serves entries and a valid verify verdict that counts them

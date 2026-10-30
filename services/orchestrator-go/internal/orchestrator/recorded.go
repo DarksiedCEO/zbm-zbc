@@ -449,41 +449,58 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context, scope FindingsScope
 
 // forClient narrows an all-tenants result to one tenant. Legacy findings
 // carry no tenant, so a tenant's view never includes them.
+//
+// AEGIS tenant review MED-2: the tenant result is built field by field from
+// an explicit allowlist — never copied from r and then patched — so a field
+// added to RecordedFindingsResult later is absent (its zero value) from every
+// tenant view until it is written here on purpose.
+// TestForClient_EveryResultFieldIsClassified fails until that new field is
+// classified there as per-tenant or ledger-wide. Only the four ledger-wide
+// fields are copied as they are (ADR 0021 "Residuals").
 func (r *RecordedFindingsResult) forClient(id string) *RecordedFindingsResult {
-	out := *r
-	out.Scope, out.ScopeClientID = FindingsScopeClient, &id
-	out.Findings = []RecordedFinding{}
+	out := &RecordedFindingsResult{
+		Scope:         FindingsScopeClient,
+		ScopeClientID: &id,
+		// Ledger-wide: they describe the whole ledger, not a tenant.
+		LedgerEntriesTotal: r.LedgerEntriesTotal,
+		LedgerTotalSource:  r.LedgerTotalSource,
+		LedgerEntriesRead:  r.LedgerEntriesRead,
+		LedgerVerify:       r.LedgerVerify,
+		// Per tenant: filtered or recomputed below. Legacy findings carry no
+		// tenant: LegacyFindingEntriesIgnored stays 0 and the list empty.
+		Findings:            []RecordedFinding{},
+		OverlappingClaims:   map[string][]RecordedFinding{},
+		Scans:               []ScanSummary{},
+		ExcludedScans:       []ExcludedScan{},
+		LegacyFindings:      []client.LegacyFindingEntry{},
+		LatestScanUncounted: map[string]string{},
+	}
 	for _, f := range r.Findings {
 		if f.ClientID == id {
 			out.Findings = append(out.Findings, f)
 		}
 	}
-	out.OverlappingClaims = map[string][]RecordedFinding{}
 	for k, fs := range r.OverlappingClaims {
 		if len(fs) > 0 && fs[0].ClientID == id {
 			out.OverlappingClaims[k] = fs
 		}
 	}
-	out.Scans, out.FindingEntriesTotal = []ScanSummary{}, 0
 	for _, s := range r.Scans {
 		if s.ClientID == id {
 			out.Scans = append(out.Scans, s)
 			out.FindingEntriesTotal += s.Findings
 		}
 	}
-	out.ExcludedScans = []ExcludedScan{}
 	for _, s := range r.ExcludedScans {
 		if s.ClientID == id {
 			out.ExcludedScans = append(out.ExcludedScans, s)
 		}
 	}
-	out.LatestScanUncounted = map[string]string{}
 	if v, ok := r.LatestScanUncounted[id]; ok {
 		out.LatestScanUncounted[id] = v
 	}
-	out.LegacyFindingEntriesIgnored, out.LegacyFindings = 0, []client.LegacyFindingEntry{}
 	out.NonLiveDataSource = nonLive(out.Scans)
-	return &out
+	return out
 }
 
 func (o *Orchestrator) recordedFindingsAllTenants(ctx context.Context) (*RecordedFindingsResult, error) {
