@@ -467,8 +467,11 @@ Do these in order. Nothing in the repository creates anything; each step is your
 
    > **Warning — on a project that already exists** (finance and legal already deployed), set BOTH
    > `FIN_ONBOARDING_CALLER_TOKEN` (on finance) and `LEGAL_ONBOARDING_CALLER_TOKEN` (on legal) in Railway **before**
-   > `railway config apply`, otherwise finance and legal refuse to start on their next deploy (their caller maps
-   > reference those two variables; see [Secrets](#secrets)). Always run `railway config plan` first and read it;
+   > `railway config apply`: a service whose onboarding token is missing refuses to start on its next deploy (finance
+   > without the first, legal without the second; their caller maps reference those variables; see [Secrets](#secrets)).
+   > Finance also refuses to start when any reference to another service's token (e.g. `FIN_LEGAL_TOKEN`) is
+   > unresolved. Generate every token with `openssl rand -hex 32` (a hand-made token containing `{{` is refused).
+   > Always run `railway config plan` first and read it;
    > never `apply` without a plan you have read. The same holds for every later re-apply (step 13 included).
 
    ```bash
