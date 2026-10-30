@@ -9,16 +9,19 @@ server dripping bytes cannot stretch it); one retry on a transport error or 5xx 
 cap; a compressed answer is refused; no redirects; any non-200, parse failure or inconsistent answer (a different
 subject id than asked) -> the NEGATIVE answer (unavailable), never a pass.
 
-Not reachable yet (reported in ADR 0009 "changes other services must make"): Compliance has no sanctions *status*
-read for ``finance_31`` (``GET /compliance/v1/sanctions/status`` is proposed), so ``sanctions_status`` answers
-unavailable even when wired; the jurisdiction answer uses ``POST /compliance/v1/jurisdictions/resolve`` only when
-Compliance lets ``finance_31`` call it (today it does not: unavailable).
+ADR 0024 (Oct 30, 2026): ``sanctions_status`` reads ``GET /compliance/v1/sanctions/status`` and ``jurisdiction``
+calls ``POST /compliance/v1/jurisdictions/resolve`` (both open to ``finance_31``); they answered "unavailable" by a
+hard-coded stub before, so a wired Finance could never pass a payout's OFAC or jurisdiction gate. Payouts stay
+blocked for their other gates. ``client_activation`` reads a client's current activation decision (invoice approval
+and billing readiness need a current ALLOW); ``row_parameters`` reads one register row's parameters (the
+economic-nexus thresholds).
 """
 
 from __future__ import annotations
 
 import json
 import re
+import secrets
 import threading
 import time
 from datetime import datetime, timezone
@@ -28,8 +31,8 @@ import httpx
 
 from clock import parse_iso
 
-from ports import (Certification, ClawbackPage, ComplianceRuling, HoldsAnswer, JurisdictionAnswer, LegalAnswer,
-                   RegisterRow, SanctionsAnswer)
+from ports import (Certification, ClawbackPage, ClientActivation, ComplianceRuling, HoldsAnswer, JurisdictionAnswer,
+                   LegalAnswer, RegisterParameters, RegisterRow, SanctionsAnswer)
 
 TIMEOUT_S = 10.0
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -39,6 +42,7 @@ _LEGAL_DOC = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _LEGAL_VERSION = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}")
 _LEGAL_ACC = re.compile(r"lg-[a-z]{3}-[0-9A-Z]{26}")
 _SHA = re.compile(r"[0-9a-f]{64}")
+_JURIS = re.compile(r"US-[A-Z]{2}|PR|GU")      # ADR 0024: the service area's codes as Compliance reports them
 
 
 def _run_bounded(fn, seconds: float):
@@ -61,10 +65,11 @@ def _run_bounded(fn, seconds: float):
 
 
 def _exchange(method: str, url: str, headers: dict, transport, remaining: float, cancel: threading.Event,
-              params: Optional[dict] = None):
+              params: Optional[dict] = None, json_body: Optional[dict] = None):
     try:
         with httpx.Client(timeout=httpx.Timeout(max(0.01, remaining)), transport=transport, follow_redirects=False) as c:
-            with c.stream(method, url, headers={**headers, "Accept-Encoding": "identity"}, params=params) as resp:
+            with c.stream(method, url, headers={**headers, "Accept-Encoding": "identity"}, params=params,
+                          json=json_body) as resp:
                 enc = resp.headers.get("content-encoding", "identity").strip().lower()
                 if enc not in ("", "identity"):
                     return "error", "encoded answer", None
@@ -97,14 +102,21 @@ class _Base:
 
     def _get(self, path: str, params: Optional[dict] = None) -> Optional[object]:
         """The parsed JSON of a 200 answer, or None (negative) on anything else."""
+        return self._call("GET", path, params, None)
+
+    def _post(self, path: str, body: dict) -> Optional[object]:
+        """ADR 0024: an idempotent read-style POST (a fixed request_id makes the retry the same request)."""
+        return self._call("POST", path, None, body)
+
+    def _call(self, method: str, path: str, params: Optional[dict], body: Optional[dict]) -> Optional[object]:
         deadline = time.monotonic() + self._timeout
         url = f"{self._base}{path}"
         for _attempt in range(2):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            res = _run_bounded(lambda cancel, r=remaining: _exchange("GET", url, self._headers, self._transport, r,
-                                                                     cancel, params), remaining)
+            res = _run_bounded(lambda cancel, r=remaining: _exchange(method, url, self._headers, self._transport, r,
+                                                                     cancel, params, body), remaining)
             if res is None:
                 break
             kind, status, body = res
@@ -192,7 +204,20 @@ class HttpCompliance(_Base):
         return HoldsAnswer(True, open_)
 
     def sanctions_status(self, subject_id: str, role: str) -> SanctionsAnswer:
-        return SanctionsAnswer(False, reason="Compliance has no sanctions status read for finance_31 yet")
+        if not _ID.fullmatch(subject_id or "") or role not in ("payee", "owner"):
+            return SanctionsAnswer(False, reason="not a subject id or role")
+        d = self._get("/compliance/v1/sanctions/status", {"subject_id": subject_id, "role": role})
+        try:
+            if not isinstance(d, dict) or d["subject_id"] != subject_id or d["role"] != role:
+                return SanctionsAnswer(False, reason="Compliance's sanctions status was not understood")
+            if d["screen_id"] is None:
+                return SanctionsAnswer(True, reason="no screen on record")
+            if d["result"] not in ("clear", "potential_match", "match"):
+                return SanctionsAnswer(False, reason="no screen result (provider unavailable) or not understood")
+            return SanctionsAnswer(True, d["screen_id"], d["result"], d.get("list_version"), d["list_current"] is True,
+                                   d.get("screened_at"), d["fresh"] is True)
+        except (KeyError, TypeError):
+            return SanctionsAnswer(False, reason="Compliance's sanctions status was not understood")
 
     def row(self, obligation_id: str) -> RegisterRow:
         if not _OID.fullmatch(obligation_id or ""):
@@ -207,7 +232,56 @@ class HttpCompliance(_Base):
             return RegisterRow(False, obligation_id)
 
     def jurisdiction(self, country: str, region: Optional[str]) -> JurisdictionAnswer:
-        return JurisdictionAnswer(False, reason="Compliance's resolve route is not open to finance_31 yet")
+        if not (isinstance(country, str) and re.fullmatch(r"[A-Z]{2}", country)) or not (
+                region is None or (isinstance(region, str) and re.fullmatch(r"[A-Z]{2}-[A-Z0-9]{1,3}", region))):
+            return JurisdictionAnswer(False, reason="not an ISO 3166 code")
+        person = {"declared_country": country, "declared_region": region, "attested": True,
+                  "attestation_ref": "finance-payee-record"}
+        rid = "fin-jur-" + secrets.token_hex(16)   # one id per lookup (its retry reuses it); Compliance records each
+        d = self._post("/compliance/v1/jurisdictions/resolve", {"request_id": rid, "person": person})
+        try:
+            answers = d["answers"] if isinstance(d, dict) else None
+            if not isinstance(answers, list) or len(answers) != 1 or answers[0]["who"] != "person":
+                return JurisdictionAnswer(False, reason="Compliance's resolve answer was not understood")
+            cls = answers[0]["class"]
+        except (KeyError, TypeError):
+            return JurisdictionAnswer(False, reason="Compliance's resolve answer was not understood")
+        status = {"operate": "operate", "conditional": "conditional", "refuse": "blocked"}.get(cls)
+        if status is None:
+            return JurisdictionAnswer(True, "unknown", reason=f"jurisdiction {cls}")
+        return JurisdictionAnswer(True, status)
+
+    def client_activation(self, client_id: str) -> ClientActivation:
+        if not _ID.fullmatch(client_id or ""):
+            return ClientActivation(False, reason="not a client id")
+        d = self._get(f"/compliance/v1/clients/{client_id}/activation")
+        try:
+            if not isinstance(d, dict) or d["client_id"] != client_id or d["lane"] != "client":
+                return ClientActivation(False, reason="Compliance's activation answer was not understood")
+            reasons = tuple(str(x)[:200] for x in (d.get("reasons") or [])[:20])
+            juris = d.get("jurisdiction")
+            if juris is not None and not (isinstance(juris, str) and _JURIS.fullmatch(juris)):
+                return ClientActivation(False, reason="Compliance's activation answer was not understood")
+            allowed = (d["decision"] == "ALLOW" and d["current"] is True and d["seed_pinned"] is True
+                       and isinstance(d["ruling_id"], str) and juris is not None)
+            if d["decision"] == "ALLOW" and d["seed_pinned"] is not True:
+                reasons += ("Compliance is running on an unpinned (non-production) seed",)
+            return ClientActivation(True, allowed, d.get("ruling_id"), juris, reasons)
+        except (KeyError, TypeError):
+            return ClientActivation(False, reason="Compliance's activation answer was not understood")
+
+    def row_parameters(self, obligation_id: str) -> RegisterParameters:
+        if not _OID.fullmatch(obligation_id or ""):
+            return RegisterParameters(False, str(obligation_id)[:40])
+        d = self._get(f"/compliance/v1/register/{obligation_id}")
+        try:
+            row = d["row"]
+            if row["id"] != obligation_id or not isinstance(row["parameters"], dict):
+                return RegisterParameters(False, obligation_id)
+            return RegisterParameters(True, obligation_id, row["effective_status"], row["parameters"],
+                                      row.get("source_url"))
+        except (KeyError, TypeError):
+            return RegisterParameters(False, obligation_id)
 
 
 class HttpLegal(_Base):

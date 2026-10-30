@@ -478,6 +478,12 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def billing_readiness(client_id: str, who: str = Depends(caller("onboarding"))) -> dict:
         return svc.billing_readiness(who, _id(client_id))
 
+    @app.get("/fin/v1/readiness/sales-tax-nexus", dependencies=auth)
+    def sales_tax_nexus(_: str = Depends(andre_or_caller("readiness/sales-tax-nexus", "onboarding"))) -> dict:
+        """ADR 0024 (memo MEMO-FIN-CQ-11-2026-10-30): invoiced totals per client state/territory, trailing 12 months
+        and calendar year, flagged at 75% of each economic-nexus threshold (Compliance row US-SALESTAX-NEXUS)."""
+        return svc.sales_tax_nexus()
+
     # --- receivables ------------------------------------------------------------------------------------------------
 
     @app.post("/fin/v1/invoices", dependencies=auth, status_code=201)
