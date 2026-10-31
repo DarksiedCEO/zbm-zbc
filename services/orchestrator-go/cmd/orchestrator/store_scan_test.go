@@ -122,7 +122,7 @@ func TestStore_ConnectedSnapshotIsScannedAndRecorded(t *testing.T) {
 	if !strings.Contains(started, "src=shopify:"+snapID+" fixture=0 defaulted=0") {
 		t.Fatalf("started record: %q", started)
 	}
-	code, fbody := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings", routeTestToken)
+	code, fbody := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings?scope=all", routeTestToken)
 	if code != 200 || !strings.Contains(fbody, `"non_live_data_source":false`) ||
 		!strings.Contains(fbody, `"data_source":"shopify:`+snapID+`"`) {
 		t.Fatalf("findings view: %d %s", code, fbody)

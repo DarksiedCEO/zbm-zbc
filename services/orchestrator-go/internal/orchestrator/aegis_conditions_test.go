@@ -191,7 +191,7 @@ func TestL3_UnfinishedScansAreLabelled(t *testing.T) {
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
 	o.now = func() time.Time { return now }
 	o.setRunning(scanID(3))
-	res, err := o.RecordedFindings(context.Background())
+	res, err := o.RecordedFindings(context.Background(), FindingsScope{AllTenants: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestLedgerTotal_ComesFromTheLedgerNotFromTheRead(t *testing.T) {
 	} {
 		fl := &fakeLedger{entries: read, verify: tc.verify, head: tc.head}
 		o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-		res, err := o.RecordedFindings(context.Background())
+		res, err := o.RecordedFindings(context.Background(), FindingsScope{AllTenants: true})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -275,13 +275,13 @@ func TestLedgerTotal_BadHeadIsAnErrorAndInvalidChainFallsBackToTheRead(t *testin
 		`{"entries":2,"head_seq":1,"head_hash":"xyz"}`, `{"entries":0,"head_seq":0,"head_hash":"` + strings.Repeat("a", 64) + `"}`, `[]`} {
 		fl := &fakeLedger{entries: `[]`, verify: `{"valid":true,"entries":0}`, head: head}
 		o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-		if _, err := o.RecordedFindings(context.Background()); err == nil {
+		if _, err := o.RecordedFindings(context.Background(), FindingsScope{AllTenants: true}); err == nil {
 			t.Errorf("head %s accepted", head)
 		}
 	}
 	fl := &fakeLedger{entries: `[]`, verify: `{"valid":false,"error":"ChainBroken"}`, verifyCode: 409}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-	res, err := o.RecordedFindings(context.Background())
+	res, err := o.RecordedFindings(context.Background(), FindingsScope{AllTenants: true})
 	if err != nil || res.LedgerTotalSource != "entries_read" || res.LedgerVerify.Valid {
 		t.Fatalf("invalid chain without head: %+v %v", res, err)
 	}
