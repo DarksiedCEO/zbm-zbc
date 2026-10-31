@@ -571,12 +571,18 @@ class BooksMixin:
             self._commit(op)
             return resp
 
-    def get_invoice(self, invoice_id: str) -> dict:
+    def get_invoice(self, invoice_id: str, full: bool = True) -> dict:
+        """``full``: Andre's read. Every other caller sees only ``held`` for a Compliance hold, never its sanctions
+        marker, reason or history (AEGIS r6)."""
         with self.lock:
             inv = self.db["invoices"].get(invoice_id)
             if inv is None:
                 raise NotFound("no such invoice")
-            return dict(inv)
+            if full:
+                return dict(inv)
+            out = {k: v for k, v in inv.items() if k not in ("held_compliance", "held_compliance_history")}
+            out["held"] = bool(inv.get("held_compliance"))
+            return out
 
     def invoice_status(self, invoice_id: str) -> dict:
         """The narrow read for Search & Answer Intelligence (seo_02; AEGIS SEO Wave 3 M2): status, ownership and

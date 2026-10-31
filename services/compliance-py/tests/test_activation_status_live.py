@@ -484,3 +484,38 @@ def test_other_refusals_are_not_sanctions_grounded():
     s = status(h)
     assert s["decision"] == "REFUSE" and s["sanctions_grounded"] is False
     assert status(h, "client-none")["sanctions_grounded"] is False
+
+
+# --- AEGIS r6 N1, N6: sanctions_grounded holds even when the latest ruling itself refused -------------------------------
+
+def test_a_refused_re_activation_with_a_sanctioned_target_is_sanctions_grounded():
+    h = harness()
+    activate(h, "client-web")
+    j = h.rule("client-web", "client", web_client(h, "client-web", targets=("US", "IR"))).json()
+    assert j["allowed"] is False
+    s = status(h)
+    assert s["decision"] == "REFUSE" and s["sanctions_grounded"] is True, s
+
+
+def test_a_client_in_a_sanctioned_country_is_sanctions_grounded():
+    h = harness()
+    j = h.rule("client-cu", "client", web_client(h, "client-cu", country="CU", region=None, targets=("CU",))).json()
+    assert j["allowed"] is False
+    s = status(h, "client-cu")
+    assert s["decision"] == "REFUSE" and s["sanctions_grounded"] is True, s
+
+
+def test_a_refusal_outside_the_area_but_not_sanctioned_is_not_sanctions_grounded():
+    h = harness()
+    h.rule("client-fr", "client", web_client(h, "client-fr", country="FR", region=None, targets=("FR",)))
+    s = status(h, "client-fr")
+    assert s["decision"] == "REFUSE" and s["sanctions_grounded"] is False, s
+
+
+def test_a_non_sanctions_hold_is_not_sanctions_grounded():
+    h = harness()
+    activate(h, "client-web")
+    h.rule("client-web", "zbc_brand", web_client(h, "client-web", network_country_signal="CA"))
+    s = status(h)
+    assert s["decision"] == "REFUSE" and any("jurisdiction_signal_mismatch" in x for x in s["reasons"])
+    assert s["sanctions_grounded"] is False

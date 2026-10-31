@@ -266,8 +266,11 @@ class HttpCompliance(_Base):
                        and isinstance(d["ruling_id"], str) and juris is not None)
             if d["decision"] == "ALLOW" and d["seed_pinned"] is not True:
                 reasons += ("Compliance is running on an unpinned (non-production) seed",)
+            # AEGIS r6 N4: on a refusal, only an explicit false means "not sanctions"; a missing or malformed flag fails
+            # closed to sanctions (Finance then never refunds that payment)
+            sg = d.get("sanctions_grounded")
             return ClientActivation(True, allowed, d.get("ruling_id"), juris, reasons,
-                                    sanctions=d.get("sanctions_grounded") is True and not allowed)
+                                    sanctions=False if allowed else not (sg is False))
         except (KeyError, TypeError):
             return ClientActivation(False, reason="Compliance's activation answer was not understood")
 

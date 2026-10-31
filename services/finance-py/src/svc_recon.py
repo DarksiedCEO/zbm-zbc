@@ -223,12 +223,18 @@ class ReconMixin:
             self._commit(op)
             return resp
 
-    def list_breaks(self) -> dict:
+    def list_breaks(self, full: bool = True) -> dict:
+        """``full``: Andre's read. Other callers see a Compliance hold's break without its note or resolution (which
+        may say the hold rests on sanctions; AEGIS r6)."""
         with self.lock:
             out = []
             today = self._today_la()
             for b in sorted(self.db["breaks"].values(), key=lambda b: b["opened_at"]):
-                out.append({**b, "aging": I7.aging_bucket(date.fromisoformat(b["opened_on"]), today)})
+                row = {**b, "aging": I7.aging_bucket(date.fromisoformat(b["opened_on"]), today)}
+                if not full and b.get("leg") in self.COMPLIANCE_LEGS:
+                    row.update(leg="compliance_hold", note="payment held by Compliance (details: Andre's token)",
+                               resolution=None)
+                out.append(row)
             return {"breaks": out}
 
     def resolve_break(self, request_id: str, break_id: str, body: dict) -> dict:

@@ -294,6 +294,26 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             return "andre"
         return dep
 
+    def andre_or_any_caller(route: str) -> Callable:
+        """AEGIS r6: a read every (general) caller may make, where Andre's token also shows the Compliance sanctions
+        details the others do not see."""
+        def dep(request: Request) -> str:
+            a = request.headers.get(FOUNDER_HEADER)
+            if a is not None:
+                try:
+                    founder.verify(a)
+                except FounderRefused as exc:
+                    svc.founder_refused(route, exc.reason)
+                    raise
+                return "andre"
+            name = callers.identify(request.headers.get(CALLER_HEADER))
+            if name is None:
+                raise Forbidden("caller token missing or not recognised")
+            if name in NAMED_ONLY:
+                raise Forbidden("this caller reaches only the routes that name it")
+            return name
+        return dep
+
     def andre_or_caller(route: str, *allowed: str) -> Callable:
         def dep(request: Request) -> str:
             a = request.headers.get(FOUNDER_HEADER)
@@ -498,8 +518,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.invoice_status(_id(invoice_id))
 
     @app.get("/fin/v1/invoices/{invoice_id}", dependencies=auth)
-    def invoice_get(invoice_id: str, _: str = Depends(caller())) -> dict:
-        return svc.get_invoice(_id(invoice_id))
+    def invoice_get(invoice_id: str, who: str = Depends(andre_or_any_caller("invoices/get"))) -> dict:
+        return svc.get_invoice(_id(invoice_id), full=who == "andre")
 
     @app.post("/fin/v1/invoices/{invoice_id}/decision", dependencies=auth)
     def invoice_decide(invoice_id: str, _: str = Depends(andre("invoices/decision")),
@@ -681,8 +701,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.run_recon(who, req.request_id)
 
     @app.get("/fin/v1/breaks", dependencies=auth)
-    def breaks(_: str = Depends(caller())) -> dict:
-        return svc.list_breaks()
+    def breaks(who: str = Depends(andre_or_any_caller("breaks/list"))) -> dict:
+        return svc.list_breaks(full=who == "andre")
 
     @app.post("/fin/v1/invoices/{invoice_id}/compliance-hold/release", dependencies=auth)
     def compliance_hold_release(invoice_id: str, _: str = Depends(andre("compliance-hold/release")),

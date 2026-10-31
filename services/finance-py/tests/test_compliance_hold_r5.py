@@ -59,7 +59,7 @@ def test_only_an_ofac_reference_releases_a_sanctions_hold(tmp_path):
     inv, pi, out = _pay_then(hr, lambda: _sanctioned(hr))
     r = _release(hr, inv, basis="ofac_authorization")
     assert r.status_code in (409, 422), r.text
-    r = _release(hr, inv, basis="ofac_authorization", ofac_authorization_sha256=AUTH)
+    r = _release(hr, inv, basis="ofac_authorization", ofac_authorization_sha256=AUTH, ofac_document_kind="license")
     assert r.status_code == 200, r.text
     assert _hold(hr, inv) is None and _receipts(hr, inv) == []
     hist = hr.svc.db["invoices"][inv["invoice_id"]]["held_compliance_history"][-1]
@@ -71,7 +71,7 @@ def test_an_ofac_reference_does_not_release_a_non_sanctions_hold(tmp_path):
     hr = _stripe_hr(tmp_path)
     inv, pi, out = _paid(hr, then="refuse")
     assert _hold(hr, inv)["sanctions"] is False
-    r = _release(hr, inv, basis="ofac_authorization", ofac_authorization_sha256=AUTH)
+    r = _release(hr, inv, basis="ofac_authorization", ofac_authorization_sha256=AUTH, ofac_document_kind="license")
     assert r.status_code == 409 and _hold(hr, inv) is not None
 
 
