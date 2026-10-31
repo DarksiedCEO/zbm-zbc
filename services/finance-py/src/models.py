@@ -698,20 +698,31 @@ class RestoreDisposition(Strict):
     statement_date: Optional[date] = None
 
 
+class StatementDay(Strict):
+    """AEGIS r6 R6-3: one business day of the bank statement: how many credit lines and their total (0 and 0.00 for
+    a day without activity), per account."""
+    day: date
+    entity: Literal["zbc", "zbm"]
+    account: Literal["1010", "1020"]
+    credit_lines: int = Field(ge=0, le=10000)
+    credit_total: Money
+
+
 class BankRefeed(Strict):
-    """AEGIS r5 R5-4: Andre confirms the bank lines of a window were fed again after a restore."""
+    """AEGIS r5 R5-4 / r6 R6-3: Andre confirms the bank lines of a window were fed again after a restore, with the
+    statement's per-day figures; Finance checks them against the lines it booked."""
     request_id: Id
     since: date
     until: date
     statement_ref: Id
+    statement_days: list[StatementDay] = Field(min_length=1, max_length=400)
 
 
 class RestoreCorrection(Strict):
-    """AEGIS r5 R5-2: books money a restore lost that Andre recorded as moved (memo FRC)."""
+    """AEGIS r5 R5-2 / r6 R6-1: books money a restore lost that Andre recorded as moved (memo FRC). The entry is
+    derived from the lost event; Andre names only the reference and what it settled."""
     request_id: Id
-    entity: Literal["zbc", "zbm"]
     provider_ref: Id
-    lines: list[CorrectionLine] = Field(min_length=2, max_length=8)
     payable_ids: list[Id] = Field(default_factory=list, max_length=200)
     refund_campaign_id: Optional[Id] = None
 

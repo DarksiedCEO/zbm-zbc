@@ -39,19 +39,15 @@ def _items(z, out):
     return z.svc.db["breaks"][out["reimport_break_id"]]["items"]
 
 
-def _moved(z, it, amount, counterparty, ref):
+def _moved(z, it, ref, **kw):
+    """Recorded as moved: the amount and counterparty come from the lost event (AEGIS r6 R6-1)."""
     return z.ok(z.post(DISP.format(it["event_id"]), {"request_id": rid(), "disposition": "moved", "reason": "seen",
-                                                    "provider_ref": ref, "moved_amount": amount,
-                                                    "counterparty": counterparty}, andre=ANDRE_TOKEN))
+                                                    "provider_ref": ref, **kw}, andre=ANDRE_TOKEN))
 
 
-def _correct(z, it, ref, lines, **kw):
+def _correct(z, it, ref, **kw):
     return z.post(f"/fin/v1/restore/items/{it['event_id']}/correction",
-                  {"request_id": rid(), "entity": "zbc", "provider_ref": ref, "lines": lines, **kw}, andre=ANDRE_TOKEN)
-
-
-def _ln(account, sub, debit="0.00", credit="0.00"):
-    return {"account": account, "subledger": sub, "debit": debit, "credit": credit}
+                  {"request_id": rid(), "provider_ref": ref, **kw}, andre=ANDRE_TOKEN)
 
 
 # --------------------------------------------------------------------------------------------- R5-1 / R5-2 payout
@@ -78,9 +74,18 @@ def test_r5_2_a_lost_payout_is_booked_by_corrections_and_payouts_work_again_noth
     _full_reimport(z, brk["since"], brk["opened_on"])
     its = {i["event_type"]: i for i in _items(z, out).values() if i["kind"] == "money_out"}
     assert {"treasury_posting_committed", "batch_release_started", "item_submitted"} <= set(its)
-    _moved(z, its["treasury_posting_committed"], amt, b["batch_id"], "bank-ref-1")
-    _moved(z, its["batch_release_started"], amt, b["batch_id"], "rail-ref-1")
-    _moved(z, its["item_submitted"], amt, payee, "rail-ref-1")
+    # R6-1: a typed amount or counterparty that disagrees with the lost event is refused
+    assert z.post(DISP.format(its["item_submitted"]["event_id"]),
+                  {"request_id": rid(), "disposition": "moved", "reason": "x", "provider_ref": "rail-ref-1",
+                   "moved_amount": "1.00"}, andre=ANDRE_TOKEN).status_code == 409
+    assert z.post(DISP.format(its["item_submitted"]["event_id"]),
+                  {"request_id": rid(), "disposition": "moved", "reason": "x", "provider_ref": "rail-ref-1",
+                   "counterparty": "clip-zz"}, andre=ANDRE_TOKEN).status_code == 409
+    _moved(z, its["treasury_posting_committed"], "bank-ref-1")
+    _moved(z, its["batch_release_started"], "rail-ref-1")
+    _moved(z, its["item_submitted"], "rail-ref-1")
+    d = _items(z, out)[its["item_submitted"]["event_id"]]["disposition"]
+    assert d["derived"] is True and d["counterparties"] == [payee] and d["moved_amount"] == amt
     lift(z)
     assert z.svc.lockdown_status()["post_restore_reconcile_required"] is True
     rec = z.recon()
@@ -89,20 +94,22 @@ def test_r5_2_a_lost_payout_is_booked_by_corrections_and_payouts_work_again_noth
     with pytest.raises(Conflict, match="POST_RESTORE_RECONCILE_REQUIRED"):
         z.svc._money_out_refusal("bank transfer", "x")
     # the corrections: the funding transfer, then the payout (its payables settled)
-    bad = _correct(z, its["item_submitted"], "rail-ref-WRONG", [_ln("2020", f"payee:{payee}", debit=amt),
-                                                                _ln("1040", None, credit=amt)])
+    bad = _correct(z, its["item_submitted"], "rail-ref-WRONG", payable_ids=[pay_["payable_id"]])
     assert bad.status_code == 409                                            # not the recorded reference
-    bad = _correct(z, its["item_submitted"], "rail-ref-1", [_ln("2020", f"payee:{payee}", debit="1.00"),
-                                                            _ln("1040", None, credit="1.00")])
-    assert bad.status_code == 409                                            # not the moved amount
-    c1 = z.ok(_correct(z, its["treasury_posting_committed"], "bank-ref-1",
-                       [_ln("1040", None, debit=amt), _ln("1020", None, credit=amt)]), 201)
-    c2 = z.ok(_correct(z, its["item_submitted"], "rail-ref-1",
-                       [_ln("2020", f"payee:{payee}", debit=amt), _ln("1040", None, credit=amt)],
-                       payable_ids=[pay_["payable_id"]]), 201)
+    bad = _correct(z, its["item_submitted"], "rail-ref-1")
+    assert bad.status_code == 409 and "payable_ids" in bad.text              # R6-1: the payables are mandatory
+    assert _correct(z, its["batch_release_started"], "rail-ref-1").status_code == 409   # nothing to derive
+    c1 = z.ok(_correct(z, its["treasury_posting_committed"], "bank-ref-1"), 201)
+    assert c1["derived"] == "transfer:funding"
+    assert payee in z.svc._subject_fences()                                  # the payee: until the debt is settled
+    c2 = z.ok(_correct(z, its["item_submitted"], "rail-ref-1", payable_ids=[pay_["payable_id"]]), 201)
+    entry = c2["entry"]
+    assert {(ln["account"], ln["subledger"], ln["debit"], ln["credit"]) for ln in entry["lines"]} == {
+        ("2020", f"payee:{payee}", amt, "0.00"), ("1040", None, "0.00", amt)}   # derived, never typed
     assert c1["breaks_resolved"] or c2["breaks_resolved"]
-    assert _correct(z, its["item_submitted"], "rail-ref-1", [_ln("2020", f"payee:{payee}", debit=amt),
-                                                              _ln("1040", None, credit=amt)]).status_code == 409
+    assert _correct(z, its["item_submitted"], "rail-ref-1",
+                    payable_ids=[pay_["payable_id"]]).status_code == 409    # booked once
+    assert payee not in z.svc._subject_fences()
     assert z.svc.db["payables"][pay_["payable_id"]]["status"] == "settled"
     rec = z.recon()
     assert rec["post_restore_clean"] is True, ([l for l in rec["recon"]["legs"] if l["status"] != "matched"], [b for b in z.svc.db["breaks"].values() if b["status"] != "resolved"])
@@ -142,13 +149,15 @@ def test_r5_1_a_lost_refund_is_fenced_by_subject_and_booked_by_a_correction(keys
     its = {i["event_type"]: i for i in _items(z, out).values() if i["kind"] in ("money_out", "in_flight")}
     assert "refund_paid" in its                                              # R5-7: refund_paid is money out
     for it in its.values():
-        _moved(z, it, rf["amount"], "camp-1", "bank-ref-9")
+        _moved(z, it, "bank-ref-9")
     lift(z)
     r = z.post("/fin/v1/refunds/camp-1", {"request_id": rid()}, caller="scheduler")
     assert r.status_code in (409, 422) and "RESTORE_FENCED" in r.text       # a new id, the same refund: refused
-    c = z.ok(_correct(z, its["refund_paid"], "bank-ref-9",
-                      [_ln("2010", "campaign:camp-1", debit=rf["amount"]), _ln("1020", None, credit=rf["amount"])],
-                      refund_campaign_id="camp-1"), 201)
+    r = _correct(z, its["treasury_posting_committed"], "bank-ref-9")
+    assert r.status_code == 409 and "refund_paid" in r.text                  # the same money: booked once, there
+    assert _correct(z, its["refund_paid"], "bank-ref-9").status_code == 409  # R6-1: the campaign is mandatory
+    c = z.ok(_correct(z, its["refund_paid"], "bank-ref-9", refund_campaign_id="camp-1"), 201)
+    assert {"camp-1", "client-1"}.isdisjoint(z.svc._subject_fences())
     rec = z.recon()
     assert rec["post_restore_clean"] is True, (c, rec["recon"]["legs"])
     assert len(z.bank.transfers) == n1                                       # paid once, ever

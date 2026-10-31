@@ -29,6 +29,7 @@ from typing import Optional
 import chart as C
 import money as M
 import reasons as R
+import restore_evidence as RE
 from clock import iso, parse_iso
 from errors import Conflict, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
@@ -879,9 +880,11 @@ class PayoutsMixin:
             op.record(xid, f"crossing_rail_{it['rail']}_requested", I4.ACTOR, iid,
                       {"port": f"rail_{it['rail']}", "action": "submit", "item_id": iid,
                        "idempotency_key": it["idempotency_key"], "net": it["net"]}, f"Submit to rail {it['rail']}")
+            # AEGIS r6 R6-1/R6-4: payee, rail, batch and key, verifiable from the summary (a restore derives from it)
             op.record(derived_id("isub", iid), "item_submitted", I4.ACTOR, iid,
-                      {"item_id": iid, "net": it["net"], "idempotency_key": it["idempotency_key"]},
-                      f"Payout item submitted to {it['rail']}: {it['net']}")
+                      RE.item_payload(iid, it["net"], it["idempotency_key"], it["payee_id"], it["rail"], it["batch_id"]),
+                      RE.item_summary(it["net"], it["idempotency_key"], it["payee_id"], it["rail"], it["batch_id"],
+                                      len(self.log) + 1))
             # AEGIS r5 R5-3: an item a restore named may have been sent already: the rail is looked up first
             touched = iid in self._restore_touched() or it.get("batch_id") in self._restore_touched()
             op.put("items", iid, {**it, "status": "submitting", "pre_entry_ids": pre, "attempts": 1, "resubmits": 0,

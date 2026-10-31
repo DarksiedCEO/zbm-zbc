@@ -38,8 +38,10 @@ import time as _time
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
+import chart as C
 import money as M
 import reasons as R
+import restore_evidence as RE
 from clock import iso, parse_iso
 from errors import Conflict, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
@@ -81,6 +83,7 @@ PAUSE_ALERT_EVERY_S = 300
 LOCKDOWN_FILE = "restore_lockdown.json"
 # AEGIS r5 R5-1: after the lift, money out stays refused until a reconciliation run AFTER the lift is fully clean
 POST_PHASE = "post_restore_reconcile_required"
+BANK_ACCOUNTS = (("zbc", "1020"), ("zbc", "1010"), ("zbm", "1010"))
 RECON_LEGS = ("L1", "L2", "L3", "L4")
 LOCKDOWN_MSG = ("RESTORE_LOCKDOWN: Finance was restored from a backup; no {what} until Andre lifts the lockdown "
                 "(POST /fin/v1/restore/lockdown/lift, after the re-import and every restore item; "
@@ -455,9 +458,9 @@ class RestoreMixin:
 
     def _lockdown_clear_after_reconcile(self) -> None:
         """A reconcile with nothing at risk: the lines it declared void are acknowledged (no lockdown for them)."""
-        if self._restore_open() or (self.restore_lockdown() is not None
-                                    and not (self.restore_lockdown() or {}).get("detected")):
-            return                                   # AEGIS r4 R4-5: never while a restore break is open
+        if self._restore_open() or self.restore_post_phase() is not None or (
+                self.restore_lockdown() is not None and not (self.restore_lockdown() or {}).get("detected")):
+            return       # AEGIS r4 R4-5 / r6 R6-2: never while a restore break is open or the post-restore phase runs
         try:
             n = len(self.recorder.client.entries())
             self._lockdown_write({"state": "clear", "ack_ledger_len": n, "at": iso(self._now())})
@@ -579,6 +582,10 @@ class RestoreMixin:
                 return "the Stripe re-import has not covered every day since the backup"
             if not self._refeed_covers(b):
                 return "Andre has not confirmed the bank lines since the backup were fed again"
+            # AEGIS r6 R6-3: no bank line since the backup refers to this invoice (matched or not)
+            if any(r.get("invoice_id") == invoice_id or r.get("reference_token") == invoice_id
+                   for r in self.db["receipts"].values() if str(r.get("value_date") or "")[:10] >= (b.get("since") or "")):
+                return "a bank line since the backup refers to this invoice"
         return None
 
     def _refeed_covers(self, b: dict) -> bool:
@@ -602,20 +609,34 @@ class RestoreMixin:
         return out - {k for k, v in freed.items() if v}
 
     def _subject_fences(self) -> set:
-        """AEGIS r5 R5-1: money Andre recorded as ``moved`` fences its SUBJECT, (counterparty, amount): a re-proposal
-        of the same refund or payout under a new id is refused, until a restore correction books it (its payables
-        are then settled, its refund recorded paid, so nothing is owed twice). The old ids stay fenced for good."""
+        """AEGIS r5 R5-1 / r6 R6-1/R6-6: money recorded as ``moved`` fences its COUNTERPARTY (the payee of a payout,
+        the campaign and client of a refund; derived from the lost event when it verifies): no money goes to it, in
+        any amount, until the debt is actually extinguished: the payables the restore correction named are settled,
+        or the lost refund is recorded paid. The old ids stay fenced for good (``_fenced``)."""
         out = set()
         for b in self.db["breaks"].values():
             if b.get("leg") != "restore_reimport_required":
                 continue
             for it in (b.get("items") or {}).values():
                 d = it.get("disposition") or {}
-                # until a restore correction books it (then its payables are settled / its refund recorded paid)
-                if d.get("disposition") == "moved" and d.get("counterparty") and d.get("moved_amount") \
-                        and not it.get("corrected_by"):
-                    out.add((d["counterparty"], M.fmt(M.D(d["moved_amount"]))))
+                if d.get("disposition") != "moved" or self._debt_settled(it):
+                    continue
+                out.update(c for c in (d.get("counterparties") or [d.get("counterparty")]) if c)
         return out
+
+    def _debt_settled(self, it: dict) -> bool:
+        pays = it.get("settled_payables") or []
+        if pays:
+            return all((self.db["payables"].get(p) or {}).get("status") == "settled" for p in pays)
+        rf = it.get("settled_refund")
+        if rf:
+            return (self.db["refunds"].get(rf) or {}).get("status") == "paid"
+        if (it.get("event_type") or "").startswith("rail_"):
+            # a rail event for a lost payout: settled when that payout's own item is booked
+            return any(o.get("ref") == it.get("ref") and o.get("event_type") == "item_submitted"
+                       and self._debt_settled(o) for b in self.db["breaks"].values()
+                       if b.get("leg") == "restore_reimport_required" for o in (b.get("items") or {}).values())
+        return bool(it.get("corrected_by")) and it.get("debt") == "none"
 
     def _restore_touched(self) -> set:
         """Every subject a money item of any restore named (moved or not): its submit always looks the rail up first."""
@@ -631,12 +652,11 @@ class RestoreMixin:
         if self.restore_post_phase() is not None:
             raise Conflict(f"POST_RESTORE_RECONCILE_REQUIRED: no {what} until a reconciliation run after the lift is "
                            "fully clean (POST /fin/v1/reconciliations/run; runbook restore-and-reimport section 5)")
-        if amount is not None:
-            amt = M.fmt(M.D(amount))
-            hits = [c for c in counterparties if c and (c, amt) in self._subject_fences()]
-            if hits:
-                raise Conflict(f"RESTORE_FENCED: {what} refused: {amt} to {hits[0]} was recorded as moved after a "
-                               "restore (the same money is never paid twice)")
+        hits = [c for c in counterparties if c and c in self._subject_fences()]
+        if hits:
+            raise Conflict(f"RESTORE_FENCED: {what} refused: money to {hits[0]} was recorded as moved after a restore "
+                           "and its debt is not settled yet (book it with the restore correction; any amount is "
+                           "refused meanwhile, so the same money is never paid twice)")
         hit = sorted(s for s in subjects if s and s in self._fenced())
         if hit:
             raise Conflict(f"RESTORE_FENCED: {what} refused: the ledger shows money for {hit[0]} may have moved after "
@@ -670,7 +690,7 @@ class RestoreMixin:
                 m = COMMIT_SUMMARY.fullmatch(str(e.get("summary") or ""))
                 if m:
                     marks.setdefault(m.group(1), (e, m))
-            elif et == "client_mail_sent":
+            elif et in ("client_mail_sent", "client_receipt_sent"):            # AEGIS r6 R6-7: receipts too
                 sent.add(e.get("subject_id"))
             elif et in ("stripe_checkout_created", "invoice_issued", "invoice_approved"):
                 affected.add(e.get("subject_id"))
@@ -680,7 +700,8 @@ class RestoreMixin:
                 items_out[e.get("event_id")] = {
                     "event_id": e.get("event_id"), "event_type": e.get("event_type"), "order": i,
                     "status": "needs_review", "kind": "money_out", "ref": e.get("subject_id"), "invoice_id": None,
-                    "client_id": None, "recorded_at": e.get("recorded_at"), "summary": str(e.get("summary") or "")[:160],
+                    "client_id": None, "recorded_at": e.get("recorded_at"), "summary": str(e.get("summary") or "")[:280],
+                    "payload_sha256": e.get("payload_sha256"),
                     "why": "money went out after the backup (per the ledger): check the bank or rail, then record it "
                            "as moved (with the reference) or not_moved"}
         items: dict = dict(items_out)
@@ -952,7 +973,21 @@ class RestoreMixin:
                 raise Conflict("only a credit note or a void is re-issued after the lift")
             if body["disposition"] == "reissued":
                 self._check_reissued_as(it, body.get("reissued_as"))
-            evidence = self._money_evidence(it, body) if money else None
+            evidence = self._money_evidence(it, body, b) if money else None
+            if evidence and evidence.get("pending"):
+                # AEGIS r6 R6-4: the rail did not find it: Andre asks again after 24 h (a re-lookup) with his statement
+                new_items = {**b["items"], event_id: {**it, "not_moved_first_lookup_at": evidence["lookup_at"],
+                                                      "not_moved_lookups": evidence["lookups"]}}
+                op = Op(self, f"rdispp|{request_id}", "andre", event_id)
+                op.record(derived_id("rdispp", event_id, request_id), "restore_not_moved_lookup", "andre", event_id,
+                          {"event_id": event_id, "lookups": len(evidence["lookups"])},
+                          "Rail looked up for a not_moved claim: not found; asked again after 24 h")
+                self._restore_progress(op, {**b, "items": new_items})
+                resp = self._idem_add(op, key, h, {"event_id": event_id, "status": "pending_not_moved",
+                                                   "retry_after": evidence["retry_after"],
+                                                   "ledger_event_ids": op.events, "request_id": request_id})
+                self._commit(op)
+                return resp
             new_items = {**b["items"], event_id: {**it, "status": "disposed",
                                                   "disposition": {"disposition": body["disposition"],
                                                                   "reason": body["reason"],
@@ -970,41 +1005,133 @@ class RestoreMixin:
             self._commit(op)
             return resp
 
-    def _restore_payout_items(self, it: dict) -> list[dict]:
-        ref = it.get("ref")
-        if it.get("event_type") in ("item_submitted", "payout_item") and ref in self.db["items"]:
-            return [self.db["items"][ref]]
-        if it.get("event_type") == "batch_release_started":
-            return [x for x in self.db["items"].values() if x.get("batch_id") == ref]
+    def _derive_money(self, it: dict) -> Optional[dict]:
+        """AEGIS r6 R6-1: what a lost money-out event did, from its own verified ledger evidence (or, for a transfer
+        the restored books hold in flight, from that operation). None when nothing verifies (fail closed)."""
+        summ, kind = str(it.get("summary") or ""), it.get("event_type")
+        e = {"event_id": it.get("event_id"), "payload_sha256": it.get("payload_sha256")}
+        if kind == "item_submitted":
+            m = RE.ITEM_SUMMARY.fullmatch(summ)
+            if m:
+                rail, net, payee, batch, key, seq = m.groups()
+                if self._verified(e, derived_id("isub", it["ref"]), kind,
+                                  RE.item_payload(it["ref"], net, key, payee, rail, batch), int(seq)):
+                    return {"what": "payout", "amount": net, "counterparties": [payee], "payee": payee, "key": key,
+                            "rail": rail, "batch": batch, "entity": "zbc",
+                            "lines": [J.dr("2020", M.D(net), f"payee:{payee}"), J.cr(C.RAIL_ACCOUNT[rail], M.D(net))]}
+        elif kind == "treasury_posting_committed":
+            m = RE.XFER_SUMMARY.fullmatch(summ)
+            if m:
+                k, n, flow, amt, da, ds, ca, cs, ref, seq = m.groups()
+                payload = RE.xfer_payload(it["ref"], int(n), k, flow, amt, (da, None if ds == "-" else ds),
+                                          (ca, None if cs == "-" else cs), None if ref == "-" else ref)
+                if self._verified(e, derived_id("trxp", it["ref"], int(n)), kind, payload, int(seq)):
+                    return {"what": f"transfer:{k}", "amount": amt, "counterparties": [] if k != "refund_payment"
+                            else [ref], "ref_id": None if ref == "-" else ref, "entity": "zbc", "flow": flow,
+                            "lines": [J.dr(da, M.D(amt), None if ds == "-" else ds),
+                                      J.cr(ca, M.D(amt), None if cs == "-" else cs)]}
+        elif kind == "refund_paid":
+            m = RE.REFUND_PAID_SUMMARY.fullmatch(summ)
+            if m:
+                amt, camp, client, seq = m.groups()
+                if self._verified(e, derived_id("rfdpd", it["ref"]), kind,
+                                  RE.refund_paid_payload(it["ref"], amt, camp, client), int(seq)):
+                    return {"what": "refund", "amount": amt, "counterparties": [camp, client], "campaign": camp,
+                            "client": client, "entity": "zbc",
+                            "lines": [J.dr("2010", M.D(amt), f"campaign:{camp}"), J.cr("1020", M.D(amt))]}
+        elif kind == "treasury_op":
+            t = self.db["treasury_ops"].get(it.get("ref") or "")
+            if t is not None and t["kind"] in ("funding", "sweep", "top_up", "refund_payment") \
+                    and (t["kind"] != "refund_payment" or t.get("ref_id") in self.db["refunds"]):
+                try:
+                    flow, lines, _ = self._transfer_lines(t)
+                except (KeyError, Invalid):
+                    return None
+                rf = self.db["refunds"].get(t.get("ref_id") or "") if t["kind"] == "refund_payment" else None
+                return {"what": f"transfer:{t['kind']}", "amount": t["amount"], "entity": "zbc", "flow": flow,
+                        "counterparties": [rf["campaign_id"], rf["client_id"]] if rf else [], "ref_id": t.get("ref_id"),
+                        "inflight_op": t["op_id"], "lines": lines}
+        return None
+
+    def _restore_payout_keys(self, it: dict, b: dict) -> list[tuple]:
+        """(rail, idempotency key, item id) of every payout this money item names: from the verified lost event, the
+        restored books, or (a release) the item-submitted events of the same batch."""
+        ref, et = it.get("ref"), it.get("event_type")
+        if et in ("item_submitted", "payout_item") or et.startswith("rail_"):
+            d = self._derive_money(it) if et == "item_submitted" else None
+            if d:
+                return [(d["rail"], d["key"], ref)]
+            x = self.db["items"].get(ref or "")
+            return [(x["rail"], x["idempotency_key"], ref)] if x else []
+        if et == "batch_release_started":
+            out = [(x["rail"], x["idempotency_key"], x["item_id"]) for x in self.db["items"].values()
+                   if x.get("batch_id") == ref]
+            for o in (b.get("items") or {}).values():
+                d = self._derive_money(o) if o.get("event_type") == "item_submitted" else None
+                if d and d["batch"] == ref and all(k[2] != o["ref"] for k in out):
+                    out.append((d["rail"], d["key"], o["ref"]))
+            return out
         return []
 
-    def _money_evidence(self, it: dict, body: dict) -> dict:
-        """AEGIS r5 R5-2/R5-3: ``moved`` names the provider reference, the amount and the counterparty (the subject
-        fence, and the restore correction, bind to them). ``not_moved`` needs evidence: for payout items Finance asks
-        the rail itself (a lookup by idempotency key; found -> refused, record it as moved); for bank money, Andre's
-        attestation with the bank's reference and the statement date."""
+    def _money_evidence(self, it: dict, body: dict, b: dict) -> dict:
+        """AEGIS r5/r6: ``moved`` names the provider reference; the amount and counterparty come from the lost event
+        when it verifies (Andre's values must then agree), else from Andre. ``not_moved``: every payout is looked up
+        at the rail by its idempotency key (found -> refused; the rail unreachable -> 503); not found -> only after a
+        24 h wait, a second lookup and Andre's statement reference and date. A rail event item is not_moved only if
+        the rail itself said failed or returned. Bank money needs Andre's attestation."""
+        d = self._derive_money(it)
         if body["disposition"] == "moved":
-            if not (body.get("provider_ref") and body.get("moved_amount") is not None and body.get("counterparty")):
-                raise Invalid("moved needs provider_ref (the bank or rail reference), moved_amount and counterparty "
-                              "(the campaign, client, payee or batch it went for)")
-            return {"provider_ref": body["provider_ref"], "moved_amount": M.fmt(M.D(body["moved_amount"])),
-                    "counterparty": body["counterparty"],
+            if not body.get("provider_ref"):
+                raise Invalid("moved needs provider_ref (the bank or rail reference)")
+            if d is not None:
+                if body.get("moved_amount") is not None and M.D(body["moved_amount"]) != M.D(d["amount"]):
+                    raise Conflict(f"the lost event moved {d['amount']}, not {M.fmt(M.D(body['moved_amount']))}")
+                if body.get("counterparty") and body["counterparty"] not in d["counterparties"]:
+                    raise Conflict("the lost event names another counterparty")
+                cps, amount = d["counterparties"], d["amount"]
+            elif it.get("event_type") in ("batch_release_started", "media_vendor_payment_recorded"):
+                # the money itself is on its item-submitted / vendor records: the id stays fenced, no counterparty
+                cps, amount = [], M.fmt(M.D(body["moved_amount"])) if body.get("moved_amount") is not None else "0.00"
+            else:
+                if body.get("moved_amount") is None or not body.get("counterparty"):
+                    raise Invalid("this lost event cannot be verified: moved needs moved_amount and counterparty too")
+                cps, amount = [body["counterparty"]], M.fmt(M.D(body["moved_amount"]))
+            return {"provider_ref": body["provider_ref"], "moved_amount": M.fmt(M.D(amount)),
+                    "counterparty": (cps or [None])[0], "counterparties": cps, "derived": d is not None,
                     "statement_date": body["statement_date"].isoformat() if body.get("statement_date") else None}
-        payouts = self._restore_payout_items(it)
-        if payouts:
+        et = it.get("event_type") or ""
+        if et.startswith("rail_"):
+            if et in ("rail_failed", "rail_returned"):
+                return {"evidence": {"rail_event": et}}
+            raise Conflict("the rail reported this payout as paid: record it as moved")
+        keys = self._restore_payout_keys(it, b)
+        payoutish = et in ("item_submitted", "batch_release_started", "payout_item")
+        if payoutish and not keys:
+            raise Conflict("no idempotency key is known for this payout: record its item-submitted items first, or "
+                           "record it as moved")
+        if keys:
             looks = []
-            for x in payouts:
+            for rail, key_, iid in keys:
                 try:
-                    lk = self._rail(x["rail"]).lookup(x["idempotency_key"], x["item_id"])
+                    lk = self._rail(rail).lookup(key_, iid)
                 except Exception:  # noqa: BLE001
                     lk = None
                 if not isinstance(lk, RailLookup) or not lk.available:
                     raise Unavailable("the rail could not be asked about this payout; nothing was recorded (retry)")
                 if lk.found:
-                    raise Conflict(f"the rail shows payout item {x['item_id']} was received ({lk.status}): record it as "
+                    raise Conflict(f"the rail shows payout item {iid} was received ({lk.status}): record it as "
                                    "moved, with the rail reference")
-                looks.append({"item_id": x["item_id"], "found": False})
-            return {"evidence": {"rail_lookups": looks}}
+                looks.append({"item_id": iid, "found": False, "at": iso(self._now())})
+            first = it.get("not_moved_first_lookup_at")
+            if not first or self._now() - parse_iso(first) < timedelta(hours=24):
+                return {"pending": True, "lookup_at": first or iso(self._now()), "lookups": looks,
+                        "retry_after": iso(parse_iso(first or iso(self._now())) + timedelta(hours=24))}
+            if not (body.get("provider_ref") and body.get("statement_date")):
+                raise Invalid("not_moved after the second lookup needs provider_ref (the rail statement reference) and "
+                              "statement_date")
+            return {"evidence": {"rail_lookups": (it.get("not_moved_lookups") or []) + looks,
+                                 "attestation": {"provider_ref": body["provider_ref"],
+                                                 "statement_date": body["statement_date"].isoformat()}}}
         if not (body.get("provider_ref") and body.get("statement_date")):
             raise Invalid("not_moved for bank money needs Andre's attestation: provider_ref (the bank statement "
                           "reference) and statement_date")
@@ -1023,8 +1150,34 @@ class RestoreMixin:
                 raise Conflict("no restore break is open")
             if body["since"] > body["until"] or body["until"] > self._business_today():
                 raise Invalid("since..until must be a past window")
+            # AEGIS r6 R6-3: backed by data: every business day of the window, every bank account, the statement's
+            # credit lines and total must equal the bank lines Finance has booked for that day (feed them first)
+            days = {(x["day"].isoformat(), x["entity"], x["account"]): x for x in body["statement_days"]}
+            booked: dict = {}
+            for r in self.db["receipts"].values():
+                if r.get("bank_txn_ref_sha256") and r.get("value_date"):
+                    k = (str(r["value_date"])[:10], r.get("entity"), r.get("into_account"))
+                    n, tot = booked.get(k, (0, M.ZERO))
+                    booked[k] = (n + 1, M.q(tot + M.D(r["amount"])))
+            wrong = []
+            day = body["since"]
+            while day <= body["until"]:
+                if day.weekday() < 5:
+                    for ent_, acct in BANK_ACCOUNTS:
+                        st = days.get((day.isoformat(), ent_, acct))
+                        got = booked.get((day.isoformat(), ent_, acct), (0, M.ZERO))
+                        if st is None:
+                            wrong.append(f"{day.isoformat()} {ent_}:{acct} missing from the statement days")
+                        elif (st["credit_lines"], M.D(st["credit_total"])) != got:
+                            wrong.append(f"{day.isoformat()} {ent_}:{acct} statement {st['credit_lines']} line(s) "
+                                         f"{M.fmt(M.D(st['credit_total']))}, booked {got[0]} line(s) {M.fmt(got[1])}")
+                day += timedelta(days=1)
+            if wrong:
+                raise Conflict("RESTORE_REFEED_MISMATCH: feed the bank lines first (POST /fin/v1/bank/events); "
+                               + "; ".join(wrong[:10]), mismatches=wrong[:50])
             rf = {"since": body["since"].isoformat(), "until": body["until"].isoformat(),
-                  "statement_ref": body["statement_ref"], "at": iso(self._now()), "by": "andre"}
+                  "statement_ref": body["statement_ref"], "at": iso(self._now()), "by": "andre",
+                  "days_checked": len(days)}
             op = Op(self, f"refeed|{request_id}", "andre", "restore-bank-refeed")
             for b in open_:
                 self._restore_progress(op, {**b, "bank_refeed": rf})
@@ -1037,19 +1190,21 @@ class RestoreMixin:
             return resp
 
     def restore_correction(self, request_id: str, event_id: str, body: dict) -> dict:
-        """AEGIS r5 R5-2: books what moved. Andre-only, bound to ONE restore item recorded as ``moved``: the same
-        provider reference, debits = credits = the moved amount; it may touch restricted cash (memo FRC, allowed
-        only here). Payables it names are settled (payout), or the lost refund is recorded paid; the reconciliation
-        breaks on the accounts it touches are resolved by it."""
+        """AEGIS r5 R5-2 / r6 R6-1: books money a restore lost that Andre recorded as ``moved``. The entry is DERIVED
+        from the lost event itself (its verified ledger evidence, or the in-flight operation of the restored books):
+        accounts, amounts, entity and counterparty are never typed. A payout must name its payables (the
+        counterparty's, adding up to the item's net; the item's own when the restored books hold it); a refund must
+        name its campaign. They are settled / recorded paid in the same line, which is what ends the counterparty's
+        fence. A refund's transfer is booked through its ``refund_paid`` item (never twice)."""
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"restore/items/{event_id}/correction", body)
             if ent:
                 return ent["response"]
             self.require_rules()
-            it = None
+            brk, it = None, None
             for b in self.db["breaks"].values():
                 if b.get("leg") == "restore_reimport_required" and event_id in (b.get("items") or {}):
-                    it = b["items"][event_id]
+                    brk, it = b, b["items"][event_id]
                     break
             if it is None:
                 raise NotFound("no restore item with that ledger event id")
@@ -1060,55 +1215,88 @@ class RestoreMixin:
                 raise Conflict("this restore item is already booked")
             if body["provider_ref"] != d.get("provider_ref"):
                 raise Conflict("provider_ref must be the bank or rail reference recorded on the item")
-            ent_ = body["entity"]
-            lines = [{"account": l["account"], "subledger": l.get("subledger"), "debit": M.fmt(l["debit"]),
-                      "credit": M.fmt(l["credit"])} for l in body["lines"]]
-            amt = M.D(d["moved_amount"])
-            if M.total(M.D(l["debit"]) for l in lines) != amt or M.total(M.D(l["credit"]) for l in lines) != amt:
-                raise Conflict(f"the correction's debits and credits must each equal the moved amount {M.fmt(amt)}")
-            pays = [self.db["payables"].get(pid) for pid in body.get("payable_ids") or []]
-            if any(p is None or p["status"] not in RUNNABLE_STATES for p in pays):
-                raise Conflict("payable_ids must name unpaid payables")
-            if pays and (any(p["payee_id"] != d["counterparty"] for p in pays)
-                         or M.total(M.D(p["current_amount"]) for p in pays) != amt):
-                raise Conflict("the payables must be the counterparty's and add up to the moved amount")
-            prof = self.db["profiles"].get(body.get("refund_campaign_id") or "")
-            if body.get("refund_campaign_id") and (prof is None or body["refund_campaign_id"] != d["counterparty"]):
-                raise Conflict("refund_campaign_id must be the counterparty's campaign")
+            der = self._derive_money(it)
+            if der is None:
+                raise Conflict("this lost event does not verify against the ledger: nothing can be derived from it, so "
+                               "no restore correction is booked (Andre books it outside Finance's restore path)")
+            if M.D(der["amount"]) != M.D(d["moved_amount"]):
+                raise Conflict(f"the lost event moved {der['amount']}, the disposition says {d['moved_amount']}")
+            if der["what"] == "transfer:refund_payment" and not der.get("inflight_op"):
+                raise Conflict("a refund's transfer is booked through its refund_paid item")
+            pays, prof, rf_row = [], None, None
+            if der["what"] == "payout":
+                ids = body.get("payable_ids") or []
+                if not ids:
+                    raise Conflict("a payout correction names the payables it paid (payable_ids)")
+                pays = [self.db["payables"].get(pid) for pid in ids]
+                if any(p is None or p["status"] not in RUNNABLE_STATES for p in pays):
+                    raise Conflict("payable_ids must name unpaid payables")
+                if any(p["payee_id"] != der["payee"] for p in pays) \
+                        or M.total(M.D(p["current_amount"]) for p in pays) != M.D(der["amount"]):
+                    raise Conflict("the payables must be the payee's and add up to the payout's net")
+                held = self.db["items"].get(it.get("ref") or "")
+                if held is not None and sorted(held.get("payable_ids") or []) != sorted(ids):
+                    raise Conflict("the payables must be the payout item's own")
+            elif der["what"] == "refund":
+                if body.get("refund_campaign_id") != der["campaign"]:
+                    raise Conflict("a refund correction names the refund's campaign (refund_campaign_id)")
+                prof = self.db["profiles"].get(der["campaign"])
+                if prof is None:
+                    raise Conflict("the refund's campaign is not in the restored books")
+            elif der.get("inflight_op") and der["what"] == "transfer:refund_payment":
+                rf_row = self.db["refunds"][der["ref_id"]]
+            elif body.get("payable_ids") or body.get("refund_campaign_id"):
+                raise Conflict("this correction settles no payables or refund")
             op = Op(self, f"rcorr|{request_id}", "andre", event_id)
             try:
-                e = self._post(op, ent_, lines, "FRC", {"kind": "restore_correction", "id": event_id},
+                e = self._post(op, der["entity"], der["lines"], "FRC", {"kind": "restore_correction", "id": event_id},
                                f"FRC|{event_id}", approval_ref=request_id, actor="andre")
             except PostingRefused as exc:
                 raise InvalidReasons("restore correction refused", exc.reasons) from None
+            extra: dict = {"corrected_by": e["entry_id"], "debt": "none"}
             for p in pays:
                 op.put("payables", p["payable_id"], {**p, "status": "settled", "settled_by_restore_correction": event_id})
+            if pays:
+                extra = {"corrected_by": e["entry_id"], "settled_payables": [p["payable_id"] for p in pays]}
             if prof is not None:
                 fid = rid("rfd", prof["campaign_id"], f"restore|{event_id}")
                 op.put("refunds", fid, {"refund_id": fid, "campaign_id": prof["campaign_id"],
-                                        "client_id": prof["client_id"], "amount": M.fmt(amt), "admin_fee": "0.00",
-                                        "status": "paid", "paid_at": iso(self._now()),
+                                        "client_id": prof["client_id"], "amount": M.fmt(M.D(der["amount"])),
+                                        "admin_fee": "0.00", "status": "paid", "paid_at": iso(self._now()),
                                         "restored_by_correction": event_id, "provider_ref": d["provider_ref"]})
                 op.put("profiles", prof["campaign_id"], {**prof, "status": "closed"})
+                extra = {"corrected_by": e["entry_id"], "settled_refund": fid}
+            if rf_row is not None:
+                op.put("refunds", rf_row["refund_id"], {**rf_row, "status": "paid", "paid_at": iso(self._now()),
+                                                        "restored_by_correction": event_id})
+                extra = {"corrected_by": e["entry_id"], "settled_refund": rf_row["refund_id"]}
+            if der.get("inflight_op"):
+                t = self.db["treasury_ops"][der["inflight_op"]]
+                op.put("treasury_ops", t["op_id"], {**t, "status": "done", "bank_ref": d["provider_ref"],
+                                                    "done_at": iso(self._now()), "restored_by_correction": event_id})
             resolved = []
-            touched = {f"{ent_}:{l['account']}" for l in lines}
-            for brk in list(self.db["breaks"].values()):
-                if brk.get("leg") in RECON_LEGS and brk["status"] != "resolved" and any(
-                        str(brk.get("subject") or "").startswith(t) for t in touched):
-                    op.put("breaks", brk["break_id"], {**brk, "status": "resolved", "resolution": {
+            touched = {f"{der['entity']}:{ln['account']}" for ln in der["lines"]}
+            for x in list(self.db["breaks"].values()):
+                if x.get("leg") in RECON_LEGS and x["status"] != "resolved" and any(
+                        str(x.get("subject") or "").startswith(t) for t in touched):
+                    op.put("breaks", x["break_id"], {**x, "status": "resolved", "resolution": {
                         "basis": "restore_correction", "entry_id": e["entry_id"], "restore_item": event_id,
                         "approved_by": "andre", "at": iso(self._now())}})
-                    resolved.append(brk["break_id"])
-            for b in self.db["breaks"].values():
-                if b.get("leg") == "restore_reimport_required" and event_id in (b.get("items") or {}):
-                    op.put("breaks", b["break_id"], {**b, "items": {**b["items"], event_id: {
-                        **it, "corrected_by": e["entry_id"]}}})
+                    resolved.append(x["break_id"])
+            items = {**brk["items"], event_id: {**it, **extra}}
+            if der["what"] == "refund":
+                # the refund's own transfer item (the same money) is booked by this one too
+                for k, o in items.items():
+                    od = self._derive_money(o) if o.get("event_type") == "treasury_posting_committed" else None
+                    if od and od.get("ref_id") == it["ref"]:
+                        items[k] = {**o, "corrected_by": e["entry_id"], "covered_by": event_id, "debt": "none"}
+            op.put("breaks", brk["break_id"], {**brk, "items": items})
             op.record(derived_id("rcorr", event_id), "restore_correction_posted", "andre", event_id,
-                      {"event_id": event_id, "entry_id": e["entry_id"], "amount": M.fmt(amt),
+                      {"event_id": event_id, "entry_id": e["entry_id"], "amount": M.fmt(M.D(der["amount"])),
                        "provider_ref": d["provider_ref"], "breaks_resolved": resolved},
-                      f"Restore correction posted for a moved item: {M.fmt(amt)}")
-            resp = self._idem_add(op, key, h, {"entry": e, "breaks_resolved": resolved, "ledger_event_ids": op.events,
-                                               "request_id": request_id})
+                      f"Restore correction posted for a moved item: {M.fmt(M.D(der['amount']))}")
+            resp = self._idem_add(op, key, h, {"entry": e, "breaks_resolved": resolved, "derived": der["what"],
+                                               "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
             return resp
 
@@ -1151,13 +1339,17 @@ class RestoreMixin:
             sent = {m for b in self.db["breaks"].values() if b.get("leg") == "restore_reimport_required"
                     for m in (b.get("mail_sent") or [])}
             todo = [r for k, r in self.db["mail_outbox"].items() if k in sent and r["status"] in ("pending", "sending")]
-            if not todo:
+            rcts = [r for k, r in self.db["client_receipts"].items()                    # AEGIS r6 R6-7
+                    if k in sent and r["status"] in ("pending_send", "sending")]
+            if not todo and not rcts:
                 return 0
-            op = Op(self, f"{prefix}|maildedupe|{len(self.log)}", "andre", "restore-mail")
+            op = Op(self, f"{prefix}|maildedupe|{len(self.log)}", I2.ACTOR, "restore-mail")
             for r in todo:
                 op.put("mail_outbox", r["mail_id"], {**r, "status": "sent", "sent_before_restore": True})
+            for r in rcts:
+                op.put("client_receipts", r["client_receipt_id"], {**r, "status": "sent", "sent_before_restore": True})
             self._commit(op)
-            return len(todo)
+            return len(todo) + len(rcts)
 
     def _check_reissued_as(self, it: dict, ref: Optional[str]) -> None:
         """AEGIS r4 R4-7: bound to the item: a lost credit note -> a credit note on the SAME invoice for at least the

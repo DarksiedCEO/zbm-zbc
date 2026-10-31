@@ -179,7 +179,11 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   counterparty and amount are refused under any new id until booked) and are booked with
   `POST /fin/v1/restore/items/{event_id}/correction` (memo FRC, may touch restricted cash, settles payables / records
   the refund, resolves the breaks); `not_moved` is checked at the rail or attested; the exception and the lift need
-  `POST /fin/v1/restore/bank-refeed`; rail events are parked during a lockdown; no client email while locked. `/health` is
+  `POST /fin/v1/restore/bank-refeed`; rail events are parked during a lockdown; no client email while locked.
+  AEGIS r6: the correction is derived from the lost event (`restore_evidence.py`: the money-out events carry their
+  payload in a verifiable summary); payouts must name their payables, refunds their campaign; a moved counterparty
+  gets no money in any amount until that debt is settled; the re-feed is checked day by day against the booked bank
+  lines; not_moved for any payout needs rail lookups 24 h apart; parked rail events replay in arrival order. `/health` is
   `degraded` and an ALERT repeats every 5 minutes (a watch thread). A failed ledger read leaves the item list
   `build_incomplete` (every re-import reads it again first). Items the re-import cannot rebuild are disposed of with
   `POST /fin/v1/restore/items/{event_id}/disposition` (Andre: `lost`, `reissued` naming a later invoice or credit

@@ -457,6 +457,8 @@ class PayeesMixin:
                     # applied at the lift; ``destination_changed`` is applied now (it only opens a payee hold). An
                     # event for an item the restored books lack is restore evidence: an item for Andre.
                     status = HELD
+                    parked = {"restore_parked": True,                         # AEGIS r6 R6-5: arrival order kept
+                              "parked_seq": (prior or {}).get("parked_seq") or self._next_parked_seq(op)}
                     op.record(derived_id("rhold", rail_name, ev["event_id"], "restore"), "rail_event_held",
                               "intel_04_payout_run", ev.get("item_id") or f"rail:{rail_name}",
                               {"item_id": ev.get("item_id"), "event_id": ev["event_id"], "type": ev["type"]},
@@ -464,13 +466,15 @@ class PayeesMixin:
                     if ev.get("item_id") and ev["item_id"] not in self.db["items"]:
                         self._restore_rail_item(op, rail_name, ev)
                 else:
+                    parked = {}
                     status = self._rail_event(op, rail_name, ev)
                 # sweep B-F2: a paid/failed event for an item still ``submitting`` (its acceptance not booked yet) is
                 # HELD, never acked-and-ignored: a redelivery of the same event re-applies it, and so does Finance
                 # itself as soon as the item's acceptance is booked (``replay_held_rail_events``)
                 op.put("rail_events", k, {"event_id": ev["event_id"], "rail": rail_name, "type": ev["type"],
                                           "item_id": ev.get("item_id"), "status": status,
-                                          "held": status == HELD, "at": (prior or {}).get("at") or iso(self._now())})
+                                          "held": status == HELD, "at": (prior or {}).get("at") or iso(self._now()),
+                                          **parked})
                 results.append({"event_id": ev["event_id"], "status": status})
             resp = {"results": results, "ledger_event_ids": op.events, "request_id": request_id}
             self._idem_add(op, key, h, resp)
@@ -583,6 +587,12 @@ class PayeesMixin:
             return "hold_opened"
         return "recorded"
 
+    def _next_parked_seq(self, op: Op) -> int:
+        """A monotonic arrival number for events parked during a restore lockdown (gaps are harmless)."""
+        top = max([int(r.get("parked_seq") or 0) for r in self.db["rail_events"].values()] or [0])
+        self.__dict__["_parked_seq_hint"] = max(top, self.__dict__.get("_parked_seq_hint", 0)) + 1
+        return self.__dict__["_parked_seq_hint"]
+
     def replay_held_rail_events(self, op_prefix: str, item_id: Optional[str] = None) -> int:
         """Apply the rail events held for items no longer ``submitting`` (sweep B-F2): each in its own operation (a
         refused posting leaves only that event held). Called once an item's acceptance is booked and by the rail-sync
@@ -592,15 +602,22 @@ class PayeesMixin:
             # AEGIS 5a56a3a M4: only held events are visited, through ``held_by_item`` (kept by ``_apply``), never a
             # scan of every rail event ever received: O(held events) under the service lock, not O(all events)
             items = [item_id] if item_id is not None else sorted(self.held_by_item)
-            held = sorted((k, dict(self.db["rail_events"][k])) for i in items
-                          if (self.db["items"].get(i) or {}).get("status") != "submitting"
-                          for k in self.held_by_item.get(i, ()))
+            held = sorted(((k, dict(self.db["rail_events"][k])) for i in items
+                           if (self.db["items"].get(i) or {}).get("status") != "submitting"
+                           for k in self.held_by_item.get(i, ())),
+                          key=lambda kr: (kr[1].get("parked_seq") or 0, kr[0]))       # AEGIS r6 R6-5: arrival order
             for k, r in held:
                 op = Op(self, f"{op_prefix}|held|{k}|{len(self.log)}", "intel_04_payout_run", f"rail:{r['rail']}")
                 try:
                     status = self._rail_event(op, r["rail"], {"event_id": r["event_id"], "type": r["type"],
                                                               "item_id": r["item_id"]})
                 except InvalidReasons:
+                    continue
+                if r.get("restore_parked") and str(status).startswith("ignored_"):
+                    # AEGIS r6 R6-5: not applicable YET (e.g. returned before paid): it stays held, never deduplicated
+                    op.put("rail_events", k, {**r, "status": HELD, "held": True, "waiting_since": iso(self._now()),
+                                              "last_try": status})
+                    self._commit(op)
                     continue
                 op.put("rail_events", k, {**r, "status": status, "held": status == HELD,
                                           "released_from_hold_at": iso(self._now())})

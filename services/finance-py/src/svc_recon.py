@@ -18,6 +18,7 @@ from typing import Optional
 import chart as C
 import money as M
 import reasons as R
+import restore_evidence as RE
 from clock import iso, parse_iso
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
@@ -678,9 +679,14 @@ class ReconMixin:
                      # across attempts and never reset
                      "first_asked_at": t.get("first_asked_at") or iso(self._now())}
                 op.put("treasury_ops", tid, t)
+                # AEGIS r6 R6-1: the posting's lines, verifiable from the summary (a restore derives its correction)
+                dl = next(x for x in e["lines"] if x["debit"] != "0.00")
+                cl = next(x for x in e["lines"] if x["credit"] != "0.00")
+                xd, xc = (dl["account"], dl["subledger"]), (cl["account"], cl["subledger"])
                 op.record(derived_id("trxp", tid, n), "treasury_posting_committed", "intel_08_treasury", tid,
-                          {"op_id": tid, "entry_id": e["entry_id"], "attempt": n},
-                          f"{t['kind']} posted and anchored before the bank instruction (attempt {n})")
+                          RE.xfer_payload(tid, n, t["kind"], memo, t["amount"], xd, xc, t.get("ref_id")),
+                          RE.xfer_summary(t["kind"], n, memo, t["amount"], xd, xc, t.get("ref_id"),
+                                          len(self.log) + 1))
                 self._commit(op)
             n = t["attempts"]
             if reentry and not t.get("outcome_unknown"):
@@ -797,7 +803,8 @@ class ReconMixin:
             if prof:
                 op.put("profiles", r["campaign_id"], {**prof, "status": "closed"})
             op.record(derived_id("rfdpd", r["refund_id"]), "refund_paid", "intel_08_treasury", r["refund_id"],
-                      {"refund_id": r["refund_id"], "amount": r["amount"]}, f"Refund paid: {r['amount']}")
+                      RE.refund_paid_payload(r["refund_id"], r["amount"], r["campaign_id"], r["client_id"]),
+                      RE.refund_paid_summary(r["amount"], r["campaign_id"], r["client_id"], len(self.log) + 1))
         if t["kind"] == "top_up" and t.get("shortfall_id"):
             self._close_shortfall(op, t["shortfall_id"], tid)
 

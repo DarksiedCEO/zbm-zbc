@@ -50,7 +50,10 @@ def _settle(z, out, disp="lost", amount="29.01"):
                if i["status"] == "needs_review"]:
         body = {"request_id": rid(), "disposition": disp, "reason": "checked: bank ref BR-1"}
         if it["kind"] in ("money_out", "in_flight"):
-            body.update(disposition="moved", provider_ref="BR-1", moved_amount=amount, counterparty=it["ref"])
+            body.update(disposition="moved", provider_ref="BR-1")
+            if z.svc._derive_money(it) is None and it["event_type"] not in ("batch_release_started",
+                                                                           "media_vendor_payment_recorded"):
+                body.update(moved_amount=amount, counterparty=it["ref"])
         z.ok(z.post(f"/fin/v1/restore/items/{it['event_id']}/disposition", body, andre=ANDRE_TOKEN))
 
 
@@ -159,9 +162,12 @@ def test_r4_3_a_payout_released_after_the_backup_is_an_item_and_is_never_release
     assert bad.status_code == 409                                            # money: moved / not_moved only
     _settle(z, out)                                                          # Andre: moved (rail reference)
     lift(z)
+    # AEGIS r6 R6-9: the post-restore phase ends first (a clean reconciliation), so this proves the id fence alone
+    rec = z.recon()
+    assert rec["post_restore_clean"] is True and z.svc.restore_post_phase() is None, rec["recon"]["legs"]
     before = z.svc.db["batches"][b["batch_id"]]["status"]
     r = z.post(f"/fin/v1/payout-batches/{b['batch_id']}/release", {"request_id": rid()}, caller="scheduler")
-    assert r.status_code == 409 and ("RESTORE_FENCED" in r.text or "POST_RESTORE_RECONCILE" in r.text)
+    assert r.status_code == 409 and "RESTORE_FENCED" in r.text
     assert len([c for c in z.stripe.calls if c[0] == "submit"]) == n_sub      # never submitted again
     assert z.svc.db["batches"][b["batch_id"]]["status"] == before            # refused before anything changed
     z2 = restart(x, tmp_path)                                                # R4-21: a restart after the lift
@@ -175,7 +181,8 @@ def test_r4_3_not_moved_releases_the_fence_and_in_flight_transfers_are_items(key
     x.ok(_void(x, x.svc.db["invoices"][a["invoice_id"]]))
     restore(tmp_path)
     y = restart(x, tmp_path, FIN_RECONCILE_MODE="1")
-    y.svc.db["treasury_ops"]["fin-trx-T1"] = {"op_id": "fin-trx-T1", "status": "approved", "kind": "funding"}
+    y.svc.db["treasury_ops"]["fin-trx-T1"] = {"op_id": "fin-trx-T1", "status": "approved", "kind": "funding",
+                                              "amount": "10.00", "rail": "stripe"}
     out = y.ok(_reconcile(y))
     its = y.svc.db["breaks"][out["reimport_break_id"]]["items"]
     assert its["inflight:fin-trx-T1"]["kind"] == "in_flight" and "fin-trx-T1" in y.svc._fenced()
