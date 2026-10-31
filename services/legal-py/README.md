@@ -54,8 +54,9 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `GET /legal/v1/documents/{doc_id}/current` | any | protocol answer for Compliance / Clipper Network |
 | `GET /legal/v1/documents/{doc_id}`, `.../versions/{v}` | any | register view (no text) |
 | `GET .../versions/{v}/text` | Andre | the text |
-| `POST /legal/v1/documents/{doc_id}/versions` | Andre (upload; `bump: major` optional) or scheduler (template fill with `party_ref`); anyone else uploading -> 403 | new draft; Legal assigns the version number |
+| `POST /legal/v1/documents/{doc_id}/versions` | Andre (upload; `bump: major` optional; or a template fill with `variables` + `party_ref`, ADR 0022) or scheduler (template fill with `party_ref`); anyone else uploading -> 403 | new draft; Legal assigns the version number |
 | `POST .../versions/{v}/counsel-review`, `/counsel-signoff`, `/decision` | Andre | package; sign-off record; approve / retire / withdraw |
+| `POST .../versions/{v}/founder-approval` | Andre | client_msa / sow / sow_seo_audit / sow_revenue_recovery / zbc_order_form only: founder approval, or renewal of a founder-approved version (LG-20, ADR 0022) |
 | `POST /legal/v1/acceptances`; `GET /legal/v1/acceptances/{id}` | hub, clipper_network, onboarding; readers | clickwrap evidence |
 | `POST /legal/v1/envelopes`; `POST /legal/v1/esign/events` | Andre; esign_gateway | envelopes (provider not wired) |
 | `POST /legal/v1/playbooks/proposals`, `/decisions`; `GET /legal/v1/playbooks/{doc_type}` | Andre; any | playbooks |
@@ -64,6 +65,8 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `POST /legal/v1/obligations/{id}/done`, `/waive` | owner department; Andre | |
 | `GET`, `PUT /legal/v1/contracts/{client_id}/terms` | onboarding | ContractTerms storage |
 | `GET /legal/v1/register`, `/register/{cq_id}`; `POST /register/{id}/invalidate` | any; compliance_38 | counsel-question mirror |
+| `POST /legal/v1/register/CQ-19/founder-determination` | Andre | CQ-19 for client commercial contracts only (LG-20, ADR 0022) |
+| `GET .../versions/{v}/founder-approval/rationale`, `GET /legal/v1/register/CQ-19/founder-determination/rationale` | Andre | his own rationale text, read back (ADR 0022) |
 | `POST /legal/v1/memos`; `GET /legal/v1/memos/{id}` | Andre; any | memo intake |
 | `POST /legal/v1/memos/{memo_id}/compliance-proposals` | Andre | step 2: Compliance proposals backed by the filed memo |
 | `POST /legal/v1/requests`; `GET /legal/v1/matters/{id}`; `POST .../close` | any; any; Andre | matters |
@@ -100,6 +103,39 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 6. Every document, fills and SOWs included, needs counsel's sign-off on its exact hash (no SOW exception). The
    advice-text guard is defense in depth, not the control (ADR 0010 amendment). No IP address is accepted in any
    string of any write route (IPv4/IPv6, embedded, with a port, URL-encoded).
+
+## Founder path for client contracts (LG-20, ADR 0022)
+
+Andre's ruling of Oct 30 2026: he approves the client commercial contracts himself. For `client_msa`, the SOWs (`sow`,
+`sow_seo_audit`, `sow_revenue_recovery`) and `zbc_order_form` only (`founder_approval_allowed` in
+`seed/documents.json`), LG-20 applies in place of item 6 above:
+
+- `POST /legal/v1/documents/{doc_id}/versions/{v}/founder-approval` (Andre): `version_sha256`, `rationale` (20-2000
+  characters), `founder_confirms: true`. The version shows `approval_basis: founder_approval`,
+  `review_label: founder_approval`.
+- `POST /legal/v1/register/CQ-19/founder-determination` (Andre): `rationale`, `founder_confirms: true`. A clickwrap
+  acceptance of those documents is then evidence-sufficient with `evidence_basis: founder_determination`; the row's
+  own status and memo list are untouched. The determination carries a `renew_by` date (`LEGAL_MEMO_REVIEW_DAYS`), as
+  a version carries `review_by`. Re-sending a founder approval on an approved founder-approved version renews it
+  with the same hash, so acceptances stay valid.
+- SOW templates: one document per template (`sow_seo_audit`, `sow_revenue_recovery`), so both are live at once. Each
+  client's fill (Andre's token: `variables` + `party_ref`) is a draft that Andre founder-approves before the client
+  can accept it.
+- Approval refuses a text holding a detected placeholder form (`UNFILLED_PLACEHOLDER`, any document). The guard
+  is a backstop to Andre's own reading, not a guarantee. Square brackets (and every Unicode bracket pair) are
+  deny-by-default: any `[...]` or unclosed `[` counts except an exact list of boilerplate phrases, numbered
+  footnotes, positioned list markers, and links to a URL or an existing anchor. `<<..>>`, identifier braces,
+  undeclared `{{...}}`, `___` blanks outside an exact signature line, X-amounts and TBD/TBA/TODO also count, and
+  so do `XXXX`, `(insert ...)`, `%%..%%`, `__FEE__`, `#FEE#`, `Lorem ipsum`, `PLACEHOLDER`, `??`, `TK` and `Fee: —`. ADR 0022
+  lists exactly what is detected and what is not (bare `CLIENT NAME`, `(CLIENT NAME)`, ...). It is linear (measured
+  under 1 s of CPU per 1 MB stress text, about 1.1 s for a 5 MB worst case), runs outside the service lock, and
+  skips replayed requests.
+- Retiring a template stops new approvals, renewals and acceptances of its fills (`TEMPLATE_NOT_IN_FORCE`). An
+  acceptance recorded under a CQ-19 determination that was later invalidated never counts again.
+- `GET .../current` never names a version bound to one party. Closing LG-20 takes founder-approved versions out of
+  force, and acceptances resting on the CQ-19 determination stop counting (`basis_in_force: false`).
+- Both need LG-20 `verified` in the rule version in force. Every other document and CQ row is unchanged. Andre's
+  steps: `docs/deploy/railway.md`, "Founder contract approval (ADR 0022)".
 
 ## Data directory and the local log (bug sweep E)
 
