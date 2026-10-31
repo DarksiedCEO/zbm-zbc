@@ -134,6 +134,33 @@ JOBS_MONEY_OUT = ("job_accrual", "job_rail_sync", "job_stripe_sessions")
 NOT_ACTIONS = ("founder_refused",)
 
 
+def _handler_calls(tree: ast.AST) -> set[str]:
+    """The service methods a handler can reach: every ``<alias>.<name>`` (called or not) where ``<alias>`` is ``svc`` or
+    a name bound to it (``s = svc``; ``t = s``), and every ``getattr(<alias>, "<name>")``. A ``getattr`` whose name is
+    not a literal yields ``"*"`` (unknown: treated as a write). AEGIS r13 R13-4."""
+    aliases = {"svc"}
+    grew = True
+    while grew:
+        grew = False
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and isinstance(n.value, ast.Name) \
+                    and n.value.id in aliases:
+                targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+                for t in targets:
+                    if isinstance(t, ast.Name) and t.id not in aliases:
+                        aliases.add(t.id)
+                        grew = True
+    out: set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in aliases:
+            out.add(n.attr)
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "getattr" and n.args \
+                and isinstance(n.args[0], ast.Name) and n.args[0].id in aliases:
+            name = n.args[1] if len(n.args) > 1 else None
+            out.add(name.value if isinstance(name, ast.Constant) and isinstance(name.value, str) else "*")
+    return out
+
+
 def _routes() -> dict[tuple[str, str], set[str]]:
     """(method, path) -> the ``svc.<name>`` service methods its handler calls. AEGIS r11 R11-7: discovered from the
     LIVE app's routes (every declaration form), each handler's own source parsed for ``svc.<name>(...)`` calls."""
@@ -147,8 +174,7 @@ def _routes() -> dict[tuple[str, str], set[str]]:
         if not methods:
             continue
         tree = ast.parse(textwrap.dedent(inspect.getsource(r.endpoint)))
-        calls = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call)
-                 and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) and n.func.value.id == "svc"}
+        calls = _handler_calls(tree)
         for m in methods:
             out[(m, r.path)] = calls
     return out
@@ -287,9 +313,8 @@ def test_no_get_route_changes_state_beyond_its_declared_reason():
         if not methods:
             continue
         tree = ast.parse(textwrap.dedent(inspect.getsource(r.endpoint)))
-        calls = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                 and isinstance(n.func.value, ast.Name) and n.func.value.id == "svc"}
-        writes = sorted(c for c in calls if _reaches(g, c, "_commit") or _reaches(g, c, "_post"))
+        calls = _handler_calls(tree)
+        writes = sorted(c for c in calls if c == "*" or _reaches(g, c, "_commit") or _reaches(g, c, "_post"))
         if writes:
             found[("GET", r.path)] = writes
     assert set(found) <= set(GET_WRITES), ("GET routes that write", {k: v for k, v in found.items()

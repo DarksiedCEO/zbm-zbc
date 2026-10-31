@@ -482,6 +482,8 @@ class LegalService:
         if not op.ops:
             return
         self._check_updates(op)
+        # AEGIS r13 R13-7: what the apply may change, read BEFORE the line is written (R12-6 rollback)
+        snap = self._snapshot(op.ops)
         data = {"ops": [[k, r] for k, r in op.ops], "ledger_event_ids": list(op.events),
                 "rules_version": self.rules_version, "anchored": True}
         if op.idem:
@@ -511,7 +513,6 @@ class LegalService:
                 except OSError:
                     pass
             raise Unavailable(f"local store write failed ({exc}); nothing took effect") from None
-        snap = self._snapshot(op.ops)
         try:
             for kind, r in op.ops:
                 self._apply(kind, r)

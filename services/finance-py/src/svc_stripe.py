@@ -826,6 +826,13 @@ class StripeMixin:
                     return cur
         return None
 
+    def _last_alert(self, client_id: str, op: Op) -> Optional[dict]:
+        """The client's most recently opened founder alert, whatever its status (AEGIS r13 R13-6)."""
+        mine = [op.get("breaks", k) for k, b in list(self.db["breaks"].items())
+                if b.get("kind") == "founder_alert" and b.get("subject") == f"client:{client_id}"]
+        mine = [b for b in mine if b is not None]
+        return max(mine, key=lambda b: b["opened_at"]) if mine else None
+
     def _job_founder_alerts(self, prefix: str, holding: set, alerted: set, acts: dict) -> None:
         """AEGIS r11 R11-4, r12 R12-1/R12-2: a DURABLE founder alert, recorded with the job's state change: an open
         high-severity ``compliance_hold`` break (kind ``founder_alert``, category ``compliance_hold``, subject
@@ -847,14 +854,19 @@ class StripeMixin:
                 if needs:
                     note = self.FUNDED_ALERT_NOTE[bool(act.sanctions)]
                     if b is None:
-                        bid = rid("brk", "founder_alert", secrets.token_hex(16))
+                        # AEGIS r13 R13-6: a client's alert that cleared and comes back re-opens the SAME record (the
+                        # ADR 0027 dispatcher alerts a condition again "after it cleared and came back"), so flips do
+                        # not pile up records; the first opening's id stays random (R13-1)
+                        old = self._last_alert(cid, op)
+                        bid = old["break_id"] if old else rid("brk", "founder_alert", secrets.token_hex(16))
                         op.put("breaks", bid, {"break_id": bid, "leg": "compliance_hold", "kind": "founder_alert",
                                                "category": "compliance_hold", "severity": "high",
                                                "subject": f"client:{cid}", "difference": "0.00",
                                                "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
                                                "owner": "andre", "explanation_code": "unknown", "status": "open",
                                                "resolution": None, "note": note, "checked_at": iso(self._now())})
-                        op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                        op.record(derived_id("brk", bid, *((prefix, "reopened") if old else ())), "break_opened",
+                                  "intel_07_reconciliation", bid,
                                   {"break_id": bid, "leg": "compliance_hold", "difference": "0.00"},
                                   "Break opened: founder alert (client money held for a client Compliance refuses)")
                     else:

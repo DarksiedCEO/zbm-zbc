@@ -354,7 +354,13 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return svc.health()
+        out = svc.health()
+        if settings.callers_not_configured:
+            # AEGIS r13 R13-3: an optional caller left unset is a half-finished deploy step (railway.md step D): not
+            # "ok", so the heartbeat keeps flagging it; a worse status (degraded, closed) is never softened
+            out = {**out, "status": "warning" if out["status"] == "ok" else out["status"],
+                   "warnings": [f"optional_caller_unset:{c}" for c in settings.callers_not_configured]}
+        return out
 
     @app.get("/legal/v1/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(reader)) -> list[dict]:

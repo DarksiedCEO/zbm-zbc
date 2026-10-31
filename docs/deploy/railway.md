@@ -861,11 +861,12 @@ railway config apply
 **D. Deploy order.** The order that matters for Legal: after `railway config apply` (step C) Legal's
 `LEGAL_CALLER_TOKENS` names `compliance_38`, whose `COMPLIANCE_LEGAL_CALLER_TOKEN` exists only once the apply created
 the `compliance` service. Legal starts anyway (the entry is optional: its log warns that compliance_38 is not set
-yet, and the route only Compliance calls answers 503), so:
+yet, the route only Compliance calls answers 503, and its `/health` says `"status": "warning"` with
+`optional_caller_unset:compliance_38` until the token is set), so:
 
 1. `railway config apply` (step C);
 2. set `COMPLIANCE_LEGAL_CALLER_TOKEN` (and the other compliance tokens of step A) on compliance;
-3. redeploy legal (it now resolves the reference; the warning is gone);
+3. redeploy legal (it now resolves the reference; the warning is gone and `/health` says `"ok"`);
 4. redeploy compliance.
 
 Then: ledger (with the new `LEDGER_CALLERS`, before compliance's first start), detection, seo, then finance. seo must run this version **before or together with** finance: this finance adds `held` to the invoice
@@ -928,7 +929,8 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    no payment held by Compliance (`compliance_holds_open` is 0: held invoices, held unapplied money and open founder
    alerts), and legal's `/health` says `"status": "ok"` (it is `degraded` while a log line the replay did not apply is
    unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
-   /legal/v1/replay-quarantine/acknowledgements`, your token). A 503, a dead or unreachable service, an open hold, or
+   /legal/v1/replay-quarantine/acknowledgements`, your token; it is `warning` while `COMPLIANCE_LEGAL_CALLER_TOKEN` is
+   unset: finish step D). A 503, a dead or unreachable service, an open hold, or
    the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
    things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
 3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already

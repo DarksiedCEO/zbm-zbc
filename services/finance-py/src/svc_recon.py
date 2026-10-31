@@ -223,6 +223,11 @@ class ReconMixin:
             self._commit(op)
             return resp
 
+    # The fields of a Compliance (or held-refund) break a non-Andre caller may see. AEGIS r13 R13-1/R13-5: no kind,
+    # category, severity or checked_at (a founder alert's alone), and nothing added later unless listed here.
+    SHARED_BREAK_FIELDS = ("break_id", "leg", "subject", "difference", "opened_at", "opened_on", "owner",
+                           "explanation_code", "status", "receipt_id", "aging")
+
     def list_breaks(self, full: bool = True) -> dict:
         """``full``: Andre's read. Other callers see a Compliance hold's break without its note or resolution (which
         may say the hold rests on sanctions; AEGIS r6)."""
@@ -232,16 +237,16 @@ class ReconMixin:
             for b in sorted(self.db["breaks"].values(), key=lambda b: b["opened_at"]):
                 row = {**b, "aging": I7.aging_bucket(date.fromisoformat(b["opened_on"]), today)}
                 if not full and b.get("leg") in self.PRIVATE_LEGS:
+                    # AEGIS r13 R13-1: built from an ALLOW-LIST, so a field added to a Compliance break later (a
+                    # ground, a severity, a kind, a checked_at) never reaches a non-Andre reader by default
+                    row = {k: row[k] for k in self.SHARED_BREAK_FIELDS if k in row}
                     row.update(leg="compliance_hold", note="payment held by Compliance (details: Andre's token)",
                                resolution=None)
-                    row.pop("severity", None)                # AEGIS r9 R9-2: no severity tell either
                     if b.get("kind") == "founder_alert":     # AEGIS r12 R12-1: no client named outside Andre's token
-                        for k in ("kind", "category"):
-                            row.pop(k, None)
                         row["subject"] = "compliance"
                 elif not full and b.get("leg") == "stripe_refund":
-                    row.pop("note", None)                    # AEGIS r10 RTM-08c: a held refund's note is Andre's
-                    row.pop("severity", None)
+                    # AEGIS r10 RTM-08c: a held refund's note and severity are Andre's (allow-list: AEGIS r13 R13-1)
+                    row = {k: row[k] for k in (*self.SHARED_BREAK_FIELDS, "resolution") if k in row}
                 out.append(row)
             return {"breaks": out}
 

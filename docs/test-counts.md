@@ -24,10 +24,10 @@ the check.
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 736 | pytest collection | — |
 | `python:detection-py` | 845 | pytest collection | — |
-| `python:finance-py` | 869 | pytest collection | — |
+| `python:finance-py` | 879 | pytest collection | — |
 | `python:fulfillment-py` | 1119 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
-| `python:legal-py` | 375 | pytest collection | — |
+| `python:legal-py` | 383 | pytest collection | — |
 | `python:onboarding-py` | 849 | pytest collection | — |
 | `python:ooh-py` | 212 | pytest collection | — |
 | `python:sales-py` | 874 | pytest collection | — |

@@ -250,9 +250,12 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   and holds, never campaign status: an unspent deposit in 2010, a refund owed in 2050, an open refund, held unapplied
   money or a held payment; an open, high-severity `compliance_hold` break, `kind: founder_alert`, `category:
   compliance_hold`, `subject: client:<id>`, a random id; closed by the hourly job on a current ALLOW or once ZBC holds
-  none of the client's money; an unanswered Compliance changes nothing). AEGIS r12 R12-1: while open it is re-written on
+  none of the client's money; an unanswered Compliance changes nothing; AEGIS r13 R13-6: if it comes back, the same
+  record re-opens, so the dispatcher sees the same condition return). AEGIS r12 R12-1: while open it is re-written on
   every hourly run whatever its ground, so a sanctions upgrade writes the same log lines as a plain refusal;
-  non-Andre break reads show it as a generic compliance break with no client, note or severity, and
+  non-Andre break reads show it as a generic compliance break with no client, note, severity or `checked_at` (AEGIS
+  r13 R13-1/R13-5: every non-Andre row of a Compliance leg or a held refund is built from an allow-list of fields,
+  `SHARED_BREAK_FIELDS`, so a field added later stays Andre's until reviewed), and
   `GET /fin/v1/integrity` gives non-Andre callers the verdict only (`status`, `checked_at`), no counters. The founder-alert dispatcher of ADR 0027 (fix wave C,
   `feat/ops-alerts-offboarding-2026-10-31`) reads open breaks of the Compliance legs as its `compliance_hold`
   category and high-severity breaks as `finance_high_break`; delivery is recorded only by that dispatcher, never by
@@ -267,7 +270,12 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   and the window is the step's own gather (seconds).
 - **Legal replay (R11-6).** A log line whose caller was answered with a failure is never applied on replay (quarantined
   whole); Andre reviews and acknowledges the quarantine (`GET /legal/v1/replay-quarantine`, `POST
-  .../acknowledgements`), and legal's `/health` is in the heartbeat check.
+  .../acknowledgements`), and legal's `/health` is in the heartbeat check. AEGIS r12 R12-6 / r13 R13-7: a line whose
+  apply fails is rolled back in memory from a snapshot taken before the line is written. AEGIS r13 R13-3: while an
+  optional caller token (`compliance_38`) is unset, legal's `/health` answers `"status": "warning"` with
+  `warnings: ["optional_caller_unset:compliance_38"]`, so the heartbeat check stays red until runbook step D is done;
+  a route another configured caller may use still answers 403 to a wrong token (503 only where no configured caller
+  could call it).
 - **The route invariant (R11-7)** discovers routes from the live app and runs each money route's behavioural proof
   (the refused client's money does not move; source and target client for an applied receipt).
 - **Deviations from the AEGIS r10 fix text (accepted by AEGIS r11 unless noted):**
