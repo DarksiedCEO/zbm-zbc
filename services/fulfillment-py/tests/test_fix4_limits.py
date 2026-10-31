@@ -225,6 +225,7 @@ REGEX_INVENTORY = {
     "contact_window.py": 1,           # _WINDOW_RE
     "fulfillment_schema/money.py": 2,  # _FLOAT_TEXT, WIRE_PATTERN
     "fulfillment_schema/__init__.py": 2,  # _ID_PATTERN, PhoneE164 pattern (pydantic-core)
+    "access_redact.py": 1,            # fix wave A (RTA-4): _WORD, the access-log path-segment word
 }
 _REGEX_SITE = re.compile(r"re\.(?:compile|match|fullmatch|search|sub|subn|findall|finditer|split)\(|pattern\s*=")
 
@@ -274,6 +275,7 @@ REGEX_CALLS = {
     "TaskId": TypeAdapter(TaskId).validate_python,
     "PhoneE164": TypeAdapter(PhoneE164).validate_python,
     "PhoneE164 json": lambda s: TypeAdapter(PhoneE164).validate_json(json.dumps(s)),
+    "access_redact.redact_target": lambda s: __import__("access_redact").redact_target("/" + s + "?" + s),
 }
 
 
