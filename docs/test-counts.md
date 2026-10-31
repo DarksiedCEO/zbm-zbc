@@ -19,7 +19,7 @@ the check.
 | `go:orchestrator-go` | 132 | go test -v | — |
 | `node:dashboard-ts` | 54 | node --test | — |
 | `python:bizdev-py` | 358 | pytest collection | — |
-| `python:client-portal-py` | 188 | pytest collection | — |
+| `python:client-portal-py` | 205 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
 | `python:compliance-py` | 777 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |

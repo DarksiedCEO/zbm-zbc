@@ -26,9 +26,11 @@ def main() -> int:
         return 1
     import uvicorn
     app = create_app(settings)
-    uvicorn.run(app, host=settings.bind_addr, port=settings.port, http="h11", access_log=False, server_header=False,
-                proxy_headers=False, forwarded_allow_ips="", limit_concurrency=64, timeout_keep_alive=5,
-                h11_max_incomplete_event_size=HEAD_MAX, log_level="warning", lifespan="on")
+    import dual_stack   # "::" is bound dual-stack (asyncio alone binds it IPv6-only; Docker's IPv4 mapping reset)
+    dual_stack.serve(uvicorn, app, settings.bind_addr, settings.port, "client-portal-py", http="h11",
+                     access_log=False, server_header=False, proxy_headers=False, forwarded_allow_ips="",
+                     limit_concurrency=64, timeout_keep_alive=5, h11_max_incomplete_event_size=HEAD_MAX,
+                     log_level="warning", lifespan="on")
     return 0
 
 
