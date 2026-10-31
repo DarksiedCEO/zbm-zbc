@@ -502,8 +502,10 @@ def test_answer_and_prompt_text_never_reach_the_document(tmp_path, srv):
     for fmt in ("html", "markdown"):
         t = h.ok(_report(h, "zbm", a["audit_id"], fmt=fmt))["content"]
         assert "PROMPTTEXT" not in t and "who recovers" not in t and "second question" not in t
-        # The planted phone number, not the bare digits "555": a random SHA-256 in the document can contain "555".
-        assert "ANSWERTEXT" not in t and "Long Beach" not in t and "555 010 0199" not in t and "010 0199" not in t
+        # The planted phone number in any common format, not the bare digits "555": a random SHA-256 in the
+        # document can contain "555".
+        assert "ANSWERTEXT" not in t and "Long Beach" not in t
+        assert not re.search(r"555\D{0,3}010\D{0,3}0199", t), "planted phone number reached the document"
         assert "Question 1" in t and "Question 2" in t
 
 
