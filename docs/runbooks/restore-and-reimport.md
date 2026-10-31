@@ -36,7 +36,8 @@ Why order matters: every department anchors its local log on the **ledger**.
 ## 2. Taking a consistent backup set (before risky work, and weekly)
 
 About 10 minutes. Finance pauses its writes for the window (Stripe webhooks and fin-cron get a 503 and retry later;
-nothing is lost: in live mode Stripe retries a webhook it could not deliver for up to 3 days, with growing gaps, so a
+nothing is lost (a rail's own status webhooks are parked during a restore lockdown, see section 4): in live mode
+Stripe retries a webhook it could not deliver for up to 3 days, with growing gaps, so a
 pause of minutes only delays them; a sandbox (test mode) retries only a few times over a few hours, so in a test drill
 a long pause can lose a delivery, which the re-import of section 5 then books). A pause lasts at most `FIN_BACKUP_PAUSE_MAX_MIN` minutes (default 30, at most 120); a
 longer `minutes` is refused. It always ends on time, also if Finance restarts inside it: the restarted Finance stays
@@ -112,16 +113,20 @@ department. Expect more to re-import (section 5).
 
    **The lockdown.** From now until you lift it, **all money out is paused**: Finance refuses every state-changing
    route and every scheduler job (409 `RESTORE_LOCKDOWN`) except an allowlist: Stripe webhooks and bank lines (money
-   in is still booked), the restore routes (reconcile, re-import, dispositions, lift), the contract-deadline routes
-   (`sow-ended`, `acknowledgements`, `deadlines/<id>/close`), the backup pause and resume, and the client-mail job
-   (the founder alerts). Every bank transfer, rail submit, payout release and refund repayment is also refused inside
+   in is still booked), rail status events (verified and **parked**: applied at the lift; a `destination_changed`
+   applies at once, it only puts the payee on hold; an event for a payout item the restored books lack becomes a
+   restore item), the restore routes (reconcile, re-import, dispositions, corrections, bank re-feed, lift), the
+   contract-deadline routes (`sow-ended`, `acknowledgements`, `deadlines/<id>/close`), the backup pause and resume,
+   and the client-mail job (the founder alerts; it sends no client email while locked). Every bank transfer, rail submit, payout release and refund repayment is also refused inside
    Finance itself. `/health` answers `"status": "degraded"` with `restore_lockdown.on: true` (and `why`), and finance
    logs `ALERT finance: restore_lockdown on` every 5 minutes. The lockdown stays on while any restore break is open,
    whatever the file says; a lockdown file that cannot be read keeps Finance locked. Only you lift it (step 5).
 
    **Contract deadlines during a lockdown.** MSA 4.12(f) acknowledgements are recorded as usual. For MSA 4.12(g) you
-   may still void an **unpaid** invoice, or credit it down without any refund, when the restore's item list is
-   complete and nothing the restore lost touches that invoice (no money moves; the lift lists these). Refunds that
+   may still void an **unpaid** invoice, or credit it down without any refund, once the restore's item list is
+   complete, the Stripe re-import has covered every day since the backup, you have confirmed the bank lines were fed
+   again (step 4 of section 5), no payment page or issue of that invoice was recorded after the backup, and nothing
+   the restore lost touches it (no money moves; the lift lists these). Refunds that
    fall due (MSA 4.10) go through the **Stripe Dashboard**, which Finance books. If the lockdown lasts more than **2
    business days**, finance logs `ALERT finance: restore_lockdown_long` with the contract deadlines due within 10
    business days, and again every day: finish section 5 before those deadlines.
@@ -187,9 +192,25 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    ```
    - **Money that went out** (`kind` `money_out`: a transfer, payout item, payout release, refund payment or vendor
      payment the ledger saw after the backup; `in_flight`: a transfer or payout item the restored books hold as
-     approved / executing / submitting): check the bank or the rail, then record `moved` (the reference in the
-     reason) or `not_moved`. Its subject stays **fenced** (never transferred, submitted, released or repaid again,
-     also after the lift) unless you record `not_moved`; book what moved by hand (journal correction).
+     approved / executing / submitting): check the bank or the rail, then record
+     - `moved` with `provider_ref` (the bank or rail reference), `moved_amount` and `counterparty` (the campaign or
+       client of a refund, the payee of a payout item, the batch of a release or funding). The old ids stay
+       **fenced** for good (never transferred, submitted, released or repaid again), and the same counterparty and
+       amount are refused under any new id until you book it with a **restore correction**:
+       ```
+       curl -sS -X POST $H $F/fin/v1/restore/items/<event_id>/correction -d '{"request_id":"rc-1","entity":"zbc",
+         "provider_ref":"<the same reference>","lines":[{"account":"2020","subledger":"payee:<payee>","debit":"29.01",
+         "credit":"0.00"},{"account":"1040","subledger":null,"debit":"0.00","credit":"29.01"}],
+         "payable_ids":["<the payables it paid>"]}'
+       ```
+       Debits and credits must each equal the moved amount; it may touch restricted cash (flow FRC, only here). A
+       payout names its payables (they become settled); a refund names `refund_campaign_id` (the refund is recorded
+       paid). It resolves the reconciliation breaks on the accounts it touches. Typical lines: a funding transfer
+       Dr 1040 / Cr 1020; a payout the rail paid Dr 2020 payee / Cr 1040; a refund the bank paid Dr 2010 campaign /
+       Cr 1020.
+     - `not_moved`: for a payout item Finance asks the rail itself (by idempotency key): if the rail has it, this is
+       refused (record it as moved). For bank money, give your attestation: `provider_ref` (the statement reference)
+       and `statement_date`. An item a restore named is always looked up at the rail before it is ever submitted.
    - `reissue_after_lift`: a credit note or void you must issue again; the lockdown refuses it now, so the lift opens
      a high-severity `restore_reissue_due` break with the item's number, amounts and refund date; issue it right after
      the lift, then resolve that break.
@@ -199,7 +220,11 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
      you handled it outside Finance (a deadline re-recorded with `sow-ended` / `acknowledgements`, an email re-sent).
    `POST /fin/v1/breaks/<id>/resolution` refuses the restore break (and every deadline break).
 4. Anything Stripe does not know (a wire, an ACH credit to the bank) is not re-imported: re-post those bank lines
-   through the bank feed as usual.
+   through the bank feed as usual, for every day from `since` to `opened_on`, then confirm it:
+   ```
+   curl -sS -X POST $H $F/fin/v1/restore/bank-refeed -d '{"request_id":"rf-1","since":"2026-11-07","until":"2026-11-09","statement_ref":"<statement id>"}'
+   ```
+   The lift (and the MSA 4.12(g) exception) needs this confirmation.
 5. **Lift the lockdown** (only you, explicitly):
    ```
    curl -sS -X POST $H $F/fin/v1/restore/lockdown/lift -d '{"request_id":"lift-1","reason":"re-import 11-07..11-09 clean; 2 items disposed"}'
@@ -207,8 +232,14 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    Refused (409, listing what is missing) while the item list is incomplete, a day is not covered, or an item is not
    rebuilt or disposed of. The answer lists `lockdown_effects` (voids and credits made during the lockdown) and the
    `fenced` subjects. The lockdown file is written first: if that fails the answer is 503 and nothing changed; a retry
-   with the same `request_id` always says the state as it is now. Then `/health` is `ok` again and money can go out.
-   Issue any `restore_reissue_due` items now.
+   with the same `request_id` always says the state as it is now. Issue any `restore_reissue_due` items now.
+
+   **After the lift money out still waits** (`/health` `restore_lockdown.post_restore_reconcile_required: true`):
+   every bank transfer, rail submit, release and refund payment answers 409 `POST_RESTORE_RECONCILE_REQUIRED` until a
+   reconciliation run AFTER the lift (`POST /fin/v1/reconciliations/run`, or fin-cron's daily run) matches every leg
+   (bank, rails, Stripe, sub-ledgers) and leaves no reconciliation break open. Book every `moved` item with its
+   restore correction first; the parked rail events are applied at the lift. Then money out resumes. Client email
+   resumes too; a message the ledger shows Resend accepted after the backup is marked sent, never sent again.
 
 ## Commit marks and the key (FIN_CONTACT_HASH_KEY)
 
