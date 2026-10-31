@@ -827,6 +827,34 @@ class StripeMixin:
         elif basis in OFAC_BASES:
             raise Conflict(f"{basis} releases a sanctions hold only; this hold is not grounded in sanctions")
 
+    def compliance_hold_status(self, invoice_id: str) -> dict:
+        """AEGIS r9 R9-3 (Andre's token only): a hold's stored ground next to Compliance's answer NOW, read immediately
+        before Andre refunds a rejected payment at Stripe (runbook step G). Read-only: the release, the hourly job and
+        every outflow record an upgrade; this read only reports the ground the next of them would apply."""
+        with self.lock:
+            inv = self.db["invoices"].get(invoice_id)
+            if inv is None:
+                raise NotFound("no such invoice")
+            hold = inv.get("held_compliance")
+            client = inv["client_id"]
+        out: dict = {"invoice_id": invoice_id, "held": bool(hold)}
+        if not hold:
+            out["rejected_return_possible"] = False
+            return out
+        stored = hold_ground(hold)
+        act = self._activation(Gather(self, f"holdstatus|{invoice_id}|{iso(self._now())}", "andre", invoice_id),
+                               client)
+        if not act.available:
+            now: dict = {"available": False}
+            ground_now = stored
+        else:
+            live = act_ground(act)
+            now = {"available": True, "allowed": bool(act.allowed), "sanctions_ground": live}
+            ground_now = merge_ground(stored, live)
+        out.update(kind=hold.get("kind"), sanctions_ground=stored, compliance_now=now, ground_now=ground_now,
+                   rejected_return_possible=bool(now["available"] and ground_now == "place"))
+        return out
+
     def compliance_hold_release(self, request_id: str, invoice_id: str, body: dict) -> dict:
         """AEGIS r4 R4-2: Andre releases a held payment, on one of two grounds only.
         - ``refund``: ``entry_id`` names an F7r refund entry of THIS payment's receipt, posted after the payment entry
@@ -856,6 +884,22 @@ class StripeMixin:
             client = inv["client_id"]
         g = Gather(self, f"holdrel|{request_id}", "andre", invoice_id)
         detail: dict = {}
+        if basis == "ofac_rejected_return":
+            # AEGIS r9 R9-3: the rejected exit asks Compliance at this moment too: a refusal that now rests on a
+            # sanctions MATCH upgrades the hold (match wins) and is refused; no answer is refused (fail closed)
+            act = self._activation(g, client)
+            if not act.available:
+                raise Refused("the hold stays: Compliance (38) cannot confirm the ground is still a place",
+                              self._activation_reasons(act, full=True), ledger_event_ids=g.events)
+            if act_ground(act) == "match":
+                with self.lock:
+                    if (self.db["invoices"][invoice_id].get("held_compliance") or {}).get("kind"):
+                        op_u = Op(self, f"holdrel|{request_id}|match", "andre", invoice_id, g)
+                        self._upgrade_to_sanctions(op_u, invoice_id, act.reasons[0] if act.reasons else "", "andre",
+                                                   "match")
+                        self._commit(op_u)
+                raise Conflict("Compliance now says this refusal rests on a sanctions MATCH: the funds are blocked, "
+                               "not rejected (the hold is now a match)")
         if basis == "refund":
             # AEGIS r6 N2: a refund release asks Compliance first: if the refusal now rests on sanctions, the hold is
             # upgraded and the release refused; if Compliance cannot answer, refused (fail closed)

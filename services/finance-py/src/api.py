@@ -709,6 +709,10 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def breaks(who: str = Depends(andre_or_any_caller("breaks/list"))) -> dict:
         return svc.list_breaks(full=who == "andre")
 
+    @app.get("/fin/v1/invoices/{invoice_id}/compliance-hold", dependencies=auth)
+    def compliance_hold_status(invoice_id: str, _: str = Depends(andre("compliance-hold/status"))) -> dict:
+        return svc.compliance_hold_status(_id(invoice_id))
+
     @app.post("/fin/v1/invoices/{invoice_id}/compliance-hold/release", dependencies=auth)
     def compliance_hold_release(invoice_id: str, _: str = Depends(andre("compliance-hold/release")),
                                 req: m.ComplianceHoldRelease = Depends(body(m.ComplianceHoldRelease))) -> dict:
