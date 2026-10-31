@@ -526,6 +526,27 @@ class ClientPortal(unittest.TestCase):
             mm = re.search(r"_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks[svc])
             self.assertNotIn("client-portal", mm.group(1), f"{svc} must not accept the portal")
 
+    def test_a_first_deploy_cannot_take_legal_down(self):
+        """AEGIS M-1: Legal's caller map names client-portal's preserve()d token, which is empty until Andre sets it
+        after the first apply. Legal must skip that entry (OPTIONAL_CALLERS in its config.py: the portal routes
+        answer 503) instead of refusing to start. Generally: an entry referencing a service this change adds (any
+        service other than those already deployed or ordered by their own runbook: finance, compliance) must be
+        optional in Legal."""
+        tree = ast.parse((REPO / "services/legal-py/src/config.py").read_text())
+        optional = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                        and any(getattr(t, "id", None) == "OPTIONAL_CALLERS" for t in n.targets))
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        for caller, ref in json.loads(m.group(1)).items():
+            target = ref[3:-2].rpartition(".")[0]
+            if target and target not in ("finance", "compliance"):
+                with self.subTest(caller=caller, service=target):
+                    self.assertIn(caller, optional, f"{caller} -> {target}: an empty value would stop Legal starting")
+        self.assertEqual(tuple(optional), ("client_portal",))
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        section = runbook.split("### Client acceptance page (ADR 0028)", 1)[1].split("\n### ", 1)[0]
+        self.assertNotIn("**before**", section, "the runbook must not ask for the impossible order (AEGIS M-1)")
+        self.assertIn("answer 503", section)
+
     def test_declared_after_legal_and_listed_once(self):
         self.assertLess(self.text.index('service("legal",'), self.text.index('service("client-portal",'))
         res = re.search(r"resources:\s*\[([^\]]*)\]", self.text).group(1)

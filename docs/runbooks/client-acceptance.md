@@ -80,7 +80,8 @@ standard form exists), `TEMPLATE_NOT_IN_FORCE` (the fill's template was retired)
 founder determination in force), `ACCEPTANCE_HASH_MISMATCH` (wrong sha256).
 
 A new SOW for a client who already accepted the MSA: the same request with the SOW alone. The page shows the
-clickwrap Part C text, naming the MSA version the client accepted and its date. An MSA alone does not open on the
+clickwrap Part C text, naming the MSA version the client accepted and its date. The SOW's `msa_version` must be that
+version (and, in a first engagement, the version of the MSA in the same link); otherwise `MSA_VERSION_MISMATCH`. An MSA alone does not open on the
 page (`page: "msa_only"`, with a warning): always send the MSA with the client's first SOW.
 
 ## 5. Send the link (clickwrap text v1, Part A)
@@ -132,19 +133,41 @@ stands. To end a contract, follow the contract's own terms; to stop a template b
 
 ## 8. Once, after the first deploy: check the client address the page records
 
-The page keys its rate limits and the recorded IP HMAC on the last `X-Forwarded-For` entry Railway's edge adds
-(**UNVERIFIED** until you do this). Create a link for a test client (`client:andre-test`, with test fills), open it
-from your phone on mobile data, accept it, and read its evidence (step 6.2). Then compute the HMAC of your phone's
-public IP address (shown by any "what is my IP" page at that moment) with the evidence key:
+The page keys its per-address rate limit and the recorded IP HMAC on `X-Real-IP` (Railway's edge sets it; a Railway
+moderator says the edge overwrites it and `X-Forwarded-For`, which is **not a documented contract**), falling back to
+the last `X-Forwarded-For` entry. Two checks, from your own machine, against the page's domain (`$PORTAL`).
+
+**A. Can a client choose its address?** Send 40 requests in under a minute, each with a different spoofed
+`X-Real-IP` and `X-Forwarded-For` (junk links; nothing is recorded):
+
+```sh
+for i in $(seq 1 40); do
+  curl -s -o /dev/null -w '%{http_code}\n' -H "X-Real-IP: 192.0.2.$i" -H "X-Forwarded-For: 192.0.2.$i" \
+    "https://$PORTAL/accept/$(printf 'Z%.0s' $(seq 1 43))"
+done | sort | uniq -c
+```
+
+- Some `429` after about 30 requests: the edge **replaced** the spoofed values with your real address (or appended
+  it, and the page read the last entry). Good: nothing to change.
+- Only `404`: the page took the spoofed values (the edge **passed them through**). Then set
+  `PORTAL_CLIENT_IP_HEADER=none` and `PORTAL_TRUSTED_PROXY_HOPS=0` on `client-portal` (every request keys on the
+  edge's own address: one shared per-address limit) and tell the next build session. Either way the page's global
+  ceilings (`PORTAL_RATE_LEGAL_PER_MINUTE`, `PORTAL_RATE_NOT_FOUND_PER_MINUTE`) still bound what reaches Legal.
+
+**B. Is the recorded address yours?** Create a link for the **test client** `client:zz-test-andre` (fills of the
+standard templates, fee 0.00; the `zz-test-` prefix marks it as a test client in Legal's records, never billed: give
+Finance no billing profile for it), open it from your phone on mobile data with a spoofed header if your browser
+allows it (or plainly), accept it, and read its evidence (step 6.2). Compute the HMAC of your phone's public IP
+address (any "what is my IP" page at that moment) with the evidence key:
 
 ```sh
 python3 -c 'import hmac,hashlib,sys; k=sys.stdin.readline().strip().encode(); print(hmac.new(k, b"ip-v1\x1f" + sys.argv[1].encode(), hashlib.sha256).hexdigest())' <your phone's IP>
 # paste PORTAL_EVIDENCE_KEY, Enter
 ```
 
-Equal to the evidence's `ip_hmac_sha256`: the setting is right. Not equal: tell the next build session (the page
-then records Railway's address, and its per-address limit is one shared limit). The same command, with a disputed
-IP address, answers whether that address submitted an acceptance.
+Equal to the evidence's `ip_hmac_sha256`: right. Equal to the HMAC of a spoofed value (`192.0.2.1`): the edge
+passes client values through; do as in A. Equal to neither: the page records the edge's address; tell the next
+build session. The same command, with a disputed IP address, answers whether that address submitted an acceptance.
 
 ## What the page does and does not do
 
@@ -154,5 +177,11 @@ IP address, answers whether that address submitted an acceptance.
 - Recorded at Legal: one acceptance per document, the typed signatory block, the page text as shown and its
   SHA-256, the time, and HMACs of the IP address and browser. The IP address and browser themselves are never stored.
 - The link works once, for 14 days at most, for one client and the exact document versions you named. A document
-  changed, retired or superseded after you created the link makes it stop working.
+  retired or superseded after you created the link makes it stop working, and approving a newer fill of the MSA or a
+  SOW for the same client revokes that client's open links to the older fill.
+- A client who refreshes the confirmation, or whose connection dropped after **Accept and sign**, sees the same
+  confirmation again (the page asks Legal for the receipt of that exact submission); a different submission on a
+  used link sees "This link cannot be used".
+- Legal renders the page's words itself and refuses any other page text, and refuses a company that is not the
+  client's legal name on the link.
 - No confirmation email is sent automatically yet (step 6.3).

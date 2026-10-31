@@ -1,8 +1,9 @@
 # ADR 0028 — The client acceptance page (2026-10-31)
 
 Status: **proposed, not merged** (local branch `feat/client-acceptance-2026-10-31`, built on the local
-`feat/compliance-gate-deploy` at 98aaf6f6 with PR #7 `feat/legal-founder-contract-path` 959a687 merged in). Not
-AEGIS-audited yet. Amends ADR 0010 (Legal: who records a client's acceptance, a new caller, two new resources) and
+`feat/compliance-gate-deploy` at 98aaf6f6 with PR #7 `feat/legal-founder-contract-path` 959a687 merged in). AEGIS
+audited it at 55023ba3: CONDITIONAL, no Critical or High; its five Medium and seven Low findings are addressed in
+"AEGIS r1 fixes" below, except the items that need Andre's decision ("For Andre's sign-off"). Amends ADR 0010 (Legal: who records a client's acceptance, a new caller, two new resources) and
 ADR 0022 (decision 6, "who may record an acceptance", for client documents).
 
 ## Context
@@ -79,9 +80,10 @@ approves the client contracts himself and his CQ-19 determination makes such a c
    - The token's format is checked first (a malformed token never reaches Legal); the same 404 page for every
      unusable link; pages the service does not serve (an MSA-only link; a SOW-only link for a client with no counted
      MSA acceptance) are that same 404.
-   - Rate limits before any Legal call: per client address (30/min), per link (40/h), and a global ceiling on
-     not-found answers (120/min); keys are HMACs, never an address or a token. In memory, one replica: a restart
-     resets them.
+   - Rate limits (AEGIS M-3): per client address (30/min) before anything; the token's format; a global ceiling on
+     every call to Legal (300/min), charged before the call; per link (40/h) only for links Legal confirmed (a junk
+     token never enters that table); a global ceiling on not-found answers (120/min). Keys are HMACs, never an
+     address or a token. In memory, one replica: a restart resets them.
    - Request limits: target 2 KiB, head 8 KiB, form body 8 KiB (`application/x-www-form-urlencoded` only), 10 s body
      deadline; uvicorn: 64 connections, 5 s keep-alive, 16 KiB head, no access log, no `Server` header.
    - CSRF: the form carries an HMAC over the token's hash, the page text's hash and the issue time (at most 4 hours
@@ -136,3 +138,73 @@ approves the client contracts himself and his CQ-19 determination makes such a c
 - **Mutation evidence.** The page's tests were written with the code; 13 targeted mutants of its defenses (CSRF,
   form signature, uniform 404, rate limit, escaping, IP HMAC, token format, Referrer-Policy, page-hash recheck,
   company match, forwarded address, text-hash check, logging) were all killed. Legal's tests were written first.
+
+## AEGIS r1 fixes (2026-10-31, report `aegis-client-acceptance.md` at 55023ba3)
+
+- **M-1, the first deploy.** Legal skips an empty or unresolved `client_portal` entry in its caller map
+  (`OPTIONAL_CALLERS` in legal-py `config.py`), logs a warning and keeps running; the portal routes answer 503 until
+  the token is set and Legal is redeployed. Every other caller entry, and a set but malformed portal token, still
+  refuses the start. `devtools/test_deploy_config.py` fails if Legal's map references a service this change adds
+  without the caller being optional, or if the runbook asks for an impossible order. The runbook order is: apply,
+  set the portal's secrets and domain, redeploy Legal, then the portal.
+- **M-2, a retry after success.** `POST /legal/v1/portal/receipts` answers the receipt (documents, display,
+  acceptances) only to the token AND the request id of the submission that used the link (the request id is an HMAC
+  of the token, the signed page hash and the typed values, so only the same form reproduces it). On a POST whose link
+  is used, or whose accept Legal answers 404 (a double submit racing the first), the page asks for the receipt and
+  shows the confirmation; anything else is the 404. It works beyond Legal's 15-minute idempotency window, for as long
+  as the form's signature is valid (4 hours).
+- **M-3, Legal's load and the client address.** The global ceiling on Legal calls is charged before each call; the
+  per-link table holds only confirmed links. The client address is `X-Real-IP` (Railway's edge sets it: a moderator
+  states it is overwritten at the edge, which is not a documented contract), else the right-most `X-Forwarded-For`
+  entry, never the left-most. **Attacker cost:** the tokens are 256-bit, so guessing is pointless; the attack left is
+  availability. If a client cannot choose its address, one address gets 30 requests a minute and a single attacker
+  needs many real addresses to matter. If it can (the edge passing client values through, which runbook step 8
+  checks), the per-address limit costs the attacker nothing; then Legal still sees at most 300 calls a minute
+  (5 a second: each a hash comparison over the open links under Legal's lock, well inside Legal's capacity), and an
+  attacker who keeps the global ceilings saturated makes the page answer 429 for everyone for as long as it keeps
+  sending: a denial of the page, not of Legal, Finance or Compliance, and no acceptance can be forged. Edge
+  protection against floods is Railway's (UNVERIFIED).
+- **M-4.** Runbook step 8 sends spoofed `X-Real-IP` and `X-Forwarded-For` values, reads append or replace versus pass-
+  through from the 429s, and says what to set if they pass through.
+- **M-5, screen evidence Legal checks itself.** Legal renders the page (`legal-py/src/clickwrap_page.py`: the
+  clickwrap text v1 Parts B and C as blocks with every value filled and each document's exact text). The portal lays
+  the blocks out and adds no words of its own to the page text. At submission Legal re-renders the page for the
+  link's current state and refuses any other page text (`PRESENTED_TEXT_MISMATCH`), and refuses a typed company that
+  is not the client's legal name on the link after NFKC, case, spaces and punctuation are ignored
+  (`COMPANY_MISMATCH`). A stolen portal token plus an intercepted link can no longer record fabricated screen
+  evidence or another company. Consequence: a link Legal renders no page for (an MSA alone; a SOW alone for a client
+  with no counted MSA acceptance) cannot be accepted at all.
+- **Lows.** L-1: the typed fields refuse Unicode Cc/Cf/Cs/Zl/Zp/Co/Cn characters after NFKC (bidi controls, zero-width
+  characters, soft hyphens), at the page and at Legal. L-2(e): a SOW's `msa_version` must be the MSA of the same link
+  or, for a SOW alone, the MSA version the client accepted (`MSA_VERSION_MISMATCH`, checked at link creation and
+  whenever the link is used). L-3: approving a newer fill of a client document revokes that client's open links to
+  other versions of it. L-4: no RTM-13 invitation is issued for a client. L-5: the legal test helper no longer
+  reroutes a client acceptance silently; tests call `client_page_accept` explicitly (it pairs the document under
+  test with a standard companion so the link is a page Legal renders). L-7: an explicit `:443` in
+  `PORTAL_PUBLIC_ORIGIN` is normalized; the test client in runbook step 8 is named `client:zz-test-andre`.
+
+## For Andre's sign-off (the approved clickwrap text is the contract record; its wording is unchanged)
+
+1. **The "Company you are signing for" field.** Not in clickwrap text v1; the build brief asked for it. It must equal
+   the client's legal name on the link.
+2. **The full text inline.** Each document is shown in full on the page above its own box, instead of in a scroll
+   panel whose box stays disabled until scrolled; Part E's "Presentation" is recorded as `inline`.
+3. **The IP address and browser as keyed hashes.** The page says "We will record ... your IP address and browser",
+   and Part E calls for them; they are recorded only as HMACs with the page's evidence key. ZBM can confirm a claimed
+   address or browser, but cannot produce one, and losing the key loses even that.
+4. **The checkbox rule on the server.** The server, not a disabled button, refuses a submission with a box unticked
+   or a field empty (no script on the page).
+5. "Not now" opens a page saying nothing was recorded, instead of closing the page.
+
+## Open items
+
+- **Finance does not tie an invoice to a SOW acceptance** (AEGIS L-6, pre-existing FIN-29 behaviour): an invoice's
+  `legal_ref` may be the MSA's acceptance, so a new-SOW invoice can issue with only the MSA accepted, and Finance
+  relies on Legal's `evidence_sufficient` without itself requiring `via: client_portal`. Not changed here (Finance's
+  contract check is shared with other invoice kinds); the fix is to require a SOW `legal_ref` for `kind: service` and
+  `via: client_portal` for client acceptances.
+- **The same first-deploy hazard exists for `compliance_38`** in Legal's caller map (ADR 0024: Compliance is new and its
+  `COMPLIANCE_LEGAL_CALLER_TOKEN` is `preserve()`), on the compliance branch: Legal refuses to start while it is
+  empty. Its runbook must set that token before the apply, or the entry must become optional like `client_portal`.
+- The confirmation page and Part D say "(Pacific Time)" while `PORTAL_DISPLAY_TZ` is configurable (the text's own
+  wording; keep the default).

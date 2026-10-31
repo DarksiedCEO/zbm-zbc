@@ -735,7 +735,9 @@ volume, no ledger, no `RAILWAY_RUN_UID`.
 | `PORTAL_LEGAL_CALLER_TOKEN` | yes | yes | (you) | the `client_portal` caller token at Legal |
 | `PORTAL_EVIDENCE_KEY` | yes | yes | (you) | ≥ 32 printable characters; HMAC key (client IP address and user agent, form signatures). Rotating it invalidates open forms and changes `hmac_key_id` on later acceptances |
 | `PORTAL_PUBLIC_ORIGIN` | yes | no | `https://client-portal-production-xxxx.up.railway.app` (you, after the domain exists) | the page's exact origin; a submission whose `Origin` differs is refused. Unset or not `https://` refuses the start |
-| `PORTAL_TRUSTED_PROXY_HOPS` | yes | no | `1` (IaC) | the client address is the `X-Forwarded-For` entry this many from the end. **UNVERIFIED: how Railway's edge writes `X-Forwarded-For`** (appends or overwrites; either way the last entry is the client with `1`). If Railway sets none, every request keys on the proxy's address: the per-address limit becomes one shared limit (a flood could slow real clients; nothing is let through) and the recorded IP HMAC is the proxy's. Check once after deploy (runbook, step 8) |
+| `PORTAL_CLIENT_IP_HEADER` | no | no | `x-real-ip` (default) | AEGIS M-3: the header Railway's edge sets to the client's address (a Railway moderator states the edge overwrites `X-Real-IP` and `X-Forwarded-For`; **UNVERIFIED**, not a documented contract). `none` = do not read one |
+| `PORTAL_TRUSTED_PROXY_HOPS` | yes | no | `1` (IaC) | fallback when the header above is absent or not an address: the `X-Forwarded-For` entry this many from the END (never the left-most, which a client can write); 0 = the socket peer. Check both once after deploy (client acceptance runbook, step 8): if a client could choose its address, the per-address limit is bypassable and only the global ceilings below bound the load |
+| `PORTAL_RATE_LEGAL_PER_MINUTE` | no | no | `300` | AEGIS M-3: every call to Legal (resolve, accept, receipt), all clients together, charged before the call |
 | `PORTAL_RATE_IP_PER_MINUTE`, `PORTAL_RATE_TOKEN_PER_HOUR`, `PORTAL_RATE_NOT_FOUND_PER_MINUTE`, `PORTAL_FORM_MAX_AGE_SECONDS`, `PORTAL_LEGAL_TIMEOUT_SECONDS`, `PORTAL_DISPLAY_TZ` | no | no | `30`, `40`, `120`, `14400`, `5`, `America/Los_Angeles` | services/client-portal-py/README.md |
 
 ### dashboard (apps/dashboard-ts, on Vercel)
@@ -1369,14 +1371,19 @@ The only way a client's acceptance of the MSA or a SOW is recorded: you create a
 the page, Finance's contract gate counts it. `POST /legal/v1/acceptances` with your onboarding token is refused for
 every client. Once, after the first deploy that includes `client-portal`:
 
-1. Generate the two secrets of the Secrets table (`PORTAL_LEGAL_CALLER_TOKEN`, `PORTAL_EVIDENCE_KEY`) and set them on
-   `client-portal` (Sealed). Legal reads the caller token through its `LEGAL_CALLER_TOKENS` map, so set it **before**
-   Legal restarts with the new map (an empty reference refuses Legal's start).
-2. `client-portal` -> Settings -> Networking -> **Generate Domain** (no custom domain is needed). Copy it and set
-   `PORTAL_PUBLIC_ORIGIN` to `https://<that domain>` (no path, no trailing slash). Redeploy `client-portal`.
-3. Set `LEGAL_ZBM_FACTS` on `legal` (the entity facts; runbook step 1 of docs/runbooks/client-acceptance.md).
-4. Check: `curl -sS https://<domain>/health` answers `{"status":"ok"}`; `curl -sSI https://<domain>/accept/x`
-   answers 404 with a `content-security-policy` header starting `default-src 'none'`.
+1. **Apply** (`railway config plan`, read it, `railway config apply`). Legal restarts with the new caller map while
+   `PORTAL_LEGAL_CALLER_TOKEN` is still empty: Legal skips that entry, logs `LEGAL_CALLER_TOKENS: client_portal not
+   set`, and keeps running; only the client acceptance page's routes answer 503 (AEGIS M-1). `client-portal` itself
+   refuses to start until its secrets exist; that touches nothing else.
+2. Generate the two secrets of the Secrets table (`PORTAL_LEGAL_CALLER_TOKEN`, `PORTAL_EVIDENCE_KEY`) and set them on
+   `client-portal` (Sealed).
+3. `client-portal` -> Settings -> Networking -> **Generate Domain** (no custom domain is needed). Copy it and set
+   `PORTAL_PUBLIC_ORIGIN` to `https://<that domain>` (no path, no trailing slash).
+4. Set `LEGAL_ZBM_FACTS` on `legal` (the entity facts; step 1 of docs/runbooks/client-acceptance.md).
+5. **Redeploy `legal`** (it reads the caller token now: the warning is gone from its log) and then `client-portal`.
+6. Check: `curl -sS https://<domain>/health` answers `{"status":"ok"}`; `curl -sSI https://<domain>/accept/x`
+   answers 404 with a `content-security-policy` header starting `default-src 'none'`; then run step 8 of the client
+   acceptance runbook once (the client-address check).
 
 Every link after that: docs/runbooks/client-acceptance.md (invite, send, verify, revoke, the confirmation email).
 
