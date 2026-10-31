@@ -974,13 +974,37 @@ class BooksMixin:
         sanctions = bool(act.available and not act.allowed and act.sanctions) or \
             any(i["held_compliance"].get("sanctions") for i in held)
         if held:
-            out.append(R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: no money "
-                                                          "goes back to the client until the hold is released"))
+            out.append(R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: none of "
+                                                          "its money is spent, moved or returned until the hold is "
+                                                          "released"))
         if sanctions and full:
             out.append(R.item("COMPLIANCE_NOT_ACTIVATED", "OFAC: this client is refused on sanctions grounds; do NOT "
                                                           "return or move its money; report to OFAC and follow "
                                                           "runbook step G"))
         return R.dedupe(out)
+
+    def _campaign_outflow(self, g: Gather, campaign_ids, full: bool) -> dict[str, list[dict]]:
+        """AEGIS r10 R10-1: per campaign, ``_outflow_reasons`` for the client whose deposit funds it. Every step that
+        spends or commits a deposit (a creator accrual, a payout run, Andre's approval, the second approval, rail
+        funding, the release) asks Compliance about that client at that moment (outside the lock), so a brand that
+        becomes an OFAC match after its campaign was funded pays no creator. Compliance asked once per client."""
+        with self.lock:
+            clients = {c: (self.db["profiles"].get(c) or {}).get("client_id") for c in sorted(set(campaign_ids))}
+        per_client: dict[str, list[dict]] = {}
+        out: dict[str, list[dict]] = {}
+        for c, client in clients.items():
+            if not client:
+                out[c] = [R.item("CAMPAIGN_NOT_FUNDED", "no Andre-approved commercial profile for this campaign")]
+                continue
+            if client not in per_client:
+                per_client[client] = self._outflow_reasons(g, client, full)
+            out[c] = per_client[client]
+        return out
+
+    def _campaigns_reasons(self, g: Gather, campaign_ids, full: bool) -> list[dict]:
+        """R10-1: the outflow reasons of every client whose deposit a batch (or its funding) draws on."""
+        per = self._campaign_outflow(g, campaign_ids, full)
+        return R.dedupe([r for c in sorted(per) for r in per[c]])
 
     def propose_refund(self, principal: str, request_id: str, campaign_id: str) -> dict:
         with self.lock:
