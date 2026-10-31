@@ -135,3 +135,25 @@ def test_legals_private_health_counts_tokens_of_another_format_version(pair):
     assert resolve(x, other).status_code == 404
     h = x.client.get("/health").json()["link_tags"]
     assert h["status"] == "ok" and h["foreign_versions_seen"] == {"2": 1}
+
+
+# --- AEGIS r5 N5-L2 ------------------------------------------------------------------------------------------------
+
+def test_an_unreadable_blob_is_its_own_red_line_in_the_integrity_report(tmp_path, monkeypatch):
+    h = Harness(data_dir=str(tmp_path / "data"))
+    h.approve_rules()
+    m = msa(h)
+    assert h.ok(h.get("/legal/v1/integrity"))["status"] == "green"
+    real = h.svc.blobs.get
+
+    def flaky(sha):
+        if sha == m["sha256"]:
+            raise store_mod.StoreReadError("blob read failed: OSError")
+        return real(sha)
+    monkeypatch.setattr(h.svc.blobs, "get", flaky)
+    r = h.get("/legal/v1/integrity")
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["status"] == "red"
+    assert "1 blob(s) unreadable (read error)" in rep["problems"]
+    assert not any("missing or not matching" in p for p in rep["problems"])

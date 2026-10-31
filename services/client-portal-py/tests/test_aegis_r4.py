@@ -111,3 +111,21 @@ def test_the_public_health_says_nothing_about_links_even_after_foreign_versions(
     assert any("link tags" in m and "version 1" in m and key_id in m for m in msgs)       # at startup, in the log
     assert len([m for m in msgs if "format version 2" in m]) == 1
     assert all(LINK_TAG_KEY not in m for m in msgs)
+
+
+def test_a_503_from_the_accept_call_alone_is_never_remembered_as_dead(monkeypatch):
+    """AEGIS r5 N5-L1: the link resolves; only Legal's accept answers 503 (or times out)."""
+    from legal_client import LegalUnavailable
+    app, legal, *_ = make()
+    page = call(app, "GET", f"/accept/{TOKEN}")
+    real = legal.accept
+
+    def down(body):
+        legal.accepts.append(body)
+        raise LegalUnavailable("down")
+    monkeypatch.setattr(legal, "accept", down)
+    assert form_post(app, get=page).status == 503
+    assert len(app.dead._until) == 0
+    monkeypatch.setattr(legal, "accept", real)
+    n = len(legal.resolves)
+    assert form_post(app, get=page).status == 200 and len(legal.resolves) == n + 1       # the POST asked Legal again

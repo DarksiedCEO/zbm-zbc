@@ -53,7 +53,7 @@ from ledger import DEPARTMENT, LedgerQueryFailed, LedgerRecordError, Recorder, c
 from models import ID_RE
 import answers as A
 from ports import ComplianceRow, Delivery, EnvelopeAnswer, ProposalAnswer, Ports
-from store import BlobStore, DataDirBusy, RecordLog, StoreWriteError
+from store import BlobStore, DataDirBusy, RecordLog, StoreReadError, StoreWriteError
 from textguard import injection_rules_in
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -763,10 +763,16 @@ class LegalService:
             entries = self._ledger_entries()
         except LedgerQueryFailed as exc:
             return None, f"ledger unreadable: {exc}", False, 0
-        bad = sum(1 for h in live if self.blobs.get(h) is None)
-        return entries, None, self.log.verify(), bad
+        missing = unreadable = 0
+        for h in live:
+            try:
+                if self.blobs.get(h) is None:
+                    missing += 1
+            except StoreReadError:        # AEGIS r5 N5-L2: its own red line, never a 503 for the whole report
+                unreadable += 1
+        return entries, None, self.log.verify(), (missing, unreadable)
 
-    def _integrity_from(self, entries, unreadable: Optional[str], chain: bool, bad: int) -> dict:
+    def _integrity_from(self, entries, unreadable: Optional[str], chain: bool, bad: tuple = (0, 0)) -> dict:
         with self.lock:
             if unreadable is not None:
                 return {"status": "red", "problems": [unreadable]}
@@ -779,8 +785,11 @@ class LegalService:
                 problems.append("local log hash chain does not verify")
             if self.log.fault:                   # bug sweep E: a failed write could not be cut back
                 problems.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
-            if bad:
-                problems.append(f"{bad} blob(s) missing or not matching their SHA-256")
+            missing, read_errors = bad
+            if missing:
+                problems.append(f"{missing} blob(s) missing or not matching their SHA-256")
+            if read_errors:
+                problems.append(f"{read_errors} blob(s) unreadable (read error)")
             return {"status": "red" if problems else "green", "problems": problems, "log_lines": len(self.log),
                     "rules_version": self.rules_version}
 
