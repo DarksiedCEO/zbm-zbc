@@ -560,3 +560,21 @@ def test_readiness_and_health_warn_30_14_and_7_days_before_a_rule_expires():
     import readiness
     text = "\n".join(readiness.summary_lines(h.svc.readiness()))
     assert "WARNING" in text and "US-OFAC-04 expires 2026-12-25 (in 5 days)" in text
+
+
+# --- money red team RTM-11: identity is checked before the body is validated (no schema hints to the unauthorized) -----
+
+def test_every_post_route_checks_identity_before_the_body():
+    import re
+    from fastapi.routing import APIRoute
+    h = harness()
+    checked = 0
+    for route in h.app.routes:
+        if not isinstance(route, APIRoute) or "POST" not in route.methods:
+            continue
+        path = re.sub(r"\{[^}]+\}", "x-1", route.path.replace("{control_id}", "C-01"))
+        # the service bearer only: no caller token, no Andre token; a body that fails validation
+        r = h.client.post(path, json={"bogus": 1}, headers={"Authorization": f"Bearer {H.SERVICE_TOKEN}"})
+        assert r.status_code in (401, 403), (route.path, r.status_code, r.text[:160])
+        checked += 1
+    assert checked >= 14

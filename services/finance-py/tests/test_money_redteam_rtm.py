@@ -181,3 +181,12 @@ def test_rtm06_the_client_reads_compliance_readiness(tmp_path):
                  "next": {"id": "US-OFAC-04", "expires_at": "2026-12-25"}}
     assert cmp_client({"/compliance/v1/readiness": (503, {})}).rule_expiry() is None
     assert cmp_client({"/compliance/v1/readiness": (200, {"x": 1})}).rule_expiry() is None
+
+
+# --- RTM-11: the second approval checks identity before the body ---------------------------------------------------------
+
+def test_rtm11_second_approval_checks_identity_before_the_body(tmp_path):
+    hr = _stripe_hr(tmp_path)
+    r = hr.client.post("/fin/v1/payout-batches/fin-bat-X/second-approval", json={"bogus": 1},
+                       headers=hr.headers(None))
+    assert r.status_code in (401, 403), (r.status_code, r.text[:200])

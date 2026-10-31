@@ -661,8 +661,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                             "alongside Andre's token")
         return svc.decide_batch(req.request_id, _id(batch_id), dump(req))
 
-    @app.post("/fin/v1/payout-batches/{batch_id}/second-approval", dependencies=auth)
-    def batch_second(batch_id: str, request: Request, req: m.Decision = Depends(body(m.Decision))) -> dict:
+    def second_identity(request: Request) -> str:
+        """RTM-11: the second approver's identity, checked BEFORE the body is validated."""
         if request.headers.get(FOUNDER_HEADER) is not None or request.headers.get(CALLER_HEADER) is not None:
             svc.founder_refused("payout-batches/second-approval", "another identity's token on the second approval")
             raise Forbidden("the second approval carries the second approver's token only (one identity per request)")
@@ -671,6 +671,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         except FounderRefused as exc:
             svc.founder_refused("payout-batches/second-approval", exc.reason)
             raise
+        return "second"
+
+    @app.post("/fin/v1/payout-batches/{batch_id}/second-approval", dependencies=auth)
+    def batch_second(batch_id: str, _: str = Depends(second_identity),
+                     req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.second_approve_batch(req.request_id, _id(batch_id), dump(req))
 
     @app.post("/fin/v1/payout-batches/{batch_id}/release", dependencies=auth)
