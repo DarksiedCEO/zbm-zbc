@@ -190,8 +190,8 @@ def test_a_global_ceiling_on_legal_calls_is_charged_before_calling_legal():
 
 
 def test_junk_tokens_never_enter_the_per_link_table():
-    app, legal, *_ = make(env={"PORTAL_RATE_IP_PER_MINUTE": "99999", "PORTAL_RATE_NOT_FOUND_PER_MINUTE": "99999",
-                               "PORTAL_RATE_LEGAL_PER_MINUTE": "99999"})
+    app, legal, *_ = make(env={"PORTAL_RATE_IP_PER_MINUTE": "999", "PORTAL_RATE_NOT_FOUND_PER_MINUTE": "999",
+                               "PORTAL_RATE_LEGAL_PER_MINUTE": "999"})
     for i in range(50):
         call(app, "GET", f"/accept/{('Q%02d' % i) * 14}Q")
         call(app, "GET", f"/accept/short{i}")
