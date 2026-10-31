@@ -48,7 +48,7 @@ def test_the_job_upgrades_a_refused_hold_to_sanctions_and_never_downgrades(tmp_p
     _sanctioned(hr)                                              # Andre records an OFAC match later
     s = _job(hr)
     h = _hold(hr, inv)
-    assert h["sanctions"] is True and s["holds_upgraded"] == 1, s
+    assert h["sanctions"] is True and s["holds_changed"] == 1, s
     assert "SANCTIONS" in hr.svc.db["breaks"][h["break_id"]]["note"] and \
         hr.svc.db["breaks"][h["break_id"]]["status"] == "open"
     _refuse_plain(hr)                                            # Compliance later says otherwise: no downgrade

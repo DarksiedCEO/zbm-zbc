@@ -89,7 +89,7 @@ def test_the_job_releases_an_unverified_hold_when_compliance_allows(tmp_path):
     bid = _hold(hr, inv)["break_id"]
     _allow(hr)
     s = _job(hr)
-    assert s["holds_released"] == 1 and s["holds_converted"] == 0, s
+    assert s["holds_released"] == 1 and s["holds_changed"] == 0, s
     assert _hold(hr, inv) is None
     assert hr.svc.db["breaks"][bid]["status"] == "resolved"
     assert len(_receipts(hr, inv)) == 1                                  # the receipt goes out now
@@ -104,7 +104,7 @@ def test_the_job_converts_an_unverified_hold_to_refused_on_refuse(tmp_path):
     hr.f["compliance"].activation_available = True
     hr.f["compliance"].activations = {CLIENT: {"allowed": False, "reasons": ["jurisdiction US-CA is refuse"]}}
     s = _job(hr)
-    assert s["holds_converted"] == 1 and s["holds_released"] == 0, s
+    assert s["holds_changed"] == 1 and s["holds_released"] == 0, s
     h = _hold(hr, inv)
     assert h["kind"] == "refused" and h["break_id"] != old
     assert hr.svc.db["breaks"][h["break_id"]]["leg"] == "compliance_hold"
@@ -116,7 +116,7 @@ def test_the_job_leaves_an_unverified_hold_while_compliance_stays_down(tmp_path)
     hr = _stripe_hr(tmp_path)
     inv, pi, _ = _paid(hr, then="down")
     s = _job(hr)
-    assert s["holds_released"] == 0 and s["holds_converted"] == 0 and _hold(hr, inv)["kind"] == "unverified"
+    assert s["holds_released"] == 0 and s["holds_changed"] == 0 and _hold(hr, inv)["kind"] == "unverified"
 
 
 # --- R4-2: what releases a hold ----------------------------------------------------------------------------------------

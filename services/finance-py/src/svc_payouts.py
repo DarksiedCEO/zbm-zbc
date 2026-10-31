@@ -140,7 +140,7 @@ class PayoutsMixin:
     # status); it is not a reconciliation break, so it does not turn FC-02 red and freeze every payout
     COMPLIANCE_LEGS = ("compliance_hold", "compliance_unverified")
     # RTM-05: breaks whose notes only Andre's token reads (a refund of a sanctions-held payment is OFAC-relevant)
-    PRIVATE_LEGS = COMPLIANCE_LEGS + ("stripe_refund_sanctions",)
+    PRIVATE_LEGS = COMPLIANCE_LEGS
 
     def _open_breaks(self) -> list[dict]:
         out = []
