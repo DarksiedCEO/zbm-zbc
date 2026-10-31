@@ -268,11 +268,16 @@ class BooksMixin:
         return ans if isinstance(ans, ClientActivation) else ClientActivation(False)
 
     @staticmethod
-    def _activation_reasons(act: ClientActivation) -> list[dict]:
+    def _activation_reasons(act: ClientActivation, full: bool = False) -> list[dict]:
+        """``full``: Compliance's own reason text (Andre's routes and the hold record only Andre reads). Every other
+        caller gets a generic "compliance hold" (AEGIS r8: never whether it rests on sanctions)."""
         if not act.available:
             return [R.item("DEPENDENCY_UNAVAILABLE:compliance_38",
                            "Compliance (38) cannot confirm the client's activation: refused")]
         if not act.allowed:
+            if not full:
+                return [R.item("COMPLIANCE_NOT_ACTIVATED", "no current Compliance activation for this client "
+                                                           "(compliance hold)")]
             first = act.reasons[0] if act.reasons else "no current ALLOW"
             return [R.item("COMPLIANCE_NOT_ACTIVATED", f"no current Compliance activation for this client: {first}")]
         return []
@@ -510,7 +515,7 @@ class BooksMixin:
         if body["decision"] == "approve" and not reasons:
             # ADR 0024: no invoice is approved or issued without Compliance's current ALLOW for the client
             act = self._activation(g, inv["client_id"])
-            reasons += self._activation_reasons(act)
+            reasons += self._activation_reasons(act, full=True)      # Andre's decision route
             reasons += self._legal_reasons(g, inv["legal_ref"], "contract (MSA/order form/SOW)", inv["client_id"],
                                            inv["entity"])
             reasons += [R.item("TAX_TREATMENT_UNVERIFIED", "sales-tax treatment (FIN-CQ-11) is unverified",

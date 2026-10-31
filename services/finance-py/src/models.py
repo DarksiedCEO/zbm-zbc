@@ -515,6 +515,9 @@ class ComplianceHoldRelease(Strict):
     # basis ofac_rejected_return: the payment was rejected and returned to the sender, not blocked)
     ofac_document_kind: Optional[Literal["license", "unblocking_report", "compliance_release", "delisting",
                                          "rejected_transaction_report"]] = None
+    # AEGIS r8: for ofac_rejected_return, the SHA-256 of OFAC's written guidance that the funds be rejected (document
+    # kind ofac_guidance), required besides the 501.604 report
+    ofac_guidance_sha256: Optional[Sha] = None
 
 
 class RefundRepay(Strict):

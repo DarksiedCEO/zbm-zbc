@@ -22,6 +22,13 @@ from test_stripe_incoming import sent
 from test_sweep_followup import _charge
 
 REPORT = "d" * 64                   # SHA-256 of the filed 501.604 report confirmation
+GUIDANCE = "e" * 64                 # SHA-256 of OFAC's written guidance that the funds be rejected (AEGIS r8)
+
+
+def _place(hr, client="zbm-client-7"):
+    hr.f["compliance"].activation_available = True
+    hr.f["compliance"].activations = {client: {"allowed": False, "sanctions": True, "ground": "place",
+                                               "reasons": ["jurisdiction CU is refuse"]}}
 
 
 def _andre_get(hr, path, **params):
@@ -102,27 +109,32 @@ def test_a_delisting_is_its_own_document_kind(tmp_path):
 
 
 def test_a_rejected_payment_returned_to_the_sender_leaves_with_its_501_604_report(tmp_path):
+    """A sanctioned PLACE (no list match) with OFAC's written guidance to reject (AEGIS r8): see test_compliance_hold_r8
+    for the match case, which never leaves this way."""
     hr = _stripe_hr(tmp_path)
-    inv, pi, out = _pay_then(hr, lambda: _sanctioned(hr))
+    inv, pi, out = _pay_then(hr, lambda: _place(hr))
     h = _hold(hr, inv)
     r = _release(hr, inv, basis="ofac_rejected_return", ofac_authorization_sha256=REPORT,
-                 ofac_document_kind="rejected_transaction_report")
+                 ofac_document_kind="rejected_transaction_report", ofac_guidance_sha256=GUIDANCE)
     assert r.status_code == 409 and "refund" in r.text, r.text              # not returned yet
     hr.sim.refund(pi)
     sent(hr, "charge.refunded", _charge(hr, pi))
     entry = _f7r(hr, h["receipt_id"])[0]["entry_id"]
     r = _release(hr, inv, basis="ofac_rejected_return", entry_id=entry, ofac_authorization_sha256=REPORT,
-                 ofac_document_kind="license")
+                 ofac_document_kind="license", ofac_guidance_sha256=GUIDANCE)
     assert r.status_code == 409                                              # the document must be the 501.604 report
-    r = _release(hr, inv, basis="ofac_rejected_return", entry_id=entry, ofac_document_kind="rejected_transaction_report")
+    r = _release(hr, inv, basis="ofac_rejected_return", entry_id=entry, ofac_document_kind="rejected_transaction_report",
+                 ofac_guidance_sha256=GUIDANCE)
     assert r.status_code == 409                                              # and its hash is required
     r = _release(hr, inv, basis="ofac_rejected_return", entry_id=entry, ofac_authorization_sha256=REPORT,
-                 ofac_document_kind="rejected_transaction_report")
+                 ofac_document_kind="rejected_transaction_report", ofac_guidance_sha256=GUIDANCE)
     assert r.status_code == 200, r.text
     hist = hr.svc.db["invoices"][inv["invoice_id"]]["held_compliance_history"][-1]
     assert hist["basis"] == "ofac_rejected_return" and hist["returned_to_sender"] is True
     assert hist["entry_id"] == entry and hist["ofac_authorization_sha256"] == REPORT
     assert _hold(hr, inv) is None
+    # v1e: returned_to_sender never reaches another caller
+    assert "returned_to_sender" not in hr.get("/fin/v1/audit/export", caller="onboarding").text
 
 
 def test_the_rejected_return_ground_is_for_sanctions_holds_only(tmp_path):

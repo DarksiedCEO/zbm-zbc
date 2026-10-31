@@ -269,8 +269,11 @@ class HttpCompliance(_Base):
             # AEGIS r6 N4: on a refusal, only an explicit false means "not sanctions"; a missing or malformed flag fails
             # closed to sanctions (Finance then never refunds that payment)
             sg = d.get("sanctions_grounded")
-            return ClientActivation(True, allowed, d.get("ruling_id"), juris, reasons,
-                                    sanctions=False if allowed else not (sg is False))
+            sanctions = False if allowed else not (sg is False)
+            # AEGIS r8: the ground; anything but an explicit "place" on a sanctions refusal is "match" (strictest)
+            ground = (("place" if d.get("sanctions_ground") == "place" else "match") if sanctions else None)
+            return ClientActivation(True, allowed, d.get("ruling_id"), juris, reasons, sanctions=sanctions,
+                                    ground=ground)
         except (KeyError, TypeError):
             return ClientActivation(False, reason="Compliance's activation answer was not understood")
 
