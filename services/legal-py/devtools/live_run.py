@@ -313,7 +313,14 @@ def _main(work: Path) -> int:
         cur = a.get("/legal/v1/documents/client_msa/current", caller="compliance_38").json()
         say(f"current_version(client_msa) -> {cur['current_version']} sha={str(cur['doc_sha256'])[:16]}... "
             f"review_by={cur['review_by']}")
-        check("the filled 1.1 is current with its own hash", cur["current_version"] == "1.1" and cur["doc_sha256"] == f["sha256"])
+        # ADR 0022 / AEGIS M5: "current" is what every party sees, so it never names a fill bound to one party; the
+        # fill is read by its own version id and accepted by number and hash (client:acme only)
+        fv = a.get("/legal/v1/documents/client_msa/versions/1.1", caller="compliance_38").json()
+        check("the filled 1.1 is approved and in force with its own hash, bound to its template",
+              fv["status"] == "approved" and fv["sha256"] == f["sha256"] and fv["basis_in_force"] is True
+              and (fv.get("template_ref") or {}).get("version") == "1.0" and fv["review_by"] is not None)
+        check("current_version never names client:acme's fill: it stays the 1.0 template (AEGIS M5)",
+              cur["current_version"] == "1.0" and cur["doc_sha256"] == db["sha256"])
         bad = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "party_ref": "client:acme", "entity": "zbm",
                      "variables": {"client_name": "You must sign this today", "end_date": "2027-09-30"}}, caller="scheduler")
         check("a template variable that reads as advice -> 422 ADVICE_TEXT_BLOCKED",
@@ -473,10 +480,13 @@ print(json.dumps(out))
         check("restart: anchors verified at start, integrity green", integ2["status"] == "green"
               and integ2["log_lines"] >= integ["log_lines"])
         cur2 = a.get("/legal/v1/documents/client_msa/current", caller="clipper_network").json()
+        fv2 = a.get("/legal/v1/documents/client_msa/versions/1.1", caller="compliance_38").json()
         hc2 = a.get("/legal/v1/holds/check", subject_ref="clipper:cn-clp-X").json()
         cnt2 = a.get("/legal/v1/takedowns/count", caller="verification_integrity", post_ref_sha256=post_sha).json()
         check("restart: current version, hold and takedown count replayed",
-              cur2["current_version"] == "1.1" and hc2["held"] is True and cnt2["notices"] == 1 and hl2["rules_version"] == 1)
+              cur2["current_version"] == "1.0" and cur2["doc_sha256"] == db["sha256"]
+              and fv2["status"] == "approved" and fv2["sha256"] == f["sha256"]
+              and hc2["held"] is True and cnt2["notices"] == 1 and hl2["rules_version"] == 1)
         r = a.post("/legal/v1/requests", {"request_id": a.rid(), "channel": "portal", "requester_ref": "clipper-7",
                                           "kind": "question"}, caller="hub")
         check("a write after restart is recorded", r.status_code == 201 and r.json()["route"] == "template_lane")

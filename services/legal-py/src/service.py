@@ -65,7 +65,9 @@ BLOB_CLASS = {"document": "contracts_and_esign_evidence", "variables": "contract
               "certificate": "contracts_and_esign_evidence", "paper": "contracts_and_esign_evidence",
               "clause": "contracts_and_esign_evidence", "memo": "legal_memos", "excerpt": "legal_memos",
               "question": "legal_memos", "evidence": "acceptance_records", "notice": "holds",
-              "outbound": "takedowns"}
+              "outbound": "takedowns", "rationale": "contracts_and_esign_evidence"}
+# LG-20 / ADR 0022: the CQ rows Andre may answer with a founder determination (client contracts only)
+FOUNDER_CQ = ("CQ-19",)
 PERIOD_RE = re.compile(r"^P([0-9]{1,3})(Y|M|D)$")
 # collections that log records ``put`` into (kind -> (attribute, key field))
 PUT_KINDS = {
@@ -870,7 +872,107 @@ class LegalService:
                                         "alias_of", "related")},
                 "status": self.cq_status(cq_id), "memo_ids": list(self.register[c]["memo_ids"]),
                 "review_by": self.register[c]["review_by"], "check": "counsel_memo",
-                "compliance": self.register[c].get("compliance"), "rules_pinned": self.rules_pinned}
+                "compliance": self.register[c].get("compliance"),
+                "founder_determination": self._founder_determination_view(c), "rules_pinned": self.rules_pinned}
+
+    # --- LG-20 / ADR 0022: founder path for client commercial contracts ---------------------------------------
+
+    def _founder_path_in_force(self) -> bool:
+        """LG-20 is in the Andre-approved rule version in force, verified (a live Legal approved before ADR 0022 has
+        to add it first: the seed alone never opens the path)."""
+        row = self.current.by_id().get("LG-20") if self.current else None
+        return row is not None and row["status"] == "verified"
+
+    def _founder_determination_status(self, cq_id: str) -> Optional[str]:
+        fd = (self.register.get(cq_id) or {}).get("founder_determination")
+        if not fd:
+            return None
+        if fd.get("status") != "active":
+            return fd.get("status")
+        if not self._founder_path_in_force():
+            return "lg20_not_in_force"
+        if self._today() >= date.fromisoformat(fd["renew_by"]):
+            return "expired"
+        return "active"
+
+    def _founder_determination_view(self, cq_id: str) -> Optional[dict]:
+        fd = (self.register.get(cq_id) or {}).get("founder_determination")
+        if not fd:
+            return None
+        return {**{k: fd[k] for k in ("determined_by", "determined_at", "renew_by", "rationale_sha256",
+                                       "scope_doc_ids", "rule_id")},
+                "status": self._founder_determination_status(cq_id)}
+
+    def _clickwrap_basis(self, doc_id: str) -> Optional[str]:
+        """What makes clickwrap evidence sufficient for ``doc_id`` now: a filed memo verifying CQ-19 (``memo``), else
+        (client commercial contracts only) Andre's founder determination on CQ-19 (``founder_determination``), else
+        nothing."""
+        if self.cq_verified("CQ-19"):
+            return "memo"
+        d = self.documents.get(doc_id) or {}
+        fd = self.register.get("CQ-19", {}).get("founder_determination") or {}
+        # AEGIS L3: only the documents the determination recorded, and only while the document is still flagged
+        if (d.get("founder_approval_allowed") and doc_id in (fd.get("scope_doc_ids") or [])
+                and self._founder_determination_status("CQ-19") == "active"):
+            return "founder_determination"
+        return None
+
+    def _acceptance_basis_ok(self, a: dict) -> bool:
+        """AEGIS M2: an acceptance whose evidence rests on Andre's CQ-19 determination counts only while LG-20 is in
+        force and the determination was not invalidated (its renewal date passing does not cut off what it already
+        covered). Any other basis is unaffected."""
+        if a.get("evidence_basis") != "founder_determination":
+            return True
+        fd = self.register.get("CQ-19", {}).get("founder_determination") or {}
+        # AEGIS r2 N5: only under the determination lineage the acceptance was recorded under
+        return (self._founder_determination_status("CQ-19") in ("active", "expired")
+                and a.get("evidence_lineage") is not None
+                and a.get("evidence_lineage") == (fd.get("lineage") or fd.get("determined_at")))
+
+    def _acceptance_sufficient(self, a: dict) -> bool:
+        return bool(a.get("evidence_sufficient")) and self._acceptance_basis_ok(a)
+
+    def founder_determine(self, request_id: str, cq_id: str, body: dict) -> dict:
+        """Andre's founder determination on CQ-19 for client commercial contracts (LG-20). The row's own status and
+        memo list are untouched; only clickwrap acceptances of documents marked ``founder_approval_allowed`` become
+        evidence-sufficient while the determination is in force."""
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, f"register/{cq_id}/founder-determination", body)
+            if ent:
+                return ent["response"]
+            c = self.canonical_cq(cq_id)
+            if c is None:
+                raise NotFound("no such register row")
+            reasons = []
+            if c not in FOUNDER_CQ:
+                reasons.append(R.item("FOUNDER_PATH_NOT_ALLOWED", f"{c}: LG-07 applies; the founder path covers CQ-19 "
+                                      "for client commercial contracts only", cq_id=c))
+            if not self._founder_path_in_force():
+                reasons.append(R.item("FOUNDER_PATH_NOT_IN_FORCE", "LG-20 is not in the rule version in force: add it "
+                                      "(rules proposal) and approve it first"))
+            if reasons:
+                self._refuse("founder_determination_refused", c, reasons, op_id=request_id)
+            now = self._now()
+            op = Op(self, f"fdt|{request_id}", "andre", c)
+            self._injection(op, {"rationale": body["rationale"]})
+            rsha = op.blob(body["rationale"].encode("utf-8"), "rationale", [f"register:{c}"])
+            scope = sorted(d for d, x in self.documents.items() if x.get("founder_approval_allowed"))
+            renew_by = (self._today() + timedelta(days=self.cfg.memo_review_days)).isoformat()
+            # AEGIS r2 N5: a determination continues the LINEAGE of the one before it when that one was never ended
+            # (still active, or only past its renewal date); after an invalidation (or with none before) a new
+            # lineage starts, so acceptances recorded under the invalidated one never count again
+            prev = self.register[c].get("founder_determination") or {}
+            continues = self._founder_determination_status(c) in ("active", "expired")
+            lineage = (prev.get("lineage") or prev.get("determined_at")) if continues else f"{iso(now)}#{request_id}"
+            fd = {"status": "active", "determined_by": "andre", "determined_at": iso(now), "renew_by": renew_by,
+                  "rationale_sha256": rsha, "scope_doc_ids": scope, "rule_id": "LG-20", "lineage": lineage}
+            op.ev("fdt", "register_row_founder_determined", c,
+                  {"cq_id": c, "rule_id": "LG-20", "renew_by": renew_by, "rationale_sha256": rsha,
+                   "scope_doc_ids": scope, "lineage": lineage},
+                  f"Andre recorded a founder determination on {c}")
+            op.update("register", c, {"founder_determination": fd})
+            return self._answer(op, key, h, {"cq_id": c, "founder_determination": dict(fd)})
 
     def register_view(self) -> dict:
         with self.lock:
@@ -902,7 +1004,11 @@ class LegalService:
                   {"target": target, "canonical": k, "was": was, "source_ref_sha256": sha(source_ref),
                    "detected_change_sha256": change_sha}, f"Compliance invalidated {target} (tighten only)",
                   actor="compliance_38")
-            op.update(coll, k, {"status": "unverified"})
+            fields = {"status": "unverified"}
+            if coll == "register" and (self.register[k].get("founder_determination") or {}).get("status") == "active":
+                # tighten only: a founder determination (LG-20) on the row falls with it
+                fields["founder_determination"] = {**self.register[k]["founder_determination"], "status": "invalidated"}
+            op.update(coll, k, fields)
             return self._answer(op, key, h, {"target": target, "canonical": k, "status": "unverified", "was": was})
 
     # ================================================================== documents (§B.1, §C.1)
@@ -916,12 +1022,19 @@ class LegalService:
     def _versions_of(self, doc_id: str) -> list[dict]:
         return [v for v in self.doc_versions.values() if v["doc_id"] == doc_id]
 
+    def _basis_in_force(self, v: dict) -> bool:
+        """AEGIS M2: a founder-approved version counts only while LG-20 is in force; closing the path stops it."""
+        return v.get("approval_basis") != "founder_approval" or self._founder_path_in_force()
+
     def _current(self, doc_id: str) -> Optional[dict]:
-        return i01.current(self._versions_of(doc_id), self._now())
+        # AEGIS M5: "current" is the document every party sees, so it never names a version bound to one party (a
+        # client fill or a per-client upload): those are accepted by their own party, version by version
+        return i01.current([v for v in self._versions_of(doc_id) if not v.get("party_ref") and self._basis_in_force(v)],
+                           self._now())
 
     def _in_force(self, v: dict) -> bool:
         """Approved, effective and not past review_by at this instant (spec §B.2 "approved at accepted_at")."""
-        return i01.current([v], self._now()) is not None
+        return i01.current([v], self._now()) is not None and self._basis_in_force(v)
 
     def _template(self, doc_id: str) -> Optional[dict]:
         """The version a scheduler fill uses: the highest in-force approved version that is itself a template
@@ -942,7 +1055,12 @@ class LegalService:
             return f"counsel_memo:{so['memo_id']}"
         if so and so.get("counsel_ref"):
             return f"counsel_countersigned:{so['counsel_ref']}"
+        if v.get("approval_basis") == "founder_approval":
+            return "founder_approval"
         if v.get("template_ref"):
+            tpl = self.doc_versions.get(f"{v['doc_id']}@{v['template_ref']['version']}") or {}
+            if tpl.get("approval_basis") == "founder_approval":
+                return f"founder_template:{v['doc_id']}@{v['template_ref']['version']}"
             return f"counsel_template:{v['doc_id']}@{v['template_ref']['version']}"
         return "unreviewed"
 
@@ -951,6 +1069,11 @@ class LegalService:
                                      "template_variables", "template_ref", "counsel_signoff", "approved_by",
                                      "approved_at", "effective_at", "review_by", "supersedes", "created_at", "created_by")}
         out["review_label"] = self._review_label(v)
+        if v.get("approval_basis"):
+            out["approval_basis"] = v["approval_basis"]      # LG-20: "founder_approval" (set only on that path)
+        out["basis_in_force"] = self._basis_in_force(v)      # AEGIS M2: false once LG-20 is closed
+        if v.get("founder_rationale_sha256"):
+            out["founder_rationale_sha256"] = v["founder_rationale_sha256"]
         return out
 
     def document_view(self, doc_id: str) -> dict:
@@ -959,6 +1082,7 @@ class LegalService:
             cur = self._current(doc_id)
             vs = sorted(self._versions_of(doc_id), key=lambda v: i01.vkey(v["version"]))
             return {**{k: d[k] for k in ("doc_id", "title", "doc_type", "entities", "counsel_required")},
+                    "founder_approval_allowed": bool(d.get("founder_approval_allowed")),
                     "current_version": cur["version"] if cur else None,
                     "versions": [self.version_view(v) for v in vs], "rules_pinned": self.rules_pinned}
 
@@ -1026,7 +1150,12 @@ class LegalService:
             date_vars: dict[str, str] = {}
             template_ref = None
             variables_sha = None
-            if principal == "andre":
+            # ADR 0022: Andre may also FILL the current template for one client (variables + party_ref, no text),
+            # exactly as the scheduler does; the fill is a new draft that still needs its own approval
+            andre_fill = principal == "andre" and body.get("variables") is not None and body.get("text") is None
+            if andre_fill and (body.get("template_variables") or body.get("bump") != "minor"):
+                raise Invalid("a template fill carries variables only (the template is the current version)")
+            if principal == "andre" and not andre_fill:
                 if body.get("text") is None or body.get("variables") is not None:
                     raise Invalid("Andre's upload carries the document text (counsel's draft) and no variables")
                 text = body["text"]
@@ -1173,10 +1302,38 @@ class LegalService:
             _ = d
             return self._answer(op, key, h, {"doc_id": doc_id, "version": version, "counsel_signoff": signoff})
 
+    def _placeholder_precount(self, doc_id: str, version: str, request_id: str, route: str,
+                              body: dict) -> Optional[tuple[str, Optional[int]]]:
+        """AEGIS r3 C1: count unfilled placeholders OUTSIDE the service lock, on the version's immutable,
+        content-addressed blob, so a long text never stalls the other Legal routes. Returns (sha256, count), with
+        count None when the text is not held; None when there is no such version (the locked path then refuses) or
+        when the request is a replay (r4 C4: the locked path answers it from the idempotency record, uncounted)."""
+        with self.lock:
+            try:
+                if self._idem("andre", request_id, route, body)[2] is not None:
+                    return None
+            except (Invalid, Conflict):
+                pass                                     # the locked path raises the same error in its own order
+            v = self.doc_versions.get(f"{doc_id}@{version}")
+            if v is None:
+                return None
+            sha_, declared = v["sha256"], set(v.get("template_variables") or {})
+        data = self.blobs.get(sha_)
+        return sha_, (i01.bracket_placeholders(data.decode("utf-8", "replace"), declared) if data is not None else None)
+
+    def _placeholders_for(self, v: dict, pre: Optional[tuple[str, Optional[int]]]) -> int:
+        if pre is not None and pre[0] == v["sha256"]:
+            return pre[1] or 0
+        text = self._text_of(v)                          # not precounted (no such version then): count here
+        return i01.bracket_placeholders(text, set(v.get("template_variables") or {})) if text is not None else 0
+
     def decide_version(self, request_id: str, doc_id: str, version: str, body: dict) -> dict:
+        route = f"decision/{doc_id}/{version}"
+        pre = (self._placeholder_precount(doc_id, version, request_id, route, body)
+               if body.get("decision") == "approve" else None)
         with self.lock:
             self._require_rules()
-            key, h, ent = self._idem("andre", request_id, f"decision/{doc_id}/{version}", body)
+            key, h, ent = self._idem("andre", request_id, route, body)
             if ent:
                 return ent["response"]
             d = self._doc(doc_id)
@@ -1188,7 +1345,8 @@ class LegalService:
                              "different content hash than this version's")], op_id=request_id)
             op = Op(self, f"dd|{request_id}", "andre", subject)
             if body["decision"] == "approve":
-                reasons = i01.approval_reasons(d, v, self.cq_verified, now)
+                reasons = i01.approval_reasons(d, v, self.cq_verified, now,
+                                               placeholders=self._placeholders_for(v, pre))
                 if reasons:
                     missing = any(r["code"] == "COUNSEL_RECORD_MISSING" for r in reasons)
                     self._refuse("approval_refused_no_counsel" if missing else "document_approval_refused", subject,
@@ -1224,11 +1382,102 @@ class LegalService:
             op.update("doc_versions", v["key"], fields)
             return self._answer(op, key, h, {"doc_id": doc_id, "version": version, **fields})
 
+    def _text_of(self, v: dict) -> Optional[str]:
+        data = self.blobs.get(v["sha256"])
+        return data.decode("utf-8", "replace") if data is not None else None
+
+    def _rationale(self, sha: Optional[str], what: str) -> dict:
+        data = self.blobs.get(sha) if sha else None
+        if data is None:
+            raise NotFound(f"no founder rationale is held for {what}")
+        return {"rationale": data.decode("utf-8"), "rationale_sha256": sha}
+
+    def version_rationale(self, doc_id: str, version: str) -> dict:
+        """AEGIS M4: Andre reads back the rationale he gave for a founder approval (Andre's token only)."""
+        with self.lock:
+            v = self._version(doc_id, version)
+            return {"doc_id": doc_id, "version": version,
+                    **self._rationale(v.get("founder_rationale_sha256"), f"{doc_id} {version}")}
+
+    def determination_rationale(self, cq_id: str) -> dict:
+        with self.lock:
+            c = self.canonical_cq(cq_id)
+            if c is None:
+                raise NotFound("no such register row")
+            fd = self.register[c].get("founder_determination") or {}
+            return {"cq_id": c, **self._rationale(fd.get("rationale_sha256"), c)}
+
+    def founder_approve_version(self, request_id: str, doc_id: str, version: str, body: dict) -> dict:
+        """LG-20 / ADR 0022: Andre approves a client commercial contract version as founder, on its content hash,
+        with a written rationale. Recorded with ``approval_basis: founder_approval`` and ``approved_by: andre`` (on the
+        version and on the ledger). Every other approval precondition stays."""
+        route = f"founder-approval/{doc_id}/{version}"
+        pre = self._placeholder_precount(doc_id, version, request_id, route, body)    # r3 C1: outside the lock
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, route, body)
+            if ent:
+                return ent["response"]
+            d = self._doc(doc_id)
+            v = self._version(doc_id, version)
+            subject = f"doc:{doc_id}"
+            now = self._now()
+            if body["version_sha256"] != v["sha256"]:
+                self._refuse("document_approval_refused", subject, [R.item("HASH_MISMATCH", "Andre's decision names a "
+                             "different content hash than this version's")], op_id=request_id)
+            renewal = v["status"] == "approved" and v.get("approval_basis") == "founder_approval"
+            # every document check runs again on a renewal too (AEGIS L2); only the draft-status check is skipped
+            reasons = [r for r in i01.approval_reasons(d, v, self.cq_verified, now, founder=True,
+                                                       placeholders=self._placeholders_for(v, pre))
+                       if not (renewal and r["code"] == "VERSION_NOT_APPROVABLE")]
+            if renewal and not body.get("renew_superseded"):
+                # ADR 0022: a renewal moves the version's date and keeps its acceptances valid, so live clients are not
+                # cut off at review_by. AEGIS L1: it never brings back a version a newer approved one of the same
+                # instance (same party, or both standard forms) replaced, unless Andre says so explicitly.
+                newer = [x for x in self._versions_of(doc_id) if x["status"] == "approved"
+                         and x.get("party_ref") == v.get("party_ref") and i01.vkey(x["version"]) > i01.vkey(version)]
+                if newer:
+                    reasons.append(R.item("VERSION_SUPERSEDED", f"{doc_id} {version} was replaced by a newer approved "
+                                          "version: send renew_superseded true to renew it anyway"))
+            # AEGIS M3 + r2 N7: the template a fill was made from must still be approved and in force, for a first
+            # approval and for a renewal alike
+            reasons += self._template_reasons(v)
+            if not self._founder_path_in_force():
+                reasons.append(R.item("FOUNDER_PATH_NOT_IN_FORCE", "LG-20 is not in the rule version in force: add it "
+                                      "(rules proposal) and approve it first"))
+            if reasons:
+                self._refuse("document_approval_refused", subject, reasons, op_id=request_id)
+            op = Op(self, f"fap|{request_id}", "andre", subject)
+            self._injection(op, {"rationale": body["rationale"]})
+            rsha = op.blob(body["rationale"].encode("utf-8"), "rationale", [subject, f"doc:{doc_id}@{version}"])
+            eff = now
+            if body.get("effective_at"):
+                eff = max(now, parse_iso(body["effective_at"]))
+            fields = {"status": "approved", "approved_by": "andre", "approved_at": iso(now), "effective_at": iso(eff),
+                      "review_by": iso(now + timedelta(days=self.cfg.memo_review_days)),
+                      "approval_basis": "founder_approval", "founder_rationale_sha256": rsha}
+            if renewal:
+                fields = {"review_by": fields["review_by"], "founder_rationale_sha256": rsha,
+                          "renewed_at": iso(now), "approved_at": v["approved_at"], "effective_at": v["effective_at"],
+                          "status": "approved", "approved_by": "andre", "approval_basis": "founder_approval"}
+            op.ev("fap", "document_version_founder_renewed" if renewal else "document_version_founder_approved", subject,
+                  {"doc_id": doc_id, "version": version, "sha256": v["sha256"], "effective_at": fields["effective_at"],
+                   "review_by": fields["review_by"], "approval_basis": "founder_approval", "approved_by": "andre",
+                   "rationale_sha256": rsha, "rule_id": "LG-20"},
+                  f"Andre {'renewed' if renewal else 'approved'} {doc_id} {version} as founder")
+            op.update("doc_versions", v["key"], fields)
+            return self._answer(op, key, h, {"doc_id": doc_id, "version": version, **fields,
+                                             "review_label": self._review_label({**v, **fields})})
+
     # ================================================================== acceptances (§B.2, §C.3)
 
     def acceptance_view(self, a: dict) -> dict:
-        return {k: a.get(k) for k in ("acceptance_id", "doc_id", "version", "doc_sha256", "accepted_at", "method",
-                                      "evidence_sufficient", "party_ref")} | {"rules_pinned": self.rules_pinned}
+        out = {k: a.get(k) for k in ("acceptance_id", "doc_id", "version", "doc_sha256", "accepted_at", "method",
+                                     "party_ref", "evidence_basis")}
+        # AEGIS M2: sufficiency as of NOW (the stored record never changes; its basis can stop counting)
+        out["evidence_sufficient"] = self._acceptance_sufficient(a)
+        out["basis_in_force"] = self._acceptance_basis_ok(a)
+        return out | {"rules_pinned": self.rules_pinned}
 
     def get_acceptance(self, acceptance_id: str) -> dict:
         with self.lock:
@@ -1256,6 +1505,7 @@ class LegalService:
                     reasons.append(R.item("VERSION_NOT_IN_FORCE", f"{body['doc_id']} {body['version']} is not "
                                           "approved and in force at accepted_at"))
                 reasons += self._instance_reasons(v, body["party_ref"])
+                reasons += self._template_reasons(v)
             if body["presented_sha256"] != body["doc_sha256"]:
                 reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the text shown is not the document exactly"))
             if body["affirmative_act"] is not True:
@@ -1281,12 +1531,19 @@ class LegalService:
                    "esign_consent": body.get("esign_consent"),
                    "evidence_ref": {"kind": ev["kind"], "sha256": ev["sha256"], "blob": blob} if ev else None,
                    "entry_by": principal}
-            rec["evidence_sufficient"] = i03.clickwrap_sufficient(rec, self.cq_verified("CQ-19"),
+            basis = self._clickwrap_basis(rec["doc_id"])
+            rec["evidence_sufficient"] = i03.clickwrap_sufficient(rec, basis is not None,
                                                                   self.cfg.esign_consent_required,
                                                                   not self._instance_reasons(v, rec["party_ref"]))
+            # LG-20: say WHY the evidence counts -- a memo verifying CQ-19, or Andre's founder determination
+            rec["evidence_basis"] = basis if rec["evidence_sufficient"] else None
+            if rec["evidence_basis"] == "founder_determination":
+                fd = self.register["CQ-19"]["founder_determination"]
+                rec["evidence_lineage"] = fd.get("lineage") or fd.get("determined_at")
             op.ev("acc", "acceptance_recorded", subject,
                   {"acceptance_id": aid, "doc_id": rec["doc_id"], "version": rec["version"], "doc_sha256": rec["doc_sha256"],
                    "method": rec["method"], "evidence_sufficient": rec["evidence_sufficient"],
+                   "evidence_basis": rec["evidence_basis"], "evidence_lineage": rec.get("evidence_lineage"),
                    "signer_identity_ref_sha256": sha(rec["signer_identity_ref"])},
                   f"Acceptance of {rec['doc_id']} {rec['version']} recorded")
             op.add("acceptance", rec)
@@ -1296,6 +1553,19 @@ class LegalService:
                        cq_id="CQ-19")]
             return self._answer(op, key, h, {**self.acceptance_view(rec), "obligation_ids": obligations,
                                              "reasons": reasons, "reason_lines": R.lines(reasons)})
+
+    def _template_reasons(self, v: dict) -> list[dict]:
+        """ADR 0022 / AEGIS r2 N7: a fill counts only while the template it was made from is approved and in force.
+        Retiring (or letting lapse) the template stops new approvals, renewals and acceptances of its fills; an
+        acceptance already recorded stays valid until the fill's own renewal date, or until Andre withdraws the fill."""
+        ref = v.get("template_ref")
+        if not ref:
+            return []
+        tpl = self.doc_versions.get(f"{v['doc_id']}@{ref['version']}")
+        if tpl is not None and self._in_force(tpl):
+            return []
+        return [R.item("TEMPLATE_NOT_IN_FORCE", f"the template {v['doc_id']} {ref['version']} this fill was made from "
+                       "is not in force")]
 
     def _instance_reasons(self, v: dict, party_ref: str) -> list[dict]:
         """AEGIS N17-4: a party accepts only a document INSTANCE bound to it. A template (declared variables, or any
@@ -1680,7 +1950,7 @@ class LegalService:
                 return None
             a = self.acceptances.get(c["acceptance_id"])
             terms = dict(c["terms"])
-            terms["signed"] = bool(a and a["evidence_sufficient"])
+            terms["signed"] = bool(a and self._acceptance_sufficient(a))
             terms["signed_at"] = a["accepted_at"] if terms["signed"] else None
             terms["ccpa_cpra_clause_present"] = self._ccpa_present(c["doc_id"], c["version"])
             return terms
@@ -1713,7 +1983,7 @@ class LegalService:
                     reasons.append(R.item("NO_SUFFICIENT_ACCEPTANCE", "the acceptance belongs to another party"))
                 if ex["doc_id"] != "client_msa":
                     reasons.append(R.item("NO_SUFFICIENT_ACCEPTANCE", "contract terms come from an executed client_msa"))
-            signed = bool(a and not reasons and a["evidence_sufficient"])
+            signed = bool(a and not reasons and self._acceptance_sufficient(a))
             if t["signed"] and not signed:
                 reasons.append(R.item("NO_SUFFICIENT_ACCEPTANCE", "signed: true needs an evidence-sufficient acceptance "
                                       "of the executed MSA version", cq_id="CQ-19"))

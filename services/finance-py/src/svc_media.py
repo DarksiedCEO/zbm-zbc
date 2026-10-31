@@ -19,7 +19,7 @@ Flows (ZBM only; posted nowhere else, i01 refuses the media accounts to every ot
 
 Revenue and cost are recognised together when the media has run (F12r, like ADR 0009 choice 4): a buy can never
 show revenue without its cost. WHEN revenue is recognised for a flight that spans months, and whether California
-sales tax applies, are the tax questions of counsel row FIN-CQ-11; no invoice issues until Andre verifies it (M8).
+sales tax applies, are the tax questions of row FIN-CQ-11 (the sales-tax determination); no invoice issues until Andre verifies it (M8).
 
 Client receipts: every matched payment (ZBC and ZBM) produces a receipt that says what the client bought; the
 scheduler sends it through the client-mail port (stand-in: nothing is sent, the receipt stays ``pending_send``).
