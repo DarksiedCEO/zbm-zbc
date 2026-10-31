@@ -238,6 +238,8 @@ class CreditsMixin:
                    "credited_ar": M.fmt(M.D(inv.get("credited_ar") or "0.00") + due)}
             if body.get("note"):
                 new["void_note_sha256"] = sha_text(body["note"])
+            if self.restore_locked():
+                new["voided_during_lockdown"] = True                        # AEGIS r4 R4-8: the lift lists it
             # AEGIS F2: the ledger event carries everything a restore needs to rebuild the void (svc_restore)
             op.record(derived_id("invv", invoice_id), "invoice_voided", "andre", invoice_id,
                       void_payload(invoice_id, M.fmt(due), body["reason_code"]),
@@ -254,7 +256,7 @@ class CreditsMixin:
 
     def _void_checks(self, inv: dict, body: dict) -> None:
         self._credit_refusals(inv, "void")
-        self._restore_refusal("void", inv["invoice_id"])
+        self._restore_refusal("void", inv["invoice_id"], unpaid_only=True)     # AEGIS r4 R4-8: 4.12(g) stays meetable
         if inv["status"] == "paid":
             raise Conflict("this invoice is paid: it is not voided; issue a credit note instead (it records the refund "
                            "ZBM owes)")
@@ -310,7 +312,6 @@ class CreditsMixin:
 
     def _credit_checks(self, inv: dict, body: dict, amount: Decimal) -> dict:
         self._credit_refusals(inv, "credit note")
-        self._restore_refusal("credit note", inv["invoice_id"])
         if inv["status"] not in ("issued", "paid", "credited"):
             raise Conflict(f"a credit note is issued against an issued or paid invoice; this one is {inv['status']}")
         if body["content_sha256"] != inv["content_sha256"]:
@@ -321,6 +322,8 @@ class CreditsMixin:
                            f"({M.fmt(st['creditable'])})")
         to_ar = min(amount, st["ar_open"])
         to_refund = M.q(amount - to_ar)
+        # AEGIS r4 R4-8: during a restore lockdown only a credit that reduces an UNPAID balance (no refund) is allowed
+        self._restore_refusal("credit note", inv["invoice_id"], unpaid_only=to_refund == 0 and st["paid"] == 0)
         if to_refund > st["refundable"]:
             raise Conflict(f"the credit would owe a refund of {M.fmt(to_refund)}, more than the client's money ZBM "
                            f"still holds on this invoice ({M.fmt(st['refundable'])})")
@@ -395,6 +398,7 @@ class CreditsMixin:
               "amount": M.fmt(amount), "to_ar": M.fmt(to_ar), "to_refund": M.fmt(to_refund),
               "refund_remaining": M.fmt(to_refund), "refunds": links, "reason_code": body["reason_code"],
               "note_sha256": sha_text(body["note"]) if body.get("note") else None, "entry_id": e["entry_id"],
+              **({"issued_during_lockdown": True} if self.restore_locked() and not rebuilt else {}),
               "issued_at": iso(self._now()), "issued_on": today.isoformat(), "issued_by": "andre",
               "refund_due_from": str(due_from) if due_by else None,
               "refund_due_by": due_by.isoformat() if due_by else None,

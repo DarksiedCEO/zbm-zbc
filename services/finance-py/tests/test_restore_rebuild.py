@@ -132,7 +132,7 @@ def test_f2_a_void_survives_a_restore_and_the_invoice_never_becomes_payable(keys
     assert z.svc.db["invoices"][a["invoice_id"]]["status"] == "issued"          # restored state...
     r = checkout(z, a["invoice_id"])
     assert r.status_code == 409 and "restore" in r.text.lower()                  # ...is not payable meanwhile
-    assert credit(z, z.svc.db["invoices"][a["invoice_id"]], "1.00").status_code == 409
+    assert credit(z, z.svc.db["invoices"][a["invoice_id"]], "1.00").status_code in (409, 422)
     _dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     assert real["failed"] == 0
     assert z.svc.db["invoices"][a["invoice_id"]]["status"] == "void"

@@ -700,6 +700,7 @@ class PayoutsMixin:
             b = self.db["batches"].get(batch_id)
             if b is None:
                 raise NotFound("no such batch")
+            self._money_out_refusal("payout release", batch_id)      # AEGIS r4 R4-3: never released twice
             self.require_rules()
             now = self._now()
             if b["status"] == "proposed":
@@ -838,6 +839,7 @@ class PayoutsMixin:
             it = self.db["items"][iid]
             if it["status"] != "approved":
                 return {"item_id": iid, "status": it["status"]}
+            self._money_out_refusal("rail submit", iid, it.get("batch_id"))       # AEGIS r4: the choke point
             payee = self.db["payees"][it["payee_id"]]
             op = Op(self, f"sub|{iid}", I4.ACTOR, iid)
             pre = []
@@ -950,9 +952,13 @@ class PayoutsMixin:
         the SAME idempotency key; after 23 h, or on Trolley (idempotency UNVERIFIED), look the item up at the rail:
         found -> record it; not found -> submit exactly once more; unknown -> break ``rail_state_unknown``."""
         out = []
+        if self.restore_locked():
+            return {"items": [], "restore_lockdown": True}      # AEGIS r4 R4-2: nothing is resubmitted while locked
         with self.lock:
+            fenced = self._fenced()
             stuck = [dict(i) for i in self.db["items"].values() if i["status"] == "submitting"
-                     and (batch_id is None or i["batch_id"] == batch_id)]
+                     and (batch_id is None or i["batch_id"] == batch_id)
+                     and i["item_id"] not in fenced and i["batch_id"] not in fenced]
         for it in stuck:
             try:
                 out.append(self._drive_item(op_prefix, it))

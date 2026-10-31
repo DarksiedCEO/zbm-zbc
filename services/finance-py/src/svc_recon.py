@@ -618,6 +618,7 @@ class ReconMixin:
             # call) is asked again with the SAME key, never left stuck
             if t is None or t["status"] not in ("approved", "bank_unknown", "executing"):
                 return {"op_id": tid, "status": t["status"] if t else "unknown"}
+            self._money_out_refusal("bank transfer", tid, t.get("ref_id"))      # AEGIS r4: the choke point
             if tid in self.xfer_in_flight:
                 # AEGIS 5a56a3a M2: another caller (a retry run, or the request that approved it) is asking the bank
                 # for this operation right now; a second ask is never sent in parallel. That caller records the answer.
@@ -873,10 +874,12 @@ class ReconMixin:
                           and not t.get("retry_window_expired")
                           and not (t["status"] == "approved" and t.get("outcome_unknown")))
         n = 0
+        if self.restore_locked():
+            return 0                    # AEGIS r4 R4-2: never re-driven during a restore lockdown
         for tid in todo:
             try:
                 res = self._execute_transfer(tid)
-            except (Unavailable, IntegrityRefused):
+            except (Unavailable, IntegrityRefused, Conflict):
                 continue                # sweep B-F2: one stuck operation never blocks the others
             if not (res.get("in_flight") or res.get("retry_window_expired") or res.get("clock_behind")
                     or res.get("outcome_unknown")):

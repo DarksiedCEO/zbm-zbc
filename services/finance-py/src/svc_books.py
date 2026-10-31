@@ -1105,6 +1105,7 @@ class BooksMixin:
             return ent["response"]
         with self.lock:
             r0 = self.db["refunds"].get(refund_id)
+            self._money_out_refusal("refund payment", refund_id)    # AEGIS r4 R4-1: the choke point
         g_cmp = Gather(self, f"rfdr|{request_id}|compliance", "andre", refund_id)
         out_reasons = self._outflow_reasons(g_cmp, r0["client_id"], full=True) if r0 is not None else []
         if out_reasons:

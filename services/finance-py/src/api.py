@@ -42,7 +42,7 @@ import models as m
 import money as M
 import reasons as R
 from clock import Clock, SystemClock
-from errors import FinError, Forbidden, FounderRefused, Invalid, Unavailable
+from errors import Conflict, FinError, Forbidden, FounderRefused, Invalid, Unavailable
 from founder import FounderGate
 from intelligences import registry
 from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
@@ -256,10 +256,14 @@ CRON_ROUTES = (re.compile(r"/fin/v1/jobs/(%s)/run" % "|".join(re.escape(j) for j
                re.compile(r"/fin/v1/reconciliations/run"))
 # CH-3: while Finance is quiesced for a backup only reads and the resume are answered
 QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume|/fin/v1/reconcile")     # reconcile: restoring a paused backup
-# AEGIS r3: money OUT, refused while the restore lockdown is on (money IN, e.g. Stripe webhooks, is still booked)
-LOCKDOWN_REFUSED = re.compile(r"/fin/v1/invoices/[^/]+/(void|credit-notes|stripe-checkout)|/fin/v1/payout-runs|"
-                              r"/fin/v1/payout-batches/[^/]+/(decision|second-approval|release)|/fin/v1/payout-handoffs|"
-                              r"/fin/v1/refunds/[^/]+(/decision)?|/fin/v1/media-buys/[^/]+/vendor-payments")
+# AEGIS r4: during a restore lockdown EVERY state-changing route and job is refused except this ALLOWLIST: money IN
+# (Stripe webhooks, bank lines), the restore routes, the contract-deadline routes (with the narrow MSA 4.12(g)
+# void / credit of an UNPAID invoice, checked again by the service), the backup pause, and the client-mail job (the
+# founder alerts: overdue deadlines and the lockdown escalation). Reads are never refused.
+LOCKDOWN_ALLOWED = re.compile(
+    r"/fin/v1/(stripe/events|bank/events|reconcile|stripe/reimport|restore/items/[^/]+/disposition"
+    r"|restore/lockdown/lift|deadlines/[^/]+/close|clients/[^/]+/acknowledgements|invoices/[^/]+/sow-ended"
+    r"|invoices/[^/]+/void|invoices/[^/]+/credit-notes|backup/quiesce|backup/resume|jobs/client-mail/run)")
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -274,7 +278,15 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                   description="NON-LIVE: rails, bank, tax agent, GL, vault, V&I, Compliance, Clipper Network, Legal, "
                               "People and push are fail-closed stand-ins unless wired.",
                   version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
-    auth = [Depends(make_require_auth(settings.service_token))]
+    def lockdown_gate(request: Request) -> None:
+        # AEGIS r4 R4-11: a route dependency AFTER the bearer check (401 comes first), before every other check
+        if request.method not in ("GET", "HEAD") and not LOCKDOWN_ALLOWED.fullmatch(request.url.path) \
+                and service.restore_locked():
+            raise Conflict("RESTORE_LOCKDOWN: Finance was restored from a backup; only money in, the restore and the "
+                           "contract-deadline routes answer until Andre lifts the lockdown "
+                           "(POST /fin/v1/restore/lockdown/lift)")
+
+    auth = [Depends(make_require_auth(settings.service_token)), Depends(lockdown_gate)]
     callers = Callers(settings.caller_tokens)
     others = list(settings.caller_tokens.values()) + [t for t in (settings.second_approver_token,) if t]
     founder = FounderGate.build(settings.andre_token, settings.service_token, others)
@@ -405,15 +417,6 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                                       or (request.method == "GET" and request.url.path == "/health")):
             return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
                                                                    "name it"})
-        return await call_next(request)
-
-    @app.middleware("http")
-    async def _lockdown(request: Request, call_next):
-        if request.method == "POST" and LOCKDOWN_REFUSED.fullmatch(request.url.path) \
-                and not request.url.path.endswith("/repay") and svc.restore_lockdown() is not None:
-            return JSONResponse(status_code=409, content={"detail": "RESTORE_LOCKDOWN: Finance was restored from a "
-                                                                    "backup; no money goes out until Andre lifts the "
-                                                                    "lockdown (POST /fin/v1/restore/lockdown/lift)"})
         return await call_next(request)
 
     @app.middleware("http")

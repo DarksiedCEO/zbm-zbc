@@ -337,7 +337,8 @@ def test_a11_a_rebuild_that_cannot_succeed_deadlocks_new_stripe_pages(keys, tmp_
     # the lockdown never deadlocks: Andre settles the lost item and lifts it
     r = checkout(z, c["invoice_id"])
     r2 = credit(z, z.svc.db["invoices"][c["invoice_id"]], "10.00", refund_due_from=None)
-    assert r.status_code == 409 and "RESTORE_LOCKDOWN" in r.text and r2.status_code == 409
+    assert r.status_code == 409 and "RESTORE_LOCKDOWN" in r.text
+    assert r2.status_code == 201, r2.text              # AEGIS r4 R4-8: crediting an UNPAID untouched invoice stays open
     brk = z.svc.db["breaks"][out["reimport_break_id"]]
     (it,) = [i for i in brk["items"].values() if i["kind"] == "void"]
     assert it["status"] == "needs_review" and "not in the restored books" in it["why"]

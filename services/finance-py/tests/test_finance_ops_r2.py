@@ -168,18 +168,15 @@ def test_r3_3_dispositions_only_for_what_cannot_be_rebuilt_bound_to_the_client(k
     assert z.post(p, {**body, "request_id": rid(), "reissued_as": paid_inv["invoice_id"]}).status_code in (401, 403)
     assert z.post(p, {**body, "request_id": rid(), "reissued_as": out["reimport_break_id"]},
                   andre=ANDRE_TOKEN).status_code == 409                               # never a break id
-    assert z.post(p, {**body, "request_id": rid(), "reissued_as": paid_inv["invoice_id"]},
-                  andre=ANDRE_TOKEN).status_code == 409                               # made before the item
-    other = ach_invoice(z, "50.00", client="zbm-client-8")
-    assert z.post(p, {**body, "request_id": rid(), "reissued_as": other["invoice_id"]},
-                  andre=ANDRE_TOKEN).status_code == 409                               # another client's
+    r = z.post(p, {**body, "request_id": rid(), "reissued_as": paid_inv["invoice_id"]}, andre=ANDRE_TOKEN)
+    assert r.status_code == 409 and "only a lost credit note or void" in r.text     # AEGIS r4 R4-7: bound to kind
+    assert z.post(p, {**body, "request_id": rid(), "disposition": "moved"}, andre=ANDRE_TOKEN).status_code == 409
     assert z.post("/fin/v1/restore/items/fin-ddl-0000000000000000000000000000000000000000/disposition",
                   {**lost, "request_id": rid()}, andre=ANDRE_TOKEN).status_code == 404
-    mine = ach_invoice(z, "60.00")                                                 # same client, after the item
-    d = z.ok(z.post(p, {**body, "request_id": rid(), "reissued_as": mine["invoice_id"]}, andre=ANDRE_TOKEN))
+    d = z.ok(z.post(p, {"request_id": rid(), "disposition": "lost", "reason": "re-acknowledged by phone"},
+                    andre=ANDRE_TOKEN))
     assert d["ready_to_lift"] is False                                             # coverage still missing
-    assert z.post(p, {**body, "request_id": rid(), "reissued_as": mine["invoice_id"]},
-                  andre=ANDRE_TOKEN).status_code == 409                               # disposed of once only
+    assert z.post(p, {**lost, "request_id": rid()}, andre=ANDRE_TOKEN).status_code == 409   # disposed of once only
     assert z.ledger.of_type("restore_item_disposed")
     for m in [i for i in items.values() if i["kind"] == "mail" and i["status"] == "needs_review"]:
         z.ok(z.post(f"/fin/v1/restore/items/{m['event_id']}/disposition",

@@ -78,7 +78,8 @@ def test_r3_1_a_failed_read_at_the_scan_leaves_the_build_incomplete_and_the_lock
     z = restart(x, tmp_path)
     brk = z.svc.db["breaks"][out["reimport_break_id"]]
     assert brk["build_incomplete"] is True and brk["items"] == {}
-    assert z.ok(z.get("/health"))["restore_lockdown"] == {"on": True, "detected": False, "build_incomplete": True}
+    assert z.ok(z.get("/health"))["restore_lockdown"] == {"on": True, "detected": False, "build_incomplete": True,
+                                                          "why": None}
     assert checkout(z, b["invoice_id"]).status_code == 409                   # the lost void is never payable
     lift(z, status=409)
     # a re-import reads the ledger again first; while that fails, nothing is planned
@@ -161,17 +162,17 @@ def test_r3_lockdown_refuses_all_money_out_books_money_in_and_degrades_health(ke
     snapshot(tmp_path)
     b = rr_invoice(x, "500.00")
     x.ok(_void(x, x.svc.db["invoices"][b["invoice_id"]]))
+    other = rr_invoice(x, "250.00")                                          # made after the backup: lost
     z, out = _restore_cycle(x, tmp_path)
-    other = rr_invoice(z, "250.00")                                          # a brand-new invoice: still refused
-    for path in (f"/fin/v1/invoices/{other['invoice_id']}/void", f"/fin/v1/invoices/{other['invoice_id']}/credit-notes",
-                 f"/fin/v1/invoices/{other['invoice_id']}/stripe-checkout", "/fin/v1/payout-runs",
+    assert z.post("/fin/v1/invoices", {"request_id": rid()}, caller="onboarding").status_code == 409
+    for path in (f"/fin/v1/invoices/{d['invoice_id']}/stripe-checkout", "/fin/v1/payout-runs",
                  "/fin/v1/refunds/zbm-camp-1", "/fin/v1/payout-batches/fin-bat-X/release",
                  "/fin/v1/media-buys/fin-mb-X/vendor-payments"):
         r = z.post(path, {"request_id": rid()}, andre=ANDRE_TOKEN)
         assert r.status_code == 409 and "RESTORE_LOCKDOWN" in r.text, (path, r.status_code, r.text[:120])
     for what in ("void", "credit note", "Stripe page"):                      # also below the api (service calls)
         with pytest.raises(Conflict, match="RESTORE_LOCKDOWN"):
-            z.svc._restore_refusal(what, other["invoice_id"])
+            z.svc._restore_refusal(what, d["invoice_id"])
     h = z.ok(z.get("/health"))
     assert h["status"] == "degraded" and h["restore_lockdown"]["on"] is True
     with caplog.at_level(logging.ERROR, logger="finance.alert"):

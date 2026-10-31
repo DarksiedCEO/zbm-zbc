@@ -787,6 +787,10 @@ class FinanceService:
             # AEGIS r3 R3-1/R3-2: a restore's reconcile first writes the lockdown to disk (write-ahead: if that fails
             # nothing is done), then commits the reconcile AND the restore break in ONE line (or fails with 503)
             reimport_break, brk = None, None
+            if plan["money_at_risk"] and (plan.get("restore_point") or {}).get("read_failed"):
+                # AEGIS r4 R4-6: never commit a restore whose backup point could not be located (nothing done)
+                raise Unavailable("the evidence ledger could not be read to locate the backup point; nothing was "
+                                  "reconciled (retry)")
             if plan["money_at_risk"]:
                 reimport_break, brk = self._restore_break_row(plan)
                 self._lockdown_enter(plan, reimport_break, brk.get("build_incomplete", True))

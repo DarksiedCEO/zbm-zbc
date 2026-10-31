@@ -168,9 +168,13 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   ledger mark with an HMAC keyed from `FIN_CONTACT_HASH_KEY`; an attempt without a valid mark, a deadline or an
   unproven email becomes a restore **item** for Andre, never booked). AEGIS r3, the **restore lockdown**: a restore's
   reconcile first writes `restore_lockdown.json` in the data directory (write-ahead), then commits itself and the
-  restore break in one line. While the lockdown is on, every credit note, void, Stripe page, payout run or release,
-  refund and vendor payment is refused (409 `RESTORE_LOCKDOWN`; money in is still booked), `/health` is `degraded`
-  and an ALERT repeats every 5 minutes (a watch thread). A failed ledger read leaves the item list
+  restore break in one line. AEGIS r4: while locked (the lockdown on OR a restore break open) every state-changing
+  route and job is refused except an allowlist (`api.LOCKDOWN_ALLOWED`: money in, the restore and contract-deadline
+  routes, the backup pause, the client-mail job), checked after authentication, and every bank transfer, rail
+  submit, release and repayment refuses inside the service too; money that went out after the backup becomes an
+  item (`moved` / `not_moved`) and its subject is fenced for good unless `not_moved`; Andre may still void or credit
+  an UNPAID untouched invoice (MSA 4.12(g)); past 2 business days an escalation ALERT repeats daily. `/health` is
+  `degraded` and an ALERT repeats every 5 minutes (a watch thread). A failed ledger read leaves the item list
   `build_incomplete` (every re-import reads it again first). Items the re-import cannot rebuild are disposed of with
   `POST /fin/v1/restore/items/{event_id}/disposition` (Andre: `lost`, `reissued` naming a later invoice or credit
   note of the same client, or `reissue_after_lift`); a rebuildable item cannot be. Only Andre lifts the lockdown,

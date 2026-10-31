@@ -35,7 +35,7 @@ import os
 import re
 import threading
 import time as _time
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 import money as M
@@ -63,6 +63,11 @@ MONEY_EVENT_TYPES = ("journal_entry_posted", "receipt_matched", "receipt_unappli
 # before the local commit; after the commit Finance records an ``effect_committed`` mark naming it (svc_restore
 # ``_mark_committed``). Only an intent with its authentic mark is ever rebuilt; any other one is an item for Andre.
 EFFECT_TYPES = ("credit_note_issued", "invoice_voided", "deadline_recorded", "client_mail_queued")
+# AEGIS r4 R4-3: money that went OUT (or toward the payout rail): never rebuilt, always an item for Andre (moved /
+# not_moved, from the bank or rail record), and its subject (transfer, payout item or batch, refund, media buy) is
+# FENCED: never executed, submitted, released or repaid again unless Andre says it did not move
+MONEY_OUT_TYPES = ("treasury_posting_committed", "item_submitted", "batch_release_started", "refund_paid",
+                   "media_vendor_payment_recorded")
 COMMIT_TYPE = "effect_committed"
 COMMIT_SUMMARY = re.compile(r"Committed (fin-[a-z0-9]{1,12}-[0-9a-f]{40}) at line (\d+) ([0-9a-f]{64}) key "
                             r"([0-9a-f]{12}|-) mac ([0-9a-f]{64}|-)")
@@ -300,7 +305,7 @@ class RestoreMixin:
         except (OSError, ValueError):
             # unreadable: fail closed
             return {"state": "on", "detected": True, "build_incomplete": True, "breaks": [],
-                    "why": "the lockdown file could not be read"}
+                    "why": "the lockdown file could not be read (fail closed)"}
 
     def _lockdown_write(self, st: dict) -> None:
         """Atomic and durable (temp file, fsync, rename, directory fsync). In memory only without a data directory."""
@@ -329,30 +334,62 @@ class RestoreMixin:
         st = getattr(self, "_lockdown", None)
         return st if st and st.get("state") == "on" else None
 
+    def restore_locked(self) -> bool:
+        """AEGIS r4 R4-5: locked while the lockdown is on OR any restore break is still open (either alone locks)."""
+        return self.restore_lockdown() is not None or bool(self._restore_open())
+
     def lockdown_status(self) -> dict:
         st = self.restore_lockdown()
-        return {"on": st is not None, "detected": bool(st and st.get("detected")),
-                "build_incomplete": bool(st and (st.get("build_incomplete")
-                                                 or any(b.get("build_incomplete") for b in self._restore_open())))}
+        return {"on": self.restore_locked(), "detected": bool(st and st.get("detected")),
+                "build_incomplete": bool(st and st.get("build_incomplete"))
+                or any(b.get("build_incomplete") for b in self._restore_open()),
+                "why": (st or {}).get("why")}
 
     def _lockdown_alert(self) -> None:
-        if self.restore_lockdown() is None:
+        if not self.restore_locked():
             return
+        self._lockdown_escalate()
         last = getattr(self, "_lockdown_alert_at", None)
         now = self._now()
         if last is None or (now - last).total_seconds() >= PAUSE_ALERT_EVERY_S:
             self._lockdown_alert_at = now
-            st = self.restore_lockdown()
+            st = self.restore_lockdown() or {}
             alert_log.error("ALERT finance: restore_lockdown on%s%s: no credit note, void, Stripe page, payout or "
                             "refund until Andre lifts it (runbook restore-and-reimport section 5)",
                             " (detected at start: ledger anchors beyond the local log)" if st.get("detected") else "",
                             " build_incomplete" if self.lockdown_status()["build_incomplete"] else "")
 
+    def _lockdown_escalate(self) -> None:
+        """AEGIS r4 R4-8: a lockdown longer than 2 business days escalates (MSA 4.12(f)/(g) and 4.10 clocks keep
+        running), and again every day after, naming the contract deadlines due within 10 business days."""
+        from svc_credits import add_business_days
+        st = self.restore_lockdown() or {}
+        opened = st.get("opened_at") or min([b.get("opened_at") or "" for b in self._restore_open()] or [""])
+        if not opened:
+            return
+        today = self._business_today()
+        start = date.fromisoformat(self._business_date(opened))
+        if today < add_business_days(start, 2) or getattr(self, "_lockdown_escalated_on", None) == today:
+            return
+        self._lockdown_escalated_on = today
+        horizon = add_business_days(today, 10).isoformat()
+        due = sorted(f"{b['leg']}:{b.get('invoice_id') or b.get('mail_id') or b['break_id']} by {b['due_by']}"
+                     for b in self.db["breaks"].values() if b["status"] != "resolved" and b.get("due_by")
+                     and b["due_by"] <= horizon)
+        alert_log.error("ALERT finance: restore_lockdown_long since %s (more than 2 business days): contract "
+                        "deadlines due within 10 business days: %s. MSA 4.12(g) cancels and credits of UNPAID "
+                        "invoices are still allowed (Andre); refunds due go through the Stripe Dashboard", start,
+                        "; ".join(due[:20]) or "none")
+
     def _lost_anchors(self, entries: list, after: int) -> int:
-        """Finance log anchors on the ledger (from index ``after``) that name no line of the local log: lines a
-        restore (or a failed write) took away."""
+        """Finance log anchors on the ledger (from index ``after``) that name no line of the local log and that no
+        honoured reconcile declared void (AEGIS r4 R4-10): lines a restore (or a failed write) took away."""
         shas = self.log.line_shas()
         mine = {i10.anchor_id(self.log.epoch, rec["seq"], s) for rec, s in zip(self.log.iter_records(), shas)}
+        for rec in self.log.iter_records():
+            for kind, r in rec["data"].get("ops", []):
+                if kind == "reconcile":
+                    mine.update((r.get("payload") or {}).get("void_event_ids") or [])
         return sum(1 for i, e in enumerate(entries) if i >= after and e.get("department") == i10.DEPT
                    and e.get("event_type") == i10.ANCHOR_TYPE and e.get("event_id") not in mine)
 
@@ -373,7 +410,8 @@ class RestoreMixin:
             raise RuntimeError("refusing to start: the evidence ledger could not be read to check for a restore "
                                "lockdown") from None
         st = self._lockdown
-        if st is None or st.get("state") != "on":
+        # in reconcile mode nothing writes anyway, and a normal start refuses unreconciled lines: detect afterwards
+        if not self.reconcile_mode and (st is None or st.get("state") != "on"):
             lost = self._lost_anchors(entries, int((st or {}).get("ack_ledger_len") or 0))
             if lost:
                 new = {"state": "on", "detected": True, "build_incomplete": True, "breaks": [],
@@ -382,6 +420,15 @@ class RestoreMixin:
                     self._lockdown_write(new)
                 except Unavailable:
                     self._lockdown = new                      # on in memory at least
+        if self._restore_open() and self.restore_lockdown() is None:
+            # AEGIS r4 R4-5: an open restore break always means a lockdown, whatever the file says
+            new = {"state": "on", "detected": True, "build_incomplete": False, "opened_at": iso(self._now()),
+                   "breaks": sorted(b["break_id"] for b in self._restore_open()),
+                   "why": "a restore break is open"}
+            try:
+                self._lockdown_write(new)
+            except Unavailable:
+                self._lockdown = new
         if not self.reconcile_mode:
             self._unmarked = self._unmarked_from_log(entries)
             self._retry_commit_marks()
@@ -398,8 +445,9 @@ class RestoreMixin:
 
     def _lockdown_clear_after_reconcile(self) -> None:
         """A reconcile with nothing at risk: the lines it declared void are acknowledged (no lockdown for them)."""
-        if self.restore_lockdown() is not None and not (self.restore_lockdown() or {}).get("detected"):
-            return
+        if self._restore_open() or (self.restore_lockdown() is not None
+                                    and not (self.restore_lockdown() or {}).get("detected")):
+            return                                   # AEGIS r4 R4-5: never while a restore break is open
         try:
             n = len(self.recorder.client.entries())
             self._lockdown_write({"state": "clear", "ack_ledger_len": n, "at": iso(self._now())})
@@ -469,9 +517,11 @@ class RestoreMixin:
                     if e.get("event_id") == aid:
                         idx = i
                         break
-            except Exception:  # noqa: BLE001 - unreadable ledger: no position (the rebuild then refuses: fail closed)
-                idx = None
-        return {"log_head_seq": n, "at": at, "ledger_index": idx, "date": self._business_date(at)}
+            except Exception:  # noqa: BLE001 - unreadable ledger: no position (AEGIS r4 R4-6: the reconcile refuses)
+                return {"log_head_seq": n, "log_head_sha256": shas[-1], "at": at, "ledger_index": None,
+                        "date": self._business_date(at), "read_failed": True}
+        return {"log_head_seq": n, "log_head_sha256": shas[-1] if n else None, "at": at, "ledger_index": idx,
+                "date": self._business_date(at)}
 
     def _business_date(self, at) -> str:
         from zoneinfo import ZoneInfo
@@ -485,12 +535,59 @@ class RestoreMixin:
         return [b for b in self.db["breaks"].values()
                 if b.get("leg") == "restore_reimport_required" and b["status"] != "resolved"]
 
-    def _restore_refusal(self, what: str, invoice_id: Optional[str] = None) -> None:
-        """AEGIS r3 R3-1/R3-2/R3-5: while the restore lockdown is on (or a restore break is still open), no money goes
-        out anywhere: every credit note, void and new Stripe page is refused, for every invoice. Simple, global and
-        fail closed: a restore is rare and Andre is present (the api also refuses payouts and refunds)."""
-        if self.restore_lockdown() is not None or self._restore_open():
+    def _restore_refusal(self, what: str, invoice_id: Optional[str] = None, unpaid_only: bool = False) -> bool:
+        """AEGIS r3/r4: while locked (the lockdown on, or a restore break open) every credit note, void and new
+        Stripe page is refused, for every invoice. One narrow exception keeps MSA 4.12(g) meetable (R4-8): Andre may
+        void an UNPAID invoice, or credit one down without any refund, when the restore's item list is complete and
+        nothing the restore lost touches that invoice (no money moves). Returns True when the exception applied."""
+        if not self.restore_locked():
+            return False
+        if unpaid_only and what in ("void", "credit note") and invoice_id:
+            why = self._lockdown_exception_refusal(invoice_id)
+            if why is None:
+                return True
+            raise Conflict(LOCKDOWN_MSG.format(what=what) + f"; the unpaid-invoice exception does not apply: {why}")
+        raise Conflict(LOCKDOWN_MSG.format(what=what))
+
+    def _lockdown_exception_refusal(self, invoice_id: str) -> Optional[str]:
+        if self.lockdown_status()["build_incomplete"] or (self.restore_lockdown() or {}).get("detected"):
+            return "the list of what the restore lost is not complete"
+        inv = self.db["invoices"].get(invoice_id) or {}
+        if inv.get("status") != "issued" or self._paid_gross(invoice_id) > 0 or M.D(inv.get("refunded") or "0.00") > 0:
+            return "the invoice is not unpaid"
+        for b in self.db["breaks"].values():
+            if b.get("leg") == "restore_reimport_required" and any(
+                    it.get("invoice_id") == invoice_id for it in (b.get("items") or {}).values()):
+                return "something the restore lost touches this invoice"
+        if invoice_id in self._fenced():
+            return "money moved on this invoice after the backup"
+        return None
+
+    def _fenced(self) -> set:
+        """AEGIS r4 R4-2/R4-3: subjects whose money may have moved after the backup (from the ledger, and in-flight
+        transfers and payout items of the restored books). Kept after the lift; only Andre's ``not_moved`` releases
+        one (when every item naming it says so)."""
+        out, freed = set(), {}
+        for b in self.db["breaks"].values():
+            if b.get("leg") != "restore_reimport_required":
+                continue
+            out.update(b.get("fenced") or [])
+            for it in (b.get("items") or {}).values():
+                if it.get("kind") in ("money_out", "in_flight") and it.get("ref"):
+                    ok = (it.get("disposition") or {}).get("disposition") == "not_moved"
+                    freed[it["ref"]] = freed.get(it["ref"], True) and ok
+        return out - {k for k, v in freed.items() if v}
+
+    def _money_out_refusal(self, what: str, *subjects) -> None:
+        """AEGIS r4 R4-1/R4-2/R4-4: the service-level choke point for every bank transfer, rail submit, release and
+        repayment: nothing while locked, and never a fenced subject (it may already have moved)."""
+        if self.restore_locked():
             raise Conflict(LOCKDOWN_MSG.format(what=what))
+        hit = sorted(s for s in subjects if s and s in self._fenced())
+        if hit:
+            raise Conflict(f"RESTORE_FENCED: {what} refused: the ledger shows money for {hit[0]} may have moved after "
+                           "the restored backup; check the bank or rail, then record the restore item as moved or "
+                           "not_moved (docs/runbooks/restore-and-reimport.md section 5)")
 
     def _cn_number_floor(self, year: Optional[int] = None) -> int:
         """AEGIS R3-6: per year, and only from credit notes whose evidence verified with an authentic mark."""
@@ -499,7 +596,8 @@ class RestoreMixin:
         for b in self.db["breaks"].values():
             if b.get("leg") == "restore_reimport_required":
                 fl = b.get("cn_number_floor")
-                out = max(out, int(fl.get(year) or 0) if isinstance(fl, dict) else 0)
+                # AEGIS r4 R4-13: a round-2 break kept one int floor (no year): it counts for every year
+                out = max(out, int(fl.get(year) or 0) if isinstance(fl, dict) else int(fl or 0))
         return out
 
     def _scan_tail(self, ledger_index: Optional[int]) -> dict:
@@ -508,7 +606,7 @@ class RestoreMixin:
         (unproven, uncommitted, unauthenticated, or a kind never rebuilt automatically: Andre disposes of it), or a
         done state for client emails that follow their parent."""
         if ledger_index is None:
-            return {"items": {}, "affected_invoices": [], "cn_number_floor": {}, "scanned": False}
+            return {"items": {}, "affected_invoices": [], "cn_number_floor": {}, "scanned": False, "fenced": []}
         entries = self.recorder.client.entries()
         tail = [(i, e) for i, e in enumerate(entries) if i > ledger_index and e.get("department") == i10.DEPT]
         marks, sent, affected, floor = {}, set(), set(), {}
@@ -522,7 +620,16 @@ class RestoreMixin:
                 sent.add(e.get("subject_id"))
             elif et in ("stripe_checkout_created", "invoice_issued", "invoice_approved"):
                 affected.add(e.get("subject_id"))
-        items: dict = {}
+        items_out: dict = {}
+        for i, e in tail:
+            if e.get("event_type") in MONEY_OUT_TYPES:
+                items_out[e.get("event_id")] = {
+                    "event_id": e.get("event_id"), "event_type": e.get("event_type"), "order": i,
+                    "status": "needs_review", "kind": "money_out", "ref": e.get("subject_id"), "invoice_id": None,
+                    "client_id": None, "recorded_at": e.get("recorded_at"), "summary": str(e.get("summary") or "")[:160],
+                    "why": "money went out after the backup (per the ledger): check the bank or rail, then record it "
+                           "as moved (with the reference) or not_moved"}
+        items: dict = dict(items_out)
         for i, e in tail:
             et = e.get("event_type")
             if et not in EFFECT_TYPES:
@@ -601,6 +708,7 @@ class RestoreMixin:
             if it.get("kind") in ("credit_note", "void"):
                 it["mail_sent_before_restore"] = it.get("ref") in mails_sent
         return {"items": items, "affected_invoices": sorted(a for a in affected if a),
+                "fenced": sorted({it["ref"] for it in items_out.values() if it.get("ref")}),
                 "cn_number_floor": floor, "scanned": True}
 
     def _anchor_at(self, entries: list, seq) -> bool:
@@ -647,12 +755,17 @@ class RestoreMixin:
         try:
             scan = self._scan_tail(rp.get("ledger_index"))
         except Exception:  # noqa: BLE001 - unreadable: nothing listed yet, and the build is incomplete (fail closed)
-            scan = {"items": {}, "affected_invoices": [], "cn_number_floor": {}, "scanned": False}
+            scan = {"items": {}, "affected_invoices": [], "cn_number_floor": {}, "scanned": False, "fenced": []}
+        # AEGIS r4 R4-2: transfers and payout items the restored books hold in flight may have moved after the backup
+        inflight = self._inflight_items()
+        scan = {**scan, "items": {**inflight, **scan["items"]},
+                "fenced": sorted(set(scan.get("fenced") or []) | {it["ref"] for it in inflight.values()})}
         row = {"break_id": bid, "leg": "restore_reimport_required", "subject": "zbm:1060",
                "difference": "0.00", "opened_at": iso(self._now()),
                "opened_on": self._business_today().isoformat(), "owner": "andre", "severity": "high",
                "explanation_code": "unknown", "status": "open", "receipt_id": None,
                "since": since, "restore_point": rp, "ledger_index": rp.get("ledger_index"),
+               "head_seq": plan.get("head_seq"), "head_sha256": plan.get("head_sha256"),
                "covered": [], "money_events": len(plan["money_at_risk"]), "resolution": None,
                **scan, "build_incomplete": not scan["scanned"], "ready_to_lift": False,
                "note": f"restored from a backup of {since}: Finance is in RESTORE LOCKDOWN. Run POST "
@@ -661,9 +774,24 @@ class RestoreMixin:
                        "the lockdown (POST /fin/v1/restore/lockdown/lift)"}
         return bid, row
 
-    @staticmethod
-    def _items_done(b: dict) -> bool:
-        return all(it["status"] in DONE for it in (b.get("items") or {}).values())
+    def _inflight_items(self) -> dict:
+        out = {}
+        for t in self.db["treasury_ops"].values():
+            if t.get("status") in ("approved", "executing", "bank_unknown"):
+                out[f"inflight:{t['op_id']}"] = {"event_id": f"inflight:{t['op_id']}", "event_type": "treasury_op",
+                                                 "kind": "in_flight", "ref": t["op_id"], "status": "needs_review",
+                                                 "order": -1, "invoice_id": None, "client_id": None,
+                                                 "why": f"a {t.get('kind')} transfer the restored books hold as "
+                                                        f"{t['status']}: it may have moved after the backup; check the "
+                                                        "bank, then record it as moved or not_moved"}
+        for it in self.db["items"].values():
+            if it.get("status") == "submitting":
+                out[f"inflight:{it['item_id']}"] = {"event_id": f"inflight:{it['item_id']}", "event_type": "payout_item",
+                                                    "kind": "in_flight", "ref": it["item_id"], "status": "needs_review",
+                                                    "order": -1, "invoice_id": None, "client_id": None,
+                                                    "why": "a payout item the restored books hold as submitting: check "
+                                                           "the rail, then record it as moved or not_moved"}
+        return out
 
     def _lift_missing(self, b: dict) -> list[str]:
         out = []
@@ -677,6 +805,12 @@ class RestoreMixin:
             out.append(f"{len(left)} restore item(s) are not rebuilt or disposed of: {', '.join(sorted(left)[:5])}")
         return out
 
+    def _lockdown_effects(self) -> list[dict]:
+        return [{"kind": "void", "invoice_id": i["invoice_id"]} for i in self.db["invoices"].values()
+                if i.get("voided_during_lockdown")] + \
+               [{"kind": "credit_note", "credit_note_id": c["credit_note_id"], "invoice_id": c["invoice_id"]}
+                for c in self.db["credit_notes"].values() if c.get("issued_during_lockdown")]
+
     def _restore_progress(self, op: Op, b: dict) -> bool:
         """Never closes anything (AEGIS r3: lifting is Andre's explicit act); it records whether the lift is ready."""
         ready = not self._lift_missing(b)
@@ -689,11 +823,17 @@ class RestoreMixin:
         with self.lock:
             todo = [b for b in self._restore_open() if b.get("build_incomplete") or b.get("scanned") is False]
             for b in todo:
-                if b.get("ledger_index") is None:
-                    raise Conflict("RESTORE_BUILD_INCOMPLETE: the restore break has no ledger position for the backup, "
-                                   "so what the restore lost cannot be listed; restore again (runbook section 3)")
+                idx = b.get("ledger_index")
+                if idx is None:
+                    # AEGIS r4 R4-6: find the restored head's anchor again (its id is deterministic)
+                    idx = self._head_index(b.get("head_seq"), b.get("head_sha256"))
+                    if idx is None:
+                        raise Conflict("RESTORE_BUILD_INCOMPLETE: the restored log head's anchor is not on the ledger, "
+                                       "so what the restore lost cannot be listed; restore again (runbook section 3)")
+                    b = {**b, "ledger_index": idx, "restore_point": {**(b.get("restore_point") or {}),
+                                                                     "ledger_index": idx}}
                 try:
-                    scan = self._scan_tail(b["ledger_index"])
+                    scan = self._scan_tail(idx)
                 except Exception:  # noqa: BLE001
                     raise Unavailable("RESTORE_BUILD_INCOMPLETE: the evidence ledger could not be read to list what "
                                       "the restore lost; nothing was planned (retry)") from None
@@ -704,12 +844,28 @@ class RestoreMixin:
                 op.record(derived_id("rscan", b["break_id"]), "restore_items_listed", "andre", b["break_id"],
                           {"break_id": b["break_id"], "items": len(scan["items"])},
                           f"Restore items listed after a failed read: {len(scan['items'])}")
-                self._restore_progress(op, {**b, **scan, "build_incomplete": False})
+                inflight = {k: v for k, v in (b.get("items") or {}).items() if k.startswith("inflight:")}
+                self._restore_progress(op, {**b, **scan, "items": {**inflight, **scan["items"]},
+                                            "fenced": sorted(set(b.get("fenced") or []) | set(scan.get("fenced") or [])),
+                                            "build_incomplete": False})
                 self._commit(op)
             st = self.restore_lockdown()
             if todo and st and st.get("build_incomplete") and not any(
                     x.get("build_incomplete") for x in self._restore_open()):
                 self._lockdown_write({**st, "build_incomplete": False})
+
+    def _head_index(self, seq, head_sha) -> Optional[int]:
+        if not seq or not head_sha:
+            return None
+        aid = i10.anchor_id(self.log.epoch, int(seq), head_sha)
+        try:
+            for i, e in enumerate(self.recorder.client.entries()):
+                if e.get("event_id") == aid:
+                    return i
+        except Exception:  # noqa: BLE001
+            raise Unavailable("RESTORE_BUILD_INCOMPLETE: the evidence ledger could not be read; nothing was planned "
+                              "(retry)") from None
+        return None
 
     def restore_item_disposition(self, request_id: str, event_id: str, body: dict) -> dict:
         """AEGIS R2-2 / R3-3: Andre's decision on one lost item the re-import CANNOT rebuild (status ``needs_review``;
@@ -731,6 +887,12 @@ class RestoreMixin:
             if it["status"] != "needs_review":
                 raise Conflict("the re-import rebuilds this item from verified evidence: it cannot be disposed of "
                                "(run the re-import)")
+            money = it.get("kind") in ("money_out", "in_flight")
+            if money != (body["disposition"] in ("moved", "not_moved")):
+                raise Conflict("money that went out is recorded as moved (with the bank or rail reference in the reason) "
+                               "or not_moved; every other item as lost, reissued or reissue_after_lift")
+            if body["disposition"] == "reissue_after_lift" and it.get("kind") not in ("credit_note", "void"):
+                raise Conflict("only a credit note or a void is re-issued after the lift")
             if body["disposition"] == "reissued":
                 self._check_reissued_as(it, body.get("reissued_as"))
             new_items = {**b["items"], event_id: {**it, "status": "disposed",
@@ -750,22 +912,35 @@ class RestoreMixin:
             return resp
 
     def _check_reissued_as(self, it: dict, ref: Optional[str]) -> None:
-        row = self.db["invoices"].get(ref or "") or self.db["credit_notes"].get(ref or "")
-        if row is None:
-            raise Conflict("reissued_as must name an invoice or a credit note Finance holds (never a break or an "
-                           "email)")
-        client = row.get("client_id") or (self.db["invoices"].get(row.get("invoice_id") or "") or {}).get("client_id")
-        if not it.get("client_id") or client != it["client_id"]:
-            raise Conflict("reissued_as must belong to the same client as the item (an item whose client is not in "
-                           "the restored books is disposed of as lost, with the reason)")
-        # made after the lost item: its first ledger event comes after the item's on the ledger
+        """AEGIS r4 R4-7: bound to the item: a lost credit note -> a credit note on the SAME invoice for at least the
+        same amount and refund, made after the item; a lost void -> the same invoice voided after the item. Anything
+        else is ``lost`` (with the reason) or ``reissue_after_lift``."""
         try:
-            first = next((i for i, e in enumerate(self.recorder.client.entries())
-                          if e.get("department") == i10.DEPT and e.get("subject_id") == ref), None)
+            entries = self.recorder.client.entries()
         except Exception:  # noqa: BLE001
             raise Unavailable("the evidence ledger could not be read; nothing was disposed of (retry)") from None
-        if first is None or first <= int(it.get("order") or 0):
-            raise Conflict("reissued_as must have been made after the lost item")
+
+        def after(subject, types) -> bool:
+            return any(i > int(it.get("order") or 0) and e.get("department") == i10.DEPT
+                       and e.get("subject_id") == subject and e.get("event_type") in types
+                       for i, e in enumerate(entries))
+        if it.get("kind") == "credit_note":
+            cn = self.db["credit_notes"].get(ref or "")
+            if cn is None or cn.get("invoice_id") != it.get("invoice_id") \
+                    or M.D(cn.get("amount") or "0.00") < M.D(it.get("amount") or "0.00") \
+                    or M.D(cn.get("to_refund") or "0.00") < M.D(it.get("to_refund") or "0.00"):
+                raise Conflict("reissued_as must be a credit note on the same invoice for at least the same amount and "
+                               "refund")
+            if not after(ref, ("credit_note_issued",)):
+                raise Conflict("reissued_as must have been issued after the lost item")
+            return
+        if it.get("kind") == "void":
+            inv = self.db["invoices"].get(ref or "") or {}
+            if ref != it.get("invoice_id") or inv.get("status") != "void" or not after(ref, ("invoice_voided",)):
+                raise Conflict("reissued_as must be the same invoice, voided after the lost item")
+            return
+        raise Conflict("only a lost credit note or void is recorded as reissued; record this item as lost (with the "
+                       "reason) instead")
 
     def restore_lockdown_lift(self, request_id: str, body: dict) -> dict:
         """AEGIS r3: the ONLY way out of the restore lockdown, Andre's explicit act, refused until the list of what
@@ -773,9 +948,10 @@ class RestoreMixin:
         with self.lock:
             key, h, ent = self._idem("andre", request_id, "restore/lockdown/lift", body)
             if ent:
-                return ent["response"]
-            st = self.restore_lockdown()
-            if st is None:
+                # AEGIS r4 R4-9: a replay tells the state as it is now
+                return {**ent["response"], "lifted": not self.restore_locked(), "locked": self.restore_locked()}
+            st = self.restore_lockdown() or {}
+            if not self.restore_locked():
                 raise Conflict("Finance is not in a restore lockdown")
             if self.reconcile_mode or self.reconcile_required:
                 raise Conflict("reconcile first (the local log does not match the ledger)")
@@ -784,6 +960,10 @@ class RestoreMixin:
             ever = [b for b in self.db["breaks"].values() if b.get("leg") == "restore_reimport_required"]
             if not open_ and not ever and not st.get("detected"):
                 missing.append("no restore break was committed: reconcile again")
+            touched = {it.get("invoice_id") for b in open_ for it in (b.get("items") or {}).values()}
+            effects = self._lockdown_effects()
+            missing += [f"{e['kind']} on {e['invoice_id']} made during the lockdown touches a restore item"
+                        for e in effects if e["invoice_id"] in touched]
             if missing:
                 raise Conflict("RESTORE_LOCKDOWN stays on: " + "; ".join(missing), missing=missing)
             try:
@@ -812,10 +992,18 @@ class RestoreMixin:
                        "detected": bool(st.get("detected"))}, "Restore lockdown lifted by Andre")
             resp = self._idem_add(op, key, h, {"lifted": True, "lift_id": lid,
                                                "breaks_resolved": [b["break_id"] for b in open_],
+                                               "lockdown_effects": effects, "fenced": sorted(self._fenced()),
                                                "ledger_event_ids": op.events, "request_id": request_id})
-            self._commit(op)
+            # AEGIS r4 R4-9: the file first (a failure here changes nothing), then the commit; if the commit fails
+            # the restore breaks stay open, which alone keeps Finance locked (fail closed), and a retry lifts
+            prior = getattr(self, "_lockdown", None)
             self._lockdown_write({"state": "lifted", "ack_ledger_len": n, "lifted_at": iso(self._now()),
                                   "lift_id": lid, "reason": body["reason"]})
+            try:
+                self._commit(op)
+            except BaseException:
+                self._lockdown = prior if prior and prior.get("state") == "on" else self._lockdown
+                raise
             return resp
 
     # ================================================================== 3. the Stripe re-import
