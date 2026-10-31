@@ -146,7 +146,10 @@ def payable_change_problem(old: Optional[dict], new: dict, key: str) -> Optional
     changed = [f for f in PAYABLE_BINDINGS if old.get(f) != new.get(f)]
     if changed:
         return f"payable {key} would be rebound ({', '.join(changed)}): refused, never rewritten"
-    if status not in PAYABLE_TRANSITIONS.get(old.get("status"), set()):
+    # AEGIS r5 R5-2: a restore correction settles a payable the restore lost the payout of (bound to the restore item)
+    restored = status == "settled" and old.get("status") in ("accrued", "returned") \
+        and bool(new.get("settled_by_restore_correction"))
+    if status not in PAYABLE_TRANSITIONS.get(old.get("status"), set()) and not restored:
         return f"payable {key} cannot move from {old.get('status')} to {status}"
     if old.get("status") != "over_budget_hold" and (old.get("amount"), old.get("revenue_amount")) != \
             (new.get("amount"), new.get("revenue_amount")):

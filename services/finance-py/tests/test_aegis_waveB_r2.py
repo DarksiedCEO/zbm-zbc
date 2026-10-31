@@ -12,7 +12,7 @@ from ledger import payload_sha256
 from svc_credits import credit_note_payload, credit_note_summary
 from test_credit_notes import CLIENT, credit
 from test_reconcile_anchor import RECONCILE, _plan
-from test_restore_reimport import durable, lift, pay, reimport, restart, restore, sim_balance, snapshot
+from test_restore_reimport import durable, lift, refeed, pay, reimport, restart, restore, sim_balance, snapshot
 from test_restore_rebuild import _full_reimport, _restore_cycle, _state, _void
 from test_stripe_incoming import checkout, keys, rr_invoice  # noqa: F401
 
@@ -209,6 +209,7 @@ def test_a6b_a_restored_backup_taken_inside_its_quiesce_window_boots_paused_and_
                  andre=ANDRE_TOKEN)
     print("A6b resume:", res.status_code, res.text[:200])
     assert r.status_code == 200 and res.status_code == 200
+    refeed(z)                                          # AEGIS r5 R5-4
     _d, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     assert real["ready_to_lift"]
 

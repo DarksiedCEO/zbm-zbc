@@ -77,8 +77,18 @@ def reimport(hr, dry=True, plan=None, since=TODAY, until=TODAY):
     return hr.post("/fin/v1/stripe/reimport", body, andre=ANDRE_TOKEN)
 
 
-def lift(hr, reason="re-import complete and every restore item settled", status=200):
+def refeed(hr):
+    """AEGIS r5 R5-4: Andre confirms the bank lines since the backup were fed again (for every open restore break)."""
+    for b in hr.svc._restore_open():
+        hr.ok(hr.post("/fin/v1/restore/bank-refeed", {"request_id": rid(), "since": b["since"],
+                                                       "until": b["opened_on"], "statement_ref": "stmt-2026-10"},
+                      andre=ANDRE_TOKEN))
+
+
+def lift(hr, reason="re-import complete and every restore item settled", status=200, with_refeed=True):
     """AEGIS r3: Andre lifts the restore lockdown (refused, 409, until everything is done)."""
+    if with_refeed:
+        refeed(hr)
     r = hr.post("/fin/v1/restore/lockdown/lift", {"request_id": rid(), "reason": reason}, andre=ANDRE_TOKEN)
     assert r.status_code == status, (r.status_code, r.text)
     return r.json()
@@ -146,6 +156,7 @@ def test_ch3_restore_never_silently_voids_paid_invoices_and_the_reimport_rebuild
     assert z.svc.db["invoices"][b["invoice_id"]]["status"] == "issued"            # a dry run books nothing
     assert reimport(z, dry=False).status_code == 409                              # no plan named
     assert reimport(z, dry=False, plan="f" * 64).status_code == 409               # not the dry run's plan
+    refeed(z)                                         # AEGIS r5: Andre confirms the bank lines were fed again
     real = z.ok(reimport(z, dry=False, plan=dry["plan"]["plan_sha256"]))
     assert real["failed"] == 0 and out["reimport_break_id"] in real["ready_to_lift"]
     assert {k: z.svc.db["invoices"][i["invoice_id"]]["status"] for k, i in (("a", a), ("b", b), ("c", c))} == \

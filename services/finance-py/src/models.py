@@ -690,6 +690,30 @@ class RestoreDisposition(Strict):
     disposition: Literal["lost", "reissued", "reissue_after_lift", "moved", "not_moved"]
     reason: Note
     reissued_as: Optional[Id] = None
+    # AEGIS r5 R5-1/R5-3: money items: the bank or rail reference, the amount and the counterparty (moved), or the
+    # bank attestation (not_moved for bank money; payout items are looked up at the rail by Finance itself)
+    provider_ref: Optional[Id] = None
+    moved_amount: Optional[PositiveMoney] = None
+    counterparty: Optional[Id] = None
+    statement_date: Optional[date] = None
+
+
+class BankRefeed(Strict):
+    """AEGIS r5 R5-4: Andre confirms the bank lines of a window were fed again after a restore."""
+    request_id: Id
+    since: date
+    until: date
+    statement_ref: Id
+
+
+class RestoreCorrection(Strict):
+    """AEGIS r5 R5-2: books money a restore lost that Andre recorded as moved (memo FRC)."""
+    request_id: Id
+    entity: Literal["zbc", "zbm"]
+    provider_ref: Id
+    lines: list[CorrectionLine] = Field(min_length=2, max_length=8)
+    payable_ids: list[Id] = Field(default_factory=list, max_length=200)
+    refund_campaign_id: Optional[Id] = None
 
 
 class LockdownLift(Strict):

@@ -17,18 +17,21 @@ from decimal import Decimal
 from helpers import ANDRE_TOKEN, rid
 from test_credit_notes import CLIENT, credit
 from test_reconcile_anchor import RECONCILE, _plan
-from test_restore_reimport import lift, durable, pay, reimport, restart, restore, sim_balance, snapshot
+from test_restore_reimport import lift, refeed, durable, pay, reimport, restart, restore, sim_balance, snapshot
 from test_stripe_incoming import checkout, keys, rr_invoice, sent  # noqa: F401  (keys: a fixture)
 
 
-def _restore_cycle(x, tmp_path):
+def _restore_cycle(x, tmp_path, with_refeed=True):
     restore(tmp_path)
     y = restart(x, tmp_path, FIN_RECONCILE_MODE="1")
     plan = _plan(y)
     body = {"request_id": rid(), "head_sha256": plan["head_sha256"], "void_lines": plan["voidable"]["lines"],
             "void_event_ids": plan["voidable"]["event_ids"], "money_events_acknowledged": True}
     out = y.ok(y.post(RECONCILE, body, andre=ANDRE_TOKEN))
-    return restart(x, tmp_path), out
+    z = restart(x, tmp_path)
+    if with_refeed:
+        refeed(z)                     # AEGIS r5 R5-4: Andre confirms the bank lines since the backup were fed again
+    return z, out
 
 
 def _full_reimport(z, since, until):

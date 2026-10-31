@@ -452,7 +452,19 @@ class PayeesMixin:
                 if prior and not prior.get("held"):
                     results.append({"event_id": ev["event_id"], "status": "duplicate"})
                     continue
-                status = self._rail_event(op, rail_name, ev)
+                if self.restore_locked() and ev["type"] != "destination_changed":
+                    # AEGIS r5 R5-5: during a restore lockdown a verified rail event is parked (HELD, durably) and
+                    # applied at the lift; ``destination_changed`` is applied now (it only opens a payee hold). An
+                    # event for an item the restored books lack is restore evidence: an item for Andre.
+                    status = HELD
+                    op.record(derived_id("rhold", rail_name, ev["event_id"], "restore"), "rail_event_held",
+                              "intel_04_payout_run", ev.get("item_id") or f"rail:{rail_name}",
+                              {"item_id": ev.get("item_id"), "event_id": ev["event_id"], "type": ev["type"]},
+                              f"Rail {ev['type']} event held during a restore lockdown (applied at the lift)")
+                    if ev.get("item_id") and ev["item_id"] not in self.db["items"]:
+                        self._restore_rail_item(op, rail_name, ev)
+                else:
+                    status = self._rail_event(op, rail_name, ev)
                 # sweep B-F2: a paid/failed event for an item still ``submitting`` (its acceptance not booked yet) is
                 # HELD, never acked-and-ignored: a redelivery of the same event re-applies it, and so does Finance
                 # itself as soon as the item's acceptance is booked (``replay_held_rail_events``)

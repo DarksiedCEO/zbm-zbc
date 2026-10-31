@@ -79,7 +79,7 @@ def test_r3_1_a_failed_read_at_the_scan_leaves_the_build_incomplete_and_the_lock
     brk = z.svc.db["breaks"][out["reimport_break_id"]]
     assert brk["build_incomplete"] is True and brk["items"] == {}
     assert z.ok(z.get("/health"))["restore_lockdown"] == {"on": True, "detected": False, "build_incomplete": True,
-                                                          "why": None}
+                                                          "why": None, "post_restore_reconcile_required": False}
     assert checkout(z, b["invoice_id"]).status_code == 409                   # the lost void is never payable
     lift(z, status=409)
     # a re-import reads the ledger again first; while that fails, nothing is planned
@@ -93,7 +93,7 @@ def test_r3_1_a_failed_read_at_the_scan_leaves_the_build_incomplete_and_the_lock
     assert z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "open"   # never closed automatically
     assert z.bal("2050", f"client:{CLIENT}", "zbm") == Decimal("400.00")
     lift(z)
-    assert z.svc.restore_lockdown() is None and _lock_file(tmp_path)["state"] == "lifted"
+    assert z.svc.restore_lockdown() is None and _lock_file(tmp_path)["state"] == "post_restore_reconcile_required"
     assert checkout(z, b["invoice_id"]).status_code in (404, 409)            # void: never payable
     assert z.ok(z.get("/health"))["status"] == "ok"
 

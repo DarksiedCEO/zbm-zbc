@@ -27,7 +27,7 @@ import reasons as R
 NUMBER, NAME, ACTOR = 1, "Journal Keeper", "intel_01_journal"
 FLOWS = ("F1", "F1a", "F1r", "F2", "F3", "F4a", "F4b", "F4c", "F4d", "F4e", "F4f", "F4g", "F5", "F5a", "F5b", "F5c",
          "F6", "F6p", "F7", "F7a", "F7l", "F8", "F9", "F10", "F11", "F11a", "F12", "F12c", "F12v", "F12r", "F12x",
-         "F13", "F13f", "F13x", "F13p", "F13q", "F7r", "F11c", "F11v", "correction")
+         "F13", "F13f", "F13x", "F13p", "F13q", "F7r", "F11c", "F11v", "correction", "FRC")
 # ADR 0026: F11c a credit note against a ZBM invoice (Dr revenue / Cr A/R, or Cr 2050 refunds payable for money
 # already paid); F11v an issued, unpaid ZBM invoice voided in full (Dr revenue / Cr A/R).
 # Media flows (ADR 0009 amendment, Oct 5 2026): F12 prepayment invoice issued, F12c issued invoice cancelled before
@@ -45,7 +45,9 @@ STRIPE_ACCOUNT = "1060"
 # a credit to restricted cash is only ever one of these flows (FIN-01): rail funding, rail paid, refund paid, chargeback,
 # sweep of earned margin, Form 945 deposit, rail fees, a client deposit the bank returned (F1r, AEGIS N17-9), and an
 # exact reversal
-RESTRICTED_CREDIT_FLOWS = ("F1r", "F4a", "F4e", "F6p", "F7", "F8", "F9", "F10")
+RESTRICTED_CREDIT_FLOWS = ("F1r", "F4a", "F4e", "F6p", "F7", "F8", "F9", "F10", "FRC")
+# AEGIS r5 R5-2: FRC books money a restore lost that Andre recorded as moved (svc_restore.restore_correction), only
+# from that route: bound to one restore item and Andre's approval
 CERT_ONLY = ("4010", "5010")
 CERT_FLOWS = ("F2", "F3", "F5", "F5a", "F5b")
 MANUAL_FORBIDDEN = set(C.RESTRICTED_POOL) | {"1200", "1210", "2010", "2020", "2030", "2040", "2050", "2070", "4010",
@@ -156,6 +158,9 @@ def validate(entry: dict, locked: set, entries_by_id: dict) -> list[dict]:
     if ent == "zbc" and restricted_credit and memo not in RESTRICTED_CREDIT_FLOWS and not exact_reversal:
         out.append(R.item("RESTRICTED_CASH_MISUSE", "restricted cash (1020/1040/1041) never pays operating expenses, "
                                                     "ZBM or anything but the listed creator/client flows"))
+    if memo == "FRC" and ((entry.get("source") or {}).get("kind") != "restore_correction"
+                          or not entry.get("approval_ref")):
+        out.append(R.item("JOURNAL_INVALID", "FRC posts only from a restore correction Andre approved"))
     if memo == "F8" and not all(ln["account"] in ("1010", "1020") for ln in lines):
         out.append(R.item("RESTRICTED_CASH_MISUSE", "a margin sweep moves 1020 to 1010 only"))
     if accounts & set(CERT_ONLY) and memo not in CERT_FLOWS and not exact_reversal:

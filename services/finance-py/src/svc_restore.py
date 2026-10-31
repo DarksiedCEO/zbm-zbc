@@ -44,10 +44,12 @@ from clock import iso, parse_iso
 from errors import Conflict, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
+from intelligences import i07_reconciliation as I7
 from intelligences import i10_evidence_audit as i10
 from ledger import derived_id, payload_sha256
-from ports import StripeDispute, StripeList, StripePayment
-from service import EVIDENCE as EVIDENCE_ACTOR, Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha
+from ports import RailLookup, StripeDispute, StripeList, StripePayment
+from service import EVIDENCE as EVIDENCE_ACTOR, RUNNABLE as RUNNABLE_STATES
+from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha
 from svc_credits import CN_SUMMARY, VOID_SUMMARY, credit_note_payload, void_payload
 
 ACTOR = I2.ACTOR
@@ -77,6 +79,9 @@ PAUSE_ALERT_EVERY_S = 300
 # AEGIS r3 R3-1/R3-2: the restore lockdown, a durable state in the data directory written BEFORE a restore's reconcile
 # changes anything; while it is on, no money goes out (credit notes, voids, Stripe pages, payouts, refunds)
 LOCKDOWN_FILE = "restore_lockdown.json"
+# AEGIS r5 R5-1: after the lift, money out stays refused until a reconciliation run AFTER the lift is fully clean
+POST_PHASE = "post_restore_reconcile_required"
+RECON_LEGS = ("L1", "L2", "L3", "L4")
 LOCKDOWN_MSG = ("RESTORE_LOCKDOWN: Finance was restored from a backup; no {what} until Andre lifts the lockdown "
                 "(POST /fin/v1/restore/lockdown/lift, after the re-import and every restore item; "
                 "docs/runbooks/restore-and-reimport.md section 5)")
@@ -299,7 +304,7 @@ class RestoreMixin:
         try:
             with open(path, "rb") as fh:
                 st = json.loads(fh.read(65536).decode())
-            if not isinstance(st, dict) or st.get("state") not in ("on", "clear", "lifted"):
+            if not isinstance(st, dict) or st.get("state") not in ("on", "clear", "lifted", POST_PHASE):
                 raise ValueError("unknown state")
             return st
         except (OSError, ValueError):
@@ -343,7 +348,12 @@ class RestoreMixin:
         return {"on": self.restore_locked(), "detected": bool(st and st.get("detected")),
                 "build_incomplete": bool(st and st.get("build_incomplete"))
                 or any(b.get("build_incomplete") for b in self._restore_open()),
-                "why": (st or {}).get("why")}
+                "why": (st or {}).get("why"),
+                "post_restore_reconcile_required": self.restore_post_phase() is not None}
+
+    def restore_post_phase(self) -> Optional[dict]:
+        st = getattr(self, "_lockdown", None)
+        return st if st and st.get("state") == POST_PHASE else None
 
     def _lockdown_alert(self) -> None:
         if not self.restore_locked():
@@ -561,7 +571,20 @@ class RestoreMixin:
                 return "something the restore lost touches this invoice"
         if invoice_id in self._fenced():
             return "money moved on this invoice after the backup"
+        # AEGIS r5 R5-4: only once nothing can still show this invoice was paid after the backup
+        for b in self._restore_open():
+            if invoice_id in (b.get("affected_invoices") or []):
+                return "a payment page or issue of this invoice was recorded after the backup"
+            if not self._covers(b.get("covered") or [], b.get("since"), b.get("opened_on")):
+                return "the Stripe re-import has not covered every day since the backup"
+            if not self._refeed_covers(b):
+                return "Andre has not confirmed the bank lines since the backup were fed again"
         return None
+
+    def _refeed_covers(self, b: dict) -> bool:
+        rf = b.get("bank_refeed") or {}
+        return bool(rf) and rf.get("since", "9999") <= (b.get("since") or "") \
+            and rf.get("until", "") >= (b.get("opened_on") or "9999")
 
     def _fenced(self) -> set:
         """AEGIS r4 R4-2/R4-3: subjects whose money may have moved after the backup (from the ledger, and in-flight
@@ -578,11 +601,42 @@ class RestoreMixin:
                     freed[it["ref"]] = freed.get(it["ref"], True) and ok
         return out - {k for k, v in freed.items() if v}
 
-    def _money_out_refusal(self, what: str, *subjects) -> None:
+    def _subject_fences(self) -> set:
+        """AEGIS r5 R5-1: money Andre recorded as ``moved`` fences its SUBJECT, (counterparty, amount): a re-proposal
+        of the same refund or payout under a new id is refused, until a restore correction books it (its payables
+        are then settled, its refund recorded paid, so nothing is owed twice). The old ids stay fenced for good."""
+        out = set()
+        for b in self.db["breaks"].values():
+            if b.get("leg") != "restore_reimport_required":
+                continue
+            for it in (b.get("items") or {}).values():
+                d = it.get("disposition") or {}
+                # until a restore correction books it (then its payables are settled / its refund recorded paid)
+                if d.get("disposition") == "moved" and d.get("counterparty") and d.get("moved_amount") \
+                        and not it.get("corrected_by"):
+                    out.add((d["counterparty"], M.fmt(M.D(d["moved_amount"]))))
+        return out
+
+    def _restore_touched(self) -> set:
+        """Every subject a money item of any restore named (moved or not): its submit always looks the rail up first."""
+        return {it["ref"] for b in self.db["breaks"].values() if b.get("leg") == "restore_reimport_required"
+                for it in (b.get("items") or {}).values() if it.get("kind") in ("money_out", "in_flight") and it.get("ref")}
+
+    def _money_out_refusal(self, what: str, *subjects, counterparties=(), amount=None) -> None:
         """AEGIS r4 R4-1/R4-2/R4-4: the service-level choke point for every bank transfer, rail submit, release and
-        repayment: nothing while locked, and never a fenced subject (it may already have moved)."""
+        repayment: nothing while locked, nothing until the post-restore reconciliation is clean (r5 R5-1), never a
+        fenced subject, and never the same counterparty and amount as money recorded as moved."""
         if self.restore_locked():
             raise Conflict(LOCKDOWN_MSG.format(what=what))
+        if self.restore_post_phase() is not None:
+            raise Conflict(f"POST_RESTORE_RECONCILE_REQUIRED: no {what} until a reconciliation run after the lift is "
+                           "fully clean (POST /fin/v1/reconciliations/run; runbook restore-and-reimport section 5)")
+        if amount is not None:
+            amt = M.fmt(M.D(amount))
+            hits = [c for c in counterparties if c and (c, amt) in self._subject_fences()]
+            if hits:
+                raise Conflict(f"RESTORE_FENCED: {what} refused: {amt} to {hits[0]} was recorded as moved after a "
+                               "restore (the same money is never paid twice)")
         hit = sorted(s for s in subjects if s and s in self._fenced())
         if hit:
             raise Conflict(f"RESTORE_FENCED: {what} refused: the ledger shows money for {hit[0]} may have moved after "
@@ -707,7 +761,7 @@ class RestoreMixin:
         for it in items.values():
             if it.get("kind") in ("credit_note", "void"):
                 it["mail_sent_before_restore"] = it.get("ref") in mails_sent
-        return {"items": items, "affected_invoices": sorted(a for a in affected if a),
+        return {"items": items, "affected_invoices": sorted(a for a in affected if a), "mail_sent": sorted(sent),
                 "fenced": sorted({it["ref"] for it in items_out.values() if it.get("ref")}),
                 "cn_number_floor": floor, "scanned": True}
 
@@ -800,6 +854,9 @@ class RestoreMixin:
                        "again)")
         if not self._covers(b.get("covered") or [], b.get("since"), b.get("opened_on")):
             out.append(f"the re-import has not covered every day from {b.get('since')} to {b.get('opened_on')}")
+        if not self._refeed_covers(b):
+            out.append(f"Andre has not confirmed the bank lines from {b.get('since')} to {b.get('opened_on')} were fed "
+                       "again (POST /fin/v1/restore/bank-refeed)")
         left = [i for i, it in (b.get("items") or {}).items() if it["status"] not in DONE]
         if left:
             out.append(f"{len(left)} restore item(s) are not rebuilt or disposed of: {', '.join(sorted(left)[:5])}")
@@ -895,10 +952,12 @@ class RestoreMixin:
                 raise Conflict("only a credit note or a void is re-issued after the lift")
             if body["disposition"] == "reissued":
                 self._check_reissued_as(it, body.get("reissued_as"))
+            evidence = self._money_evidence(it, body) if money else None
             new_items = {**b["items"], event_id: {**it, "status": "disposed",
                                                   "disposition": {"disposition": body["disposition"],
                                                                   "reason": body["reason"],
                                                                   "reissued_as": body.get("reissued_as"),
+                                                                  **(evidence or {}),
                                                                   "at": iso(self._now())}}}
             op = Op(self, f"rdisp|{request_id}", "andre", event_id)
             op.record(derived_id("rdisp", event_id), "restore_item_disposed", "andre", event_id,
@@ -910,6 +969,195 @@ class RestoreMixin:
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
             return resp
+
+    def _restore_payout_items(self, it: dict) -> list[dict]:
+        ref = it.get("ref")
+        if it.get("event_type") in ("item_submitted", "payout_item") and ref in self.db["items"]:
+            return [self.db["items"][ref]]
+        if it.get("event_type") == "batch_release_started":
+            return [x for x in self.db["items"].values() if x.get("batch_id") == ref]
+        return []
+
+    def _money_evidence(self, it: dict, body: dict) -> dict:
+        """AEGIS r5 R5-2/R5-3: ``moved`` names the provider reference, the amount and the counterparty (the subject
+        fence, and the restore correction, bind to them). ``not_moved`` needs evidence: for payout items Finance asks
+        the rail itself (a lookup by idempotency key; found -> refused, record it as moved); for bank money, Andre's
+        attestation with the bank's reference and the statement date."""
+        if body["disposition"] == "moved":
+            if not (body.get("provider_ref") and body.get("moved_amount") is not None and body.get("counterparty")):
+                raise Invalid("moved needs provider_ref (the bank or rail reference), moved_amount and counterparty "
+                              "(the campaign, client, payee or batch it went for)")
+            return {"provider_ref": body["provider_ref"], "moved_amount": M.fmt(M.D(body["moved_amount"])),
+                    "counterparty": body["counterparty"],
+                    "statement_date": body["statement_date"].isoformat() if body.get("statement_date") else None}
+        payouts = self._restore_payout_items(it)
+        if payouts:
+            looks = []
+            for x in payouts:
+                try:
+                    lk = self._rail(x["rail"]).lookup(x["idempotency_key"], x["item_id"])
+                except Exception:  # noqa: BLE001
+                    lk = None
+                if not isinstance(lk, RailLookup) or not lk.available:
+                    raise Unavailable("the rail could not be asked about this payout; nothing was recorded (retry)")
+                if lk.found:
+                    raise Conflict(f"the rail shows payout item {x['item_id']} was received ({lk.status}): record it as "
+                                   "moved, with the rail reference")
+                looks.append({"item_id": x["item_id"], "found": False})
+            return {"evidence": {"rail_lookups": looks}}
+        if not (body.get("provider_ref") and body.get("statement_date")):
+            raise Invalid("not_moved for bank money needs Andre's attestation: provider_ref (the bank statement "
+                          "reference) and statement_date")
+        return {"evidence": {"attestation": {"provider_ref": body["provider_ref"],
+                                             "statement_date": body["statement_date"].isoformat()}}}
+
+    def restore_bank_refeed(self, request_id: str, body: dict) -> dict:
+        """AEGIS r5 R5-4: Andre confirms the bank lines from the backup's day to today were fed again (bank events),
+        so a payment made by bank after the backup is in the books before the lift or any 4.12(g) exception."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, "restore/bank-refeed", body)
+            if ent:
+                return ent["response"]
+            open_ = self._restore_open()
+            if not open_:
+                raise Conflict("no restore break is open")
+            if body["since"] > body["until"] or body["until"] > self._business_today():
+                raise Invalid("since..until must be a past window")
+            rf = {"since": body["since"].isoformat(), "until": body["until"].isoformat(),
+                  "statement_ref": body["statement_ref"], "at": iso(self._now()), "by": "andre"}
+            op = Op(self, f"refeed|{request_id}", "andre", "restore-bank-refeed")
+            for b in open_:
+                self._restore_progress(op, {**b, "bank_refeed": rf})
+            op.record(derived_id("refeed", request_id), "restore_bank_refeed_confirmed", "andre", "restore-bank-refeed",
+                      {k: rf[k] for k in ("since", "until", "statement_ref")},
+                      f"Andre confirmed bank lines {rf['since']}..{rf['until']} were fed again")
+            resp = self._idem_add(op, key, h, {"bank_refeed": rf, "ledger_event_ids": op.events,
+                                               "request_id": request_id})
+            self._commit(op)
+            return resp
+
+    def restore_correction(self, request_id: str, event_id: str, body: dict) -> dict:
+        """AEGIS r5 R5-2: books what moved. Andre-only, bound to ONE restore item recorded as ``moved``: the same
+        provider reference, debits = credits = the moved amount; it may touch restricted cash (memo FRC, allowed
+        only here). Payables it names are settled (payout), or the lost refund is recorded paid; the reconciliation
+        breaks on the accounts it touches are resolved by it."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"restore/items/{event_id}/correction", body)
+            if ent:
+                return ent["response"]
+            self.require_rules()
+            it = None
+            for b in self.db["breaks"].values():
+                if b.get("leg") == "restore_reimport_required" and event_id in (b.get("items") or {}):
+                    it = b["items"][event_id]
+                    break
+            if it is None:
+                raise NotFound("no restore item with that ledger event id")
+            d = it.get("disposition") or {}
+            if it.get("kind") not in ("money_out", "in_flight") or d.get("disposition") != "moved":
+                raise Conflict("a restore correction books only money Andre recorded as moved")
+            if it.get("corrected_by"):
+                raise Conflict("this restore item is already booked")
+            if body["provider_ref"] != d.get("provider_ref"):
+                raise Conflict("provider_ref must be the bank or rail reference recorded on the item")
+            ent_ = body["entity"]
+            lines = [{"account": l["account"], "subledger": l.get("subledger"), "debit": M.fmt(l["debit"]),
+                      "credit": M.fmt(l["credit"])} for l in body["lines"]]
+            amt = M.D(d["moved_amount"])
+            if M.total(M.D(l["debit"]) for l in lines) != amt or M.total(M.D(l["credit"]) for l in lines) != amt:
+                raise Conflict(f"the correction's debits and credits must each equal the moved amount {M.fmt(amt)}")
+            pays = [self.db["payables"].get(pid) for pid in body.get("payable_ids") or []]
+            if any(p is None or p["status"] not in RUNNABLE_STATES for p in pays):
+                raise Conflict("payable_ids must name unpaid payables")
+            if pays and (any(p["payee_id"] != d["counterparty"] for p in pays)
+                         or M.total(M.D(p["current_amount"]) for p in pays) != amt):
+                raise Conflict("the payables must be the counterparty's and add up to the moved amount")
+            prof = self.db["profiles"].get(body.get("refund_campaign_id") or "")
+            if body.get("refund_campaign_id") and (prof is None or body["refund_campaign_id"] != d["counterparty"]):
+                raise Conflict("refund_campaign_id must be the counterparty's campaign")
+            op = Op(self, f"rcorr|{request_id}", "andre", event_id)
+            try:
+                e = self._post(op, ent_, lines, "FRC", {"kind": "restore_correction", "id": event_id},
+                               f"FRC|{event_id}", approval_ref=request_id, actor="andre")
+            except PostingRefused as exc:
+                raise InvalidReasons("restore correction refused", exc.reasons) from None
+            for p in pays:
+                op.put("payables", p["payable_id"], {**p, "status": "settled", "settled_by_restore_correction": event_id})
+            if prof is not None:
+                fid = rid("rfd", prof["campaign_id"], f"restore|{event_id}")
+                op.put("refunds", fid, {"refund_id": fid, "campaign_id": prof["campaign_id"],
+                                        "client_id": prof["client_id"], "amount": M.fmt(amt), "admin_fee": "0.00",
+                                        "status": "paid", "paid_at": iso(self._now()),
+                                        "restored_by_correction": event_id, "provider_ref": d["provider_ref"]})
+                op.put("profiles", prof["campaign_id"], {**prof, "status": "closed"})
+            resolved = []
+            touched = {f"{ent_}:{l['account']}" for l in lines}
+            for brk in list(self.db["breaks"].values()):
+                if brk.get("leg") in RECON_LEGS and brk["status"] != "resolved" and any(
+                        str(brk.get("subject") or "").startswith(t) for t in touched):
+                    op.put("breaks", brk["break_id"], {**brk, "status": "resolved", "resolution": {
+                        "basis": "restore_correction", "entry_id": e["entry_id"], "restore_item": event_id,
+                        "approved_by": "andre", "at": iso(self._now())}})
+                    resolved.append(brk["break_id"])
+            for b in self.db["breaks"].values():
+                if b.get("leg") == "restore_reimport_required" and event_id in (b.get("items") or {}):
+                    op.put("breaks", b["break_id"], {**b, "items": {**b["items"], event_id: {
+                        **it, "corrected_by": e["entry_id"]}}})
+            op.record(derived_id("rcorr", event_id), "restore_correction_posted", "andre", event_id,
+                      {"event_id": event_id, "entry_id": e["entry_id"], "amount": M.fmt(amt),
+                       "provider_ref": d["provider_ref"], "breaks_resolved": resolved},
+                      f"Restore correction posted for a moved item: {M.fmt(amt)}")
+            resp = self._idem_add(op, key, h, {"entry": e, "breaks_resolved": resolved, "ledger_event_ids": op.events,
+                                               "request_id": request_id})
+            self._commit(op)
+            return resp
+
+    def _post_restore_check(self, legs: list, opened: list) -> bool:
+        """AEGIS r5 R5-1: called by every reconciliation run: in the post-restore phase, a run whose legs all match
+        and that leaves no reconciliation break open ends the phase (money out resumes)."""
+        if self.restore_post_phase() is None:
+            return False
+        if opened or not I7.all_matched(legs):
+            return False
+        return not any(b.get("leg") in RECON_LEGS and b["status"] in ("open", "explained")
+                       for b in self.db["breaks"].values())
+
+    def _post_restore_clear(self, recon_id: str) -> None:
+        st = self.restore_post_phase() or {}
+        try:
+            self._lockdown_write({**st, "state": "lifted", "post_restore_recon_id": recon_id,
+                                  "post_restore_clean_at": iso(self._now())})
+        except Unavailable:
+            pass                              # still in the post phase: the next clean run ends it
+
+    def _restore_rail_item(self, op: Op, rail_name: str, ev: dict) -> None:
+        eid = f"rail:{rail_name}:{ev['event_id']}"
+        for b in self._restore_open():
+            items = dict(b.get("items") or {})
+            if eid in items:
+                continue
+            items[eid] = {"event_id": eid, "event_type": f"rail_{ev['type']}", "kind": "in_flight",
+                          "ref": ev["item_id"], "status": "needs_review", "order": -1, "invoice_id": None,
+                          "client_id": None, "why": f"the rail reported {ev['type']} for payout item {ev['item_id']}, "
+                                                    "which the restored books do not hold: record it as moved or "
+                                                    "not_moved"}
+            self._restore_progress(op, {**b, "items": items, "fenced": sorted(set(b.get("fenced") or [])
+                                                                               | {ev["item_id"]})})
+
+    def _restore_mail_dedupe(self, prefix: str) -> int:
+        """AEGIS r5 R5-8: outbox messages the restored books hold as pending but the ledger shows Resend accepted after
+        the backup are marked sent (never a second email; Resend's idempotency key covers only 24 h)."""
+        with self.lock:
+            sent = {m for b in self.db["breaks"].values() if b.get("leg") == "restore_reimport_required"
+                    for m in (b.get("mail_sent") or [])}
+            todo = [r for k, r in self.db["mail_outbox"].items() if k in sent and r["status"] in ("pending", "sending")]
+            if not todo:
+                return 0
+            op = Op(self, f"{prefix}|maildedupe|{len(self.log)}", "andre", "restore-mail")
+            for r in todo:
+                op.put("mail_outbox", r["mail_id"], {**r, "status": "sent", "sent_before_restore": True})
+            self._commit(op)
+            return len(todo)
 
     def _check_reissued_as(self, it: dict, ref: Optional[str]) -> None:
         """AEGIS r4 R4-7: bound to the item: a lost credit note -> a credit note on the SAME invoice for at least the
@@ -990,21 +1238,26 @@ class RestoreMixin:
             op.record(derived_id("lift", lid), "restore_lockdown_lifted", "andre", "restore-lockdown",
                       {"lift_id": lid, "breaks": [b["break_id"] for b in open_], "reason_sha256": sha({"r": body["reason"]}),
                        "detected": bool(st.get("detected"))}, "Restore lockdown lifted by Andre")
-            resp = self._idem_add(op, key, h, {"lifted": True, "lift_id": lid,
+            resp = self._idem_add(op, key, h, {"lifted": True, "lift_id": lid, "next": POST_PHASE,
                                                "breaks_resolved": [b["break_id"] for b in open_],
                                                "lockdown_effects": effects, "fenced": sorted(self._fenced()),
                                                "ledger_event_ids": op.events, "request_id": request_id})
             # AEGIS r4 R4-9: the file first (a failure here changes nothing), then the commit; if the commit fails
             # the restore breaks stay open, which alone keeps Finance locked (fail closed), and a retry lifts
             prior = getattr(self, "_lockdown", None)
-            self._lockdown_write({"state": "lifted", "ack_ledger_len": n, "lifted_at": iso(self._now()),
+            # AEGIS r5 R5-1: not "lifted" yet: money out waits for a clean reconciliation run after the lift
+            self._lockdown_write({"state": POST_PHASE, "ack_ledger_len": n, "lifted_at": iso(self._now()),
                                   "lift_id": lid, "reason": body["reason"]})
             try:
                 self._commit(op)
             except BaseException:
                 self._lockdown = prior if prior and prior.get("state") == "on" else self._lockdown
                 raise
-            return resp
+        try:
+            self.replay_held_rail_events(f"lift|{request_id}")       # AEGIS r5 R5-5: the parked rail events
+        except Unavailable:
+            pass                                                      # the rail-sync job applies them later
+        return resp
 
     # ================================================================== 3. the Stripe re-import
 

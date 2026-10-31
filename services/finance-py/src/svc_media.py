@@ -142,6 +142,8 @@ class MediaMixin:
         with self.lock:
             buy0 = self.db["media_buys"].get(buy_id)
             client0 = (self.db["invoices"].get((buy0 or {}).get("invoice_id")) or {}).get("client_id")
+            # AEGIS r5 R5-6: a media buy whose vendor payment a restore lost is fenced (never booked twice)
+            self._money_out_refusal("vendor payment", buy_id, counterparties=(buy_id,), amount=body.get("amount"))
         g_cmp = Gather(self, f"mbv|{request_id}|compliance", "andre", buy_id)
         act_reasons = self._activation_reasons(self._activation(g_cmp, client0), full=True) if client0 else []
         with self.lock:

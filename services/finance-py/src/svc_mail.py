@@ -310,6 +310,12 @@ class MailMixin:
                     sum(1 for r in self.db["mail_outbox"].values() if r["status"] == "pending")
             return {"sent": 0, "waiting": waiting, "failed_for_good": 0, "skipped": 0, "due": 0, "mail_off": True,
                     "deadlines_overdue": overdue}
+        if self.restore_locked():
+            # AEGIS r5 R5-8: no client email while a restore is open (the restored outbox may hold mail that was sent
+            # after the backup); after the lift, mail the ledger shows as sent is marked sent, never sent again
+            return {"sent": 0, "waiting": 0, "failed_for_good": 0, "skipped": 0, "due": 0, "restore_lockdown": True,
+                    "deadlines_overdue": overdue}
+        self._restore_mail_dedupe(prefix)
         needs_contact = bool(getattr(port, "requires_contact", False))
         with self.lock:
             receipts = sorted((r["created_at"], k) for k, r in self.db["client_receipts"].items()

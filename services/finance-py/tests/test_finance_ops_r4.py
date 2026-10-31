@@ -36,14 +36,22 @@ from test_restore_rebuild import _full_reimport, _restore_cycle, _void
 from test_stripe_incoming import keys, rr_invoice  # noqa: F401
 
 LOCKED = "RESTORE_LOCKDOWN"
+EXPECTED_ALLOWED = {
+    "/fin/v1/stripe/events", "/fin/v1/bank/events", "/fin/v1/rails/x1/events",           # money in, rail status
+    "/fin/v1/reconcile", "/fin/v1/stripe/reimport", "/fin/v1/restore/items/x1/disposition",
+    "/fin/v1/restore/items/x1/correction", "/fin/v1/restore/bank-refeed", "/fin/v1/restore/lockdown/lift",
+    "/fin/v1/deadlines/x1/close", "/fin/v1/clients/x1/acknowledgements", "/fin/v1/invoices/x1/sow-ended",
+    "/fin/v1/invoices/x1/void", "/fin/v1/invoices/x1/credit-notes",                      # service-checked (4.12(g))
+    "/fin/v1/backup/quiesce", "/fin/v1/backup/resume", "/fin/v1/jobs/client-mail/run"}
 
 
-def _settle(z, out, disp="lost"):
+def _settle(z, out, disp="lost", amount="29.01"):
     for it in [i for i in z.svc.db["breaks"][out["reimport_break_id"]]["items"].values()
                if i["status"] == "needs_review"]:
-        d = "moved" if it["kind"] in ("money_out", "in_flight") else disp
-        z.ok(z.post(f"/fin/v1/restore/items/{it['event_id']}/disposition",
-                    {"request_id": rid(), "disposition": d, "reason": "checked: bank ref BR-1"}, andre=ANDRE_TOKEN))
+        body = {"request_id": rid(), "disposition": disp, "reason": "checked: bank ref BR-1"}
+        if it["kind"] in ("money_out", "in_flight"):
+            body.update(disposition="moved", provider_ref="BR-1", moved_amount=amount, counterparty=it["ref"])
+        z.ok(z.post(f"/fin/v1/restore/items/{it['event_id']}/disposition", body, andre=ANDRE_TOKEN))
 
 
 def _locked_harness():
@@ -85,7 +93,8 @@ def test_r4_every_write_route_and_job_is_allowlisted_or_refused_while_locked():
                  "/fin/v1/jobs/rail-sync/run", "/fin/v1/invoices/x1/stripe-checkout", "/fin/v1/invoices",
                  "/fin/v1/media-buys/x1/vendor-payments", "/fin/v1/reconciliations/run"):
         assert must in refused, must
-    assert "/fin/v1/jobs/client-mail/run" in allowed and "/fin/v1/stripe/events" in allowed
+    # AEGIS r5 R5-7: an independent, hand-written allowlist: widening the code's list fails here
+    assert sorted(set(allowed)) == sorted(EXPECTED_ALLOWED), sorted(set(allowed) ^ EXPECTED_ALLOWED)
     assert len(refused) > 40
     # R4-11: authentication first (no lockdown oracle for the unauthenticated)
     assert hr.post("/fin/v1/payout-runs", {"request_id": rid()}, bearer=None).status_code == 401
@@ -152,7 +161,7 @@ def test_r4_3_a_payout_released_after_the_backup_is_an_item_and_is_never_release
     lift(z)
     before = z.svc.db["batches"][b["batch_id"]]["status"]
     r = z.post(f"/fin/v1/payout-batches/{b['batch_id']}/release", {"request_id": rid()}, caller="scheduler")
-    assert r.status_code == 409 and "RESTORE_FENCED" in r.text
+    assert r.status_code == 409 and ("RESTORE_FENCED" in r.text or "POST_RESTORE_RECONCILE" in r.text)
     assert len([c for c in z.stripe.calls if c[0] == "submit"]) == n_sub      # never submitted again
     assert z.svc.db["batches"][b["batch_id"]]["status"] == before            # refused before anything changed
     z2 = restart(x, tmp_path)                                                # R4-21: a restart after the lift
@@ -173,7 +182,8 @@ def test_r4_3_not_moved_releases_the_fence_and_in_flight_transfers_are_items(key
     y.svc.reconcile_mode = False
     y.svc.reconcile_required = []
     y.ok(y.post("/fin/v1/restore/items/inflight:fin-trx-T1/disposition",
-                {"request_id": rid(), "disposition": "not_moved", "reason": "bank shows nothing"}, andre=ANDRE_TOKEN))
+                {"request_id": rid(), "disposition": "not_moved", "reason": "bank shows nothing",
+                 "provider_ref": "stmt-1002", "statement_date": "2026-10-02"}, andre=ANDRE_TOKEN))
     assert "fin-trx-T1" not in y.svc._fenced()
 
 
@@ -256,6 +266,7 @@ def test_r4_7_reissued_is_bound_to_the_item_and_r4_8_unpaid_voids_stay_possible(
         r = z.post(p_cn, {"request_id": rid(), "disposition": "reissued", "reason": "x", "reissued_as": ref},
                    andre=ANDRE_TOKEN)
         assert r.status_code == 409, ref                                       # never an unrelated id
+    _full_reimport(z, "2026-10-02", "2026-10-02")                            # R5-4: the window covered first
     # R4-8: an UNPAID untouched invoice is voided during the lockdown (4.12(g)); a touched one is not
     assert void(z, z.svc.db["invoices"][unpaid["invoice_id"]]).status_code == 409   # the restore touches it
     z.ok(void(z, z.svc.db["invoices"][other["invoice_id"]]))

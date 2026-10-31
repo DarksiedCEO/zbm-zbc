@@ -1013,6 +1013,11 @@ class BooksMixin:
                 reasons.append(R.item("OVER_BUDGET", f"{len(pending)} payable(s) of this campaign still await checks "
                                                      "or Andre", rule="FIN-06"))
             amount = self.bal("2010", f"campaign:{campaign_id}")
+            # AEGIS r5 R5-1: the same refund recorded as moved after a restore is never proposed again
+            fences = self._subject_fences()
+            if amount > 0 and any((c, M.fmt(amount)) in fences for c in (campaign_id, prof.get("client_id"))):
+                raise Conflict(f"RESTORE_FENCED: a refund of {M.fmt(amount)} for this campaign was recorded as moved "
+                               "after a restore: it is never paid twice")
             if amount <= 0:
                 reasons.append(R.item("CAMPAIGN_NOT_FUNDED", "no unspent deposit to refund"))
             reasons += out_reasons

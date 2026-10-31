@@ -218,9 +218,17 @@ class ReconMixin:
             op.record(derived_id("trs", recon_id), "treasury_ok" if ok else "treasury_breach", T.ACTOR, recon_id,
                       {"journal_gap": pos["gap"], "independent_known": ind["known"], "independent_ok": ind["ok"]},
                       "Treasury invariant holds" if ok else "Treasury invariant not proven (FC-03 red)")
-            resp = {"recon": run, "fc01": I7.all_matched(legs), "ledger_event_ids": op.events, "request_id": request_id}
+            # AEGIS r5 R5-1: after a restore's lift, the first fully clean run ends the post-restore phase
+            post_clean = self._post_restore_check(legs, opened)
+            if post_clean:
+                op.record(derived_id("prc", recon_id), "post_restore_reconcile_passed", I7.ACTOR, recon_id,
+                          {"recon_id": recon_id}, "Post-restore reconciliation clean: money out resumes")
+            resp = {"recon": run, "fc01": I7.all_matched(legs), "post_restore_clean": post_clean,
+                    "ledger_event_ids": op.events, "request_id": request_id}
             self._idem_add(op, key, h, resp)
             self._commit(op)
+            if post_clean:
+                self._post_restore_clear(recon_id)
             return resp
 
     def list_breaks(self, full: bool = True) -> dict:
@@ -618,7 +626,10 @@ class ReconMixin:
             # call) is asked again with the SAME key, never left stuck
             if t is None or t["status"] not in ("approved", "bank_unknown", "executing"):
                 return {"op_id": tid, "status": t["status"] if t else "unknown"}
-            self._money_out_refusal("bank transfer", tid, t.get("ref_id"))      # AEGIS r4: the choke point
+            rf = self.db["refunds"].get(t.get("ref_id") or "") or {}
+            self._money_out_refusal("bank transfer", tid, t.get("ref_id"),           # AEGIS r4/r5: the choke point
+                                    counterparties=(rf.get("campaign_id"), rf.get("client_id"), t.get("ref_id")),
+                                    amount=t.get("amount"))
             if tid in self.xfer_in_flight:
                 # AEGIS 5a56a3a M2: another caller (a retry run, or the request that approved it) is asking the bank
                 # for this operation right now; a second ask is never sent in parallel. That caller records the answer.

@@ -839,7 +839,8 @@ class PayoutsMixin:
             it = self.db["items"][iid]
             if it["status"] != "approved":
                 return {"item_id": iid, "status": it["status"]}
-            self._money_out_refusal("rail submit", iid, it.get("batch_id"))       # AEGIS r4: the choke point
+            self._money_out_refusal("rail submit", iid, it.get("batch_id"),       # AEGIS r4/r5: the choke point
+                                    counterparties=(it.get("payee_id"),), amount=it.get("net"))
             payee = self.db["payees"][it["payee_id"]]
             op = Op(self, f"sub|{iid}", I4.ACTOR, iid)
             pre = []
@@ -881,10 +882,15 @@ class PayoutsMixin:
             op.record(derived_id("isub", iid), "item_submitted", I4.ACTOR, iid,
                       {"item_id": iid, "net": it["net"], "idempotency_key": it["idempotency_key"]},
                       f"Payout item submitted to {it['rail']}: {it['net']}")
+            # AEGIS r5 R5-3: an item a restore named may have been sent already: the rail is looked up first
+            touched = iid in self._restore_touched() or it.get("batch_id") in self._restore_touched()
             op.put("items", iid, {**it, "status": "submitting", "pre_entry_ids": pre, "attempts": 1, "resubmits": 0,
-                                  "first_submitted_at": iso(self._now()), "submitted_at": iso(self._now())})
+                                  "first_submitted_at": iso(self._now()), "submitted_at": iso(self._now()),
+                                  **({"restore_lookup_first": True} if touched else {})})
             self._commit(op)
             ref = payee.get("rail_account_ref")
+        if touched:
+            return self._drive_item(f"sub|{iid}", dict(self.db["items"][iid]))
         return self._record_outcome(iid, self._rail_submit(it, ref))
 
     def _rail_submit(self, it: dict, ref: Optional[str]) -> RailSubmit:
@@ -959,6 +965,8 @@ class PayoutsMixin:
             stuck = [dict(i) for i in self.db["items"].values() if i["status"] == "submitting"
                      and (batch_id is None or i["batch_id"] == batch_id)
                      and i["item_id"] not in fenced and i["batch_id"] not in fenced]
+        if self.restore_post_phase() is not None:
+            return {"items": [], "post_restore_reconcile_required": True}
         for it in stuck:
             try:
                 out.append(self._drive_item(op_prefix, it))
@@ -970,6 +978,9 @@ class PayoutsMixin:
     def _drive_item(self, op_prefix: str, it: dict) -> dict:
         """One stuck item (``drive_open_items``)."""
         iid = it["item_id"]
+        with self.lock:
+            if iid in self._fenced() or it.get("batch_id") in self._fenced():       # AEGIS r5 R5-7: never driven
+                return {"item_id": iid, "status": it["status"], "fenced": True}
         rail = self._rail(it["rail"])
         ref = (self.db["payees"].get(it["payee_id"]) or {}).get("rail_account_ref")
         # AEGIS 5a56a3a M3: a signed rail event held for this item is the rail's own word, read BEFORE any resubmit.
@@ -982,7 +993,8 @@ class PayoutsMixin:
             return self._held_paid(op_prefix, iid)
         held_failed = "failed" in held_types
         age = self._now() - parse_iso(it["first_submitted_at"])
-        lookup_mode = held_failed or it["rail"] == "trolley" or age >= timedelta(hours=I4.RETRY_WINDOW_H)
+        lookup_mode = held_failed or it["rail"] == "trolley" or age >= timedelta(hours=I4.RETRY_WINDOW_H) \
+            or bool(it.get("restore_lookup_first"))
         with self.lock:
             n = it.get("attempts", 1) + 1
             op = Op(self, f"{op_prefix}|drive|{iid}|{n}", I4.ACTOR, iid)

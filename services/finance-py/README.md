@@ -173,7 +173,13 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   routes, the backup pause, the client-mail job), checked after authentication, and every bank transfer, rail
   submit, release and repayment refuses inside the service too; money that went out after the backup becomes an
   item (`moved` / `not_moved`) and its subject is fenced for good unless `not_moved`; Andre may still void or credit
-  an UNPAID untouched invoice (MSA 4.12(g)); past 2 business days an escalation ALERT repeats daily. `/health` is
+  an UNPAID untouched invoice (MSA 4.12(g)); past 2 business days an escalation ALERT repeats daily. AEGIS r5:
+  after the lift money out waits for a reconciliation run after the lift that is fully clean
+  (`post_restore_reconcile_required`); `moved` items name their reference, amount and counterparty (the same
+  counterparty and amount are refused under any new id until booked) and are booked with
+  `POST /fin/v1/restore/items/{event_id}/correction` (memo FRC, may touch restricted cash, settles payables / records
+  the refund, resolves the breaks); `not_moved` is checked at the rail or attested; the exception and the lift need
+  `POST /fin/v1/restore/bank-refeed`; rail events are parked during a lockdown; no client email while locked. `/health` is
   `degraded` and an ALERT repeats every 5 minutes (a watch thread). A failed ledger read leaves the item list
   `build_incomplete` (every re-import reads it again first). Items the re-import cannot rebuild are disposed of with
   `POST /fin/v1/restore/items/{event_id}/disposition` (Andre: `lost`, `reissued` naming a later invoice or credit
