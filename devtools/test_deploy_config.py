@@ -51,13 +51,14 @@ SERVICES = {
                        "stripe-gateway", False),
     "seo": ("services/seo-py/Dockerfile", "SEO_PORT", 8500, "seo-py", True),
     "compliance": ("services/compliance-py/Dockerfile", "COMPLIANCE_PORT", 8380, "compliance-py", True),   # ADR 0024
+    "client-portal": ("services/client-portal-py/Dockerfile", "PORTAL_PORT", 8480, "client-portal-py", False),  # ADR 0028
 }
 PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
-               "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",)}
+               "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",), "client-portal-py": ("PORTAL_",)}
 # ADR 0024: compliance-py's requirements.txt is clipper-network-py's (that suite checks the two are identical) and has
 # no use for cryptography; its pins must be a SUBSET of requirements.in, each locked at its pin. The image installs the
 # whole lock, like every Python image.
-LOCK_SUBSET = {"compliance-py"}
+LOCK_SUBSET = {"compliance-py", "client-portal-py"}   # ADR 0028: uvicorn and httpx only
 # AEGIS final go-live M-2: the prefix scan alone missed detection-py's RR_STORE_* variables (both Revenue Recovery
 # kill switches among them). Besides the prefixes, any upper-case name in an environment-read position is collected
 # whatever its prefix: os.environ.get("X"), os.environ["X"], os.getenv("X"), env.get("X"), env["X"] (the services'
@@ -493,6 +494,50 @@ class ComplianceGate(unittest.TestCase):
         self.assertIn("complianceData", names)
 
 
+class ClientPortal(unittest.TestCase):
+    """ADR 0028: the client acceptance page is a separate, stateless service. Its only secrets are Legal's service
+    token (a reference), its own client_portal caller token at Legal and its evidence key; it reaches Legal only, over
+    the private network; it holds no ledger, Finance or Compliance credential and no volume."""
+
+    def setUp(self):
+        self.blocks = iac_services()
+        self.text = IAC.read_text()
+        self.b = self.blocks["client-portal"]
+        self.code = re.sub(r"//[^\n]*", "", self.b)
+
+    def test_the_portal_is_stateless_and_wired_to_legal_only(self):
+        for line in ('PORT: "8480",', 'PORTAL_BIND_ADDR: "::",', 'PORTAL_LEGAL_URL: PRIVATE("legal", 8420),',
+                     "PORTAL_LEGAL_SERVICE_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,", 'PORTAL_TRUSTED_PROXY_HOPS: "1",'):
+            self.assertIn(line, self.b)
+        for name in ("PORTAL_LEGAL_CALLER_TOKEN", "PORTAL_EVIDENCE_KEY", "PORTAL_PUBLIC_ORIGIN"):
+            self.assertRegex(self.code, rf"(?m)^\s+{name}:\s*preserve\(\)", f"{name} is not preserve()")
+        self.assertNotIn("volumeMounts", self.code)
+        self.assertNotIn("RAILWAY_RUN_UID", self.code)
+        names = set(re.findall(r"(?m)^\s+([A-Z][A-Z0-9_]+):", self.code))
+        self.assertEqual({n for n in names if not n.startswith("PORTAL_")}, {"PORT"},
+                         "the portal gets no ledger, Finance, Compliance or other service variable")
+        self.assertNotRegex(self.code, r"(ledger|finance|compliance|seo|detection)\.env\.")
+
+    def test_legal_accepts_the_portal_caller_from_the_portal_service(self):
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        callers = json.loads(m.group(1))
+        self.assertEqual(callers.get("client_portal"), "${{client-portal.PORTAL_LEGAL_CALLER_TOKEN}}")
+        for svc in ("finance", "compliance"):
+            mm = re.search(r"_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks[svc])
+            self.assertNotIn("client-portal", mm.group(1), f"{svc} must not accept the portal")
+
+    def test_declared_after_legal_and_listed_once(self):
+        self.assertLess(self.text.index('service("legal",'), self.text.index('service("client-portal",'))
+        res = re.search(r"resources:\s*\[([^\]]*)\]", self.text).group(1)
+        self.assertEqual([x.strip() for x in res.split(",")].count("clientPortal"), 1)
+
+    def test_the_runbook_says_how_the_public_domain_is_made(self):
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        self.assertIn("### Client acceptance page (ADR 0028)", runbook)
+        self.assertIn("docs/runbooks/client-acceptance.md", runbook)
+        self.assertTrue((REPO / "docs" / "runbooks" / "client-acceptance.md").is_file())
+
+
 class CiAndSmoke(unittest.TestCase):
     def test_ci_builds_every_dockerfile_and_the_smoke_covers_it(self):
         ci = CI.read_text()
@@ -521,7 +566,7 @@ class VariableScan(unittest.TestCase):
         """Every upper-case name a Python service reads in an environment-read position is either under the
         service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
         outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set(),
-                            "compliance-py": set()}
+                            "compliance-py": set(), "client-portal-py": set()}
         for svc, prefixes in PY_SERVICES.items():
             found = set()
             for p in (REPO / "services" / svc / "src").rglob("*.py"):

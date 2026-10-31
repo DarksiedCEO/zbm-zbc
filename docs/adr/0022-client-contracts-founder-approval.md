@@ -210,7 +210,9 @@ This ADR applies the same pattern to client contracts.
    - `affirmative_act: true`;
    - a signer identity ref;
    - the party binding of a filled instance;
-   - who may record an acceptance (`hub`, `clipper_network`, `onboarding`).
+   - who may record an acceptance (`hub`, `clipper_network`, `onboarding`). **Amended by ADR 0028 (2026-10-31):** a
+     client's acceptance is recorded only by the client acceptance page (caller `client_portal`, from a single-use
+     link Andre creates); no caller records one on `POST /legal/v1/acceptances`.
 
    An acceptance record never changes after the fact. One recorded before the determination stays insufficient, and
    the client accepts again.

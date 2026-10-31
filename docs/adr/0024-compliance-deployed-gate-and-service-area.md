@@ -229,6 +229,8 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   party, document and version, unused, unexpired), else 409 with nothing written; only the onboarding path records a
   `client:*` acceptance (`hub` and `clipper_network` are refused); the commit refuses an update of a record that does
   not exist, and a replay quarantines (and `/health` flags) a record it cannot apply instead of refusing to start.
+  **Superseded for clients by ADR 0028 (2026-10-31):** no caller records a `client:*` acceptance on this route, the
+  onboarding token included; only the client acceptance page does, from a single-use link Andre creates.
 
 ### 4b. AEGIS r11 (Oct 31 2026): held unapplied money, founder alerts, audit reads, deviations
 

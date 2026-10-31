@@ -8,7 +8,7 @@ What is in the repository:
 
 | Piece | Where |
 |---|---|
-| One production Dockerfile per Railway service | `services/ledger-rust/Dockerfile`, `services/detection-py/Dockerfile`, `services/finance-py/Dockerfile`, `services/legal-py/Dockerfile`, `services/seo-py/Dockerfile`, `services/compliance-py/Dockerfile`, `services/orchestrator-go/Dockerfile.orchestrator`, `services/orchestrator-go/Dockerfile.stripe-gateway` |
+| One production Dockerfile per Railway service | `services/ledger-rust/Dockerfile`, `services/detection-py/Dockerfile`, `services/finance-py/Dockerfile`, `services/legal-py/Dockerfile`, `services/seo-py/Dockerfile`, `services/compliance-py/Dockerfile`, `services/client-portal-py/Dockerfile`, `services/orchestrator-go/Dockerfile.orchestrator`, `services/orchestrator-go/Dockerfile.stripe-gateway` |
 | The entrypoint every image starts with | `deploy/docker/zbm-entrypoint.sh` |
 | The Python images' dependency lock (every transitive package, with hashes) | `deploy/python/requirements.in` → `deploy/python/requirements.lock.txt` |
 | Railway infrastructure as code | `.railway/railway.ts` (SDK pinned in `.railway/package.json` + lockfile) |
@@ -34,6 +34,7 @@ typechecks and evaluates to the intended configuration with that SDK.
 | `stripe-gateway` | `services/orchestrator-go`, `cmd/stripe-gateway` | `services/orchestrator-go/Dockerfile.stripe-gateway` | 8470 | **public** (Stripe calls it) | — | 1 |
 | `seo` | `services/seo-py` (Search & Answer Intelligence 2) | `services/seo-py/Dockerfile` | 8500 | private network | `seo-data` at `/data` | 1 |
 | `compliance` | `services/compliance-py` (Compliance 38: the hard gate before a client is served, ADR 0024) | `services/compliance-py/Dockerfile` | 8380 | private network only (no domain) | `compliance-data` at `/data` | 1 |
+| `client-portal` | `services/client-portal-py` (the client acceptance page, ADR 0028) | `services/client-portal-py/Dockerfile` | 8480 | **public** (clients open their acceptance link); reaches Legal only | — | 1 |
 | dashboard | `apps/dashboard-ts` (Next.js) | — (Vercel builds it) | — | public, password session | — | Vercel |
 
 **The Stripe gateway is in orchestrator-go — verified.** `services/orchestrator-go/cmd/stripe-gateway/main.go` is a
@@ -196,6 +197,8 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEGAL_SERVICE_TOKEN` | `openssl rand -hex 32` | legal | finance `FIN_LEGAL_TOKEN` (reference) |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | legal | you |
 | `LEGAL_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` (a different value from `FIN_ONBOARDING_CALLER_TOKEN`) | legal | legal `LEGAL_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-LEGAL-Caller-Token` |
+| `PORTAL_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | client-portal | legal `LEGAL_CALLER_TOKENS` (`client_portal`, interpolated). Nobody else holds it: it reaches only Legal's two portal routes (ADR 0028) |
+| `PORTAL_EVIDENCE_KEY` | `openssl rand -hex 32` | client-portal | nobody: the page's HMAC key for the client's IP address and user agent, its form signatures and retry keys. Keep a copy in your password manager: it is the only way to check later whether an IP address matches an acceptance's HMAC |
 | `SEO_SERVICE_TOKEN` | `openssl rand -hex 32` | seo | — |
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
@@ -445,8 +448,9 @@ they point at. Finance and Legal refuse to start when a token value still holds 
 did not resolve, left as literal text): the error names the setting, never the value (AEGIS night review M-2).
 
 **The `onboarding` caller is you, for now** (AEGIS A1 C1). Drafting an invoice (`POST /fin/v1/invoices`) needs the
-`onboarding` (or `scheduler`) caller, and recording a client's acceptance (`POST /legal/v1/acceptances`) needs
-`onboarding` (or `hub` / `clipper_network`); none of those services is deployed. Until an onboarding service exists
+`onboarding` (or `scheduler`) caller, and Legal's contract terms and obligations routes need `onboarding`; no
+onboarding service is deployed. (A client's acceptance is not recorded with this token: only the client acceptance
+page records it, ADR 0028 and docs/runbooks/client-acceptance.md.) Until an onboarding service exists
 you hold `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN` yourself: generate each on your own
 machine with `openssl rand -hex 32` (two different values; each service refuses to start when a caller token is under
 32 printable characters or equals another of its tokens), paste it into the variable on its service, mark it
@@ -628,8 +632,9 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | legal's own ledger caller token |
 | `LEGAL_SERVICE_TOKEN` | yes | yes | (you) | |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | |
-| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding`, `compliance_38` | `onboarding` is your operator-held token (Secrets); `compliance_38` reads a client's acceptances (ADR 0024, HR-15) |
-| `LEGAL_ONBOARDING_CALLER_TOKEN` | yes to record acceptances | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
+| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding`, `compliance_38`, `client_portal` | `onboarding` is your operator-held token (Secrets); `compliance_38` reads a client's acceptances (ADR 0024, HR-15); `client_portal` is the client acceptance page (ADR 0028): it reaches only Legal's two `/legal/v1/portal/...` routes |
+| `LEGAL_ONBOARDING_CALLER_TOKEN` | yes for contract terms and obligations | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters. It never records a client's acceptance (ADR 0028: only the client acceptance page does) |
+| `LEGAL_ZBM_FACTS` | yes before you fill a template that names a `{{zbm_*}}` fact | no | `{"zbm_legal_entity_name": "...", "zbm_entity_type_and_state": "...", "zbm_street_address": "...", "zbm_zip": "..."}` | ADR 0028: ZBM's own entity facts, filled into every client fill from here (never from a request, never hard-coded); a fact a template names that is missing here refuses the fill; a malformed value refuses the start. docs/runbooks/client-acceptance.md, step 1 |
 | `LEGAL_COMPLIANCE_URL` | yes | no | `http://compliance.railway.internal:8380` (IaC) | ADR 0024: counsel-memo register proposals are delivered to Compliance's inbox |
 | `LEGAL_COMPLIANCE_TOKEN` | yes | yes | interpolated `${{compliance.COMPLIANCE_SERVICE_TOKEN}}` (IaC) | an unresolved reference refuses the start |
 | `LEGAL_COMPLIANCE_CALLER_TOKEN` | yes | yes | (you) | Legal's `legal_37` caller token at Compliance |
@@ -714,6 +719,24 @@ them, services/compliance-py/README.md).
 | `COMPLIANCE_SEED_PATH`, `COMPLIANCE_SEED_SHA256`, `COMPLIANCE_ALLOW_UNPINNED_SEED` | no | no | the image's pinned seed, unset, unset | an unpinned seed is non-production (every caller refuses its answers) |
 | `COMPLIANCE_RECONCILE_MODE` | no | no | unset | `1` only while reconciling after a refused start (compliance README) |
 | `COMPLIANCE_REQUEST_HEAD_TIMEOUT_SECONDS`, `COMPLIANCE_KEEP_ALIVE_TIMEOUT_SECONDS`, `COMPLIANCE_LIMIT_CONCURRENCY`, `COMPLIANCE_SWITCH_INTERVAL_SECONDS`, `COMPLIANCE_DRAINS_MAX` | no | no | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
+
+### client-portal (client-portal-py)
+
+ADR 0028. Public: the only domain is the one you generate for it (step "Client acceptance page"). Stateless: no
+volume, no ledger, no `RAILWAY_RUN_UID`.
+
+| Variable | Required | Secret | Value / example | Notes |
+|---|---|---|---|---|
+| `PORT` | yes | no | `8480` (IaC) | copied to `PORTAL_PORT` |
+| `PORTAL_PORT` | — | no | (from `PORT`) | |
+| `PORTAL_BIND_ADDR` | yes | no | `::` (IaC) | default `127.0.0.1` |
+| `PORTAL_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal; plain http only to `*.railway.internal` or localhost |
+| `PORTAL_LEGAL_SERVICE_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
+| `PORTAL_LEGAL_CALLER_TOKEN` | yes | yes | (you) | the `client_portal` caller token at Legal |
+| `PORTAL_EVIDENCE_KEY` | yes | yes | (you) | ≥ 32 printable characters; HMAC key (client IP address and user agent, form signatures). Rotating it invalidates open forms and changes `hmac_key_id` on later acceptances |
+| `PORTAL_PUBLIC_ORIGIN` | yes | no | `https://client-portal-production-xxxx.up.railway.app` (you, after the domain exists) | the page's exact origin; a submission whose `Origin` differs is refused. Unset or not `https://` refuses the start |
+| `PORTAL_TRUSTED_PROXY_HOPS` | yes | no | `1` (IaC) | the client address is the `X-Forwarded-For` entry this many from the end. **UNVERIFIED: how Railway's edge writes `X-Forwarded-For`** (appends or overwrites; either way the last entry is the client with `1`). If Railway sets none, every request keys on the proxy's address: the per-address limit becomes one shared limit (a flood could slow real clients; nothing is let through) and the recorded IP HMAC is the proxy's. Check once after deploy (runbook, step 8) |
+| `PORTAL_RATE_IP_PER_MINUTE`, `PORTAL_RATE_TOKEN_PER_HOUR`, `PORTAL_RATE_NOT_FOUND_PER_MINUTE`, `PORTAL_FORM_MAX_AGE_SECONDS`, `PORTAL_LEGAL_TIMEOUT_SECONDS`, `PORTAL_DISPLAY_TZ` | no | no | `30`, `40`, `120`, `14400`, `5`, `America/Los_Angeles` | services/client-portal-py/README.md |
 
 ### dashboard (apps/dashboard-ts, on Vercel)
 
@@ -976,11 +999,9 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    ```
 
    Keep the `attestation_id` it prints.
-3. The client's MSA acceptance at Legal (the acceptance you record today with `LEGAL_ONBOARDING_CALLER_TOKEN`): note
-   its `acceptance_id`, the `version` and the document's `doc_sha256`. The onboarding token records a standard form's
-   acceptance only with an invitation you issued for that client first (`POST /legal/v1/acceptance-invitations` with
-   your Legal approval token and `{"request_id", "doc_id", "version", "party_ref": "client:<client id>"}`, valid 14
-   days); the acceptance names its `invitation_id`, otherwise Legal answers `ACCEPTANCE_NOT_INVITED` (RTM-13).
+3. The client's MSA acceptance at Legal, made by the client on the client acceptance page (ADR 0028;
+   docs/runbooks/client-acceptance.md, steps 4-6): note its `acceptance_id`, the `version` and the document's
+   `doc_sha256` (the link's `GET .../evidence` lists them). Legal records a client's acceptance in no other way.
 4. Run the activation (edit the values in `<...>`; the state is the client's ISO 3166-2 code: `US-CA`, `US-NY`;
    a territory `PR`, `GU`, `VI`, `AS` or `MP`; set a flag `true` only if it is true of the client):
 
@@ -1308,26 +1329,11 @@ same answer and records nothing twice.
    `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "cq19-fdt-1", "rationale": "<how the client sees and ticks the box, and what is kept>", "founder_confirms": true}' $L/legal/v1/register/CQ-19/founder-determination`
    → 200 `"founder_determination": {"status": "active", "renew_by": "<date>", ...}`.
    `curl -sS $A $L/legal/v1/register/CQ-19` shows it at any time.
-7. **Record a client's acceptance**, only after the client actually ticked the unticked box next to exactly that
-   text (railway.md, "The `onboarding` caller is you, for now"). Use the onboarding token, not your approval token:
-   `curl -sS -H @$HOME/zbm/legal-svc.hdr -H @$HOME/zbm/legal-onb.hdr -H 'Content-Type: application/json' -d '{"request_id": "acc-<client_id>-msa-1", "party_ref": "client:<client_id>", "signer_identity_ref": "<signer ref>", "doc_id": "client_msa", "version": "<version>", "doc_sha256": "<sha256>", "presented_sha256": "<sha256 of the exact text shown>", "method": "clickwrap_unticked_box", "presentation": "scroll_to_accept", "affirmative_act": true}' $L/legal/v1/acceptances`
-   → 201 with `"evidence_sufficient": true`, `"evidence_basis": "founder_determination"`. Keep
-   `acceptance_id`.
-   - `presentation`: one of `scroll_to_accept`, `link` or `inline`.
-   - `signer_identity_ref`: 1-200 characters of `[A-Za-z0-9._:/-]`. No `@`, so no email address. Use your own
-     reference for the person, such as `signer:acme-owner-1`.
-   - Never put an IP address, user agent or device detail anywhere in the body: it is refused 422.
-   - `presented_sha256` must equal `doc_sha256`.
-
-   Refusals:
-   - `VERSION_NOT_IN_FORCE`: step 4 was not done (for a SOW: on that client's fill).
-   - `ACCEPTANCE_HASH_MISMATCH`: wrong sha256.
-   - `INSTANCE_NOT_BOUND`: the SOW is bound to another client.
-   - `TEMPLATE_NOT_ACCEPTABLE`: you sent the template, not the client's fill.
-
-   For a client's SOW, send the same body with `"doc_id": "sow_seo_audit"` (or `sow_revenue_recovery`) and the
-   version and sha256 of THAT client's approved fill. An acceptance recorded
-   before step 6 stays insufficient (records never change): record it again with a new request_id after step 6.
+7. **The client accepts on the client acceptance page** (ADR 0028), never through `POST /legal/v1/acceptances`:
+   Legal refuses that route for every client, your onboarding token included. You create a link for the client's
+   approved fills (the MSA and the SOW), the client accepts on the page, and Legal records one acceptance per
+   document with `"via": "client_portal"`. Every step: docs/runbooks/client-acceptance.md. Legal issues no link
+   while step 6 is missing (`EVIDENCE_INSUFFICIENT`).
 8. **What Finance gets.** The contract reference for Finance's billing profile (`msa`) and an invoice's `legal_ref` is
    `{"doc_id": "client_msa", "version": "<version>", "doc_sha256": "<sha256>", "acceptance_id": "<acceptance_id>"}`
    (or the SOW's). Finance no longer refuses on Legal. FIN-CQ-11 still does until you amend it. Finance's
@@ -1356,6 +1362,23 @@ and 8 ran end to end on Oct 30 2026 against a local stack: the real ledger-rust 
 started through their production entrypoints. The LG-20 add (step 2) and the stop (step 10) are covered by legal-py's
 tests. The tunnel, the header files and these exact curl lines have not been run, and nothing here has been run
 against Railway.
+
+### Client acceptance page (ADR 0028)
+
+The only way a client's acceptance of the MSA or a SOW is recorded: you create a link at Legal, the client accepts on
+the page, Finance's contract gate counts it. `POST /legal/v1/acceptances` with your onboarding token is refused for
+every client. Once, after the first deploy that includes `client-portal`:
+
+1. Generate the two secrets of the Secrets table (`PORTAL_LEGAL_CALLER_TOKEN`, `PORTAL_EVIDENCE_KEY`) and set them on
+   `client-portal` (Sealed). Legal reads the caller token through its `LEGAL_CALLER_TOKENS` map, so set it **before**
+   Legal restarts with the new map (an empty reference refuses Legal's start).
+2. `client-portal` -> Settings -> Networking -> **Generate Domain** (no custom domain is needed). Copy it and set
+   `PORTAL_PUBLIC_ORIGIN` to `https://<that domain>` (no path, no trailing slash). Redeploy `client-portal`.
+3. Set `LEGAL_ZBM_FACTS` on `legal` (the entity facts; runbook step 1 of docs/runbooks/client-acceptance.md).
+4. Check: `curl -sS https://<domain>/health` answers `{"status":"ok"}`; `curl -sSI https://<domain>/accept/x`
+   answers 404 with a `content-security-policy` header starting `default-src 'none'`.
+
+Every link after that: docs/runbooks/client-acceptance.md (invite, send, verify, revoke, the confirmation email).
 
 ### Connecting Search Console (optional)
 
@@ -1594,6 +1617,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - [ ] finance, legal, seo logs: no `REFUSING TO START` / `refusing to start`.
 - [ ] SEO report delivery path: open the seo tunnel (steps 1-2 of "Delivering an SEO client report from Railway"),
       `curl -sS http://127.0.0.1:18500/health` → 200 `{"status":"ok"}`, then close it.
+- [ ] Client acceptance page (`$PORTAL` = its domain): `curl -sS https://$PORTAL/health` → 200 `{"status":"ok"}`;
+      `curl -sS -o /dev/null -w '%{http_code}\n' https://$PORTAL/accept/x` → `404`; no other path answers 200.
 - [ ] `curl -sS https://$ORCH/health` → 200 `{"status":"ok","service":"orchestrator-go"}`.
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' https://$ORCH/revenue-recovery/findings` → `401` (no token).
 - [ ] `curl -sS -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" https://$ORCH/revenue-recovery/findings` → 200,
