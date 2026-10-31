@@ -425,7 +425,9 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return svc.health()
+        out = svc.health()
+        out["backup_pause"] = svc.pause_status()          # AEGIS R2-6: paused, or a marker left open
+        return out
 
     @app.get("/fin/v1/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(caller())) -> list[dict]:
@@ -600,6 +602,16 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.requeue_mail(req.request_id, _id(mail_id))
 
     # --- backups and the Stripe re-import (CH-3) -----------------------------------------------------------------------
+
+    @app.post("/fin/v1/deadlines/{break_id}/close", dependencies=auth)
+    def deadline_close(break_id: str, _: str = Depends(andre("deadlines/close")),
+                       req: m.DeadlineClose = Depends(body(m.DeadlineClose))) -> dict:
+        return svc.close_deadline(req.request_id, _id(break_id), dump(req))
+
+    @app.post("/fin/v1/restore/items/{event_id}/disposition", dependencies=auth)
+    def restore_disposition(event_id: str, _: str = Depends(andre("restore/items/disposition")),
+                            req: m.RestoreDisposition = Depends(body(m.RestoreDisposition))) -> dict:
+        return svc.restore_item_disposition(req.request_id, _id(event_id), dump(req))
 
     @app.post("/fin/v1/backup/quiesce", dependencies=auth)
     def backup_quiesce(_: str = Depends(andre("backup/quiesce")),

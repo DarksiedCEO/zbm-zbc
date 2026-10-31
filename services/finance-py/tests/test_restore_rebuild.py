@@ -103,7 +103,7 @@ def test_f2_a_credit_note_survives_a_restore_with_its_number_and_its_refund_obli
     pay(x, a)
     snapshot(tmp_path)
     cn = x.ok(credit(x, x.svc.db["invoices"][a["invoice_id"]], "300.00", reason="nonconforming",
-                     refund_due_from="2026-10-01"), 201)["credit_note"]
+                     refund_due_from="2026-10-02"), 201)["credit_note"]
     before = _state(x, [a["invoice_id"]])
     z, out = _restore_cycle(x, tmp_path)
     assert cn["credit_note_id"] not in z.svc.db["credit_notes"]                   # lost by the restore...
@@ -113,9 +113,10 @@ def test_f2_a_credit_note_survives_a_restore_with_its_number_and_its_refund_obli
     assert _state(z, [a["invoice_id"]]) == before                                 # ...and rebuilt exactly
     assert z.bal("2050", f"client:{CLIENT}", "zbm") == Decimal("300.00")
     due = [b for b in z.svc.db["breaks"].values() if b["leg"] == "credit_note_refund_due" and b["status"] == "open"]
-    assert len(due) == 1 and due[0]["due_by"] == "2026-10-15"
-    assert not [m for m in z.svc.db["mail_outbox"].values() if m["ref"] == cn["credit_note_id"]
-                and m["status"] == "pending"]                                      # the client is not emailed twice
+    assert len(due) == 1 and due[0]["due_by"] == "2026-10-16"
+    # the credit note's email was never sent before the restore: it is queued again, once (AEGIS R2-4)
+    assert len([m for m in z.svc.db["mail_outbox"].values() if m["ref"] == cn["credit_note_id"]
+                and m["status"] == "pending"]) == 1
     nxt = z.ok(credit(z, z.svc.db["invoices"][a["invoice_id"]], "50.00", refund_due_from="2026-10-02"), 201)
     assert cn["number"] == "CN-2026-0001" and nxt["credit_note"]["number"] == "CN-2026-0002"
 
@@ -166,12 +167,15 @@ def test_f2_evidence_that_does_not_verify_is_not_rebuilt_and_the_break_stays_ope
     a = rr_invoice(x, "1000.00")
     pay(x, a)
     snapshot(tmp_path)
-    x.ok(credit(x, x.svc.db["invoices"][a["invoice_id"]], "300.00", refund_due_from="2026-10-01"), 201)
+    x.ok(credit(x, x.svc.db["invoices"][a["invoice_id"]], "300.00", refund_due_from="2026-10-02"), 201)
     ev = x.ledger.of_type("credit_note_issued")[0]
     ev["summary"] = ev["summary"].replace("300.00", "30.00")       # a summary that no longer matches its payload
     z, out = _restore_cycle(x, tmp_path)
+    items = z.svc.db["breaks"][out["reimport_break_id"]]["items"]
+    (cn_item,) = [i for i in items.values() if i["kind"] == "credit_note"]
+    assert cn_item["status"] == "needs_review" and "hash" in cn_item["why"]
     _dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
-    assert real["failed"] == 1 and out["reimport_break_id"] not in real["breaks_resolved"]
+    assert out["reimport_break_id"] not in real["breaks_resolved"]
     assert not z.svc.db["credit_notes"]
     assert z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "open"
 

@@ -166,6 +166,8 @@ class Settings:
     resend_api_key: Optional[Secret] = field(default=None, repr=False)
     # AEGIS F8: the per-deployment key of the HMAC that stands for a billing contact's address on the ledger
     contact_hash_key: Optional[bytes] = field(default=None, repr=False)
+    # AEGIS R2-6: the longest backup pause (minutes); a pause always ends
+    backup_pause_max_min: int = 30
 
 
 _HELD: dict = {}
@@ -416,6 +418,7 @@ def load(env: Optional[dict] = None) -> Settings:
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
         business_tz=_tz(env, "FIN_BUSINESS_TZ", "America/Los_Angeles"),
         **stripe, **_mail(env), contact_hash_key=_contact_key(env),
+        backup_pause_max_min=_int(env, "FIN_BACKUP_PAUSE_MAX_MIN", 30, 5, 120),
     )
     # the flock last: every other refusal above leaves the directory untouched
     s.data_dir_lock = hold_data_dir(data_dir) if data_dir else None

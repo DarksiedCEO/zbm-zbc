@@ -25,29 +25,43 @@ Backups and restores (red team CH-3; runbook docs/runbooks/restore-and-reimport.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import logging
 import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Optional
 
 import money as M
 import reasons as R
-from clock import iso
+from clock import iso, parse_iso
 from errors import Conflict, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from intelligences import i10_evidence_audit as i10
 from ledger import derived_id, payload_sha256
 from ports import StripeDispute, StripeList, StripePayment
-from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha
+from service import EVIDENCE as EVIDENCE_ACTOR, Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha
 from svc_credits import CN_SUMMARY, VOID_SUMMARY, credit_note_payload, void_payload
 
 ACTOR = I2.ACTOR
 MAX_REIMPORT_DAYS = 92
+alert_log = logging.getLogger("finance.alert")
 # ledger event types that are money: a reconcile that voids any of them needs the re-import
 MONEY_EVENT_TYPES = ("journal_entry_posted", "receipt_matched", "receipt_unapplied", "invoice_issued",
                      "invoice_approved", "invoice_voided", "credit_note_issued", "credit_note_refund_linked",
                      "stripe_event_applied", "stripe_refund_booked", "stripe_checkout_created", "dispute_opened",
                      "dispute_closed", "compliance_hold_opened", "client_receipt_created")
+# AEGIS R2-1/R2-4: effects a restore can lose that Stripe does not hold. Each is an INTENT on the ledger, recorded
+# before the local commit; after the commit Finance records an ``effect_committed`` mark naming it (svc_restore
+# ``_mark_committed``). Only an intent with its authentic mark is ever rebuilt; any other one is an item for Andre.
+EFFECT_TYPES = ("credit_note_issued", "invoice_voided", "deadline_recorded", "client_mail_queued")
+COMMIT_TYPE = "effect_committed"
+COMMIT_SUMMARY = re.compile(r"Committed (fin-[a-z0-9]{1,12}-[0-9a-f]{40}) at line (\d+) ([0-9a-f]{64}) mac "
+                            r"([0-9a-f]{64}|-)")
+MAIL_SUMMARY = re.compile(r"Client email queued \(([a-z_]+)\) for (\S+)")
+DONE = ("rebuilt", "disposed", "sent_before_restore", "follows_parent", "follows_refund")
+PAUSE_ALERT_EVERY_S = 300
 
 
 class RestoreMixin:
@@ -55,18 +69,40 @@ class RestoreMixin:
     # ================================================================== 1. quiesce + snapshot marker
 
     def quiesced(self) -> Optional[dict]:
+        """The open backup window, if any. AEGIS R2-6: a window always ENDS (FIN_BACKUP_PAUSE_MAX_MIN, at most 120
+        minutes): live, and after a restart (the persisted marker's ``until``). A restarted Finance inside the
+        window stays paused (fail closed, AEGIS F6) and logs an ALERT every 5 minutes; a marker left open past its
+        window no longer pauses anything but alerts the same way until Andre resumes it."""
+        now = self._now()
         q = getattr(self, "_quiesce", None)
         if q is not None:
-            if self._now() >= q["until"]:
-                self._quiesce = None
-                return None
-            return q
-        # AEGIS F6: a marker still open in the log means Finance restarted (or was restored) inside a backup window:
-        # it stays paused, fail closed, until Andre resumes that marker
+            if now < q["until"]:
+                return q
+            self._quiesce = None
         for m in self.db["backup_markers"].values():
             if m.get("status") == "quiesced":
-                return {"marker_id": m["marker_id"], "restarted": True}
+                until = parse_iso(m["until"]) if m.get("until") else now
+                if now < until and q is None:
+                    self._pause_alert(f"paused_for_backup marker={m['marker_id']} until={m['until']} (restarted inside "
+                                      "the window)")
+                    return {"marker_id": m["marker_id"], "restarted": True, "until": until}
+                self._pause_alert(f"backup_marker_left_open marker={m['marker_id']} window ended {m.get('until')}: "
+                                  "resume it (POST /fin/v1/backup/resume)")
         return None
+
+    def _pause_alert(self, text: str) -> None:
+        last = getattr(self, "_pause_alert_at", None)
+        now = self._now()
+        if last is None or (now - last).total_seconds() >= PAUSE_ALERT_EVERY_S:
+            self._pause_alert_at = now
+            alert_log.error("ALERT finance: %s", text)
+
+    def pause_status(self) -> dict:
+        q = self.quiesced()
+        left = [m["marker_id"] for m in self.db["backup_markers"].values() if m.get("status") == "quiesced"]
+        return {"paused": q is not None, "marker_id": (q or {}).get("marker_id"),
+                "until": iso(q["until"]) if q and q.get("until") else None,
+                "restarted_inside_window": bool(q and q.get("restarted")), "markers_left_open": left}
 
     def _heads(self) -> dict:
         shas = self.log.line_shas()
@@ -74,6 +110,9 @@ class RestoreMixin:
                 "journal_heads": {k: v for k, v in sorted(self.heads.items())}}
 
     def backup_quiesce(self, request_id: str, minutes: int) -> dict:
+        cap = getattr(self.cfg, "backup_pause_max_min", 30)
+        if minutes > cap:
+            raise Invalid(f"a backup pause lasts at most {cap} minutes (FIN_BACKUP_PAUSE_MAX_MIN)")
         with self.lock:
             if self.quiesced():
                 raise Conflict("Finance is already quiesced for a backup; resume it first")
@@ -103,42 +142,99 @@ class RestoreMixin:
                 raise NotFound("no such backup marker")
             q = getattr(self, "_quiesce", None)
             heads = self._heads()
-            consistent = q is not None and q["marker_id"] == marker_id and \
-                heads["log_head_sha256"] == q["log_head_sha256"] and self._now() < q["until"]
+            if q is None or q["marker_id"] != marker_id:
+                reason = "restarted_or_restored"       # this process never opened the window (a deploy, a restore)
+            elif self._now() >= q["until"]:
+                reason = "window_expired"
+            elif heads["log_head_sha256"] != q["log_head_sha256"]:
+                reason = "log_moved"
+            else:
+                reason = None
+            consistent = reason is None
             self._quiesce = None
             op = Op(self, f"bkpr|{request_id}", "andre", marker_id)
             op.record(derived_id("bkpr", marker_id), "backup_marker_closed", "andre", marker_id,
-                      {"marker_id": marker_id, "consistent": consistent, "log_head_seq": heads["log_head_seq"]},
-                      f"Backup window closed ({'consistent' if consistent else 'NOT consistent: take it again'})")
+                      {"marker_id": marker_id, "consistent": consistent, "reason": reason,
+                       "log_head_seq": heads["log_head_seq"]},
+                      f"Backup window closed ({'consistent' if consistent else reason})")
             op.put("backup_markers", marker_id, {**m, "status": "closed", "closed_at": iso(self._now()),
-                                                 "consistent": consistent})
+                                                 "consistent": consistent, "reason": reason})
             self._commit(op)
-            return {"marker_id": marker_id, "consistent": consistent, "log_head_seq_at_marker": m["log_head_seq"],
-                    "detail": "the backup set taken in this window is consistent for Finance" if consistent else
-                    "Finance's log moved or the window expired before resume: take the backup set again"}
+            detail = {None: "the backup set taken in this window is consistent for Finance",
+                      "restarted_or_restored": "closed after a restart or a restore (expected after a restore; after a "
+                                               "deploy inside the window, take the backup set again)",
+                      "window_expired": "the window ran out before resume: take the backup set again",
+                      "log_moved": "Finance wrote during the window: take the backup set again"}[reason]
+            return {"marker_id": marker_id, "consistent": consistent, "reason": reason,
+                    "log_head_seq_at_marker": m["log_head_seq"], "detail": detail}
 
-    # ================================================================== 2. the restore guard
+    # ================================================================== 2. effects, commit marks, the restore guard
 
-    def money_at_risk(self, void_event_ids) -> list[dict]:
-        """The voidable ledger events (a reconcile plan) that are money: never voided without the re-import."""
+    def _evidence_key(self) -> Optional[bytes]:
+        """The key of the MAC on commit marks (AEGIS R2-5), derived from FIN_CONTACT_HASH_KEY (domain-separated)."""
+        k = getattr(self.cfg, "contact_hash_key", None)
+        return hmac.new(k, b"zbm-finance-commit-mark-v1", hashlib.sha256).digest() if k else None
+
+    def _commit_mac(self, intent: str, seq: int, line_sha: str) -> str:
+        k = self._evidence_key()
+        return hmac.new(k, f"{intent}|{seq}|{line_sha}".encode(), hashlib.sha256).hexdigest() if k else "-"
+
+    def _mark_committed(self, op: Op, seq: int, line_sha: str) -> None:
+        """Called by ``_commit`` once a line is appended: each EFFECT intent in it gets its ``effect_committed`` mark.
+        A mark that cannot be written is retried by the hourly job; until then a restore treats the intent as
+        unproven (an item for Andre, never booked by itself)."""
+        for n in getattr(op, "named", []):
+            if n.get("event_type") in EFFECT_TYPES:
+                self._write_commit_mark(n["event_id"], seq, line_sha)
+
+    def _write_commit_mark(self, intent: str, seq: int, line_sha: str) -> bool:
+        mac = self._commit_mac(intent, seq, line_sha)
+        try:
+            self._record(derived_id("cmt", intent), COMMIT_TYPE, EVIDENCE_ACTOR, intent,
+                         {"intent_event_id": intent, "line_seq": seq, "line_sha256": line_sha, "mac": mac},
+                         f"Committed {intent} at line {seq} {line_sha} mac {mac}")
+            return True
+        except Exception:  # noqa: BLE001 - the effect stands; the mark is retried (and a restore asks Andre)
+            pend = self.__dict__.setdefault("_unmarked", [])
+            if (intent, seq, line_sha) not in pend:
+                pend.append((intent, seq, line_sha))
+            alert_log.error("ALERT finance: commit_mark_unwritten intent=%s line=%s", intent, seq)
+            return False
+
+    def _retry_commit_marks(self) -> int:
+        pend = list(self.__dict__.get("_unmarked", []))
+        done = [p for p in pend if self._write_commit_mark(*p)]
+        self._unmarked = [p for p in self.__dict__.get("_unmarked", []) if p not in done]
+        return len(done)
+
+    def money_at_risk(self, void_event_ids, restore_point: Optional[dict] = None) -> list[dict]:
+        """Voidable ledger events (a reconcile plan) that are money, plus (AEGIS R2-4) every credit note, void,
+        deadline and client email the ledger recorded after the restored state: none is dropped without the
+        acknowledgement and the restore break."""
         ids = set(void_event_ids or ())
-        if not ids:
+        idx = (restore_point or {}).get("ledger_index")
+        if not ids and idx is None:
             return []
         try:
             entries = self.recorder.client.entries()
         except Exception:  # noqa: BLE001 - unreadable: every voidable event counts as money (fail closed)
-            return [{"event_id": i, "event_type": "unknown"} for i in sorted(ids)]
-        out = [{"event_id": e["event_id"], "event_type": e["event_type"], "summary": str(e.get("summary") or "")[:120]}
-               for e in entries if e.get("event_id") in ids and e.get("event_type") in MONEY_EVENT_TYPES]
-        return sorted(out, key=lambda x: x["event_id"])
+            return [{"event_id": i, "event_type": "unknown"} for i in sorted(ids)] or \
+                [{"event_id": "unknown", "event_type": "ledger_unreadable"}]
+        out = {e["event_id"]: {"event_id": e["event_id"], "event_type": e["event_type"],
+                               "summary": str(e.get("summary") or "")[:120]}
+               for i, e in enumerate(entries)
+               if (e.get("event_id") in ids and e.get("event_type") in MONEY_EVENT_TYPES)
+               or (idx is not None and i > idx and e.get("department") == i10.DEPT
+                   and e.get("event_type") in EFFECT_TYPES)}
+        return sorted(out.values(), key=lambda x: x["event_id"])
 
     def restore_guard(self, plan: dict, acknowledged: bool) -> None:
         if plan.get("money_at_risk") and not acknowledged:
             raise Conflict("RESTORE_GUARD: this reconcile would declare void ledger evidence of money Finance no "
-                           f"longer holds ({len(plan['money_at_risk'])} event(s): payments, invoices, refunds or "
-                           "journal entries made after the backup). They are NOT deleted at Stripe: reconcile with "
-                           "money_events_acknowledged=true, then run the Stripe re-import for the period "
-                           "(docs/runbooks/restore-and-reimport.md). Never treat this as a cleanup.",
+                           f"longer holds ({len(plan['money_at_risk'])} event(s): payments, invoices, refunds, credit "
+                           "notes, voids, deadlines or client emails made after the backup). They are NOT deleted at "
+                           "Stripe: reconcile with money_events_acknowledged=true, then run the Stripe re-import for "
+                           "the period (docs/runbooks/restore-and-reimport.md). Never treat this as a cleanup.",
                            money_at_risk=plan["money_at_risk"][:50])
 
     def restore_point(self) -> dict:
@@ -172,16 +268,142 @@ class RestoreMixin:
         return [b for b in self.db["breaks"].values()
                 if b.get("leg") == "restore_reimport_required" and b["status"] != "resolved"]
 
-    def _restore_refusal(self, what: str) -> None:
-        """AEGIS F2: until the re-import has rebuilt what the restore lost (payments, refunds, credit notes, voids),
-        nothing new is credited, voided or offered for payment: a lost void must never make an invoice payable."""
-        if self._restore_open():
-            raise Conflict(f"Finance was restored from a backup and the re-import has not finished: no {what} until "
-                           "it has (docs/runbooks/restore-and-reimport.md, section 5)")
+    def _restore_refusal(self, what: str, invoice_id: Optional[str] = None) -> None:
+        """AEGIS F2 / R2-2, scoped to the invoices the restore touched. A Stripe page is refused for any invoice the
+        lost tail names (a void the restore lost must never become payable). A credit note or void is refused only
+        while an item of that invoice is still to be REBUILT automatically (a manual re-issue then would double it);
+        an item Andre must review leaves the manual re-issue open, and he then disposes of the item."""
+        for b in self._restore_open():
+            items = (b.get("items") or {}).values()
+            if what == "Stripe page":
+                hit = invoice_id in (b.get("affected_invoices") or []) or any(
+                    it.get("invoice_id") == invoice_id and it["status"] not in DONE for it in items)
+            else:
+                hit = any(it.get("invoice_id") == invoice_id and it["status"] == "pending" for it in items)
+            if hit:
+                raise Conflict(f"Finance was restored from a backup and this invoice has evidence still to be "
+                               f"re-imported: no {what} for it until the re-import has rebuilt it or Andre has "
+                               "disposed of it (docs/runbooks/restore-and-reimport.md, section 5)")
+
+    def _cn_number_floor(self) -> int:
+        return max([int(b.get("cn_number_floor") or 0) for b in self.db["breaks"].values()
+                    if b.get("leg") == "restore_reimport_required"] or [0])
+
+    def _scan_tail(self, ledger_index: Optional[int]) -> dict:
+        """Every EFFECT the ledger recorded after the restored state, classified (AEGIS R2-1, R2-4, R2-5):
+        ``pending`` (a verified intent with its authentic commit mark: the re-import rebuilds it), ``needs_review``
+        (unproven, uncommitted, unauthenticated, or a kind never rebuilt automatically: Andre disposes of it), or a
+        done state for client emails that follow their parent."""
+        if ledger_index is None:
+            return {"items": {}, "affected_invoices": [], "cn_number_floor": 0, "scanned": False}
+        entries = self.recorder.client.entries()
+        tail = [(i, e) for i, e in enumerate(entries) if i > ledger_index and e.get("department") == i10.DEPT]
+        marks, sent, affected, floor = {}, set(), set(), 0
+        for i, e in tail:
+            et = e.get("event_type")
+            if et == COMMIT_TYPE:
+                m = COMMIT_SUMMARY.fullmatch(str(e.get("summary") or ""))
+                if m:
+                    marks.setdefault(m.group(1), (e, m))
+            elif et == "client_mail_sent":
+                sent.add(e.get("subject_id"))
+            elif et in ("stripe_checkout_created", "invoice_issued", "invoice_approved"):
+                affected.add(e.get("subject_id"))
+        items: dict = {}
+        for i, e in tail:
+            et = e.get("event_type")
+            if et not in EFFECT_TYPES:
+                continue
+            eid = e.get("event_id")
+            it = {"event_id": eid, "event_type": et, "order": i, "status": "needs_review", "why": None,
+                  "invoice_id": None}
+            ok, why = self._mark_ok(eid, marks)
+            if et == "credit_note_issued":
+                m = CN_SUMMARY.fullmatch(str(e.get("summary") or ""))
+                if not m:
+                    it["why"] = "unreadable credit note evidence"
+                else:
+                    number, cnid, iid, amount, to_refund, due_from, reason, seq = m.groups()
+                    floor = max(floor, int(number.rsplit("-", 1)[1]))
+                    it.update(kind="credit_note", ref=cnid, credit_note_id=cnid, number=number, invoice_id=iid,
+                              amount=amount, to_refund=to_refund, refund_due_from=None if due_from == "-" else due_from,
+                              reason_code=reason, line=int(seq))
+                    payload = credit_note_payload(cnid, number, iid, amount, to_refund, reason, it["refund_due_from"])
+                    verified = self._verified(e, derived_id("cn", cnid), et, payload, int(seq))
+                    it["why"] = why if not ok else (None if verified else "the summary does not hash to the payload")
+                    if ok and verified:
+                        it["status"] = "pending"
+            elif et == "invoice_voided":
+                m = VOID_SUMMARY.fullmatch(str(e.get("summary") or ""))
+                if not m:
+                    it["why"] = "unreadable void evidence"
+                else:
+                    iid, amount, reason, seq = m.groups()
+                    it.update(kind="void", ref=iid, invoice_id=iid, amount=amount, reason_code=reason, line=int(seq))
+                    verified = self._verified(e, derived_id("invv", iid), et, void_payload(iid, amount, reason),
+                                              int(seq))
+                    it["why"] = why if not ok else (None if verified else "the summary does not hash to the payload")
+                    if ok and verified:
+                        it["status"] = "pending"
+            elif et == "deadline_recorded":
+                it.update(kind="deadline", ref=e.get("subject_id"), summary=str(e.get("summary") or "")[:200],
+                          why=why if not ok else "a contract deadline recorded after the backup: re-record it "
+                                                 "(sow-ended / acknowledgement), then dispose of this item")
+            else:
+                m = MAIL_SUMMARY.fullmatch(str(e.get("summary") or ""))
+                kind, ref = (m.group(1), m.group(2)) if m else ("unknown", None)
+                it.update(kind="mail", ref=e.get("subject_id"), mail_kind=kind, parent=ref)
+                if e.get("subject_id") in sent:
+                    it.update(status="sent_before_restore", why=None)
+                elif kind in ("credit_note", "invoice_cancelled"):
+                    it.update(status="follows_parent", why=None)      # its rebuild re-queues it (never sent yet)
+                elif kind == "refund_sent":
+                    it.update(status="follows_refund", why=None)      # re-queued when the refund is re-imported
+                else:
+                    it["why"] = why if not ok else "queued but not sent before the restore: send it again, then " \
+                                                   "dispose of this item"
+            if it.get("invoice_id"):
+                affected.add(it["invoice_id"])
+            items[eid] = it
+        # a client email follows its parent only if that parent is rebuilt automatically
+        parents = {it.get("ref"): it for it in items.values() if it.get("kind") in ("credit_note", "void")}
+        for it in items.values():
+            if it.get("status") == "follows_parent":
+                par = parents.get(it.get("parent"))
+                if par is None or par["status"] != "pending":
+                    it.update(status="needs_review", why="its credit note or void is not rebuilt automatically: "
+                                                         "send the email again if it applies, then dispose of it")
+        mails_sent = {it["parent"] for it in items.values() if it.get("kind") == "mail"
+                      and it["status"] == "sent_before_restore" and it.get("parent")}
+        for it in items.values():
+            if it.get("kind") in ("credit_note", "void"):
+                it["mail_sent_before_restore"] = it.get("ref") in mails_sent
+        return {"items": items, "affected_invoices": sorted(a for a in affected if a),
+                "cn_number_floor": floor, "scanned": True}
+
+    def _mark_ok(self, intent: str, marks: dict) -> tuple[bool, Optional[str]]:
+        hit = marks.get(intent)
+        if hit is None:
+            return False, "an attempt only: no commit mark (the operation answered an error, or its mark was lost)"
+        e, m = hit
+        if e.get("event_id") != derived_id("cmt", intent):
+            return False, "the commit mark's id does not match"
+        mac = m.group(4)
+        if mac == "-" or self._evidence_key() is None:
+            return False, "the commit mark is not authenticated (FIN_CONTACT_HASH_KEY not set)"
+        want = self._commit_mac(intent, int(m.group(2)), m.group(3))
+        if not hmac.compare_digest(mac, want):
+            return False, "the commit mark's MAC does not verify (not written by this Finance)"
+        psha = payload_sha256({"intent_event_id": intent, "line_seq": int(m.group(2)), "line_sha256": m.group(3),
+                               "mac": mac})
+        if psha != e.get("payload_sha256"):
+            return False, "the commit mark's summary does not hash to its payload"
+        return True, None
 
     def _restore_reimport_break(self, plan: dict) -> Optional[str]:
         """Committed right after the reconcile line: a break that stays open until re-imports have covered the whole
-        window from the backup's day to the day the break opened, with nothing left missing (CH-3, AEGIS F1)."""
+        window from the backup's day to the day the break opened, with nothing left missing (CH-3, AEGIS F1), and
+        every lost item is rebuilt or disposed of by Andre (AEGIS R2-2)."""
         if not plan.get("money_at_risk"):
             return None
         rp = plan.get("restore_point") or {}
@@ -189,21 +411,79 @@ class RestoreMixin:
         bid = rid("brk", "restore_reimport_required", plan["head_sha256"] or "empty")
         if bid in self.db["breaks"]:
             return bid
+        try:
+            scan = self._scan_tail(rp.get("ledger_index"))
+        except Exception:  # noqa: BLE001 - unreadable: the break opens with nothing rebuildable (fail closed)
+            scan = {"items": {}, "affected_invoices": [], "cn_number_floor": 0, "scanned": False}
         op = Op(self, f"restore|{bid}", "andre", bid)
         op.put("breaks", bid, {"break_id": bid, "leg": "restore_reimport_required", "subject": "zbm:1060",
                                "difference": "0.00", "opened_at": iso(self._now()),
-                               "opened_on": self._today_la().isoformat(), "owner": "andre", "severity": "high",
+                               "opened_on": self._business_today().isoformat(), "owner": "andre", "severity": "high",
                                "explanation_code": "unknown", "status": "open", "receipt_id": None,
                                "since": since, "restore_point": rp, "ledger_index": rp.get("ledger_index"),
                                "covered": [], "money_events": len(plan["money_at_risk"]), "resolution": None,
+                               **scan,
                                "note": f"restored from a backup of {since}: run POST /fin/v1/stripe/reimport (dry run, "
                                        f"then real) for every day from {since} to {self._business_today().isoformat()}; "
-                                       "it also rebuilds credit notes and voids from the ledger"})
+                                       "dispose of every item it cannot rebuild"})
         op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
                   {"break_id": bid, "leg": "restore_reimport_required", "difference": "0.00"},
                   "Break opened: restored from a backup; Stripe re-import required")
         self._commit(op)
         return bid
+
+    @staticmethod
+    def _items_done(b: dict) -> bool:
+        return all(it["status"] in DONE for it in (b.get("items") or {}).values())
+
+    def _maybe_close_restore(self, op: Op, b: dict, basis: dict) -> bool:
+        if b.get("scanned") is False and b.get("ledger_index") is None and b.get("money_events"):
+            return False                          # the lost tail could not be read: Andre restores again or by hand
+        if self._covers(b.get("covered") or [], b.get("since"), b.get("opened_on")) and self._items_done(b):
+            op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
+                                             "resolution": {**basis, "covered": b.get("covered")}})
+            return True
+        op.put("breaks", b["break_id"], b)
+        return False
+
+    def restore_item_disposition(self, request_id: str, event_id: str, body: dict) -> dict:
+        """AEGIS R2-2: Andre's decision on one lost item the re-import does not (or cannot) rebuild: ``lost`` (with
+        the reason) or ``reissued`` (naming what he re-issued: a credit note, a voided invoice, a deadline break or a
+        client email). Recorded on the ledger; the item leaves the plan."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"restore/items/{event_id}", body)
+            if ent:
+                return ent["response"]
+            for b in self._restore_open():
+                if event_id in (b.get("items") or {}):
+                    break
+            else:
+                raise NotFound("no open restore item with that ledger event id")
+            it = b["items"][event_id]
+            if it["status"] in DONE:
+                raise Conflict(f"this item is already {it['status']}")
+            if body["disposition"] == "reissued":
+                ref = body.get("reissued_as")
+                known = ref in self.db["credit_notes"] or ref in self.db["breaks"] or ref in self.db["mail_outbox"] \
+                    or (self.db["invoices"].get(ref) or {}).get("status") == "void"
+                if not known:
+                    raise Conflict("reissued_as must name what was re-issued: a credit note, a voided invoice, a "
+                                   "deadline break or a client email")
+            new_items = {**b["items"], event_id: {**it, "status": "disposed",
+                                                  "disposition": {"disposition": body["disposition"],
+                                                                  "reason": body["reason"],
+                                                                  "reissued_as": body.get("reissued_as"),
+                                                                  "at": iso(self._now())}}}
+            op = Op(self, f"rdisp|{request_id}", "andre", event_id)
+            op.record(derived_id("rdisp", event_id), "restore_item_disposed", "andre", event_id,
+                      {"event_id": event_id, "disposition": body["disposition"],
+                       "reason_sha256": sha({"r": body["reason"]}), "reissued_as": body.get("reissued_as")},
+                      f"Restore item disposed: {body['disposition']}")
+            closed = self._maybe_close_restore(op, {**b, "items": new_items}, {"basis": "dispositions"})
+            resp = self._idem_add(op, key, h, {"event_id": event_id, "status": "disposed", "break_closed": closed,
+                                               "ledger_event_ids": op.events, "request_id": request_id})
+            self._commit(op)
+            return resp
 
 
     # ================================================================== 3. the Stripe re-import
@@ -238,22 +518,30 @@ class RestoreMixin:
             entries = self.recorder.client.entries()
         except Exception:  # noqa: BLE001
             raise Unavailable("the evidence ledger could not be read; nothing was planned (retry)") from None
-        tail = {"credit_notes": [], "voids": [], "payment_at": {}, "refunds": {}}
+        tail = {"payment_at": {}, "refunds": {}}
         for i, e in enumerate(entries):
             if i <= start or e.get("department") != i10.DEPT:
                 continue
             et, subj = e.get("event_type"), e.get("subject_id")
-            if et == "credit_note_issued":
-                tail["credit_notes"].append((i, e))
-            elif et == "invoice_voided":
-                tail["voids"].append((i, e))
-            elif et in ("receipt_matched", "receipt_unapplied"):
+            if et in ("receipt_matched", "receipt_unapplied"):
                 tail["payment_at"].setdefault(subj, i)
             elif et == "stripe_refund_booked":
-                m = re.search(r"total refunded (\d+\.\d{2})\)", str(e.get("summary") or ""))
-                if m:
-                    tail["refunds"].setdefault(subj, []).append((i, m.group(1)))
+                tail["refunds"].setdefault(subj, []).append((i, e))    # verified per payment in the plan (R2-10)
         return tail
+
+    def _refund_steps(self, tail: Optional[dict], rct: str, pi: str) -> list[tuple[int, str]]:
+        """AEGIS R2-10: the refund totals the books saw, from VERIFIED ``stripe_refund_booked`` events only."""
+        from svc_stripe import REFUND_SUMMARY, refund_payload
+        out = []
+        for i, e in (tail or {}).get("refunds", {}).get(rct, []):
+            m = REFUND_SUMMARY.fullmatch(str(e.get("summary") or ""))
+            if not m:
+                continue
+            delta, total, iid, linked, seq = m.groups()
+            payload = refund_payload(rct, pi, delta, total, None if iid == "-" else iid, linked)
+            if self._verified(e, derived_id("rfds", rct, total), "stripe_refund_booked", payload, int(seq)):
+                out.append((i, total))
+        return out
 
     @staticmethod
     def _verified(e: dict, rk: str, event_type: str, payload: dict, seq: int) -> bool:
@@ -261,30 +549,22 @@ class RestoreMixin:
         psha = payload_sha256({**payload, "rk": rk, "seq": seq})
         return psha == e.get("payload_sha256") and i10.evidence_id(rk, event_type, psha) == e.get("event_id")
 
-    def _rebuild_actions(self, tail: dict) -> list[dict]:
+    def _rebuild_actions(self) -> list[dict]:
+        """AEGIS R2-1: only items classified ``pending`` at the reconcile (verified intent + authentic commit mark)."""
         out = []
-        for i, e in tail["credit_notes"]:
-            m = CN_SUMMARY.fullmatch(str(e.get("summary") or ""))
-            a = {"action": "rebuild_credit_note", "order": i, "event_id": e.get("event_id")}
-            if not m:
-                out.append({**a, "problem": "unreadable"})
-                continue
-            number, cnid, iid, amount, to_refund, due_from, reason, seq = m.groups()
-            if cnid in self.db["credit_notes"]:
-                continue
-            a.update(credit_note_id=cnid, number=number, invoice_id=iid, amount=amount, to_refund=to_refund,
-                     refund_due_from=None if due_from == "-" else due_from, reason_code=reason, line=int(seq))
-            out.append(a)
-        for i, e in tail["voids"]:
-            m = VOID_SUMMARY.fullmatch(str(e.get("summary") or ""))
-            a = {"action": "rebuild_void", "order": i, "event_id": e.get("event_id")}
-            if not m:
-                out.append({**a, "problem": "unreadable"})
-                continue
-            iid, amount, reason, seq = m.groups()
-            if (self.db["invoices"].get(iid) or {}).get("status") == "void":
-                continue
-            out.append({**a, "invoice_id": iid, "amount": amount, "reason_code": reason, "line": int(seq)})
+        for b in self._restore_open():
+            for it in (b.get("items") or {}).values():
+                if it["status"] != "pending":
+                    continue
+                if it["kind"] == "credit_note" and it["credit_note_id"] not in self.db["credit_notes"]:
+                    out.append({"action": "rebuild_credit_note", "order": it["order"], "event_id": it["event_id"],
+                                **{k: it[k] for k in ("credit_note_id", "number", "invoice_id", "amount", "to_refund",
+                                                       "refund_due_from", "reason_code", "line",
+                                                       "mail_sent_before_restore")}})
+                elif it["kind"] == "void" and (self.db["invoices"].get(it["invoice_id"]) or {}).get("status") != "void":
+                    out.append({"action": "rebuild_void", "order": it["order"], "event_id": it["event_id"],
+                                **{k: it[k] for k in ("invoice_id", "amount", "reason_code", "line",
+                                                       "mail_sent_before_restore")}})
         return out
 
     def _reimport_plan(self, g: Gather, since, until) -> dict:
@@ -321,7 +601,7 @@ class RestoreMixin:
             stripe_refund = M.D(p.amount_refunded) if p.amount_refunded is not None else M.ZERO
             # where the books saw this payment and its refunds before the restore (AEGIS F2: ledger order)
             at = (tail or {}).get("payment_at", {}).get(rct, late)
-            steps = [(i, tot) for i, tot in (tail or {}).get("refunds", {}).get(rct, []) if M.D(tot) > booked_refund]
+            steps = [(i, tot) for i, tot in self._refund_steps(tail, rct, pi) if M.D(tot) > booked_refund]
             if rc is None:
                 if inv is not None and not has_page:
                     sl = g.call("stripe", "sessions_for_payment", (pi,), lambda pi=pi: port.sessions_for_payment(pi),
@@ -371,7 +651,7 @@ class RestoreMixin:
                                 "payment_intent": d.payment_intent, "status": d.status})
         if tail is not None:
             with self.lock:
-                actions += [{**a, "sub": 1} for a in self._rebuild_actions(tail)]
+                actions += [{**a, "sub": 1} for a in self._rebuild_actions()]
         actions.sort(key=lambda a: (a["order"], a["sub"], a.get("payment_intent") or "", a.get("dispute_id") or "",
                                     a.get("credit_note_id") or a.get("invoice_id") or ""))
         for a in actions:
@@ -427,11 +707,14 @@ class RestoreMixin:
                 results.append({**a, "result": "failed", "why": str(getattr(exc, "reason", exc))[:160]})
         failed = [r for r in results if r["result"] == "failed"]
         clean = False
-        if not failed:
+        # AEGIS R2-2: a rebuild that fails becomes an item for Andre below, so it does not stop the window counting
+        to_andre = {r["event_id"] for r in failed if r["action"].startswith("rebuild_")}
+        if len(to_andre) == len(failed):
             # AEGIS F1: books == Stripe for this window means a fresh plan for it finds nothing left to do
             with self._stripe_turn("stripe re-import (check)"):
-                clean = not self._reimport_plan(Gather(self, f"reimp|{request_id}|check", "andre", "stripe-reimport"),
-                                                since, until)["actions"]
+                fresh = self._reimport_plan(Gather(self, f"reimp|{request_id}|check", "andre", "stripe-reimport"),
+                                            since, until)["actions"]
+            clean = not [a for a in fresh if a.get("event_id") not in to_andre]
         with self.lock:
             op = Op(self, f"reimp|{request_id}|done", "andre", iid, g)
             op.put("stripe_imports", iid, {**self.db["stripe_imports"][iid], "status": "partial" if failed else "done",
@@ -440,15 +723,21 @@ class RestoreMixin:
                       {"import_id": iid, "actions": len(results), "failed": len(failed)},
                       f"Stripe re-import ran: {len(results) - len(failed)} booked or present, {len(failed)} failed")
             closed = []
-            if clean:
-                for b in self._restore_open():
-                    covered = list(b.get("covered") or []) + [[plan["since"], plan["until"]]]
-                    upd = {**b, "covered": covered}
-                    if self._covers(covered, b.get("since"), b.get("opened_on")):
-                        upd.update(status="resolved", resolved_at=iso(self._now()),
-                                   resolution={"basis": "stripe_reimport", "import_id": iid, "covered": covered})
-                        closed.append(b["break_id"])
-                    op.put("breaks", b["break_id"], upd)
+            outcome = {r["event_id"]: r for r in results if r["action"].startswith("rebuild_")}
+            for b in self._restore_open():
+                items = dict(b.get("items") or {})
+                for eid, r in outcome.items():
+                    if eid in items:
+                        if r["result"] in ("rebuilt", "present"):
+                            items[eid] = {**items[eid], "status": "rebuilt"}
+                        elif r["result"] == "failed":
+                            # AEGIS R2-2: an item that cannot be rebuilt goes to Andre (it never blocks anything else)
+                            items[eid] = {**items[eid], "status": "needs_review", "why": r.get("why")}
+                upd = {**b, "items": items}
+                if clean:
+                    upd["covered"] = list(b.get("covered") or []) + [[plan["since"], plan["until"]]]
+                if self._maybe_close_restore(op, upd, {"basis": "stripe_reimport", "import_id": iid}):
+                    closed.append(b["break_id"])
             resp = self._idem_add(op, key, h, {"dry_run": False, "import_id": iid, "results": results,
                                                "failed": len(failed), "clean": clean, "breaks_resolved": closed,
                                                "ledger_event_ids": op.events, "request_id": request_id})
@@ -553,7 +842,8 @@ class RestoreMixin:
         payload = credit_note_payload(cnid, a["number"], a["invoice_id"], a["amount"], a["to_refund"],
                                       a["reason_code"], a["refund_due_from"])
         e = self._ledger_event(a["event_id"])
-        if e is None or not self._verified(e, derived_id("cn", cnid), "credit_note_issued", payload, a["line"]):
+        if e is None or e.get("department") != i10.DEPT or \
+                not self._verified(e, derived_id("cn", cnid), "credit_note_issued", payload, a["line"]):
             raise Conflict(f"credit note {a['number']}: the ledger's evidence does not verify; not rebuilt")
         with self.lock:
             if cnid in self.db["credit_notes"]:
@@ -569,7 +859,9 @@ class RestoreMixin:
             split = {"to_ar": M.q(amount - to_refund), "to_refund": to_refund, "state": st,
                      "refund_due_from": a["refund_due_from"]}
             self._book_credit_note(op, inv, amount, split, {"reason_code": a["reason_code"], "note": None},
-                                   request_id, cnid=cnid, number=a["number"], rebuilt=True)
+                                   request_id, cnid=cnid, number=a["number"], rebuilt=True,
+                                   # AEGIS R2-4: the client's email goes out again only if it never did
+                                   resend_mail=not a.get("mail_sent_before_restore"))
             self._commit(op)
             return "rebuilt"
 
@@ -578,7 +870,7 @@ class RestoreMixin:
             raise Conflict(f"a void event on the ledger cannot be read ({a['event_id']}): rebuild it by hand")
         iid = a["invoice_id"]
         e = self._ledger_event(a["event_id"])
-        if e is None or not self._verified(e, derived_id("invv", iid), "invoice_voided",
+        if e is None or e.get("department") != i10.DEPT or not self._verified(e, derived_id("invv", iid), "invoice_voided",
                                            void_payload(iid, a["amount"], a["reason_code"]), a["line"]):
             raise Conflict(f"the void of {iid}: the ledger's evidence does not verify; not rebuilt")
         with self.lock:
@@ -610,6 +902,10 @@ class RestoreMixin:
             op.record(derived_id("invvrb", iid), "invoice_void_rebuilt", "andre", iid,
                       {"invoice_id": iid, "entry_id": entry_id}, "A void was rebuilt from the ledger after a restore")
             self._resolve_deadlines(op, "cancel_or_credit_due", iid, "voided")
+            if not a.get("mail_sent_before_restore"):
+                self._enqueue_client_mail(op, "invoice_cancelled", inv["client_id"], iid,
+                                          {"invoice_id": iid, "amount_cancelled": M.fmt(due),
+                                           "cancelled_on": self._business_today().isoformat()})
             self._commit(op)
             return "rebuilt"
 

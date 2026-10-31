@@ -43,16 +43,16 @@ def st(keys):  # noqa: F811
 
 def test_f4_the_refund_is_due_10_business_days_after_it_became_due_not_after_the_credit_note(st):
     inv, _pi = stripe_paid(st, "1200.00")
-    st.clock.advance(days=6)                                    # Thursday Oct 8: Andre credits a SOW that ended Oct 1
+    st.clock.advance(days=6)                                    # Thursday Oct 8: Andre credits a SOW that ended Oct 2
     out = st.ok(credit(st, st.svc.db["invoices"][inv["invoice_id"]], "400.00", reason="sow_ended_prepaid",
-                       refund_due_from="2026-10-01"), 201)
+                       refund_due_from="2026-10-02"), 201)
     cn = out["credit_note"]
-    assert cn["refund_due_from"] == "2026-10-01" and cn["refund_due_by"] == "2026-10-15"    # not Oct 22
+    assert cn["refund_due_from"] == "2026-10-02" and cn["refund_due_by"] == "2026-10-16"    # not Oct 22 (10 business days after the credit note)
     brk = st.svc.db["breaks"][cn["break_id"]]
-    assert brk["due_by"] == "2026-10-15"
+    assert brk["due_by"] == "2026-10-16"
     (m,) = [m for m in st.svc.db["mail_outbox"].values() if m["kind"] == "credit_note"]
-    assert m["data"]["refund_due_by"] == "2026-10-15"
-    assert "2026-10-15" in MAIL.render("credit_note", m["data"])[1]
+    assert m["data"]["refund_due_by"] == "2026-10-16"
+    assert "2026-10-16" in MAIL.render("credit_note", m["data"])[1]
 
 
 def test_f4_a_refund_owing_credit_note_must_say_when_the_refund_became_due(st):
@@ -62,8 +62,8 @@ def test_f4_a_refund_owing_credit_note_must_say_when_the_refund_became_due(st):
     assert r.status_code == 409 and "refund_due_from" in r.text
     assert credit(st, i, "100.00", refund_due_from="2026-10-03").status_code == 422      # the future
     st.clock.advance(days=20)
-    late = st.ok(credit(st, i, "100.00", refund_due_from="2026-10-01"), 201)["credit_note"]
-    assert late["refund_due_by"] == "2026-10-15" and st.svc.db["breaks"][late["break_id"]]["severity"] == "high"
+    late = st.ok(credit(st, i, "100.00", refund_due_from="2026-10-02"), 201)["credit_note"]
+    assert late["refund_due_by"] == "2026-10-16" and st.svc.db["breaks"][late["break_id"]]["severity"] == "high"
     assert st.svc.db["breaks"][late["break_id"]]["late"] is True
 
 
@@ -75,17 +75,27 @@ def test_f4_an_unpaid_reduction_needs_no_refund_date():
 
 # --------------------------------------------------------------------------------------------- F6
 
-def test_f6_a_restarted_finance_stays_paused_until_the_marker_is_resumed(keys, tmp_path):  # noqa: F811
+def test_f6_a_restarted_finance_stays_paused_inside_the_window_and_the_window_always_ends(keys, tmp_path, caplog):  # noqa: F811
     x = durable(keys, tmp_path)
     q = x.ok(x.post("/fin/v1/backup/quiesce", {"request_id": rid(), "minutes": 5}, andre=ANDRE_TOKEN))
     y = restart(x, tmp_path)
-    y.clock.advance(minutes=30)                                  # even past the window: fail closed until resumed
-    r = y.post("/fin/v1/invoices", {"request_id": rid()}, caller="onboarding")
-    assert r.status_code == 503 and "QUIESCED" in r.text
+    with caplog.at_level(logging.ERROR, logger="finance.alert"):
+        r = y.post("/fin/v1/invoices", {"request_id": rid()}, caller="onboarding")
+        assert r.status_code == 503 and "QUIESCED" in r.text                    # inside the window: fail closed
+        assert y.ok(y.get("/health"))["backup_pause"]["paused"] is True
+    assert any("ALERT finance: paused_for_backup" in m.getMessage() for m in caplog.records)
+    y.clock.advance(minutes=6)                                   # AEGIS R2-6: past the window it never stays paused
+    caplog.clear()
+    with caplog.at_level(logging.ERROR, logger="finance.alert"):
+        assert y.post("/fin/v1/invoices", {"request_id": rid()}, caller="onboarding").status_code == 422
+        h = y.ok(y.get("/health"))["backup_pause"]
+    assert h["paused"] is False and h["markers_left_open"] == [q["marker"]["marker_id"]]
+    assert any("backup_marker_left_open" in m.getMessage() for m in caplog.records)
     out = y.ok(y.post("/fin/v1/backup/resume", {"request_id": rid(), "marker_id": q["marker"]["marker_id"]},
                       andre=ANDRE_TOKEN))
-    assert out["consistent"] is False                            # a restart happened inside the window
-    assert y.post("/fin/v1/invoices", {"request_id": rid()}, caller="onboarding").status_code == 422
+    assert out["consistent"] is False and out["reason"] == "restarted_or_restored"
+    assert y.ok(y.get("/health"))["backup_pause"]["markers_left_open"] == []
+    assert y.post("/fin/v1/backup/quiesce", {"request_id": rid(), "minutes": 31}, andre=ANDRE_TOKEN).status_code == 422
 
 
 # --------------------------------------------------------------------------------------------- F7
@@ -179,20 +189,22 @@ def test_f9_an_unsent_acknowledgement_turns_overdue_and_alerts(caplog):
 def test_f9_sow_end_opens_a_cancel_or_credit_deadline_that_a_void_or_credit_note_closes(caplog):
     hr = Harness().ready()
     inv = ach_invoice(hr)
-    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/sow-ended", {"request_id": rid(), "sow_ended_on": "2026-10-01"},
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/sow-ended", {"request_id": rid(), "sow_ended_on": "2026-10-02"},
                 andre=ANDRE_TOKEN)
     out = hr.ok(r, 201)
     b = hr.svc.db["breaks"][out["break_id"]]
-    assert b["leg"] == "cancel_or_credit_due" and b["due_by"] == "2026-10-15"
-    assert hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/sow-ended", {"request_id": rid(), "sow_ended_on": "2026-10-01"},
+    assert b["leg"] == "cancel_or_credit_due" and b["due_by"] == "2026-10-16"
+    assert hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/sow-ended", {"request_id": rid(), "sow_ended_on": "2026-10-02"},
                    caller="onboarding").status_code in (401, 403)
-    hr.ok(credit(hr, inv, "300.00"), 201)
+    hr.ok(credit(hr, inv, "300.00"), 201)                        # AEGIS R2-8: a partial credit does not meet it
+    assert hr.svc.db["breaks"][out["break_id"]]["status"] == "open"
+    hr.ok(credit(hr, hr.svc.db["invoices"][inv["invoice_id"]], "700.00"), 201)   # the whole amount still owed
     assert hr.svc.db["breaks"][out["break_id"]]["status"] == "resolved"
     # one that runs late alerts
     inv2 = ach_invoice(hr, "500.00")
     out2 = hr.ok(hr.post(f"/fin/v1/invoices/{inv2['invoice_id']}/sow-ended",
-                         {"request_id": rid(), "sow_ended_on": "2026-10-01"}, andre=ANDRE_TOKEN), 201)
-    hr.clock.advance(days=14)
+                         {"request_id": rid(), "sow_ended_on": "2026-10-02"}, andre=ANDRE_TOKEN), 201)
+    hr.clock.advance(days=15)
     with caplog.at_level(logging.ERROR, logger="finance.alert"):
         hr.ok(hr.post("/fin/v1/jobs/client-mail/run", {"request_id": rid()}, caller="ops_cron"))
     assert hr.svc.db["breaks"][out2["break_id"]]["severity"] == "high"

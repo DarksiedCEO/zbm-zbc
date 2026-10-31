@@ -129,6 +129,16 @@ def event_kind(typ: str) -> Optional[str]:
     return None
 
 
+REFUND_SUMMARY = re.compile(r"Stripe refund booked: (\d+\.\d{2}) \(total refunded (\d+\.\d{2})\) invoice "
+                            r"(fin-inv-[0-9A-Z]{26}|-) against credit notes (\d+\.\d{2}) line (\d+)")
+
+
+def refund_payload(rct: str, pi: str, delta: str, total: str, invoice_id, linked: str) -> dict:
+    return {"receipt_id": rct, "amount": delta, "refunded_total": total,
+            "entry_id": rid("je", "zbm", f"F7r|{pi}|{total}"), "invoice_id": invoice_id,
+            "against_credit_notes": linked}
+
+
 class StripeMixin:
 
     # ================================================================== checkout
@@ -282,7 +292,7 @@ class StripeMixin:
                     raise NotFound("no such invoice")
                 if inv["status"] != "issued":
                     raise Conflict(f"only an issued invoice can be paid; this one is {inv['status']}")
-                self._restore_refusal("Stripe page")       # AEGIS F2: a lost void must never become payable
+                self._restore_refusal("Stripe page", invoice_id)   # AEGIS F2/R2-2: a lost void never payable
                 methods, reasons = self._stripe_methods(inv)
                 if reasons:
                     raise Refused("no Stripe checkout for this invoice", reasons)
@@ -1229,10 +1239,12 @@ class StripeMixin:
             op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
                       {"break_id": bid, "leg": "stripe_refund", "difference": M.fmt(delta - linked)},
                       f"Break opened: {M.fmt(delta - linked)} refunded at Stripe with no credit note")
+        # AEGIS R2-10: the summary carries every payload fact, so a restore can verify the refund steps it orders by
+        iid_ = inv["invoice_id"] if inv else None
         op.record(derived_id("rfds", rct, M.fmt(total)), "stripe_refund_booked", ACTOR, rct,
-                  {"receipt_id": rct, "amount": M.fmt(delta), "refunded_total": M.fmt(total), "entry_id": e["entry_id"],
-                   "invoice_id": inv["invoice_id"] if inv else None, "against_credit_notes": M.fmt(linked)},
-                  f"Stripe refund booked: {M.fmt(delta)} (total refunded {M.fmt(total)})")
+                  refund_payload(rct, p.payment_intent, M.fmt(delta), M.fmt(total), iid_, M.fmt(linked)),
+                  f"Stripe refund booked: {M.fmt(delta)} (total refunded {M.fmt(total)}) invoice {iid_ or '-'} "
+                  f"against credit notes {M.fmt(linked)} line {len(self.log) + 1}")
         return "refund_booked_held" if held else "refund_booked"   # neutral: the same for every kind of hold
 
     HELD_REFUND_NOTE = {

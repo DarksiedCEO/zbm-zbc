@@ -163,10 +163,21 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   `money_events_acknowledged: true` to void money evidence (then a `restore_reimport_required` break stays open);
   `POST /fin/v1/stripe/reimport` (Andre; dry run first, then the real run naming its `plan_sha256`) books what Stripe
   holds for a period, and rebuilds the credit notes and voids made after the backup from their ledger events
-  (verified against the ledger's payload SHA-256), in ledger order with the payments and refunds. While the restore
-  break is open no credit note, void or Stripe page is made; it closes only when verified-clean runs cover every day
-  from the backup's day to the day it opened. A Finance restarted (or restored) inside a backup window stays paused
-  until the marker is resumed. docs/runbooks/restore-and-reimport.md.
+  (verified against the ledger's payload SHA-256), in ledger order with the payments and refunds. AEGIS r2: only an
+  effect that took effect is rebuilt (each committed credit note, void and client email gets an `effect_committed`
+  ledger mark with an HMAC keyed from `FIN_CONTACT_HASH_KEY`; an attempt without a valid mark, a deadline or an
+  unproven email becomes a restore **item** for Andre, never booked). Only the invoices a restore item touches are
+  refused a credit note, void or Stripe page; `POST /fin/v1/restore/items/{event_id}/disposition` (Andre: `lost` with
+  a reason, or `reissued` naming what was re-issued) settles an item. The restore break closes when verified-clean
+  runs cover every day from the backup's day to the day it opened and every item is rebuilt or disposed; the generic
+  break resolution refuses it and every deadline. A backup pause lasts at most `FIN_BACKUP_PAUSE_MAX_MIN` (default
+  30, 5-120) minutes, also after a restart inside the window (then every write, Stripe webhooks included, answers
+  503, `/health` shows `backup_pause`, and an `ALERT finance:` line repeats every 5 minutes); a marker left open
+  after its window pauses nothing and keeps alerting until resumed. docs/runbooks/restore-and-reimport.md.
+- Deadlines (AEGIS r2): `refund_due_from` and `sow_ended_on` must lie between the invoice's issue day and today (and
+  at most 400 days back). Cancel-or-credit closes on a void or a credit that leaves nothing owed; otherwise, and for an
+  acknowledgement sent outside Finance (mail off), `POST /fin/v1/deadlines/{break_id}/close` (Andre, with a reason;
+  an acknowledgement's queued email is then cancelled). Refund deadlines never close by hand.
 - CH-4: a paid Checkout page Finance does not know is answered 2xx with a `stripe_unknown_session` break and an
   `ALERT finance:` log line. CH-10: due dates count from the `FIN_BUSINESS_TZ` date (default America/Los_Angeles).
 

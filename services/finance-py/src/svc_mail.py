@@ -92,7 +92,7 @@ class MailMixin:
                                     "status": "pending", "attempts": 0, "created_at": iso(self._now()),
                                     "last_attempt_at": None, "sent_at": None, "last_code": None})
         op.record(derived_id("mailq", mid), "client_mail_queued", I2.ACTOR, mid,
-                  {"mail_id": mid, "kind": kind, "ref": ref}, f"Client email queued ({kind})")
+                  {"mail_id": mid, "kind": kind, "ref": ref}, f"Client email queued ({kind}) for {ref}"[:280])
         return mid
 
     def acknowledge(self, request_id: str, client_id: str, body: dict) -> dict:
@@ -125,9 +125,11 @@ class MailMixin:
                                    "severity": "high" if late else "normal", "resolution": None,
                                    "note": f"acknowledge the client's {body['topic'].replace('_', ' ')} by "
                                            f"{due.isoformat()} (MSA 4.12(f)): closed when the email is sent"})
-            op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
-                      {"break_id": bid, "leg": "acknowledgement_due", "difference": "0.00"},
-                      f"Acknowledgement due by {due.isoformat()}")
+            op.record(derived_id("ddl", bid), "deadline_recorded", "andre", bid,
+                      {"break_id": bid, "leg": "acknowledgement_due", "client_id": client_id, "mail_id": mid,
+                       "since": received.isoformat(), "due_by": due.isoformat()},
+                      f"Deadline acknowledgement_due {bid} client {client_id} mail {mid} since {received.isoformat()} "
+                      f"due {due.isoformat()}"[:280])
             resp = self._idem_add(op, key, h, {"mail_id": mid, "acknowledge_by": due.isoformat(), "break_id": bid,
                                                "late": late,
                                                "ledger_event_ids": op.events, "request_id": request_id})
@@ -299,6 +301,7 @@ class MailMixin:
         (the break from its first attempt already asks Andre for the contact)."""
         from ports import NotBuiltClientMail
         overdue = self._deadline_sweep(prefix)
+        self._retry_commit_marks()                       # AEGIS R2-1: marks a ledger outage left unwritten
         port = self.ports.client_mail
         if isinstance(port, NotBuiltClientMail):
             with self.lock:

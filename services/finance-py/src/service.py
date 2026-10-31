@@ -434,6 +434,9 @@ class FinanceService:
             raise Unavailable(f"local store write failed ({exc}); nothing took effect") from None
         for kind, r in op.ops:
             self._apply(kind, r)
+        mark = getattr(self, "_mark_committed", None)
+        if mark is not None:
+            mark(op, rec["seq"], line_sha)          # AEGIS R2-1: "this effect took effect" (svc_restore)
 
     def _apply(self, kind: str, r: dict) -> None:
         if kind == "put":
@@ -751,9 +754,11 @@ class FinanceService:
                     "voidable": {"lines": sorted(a.void_lines), "event_ids": sorted(a.void_event_ids)},
                     "reconcile_mode": self.reconcile_mode,
                     # CH-3 (svc_restore): voidable evidence that is MONEY is never a cleanup; it needs the re-import
-                    "money_at_risk": self.money_at_risk(a.void_event_ids),
                     # AEGIS F1: the point the restored state reflects, read before any reconcile line is appended
-                    "restore_point": self.restore_point()}
+                    "restore_point": (rp := self.restore_point()),
+                    # CH-3 + AEGIS R2-4: voidable money evidence, and every credit note, void, deadline and client
+                    # email the ledger recorded after the restored state
+                    "money_at_risk": self.money_at_risk(a.void_event_ids, rp)}
 
     def reconcile(self, request_id: str, head_sha256: str, void_lines: list[int], void_event_ids: list[str],
                   money_events_acknowledged: bool = False) -> dict:

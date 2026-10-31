@@ -675,6 +675,23 @@ class Acknowledgement(Strict):
     invoice_id: Optional[Id] = None
 
 
+class DeadlineClose(Strict):
+    """AEGIS R2-8/R2-9: Andre closes a contract deadline met outside Finance, with the reason (audit trail)."""
+    request_id: Id
+    basis: Literal["acknowledged_outside_finance", "closed_by_andre"]
+    reason: Note
+    done_on: Optional[date] = None
+    evidence_sha256: Optional[Sha] = None
+
+
+class RestoreDisposition(Strict):
+    """AEGIS R2-2: Andre's decision on one lost item a restore's re-import does not rebuild."""
+    request_id: Id
+    disposition: Literal["lost", "reissued"]
+    reason: Note
+    reissued_as: Optional[Id] = None
+
+
 class QuiesceRequest(Strict):
     request_id: Id
     minutes: int = Field(default=30, ge=5, le=120)

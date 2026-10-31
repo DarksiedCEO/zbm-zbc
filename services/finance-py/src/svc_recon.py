@@ -247,6 +247,12 @@ class ReconMixin:
             b = self.db["breaks"].get(break_id)
             if b is None:
                 raise NotFound("no such break")
+            if b.get("leg") in ("restore_reimport_required", "credit_note_refund_due", "cancel_or_credit_due",
+                                "acknowledgement_due"):
+                # AEGIS R2-3: these close only by their own rule (coverage and dispositions; the refund linked; the void
+                # or full credit; the email sent) or Andre's explicit deadline close, never by an unrelated entry
+                raise Conflict(f"a {b['leg']} break closes only by its own rule (docs/runbooks/restore-and-reimport.md; "
+                               "POST /fin/v1/deadlines/{break_id}/close for a deadline met outside Finance)")
             if b.get("leg") in self.COMPLIANCE_LEGS:
                 # AEGIS r4 R4-2: a Compliance hold is released only on its own grounds (a refund, or a current ALLOW)
                 raise Conflict("a Compliance hold is released only through POST "

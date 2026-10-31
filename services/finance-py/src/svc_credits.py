@@ -254,7 +254,7 @@ class CreditsMixin:
 
     def _void_checks(self, inv: dict, body: dict) -> None:
         self._credit_refusals(inv, "void")
-        self._restore_refusal("void")
+        self._restore_refusal("void", inv["invoice_id"])
         if inv["status"] == "paid":
             raise Conflict("this invoice is paid: it is not voided; issue a credit note instead (it records the refund "
                            "ZBM owes)")
@@ -310,7 +310,7 @@ class CreditsMixin:
 
     def _credit_checks(self, inv: dict, body: dict, amount: Decimal) -> dict:
         self._credit_refusals(inv, "credit note")
-        self._restore_refusal("credit note")
+        self._restore_refusal("credit note", inv["invoice_id"])
         if inv["status"] not in ("issued", "paid", "credited"):
             raise Conflict(f"a credit note is issued against an issued or paid invoice; this one is {inv['status']}")
         if body["content_sha256"] != inv["content_sha256"]:
@@ -331,8 +331,7 @@ class CreditsMixin:
             if due_from is None:
                 raise Conflict("this credit note owes a refund: say the day the refund became due under MSA 4.10 "
                                "(refund_due_from); the 10 business days count from it")
-            if due_from > self._business_today():
-                raise Invalid("refund_due_from is in the future")
+            self._date_bounds(inv, due_from, "refund_due_from")
         return {"to_ar": M.q(to_ar), "to_refund": to_refund, "state": st,
                 "refund_due_from": due_from if to_refund > 0 else None}
 
@@ -345,10 +344,13 @@ class CreditsMixin:
             m = re.fullmatch(r"CN-(\d{4})-(\d{4,})", c.get("number") or "")
             if m and int(m.group(1)) == year:
                 top = max(top, int(m.group(2)))
+        # AEGIS R2-11/N11: never below a number a restore saw on the ledger (even one still being rebuilt)
+        top = max(top, self._cn_number_floor())
         return f"CN-{year}-{top + 1:04d}"
 
     def _book_credit_note(self, op: Op, inv: dict, amount: Decimal, split: dict, body: dict, request_id: str, *,
-                          cnid: Optional[str] = None, number: Optional[str] = None, rebuilt: bool = False) -> dict:
+                          cnid: Optional[str] = None, number: Optional[str] = None, rebuilt: bool = False,
+                          resend_mail: bool = False) -> dict:
         iid, cid = inv["invoice_id"], inv["client_id"]
         cnid = cnid or rid("cn", iid, request_id)
         number = number or self._next_credit_note_number()
@@ -436,8 +438,11 @@ class CreditsMixin:
                                           len(self.log) + 1))
         op.put("credit_notes", cnid, cn)
         op.put("invoices", iid, new)
-        self._resolve_deadlines(op, "cancel_or_credit_due", iid, "credit_note")
-        if rebuilt:
+        if new["status"] in ("void", "credited") or I2.amount_due(new) <= 0:
+            # AEGIS R2-8: the 4.12(g) deadline is met by cancelling the whole amount still owed (a partial credit is
+            # closed by Andre, with the reason, through POST /fin/v1/deadlines/{break_id}/close)
+            self._resolve_deadlines(op, "cancel_or_credit_due", iid, "credit_note")
+        if rebuilt and not resend_mail:
             return {"credit_note": cn, "invoice": new, "entry_id": e["entry_id"]}
         self._enqueue_client_mail(op, "credit_note", cid, cnid,
                                   {"credit_note_number": number, "invoice_id": iid, "amount": M.fmt(amount),
@@ -454,6 +459,62 @@ class CreditsMixin:
                 op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
                                                  "resolution": {"basis": basis}})
 
+    MAX_PAST_DAYS = 400
+
+    def _date_bounds(self, inv: dict, day: date, name: str) -> None:
+        """AEGIS R2-7: a contract date Andre states is not in the future, not more than 400 days ago, and not before
+        the invoice was issued."""
+        today = self._business_today()
+        if day > today:
+            raise Invalid(f"{name} is in the future")
+        if day < today - timedelta(days=self.MAX_PAST_DAYS):
+            raise Invalid(f"{name} is more than {self.MAX_PAST_DAYS} days ago")
+        issued = inv.get("issued_at")
+        if issued and day < self._business_date_of(issued):
+            raise Invalid(f"{name} is before the invoice was issued")
+
+    def _business_date_of(self, at: str) -> date:
+        from zoneinfo import ZoneInfo
+        from clock import parse_iso
+        return parse_iso(at).astimezone(ZoneInfo(self.cfg.business_tz)).date()
+
+    def close_deadline(self, request_id: str, break_id: str, body: dict) -> dict:
+        """AEGIS R2-8/R2-9: Andre closes a contract deadline met outside Finance, with an audit trail: an
+        acknowledgement sent by hand (its queued email is then cancelled, never sent twice), or a cancel-or-credit
+        handled otherwise (for example a partial credit to the work done). Never a refund deadline or a restore."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"deadlines/{break_id}/close", body)
+            if ent:
+                return ent["response"]
+            b = self.db["breaks"].get(break_id)
+            if b is None:
+                raise NotFound("no such break")
+            want = {"acknowledgement_due": "acknowledged_outside_finance", "cancel_or_credit_due": "closed_by_andre"}
+            if b.get("leg") not in want:
+                raise Conflict("only an acknowledgement or a cancel-or-credit deadline is closed by hand")
+            if body["basis"] != want[b["leg"]]:
+                raise Conflict(f"a {b['leg']} deadline closes with basis {want[b['leg']]}")
+            if b["status"] == "resolved":
+                raise Conflict("this deadline is already closed")
+            done_on = body.get("done_on") or self._business_today()
+            if done_on > self._business_today():
+                raise Invalid("done_on is in the future")
+            op = Op(self, f"ddlclose|{request_id}", "andre", break_id)
+            res = {"basis": body["basis"], "reason_sha256": sha_text(body["reason"]), "done_on": done_on.isoformat(),
+                   "evidence_sha256": body.get("evidence_sha256"), "by": "andre"}
+            op.put("breaks", break_id, {**b, "status": "resolved", "resolved_at": iso(self._now()), "resolution": res,
+                                        "met_late": bool(b.get("due_by")) and done_on.isoformat() > b["due_by"]})
+            if b["leg"] == "acknowledgement_due" and b.get("mail_id"):
+                m = self.db["mail_outbox"].get(b["mail_id"])
+                if m is not None and m["status"] in ("pending", "send_failed"):
+                    op.put("mail_outbox", m["mail_id"], {**m, "status": "cancelled_sent_outside"})
+            op.record(derived_id("ddlclose", break_id), "deadline_closed_by_andre", "andre", break_id,
+                      {"break_id": break_id, "leg": b["leg"], **res}, f"Deadline {b['leg']} closed by Andre")
+            resp = self._idem_add(op, key, h, {"break_id": break_id, "resolution": res, "ledger_event_ids": op.events,
+                                               "request_id": request_id})
+            self._commit(op)
+            return resp
+
     def sow_ended(self, request_id: str, invoice_id: str, body: dict) -> dict:
         """AEGIS F9 / MSA 4.12(g): an SOW ended while this invoice is unpaid: within 10 business days ZBM cancels it
         or credits it down. The deadline is a break until a void or a credit note on the invoice closes it."""
@@ -467,8 +528,7 @@ class CreditsMixin:
             if inv["status"] != "issued":
                 raise Conflict(f"only an unpaid (issued) invoice is cancelled or credited; this one is {inv['status']}")
             ended = body["sow_ended_on"]
-            if ended > self._business_today():
-                raise Invalid("sow_ended_on is in the future")
+            self._date_bounds(inv, ended, "sow_ended_on")
             due = add_business_days(ended, REFUND_DUE_BUSINESS_DAYS)
             bid = rid("brk", "cancel_or_credit_due", invoice_id)
             if bid in self.db["breaks"] and self.db["breaks"][bid]["status"] != "resolved":
@@ -482,9 +542,12 @@ class CreditsMixin:
                                    "late": due < self._business_today(), "resolution": None,
                                    "note": f"the SOW ended {ended.isoformat()}: void this invoice or credit it down to "
                                            f"the work done by {due.isoformat()} (MSA 4.12(g))"})
-            op.record(derived_id("brk", bid, ended.isoformat()), "break_opened", "intel_07_reconciliation", bid,
-                      {"break_id": bid, "leg": "cancel_or_credit_due", "difference": inv["total"]},
-                      f"Cancel or credit by {due.isoformat()} (SOW ended {ended.isoformat()})")
+            # AEGIS R2-4: an obligation the ledger knows by its own type (a restore lists it for Andre)
+            op.record(derived_id("ddl", bid, ended.isoformat()), "deadline_recorded", "andre", bid,
+                      {"break_id": bid, "leg": "cancel_or_credit_due", "invoice_id": invoice_id,
+                       "since": ended.isoformat(), "due_by": due.isoformat()},
+                      f"Deadline cancel_or_credit_due {bid} invoice {invoice_id} since {ended.isoformat()} due "
+                      f"{due.isoformat()}")
             resp = self._idem_add(op, key, h, {"break_id": bid, "due_by": due.isoformat(), "ledger_event_ids": op.events,
                                                "request_id": request_id})
             self._commit(op)
