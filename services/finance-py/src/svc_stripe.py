@@ -63,6 +63,9 @@ MAX_JOB_CLOSES = 25                               # pages one job run closes (bo
 MAX_REQUEST_CLOSES = 25
 MAX_JOB_ACTIVATION_CHECKS = 25
 _SID = re.compile(r"[a-z]{2,8}_[A-Za-z0-9_]{1,120}")
+# AEGIS r5-r7: how a sanctions hold leaves (31 CFR 501.603 / 501.604 / 501.806; OFAC FAQ 1196)
+OFAC_BASES = ("ofac_authorization", "ofac_rejected_return")
+BLOCKED_EXIT_KINDS = ("license", "unblocking_report", "compliance_release", "delisting")
 METHOD_LABEL = {"card": "card (Stripe)", "us_bank_account": "ACH bank debit (Stripe)"}
 DONE_DISPUTE = ("won", "lost", "warning_closed", "prevented")
 
@@ -755,16 +758,24 @@ class StripeMixin:
         """AEGIS r5 C1: a hold grounded in sanctions is never refunded or released on an ALLOW: OFAC's blocking rules
         apply (report within 10 business days, 31 CFR 501.603 / 501.604), and only Andre's release recording the OFAC
         authorization or reference clears it. That ground is for sanctions holds only."""
+        kind = body.get("ofac_document_kind")
         if hold.get("sanctions"):
-            if basis != "ofac_authorization":
+            if basis not in OFAC_BASES:
                 raise Conflict("this payment is held on SANCTIONS grounds: it is not refunded or released on an ALLOW; "
-                               "it is reported to OFAC and released only with an OFAC authorization "
-                               "(basis ofac_authorization, ofac_authorization_sha256)")
-            if not body.get("ofac_authorization_sha256") or not body.get("ofac_document_kind"):
+                               "it is reported to OFAC and released only with an OFAC document (basis "
+                               "ofac_authorization, or ofac_rejected_return for a rejected payment returned to the "
+                               "sender)")
+            if not body.get("ofac_authorization_sha256") or not kind:
                 raise Conflict("an OFAC release names the SHA-256 of the OFAC document (ofac_authorization_sha256) and "
-                               "its kind (ofac_document_kind: license, unblocking_report or compliance_release)")
-        elif basis == "ofac_authorization":
-            raise Conflict("ofac_authorization releases a sanctions hold only; this hold is not grounded in sanctions")
+                               "its kind (ofac_document_kind)")
+            if basis == "ofac_authorization" and kind not in BLOCKED_EXIT_KINDS:
+                raise Conflict("ofac_authorization takes a license, an unblocking report, a Compliance Release or a "
+                               "delisting; a rejected-transaction report goes with ofac_rejected_return")
+            if basis == "ofac_rejected_return" and kind != "rejected_transaction_report":
+                raise Conflict("ofac_rejected_return takes the filed 501.604 rejected-transaction report "
+                               "(ofac_document_kind rejected_transaction_report)")
+        elif basis in OFAC_BASES:
+            raise Conflict(f"{basis} releases a sanctions hold only; this hold is not grounded in sanctions")
 
     def compliance_hold_release(self, request_id: str, invoice_id: str, body: dict) -> dict:
         """AEGIS r4 R4-2: Andre releases a held payment, on one of two grounds only.
@@ -773,7 +784,10 @@ class StripeMixin:
           amount. The client gets no receipt.
         - ``compliance_allow``: Compliance (38) answers a current ALLOW for the client now (read before the lock). The
           held-back client receipt is prepared (unless anything was refunded).
-        - ``ofac_authorization``: a sanctions hold only, with the SHA-256 of the OFAC authorization (AEGIS r5 C1)."""
+        - ``ofac_authorization``: a sanctions hold only, with the SHA-256 and kind of the OFAC document: a license, an
+          unblocking report (FAQ 1196), a Compliance Release (501.806) or a delisting notice (AEGIS r5 C1, r6, r7).
+        - ``ofac_rejected_return``: a sanctions hold whose payment was REJECTED, not blocked: it was returned to the
+          sender (a refund proven as for ``refund``) and the 501.604 rejected-transaction report is hashed (AEGIS r7)."""
         basis = body["basis"]
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"compliance-hold/{invoice_id}",
@@ -822,10 +836,13 @@ class StripeMixin:
             if basis == "ofac_authorization":
                 detail = {"ofac_authorization_sha256": body["ofac_authorization_sha256"],
                           "ofac_document_kind": body["ofac_document_kind"]}
-            if basis == "refund":
+            if basis in ("refund", "ofac_rejected_return"):
+                # AEGIS r7: a rejected payment returned to the sender is proven like a refund (an F7r of THIS payment,
+                # after it, covering it), plus the hash of the filed 501.604 report
                 eid = body.get("entry_id")
                 if not eid:
-                    raise Conflict("a refund release names the refund's journal entry (entry_id)")
+                    raise Conflict("this release names the refund's journal entry (entry_id): refund the payment to "
+                                   "the sender at Stripe first")
                 order = {e["entry_id"]: i for i, e in enumerate(self.entries)}
                 e = self.entries_by_id.get(eid)
                 if e is None or e.get("memo_code") != "F7r" or (e.get("source") or {}).get("kind") != "stripe_refund" \
@@ -838,6 +855,9 @@ class StripeMixin:
                 if refunded < M.D(hold["amount"]):
                     raise Conflict(f"refunds booked ({M.fmt(refunded)}) do not cover the held amount ({hold['amount']})")
                 detail = {"entry_id": eid, "refunded": M.fmt(refunded)}
+                if basis == "ofac_rejected_return":
+                    detail.update(returned_to_sender=True, ofac_authorization_sha256=body["ofac_authorization_sha256"],
+                                  ofac_document_kind=body["ofac_document_kind"])
             op = Op(self, f"holdrel|{request_id}", "andre", invoice_id, g)
             self._release_compliance_hold(op, invoice_id, basis, detail, "andre")
             resp = self._idem_add(op, key, h, {"invoice_id": invoice_id, "released": True, "basis": basis, **detail,

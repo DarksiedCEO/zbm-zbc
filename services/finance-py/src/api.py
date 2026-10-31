@@ -812,20 +812,22 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.form_1099("andre", tax_year)
 
     @app.get("/fin/v1/audit/evidence", dependencies=auth)
-    def audit_evidence(who: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+    def audit_evidence(who: str = Depends(andre_or_any_caller("audit/evidence")),
+                       limit: int = Query(default=200, ge=1, le=1000),
                        offset: int = Query(default=0, ge=0, le=10_000_000),
                        event_type: Optional[str] = Query(default=None, pattern=r"^[a-z_]{1,64}$")) -> dict:
         """Sweep B-F2 (bizdev R6 M1): every Finance evidence event on the ledger, ``committed`` (named by an anchored
         local log line whose seq and request key its payload carries) or ``attempted`` (recorded first, never
         committed under that id); unanchored evidence = attempted, not done."""
-        return svc.audit_evidence(limit, offset, event_type)
+        return svc.audit_evidence(limit, offset, event_type, full=who == "andre")
 
     @app.get("/fin/v1/audit/export", dependencies=auth)
-    def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),
+    def audit(who: str = Depends(andre_or_any_caller("audit/export")),
+              since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
               cursor: int = Query(default=0, ge=0, le=10**12)) -> dict:
         try:
-            return svc.audit_export(who, since, until, cursor)
+            return svc.audit_export(who, since, until, cursor, full=who == "andre")
         except ValueError:
             raise Invalid("since/until must be RFC 3339 timestamps with offset") from None
 

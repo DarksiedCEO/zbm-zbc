@@ -976,7 +976,8 @@ class FinanceService:
 
     # ================================================================== audit, health
 
-    def audit_export(self, principal: str, since: Optional[str], until: Optional[str], cursor: int) -> dict:
+    def audit_export(self, principal: str, since: Optional[str], until: Optional[str], cursor: int,
+                     full: bool = True) -> dict:
         with self.lock:
             s = parse_iso(since) if since else None
             u = parse_iso(until) if until else None
@@ -986,7 +987,7 @@ class FinanceService:
                 at = parse_iso(rec["at"])
                 if (s and at < s) or (u and at > u):
                     continue
-                out.append(i10.export_entry(rec))
+                out.append(i10.export_entry(rec, full=full))
                 if len(out) >= i10.PAGE:
                     break
             more = last < len(self.log)
@@ -997,7 +998,7 @@ class FinanceService:
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "rules_version": self.rules_version}
 
-    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None, full: bool = True) -> dict:
         """``GET /fin/v1/audit/evidence`` (sweep B-F2; bizdev-py ``audit_evidence``, AEGIS round 6 M1). Every Finance
         event on the ledger except the log anchors, each marked:
 
@@ -1041,13 +1042,15 @@ class FinanceService:
                 cited.setdefault(eid, r["seq"])
         rows, counts = [], {"committed": 0, "cited": 0, "attempted": 0}
         for e in mine:
-            et = e.get("event_type")
-            if et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
+            et = real_et = e.get("event_type")
+            if not full and isinstance(et, str) and et.startswith("compliance_hold_"):
+                et = i10.GENERIC_HOLD_EVENT     # AEGIS r7 V1: Andre's token alone sees which hold event it is
+            if real_et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
                 continue
             eid = e.get("event_id")
             n = named.get(eid)
             if n is not None and n[2] == e.get("payload_sha256") \
-                    and eid == i10.evidence_id(n[1] or "", et, e.get("payload_sha256") or ""):
+                    and eid == i10.evidence_id(n[1] or "", real_et, e.get("payload_sha256") or ""):
                 status, seq, rk = "committed", n[0], n[1]
             elif n is None and eid in cited:
                 status, seq, rk = "cited", cited[eid], None
