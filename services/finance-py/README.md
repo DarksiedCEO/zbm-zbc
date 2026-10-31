@@ -133,6 +133,16 @@ Webhook events to subscribe: `checkout.session.completed`, `checkout.session.asy
 
 ## Reconciling the local log with the ledger
 
+Fix wave A (ADR 0025): a write interrupted by a crash or a lost ledger answer is rolled back AUTOMATICALLY — at the
+next start, or by the ledger watch while running — when every voidable item was announced by this log's intent
+journal (`<log>.intent`, fsynced before each ruling/anchor/version/lease write). The rollback is the same recorded
+reconcile, marked `"automatic": true`, logged as `{"alert":"crash_recovered",…}`. Only residue the journal does not
+explain (another instance, a restored or truncated log, a forged event) still needs Andre, below; the service then
+holds (`/health` 503 `"refused"` with the reason) instead of exiting. `/health` is 503 `"degraded"` with
+`degraded_reasons` while the instance cannot write (ADR 0025 section 2). Token rotation (`FIN_SERVICE_TOKEN_NEXT`,
+`FIN_CALLER_TOKENS_NEXT`, `FIN_ANDRE_APPROVAL_TOKEN_SHA256`, `FIN_ANDRE_APPROVAL_TOKEN_NEXT_SHA256`):
+docs/runbooks/token-rotation.md.
+
 Identical to compliance-py / verification-py. If start-up refuses with a VOIDABLE problem (a commit that failed
 after its anchor, a truncated tail, a newer lease from another instance, a version event with no local decision),
 restart with `FIN_RECONCILE_MODE=1` (only reads and the reconcile route answer), read `GET /fin/v1/reconcile`

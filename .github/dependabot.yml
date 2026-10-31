@@ -1,0 +1,22 @@
+# Fix wave A (red team Oct 30-31 2026, RTA-6): base-image digest bumps. Every FROM is pinned by digest
+# (devtools/check_docker_pins.py fails CI otherwise); Dependabot opens a PR when a pinned image moves, so OS CVEs in
+# the python:3.12-slim runtime and the golang/rust builders do not accumulate. Docker only: the Python, Rust, Go and
+# Node dependencies are pinned and audited by their own CI jobs.
+version: 2
+updates:
+  - package-ecosystem: "docker"
+    directories:
+      - "/services/ledger-rust"
+      - "/services/orchestrator-go"
+      - "/services/finance-py"
+      - "/services/legal-py"
+      - "/services/compliance-py"
+      - "/services/seo-py"
+      - "/services/detection-py"
+      - "/services/delivery-py/docker"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"

@@ -134,6 +134,11 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
   verified), pytest 9.1.1 (hygiene-static). Language runtimes: Python 3.12 and 3.13 (both, because a 3.13-only
   breakage has been missed before), Go from `go.mod`, Node 22 — and Rust **stable, floating** (not pinned; see above).
   Not pinned either: `registry:2` and `python:3.12-slim` in `delivery-docker-live` (below).
+- Docker base images (fix wave A, RTA-6): every `FROM` must be pinned by digest; `hygiene-static` runs
+  `devtools/check_docker_pins.py` and is RED until the `golang:1.27.3-bookworm` and `rust:1.99.1-slim-bookworm`
+  builder digests are pasted into the three Dockerfiles (the railway-images job's "base images actually used" step
+  prints them; the sandbox that wrote the check could not reach the registry). `.github/dependabot.yml` (docker,
+  weekly) then proposes digest bumps.
 - Concurrency: one run per ref; a newer push to a pull request cancels the older run. Pushes to `main` and
   `integration-*` are never cancelled.
 - `permissions: contents: read` for the whole workflow.
@@ -150,7 +155,13 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
 - **The deer-flow harness packages in the Python audit.** `deerflow-harness` and `deerflow-extension-api` are
   git-sourced at commit `345f08be` in `uv.lock`; pip-audit has no registry version to look up for them and refuses
   URL requirements, so they are filtered out of the export before the audit. Their transitive dependencies (187
-  registry packages) are audited.
+  registry packages) are audited. Fix wave A (RTA-8): `audit-python` now also asks OSV for advisories affecting that
+  exact commit (`devtools/osv_git_audit.py`, `POST https://api.osv.dev/v1/query {"commit": …}`), red on any hit. When
+  the pinned commit moves, also read deer-flow's changes since the old commit (`git log 345f08be..<new>` in
+  `backend/packages/harness`): the harness runs agent code. `langchain-openai` stays: `deerflow.models.factory`
+  imports it at module level. `langchain-deepseek` is never selected (delivery's `DLV_LLM_PROVIDER` allows
+  anthropic, openai_compatible and fake only) but is still installed; removing it means a `uv lock` with uv 0.8.17 and
+  a networked resolve plus the 70-minute delivery suite (not done in fix wave A).
 - **A pinned base digest for the sandbox image.** `docker/sandbox.Dockerfile` requires `python:3.12-slim`'s digest
   as a build argument. ADR 0011's "Pinned hashes" records one (2026-10-02, fix wave 26a W26-3; also
   `RECORDED_BASE_DIGEST` in the job), but the build uses the `DLV_SANDBOX_BASE_DIGEST` repository variable, which

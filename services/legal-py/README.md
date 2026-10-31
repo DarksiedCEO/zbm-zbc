@@ -114,6 +114,12 @@ re-verifies the chain and the blobs outside the service lock.
 
 ## Reconciling the local log with the ledger
 
+Fix wave A (ADR 0025): crash residue announced by the intent journal is rolled back automatically (finance-py README,
+same section); `/health` is 503 while Legal cannot write; finance_31 and compliance_38 reach only their named routes
+(`api.NAMED_ROUTES`), and Compliance may not invalidate a `FIN-*` register row. Token rotation
+(`LEGAL_SERVICE_TOKEN_NEXT`, `LEGAL_CALLER_TOKENS_NEXT`, `LEGAL_ANDRE_APPROVAL_TOKEN_SHA256`,
+`LEGAL_ANDRE_APPROVAL_TOKEN_NEXT_SHA256`): docs/runbooks/token-rotation.md.
+
 Identical to verification-py / compliance-py (their READMEs, "Reconciling the local log with the ledger"), with
 `LEGAL_RECONCILE_MODE=1` and `GET/POST /legal/v1/reconcile`: stop the service, start it in reconcile mode, read the
 plan with Andre's token, POST exactly the plan (`request_id`, `head_sha256`, `void_lines`, `void_event_ids`;

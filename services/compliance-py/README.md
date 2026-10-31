@@ -208,6 +208,12 @@ service refuses to start rather than pretend.
 
 ## Reconciling the local log with the ledger (operator procedure)
 
+Fix wave A (ADR 0025): crash residue announced by the intent journal is rolled back automatically (finance-py README,
+same section) and a voided ruling id is never issued again (the retry gets a new one); `/health` is 503 while
+Compliance cannot write; seo_02 and revenue_recovery reach only `GET /compliance/v1/clients/{id}/activation` and
+`/health`. Token rotation (`COMPLIANCE_SERVICE_TOKEN_NEXT`, `COMPLIANCE_CALLER_TOKENS_NEXT`,
+`COMPLIANCE_ANDRE_APPROVAL_TOKEN_SHA256`, `COMPLIANCE_ANDRE_APPROVAL_TOKEN_NEXT_SHA256`): docs/runbooks/token-rotation.md.
+
 Every local-log line is anchored on the ledger before it is written. If a
 commit fails after its anchor (disk error, crash, a ledger answer lost), or
 another instance ran on a copy of the data directory, the ledger holds

@@ -911,15 +911,38 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    with a cron schedule `*/10 * * * *` and the start command
 
    ```sh
-   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
+   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 http://legal.railway.internal:8420/health >/dev/null && curl -fsS --max-time 10 http://ledger.railway.internal:8090/health >/dev/null && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
    ```
+
+   Fix wave A (ADR 0025): finance, legal and compliance `/health` now answer **503** `"status":"degraded"` (with
+   `degraded_reasons`) while they cannot write — ledger unreachable, a ledger write failing or not yet reconciled,
+   reconcile required — and `"starting"` / `"refused"` while the start-up hold waits for the ledger or refuses a
+   diverged log. The ledger's `/health` is 503 when its last append failed or its disk is below
+   `LEDGER_MIN_FREE_BYTES`. `curl -f` fails on every 503, so each of these stops the pings. The services also log one
+   JSON line per event (`{"alert":"ledger_unreachable"|"ledger_write_pending"|"crash_recovered"|"log_divergence"|
+   "startup_waiting_for_ledger"|"register_row_invalidated",…}`, logger `zbm.alert`): a Railway log alert on
+   `"alert":` catches them.
 
    and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance and finance over the private network
    (`/health` needs no token) and pings the monitor only while compliance's `/health` answers 200 **and** finance has
    no payment held by Compliance (`compliance_holds_open` is 0). A 503, a dead or unreachable service, an open hold, or
    the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
    things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
-3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
+3. **Daily external anchor of the evidence ledger (fix wave A, RTM-07).** A second cron service from the same image,
+   schedule `17 9 * * *`, with a Sealed `LEDGER_ANCHOR_TOKEN` (a READ caller in `LEDGER_CALLERS` that reads nothing:
+   `{"caller":"anchor","scope":"read","departments":["anchor"]}`) and a Sealed `ANCHOR_SINK_URL` (a second heartbeat
+   monitor that keeps each ping's body, e.g. a Healthchecks.io check, whose ping log is outside this system):
+
+   ```sh
+   sh -c 'curl -fsS --max-time 20 -H "Authorization: Bearer $LEDGER_ANCHOR_TOKEN" http://ledger.railway.internal:8090/ledger/anchor | curl -fsS --max-time 20 --data-binary @- "$ANCHOR_SINK_URL" >/dev/null'
+   ```
+
+   Each body is `{"anchor":"<entries>:<head_hash>","at":…,"signature":…}`. Once a week copy the latest `anchor` into
+   your own records (the monitor's log is the backup copy). When the ledger is redeployed, set
+   `LEDGER_ANCHORED_HEAD` to the latest stored `anchor`: the ledger then refuses to start on a log that was rolled back
+   or rewritten since (services/ledger-rust/README.md, "External anchor"). Set `LEDGER_HEAD_SIGNING_KEY`
+   (`openssl rand -hex 32`, kept by you too) to have every stored anchor signed.
+4. These services are not in `.railway/railway.ts`; add them there in a later change (the plan must then show it as already
    existing, not created twice), or leave it as the one hand-made service and note it in your Railway checklist.
 
 Until it exists, and as a fallback when it does: **every day**, through the tunnels, check compliance's `/health` and

@@ -185,7 +185,9 @@ behaviour that could refuse an existing client is opt-in.
 - F-1: one server per log (`<log>.lock`); a second refuses to start.
 - F-6: head checkpoint `<log>.head` after every append; a deleted, truncated or replaced log refuses to start
   unless `LEDGER_ALLOW_RESET=<the value the refusal prints>` (logged; since Oct 7 2026 bound to that exact state,
-  ADR 0003 section 13). `GET /ledger/head`. A signed, external head is future work.
+  ADR 0003 section 13). `GET /ledger/head`. Fix wave A (RTM-07, ADR 0025): `GET /ledger/anchor` (HMAC-signed with
+  `LEDGER_HEAD_SIGNING_KEY`) is stored daily off-system by the heartbeat monitor; `LEDGER_ANCHORED_HEAD` refuses a
+  ledger behind or off the last stored anchor.
 - F-13: a blank line, or an unterminated final line that is a complete entry, refuses to start (only a genuinely
   torn line is still moved aside).
 - F-7: `Idempotency-Key: <finding_id>` on `POST /ledger/append` makes it idempotent (201/200/409); opt-in.

@@ -621,6 +621,8 @@ jobs:
   # secret file only as root) and the ledger on a root-owned volume with RAILWAY_RUN_UID=0
   # (devtools/railway_smoke.py). Same shape as delivery-docker-live: Linux only (no Docker on the macOS runners).
   # The Go and Rust build stages are pinned by exact tag only (no digest yet; docs/deploy/railway.md "Open items").
+  # Fix wave A (RTA-6): hygiene-static's devtools/check_docker_pins.py fails until they are pinned by digest; the step
+  # "The base images actually used" below prints the digests to paste in.
   # ---------------------------------------------------------------------------------------------------------------
   railway-images:
     name: railway-images
@@ -702,6 +704,17 @@ jobs:
           grep -v '@ git+' "$RUNNER_TEMP/dlv-lock.txt" > "$RUNNER_TEMP/dlv-registry.txt"
           echo "excluded (git-sourced):"; grep '@ git+' "$RUNNER_TEMP/dlv-lock.txt" || true
           pip-audit -r "$RUNNER_TEMP/dlv-registry.txt" --no-deps --disable-pip --strict --progress-spinner off
+      - name: OSV review of delivery-py's git-pinned deer-flow commit (red team RTA-8; pip-audit cannot)
+        shell: bash
+        run: |
+          set +e
+          {
+            python -B -m unittest devtools/test_osv_git_audit.py -v && \
+              python3 devtools/osv_git_audit.py services/delivery-py/pyproject.toml
+          } 2>&1 | tee "$RUNNER_TEMP/osv-git.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/osv-git.log" --code "$code" --suite "audit:osv-git"
+          exit "$code"
 
   audit-rust:
     name: audit-rust (cargo audit)
@@ -903,6 +916,17 @@ jobs:
           code=${PIPESTATUS[0]}
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-ci-annotate.log" --code "$code" \
             --suite "devtools:test_ci_annotate"
+          exit "$code"
+      - name: Every Dockerfile FROM is pinned by digest (red team RTA-6; devtools/check_docker_pins.py)
+        shell: bash
+        run: |
+          set +e
+          {
+            python -B -m unittest devtools/test_check_docker_pins.py -v && python3 devtools/check_docker_pins.py --resolve
+          } 2>&1 | tee "$RUNNER_TEMP/docker-pins.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/docker-pins.log" --code "$code" \
+            --suite "devtools:check_docker_pins"
           exit "$code"
       - name: Static rules L1-L4
         shell: bash
