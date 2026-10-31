@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal, Optional, Union
 
+from clickwrap_page import has_invisible
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 ID_PATTERN = r"^[A-Za-z0-9._:-]{1,128}$"
@@ -198,8 +199,18 @@ CLIENT_DOC_IDS = ("client_msa", "sow", "sow_seo_audit", "sow_revenue_recovery")
 SOW_DOC_IDS = ("sow", "sow_seo_audit", "sow_revenue_recovery")
 Email = Annotated[str, StringConstraints(min_length=3, max_length=254,
                                          pattern=r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})+$")]
+def _visible(v: str) -> str:
+    """AEGIS L-1: no bidi control, zero-width or other invisible/control character (Unicode Cc/Cf/Cs/Zl/Zp, after
+    NFKC): a typed name must read as it is stored."""
+    if has_invisible(v):
+        raise ValueError("invisible or control characters are not allowed")
+    return v
+
+
 Person = Annotated[str, StringConstraints(min_length=1, max_length=120, strip_whitespace=True),
-                   AfterValidator(_printable)]
+                   AfterValidator(_printable), AfterValidator(_visible)]
+Company = Annotated[str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True),
+                    AfterValidator(_printable), AfterValidator(_visible)]
 Token = Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]{1,200}$")]
 
 
@@ -261,7 +272,13 @@ class PortalDocument(Strict):
 class PortalSignatory(Strict):
     full_name: Person
     title: Person
-    company: Short
+    company: Company
+
+
+class PortalReceipt(Strict):
+    """AEGIS M-2: the receipt of the submission that used a link (a retry after a lost response or a refresh)."""
+    token: Token
+    request_id: Id
 
 
 class PortalAcceptanceCreate(Strict):

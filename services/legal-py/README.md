@@ -62,7 +62,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `POST /legal/v1/acceptances`; `GET /legal/v1/acceptances/{id}` | hub, clipper_network, onboarding (never a `client:*` party, for any caller: ADR 0028); readers | clickwrap evidence |
 | `GET /legal/v1/replay-quarantine`; `POST /legal/v1/replay-quarantine/acknowledgements` | Andre only | log lines a replay did not apply (a write whose caller was told it failed, AEGIS r11 R11-6); acknowledging them returns `/health` to ok |
 | `POST /legal/v1/client-acceptance-invitations`; `GET .../{id}`; `GET .../{id}/evidence`; `POST .../{id}/revoke` | Andre | ADR 0028: a client acceptance link for one client and these document versions (the token is in this answer only); its status; the signatory, page text and HMACs of a used link; revoke before use |
-| `POST /legal/v1/portal/invitations/resolve`; `POST /legal/v1/portal/acceptances` | client_portal | ADR 0028: the page's documents for a token (every unusable token: the same 404); record the client's acceptance (the only way a client's acceptance is recorded) |
+| `POST /legal/v1/portal/invitations/resolve`; `POST /legal/v1/portal/acceptances`; `POST /legal/v1/portal/receipts` | client_portal (503 while its token is not set) | ADR 0028: the page Legal renders for a token (every unusable token: the same 404); record the client's acceptance (the only way a client's acceptance is recorded); the receipt of the submission that used a link (same token and request id; else 404) |
 | `POST /legal/v1/envelopes`; `POST /legal/v1/esign/events` | Andre; esign_gateway | envelopes (provider not wired) |
 | `POST /legal/v1/playbooks/proposals`, `/decisions`; `GET /legal/v1/playbooks/{doc_type}` | Andre; any | playbooks |
 | `POST /legal/v1/playbooks/{doc_type}/reviews` | onboarding, scheduler, Andre | deviation classes |
@@ -173,6 +173,22 @@ recorded by the page never counts as evidence. Andre's steps: `docs/runbooks/cli
   acceptance ids. `POST .../revoke` before use; an accepted link cannot be revoked.
 - **ZBM's facts.** Template variables named `zbm_*` are ZBM's own entity facts, filled from `LEGAL_ZBM_FACTS` at
   fill time.
+- **AEGIS r1 fixes (aegis-client-acceptance.md).**
+  - M-1: an empty or unresolved `client_portal` entry in `LEGAL_CALLER_TOKENS` is skipped with a start-up warning
+    (the first deploy sets that token after Legal restarts); the portal routes answer 503 until it is set. Every other
+    caller entry, and a set but short `client_portal` value, still refuses the start.
+  - M-2: `POST /legal/v1/portal/receipts` `{"token", "request_id"}` answers the receipt (documents, display,
+    acceptances) only to the submission that used the link; the portal shows it on a retry or a refresh.
+  - M-5: Legal renders the page itself (`src/clickwrap_page.py`: clickwrap text v1 Parts B/C as blocks;
+    `resolve` returns `blocks` and `page_sha256`) and refuses a submission whose page text is not that text
+    (`PRESENTED_TEXT_MISMATCH`) or whose company is not the client's legal name (`COMPANY_MISMATCH`). An MSA-only
+    link, or a SOW alone for a client with no counted MSA acceptance, has no page and cannot be accepted.
+  - L-1: the typed signatory refuses bidi, zero-width and other invisible or control characters (after NFKC).
+  - L-2(e): a SOW's `msa_version` value must be the MSA of the same link, or (a SOW alone) the MSA version the
+    client accepted (`MSA_VERSION_MISMATCH`).
+  - L-3: approving a newer fill of a client document revokes that client's open links to other versions of it
+    (`reason: newer_fill_approved`).
+  - L-4: `POST /legal/v1/acceptance-invitations` refuses a `client:*` party.
 
 ## Data directory and the local log (bug sweep E)
 

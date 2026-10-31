@@ -118,11 +118,11 @@ def test_every_other_document_keeps_its_existing_gate(hr, doc_id):
 def test_cq19_founder_determination_makes_a_client_clickwrap_sufficient(hr):
     v = client_msa(hr)
     # before: no acceptance link is issued at all while a clickwrap acceptance would be insufficient (ADR 0028)
-    r1 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=409)
+    r1 = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT, code=409)
     assert "EVIDENCE_INSUFFICIENT" in [x["code"] for x in r1["reasons"]]
     out = determine_cq19(hr)
     assert out["founder_determination"]["status"] == "active" and out["founder_determination"]["renew_by"]
-    a2 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a2 = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     assert a2["evidence_sufficient"] is True and a2["evidence_basis"] == "founder_determination"
     row = hr.ok(hr.get("/legal/v1/register/CQ-19"))
     assert row["status"] == "unverified" and row["memo_ids"] == []                  # the row itself is untouched
@@ -151,20 +151,20 @@ def test_only_cq19_takes_a_founder_determination(hr):
 def test_acceptance_still_needs_the_exact_hash_version_affirmative_act_and_its_own_instance(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    r = hr.clickwrap("client_msa", "1.0", "a" * 64, party=CLIENT, caller="onboarding", code=409)
+    r = hr.client_page_accept("client_msa", "1.0", "a" * 64, party=CLIENT, code=409)
     assert "ACCEPTANCE_HASH_MISMATCH" in [x["code"] for x in r["reasons"]]
-    r = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=409,
+    r = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT, code=409,
                      presented_sha256="b" * 64)
     assert "PRESENTED_TEXT_MISMATCH" in [x["code"] for x in r["reasons"]]
-    r = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=409,
+    r = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT, code=409,
                      affirmative_act=False)
     assert "AFFIRMATIVE_ACT_MISSING" in [x["code"] for x in r["reasons"]]
     d = hr.upload("client_msa", "ZBM client MSA v1.1 draft", "1.1", "zbm")             # not approved
-    r = hr.clickwrap("client_msa", "1.1", d["sha256"], party=CLIENT, caller="onboarding", code=409)
+    r = hr.client_page_accept("client_msa", "1.1", d["sha256"], party=CLIENT, code=409)
     assert "VERSION_NOT_IN_FORCE" in [x["code"] for x in r["reasons"]]
     p = hr.upload("client_msa", "ZBM client MSA for client 2", "1.2", "zbm", party_ref="client:zbm-client-2")
     founder_approve(hr, "client_msa", "1.2", p["sha256"])
-    r = hr.clickwrap("client_msa", "1.2", p["sha256"], party=CLIENT, caller="onboarding", code=409)
+    r = hr.client_page_accept("client_msa", "1.2", p["sha256"], party=CLIENT, code=409)
     assert "INSTANCE_NOT_BOUND" in [x["code"] for x in r["reasons"]]
 
 
@@ -174,7 +174,7 @@ def test_compliance_invalidating_cq19_also_ends_the_founder_determination(hr):
     hr.ok(hr.post("/legal/v1/register/CQ-19/invalidate", {"request_id": rid(), "source_ref": "urn:x:1",
                                                           "detected_change_sha256": "c" * 64}, caller="compliance_38"))
     assert hr.ok(hr.get("/legal/v1/register/CQ-19"))["founder_determination"]["status"] == "invalidated"
-    r = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=409)
+    r = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT, code=409)
     assert "EVIDENCE_INSUFFICIENT" in [x["code"] for x in r["reasons"]]             # ADR 0028: no link is issued
 
 
@@ -217,7 +217,7 @@ def test_the_memo_signoff_path_still_works(he):
     assert view["status"] == "approved" and "approval_basis" not in view
     assert view["review_label"] != "founder_approval"
     he.verify_cq("CQ-19")
-    a = he.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a = he.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     assert a["evidence_sufficient"] is True and a["evidence_basis"] == "memo"
 
 
@@ -281,7 +281,7 @@ def test_andre_can_close_the_path_by_marking_lg20_unverified(hr):
         {"proposal_id": p["proposal"]["proposal_id"], "content_sha256": p["proposal"]["content_sha256"],
          "decision": "approve"}]}))
     # AEGIS M2: closing LG-20 also takes the founder-approved version out of force, so no new acceptance is recorded
-    r = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=409)
+    r = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT, code=409)
     assert "VERSION_NOT_IN_FORCE" in [x["code"] for x in r["reasons"]]
     assert hr.ok(hr.get("/legal/v1/register/CQ-19"))["founder_determination"]["status"] == "lg20_not_in_force"
     w = hr.upload("client_msa", "ZBM client MSA v1.1", "1.1", "zbm")
@@ -304,7 +304,7 @@ def test_a_restart_replays_the_founder_records(tmp_path):
     y = Harness(data_dir=str(tmp_path), ledger=x.ledger, clock=x.clock)
     view = y.ok(y.get("/legal/v1/documents/client_msa/versions/1.0"))
     assert view["approval_basis"] == "founder_approval"
-    a = y.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a = y.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     assert a["evidence_basis"] == "founder_determination"
 
 
@@ -337,17 +337,17 @@ def test_both_sow_templates_are_live_at_once_and_each_client_fill_is_founder_app
         assert f["version"] == "1.1" and f["status"] == "draft"
         assert f["review_label"] == f"founder_template:{doc_id}@1.0"
         # a fill is not acceptable until Andre approves THAT client's values (lightweight founder approval per fill)
-        r = hr.clickwrap(doc_id, "1.1", f["sha256"], party=CLIENT, caller="onboarding", code=409)
+        r = hr.client_page_accept(doc_id, "1.1", f["sha256"], party=CLIENT, code=409)
         assert "VERSION_NOT_IN_FORCE" in [x["code"] for x in r["reasons"]]
         founder_approve(hr, doc_id, "1.1", f["sha256"], rationale="Acme LLC SOW at 1500.00 per the approved template.")
-        a = hr.clickwrap(doc_id, "1.1", f["sha256"], party=CLIENT, caller="onboarding")
+        a = hr.client_page_accept(doc_id, "1.1", f["sha256"], party=CLIENT)
         assert a["evidence_sufficient"] is True and a["evidence_basis"] == "founder_determination"
         # the template itself is still the live one for the next client, and never acceptable
         assert hr.svc._template(doc_id)["version"] == "1.0"
-        r = hr.clickwrap(doc_id, "1.0", hr.svc._template(doc_id)["sha256"], party=CLIENT, caller="onboarding", code=409)
+        r = hr.client_page_accept(doc_id, "1.0", hr.svc._template(doc_id)["sha256"], party=CLIENT, code=409)
         assert "TEMPLATE_NOT_ACCEPTABLE" in [x["code"] for x in r["reasons"]]
         # another client cannot accept Acme's fill
-        r = hr.clickwrap(doc_id, "1.1", f["sha256"], party="client:other-1", caller="onboarding", code=409)
+        r = hr.client_page_accept(doc_id, "1.1", f["sha256"], party="client:other-1", code=409)
         assert "INSTANCE_NOT_BOUND" in [x["code"] for x in r["reasons"]]
 
 
@@ -382,7 +382,7 @@ def test_ordinary_brackets_are_not_placeholders(hr):
 def test_andre_renews_a_founder_approved_version_and_live_acceptances_stay_valid(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    a = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     first = hr.ok(hr.get("/legal/v1/documents/client_msa/versions/1.0"))["review_by"]
     hr.clock.advance(days=hr.svc.cfg.memo_review_days - 5)
     out = founder_approve(hr, "client_msa", "1.0", v["sha256"], rationale="Re-reviewed the MSA; terms unchanged.")
@@ -468,7 +468,7 @@ def _close_lg20(h):
 def test_m2_closing_lg20_stops_existing_founder_versions_and_acceptances_counting(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    a = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     assert hr.ok(hr.get(f"/legal/v1/acceptances/{a['acceptance_id']}", caller="finance_31"))["evidence_sufficient"]
     _close_lg20(hr)
     view = hr.ok(hr.get("/legal/v1/documents/client_msa/versions/1.0", caller="finance_31"))
@@ -481,7 +481,7 @@ def test_m2_closing_lg20_stops_existing_founder_versions_and_acceptances_countin
 def test_m2_invalidating_cq19_stops_existing_founder_acceptances_counting(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    a = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     hr.ok(hr.post("/legal/v1/register/CQ-19/invalidate", {"request_id": rid(), "source_ref": "urn:x:2",
                                                           "detected_change_sha256": "d" * 64}, caller="compliance_38"))
     acc = hr.ok(hr.get(f"/legal/v1/acceptances/{a['acceptance_id']}", caller="finance_31"))
@@ -493,7 +493,7 @@ def test_m2_invalidating_cq19_stops_existing_founder_acceptances_counting(hr):
 def test_m2_an_expired_determination_does_not_cut_off_recorded_acceptances(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    a = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     hr.clock.advance(days=hr.svc.cfg.memo_review_days + 1)
     acc = hr.ok(hr.get(f"/legal/v1/acceptances/{a['acceptance_id']}", caller="finance_31"))
     assert acc["evidence_sufficient"] is True and acc["basis_in_force"] is True
@@ -563,7 +563,7 @@ def test_l3_the_determination_covers_only_the_documents_it_recorded(hr):
     founder_approve(hr, "dpa", "1.0", v["sha256"])
     # ADR 0028: the client acceptance page serves only the client contracts (no link for a DPA), and no other route
     # records a client's acceptance
-    hr.clickwrap("dpa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=422)
+    hr.client_page_accept("dpa", "1.0", v["sha256"], party=CLIENT, code=422)
     r = hr.clickwrap("dpa", "1.0", v["sha256"], party=CLIENT, caller="hub", code=409)
     assert r["detail"] == "ACCEPTANCE_NOT_INVITED"
     assert hr.svc._clickwrap_basis("dpa") is None                                  # and its evidence would not count
@@ -639,14 +639,14 @@ def test_n1_a_paragraph_break_ends_a_bracket(hr):
 def test_n5_a_new_determination_does_not_revive_acceptances_recorded_under_an_invalidated_one(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    a1 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a1 = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     hr.ok(hr.post("/legal/v1/register/CQ-19/invalidate", {"request_id": rid(), "source_ref": "urn:x:3",
                                                           "detected_change_sha256": "e" * 64}, caller="compliance_38"))
     hr.clock.advance(days=1)
     determine_cq19(hr)
     acc1 = hr.ok(hr.get(f"/legal/v1/acceptances/{a1['acceptance_id']}", caller="finance_31"))
     assert acc1["evidence_sufficient"] is False and acc1["basis_in_force"] is False
-    a2 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a2 = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     acc2 = hr.ok(hr.get(f"/legal/v1/acceptances/{a2['acceptance_id']}", caller="finance_31"))
     assert acc2["evidence_sufficient"] is True and acc2["basis_in_force"] is True
 
@@ -654,7 +654,7 @@ def test_n5_a_new_determination_does_not_revive_acceptances_recorded_under_an_in
 def test_n5_a_renewed_determination_keeps_covering_what_it_covered(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    a1 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a1 = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     hr.clock.advance(days=hr.svc.cfg.memo_review_days + 1)
     determine_cq19(hr)                               # Andre renews an expired (never invalidated) determination
     acc1 = hr.ok(hr.get(f"/legal/v1/acceptances/{a1['acceptance_id']}", caller="finance_31"))
@@ -671,9 +671,9 @@ def test_n7_retiring_a_template_stops_new_acceptances_and_renewals_of_its_fills(
     t = sow_template(hr, "sow_seo_audit", "SEO audit")
     f = andre_fill(hr, "sow_seo_audit", CLIENT)
     founder_approve(hr, "sow_seo_audit", f["version"], f["sha256"], rationale="Acme LLC at 1500.00 on the template.")
-    a = hr.clickwrap("sow_seo_audit", f["version"], f["sha256"], party=CLIENT, caller="onboarding")
+    a = hr.client_page_accept("sow_seo_audit", f["version"], f["sha256"], party=CLIENT)
     _retire(hr, "sow_seo_audit", "1.0", t["sha256"])
-    r = hr.clickwrap("sow_seo_audit", f["version"], f["sha256"], party=CLIENT, caller="onboarding", code=409)
+    r = hr.client_page_accept("sow_seo_audit", f["version"], f["sha256"], party=CLIENT, code=409)
     assert "TEMPLATE_NOT_IN_FORCE" in [x["code"] for x in r["reasons"]]
     r = founder_approve(hr, "sow_seo_audit", f["version"], f["sha256"], code=409,
                         rationale="Renewing the Acme fill for another period.")
@@ -688,7 +688,7 @@ def test_n7_retiring_a_template_stops_new_acceptances_and_renewals_of_its_fills(
 def test_n8_closing_lg20_unsigns_stored_contract_terms(hr):
     v = client_msa(hr)
     determine_cq19(hr)
-    a = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
+    a = hr.client_page_accept("client_msa", "1.0", v["sha256"], party=CLIENT)
     ex = {"doc_id": "client_msa", "version": "1.0", "doc_sha256": v["sha256"], "acceptance_id": a["acceptance_id"]}
     path = "/legal/v1/contracts/zbm-client-1/terms"
     hr.ok(hr.put(path, {"request_id": rid(), "terms": terms("zbm-client-1", ccpa=False), "executed": ex},

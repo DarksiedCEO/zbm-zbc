@@ -36,6 +36,7 @@ from decimal import Decimal
 from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
+import clickwrap_page as CP
 import reasons as R
 import rules as RU
 from advice import AdviceGuard
@@ -1644,8 +1645,24 @@ class LegalService:
                    "rationale_sha256": rsha, "rule_id": "LG-20"},
                   f"Andre {'renewed' if renewal else 'approved'} {doc_id} {version} as founder")
             op.update("doc_versions", v["key"], fields)
+            if not renewal and v.get("party_ref") and v.get("template_ref") and doc_id in CLIENT_PAGE_DOCS:
+                self._revoke_older_fill_links(op, v["party_ref"], doc_id, version, now)
             return self._answer(op, key, h, {"doc_id": doc_id, "version": version, **fields,
                                              "review_label": self._review_label({**v, **fields})})
+
+    def _revoke_older_fill_links(self, op: "Op", party: str, doc_id: str, version: str, now) -> None:
+        """AEGIS L-3: Andre approved a newer fill of ``doc_id`` for ``party``: that client's open links to another
+        version of the document are revoked (in the same operation), so the client can no longer accept the older
+        terms."""
+        for inv in self.client_invitations.values():
+            if inv["party_ref"] != party or self._client_invitation_status(inv) != "open":
+                continue
+            if any(d["doc_id"] == doc_id and d["version"] != version for d in inv["documents"]):
+                op.ev("cin", "client_acceptance_link_revoked", party,
+                      {"invitation_id": inv["invitation_id"], "reason": "newer_fill_approved", "doc_id": doc_id,
+                       "version": version}, "Client acceptance link revoked: a newer fill was approved", actor="andre")
+                op.update("client_invitations", inv["invitation_id"], {"revoked_at": iso(now),
+                                                                       "revoked_reason": "newer_fill_approved"})
 
     # ================================================================== acceptances (§B.2, §C.3)
 
@@ -1778,6 +1795,12 @@ class LegalService:
             key, h, ent = self._idem("andre", request_id, "acceptance-invitations", body)
             if ent:
                 return ent["response"]
+            if str(body["party_ref"]).startswith("client:"):
+                # AEGIS L-4 (ADR 0028): a client accepts only on the client acceptance page; its link is
+                # POST /legal/v1/client-acceptance-invitations
+                raise Refused("ACCEPTANCE_NOT_INVITED", reasons=[R.item(
+                    "ACCEPTANCE_NOT_INVITED", "a client's acceptance link is a client acceptance invitation "
+                    "(the client acceptance page), not this one")], recorded=False)
             v = self.doc_versions.get(f"{body['doc_id']}@{body['version']}")
             if v is None or not self._in_force(v):
                 raise Conflict(f"no approved, in-force {body['doc_id']} version {body['version']}")
@@ -1848,6 +1871,39 @@ class LegalService:
         out = []
         for d in inv["documents"]:
             out += self._client_doc_reasons(inv["party_ref"], d)
+        return out or self._msa_version_reasons(inv["party_ref"], inv["documents"])
+
+    def _fill_variable(self, v: dict, name: str) -> Optional[str]:
+        if not v.get("variables_sha256"):
+            return None
+        data = self.blobs.get(v["variables_sha256"])
+        try:
+            val = json.loads(data).get(name) if data is not None else None
+        except ValueError:
+            return None
+        return val if isinstance(val, str) else None
+
+    def _msa_version_reasons(self, party: str, docs: list[dict]) -> list[dict]:
+        """AEGIS L-2(e), clickwrap text Part C: a SOW names the MSA version it is made under (its ``msa_version``
+        value). It must be the MSA in the same link, or (a SOW alone) the MSA version the client has accepted. A SOW
+        whose template has no ``msa_version`` names none and is not checked."""
+        msa = next((d for d in docs if d["doc_id"] == "client_msa"), None)
+        out = []
+        for d in docs:
+            if d["doc_id"] not in SOW_DOCS:
+                continue
+            v = self.doc_versions.get(f"{d['doc_id']}@{d['version']}")
+            cited = self._fill_variable(v, "msa_version") if v else None
+            if cited is None:
+                continue
+            if msa is not None:
+                want = msa["version"]
+            else:
+                acc = self._msa_acceptance(party)
+                want = acc["version"] if acc else None
+            if cited != want:
+                out.append(R.item("MSA_VERSION_MISMATCH", f"{d['doc_id']} {d['version']} is made under MSA version "
+                                  f"{cited}, which is not {'the MSA of this link' if msa else 'the MSA the client accepted'}"))
         return out
 
     def _msa_acceptance(self, party: str) -> Optional[dict]:
@@ -1894,6 +1950,7 @@ class LegalService:
             reasons = []
             for d in docs:
                 reasons += self._client_doc_reasons(party, d)
+            reasons = reasons or self._msa_version_reasons(party, docs)
             if reasons:
                 self._refuse("client_acceptance_link_refused", party, reasons, op_id=request_id)
             now = self._now()
@@ -1965,7 +2022,8 @@ class LegalService:
                 return self._client_invitation_view(inv)
             now = self._now()
             op = Op(self, f"cinr|{invitation_id}", "andre", inv["party_ref"])
-            op.ev("cin", "client_acceptance_link_revoked", inv["party_ref"], {"invitation_id": invitation_id},
+            op.ev("cin", "client_acceptance_link_revoked", inv["party_ref"],
+                  {"invitation_id": invitation_id, "reason": "andre"},
                   "Client acceptance link revoked", actor="andre")
             op.update("client_invitations", invitation_id, {"revoked_at": iso(now)})
             return self._answer(op, key, h, self._client_invitation_view({**inv, "revoked_at": iso(now)}))
@@ -1979,23 +2037,56 @@ class LegalService:
             raise NotFound("not found")
         return inv
 
+    def _link_documents(self, inv: dict) -> tuple[dict, list[dict]]:
+        """The link's display block and its documents (the MSA first) with their exact registered text and label."""
+        disp = self.blobs.get(inv["display_sha256"])
+        if disp is None:
+            raise NotFound("not found")
+        display = json.loads(disp)
+        docs = []
+        for d in sorted(inv["documents"], key=lambda x: x["doc_id"] != "client_msa"):
+            v = self.doc_versions[f"{d['doc_id']}@{d['version']}"]
+            data = self.blobs.get(v["sha256"])
+            if data is None or sha_bytes(data) != d["doc_sha256"]:
+                raise NotFound("not found")
+            docs.append({**d, "title": self.documents[d["doc_id"]]["title"],
+                         "label": CP.doc_label(d["doc_id"], display), "text": data.decode("utf-8")})
+        return display, docs
+
+    def _page(self, inv: dict) -> tuple[dict, list[dict], Optional[dict], list[dict]]:
+        """AEGIS M-5: the page Legal renders for this link now (clickwrap text v1, Part B or C)."""
+        display, docs = self._link_documents(inv)
+        msa_acc = self._msa_acceptance(inv["party_ref"])
+        bl = []
+        if inv["page"] == "first_engagement" or (inv["page"] == "new_sow" and msa_acc):
+            bl = CP.blocks(inv["page"], display, docs, msa_acc, self.cfg.business_tz)
+        return display, docs, msa_acc, bl
+
     def portal_resolve(self, token: str) -> dict:
-        """ADR 0028 (caller client_portal): the documents' exact registered text for the acceptance page."""
+        """ADR 0028 (caller client_portal): the page Legal renders for the link (blocks and the hash of their text) and
+        the documents' exact registered text. A page Legal does not render (an MSA-only link, a SOW alone for a client
+        with no counted MSA acceptance) has no blocks; the portal answers its 404."""
         with self.lock:
             inv = self._usable_client_invitation(token)
-            docs = []
-            for d in inv["documents"]:
-                v = self.doc_versions[f"{d['doc_id']}@{d['version']}"]
-                data = self.blobs.get(v["sha256"])
-                if data is None or sha_bytes(data) != d["doc_sha256"]:
-                    raise NotFound("not found")
-                docs.append({**d, "title": self.documents[d["doc_id"]]["title"], "text": data.decode("utf-8")})
-            disp = self.blobs.get(inv["display_sha256"])
-            if disp is None:
-                raise NotFound("not found")
+            display, docs, msa_acc, bl = self._page(inv)
             return {"invitation_id": inv["invitation_id"], "page": inv["page"], "expires_at": inv["expires_at"],
-                    "display": json.loads(disp), "documents": docs,
-                    "msa_acceptance": self._msa_acceptance(inv["party_ref"])}
+                    "display": display, "documents": docs, "msa_acceptance": msa_acc, "blocks": bl,
+                    "page_sha256": hashlib.sha256(CP.page_text(bl).encode("utf-8")).hexdigest() if bl else None}
+
+    def portal_receipt(self, token: str, request_id: str) -> dict:
+        """AEGIS M-2 (caller client_portal): the receipt of the submission that used this link, for a retry after a
+        lost response or a refresh. Only for the same token AND the same request id (the portal derives it from the
+        submission); anything else is the one 404."""
+        with self.lock:
+            inv = self._client_invitation_by_token(token)
+            if inv is None or not inv.get("used_at") or inv.get("used_request_sha256") is None \
+                    or not hmac.compare_digest(inv["used_request_sha256"], sha(request_id)):
+                raise NotFound("not found")
+            display, docs = self._link_documents(inv)
+            accs = [self.acceptances[a] for a in inv["acceptance_ids"] if a in self.acceptances]
+            return {"invitation_id": inv["invitation_id"], "page": inv["page"], "accepted_at": inv["used_at"],
+                    "display": display, "documents": docs,
+                    "acceptances": [self.acceptance_view(a) for a in accs]}
 
     def portal_accept(self, request_id: str, body: dict) -> dict:
         """ADR 0028 (caller client_portal): the client accepted every document of the link on the acceptance page. One
@@ -2024,6 +2115,15 @@ class LegalService:
             page = b64decode(body["page_text_b64"], "page_text_b64")
             if sha_bytes(page) != body["page_sha256"]:
                 reasons.append(R.item("ACCEPTANCE_HASH_MISMATCH", "page_text_b64 does not match page_sha256"))
+            # AEGIS M-5: the screen evidence must be the page Legal renders for this link now, and the company typed
+            # must be the client's legal name on the link (case, spaces and punctuation ignored)
+            display, _docs, _msa, bl = self._page(inv)
+            if not bl or not hmac.compare_digest(sha_bytes(CP.page_text(bl).encode("utf-8")), sha_bytes(page)):
+                reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the page text submitted is not the acceptance page "
+                                      "Legal renders for this link"))
+            if CP.norm_company(body["signatory"]["company"]) != CP.norm_company(display["client_legal_name"]):
+                reasons.append(R.item("COMPANY_MISMATCH", "the company typed is not the client's legal name on the "
+                                      "link"))
             if reasons:
                 self._refuse("acceptance_refused", party, reasons, op_id=request_id)
             now = self._now()

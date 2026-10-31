@@ -29,6 +29,7 @@ from datetime import timedelta
 import pytest
 
 import config as config_mod
+import clickwrap_page as CP
 from clock import iso
 from helpers import ANDRE_TOKEN, CALLERS, Harness, b64, rid, sha
 
@@ -87,10 +88,19 @@ def resolve(h, token, caller="client_portal"):
     return h.post("/legal/v1/portal/invitations/resolve", {"token": token}, caller=caller)
 
 
-def accept_body(token, docs, **over):
+def page_of(h, token) -> bytes:
+    """The page Legal renders for this link (AEGIS M-5), or a stand-in for a link that no longer resolves."""
+    r = resolve(h, token) if h is not None else None
+    if r is not None and r.status_code == 200 and r.json().get("blocks"):
+        return CP.page_text(r.json()["blocks"]).encode("utf-8")
+    return PAGE
+
+
+def accept_body(token, docs, h=None, **over):
+    page = page_of(h, token)
     body = {"request_id": rid("pacc"), "token": token,
             "documents": [{**d, "presented_sha256": d["doc_sha256"], "affirmative_act": True} for d in docs],
-            "presentation": "inline", "page_sha256": hashlib.sha256(PAGE).hexdigest(), "page_text_b64": b64(PAGE),
+            "presentation": "inline", "page_sha256": hashlib.sha256(page).hexdigest(), "page_text_b64": b64(page),
             "signatory": dict(SIGNATORY), "ip_hmac_sha256": HMAC_IP, "user_agent_hmac_sha256": HMAC_UA,
             "hmac_key_id": KEY_ID}
     body.update(over)
@@ -98,7 +108,7 @@ def accept_body(token, docs, **over):
 
 
 def accept(h, token, docs, caller="client_portal", **over):
-    return h.post("/legal/v1/portal/acceptances", accept_body(token, docs, **over), caller=caller)
+    return h.post("/legal/v1/portal/acceptances", accept_body(token, docs, h=h, **over), caller=caller)
 
 
 @pytest.fixture
@@ -281,6 +291,7 @@ def test_a_retired_or_superseded_msa_after_the_invitation_makes_the_link_dead(pa
 def test_the_portal_records_each_document_once_with_its_evidence(pair):
     hr, m, s, docs = pair
     out = invite(hr, docs)
+    page = page_of(hr, out["token"])
     r = hr.ok(accept(hr, out["token"], docs), 201)
     assert r["invitation_id"] == out["invitation_id"] and len(r["acceptances"]) == 2
     for a, d in zip(r["acceptances"], docs):
@@ -293,7 +304,7 @@ def test_the_portal_records_each_document_once_with_its_evidence(pair):
         assert fin["evidence_sufficient"] is True and fin["party_ref"] == CLIENT
     rec = hr.svc.acceptances[r["acceptances"][0]["acceptance_id"]]
     pe = rec["portal_evidence"]
-    assert pe["page_sha256"] == hashlib.sha256(PAGE).hexdigest() and hr.svc.blobs.get(pe["page_sha256"]) == PAGE
+    assert hr.svc.blobs.get(pe["page_sha256"]) == page and pe["page_sha256"] == hashlib.sha256(page).hexdigest()
     assert pe["ip_hmac_sha256"] == HMAC_IP and pe["user_agent_hmac_sha256"] == HMAC_UA and pe["hmac_key_id"] == KEY_ID
     sig = json.loads(hr.svc.blobs.get(pe["signatory_sha256"]))
     assert sig == SIGNATORY and rec["signer_identity_ref"] == f"sig:{pe['signatory_sha256'][:40]}"
@@ -313,12 +324,12 @@ def test_the_portal_records_each_document_once_with_its_evidence(pair):
 def test_a_retry_of_the_same_submission_answers_the_same_and_a_new_one_is_404(pair):
     hr, _, _, docs = pair
     tok = invite(hr, docs)["token"]
-    body = accept_body(tok, docs)
+    body = accept_body(tok, docs, h=hr)
     first = hr.ok(hr.post("/legal/v1/portal/acceptances", body, caller="client_portal"), 201)
     again = hr.ok(hr.post("/legal/v1/portal/acceptances", body, caller="client_portal"), 201)
     assert again["acceptances"] == first["acceptances"]
     assert len(hr.svc.acceptances) == 2
-    _not_found(hr.post("/legal/v1/portal/acceptances", accept_body(tok, docs), caller="client_portal"))
+    _not_found(hr.post("/legal/v1/portal/acceptances", accept_body(tok, docs, h=hr), caller="client_portal"))
     r = hr.post("/legal/v1/portal/acceptances", {**body, "signatory": {**SIGNATORY, "title": "CEO"}},
                 caller="client_portal")
     assert r.status_code == 409                                           # same request id, another body
@@ -328,7 +339,7 @@ def test_a_retry_of_the_same_submission_answers_the_same_and_a_new_one_is_404(pa
 def test_concurrent_submissions_consume_the_token_exactly_once(pair):
     hr, _, _, docs = pair
     tok = invite(hr, docs)["token"]
-    bodies = [accept_body(tok, docs, signatory={**SIGNATORY, "title": f"Title {i}"}) for i in range(8)]
+    bodies = [accept_body(tok, docs, h=hr, signatory={**SIGNATORY, "title": f"Title {i}"}) for i in range(8)]
     with concurrent.futures.ThreadPoolExecutor(8) as pool:
         codes = sorted(pool.map(lambda b: hr.post("/legal/v1/portal/acceptances", b,
                                                   caller="client_portal").status_code, bodies))
@@ -340,7 +351,7 @@ def test_concurrent_submissions_consume_the_token_exactly_once(pair):
 def test_a_tampered_submission_is_refused_and_does_not_use_up_the_link(pair, change):
     hr, m, s, docs = pair
     tok = invite(hr, docs)["token"]
-    body = accept_body(tok, docs)
+    body = accept_body(tok, docs, h=hr)
     d0 = body["documents"][0]
     if change == "hash":
         d0["doc_sha256"] = d0["presented_sha256"] = "b" * 64
@@ -538,11 +549,12 @@ def test_andre_reads_the_signatory_and_the_evidence_of_a_used_link(pair):
     out = invite(hr, docs)
     path = f"/legal/v1/client-acceptance-invitations/{out['invitation_id']}/evidence"
     assert hr.client.get(path, headers=hr.headers(andre=ANDRE_TOKEN)).status_code == 409     # not used yet
+    page = page_of(hr, out["token"])
     r = hr.ok(accept(hr, out["token"], docs), 201)
     ev = hr.ok(hr.client.get(path, headers=hr.headers(andre=ANDRE_TOKEN)))
     assert ev["signatory"] == SIGNATORY and ev["display"] == DISPLAY and ev["accepted_at"] == r["accepted_at"]
     assert [a["acceptance_id"] for a in ev["acceptances"]] == [a["acceptance_id"] for a in r["acceptances"]]
-    assert ev["page_sha256"] == hashlib.sha256(PAGE).hexdigest() and base64.b64decode(ev["page_text_b64"]) == PAGE
+    assert base64.b64decode(ev["page_text_b64"]) == page and ev["page_sha256"] == hashlib.sha256(page).hexdigest()
     assert (ev["ip_hmac_sha256"], ev["user_agent_hmac_sha256"], ev["hmac_key_id"]) == (HMAC_IP, HMAC_UA, KEY_ID)
     for who in ("onboarding", "client_portal", "finance_31", "compliance_38"):
         assert hr.get(path, caller=who).status_code == 403

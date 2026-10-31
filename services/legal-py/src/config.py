@@ -18,12 +18,13 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
-# Callers whose token is set on a service deployed in the same apply as Legal's new caller map (the pattern of the
-# client acceptance branch, ADR 0028 AEGIS M-1). An empty or unresolved entry for one of them is SKIPPED (no token
-# matches it; routes only it may call answer 503 and the start prints a warning) instead of refusing Legal's start. A
-# set value is checked like every other caller token. Every other caller stays strict. ``compliance_38`` joined the
-# deployed map on this branch (ADR 0024): on the first apply COMPLIANCE_LEGAL_CALLER_TOKEN does not exist yet.
-OPTIONAL_CALLERS = ("compliance_38",)
+# Callers whose token is set on a service deployed in the same apply as Legal's new caller map (ADR 0028 AEGIS M-1).
+# An empty or unresolved entry for one of them is SKIPPED (no token matches it; routes only it may call answer 503,
+# /health warns ``optional_caller_unset:<name>`` and the start prints a warning) instead of refusing Legal's start. A
+# set value is checked like every other caller token. Every other caller stays strict. ``compliance_38`` (ADR 0024):
+# on the first apply COMPLIANCE_LEGAL_CALLER_TOKEN does not exist yet; ``client_portal`` (ADR 0028): the same for
+# PORTAL_LEGAL_CALLER_TOKEN.
+OPTIONAL_CALLERS = ("compliance_38", "client_portal")
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
                 "finance_31", "hub", "esign_gateway", "scheduler", "client_portal")
 # ADR 0028: ZBM's own entity facts a client template names as ``{{zbm_*}}`` variables (legal entity name, entity type and

@@ -65,7 +65,7 @@ def executed_msa(x, client="acme", end_date="2027-09-30", with_ccpa=True, verify
                       "rationale": "Founder determination (ADR 0022): B2B clients accept by an unticked box."}))
     # ADR 0028: without CQ-19 no acceptance link is issued (the refusal is the answer); with it, the client accepts on
     # the client acceptance page
-    acc = x.clickwrap("client_msa", "1.1", fill["sha256"], party=f"client:{client}", caller="onboarding",
+    acc = x.client_page_accept("client_msa", "1.1", fill["sha256"], party=f"client:{client}",
                       code=201 if (verify_cq19 or founder_cq19) else 409)
     return fill, acc
 

@@ -76,6 +76,7 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/legal/v1/reconcile$"), 1024 * 1024),
     (re.compile(r"^/legal/v1/portal/acceptances$"), 4 * 1024 * 1024),     # ADR 0028: the page text as shown (base64)
     (re.compile(r"^/legal/v1/portal/invitations/resolve$"), 1024),
+    (re.compile(r"^/legal/v1/portal/receipts$"), 1024),
 ]
 DEFAULT_ROUTE_LIMIT = 256 * 1024
 
@@ -311,9 +312,22 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
 
     reader = caller(andre_ok=True, route="read")
 
+    def portal() -> Callable:
+        """ADR 0028: the client-portal caller. AEGIS M-1: while its token is not set (the first deploy), its routes
+        answer 503 and Legal keeps running."""
+        inner = caller("client_portal")
+
+        def dep(request: Request) -> str:
+            if "client_portal" not in settings.caller_tokens:
+                raise Unavailable("the client_portal caller token is not set in LEGAL_CALLER_TOKENS: the client "
+                                  "acceptance page is closed until it is")
+            return inner(request)
+        return dep
+
     if settings.callers_not_configured:
         log.warning("LEGAL_CALLER_TOKENS: %s not set; the routes only it may call answer 503 until it is "
-                    "(docs/deploy/railway.md, ADR 0024 step D)", ", ".join(settings.callers_not_configured))
+                    "(docs/deploy/railway.md: ADR 0024 step D for compliance_38, 'Client acceptance page' for "
+                    "client_portal)", ", ".join(settings.callers_not_configured))
 
     def body(model: type[BaseModel]) -> Callable:
         def parse(payload: Any = Body(default=None)) -> Any:
@@ -478,13 +492,18 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                                                                   req.model_dump()))
 
     @app.post("/legal/v1/portal/invitations/resolve", dependencies=auth)
-    def portal_resolve(_: str = Depends(caller("client_portal")),
+    def portal_resolve(_: str = Depends(portal()),
                        req: m.PortalResolve = Depends(body(m.PortalResolve))) -> dict:
         """The client-portal service's read of one acceptance link: every unusable token is the same 404."""
         return svc.portal_resolve(req.token)
 
+    @app.post("/legal/v1/portal/receipts", dependencies=auth)
+    def portal_receipt(_: str = Depends(portal()), req: m.PortalReceipt = Depends(body(m.PortalReceipt))) -> dict:
+        """AEGIS M-2: the receipt of the submission that used a link (same token, same request id); else 404."""
+        return svc.portal_receipt(req.token, req.request_id)
+
     @app.post("/legal/v1/portal/acceptances", dependencies=auth, status_code=201)
-    def portal_acceptance(_: str = Depends(caller("client_portal")),
+    def portal_acceptance(_: str = Depends(portal()),
                           req: m.PortalAcceptanceCreate = Depends(body(m.PortalAcceptanceCreate))) -> dict:
         """The ONLY way a client's acceptance is recorded (ADR 0028)."""
         return _echo(req.request_id, svc.portal_accept(req.request_id, req.model_dump()))
