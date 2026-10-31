@@ -698,7 +698,13 @@ class StripeMixin:
             booked = rid("rct", "stripe", p.payment_intent) in self.db["receipts"]
         if inv is None or booked:
             return None
-        act = self._activation(g, inv["client_id"])
+        return self._client_check(g, inv["client_id"])
+
+    def _client_check(self, g: Gather, client_id: str) -> Optional[tuple]:
+        """Compliance's CURRENT answer for a client, as a hold: None on a current ALLOW; otherwise
+        ("refused" | "unverified", reason, sanctions ground or None). Read outside the lock. Every path that books a
+        client's money uses it: Stripe, bank statement lines, Andre's application of a receipt (RTM-01)."""
+        act = self._activation(g, client_id)
         if not act.available:
             return ("unverified", "Compliance (38) could not confirm the client's activation when the payment was booked",
                     False)
@@ -761,6 +767,11 @@ class StripeMixin:
         the client receipt that was held back is prepared now (a refund issues none)."""
         cur = op.get("invoices", invoice_id)
         hold = cur["held_compliance"]
+        if basis == "compliance_allow" and cur.get("kind") == "campaign_deposit":
+            # RTM-01: a held campaign deposit funds its campaign only when the hold is released on a current ALLOW
+            prof = op.get("profiles", cur.get("campaign_id") or "")
+            if prof and prof["status"] == "approved":
+                op.put("profiles", cur["campaign_id"], {**prof, "status": "funded"})
         b = op.get("breaks", hold["break_id"])
         if b is not None and b["status"] != "resolved":
             op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolution": {"basis": basis, **detail},
