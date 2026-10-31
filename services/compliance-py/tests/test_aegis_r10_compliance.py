@@ -122,3 +122,16 @@ def test_a_missing_screening_reads_the_same_as_a_hit_to_onboarding():
         j = h.rule("client-web", "client", f).json()
         out.append(sorted((u["code"], u["obligation_id"], u["message"]) for u in j["unmet"]))
     assert out[0] == out[1], out
+
+
+def test_c4_the_expiry_warning_day_boundaries_are_inclusive():
+    """AEGIS r10 mutant c4: a rule expiring in exactly 30 / 14 / 7 days is in that window; one day more is not."""
+    from datetime import datetime, timezone
+    expires = datetime(2026, 12, 25, 12, 0, tzinfo=timezone.utc)                  # US-OFAC-04
+    for d in (30, 14, 7):
+        for extra, inside in ((0, True), (1, False)):
+            from datetime import timedelta
+            h = harness(at=expires - timedelta(days=d + extra))
+            w = h.get("/compliance/v1/readiness").json()["expiry_warnings"]
+            assert ("US-OFAC-04" in w[f"within_{d}_days"]) is inside, (d, extra, w[f"within_{d}_days"])
+            assert ("US-OFAC-04" in w["client_activation_rules"][f"within_{d}_days"]) is inside
