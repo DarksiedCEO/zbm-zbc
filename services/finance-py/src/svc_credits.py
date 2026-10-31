@@ -30,10 +30,11 @@ creates a refund asks Compliance first: a client refused on SANCTIONS grounds is
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
+import bizdays as _bizdays
 import money as M
 import reasons as R
 from clock import iso
@@ -49,14 +50,10 @@ PAID_RECEIPT = ("matched", "partially_refunded", "refunded")
 
 
 def add_business_days(day: date, n: int) -> date:
-    """``n`` business days after ``day`` (Monday to Friday; US bank holidays are NOT skipped, so the date is never
-    later than the contract's -- Andre may be a day early, never late)."""
-    d = day
-    while n > 0:
-        d += timedelta(days=1)
-        if d.weekday() < 5:
-            n -= 1
-    return d
+    """``n`` business days after ``day``: Monday to Friday, skipping US federal bank holidays on the Federal
+    Reserve's schedule (``bizdays``; MSA "a business day is a weekday that is not a United States federal holiday").
+    Used for every contract deadline Finance computes: refunds (10), acknowledgements (2), billing disputes (15)."""
+    return _bizdays.add_business_days(day, n)
 
 
 class CreditsMixin:

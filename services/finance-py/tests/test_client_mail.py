@@ -218,7 +218,7 @@ def test_credit_notes_and_acknowledgements_are_queued_with_the_booking_and_sent_
     cn_mail = [m for m in hr.f["client_mail"].delivered if m["kind"] == "credit_note"][0]
     assert out["credit_note"]["number"] in cn_mail["subject"] and "900.00" in cn_mail["text"]
     ack_mail = [m for m in hr.f["client_mail"].delivered if m["kind"] == "acknowledgement"][0]
-    assert "2026-10-22" in ack_mail["text"]                  # 15 business days to resolve (policy 8.3)
+    assert "2026-10-23" in ack_mail["text"]        # 15 business days (Columbus Day skipped) to resolve (policy 8.3)
     assert all(m["to"] == CONTACT for m in hr.f["client_mail"].delivered)
 
 

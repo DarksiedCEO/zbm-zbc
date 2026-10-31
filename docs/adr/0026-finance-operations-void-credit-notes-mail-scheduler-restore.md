@@ -28,8 +28,8 @@ The contracts promise things Finance could not do:
 2. **Credit notes** (`POST /fin/v1/invoices/{id}/credit-notes`, Andre only), partial or full, against an issued or paid
    invoice. F11c: Dr 4110/2110 for the amount; Cr 1100 for the part still owed on paper (A/R open on the invoice), Cr
    2050 Refunds payable for the part already paid. One debit, credits summing to it: always balanced. A credit owing a
-   refund opens a `credit_note_refund_due` break due 10 business days later (weekends skipped; US holidays not, so the
-   date is never later than the contract's). Fully credited: `void` when nothing was paid, `credited` when money was.
+   refund opens a `credit_note_refund_due` break due 10 business days later (weekends and US federal bank holidays
+   skipped, Federal Reserve schedule: ADR 0027 decision 6, fix wave C). Fully credited: `void` when nothing was paid, `credited` when money was.
    Limits: never more than the total left to credit; a refund never above the client's money ZBM still holds.
    Refused: ZBC deposits, media prepayments (their own cancel flow), drafts, Compliance holds, disputes, returns.
    A refund-owing credit note asks Compliance first; SANCTIONS or no answer refuses (31 CFR 501.603: blocked property is
@@ -84,7 +84,7 @@ The contracts promise things Finance could not do:
 - Existing reconcile callers that void money evidence must now acknowledge it.
 - Not done here: sales-tax lines on invoices (OPS-M2); a ZBM "apply an unapplied Stripe receipt" route (a re-imported
   payment whose page cannot be re-linked stays unapplied cash with a break); legal/seo cron entries; a log-based alert
-  sink (the ALERT lines are searchable, nothing pages Andre yet); US bank holidays in the 10-business-day count.
+  sink (done in ADR 0027: founder alert email); US bank holidays in the 10-business-day count (done in ADR 0027).
 
 ## Verification
 

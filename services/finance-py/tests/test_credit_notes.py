@@ -206,13 +206,13 @@ def test_credit_note_on_a_paid_invoice_owes_a_refund_that_the_dashboard_refund_p
     out = st.ok(credit(st, inv, "400.00", reason="nonconforming"), 201)
     cn = out["credit_note"]
     assert cn["to_ar"] == "0.00" and cn["to_refund"] == "400.00" and cn["status"] == "refund_pending"
-    assert cn["refund_due_by"] == "2026-10-16"                     # Fri Oct 2 + 10 business days (MSA 4.10)
+    assert cn["refund_due_by"] == "2026-10-19"      # Fri Oct 2 + 10 business days, Columbus Day Oct 12 skipped (MSA 4.10)
     e = st.svc.entries_by_id[cn["entry_id"]]
     assert e["memo_code"] == "F11c" and {(l["account"], l["debit"], l["credit"]) for l in e["lines"]} == {
         ("4110", "400.00", "0.00"), ("2050", "0.00", "400.00")}
     assert owed_back(st) == J.M.D("400.00") and ar(st) == 0
     brk = st.svc.db["breaks"][cn["break_id"]]
-    assert brk["leg"] == "credit_note_refund_due" and brk["status"] == "open" and brk["due_by"] == "2026-10-16"
+    assert brk["leg"] == "credit_note_refund_due" and brk["status"] == "open" and brk["due_by"] == "2026-10-19"
     assert out["invoice"]["status"] == "paid"
     # Andre refunds 400.00 in the Stripe Dashboard; charge.refunded links it to the credit note
     r = dashboard_refund(st, pi, 40000)

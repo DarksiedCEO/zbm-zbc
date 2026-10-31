@@ -1252,7 +1252,7 @@ the client already paid on a page, it refuses: wait for the payment, then credit
 `{"request_id", "content_sha256", "amount": "300.00", "reason_code"}`.
 - Unpaid invoice: the amount due drops (a new Stripe page asks for the new amount; the old page is closed first).
 - Paid invoice: the credit note records a refund ZBM owes (account 2050) and opens a `credit_note_refund_due` break
-  with `due_by` = 10 business days (MSA 4.10; weekends skipped, US holidays NOT skipped, so the date is never late).
+  with `due_by` = 10 business days (MSA 4.10; weekends and US federal bank holidays skipped, Federal Reserve schedule, ADR 0027).
   **Then refund it in the Stripe Dashboard** (Payments → the payment → Refund, the credit note's amount). The
   `charge.refunded` webhook books it against the credit note (F7r from 2050), marks the credit note `refunded`,
   resolves the break and queues the "refund sent" email. A refund made before the credit note is linked when the
