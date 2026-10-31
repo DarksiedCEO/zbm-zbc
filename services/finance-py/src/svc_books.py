@@ -961,7 +961,32 @@ class BooksMixin:
 
     # ================================================================== refunds (F6)
 
+    def _outflow_reasons(self, g: Gather, client_id: str, full: bool) -> list[dict]:
+        """AEGIS r9 R9-1: before ANY money of a client goes out (a deposit refund, its approval, its re-payment),
+        Compliance is asked at that moment (outside the lock): anything but a current ALLOW refuses, and so does any
+        payment of the client held by Compliance. On a sanctions ground Andre's token (``full``) gets an OFAC
+        warning: blocked property is never returned without OFAC's written authorization (runbook step G)."""
+        act = self._activation(g, client_id)
+        out = list(self._activation_reasons(act, full=full))
+        with self.lock:
+            held = [i for i in self.db["invoices"].values()
+                    if i.get("client_id") == client_id and i.get("held_compliance")]
+        sanctions = bool(act.available and not act.allowed and act.sanctions) or \
+            any(i["held_compliance"].get("sanctions") for i in held)
+        if held:
+            out.append(R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: no money "
+                                                          "goes back to the client until the hold is released"))
+        if sanctions and full:
+            out.append(R.item("COMPLIANCE_NOT_ACTIVATED", "OFAC: this client is refused on sanctions grounds; do NOT "
+                                                          "return or move its money; report to OFAC and follow "
+                                                          "runbook step G"))
+        return R.dedupe(out)
+
     def propose_refund(self, principal: str, request_id: str, campaign_id: str) -> dict:
+        with self.lock:
+            prof0 = self.db["profiles"].get(campaign_id)
+        g_cmp = Gather(self, f"rfd|{request_id}|compliance", "intel_02_receivables", campaign_id)
+        out_reasons = self._outflow_reasons(g_cmp, prof0["client_id"], full=False) if prof0 else []
         with self.lock:
             key, h, ent = self._idem(principal, request_id, f"refunds/{campaign_id}", campaign_id)
             if ent:
@@ -982,8 +1007,9 @@ class BooksMixin:
             amount = self.bal("2010", f"campaign:{campaign_id}")
             if amount <= 0:
                 reasons.append(R.item("CAMPAIGN_NOT_FUNDED", "no unspent deposit to refund"))
+            reasons += out_reasons
             if reasons:
-                raise Refused("refund refused", R.dedupe(reasons))
+                raise Refused("refund refused", R.dedupe(reasons), ledger_event_ids=g_cmp.events)
             fid = rid("rfd", campaign_id, request_id)
             r = {"refund_id": fid, "campaign_id": campaign_id, "client_id": prof["client_id"], "amount": M.fmt(amount),
                  "admin_fee": "0.00", "status": "proposed", "proposed_at": iso(self._now()), "proposed_by": principal}
@@ -1002,6 +1028,11 @@ class BooksMixin:
         key, h, ent = self._idem("andre", request_id, f"refund/{refund_id}", body)
         if ent:
             return ent["response"]
+        with self.lock:
+            r0 = self.db["refunds"].get(refund_id)
+        g_cmp = Gather(self, f"rfdd|{request_id}|compliance", "andre", refund_id)
+        out_reasons = (self._outflow_reasons(g_cmp, r0["client_id"], full=True)
+                       if r0 is not None and body.get("decision") == "approve" else [])
         with self.lock:
             r = self.db["refunds"].get(refund_id)
             if r is None:
@@ -1027,8 +1058,9 @@ class BooksMixin:
             reasons += self._control_block_reasons("refund")
             if self.bal("2010", f"campaign:{r['campaign_id']}") != M.D(r["amount"]):
                 reasons.append(R.item("CAMPAIGN_NOT_FUNDED", "the unspent deposit changed since the proposal"))
+            reasons += out_reasons
             if reasons:
-                raise Refused("refund refused", R.dedupe(reasons))
+                raise Refused("refund refused", R.dedupe(reasons), ledger_event_ids=g_cmp.events)
             amt = M.D(r["amount"])
             try:
                 e = self._post(op, "zbc", [J.dr("2010", amt, f"campaign:{r['campaign_id']}"),
@@ -1063,6 +1095,12 @@ class BooksMixin:
         key, h, ent = self._idem("andre", request_id, f"refund-repay/{refund_id}", body)
         if ent:
             return ent["response"]
+        with self.lock:
+            r0 = self.db["refunds"].get(refund_id)
+        g_cmp = Gather(self, f"rfdr|{request_id}|compliance", "andre", refund_id)
+        out_reasons = self._outflow_reasons(g_cmp, r0["client_id"], full=True) if r0 is not None else []
+        if out_reasons:
+            raise Refused("refund payment refused", out_reasons, ledger_event_ids=g_cmp.events)
         with self.lock:
             self.require_rules()
             r = self.db["refunds"].get(refund_id)
