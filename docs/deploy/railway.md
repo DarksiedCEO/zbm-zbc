@@ -192,6 +192,8 @@ be a different value: several services refuse to start when two of their tokens 
 | `STRIPE_GATEWAY_CALLER_TOKEN` | `openssl rand -hex 32` | stripe-gateway | finance `FIN_CALLER_TOKENS` (`rail_gateway`, interpolated) |
 | `SEO_FINANCE_CALLER_TOKEN` | `openssl rand -hex 32` | seo | finance `FIN_CALLER_TOKENS` (`seo_02`, interpolated) |
 | `FIN_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | finance | legal `LEGAL_CALLER_TOKENS` (`finance_31`, interpolated) |
+| `FIN_CRON_CALLER_TOKEN` | `openssl rand -hex 32` | fin-cron | finance `FIN_CALLER_TOKENS` (`ops_cron`, interpolated; ADR 0026) |
+| `RESEND_API_KEY` | Resend → API Keys → Create (permission **Sending access**, domain `zbestmedia.com`) | finance | — (becomes `RESEND_API_KEY_FILE`; client email stays OFF until it is set, ADR 0026) |
 | `FIN_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` | finance | finance `FIN_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-FIN-Caller-Token` (keep it in your password manager) |
 | `LEGAL_SERVICE_TOKEN` | `openssl rand -hex 32` | legal | finance `FIN_LEGAL_TOKEN` (reference) |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | legal | you |
@@ -572,7 +574,7 @@ Set by IaC or by you:
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | finance's own ledger caller token |
 | `FIN_SERVICE_TOKEN` | yes | yes | (you) | ≥ 32 printable characters |
 | `FIN_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | header `X-Andre-Approval-Token` |
-| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02`, `onboarding` | `onboarding` is your operator-held token (Secrets); other callers (`scheduler`, ...) are not deployed yet |
+| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02`, `onboarding`, `ops_cron` | `onboarding` is your operator-held token (Secrets); `ops_cron` is fin-cron's (it reaches only the housekeeping jobs and the reconciliation); `scheduler` is never deployed |
 | `FIN_ONBOARDING_CALLER_TOKEN` | yes to draft invoices | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
 | `FIN_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal. Without Legal no invoice can issue |
 | `FIN_LEGAL_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
@@ -587,6 +589,11 @@ Set by IaC or by you:
 | `FIN_STRIPE_SECRET_KEY_FILE`, `FIN_STRIPE_WEBHOOK_SECRET_FILE` | — | — | (set by the entrypoint) | do not set yourself |
 | `FIN_STRIPE_SUCCESS_URL` | yes | no | `https://zbestmedia.example/payment/thanks` (you) | the https page Stripe returns the client to |
 | `FIN_STRIPE_CANCEL_URL` | yes | no | `https://zbestmedia.example/payment/cancelled` (you) | |
+| `FIN_CARD_PREPAYMENTS` | yes | no | `1` (IaC; founder Oct 30 2026) | card next to ACH on Revenue Recovery and SEO audit (`seo_audit_services`) invoices up to `FIN_CARD_MAX_INVOICE`; no surcharge; `0` turns cards off (the hourly job then closes pages offering a card) |
+| `FIN_BUSINESS_TZ` | yes | no | `America/Los_Angeles` (IaC; the default) | CH-10: invoice due dates count from this zone's date; an unknown zone refuses start |
+| `MAIL_FROM` | yes | no | `Z Best Media <billing@zbestmedia.com>` (IaC) | the only sender allowed (any other address refuses start); alone it does not switch mail on |
+| `RESEND_API_KEY` | to send client email | yes | (you; Resend) | becomes `RESEND_API_KEY_FILE`. With `MAIL_FROM`, client email is ON (receipts, credit notes, refund confirmations, acknowledgements); unset = OFF, nothing is sent and nothing alerts |
+| `RESEND_API_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself; set without `MAIL_FROM` refuses start |
 
 Everything else finance-py reads — leave at the default (services/finance-py/README.md has the meaning of each):
 
@@ -610,10 +617,31 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `FIN_MAX_RATE_PER_1000`, `FIN_MAX_CERTIFIED_VIEWS`, `FIN_WITHHOLDING_BASIS` | `1000.00`, 10^12, `gross` | |
 | `FIN_MAX_INVOICE_TOTAL` | `250000.00` | the largest invoice Finance drafts (RTM-09) |
 | `FIN_MEDIA_DEFAULT_MARKUP_PCT`, `FIN_MEDIA_MAX_MARKUP_PCT`, `FIN_MEDIA_RELEASE_HOLD_BD` | `15.00`, `100.00`, `2` | media buys |
-| `FIN_CARD_PREPAYMENTS`, `FIN_CARD_MAX_INVOICE` | off, `5000.00` | card rule (founder M10) |
+| `FIN_CARD_MAX_INVOICE` | `5000.00` | card cap (founder M10; at most 5000.00). `FIN_CARD_PREPAYMENTS` is in the table above |
 | `FIN_SEED_PATH`, `FIN_SEED_SHA256`, `FIN_ALLOW_UNPINNED_SEED` | the image's pinned seed, unset, unset | an unpinned seed is non-production only |
 | `FIN_RECONCILE_MODE` | unset | `1` only while reconciling after a refused start (finance README) |
 | `FIN_REQUEST_HEAD_TIMEOUT_SECONDS`, `FIN_KEEP_ALIVE_TIMEOUT_SECONDS`, `FIN_LIMIT_CONCURRENCY`, `FIN_SWITCH_INTERVAL_SECONDS`, `FIN_DRAINS_MAX` | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
+
+### fin-cron (deploy/scheduler; ADR 0026)
+
+A Railway **cron** service: no volume, no domain, no port. Railway starts it at minute 17 of every hour
+(`cronSchedule: "17 * * * *"`, UTC); it calls Finance and exits. Restart policy Never (a failed run is not re-run;
+the next tick runs anyway, and every call is safe to repeat).
+
+| Variable | Required | Secret | Value / example | Notes |
+|---|---|---|---|---|
+| `FIN_CRON_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | only a `*.railway.internal` http URL or an https URL is accepted |
+| `FIN_CRON_SERVICE_TOKEN` | yes | yes | ref `finance.FIN_SERVICE_TOKEN` (IaC) | Finance's bearer |
+| `FIN_CRON_CALLER_TOKEN` | yes | yes | (you; Secrets) | `ops_cron` at Finance; must differ from every other token |
+| `FIN_CRON_RECON_HOUR` | yes | no | `7` (IaC) | the local hour of the daily reconciliation |
+| `FIN_CRON_TZ` | yes | no | `America/Los_Angeles` (IaC) | the zone of that hour |
+
+What each tick does: `POST /fin/v1/jobs/stripe-sessions/run` (closes Stripe pages that must not take money and
+re-asks Compliance about every payment held `unverified`: the hourly hold re-check), `POST /fin/v1/jobs/client-mail/run`
+(client email; retries with backoff), and at 07:xx Los Angeles time `POST /fin/v1/reconciliations/run`. A 503 (Finance
+paused for a backup) is retried twice; anything else that is not 2xx prints an `ALERT fin-cron:` line and fails the
+run (Railway shows the cron run as failed). Compliance's controls are not called here: they run inside Compliance.
+Legal's daily jobs and seo's schedule tick are NOT run by fin-cron (they need their own `scheduler` callers; Open items).
 
 ### legal (legal-py)
 
@@ -768,22 +796,34 @@ Do these in order. Nothing in the repository creates anything; each step is your
 7. **Stripe (test mode).** Create the restricted key and set `FIN_STRIPE_SECRET_KEY` on finance; set
    `FIN_STRIPE_SUCCESS_URL` / `FIN_STRIPE_CANCEL_URL`. Then Developers → Webhooks → Add endpoint:
    - URL: **`https://<stripe-gateway's Railway domain>/webhooks/stripe`**
-   - events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   - events, WEBHOOK EVENTS (services/finance-py/src/stripe_webhooks.py, the one list; print it with
+     `python3 services/finance-py/devtools/stripe_webhook_events.py`; a test fails if this list differs):
+     `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
      `checkout.session.async_payment_failed`, `checkout.session.expired`, `payment_intent.succeeded`,
-     `payment_intent.payment_failed`, `charge.failed`, `charge.dispute.created`, `charge.dispute.updated`,
+     `payment_intent.payment_failed`, `charge.failed`, `charge.refunded`, `charge.refund.updated`, `refund.created`,
+     `refund.updated`, `refund.failed`, `charge.dispute.created`, `charge.dispute.updated`,
      `charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
-     `payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled` (services/finance-py/README.md)
+     `payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
+     `charge.refunded`, `charge.refund.updated` and `refund.*` are what bring a refund made in the Stripe Dashboard
+     into the books (F7r) and link it to its credit note; without them a Dashboard refund never reaches Finance.
+     An endpoint registered before Oct 31 2026 lacks them: add them (Developers → Webhooks → the endpoint →
+     Update details → Select events).
    - copy the endpoint's signing secret (`whsec_...`) into `FIN_STRIPE_WEBHOOK_SECRET` on finance.
 8. **Deploy, ledger first.** Deploy `ledger`; wait until it is Active and its log shows
    `ledger-rust: EVENT {"event":"ledger_created",...}` and `listening on [::]:8090`, and does **not** show the
    `LEDGER_CALLERS_FILE is not set` warning. Then deploy `legal`; then `compliance`; then `detection`; then `finance`; then `orchestrator`,
-   `stripe-gateway` and `seo`. A department that crashed because the ledger was not up yet: Redeploy it.
+   `stripe-gateway` and `seo`; then `fin-cron` (it needs `FIN_CRON_CALLER_TOKEN` set first, on fin-cron; its first
+   tick is at the next minute 17 and its log shows two `fin-cron: {...}` lines with `"ok": true`). A department that
+   crashed because the ledger was not up yet: Redeploy it.
 9. **Volume backups.** The IaC declares a daily backup schedule for `ledger-data`, `finance-data`, `legal-data`,
    `seo-data` and `compliance-data` (`backupSchedules: ["DAILY"]` on each service's volume attachment, the SDK field; AEGIS L6). Check that
    `railway config plan` shows the schedule and that each volume → Backups shows Daily after the apply; if the plan
    does not carry it (the engine that applies it is in the Railway CLI, not the SDK, and has not been run against
-   this file), enable daily backups there by hand. Restoring a backup later makes the ledger refuse to start until
-   the one-shot `LEDGER_ALLOW_RESET` flow (services/ledger-rust/README.md).
+   this file), enable daily backups there by hand. Daily backups of different volumes are taken at different times
+   and are not a consistent set: before risky work and weekly, take a **consistent backup set** (Finance quiesced,
+   departments first, ledger last), and restore only with docs/runbooks/restore-and-reimport.md (it never voids paid
+   invoices; it re-imports what Stripe holds). Restoring a backup makes the ledger refuse to start until the one-shot
+   `LEDGER_ALLOW_RESET` flow (services/ledger-rust/README.md).
 10. **Restart policy check.** Each service's Settings should show restart policy On Failure, 10 retries, and
     healthcheck path `/health` (from the IaC file).
 11. **Dashboard on Vercel.** Project root `apps/dashboard-ts`. Set the five variables in the dashboard table
@@ -1185,6 +1225,64 @@ Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands hav
 them under `thresholds.check_before_first_client` ("local gross receipts/business tax — check before first client")
 and flags any of them with a sale. Do that check before the first client there.
 
+### Money operations: void, credit notes, refunds, client email (ADR 0026)
+
+Through the finance tunnel with `fin-auth.hdr` and `fin-andre.hdr` (Compliance step I). `F=http://127.0.0.1:18410`.
+Every route below takes Andre's approval token; none takes a caller token.
+
+**SEO audit invoices take card or ACH.** Draft the SEO Technical Audit with line code `seo_audit_services` (not
+`strategy_services`) and `"payment_methods": ["ach", "card"]`; the Stripe page then offers both (USD only, no
+surcharge, at most $5,000 by card, `FIN_CARD_PREPAYMENTS=1`). Other strategy work stays ACH or wire.
+
+**Billing contact first** (once per client, from the signed SOW): the only address client email ever goes to.
+```sh
+curl -sS -X PUT -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' $F/fin/v1/clients/<client id>/billing-contact \
+  -d '{"request_id":"contact-<client id>-1","email":"ap@client.example","name":"Accounts payable"}'
+```
+
+**Cancel an unpaid invoice in full** (refund policy 5.3; MSA 4.12(g), within 10 business days after the SOW ends):
+read the invoice (`GET $F/fin/v1/invoices/<id>`, keep `content_sha256`), then
+`POST $F/fin/v1/invoices/<id>/void` with `{"request_id": "...", "content_sha256": "...", "reason_code": "sow_ended_unpaid"}`.
+Finance first closes the invoice's open Stripe pages at Stripe (if Stripe cannot confirm, nothing changes: retry; if
+the client already paid on a page, it refuses: wait for the payment, then credit the paid invoice). Reason codes:
+`sow_ended_unpaid`, `sow_ended_prepaid`, `cancelled_before_work`, `nonconforming`, `billing_dispute`,
+`infringement_refund`, `audit_not_run`, `other`.
+
+**Reduce an invoice, or owe a refund: a credit note.** `POST $F/fin/v1/invoices/<id>/credit-notes` with
+`{"request_id", "content_sha256", "amount": "300.00", "reason_code"}`.
+- Unpaid invoice: the amount due drops (a new Stripe page asks for the new amount; the old page is closed first).
+- Paid invoice: the credit note records a refund ZBM owes (account 2050) and opens a `credit_note_refund_due` break
+  with `due_by` = 10 business days (MSA 4.10; weekends skipped, US holidays NOT skipped, so the date is never late).
+  **Then refund it in the Stripe Dashboard** (Payments → the payment → Refund, the credit note's amount). The
+  `charge.refunded` webhook books it against the credit note (F7r from 2050), marks the credit note `refunded`,
+  resolves the break and queues the "refund sent" email. A refund made before the credit note is linked when the
+  credit note is issued.
+- Refused: a draft, a media prepayment (cancel the media buy), a ZBC deposit, an invoice with a Compliance hold or a
+  dispute, more than is left to credit, or a refund larger than the client's money ZBM still holds. A credit note
+  that owes a refund asks Compliance first: a client refused on SANCTIONS grounds is never refunded (OFAC steps
+  instead), and no answer from Compliance refuses it.
+- `GET $F/fin/v1/invoices/<id>/credit-notes` lists them; `GET $F/fin/v1/credit-notes/<id>` reads one.
+
+**Acknowledge a client request within 2 business days** (MSA 4.12(f)): `POST $F/fin/v1/clients/<client id>/acknowledgements`
+with `{"request_id", "topic": "refund_request" | "cancellation" | "billing_dispute" | "payment_question",
+"received_on": "2026-11-02", "invoice_id": "<optional>"}`. The answer gives `acknowledge_by` and says `late` if that date has passed.
+
+**Client email** (off until configured). One time, in Resend: add and verify the domain `zbestmedia.com` (Resend shows
+the DNS records; adding them is your DNS change, not the code's), then in the domain's settings turn **Open tracking
+OFF** and **Click tracking OFF**, then create an API key with **Sending access** for that domain only and set it as
+`RESEND_API_KEY` on finance (Sealed). `MAIL_FROM` is already in the IaC. After the redeploy, the hourly fin-cron run
+sends what is queued: payment receipts, credit notes, invoice cancellations, refund confirmations, acknowledgements.
+Plain text plus simple HTML, from billing@zbestmedia.com, to the billing contact only; never a hold reason or anything
+about sanctions. Retries back off 15 min, 30, 60, 120, 240, 480; after 7 attempts (or a permanent refusal such as an
+unverified domain) the message is `send_failed`, a high-severity `client_mail_failed` break opens and finance logs
+`ALERT finance: client_mail_failed`. Fix the cause, then `POST $F/fin/v1/client-mail/<id>/requeue`
+(`{"request_id": "..."}`); `GET $F/fin/v1/client-mail/<id>` shows a message's state. A client with no billing contact
+gets a `client_mail_no_contact` break; nothing is sent until the contact is recorded.
+
+**Alerts to watch** (until a log alert is wired, search the finance log daily): `ALERT finance:` (a payment on a
+Stripe page Finance does not know, CH-4; a client email that failed for good) and `ALERT fin-cron:` (a housekeeping
+call that failed). Breaks with `"severity": "high"` in `GET $F/fin/v1/breaks` are the same events, kept.
+
 ### Connecting Search Console (optional)
 
 Search Console stays `NOT_CONNECTED` until you do this; seo starts and runs normally without it.
@@ -1505,8 +1603,10 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - **Two public services.** The orchestrator's token has no minimum-length check and no rate limit, so its entropy is
   the only defence (use `openssl rand -hex 32`). Anyone holding it can also start a scan of a connected
   tenant; a fixture scan is refused unless `ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1` (never set here; L-2).
-- **No scheduler is deployed.** Finance's daily reconciliation and Stripe-session job, Legal's daily jobs and seo's
-  schedule tick need a `scheduler` caller (and a cron service) that this deploy does not include.
+- **fin-cron runs Finance's housekeeping only** (ADR 0026): the hourly Stripe-session sweep and hold re-check, client
+  mail, the daily reconciliation. Legal's daily jobs and seo's schedule tick still need a `scheduler` caller (and a
+  cron entry) of their own; until then they run only when you call them. Railway's cron behaviour (minute-17 schedule
+  in UTC, Restart policy Never for a cron service) is from Railway's documentation, not yet observed on this project.
 - **Detection's store connector on Railway: wired, off until Andre connects a store** (AEGIS A2 H-2). The image maps
   four secret files and detection runs with `RAILWAY_RUN_UID=0` (root only in the entrypoint); the IaC sets
   `DETECTION_LEDGER_URL`. Not yet observed on Railway: the first real sync is the first end-to-end check of the
