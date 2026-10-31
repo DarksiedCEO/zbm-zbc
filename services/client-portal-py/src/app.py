@@ -33,10 +33,12 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import re
 import time
+import unicodedata
 from typing import Callable, Optional
 from urllib.parse import parse_qs
 
@@ -95,6 +97,8 @@ class PortalApp:
         self.by_ip = Limiter(settings.ip_per_minute, 60, clock=monotonic)
         self.by_token = Limiter(settings.token_per_hour, 3600, clock=monotonic)
         self.not_found = Limiter(settings.not_found_per_minute, 60, clock=monotonic)
+        # AEGIS M-3: one ceiling on EVERY call to Legal (resolve, accept, receipt), charged before the call
+        self.legal_calls = Limiter(settings.legal_per_minute, 60, clock=monotonic)
 
     # --- ASGI ----------------------------------------------------------------------------------------------------
 
@@ -128,8 +132,19 @@ class PortalApp:
         return status, [(b"content-type", b"text/html; charset=utf-8")] + (extra or []), page.html().encode("utf-8")
 
     def _client_ip(self, scope) -> str:
-        """The client's address: the X-Forwarded-For entry PORTAL_TRUSTED_PROXY_HOPS from the end (Railway's edge
-        appends it), else the socket peer. Used only as an HMAC (rate-limit key, evidence)."""
+        """The client's address, used only as an HMAC (rate-limit key, evidence). AEGIS M-3: Railway's edge sets
+        ``X-Real-IP`` (PORTAL_CLIENT_IP_HEADER; a Railway moderator states the edge overwrites it and
+        X-Forwarded-For, which is not a documented contract: runbook step 8 checks it). Without a valid one, the
+        X-Forwarded-For entry PORTAL_TRUSTED_PROXY_HOPS from the END (never the left-most, which a client can
+        write), else the socket peer. If a client could still choose the value, the per-address limit is bypassable;
+        the global ceilings on Legal calls and not-found answers still bound the load (ADR 0028)."""
+        name = self.s.client_ip_header
+        if name:
+            raw = (self._header(scope, name.encode("latin-1")) or "").strip()
+            try:
+                return str(ipaddress.ip_address(raw))
+            except ValueError:
+                pass
         hops = self.s.trusted_proxy_hops
         if hops:
             xff = [v.decode("latin-1") for k, v in scope.get("headers", ()) if k == b"x-forwarded-for"]
@@ -171,17 +186,19 @@ class PortalApp:
             return ("method", 405, [(b"allow", ", ".join(allowed).encode())], b"")
         token = (m_doc or m_acc).group(1)
         name = "document" if m_doc else ("accept_post" if method == "POST" else "accept_get")
-        ip_key = _mac(self.s.evidence_key, "rl-ip", self._client_ip(scope))
-        tok_key = _mac(self.s.evidence_key, "rl-token", token)
-        ok_ip, retry_ip = self.by_ip.hit(ip_key)
-        ok_tok, retry_tok = self.by_token.hit(tok_key)
-        if not (ok_ip and ok_tok):
-            return (name, *self._page(429, V.RATE_LIMITED, [(b"retry-after", str(max(retry_ip, retry_tok)).encode())]))
+        ok_ip, retry_ip = self.by_ip.hit(_mac(self.s.evidence_key, "rl-ip", self._client_ip(scope)))
+        if not ok_ip:
+            return (name, *self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry_ip).encode())]))
+        if not TOKEN_RE.fullmatch(token):
+            return (name, *self._not_found())
         if method == "POST":
             return (name, *await self._post(scope, receive, token))
         view = await self._resolve(token)
         if not isinstance(view, PortalView):
             return (name, *view)
+        limited = self._link_limited(token)
+        if limited:
+            return (name, *limited)
         if m_doc:
             n = int(m_doc.group(2))
             docs = self._shown(view)
@@ -207,17 +224,48 @@ class PortalApp:
             log.error("confirmation mail failed: %s", type(exc).__name__)
             return False
 
+    async def _receipt_or(self, token: str, rid: str, state: "V.FormState", otherwise):
+        limited = self._legal_limited()
+        if limited:
+            return limited
+        try:
+            rec = await asyncio.to_thread(self.legal.receipt, token, rid)
+        except LegalUnavailable:
+            return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
+        if rec is None:
+            return otherwise
+        limited = self._link_limited(token)
+        if limited:
+            return limited
+        pg = V.confirmation_page(rec, rec.acceptances, state.full_name, state.title, self.s.display_tz, False)
+        return self._page(200, pg)
+
     def _not_found(self):
         ok, retry = self.not_found.hit("global")
         if not ok:
             return self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry).encode())])
         return self._page(404, V.NOT_FOUND)
 
+    def _legal_limited(self):
+        """AEGIS M-3: charged BEFORE every Legal call; at the ceiling, Legal is not called."""
+        ok, retry = self.legal_calls.hit("global")
+        return None if ok else self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry).encode())])
+
+    def _link_limited(self, token: str):
+        """Per-link limit, charged only for a link Legal confirmed (a view or a receipt): a junk token never enters
+        the table, so junk cannot evict a real link's counter (AEGIS M-3)."""
+        ok, retry = self.by_token.hit(_mac(self.s.evidence_key, "rl-token", token))
+        return None if ok else self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry).encode())])
+
     async def _resolve(self, token: str):
         """The link's view, or the answer to send (uniform 404, 429, 503). Pages the portal does not serve (an
-        MSA-only link, or a SOW-only link for a client with no counted MSA acceptance) are the same 404."""
+        MSA-only link, or a SOW-only link for a client with no counted MSA acceptance: Legal renders no blocks) are the
+        same 404."""
         if not TOKEN_RE.fullmatch(token):
             return self._not_found()
+        limited = self._legal_limited()
+        if limited:
+            return limited
         try:
             view = await asyncio.to_thread(self.legal.resolve, token)
         except LegalUnavailable:
@@ -228,12 +276,12 @@ class PortalApp:
 
     @staticmethod
     def _servable(view: PortalView) -> bool:
-        d = view.display
+        if not view.blocks or not view.page_sha256:
+            return False
         if view.page == "first_engagement":
-            return bool(view.doc("msa") and view.doc("sow") and d.sow_number and d.sow_title)
+            return bool(view.doc("msa") and view.doc("sow"))
         if view.page == "new_sow":
-            return bool(view.doc("sow") and not view.doc("msa") and d.sow_number and d.sow_title
-                        and view.msa_accepted_version and view.msa_accepted_at)
+            return bool(view.doc("sow") and not view.doc("msa") and view.msa_accepted_version)
         return False
 
     @staticmethod
@@ -245,10 +293,16 @@ class PortalApp:
 
     def _page_sha(self, view: PortalView, token: str) -> str:
         text = V.acceptance_page(view, token, 0, "", None, display_tz=self.s.display_tz).text
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if digest != view.page_sha256:      # the layout added or dropped text: never show or record such a page
+            raise LegalUnavailable("the laid-out page text differs from Legal's page")
+        return digest
 
     def _form(self, view: PortalView, token: str, state: Optional[V.FormState] = None, status: int = 200):
-        page_sha = self._page_sha(view, token)
+        try:
+            page_sha = self._page_sha(view, token)
+        except LegalUnavailable:
+            return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         issued = int(self.clock())
         pg = V.acceptance_page(view, token, issued, self._sign(token, page_sha, issued), page_sha, state,
                                self.s.display_tz)
@@ -307,14 +361,27 @@ class PortalApp:
         if not hmac.compare_digest(sig, self._sign(token, page_sha, issued)) \
                 or issued > now + 60 or now - issued > self.s.form_max_age_s:
             return self._page(403, V.FORM_REFUSED)
+        state = V.FormState(*(_typed(one.get(k, ""))[:FIELD_MAX[k] + 1] for k in ("full_name", "title", "company")))
+        sig_block = {"full_name": state.full_name, "title": state.title, "company": state.company}
+        rid = "pa-" + _mac(self.s.evidence_key, "request-v1", hashlib.sha256(token.encode()).hexdigest(), page_sha,
+                           json.dumps(sig_block, sort_keys=True))[:40]
         view = await self._resolve(token)
         if not isinstance(view, PortalView):
+            if view[0] == 404:
+                # AEGIS M-2: the link is used. If THIS submission used it (a lost response, a refresh), Legal's
+                # receipt answers and the client sees the confirmation again; anything else stays the 404
+                return await self._receipt_or(token, rid, state, view)
             return view
+        limited = self._link_limited(token)
+        if limited:
+            return limited
         shown = self._shown(view)
-        fresh = self._page_sha(view, token)
+        try:
+            fresh = self._page_sha(view, token)
+        except LegalUnavailable:
+            return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         if not hmac.compare_digest(fresh, page_sha):
             return self._page(409, V.changed_page(token))
-        state = V.FormState(*(one.get(k, "").strip()[:FIELD_MAX[k] + 1] for k in ("full_name", "title", "company")))
         errors = {}
         for n, doc in enumerate(shown, start=1):
             if one.get(f"accept_doc_{n}") != "yes":
@@ -324,7 +391,7 @@ class PortalApp:
             v = getattr(state, k)
             if not v:
                 errors[k] = f"Enter {label}"
-            elif len(v) > FIELD_MAX[k] or _CONTROL.search(v):
+            elif len(v) > FIELD_MAX[k] or _CONTROL.search(v) or _invisible(v):
                 errors[k] = f"Enter {label} in at most {FIELD_MAX[k]} characters, without special characters"
         if "company" not in errors and _norm_company(state.company) != _norm_company(view.display.client_legal_name):
             errors["company"] = f"Enter the company name as it appears in the documents: {view.display.client_legal_name}"
@@ -332,11 +399,11 @@ class PortalApp:
             state.errors = {k: errors[k] for k in [f"accept_doc_{n}" for n in range(1, len(shown) + 1)]
                             + ["full_name", "title", "company"] if k in errors}
             return self._form(view, token, state, status=422)
-        page_text = V.acceptance_page(view, token, 0, "", None, display_tz=self.s.display_tz).text.encode("utf-8")
+        page_text = view.page_text.encode("utf-8")
         ua = (self._header(scope, b"user-agent") or "")[:1024]
-        sig_block = {"full_name": state.full_name, "title": state.title, "company": state.company}
-        rid = "pa-" + _mac(self.s.evidence_key, "request-v1", hashlib.sha256(token.encode()).hexdigest(), page_sha,
-                           json.dumps(sig_block, sort_keys=True))[:40]
+        limited = self._legal_limited()
+        if limited:
+            return limited
         req = {"request_id": rid, "token": token,
                "documents": [{"doc_id": d.doc_id, "version": d.version, "doc_sha256": d.doc_sha256,
                               "presented_sha256": hashlib.sha256(d.text.encode("utf-8")).hexdigest(),
@@ -351,12 +418,25 @@ class PortalApp:
         except LegalUnavailable:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         if out.kind == "not_found":
-            return self._not_found()
+            return await self._receipt_or(token, rid, state, self._not_found())
         if out.kind != "accepted":
             return self._page(409, V.changed_page(token))
         emailed = self._send_confirmation(view, out, state)
         pg = V.confirmation_page(view, out.acceptances, state.full_name, state.title, self.s.display_tz, emailed)
         return self._page(200, pg)
+
+
+_INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp", "Co", "Cn"})
+
+
+def _typed(v: str) -> str:
+    """A typed field as recorded: NFKC-normalized, surrounding spaces removed."""
+    return unicodedata.normalize("NFKC", v).strip()
+
+
+def _invisible(v: str) -> bool:
+    """AEGIS L-1: bidi controls, zero-width and other invisible or control characters."""
+    return any(unicodedata.category(ch) in _INVISIBLE for ch in v)
 
 
 def _attachments(view: PortalView, accepted) -> tuple:

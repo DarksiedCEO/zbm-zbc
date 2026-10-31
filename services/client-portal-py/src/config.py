@@ -36,6 +36,8 @@ class Settings:
     ip_per_minute: int = 30
     token_per_hour: int = 40
     not_found_per_minute: int = 120
+    legal_per_minute: int = 300
+    client_ip_header: str = "x-real-ip"
     form_max_age_s: int = 4 * 3600
     display_tz: str = "America/Los_Angeles"
 
@@ -75,7 +77,11 @@ def _origin(env: dict) -> str:
             or parts.path not in ("", "/") or parts.query or parts.fragment or parts.username or parts.password:
         raise RuntimeError("PORTAL_PUBLIC_ORIGIN must be an origin like https://accept.example.com (http only for "
                            "localhost), with no path, query or credentials")
-    return f"{parts.scheme}://{parts.netloc}".lower()
+    host = parts.hostname.lower()
+    host = f"[{host}]" if ":" in host else host
+    port = parts.port
+    default = {"https": 443, "http": 80}[parts.scheme]
+    return f"{parts.scheme}://{host}" + (f":{port}" if port and port != default else "")
 
 
 def _legal_url(env: dict) -> str:
@@ -89,6 +95,16 @@ def _legal_url(env: dict) -> str:
         raise RuntimeError("PORTAL_LEGAL_URL: plain http only on Railway's private network (*.railway.internal) or "
                            "localhost")
     return raw.rstrip("/")
+
+
+def _header_name(env: dict) -> str:
+    """AEGIS M-3: the header Railway's edge sets to the client address (``x-real-ip``); ``none`` = do not read one."""
+    raw = (env.get("PORTAL_CLIENT_IP_HEADER") or "x-real-ip").strip().lower()
+    if raw == "none":
+        return ""
+    if not re.fullmatch(r"[a-z0-9-]{1,40}", raw) or raw in ("x-forwarded-for", "forwarded"):
+        raise RuntimeError("PORTAL_CLIENT_IP_HEADER must be a single-address header name such as x-real-ip, or none")
+    return raw
 
 
 def load(env: Optional[dict] = None) -> Settings:
@@ -114,6 +130,8 @@ def load(env: Optional[dict] = None) -> Settings:
         ip_per_minute=_int(env, "PORTAL_RATE_IP_PER_MINUTE", 30, 1, 10_000),
         token_per_hour=_int(env, "PORTAL_RATE_TOKEN_PER_HOUR", 40, 1, 10_000),
         not_found_per_minute=_int(env, "PORTAL_RATE_NOT_FOUND_PER_MINUTE", 120, 1, 100_000),
+        legal_per_minute=_int(env, "PORTAL_RATE_LEGAL_PER_MINUTE", 300, 1, 100_000),
+        client_ip_header=_header_name(env),
         form_max_age_s=_int(env, "PORTAL_FORM_MAX_AGE_SECONDS", 4 * 3600, 300, 24 * 3600),
         display_tz=tz,
     )

@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
+import importlib.util
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
 import config as config_mod
 from app import PortalApp
-from legal_client import AcceptOutcome, Accepted, Display, Document, LegalUnavailable, PortalView
+from legal_client import AcceptOutcome, Accepted, Display, Document, LegalUnavailable, PortalView, Receipt
+
+# Legal's own page renderer (standard library only), loaded by path: the fake Legal below answers with the blocks the
+# real Legal renders, so the page's words in these tests are the founder-approved clickwrap text (AEGIS M-5)
+_spec = importlib.util.spec_from_file_location(
+    "legal_clickwrap_page", Path(__file__).resolve().parents[2] / "legal-py" / "src" / "clickwrap_page.py")
+CP = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(CP)
 
 ORIGIN = "https://accept.zbm.example"
 ENV = {"PORTAL_LEGAL_URL": "http://legal.railway.internal:8420",
@@ -30,9 +40,24 @@ def sha(text: str) -> str:
 
 
 def view(page="first_engagement", docs=None, display=DISPLAY, msa_acc=(None, None)) -> PortalView:
+    """A link as Legal answers it: Legal renders blocks only for a page it serves (an MSA and a SOW; a SOW alone for
+    a client with a counted MSA acceptance), and only with the SOW's number and title."""
     docs = docs if docs is not None else [Document("client_msa", "1.0", sha(MSA_TEXT), MSA_TEXT),
                                           Document("sow_seo_audit", "1.1", sha(SOW_TEXT), SOW_TEXT)]
-    return PortalView("lg-cin-" + "A" * 26, page, "2026-10-15T17:00:00Z", display, tuple(docs), *msa_acc)
+    disp = dataclasses.asdict(display)
+    docs = [dataclasses.replace(d, label=CP.doc_label(d.doc_id, disp) if disp["sow_number"] else "") for d in docs]
+    ids = [d.doc_id for d in docs]
+    servable = disp["sow_number"] and disp["sow_title"] and (
+        (page == "first_engagement" and "client_msa" in ids and len(ids) == 2)
+        or (page == "new_sow" and "client_msa" not in ids and msa_acc[0]))
+    bl = ()
+    if servable:
+        ordered = sorted(docs, key=lambda d: d.doc_id != "client_msa")
+        bl = tuple(CP.blocks(page, disp, [dataclasses.asdict(d) for d in ordered],
+                             {"version": msa_acc[0], "accepted_at": msa_acc[1]} if msa_acc[0] else None))
+    page_sha = hashlib.sha256(CP.page_text(list(bl)).encode()).hexdigest() if bl else None
+    return PortalView("lg-cin-" + "A" * 26, page, "2026-10-15T17:00:00Z", display, tuple(docs), *msa_acc,
+                      blocks=bl, page_sha256=page_sha)
 
 
 @dataclass
@@ -42,7 +67,9 @@ class FakeLegal:
     accept_kind: str = "accepted"
     resolves: list = field(default_factory=list)
     accepts: list = field(default_factory=list)
+    receipts: list = field(default_factory=list)
     used: set = field(default_factory=set)
+    used_by: dict = field(default_factory=dict)        # token -> (request_id, AcceptOutcome)
 
     def resolve(self, token: str) -> Optional[PortalView]:
         self.resolves.append(token)
@@ -51,6 +78,17 @@ class FakeLegal:
         if token in self.used:
             return None
         return self.views.get(token)
+
+    def receipt(self, token: str, request_id: str):
+        """Legal's receipt: only for the submission (request id) that used this link."""
+        self.receipts.append((token, request_id))
+        if self.unavailable:
+            raise LegalUnavailable("down")
+        got = self.used_by.get(token)
+        if not got or got[0] != request_id:
+            return None
+        v = self.views[token]
+        return Receipt(v.invitation_id, v.display, v.documents, got[1].acceptances, "2026-10-01T17:05:00Z")
 
     def accept(self, body: dict) -> AcceptOutcome:
         self.accepts.append(body)
@@ -64,9 +102,11 @@ class FakeLegal:
             if not prior or prior[0]["request_id"] != body["request_id"]:
                 return AcceptOutcome("not_found")
         self.used.add(body["token"])
-        return AcceptOutcome("accepted", tuple(
+        out = AcceptOutcome("accepted", tuple(
             Accepted("lg-acc-" + str(i) * 26, d["doc_id"], d["version"], d["doc_sha256"], "2026-10-01T17:05:00Z")
             for i, d in enumerate(body["documents"], start=1)))
+        self.used_by.setdefault(body["token"], (body["request_id"], out))
+        return out
 
 
 @dataclass

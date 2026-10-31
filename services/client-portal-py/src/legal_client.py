@@ -5,6 +5,11 @@ equal the hash Legal names (a mismatch is treated as Legal being unavailable: no
 
 - ``resolve(token)`` -> ``PortalView`` | ``None`` (Legal's uniform 404) ; raises ``LegalUnavailable``.
 - ``accept(body)``   -> ``AcceptOutcome`` (accepted / not_found / refused) ; raises ``LegalUnavailable``.
+- ``receipt(token, request_id)`` -> ``Receipt`` | ``None`` : the receipt of the submission that used the link (AEGIS
+  M-2: a retry after a lost response or a refresh) ; raises ``LegalUnavailable``.
+
+The page's words are Legal's (AEGIS M-5): ``PortalView.blocks`` is the page Legal renders; this adapter checks that
+the blocks' text hashes to Legal's ``page_sha256`` and that each document block carries the document's exact text.
 
 The token travels in a JSON body (never a URL Legal could log); the client's IP address and user agent never travel
 at all (the app sends HMACs made with its own key).
@@ -39,6 +44,7 @@ class Document:
     version: str
     doc_sha256: str
     text: str
+    label: str = ""
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,12 @@ class PortalView:
     documents: tuple[Document, ...]
     msa_accepted_version: Optional[str]
     msa_accepted_at: Optional[str]
+    blocks: tuple = ()
+    page_sha256: Optional[str] = None
+
+    @property
+    def page_text(self) -> str:
+        return page_text(self.blocks)
 
     def doc(self, kind: str) -> Optional[Document]:
         for d in self.documents:
@@ -74,6 +86,21 @@ class Accepted:
     version: str
     doc_sha256: str
     accepted_at: str
+
+
+@dataclass(frozen=True)
+class Receipt:
+    invitation_id: str
+    display: Display
+    documents: tuple
+    acceptances: tuple
+    accepted_at: str
+
+    def doc(self, kind: str) -> Optional[Document]:
+        for d in self.documents:
+            if (kind == "msa" and d.doc_id == "client_msa") or (kind == "sow" and d.doc_id != "client_msa"):
+                return d
+        return None
 
 
 @dataclass(frozen=True)
@@ -131,6 +158,14 @@ class LegalClient:
             raise LegalUnavailable(f"Legal answered {r.status_code}")
         return parse_view(self._json(r))
 
+    def receipt(self, token: str, request_id: str) -> Optional["Receipt"]:
+        r = self._post("/legal/v1/portal/receipts", {"token": token, "request_id": request_id})
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise LegalUnavailable(f"Legal answered {r.status_code}")
+        return parse_receipt(self._json(r))
+
     def accept(self, body: dict) -> AcceptOutcome:
         r = self._post("/legal/v1/portal/acceptances", body)
         if r.status_code == 404:
@@ -145,13 +180,42 @@ class LegalClient:
         return parse_accepted(self._json(r), body)
 
 
-def parse_view(data: Any) -> PortalView:
-    if not isinstance(data, dict):
-        raise LegalUnavailable("Legal's answer is not an object")
-    page = data.get("page")
-    if page not in PAGES:
-        raise LegalUnavailable("Legal's answer: page not understood")
-    docs_raw = data.get("documents")
+BLOCK_KINDS = ("title", "p", "doc_heading", "meta", "links", "doc_text", "check", "field", "actions")
+FIELD_IDS = ("full_name", "title", "company")
+
+
+def page_text(blocks) -> str:
+    return "\n\n".join(b["text"] for b in blocks) + "\n" if blocks else ""
+
+
+def _blocks(raw: Any, docs: list) -> tuple:
+    if raw is None or raw == []:
+        return ()
+    if not isinstance(raw, list) or len(raw) > 40:
+        raise LegalUnavailable("Legal's answer: blocks not understood")
+    out = []
+    for b in raw:
+        if not isinstance(b, dict) or b.get("k") not in BLOCK_KINDS or not isinstance(b.get("text"), str):
+            raise LegalUnavailable("Legal's answer: a block is not understood")
+        if b["k"] in ("doc_heading", "meta", "links", "doc_text", "check"):
+            if b.get("n") not in range(1, len(docs) + 1):
+                raise LegalUnavailable("Legal's answer: a block names no document")
+        if b["k"] == "doc_text":
+            shown = [d for d in docs if d.doc_id == "client_msa"] + [d for d in docs if d.doc_id != "client_msa"]
+            if b["text"] not in [d.text for d in shown]:
+                raise LegalUnavailable("a document block is not a document's exact text: nothing is shown")
+        if b["k"] == "field" and (b.get("id") not in FIELD_IDS or not isinstance(b.get("label"), str)):
+            raise LegalUnavailable("Legal's answer: a field block is not understood")
+        if b["k"] == "check" and not isinstance(b.get("label"), str):
+            raise LegalUnavailable("Legal's answer: a check block is not understood")
+        if len(b["text"]) > MAX_TEXT or any(isinstance(v, str) and len(v) > 2000 for k, v in b.items()
+                                            if k not in ("text",)):
+            raise LegalUnavailable("Legal's answer: a block is too large")
+        out.append(dict(b))
+    return tuple(out)
+
+
+def _documents(docs_raw: Any) -> list:
     if not isinstance(docs_raw, list) or not 1 <= len(docs_raw) <= 2:
         raise LegalUnavailable("Legal's answer: documents not understood")
     docs = []
@@ -164,20 +228,52 @@ def parse_view(data: Any) -> PortalView:
         digest = _match(_SHA, d.get("doc_sha256"), "doc_sha256")
         if hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest() != digest:
             raise LegalUnavailable("a document's text does not match its SHA-256: nothing is shown")
-        docs.append(Document(d["doc_id"], _match(_VERSION, d.get("version"), "version"), digest, text))
+        label = d.get("label") if isinstance(d.get("label"), str) and len(d.get("label")) <= 300 else ""
+        docs.append(Document(d["doc_id"], _match(_VERSION, d.get("version"), "version"), digest, text, label))
     if len({d.doc_id for d in docs}) != len(docs):
         raise LegalUnavailable("Legal's answer: a document is named twice")
-    disp = data.get("display")
-    display = Display(_s(disp, "client_legal_name", 200), _s(disp, "notice_email", 254),
-                      _s(disp, "contact_first_name", 120, True), _s(disp, "sow_number", 60, True),
-                      _s(disp, "sow_title", 200, True))
+    return docs
+
+
+def _display(disp: Any) -> Display:
+    return Display(_s(disp, "client_legal_name", 200), _s(disp, "notice_email", 254),
+                   _s(disp, "contact_first_name", 120, True), _s(disp, "sow_number", 60, True),
+                   _s(disp, "sow_title", 200, True))
+
+
+def parse_receipt(data: Any) -> Receipt:
+    if not isinstance(data, dict):
+        raise LegalUnavailable("Legal's answer is not an object")
+    docs = _documents(data.get("documents"))
+    accs = parse_accepted({"acceptances": data.get("acceptances")},
+                          {"documents": [{"doc_id": d.doc_id, "version": d.version, "doc_sha256": d.doc_sha256}
+                                         for d in docs]})
+    return Receipt(_match(_LG_ID, data.get("invitation_id"), "invitation_id"), _display(data.get("display")),
+                   tuple(docs), accs.acceptances, _match(_TS, data.get("accepted_at"), "accepted_at"))
+
+
+def parse_view(data: Any) -> PortalView:
+    if not isinstance(data, dict):
+        raise LegalUnavailable("Legal's answer is not an object")
+    page = data.get("page")
+    if page not in PAGES:
+        raise LegalUnavailable("Legal's answer: page not understood")
+    docs = _documents(data.get("documents"))
+    display = _display(data.get("display"))
+    blocks = _blocks(data.get("blocks"), docs)
+    page_sha = data.get("page_sha256")
+    if blocks:
+        _match(_SHA, page_sha, "page_sha256")
+        if hashlib.sha256(page_text(blocks).encode("utf-8")).hexdigest() != page_sha:
+            raise LegalUnavailable("the page blocks do not hash to Legal's page_sha256: nothing is shown")
     msa = data.get("msa_acceptance")
     mv = ma = None
     if msa is not None:
         mv = _match(_VERSION, msa.get("version") if isinstance(msa, dict) else None, "msa_acceptance.version")
         ma = _match(_TS, msa.get("accepted_at"), "msa_acceptance.accepted_at")
     return PortalView(_match(_LG_ID, data.get("invitation_id"), "invitation_id"), page,
-                      _match(_TS, data.get("expires_at"), "expires_at"), display, tuple(docs), mv, ma)
+                      _match(_TS, data.get("expires_at"), "expires_at"), display, tuple(docs), mv, ma,
+                      blocks, page_sha if blocks else None)
 
 
 def parse_accepted(data: Any, body: dict) -> AcceptOutcome:

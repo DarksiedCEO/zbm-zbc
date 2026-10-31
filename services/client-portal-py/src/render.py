@@ -2,16 +2,14 @@
 Server-rendered HTML for the client acceptance page (ADR 0028). No script, no third-party resource, no cookie; one
 inline stylesheet allowed by its hash in the Content-Security-Policy. Every value is HTML-escaped.
 
-The words are the founder-approved clickwrap text v1 (scratchpad legal/clickwrap-acceptance-text-v1.md, Parts B, C
-and D), character for character, with its ``{{values}}`` filled. Two changes of behaviour, not of words (ADR 0028):
-the documents are shown in full inline (no scroll panel, so no script is needed to unlock a box: the client passes the
-whole text of each document before reaching its box), and the server, not a disabled button, refuses a submission
-with a box unticked or a field empty. The brief adds one field the text does not have: the company the signatory
-signs for, which must match the client's legal name on the documents.
+The acceptance page's words are Legal's (AEGIS M-5): Legal renders the founder-approved clickwrap text v1 (Parts B
+and C, with every value filled and each document's exact text) as blocks, and this module only lays the blocks out.
+The page text recorded as screen evidence is Legal's ``page_text(blocks)``; Legal re-renders it at submission and
+refuses any other. Behaviour, not wording, differs from the text's description (ADR 0028 lists each for Andre's
+sign-off): the full text shown inline, the server refusing an unticked box, "Not now" opening a page, and the
+"Company you are signing for" field.
 
-Every page builds its HTML and its plain text from the same blocks. The acceptance page's plain text (every value
-filled in, each document's exact registered text included) is the "screen evidence" of clickwrap Part E: its
-SHA-256 is signed into the form and recorded with the acceptance, and the text itself is stored by Legal.
+The other pages (not found, confirmation, ...) and the Part D email builder are this service's.
 """
 
 from __future__ import annotations
@@ -103,91 +101,84 @@ class FormState:
     errors: dict = field(default_factory=dict)       # field id -> message (ordered as on the page)
 
 
-def doc_label(view: PortalView, kind: str) -> str:
-    if kind == "msa":
-        return "Z Best Media Master Services Agreement"
-    return f"Statement of Work {view.display.sow_number}: {view.display.sow_title}"
+def doc_label(view, kind: str) -> str:
+    """The document's label as Legal rendered it (``Document.label``)."""
+    doc = view.doc(kind) if hasattr(view, "doc") else None
+    if doc is not None and doc.label:
+        return doc.label
+    d = view.display
+    return "Z Best Media Master Services Agreement" if kind == "msa" else \
+        f"Statement of Work {d.sow_number}: {d.sow_title}"
 
 
 def acceptance_page(view: PortalView, token: str, issued: int, form_sig: str, page_sha256: Optional[str],
                     state: Optional[FormState] = None, display_tz: str = "America/Los_Angeles") -> Page:
-    """The page for this link. ``page_sha256`` None: compute the page text only (the caller signs its hash)."""
+    """The page for this link, built from the blocks Legal rendered (AEGIS M-5: the words, the values and each
+    document's text are Legal's; this function only lays them out). The page text is exactly Legal's
+    ``page_text(blocks)``: hidden inputs, error messages and typed values add none."""
     state = state or FormState()
-    d = view.display
-    name = d.client_legal_name
-    msa, sow = view.doc("msa"), view.doc("sow")
-    first = view.page == "first_engagement"
-    pg = Page("Review and accept your agreement with Z Best Media" if first
-              else "Review and accept your new Statement of Work")
+    title = next(b["text"] for b in view.blocks if b["k"] == "title")
+    pg = Page(title)
     pg.add('<a class="skip" href="#accept-form">Skip to the acceptance form</a><main>', None)
-    pg.h1(pg.title)
-    if state.errors:
-        items = "".join(f'<li><a href="#{e(k)}">{e(v)}</a></li>' for k, v in state.errors.items())
-        pg.add('<div class="errors" role="alert" aria-labelledby="errors-title"><h2 id="errors-title">'
-               f'There is a problem</h2><ul>{items}</ul></div>', None)
-    if first:
-        pg.p(f"Before we start, please read and accept two documents for {name}. The Master Services Agreement sets "
-             "the ground rules for working together. The Statement of Work describes this project, its price and its "
-             "timeline. Each document is shown in full below, and you can download a copy of each before you accept.")
-        pg.p("Accepting on this page is a legal signature. It has the same effect as signing on paper. Only a person "
-             f"authorized to sign for {name} should accept.")
-    else:
-        when = local_date(view.msa_accepted_at or "", display_tz)
-        pg.p(f"This Statement of Work is made under the Master Services Agreement, version "
-             f"{view.msa_accepted_version}, that {name} accepted on {when}.")
-    pg.add(f'<form id="accept-form" method="post" action="/accept/{e(token)}" accept-charset="utf-8">'
-           f'<input type="hidden" name="issued" value="{issued}">'
-           f'<input type="hidden" name="form_sig" value="{e(form_sig)}">'
-           f'<input type="hidden" name="page_sha256" value="{e(page_sha256 or "")}">', None)
-    blocks = ([("msa", msa, 1)] if first else []) + [("sow", sow, 2 if first else 1)]
-    for kind, doc, n in blocks:
-        label = doc_label(view, kind)
-        hid = f"doc{n}-title"
-        pg.add(f'<section aria-labelledby="{hid}"><h2 id="{hid}">{e(label)}</h2>', label)
-        meta = f"Version {doc.version} · SHA-256 fingerprint {doc.doc_sha256}"
-        pg.p(meta, "meta")
-        open_text = "Open the full agreement" if kind == "msa" else "Open the full Statement of Work"
-        pg.add(f'<p><a href="/accept/{e(token)}/document/{n}">{e(open_text)}</a> · '
-               f'<a href="/accept/{e(token)}/document/{n}/download">Download a copy</a></p>',
-               f"{open_text} · Download a copy")
-        pg.add(f'<div class="doc" role="region" aria-label="Full text: {e(label)}" tabindex="0"><pre>'
-               f"{e(doc.text)}</pre></div>", doc.text)
-        box = f"accept_doc_{n}"
-        if kind == "msa":
-            check = (f"I have read the Z Best Media Master Services Agreement, version {doc.version}, and I agree to "
-                     f"it on behalf of {name}.")
-        else:
-            check = (f"I have read Statement of Work {d.sow_number}, version {doc.version}, including its fees, and I "
-                     f"agree to it on behalf of {name}.")
-        err = state.errors.get(box)
-        aria = f' aria-invalid="true" aria-describedby="{box}-error"' if err else ""
-        pg.add(f'<div class="check"><input type="checkbox" id="{box}" name="{box}" value="yes" required{aria}>'
-               f'<label for="{box}">{e(check)}'
-               + (f'<span class="error" id="{box}-error">{e(err)}</span>' if err else "")
-               + "</label></div></section>", f"☐ {check}")
-    for fid, label, hint, auto, maxlen in (
-            ("full_name", "Your full name", None, "name", 120),
-            ("title", "Your title", "(for example, Owner, CEO, Managing Member)", "organization-title", 120),
-            ("company", "Company you are signing for", None, "organization", 200)):
-        err = state.errors.get(fid)
-        described = " ".join(x for x in ((f"{fid}-hint" if hint else ""), (f"{fid}-error" if err else "")) if x)
-        attrs = (f' aria-describedby="{described}"' if described else "") + (' aria-invalid="true"' if err else "")
-        value = getattr(state, fid)
-        pg.add(f'<div class="field"><label for="{fid}">{e(label)}</label>'
-               + (f'<span class="hint" id="{fid}-hint">{e(hint)}</span>' if hint else "")
-               + (f'<span class="error" id="{fid}-error">{e(err)}</span>' if err else "")
-               + f'<input type="text" id="{fid}" name="{fid}" autocomplete="{auto}" maxlength="{maxlen}" required'
-               f' spellcheck="false" value="{e(value)}"{attrs}></div>',
-               f"{label}{(' ' + hint) if hint else ''}")
-    pg.p(f'By selecting "Accept and sign", I confirm that I am the person named above and that I am authorized to '
-         f"bind {name}.")
-    pg.p('By selecting "Accept and sign", you agree to do business with Z Best Media electronically, including '
-         f"receiving these documents, notices, invoices and reports by email at {d.notice_email}. We will record your "
-         "name, title, the time, the documents' fingerprints, and your IP address and browser as evidence of this "
-         "acceptance, and we will email you a copy of everything you accept. You can ask us for another copy at any "
-         f"time at {CONTACT}.")
-    pg.add('<p><button type="submit">Accept and sign</button><a href="/accept/not-now">Not now</a></p></form></main>',
-           "Accept and sign · Not now")
+    form_open = False
+
+    def open_form():
+        pg.add(f'<form id="accept-form" method="post" action="/accept/{e(token)}" accept-charset="utf-8">'
+               f'<input type="hidden" name="issued" value="{issued}">'
+               f'<input type="hidden" name="form_sig" value="{e(form_sig)}">'
+               f'<input type="hidden" name="page_sha256" value="{e(page_sha256 or "")}">', None)
+
+    for b in view.blocks:
+        k, text = b["k"], b["text"]
+        if k == "title":
+            pg.add(f"<h1>{e(text)}</h1>", text)
+            if state.errors:
+                items = "".join(f'<li><a href="#{e(fid)}">{e(msg)}</a></li>' for fid, msg in state.errors.items())
+                pg.add('<div class="errors" role="alert" aria-labelledby="errors-title"><h2 id="errors-title">'
+                       f'There is a problem</h2><ul>{items}</ul></div>', None)
+            continue
+        if k in ("doc_heading", "field", "actions") and not form_open:
+            open_form()
+            form_open = True
+        if k == "p":
+            pg.add(f"<p>{e(text)}</p>", text)
+        elif k == "doc_heading":
+            hid = f"doc{b['n']}-title"
+            pg.add(f'<section aria-labelledby="{hid}"><h2 id="{hid}">{e(text)}</h2>', text)
+        elif k == "meta":
+            pg.add(f'<p class="meta">{e(text)}</p>', text)
+        elif k == "links":
+            n = b["n"]
+            pg.add(f'<p><a href="/accept/{e(token)}/document/{n}">{e(b["open_label"])}</a> · '
+                   f'<a href="/accept/{e(token)}/document/{n}/download">Download a copy</a></p>', text)
+        elif k == "doc_text":
+            label = next((x["text"] for x in view.blocks if x["k"] == "doc_heading" and x["n"] == b["n"]), "")
+            pg.add(f'<div class="doc" role="region" aria-label="Full text: {e(label)}" tabindex="0"><pre>'
+                   f"{e(text)}</pre></div>", text)
+        elif k == "check":
+            box = f"accept_doc_{b['n']}"
+            err = state.errors.get(box)
+            aria = f' aria-invalid="true" aria-describedby="{box}-error"' if err else ""
+            pg.add(f'<div class="check"><input type="checkbox" id="{box}" name="{box}" value="yes" required{aria}>'
+                   f'<label for="{box}">{e(b["label"])}'
+                   + (f'<span class="error" id="{box}-error">{e(err)}</span>' if err else "")
+                   + "</label></div></section>", text)
+        elif k == "field":
+            fid, hint = b["id"], b.get("hint")
+            err = state.errors.get(fid)
+            auto, maxlen = {"full_name": ("name", 120), "title": ("organization-title", 120),
+                            "company": ("organization", 200)}[fid]
+            described = " ".join(x for x in ((f"{fid}-hint" if hint else ""), (f"{fid}-error" if err else "")) if x)
+            attrs = (f' aria-describedby="{described}"' if described else "") + (' aria-invalid="true"' if err else "")
+            pg.add(f'<div class="field"><label for="{fid}">{e(b["label"])}</label>'
+                   + (f'<span class="hint" id="{fid}-hint">{e(hint)}</span>' if hint else "")
+                   + (f'<span class="error" id="{fid}-error">{e(err)}</span>' if err else "")
+                   + f'<input type="text" id="{fid}" name="{fid}" autocomplete="{auto}" maxlength="{maxlen}" required'
+                   f' spellcheck="false" value="{e(getattr(state, fid))}"{attrs}></div>', text)
+        elif k == "actions":
+            pg.add('<p><button type="submit">Accept and sign</button><a href="/accept/not-now">Not now</a></p>',
+                   text)
+    pg.add(("</form>" if form_open else "") + "</main>", None)
     return pg
 
 
@@ -239,8 +230,9 @@ def changed_page(token: str) -> Page:
                         link=(f"/accept/{token}", "Open the page again"))
 
 
-def confirmation_page(view: PortalView, accepted: tuple, full_name: str, title: str, display_tz: str,
+def confirmation_page(view, accepted: tuple, full_name: str, title: str, display_tz: str,
                       emailed: bool) -> Page:
+    """``view``: the link's PortalView, or Legal's Receipt for a retry (AEGIS M-2)."""
     pg = Page("Thank you. Your acceptance is recorded.")
     pg.add("<main>", None)
     pg.h1(pg.title)
@@ -265,7 +257,7 @@ def confirmation_page(view: PortalView, accepted: tuple, full_name: str, title: 
     return pg
 
 
-def confirmation_email(view: PortalView, accepted: tuple, full_name: str, title: str, display_tz: str,
+def confirmation_email(view, accepted: tuple, full_name: str, title: str, display_tz: str,
                        postal_line: str, next_step: str) -> tuple[str, str]:
     """Clickwrap text v1, Part D: (subject, body). ``postal_line`` is ZBM's entity name and address (founder facts
     from configuration, never hard-coded); ``next_step`` the sentence for this engagement."""

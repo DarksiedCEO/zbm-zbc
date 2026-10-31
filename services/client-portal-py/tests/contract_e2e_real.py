@@ -160,9 +160,15 @@ def main() -> int:
     msa_acc, sow_acc = accs["client_msa"]["acceptance_id"], accs["sow_seo_audit"]["acceptance_id"]
     out["ip_hmac_only"] = all(len(a["portal_evidence"]["ip_hmac_sha256"]) == 64 for a in accs.values()) \
         and "203.0.113.7" not in json.dumps(list(accs.values()))
-    # reuse: the page is gone, and a resubmission of the same form records nothing more
+    # reuse: the page is gone; the SAME form again (a refresh, a lost response) gets the confirmation from Legal's
+    # receipt (AEGIS M-2), a different submission gets the 404; nothing more is recorded
     out["reuse_page"] = PH.call(page_app, "GET", f"/accept/{tok}").status
-    out["reuse_submit"] = PH.form_post(page_app, token=tok, get=page).status
+    again = PH.form_post(page_app, token=tok, get=page)
+    out["reuse_submit"] = [again.status, "Thank you. Your acceptance is recorded." in again.text,
+                           sorted(re.findall(r"Acceptance reference: (lg-acc-[0-9A-Z]{26})", again.text)) == sorted(refs)]
+    lclock.advance(minutes=30)                                    # beyond Legal's 15-minute idempotency window
+    out["reuse_submit_later"] = PH.form_post(page_app, token=tok, get=page).status
+    out["other_submit"] = PH.form_post(page_app, token=tok, get=page, fields={"title": "CEO"}).status
     out["acceptance_count_after_reuse"] = len(x.svc.acceptances)
 
     # ---------------------------------------------------------------- 4) Finance recognises the page's acceptances
@@ -193,6 +199,14 @@ def main() -> int:
             "ip_hmac_sha256": "1" * 64, "user_agent_hmac_sha256": "2" * 64, "hmac_key_id": "0" * 16}
     r = x.post("/legal/v1/portal/acceptances", body, caller="client_portal")
     out["tampered_hash_accept"] = [r.status_code, x.svc.client_invitations[link2["invitation_id"]]["used_at"]]
+    # AEGIS M-5: the portal caller cannot record a page Legal did not render, nor another company
+    good_docs = [{**msa_ref, "presented_sha256": msa_ref["doc_sha256"], "affirmative_act": True},
+                 {**sow2_ref, "presented_sha256": sow2_ref["doc_sha256"], "affirmative_act": True}]
+    fake = {**body, "request_id": "e2e-fake-page", "documents": good_docs,
+            "signatory": {"full_name": "Mallory", "title": "CEO", "company": "Totally Different Inc"},
+            "page_sha256": LH.sha(b"anything at all"), "page_text_b64": LH.b64(b"anything at all")}
+    r = x.post("/legal/v1/portal/acceptances", fake, caller="client_portal")
+    out["fabricated_page_accept"] = [r.status_code, sorted(i["code"] for i in r.json().get("reasons", []))]
     # the SOW template retired after the invitation: the page (opened before) cannot be submitted, nor reopened
     page2 = PH.call(page_app, "GET", f"/accept/{link2['token']}")
     x.ok(x.apost("/legal/v1/documents/sow_seo_audit/versions/1.0/decision",

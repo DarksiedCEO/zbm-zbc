@@ -158,7 +158,7 @@ def test_legal_down_or_a_text_whose_hash_does_not_match_shows_nothing():
     assert r.status == 503 and "Nothing was recorded" in r.text and MSA_TEXT[:20] not in r.text
 
 
-def test_rate_limits_per_ip_per_token_and_for_not_found():
+def test_rate_limits_per_client_address_per_link_and_for_not_found():
     app, legal, clock, mono = make(env={"PORTAL_RATE_IP_PER_MINUTE": "5", "PORTAL_RATE_TOKEN_PER_HOUR": "7",
                                         "PORTAL_RATE_NOT_FOUND_PER_MINUTE": "3"})
     for _ in range(5):
@@ -166,10 +166,11 @@ def test_rate_limits_per_ip_per_token_and_for_not_found():
     r = call(app, "GET", f"/accept/{TOKEN}")
     assert r.status == 429 and int(r.headers["retry-after"]) >= 1
     n = len(legal.resolves)
-    # another client address: its own IP window, but the same token's window (7 per hour) is nearly used
+    # another client address: its own address window, the same link's window (7 per hour)
     assert call(app, "GET", f"/accept/{TOKEN}", client=("198.51.100.2", 1)).status == 200
-    assert call(app, "GET", f"/accept/{TOKEN}", client=("198.51.100.3", 1)).status == 429      # 8th for this token
-    assert len(legal.resolves) == n + 1                       # a limited request never reaches Legal
+    assert call(app, "GET", f"/accept/{TOKEN}", client=("198.51.100.3", 1)).status == 200
+    assert call(app, "GET", f"/accept/{TOKEN}", client=("198.51.100.4", 1)).status == 429      # 8th for this link
+    assert len(legal.resolves) == n + 3 and len(app.by_token._hits) == 1
     mono.t += 61
     # not-found answers have a global ceiling (distributed guessing): 3 per minute, then 429
     codes = [call(app, "GET", f"/accept/{c * 43}", client=(f"192.0.2.{i}", 1)).status
@@ -177,13 +178,47 @@ def test_rate_limits_per_ip_per_token_and_for_not_found():
     assert codes == [404, 404, 404, 429, 429]
 
 
-def test_the_ip_limit_keys_on_the_forwarded_client_not_the_proxy():
+def test_a_global_ceiling_on_legal_calls_is_charged_before_calling_legal():
+    """AEGIS M-3: a client that can choose its address (a spoofed header) bypasses the per-address limit; every call
+    to Legal still counts against one ceiling, charged BEFORE the call, so Legal sees at most that many."""
+    app, legal, clock, mono = make(env={"PORTAL_RATE_LEGAL_PER_MINUTE": "4", "PORTAL_RATE_NOT_FOUND_PER_MINUTE": "1000"})
+    codes = [call(app, "GET", f"/accept/{chr(66 + i % 20) * 43}", {"x-real-ip": f"203.0.113.{i}"}).status
+             for i in range(10)]
+    assert codes == [404] * 4 + [429] * 6 and len(legal.resolves) == 4
+    mono.t += 61
+    assert call(app, "GET", f"/accept/{TOKEN}").status == 200
+
+
+def test_junk_tokens_never_enter_the_per_link_table():
+    app, legal, *_ = make(env={"PORTAL_RATE_IP_PER_MINUTE": "99999", "PORTAL_RATE_NOT_FOUND_PER_MINUTE": "99999",
+                               "PORTAL_RATE_LEGAL_PER_MINUTE": "99999"})
+    for i in range(50):
+        call(app, "GET", f"/accept/{('Q%02d' % i) * 14}Q")
+        call(app, "GET", f"/accept/short{i}")
+    assert len(app.by_token._hits) == 0                      # neither malformed nor unknown links are counted
+    call(app, "GET", f"/accept/{TOKEN}")
+    assert len(app.by_token._hits) == 1
+
+
+def test_the_client_address_is_the_edge_header_never_the_left_most_forwarded_entry():
+    app, *_ = make()
+    peer = ("10.0.0.1", 1)
+    ip = lambda h: app._client_ip({"headers": [(k.encode(), v.encode()) for k, v in h.items()], "client": peer})  # noqa: E731
+    assert ip({"x-real-ip": "203.0.113.5", "x-forwarded-for": "1.2.3.4, 198.51.100.9"}) == "203.0.113.5"
+    assert ip({"x-real-ip": "not an ip", "x-forwarded-for": "1.2.3.4, 198.51.100.9"}) == "198.51.100.9"
+    assert ip({"x-forwarded-for": "1.2.3.4, 198.51.100.9"}) == "198.51.100.9"
+    assert ip({}) == "10.0.0.1"
+    app2, *_ = make(env={"PORTAL_CLIENT_IP_HEADER": "none", "PORTAL_TRUSTED_PROXY_HOPS": "0"})
+    assert app2._client_ip({"headers": [(b"x-real-ip", b"203.0.113.5")], "client": peer}) == "10.0.0.1"
+
+
+def test_the_ip_limit_keys_on_the_edge_address_not_the_proxy():
     app, *_ = make(env={"PORTAL_RATE_IP_PER_MINUTE": "2", "PORTAL_RATE_TOKEN_PER_HOUR": "100"})
     proxy = ("10.0.0.1", 1)
     for client in ("203.0.113.1", "203.0.113.2", "203.0.113.3"):
         for _ in range(2):
-            assert call(app, "GET", f"/accept/{TOKEN}", {"x-forwarded-for": f"1.2.3.4, {client}"}, client=proxy).status == 200
-    assert call(app, "GET", f"/accept/{TOKEN}", {"x-forwarded-for": "203.0.113.1"}, client=proxy).status == 429
+            assert call(app, "GET", f"/accept/{TOKEN}", {"x-real-ip": client}, client=proxy).status == 200
+    assert call(app, "GET", f"/accept/{TOKEN}", {"x-real-ip": "203.0.113.1"}, client=proxy).status == 429
 
 
 @pytest.mark.parametrize("method", ["PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"])

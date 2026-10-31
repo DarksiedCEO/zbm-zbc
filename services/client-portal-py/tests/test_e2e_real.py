@@ -33,8 +33,16 @@ def test_invite_accept_and_finance_issues_the_invoice(run):
     assert run["invoice_issue"] == [200, "issued"]
 
 
-def test_a_used_link_records_nothing_more(run):
-    assert run["reuse_page"] == 404 and run["reuse_submit"] == 404 and run["acceptance_count_after_reuse"] == 2
+def test_a_used_link_records_nothing_more_and_a_retry_sees_its_confirmation(run):
+    assert run["reuse_page"] == 404 and run["acceptance_count_after_reuse"] == 2
+    assert run["reuse_submit"] == [200, True, True]                  # AEGIS M-2: the receipt, the same references
+    assert run["reuse_submit_later"] == 200                          # also after Legal's idempotency window
+    assert run["other_submit"] == 404
+
+
+def test_the_portal_caller_cannot_record_a_page_legal_did_not_render(run):
+    status, codes = run["fabricated_page_accept"]
+    assert status == 409 and "PRESENTED_TEXT_MISMATCH" in codes and "COMPANY_MISMATCH" in codes
 
 
 def test_another_client_cannot_use_the_acceptance_or_the_documents(run):

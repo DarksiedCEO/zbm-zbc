@@ -6,9 +6,9 @@ unticked box per document, types their name, title and company, and selects **Ac
 acceptance per document; Finance's contract gate (FIN-29) then counts it. Andre's steps:
 `docs/runbooks/client-acceptance.md`. Design and threat model: `docs/adr/0028-client-acceptance-page.md`.
 
-The service is stateless and holds no record: every acceptance, link and piece of evidence is Legal's. Its words are
-the founder-approved clickwrap text v1 (Parts B and C on the page, Part D for the confirmation email), filled from
-Legal's register.
+The service is stateless and holds no record: every acceptance, link and piece of evidence is Legal's. The page's
+words are rendered by Legal (the founder-approved clickwrap text v1, Parts B and C, as blocks; AEGIS M-5) and laid out
+here; Legal checks the page text at submission. Part D (the confirmation email) is built here.
 
 ## Run
 
@@ -29,9 +29,11 @@ cd src && python3 -m api                                # PORTAL_BIND_ADDR (127.
 | `PORTAL_LEGAL_CALLER_TOKEN` | required | this service's `client_portal` caller token at Legal: it reaches only Legal's two `/legal/v1/portal/...` routes |
 | `PORTAL_EVIDENCE_KEY` | required | >= 32 printable characters. HMAC key for the client's IP address and user agent (recorded at Legal as HMACs only), the form signature and the retry key. Rotating it invalidates open forms (the client reloads) and changes `hmac_key_id` on later acceptances; keep the old value offline to verify old HMACs |
 | `PORTAL_PUBLIC_ORIGIN` | required | the exact origin the page is served from (`https://<domain>`); a POST whose `Origin` differs is refused |
-| `PORTAL_TRUSTED_PROXY_HOPS` | 1 | 0..3: the client address is the `X-Forwarded-For` entry this many from the end (Railway's edge adds one); 0 = the socket peer. **UNVERIFIED** how Railway's edge writes `X-Forwarded-For` (see ADR 0028) |
+| `PORTAL_CLIENT_IP_HEADER` | `x-real-ip` | the header Railway's edge sets to the client address (**UNVERIFIED**: a moderator's statement, not a documented contract; runbook step 8); `none` = do not read one |
+| `PORTAL_TRUSTED_PROXY_HOPS` | 1 | 0..3: fallback when that header is missing: the `X-Forwarded-For` entry this many from the END (never the left-most); 0 = the socket peer |
+| `PORTAL_RATE_LEGAL_PER_MINUTE` | 300 | every call to Legal, all clients together, charged before the call (AEGIS M-3) |
 | `PORTAL_RATE_IP_PER_MINUTE` | 30 | requests per client address per minute on `/accept/...` |
-| `PORTAL_RATE_TOKEN_PER_HOUR` | 40 | requests per link per hour |
+| `PORTAL_RATE_TOKEN_PER_HOUR` | 40 | requests per link per hour (counted only for links Legal confirmed) |
 | `PORTAL_RATE_NOT_FOUND_PER_MINUTE` | 120 | not-found answers per minute, all clients together |
 | `PORTAL_FORM_MAX_AGE_SECONDS` | 14400 | how long a served form can be submitted (300..86400) |
 | `PORTAL_LEGAL_TIMEOUT_SECONDS` | 5 | 1..30 |
@@ -64,13 +66,17 @@ serve) gets the same 404 page.
   hash and the issue time; at most `PORTAL_FORM_MAX_AGE_SECONDS` old) and an `Origin` equal to `PORTAL_PUBLIC_ORIGIN`;
   `Sec-Fetch-Site`, when sent, must be `same-origin`. `application/x-www-form-urlencoded` only.
 - **Limits.** Request target 2 KiB, head 8 KiB, form body 8 KiB, 10 s body deadline; rate limits per client address,
-  per link and on not-found answers, keyed by HMACs; uvicorn: 64 concurrent connections, 5 s keep-alive, 16 KiB
+  a global ceiling on Legal calls charged before each call, per confirmed link, and on not-found answers, keyed by
+  HMACs (AEGIS M-3; the attacker cost is in ADR 0028); uvicorn: 64 concurrent connections, 5 s keep-alive, 16 KiB
   head.
 - **What Legal receives.** The documents with their hashes, each box's own tick, the page text as shown and its hash,
   the typed name, title and company, and HMAC-SHA256 values of the client's IP address and user agent with the key's
   id. Never the IP address or the user agent themselves.
-- **Exactly once.** Legal uses the link up in the same operation that records the acceptances; a double-submit is
-  answered as the 404 (the link is used), a retry of the same submission carries the same request id.
+- **Exactly once, and a retry sees its confirmation.** Legal uses the link up in the same operation that records the
+  acceptances. A refresh or a retry after a lost response (the same form) gets the confirmation from Legal's receipt
+  for that submission's request id (AEGIS M-2); any other submission on a used link gets the 404.
+- **Typed fields** are NFKC-normalized; bidi, zero-width and other invisible or control characters are refused here
+  and at Legal (AEGIS L-1).
 - **Nothing logged** but the route name, the status and the time taken: never a token, a name, an email, an IP
   address or a user agent. uvicorn's access log is off.
 - **Accessible.** Every field and box has a label; errors are listed in an alert summary linking to each field, and

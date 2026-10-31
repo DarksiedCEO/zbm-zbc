@@ -150,16 +150,57 @@ def test_documents_changed_between_the_page_and_the_submission():
     assert legal.accepts == []
 
 
-def test_a_retry_is_the_same_request_and_a_used_link_is_404():
+def test_a_refresh_or_a_lost_response_shows_the_confirmation_again():
+    """AEGIS M-2: the same form submitted again after it was accepted (the response was lost, or the client
+    refreshed the confirmation) gets the confirmation from Legal's receipt; nothing is recorded twice."""
     app, legal, *_ = make()
     page = call(app, "GET", f"/accept/{TOKEN}")
     first = form_post(app, get=page)
     assert first.status == 200
-    # the page is gone once used (Legal's 404) ...
-    assert call(app, "GET", f"/accept/{TOKEN}").status == 404
-    # ... a double-submit of the same form: Legal resolves the link as used, so the portal never re-sends
-    second = form_post(app, get=page)
-    assert second.status == 404 and len(legal.accepts) == 1
+    assert call(app, "GET", f"/accept/{TOKEN}").status == 404          # the page itself is gone once used
+    again = form_post(app, get=page)
+    assert again.status == 200 and "Thank you. Your acceptance is recorded." in again.text
+    assert "Acceptance reference: lg-acc-" + "1" * 26 in again.text and len(legal.accepts) == 1
+    assert legal.receipts[-1][1] == legal.accepts[0]["request_id"]
+
+
+def test_a_different_submission_on_a_used_link_is_the_404():
+    app, legal, *_ = make()
+    page = call(app, "GET", f"/accept/{TOKEN}")
+    assert form_post(app, get=page).status == 200
+    r = form_post(app, get=page, fields={"title": "CEO"})               # someone else's form for the same link
+    assert r.status == 404 and "Thank you" not in r.text and len(legal.accepts) == 1
+
+
+def test_a_double_submit_racing_the_first_gets_the_receipt():
+    """Legal answered the accept with 404 because the first submission used the link a moment earlier."""
+    from legal_client import AcceptOutcome
+    app, legal, *_ = make()
+    page = call(app, "GET", f"/accept/{TOKEN}")
+    form_post(app, get=page)
+    legal.used.discard(TOKEN)                                         # the second resolve ran before the first commit
+    orig = legal.accept
+
+    def late(body):
+        legal.used.add(TOKEN)
+        return AcceptOutcome("not_found")
+    legal.accept = late
+    r = form_post(app, get=page)
+    legal.accept = orig
+    assert r.status == 200 and "Thank you. Your acceptance is recorded." in r.text
+
+
+@pytest.mark.parametrize("name", ["Pat\u202e CLL emcA", "Pat\u200bQ", "Pat\u2066x\u2069", "Pat\u00adQ"])
+def test_bidi_and_invisible_characters_are_refused_before_legal(name):
+    app, legal, *_ = make()
+    r = form_post(app, fields={"full_name": name})
+    assert r.status == 422 and legal.accepts == [] and 'href="#full_name"' in r.text
+
+
+def test_typed_fields_are_nfkc_normalized():
+    app, legal, *_ = make()
+    assert form_post(app, fields={"full_name": "Ｐａｔ Example", "company": "Ａｃｍｅ LLC"}).status == 200
+    assert legal.accepts[0]["signatory"]["full_name"] == "Pat Example"
 
 
 def test_the_same_submission_always_has_the_same_request_id():
