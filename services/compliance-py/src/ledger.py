@@ -25,7 +25,7 @@ import hashlib
 import json
 import re
 import threading
-from typing import Any, Protocol
+from typing import Optional, Any, Protocol
 
 import httpx
 
@@ -151,6 +151,21 @@ class HttpLedgerClient:
             return resp.status_code == 200 and resp.json().get("valid") is True
         except (httpx.HTTPError, ValueError, AttributeError):
             return False
+
+    def anchor(self, at: Optional[int] = None) -> dict:
+        """AEGIS wave A F-5: GET /ledger/anchor[?at=N] (raises LedgerQueryFailed)."""
+        q = "" if at is None else f"?at={int(at)}"
+        try:
+            with httpx.Client(timeout=self._timeout, transport=self._transport) as client:
+                resp = client.get(f"{self._base_url}/ledger/anchor{q}", headers={"Authorization": f"Bearer {self._token}"})
+            if resp.status_code != 200:
+                raise LedgerQueryFailed(f"ledger anchor could not be read: HTTP {resp.status_code}")
+            data = resp.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise LedgerQueryFailed(f"ledger anchor could not be read: {type(exc).__name__}") from None
+        if not isinstance(data, dict) or not isinstance(data.get("anchor"), str):
+            raise LedgerQueryFailed("ledger anchor answer has no anchor")
+        return data
 
     def head(self) -> bool:
         """Fix wave A (CH-6): True when GET /ledger/head answers 200 (the ledger is reachable and serving)."""

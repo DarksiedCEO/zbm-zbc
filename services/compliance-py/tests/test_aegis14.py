@@ -244,9 +244,6 @@ def test_n14_4_failed_append_after_anchor_does_not_brick_restart(tmp_path):
     r = x.rule("client-z", "client", client_facts())
     assert r.status_code == 503
     assert not x.ledger.of_type("local_commit_failed")
-    # fix wave A (CH-1): an interrupted write this log announced is rolled back automatically at the next start
-    # (test_fixwave_a_resilience.py); without its intent journal it is still Andre's -- the path kept covered here
-    (tmp_path / "d" / "compliance_log.jsonl.intent").unlink()
     with pytest.raises(RuntimeError, match="COMPLIANCE_RECONCILE_MODE"):
         Harness(data_dir=str(tmp_path / "d"), ledger=x.ledger, clock=x.clock, ports=x.ports)
     y = Harness(data_dir=str(tmp_path / "d"), ledger=x.ledger, clock=x.clock, ports=x.ports,

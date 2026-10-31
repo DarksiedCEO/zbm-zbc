@@ -47,6 +47,7 @@ class Scheduler:
         self.watcher, self.clock, self.out = watcher, clock or SystemClock(), out
         self.last_controls: Optional[datetime] = None
         self.last_watcher: Optional[datetime] = None
+        self.last_anchor: Optional[datetime] = None
         self.started_at: Optional[datetime] = None
         self.last_error: Optional[dict] = None
         self.on_thread_death = on_thread_death
@@ -58,6 +59,10 @@ class Scheduler:
 
     def due_controls(self) -> bool:
         return self.last_controls is None or self._now() - self.last_controls >= self.interval
+
+    def due_anchor(self) -> bool:
+        return getattr(self.svc, "anchor_store", None) is not None and (
+            self.last_anchor is None or self._now() - self.last_anchor >= WATCHER_EVERY)
 
     def due_watcher(self) -> bool:
         return self.watcher and (self.last_watcher is None or self._now() - self.last_watcher >= WATCHER_EVERY)
@@ -93,6 +98,8 @@ class Scheduler:
         if self.due_controls() and self._run("controls", self.svc.run_internal_controls):
             self.last_controls = self._now()
             ran = True
+        if self.due_anchor() and self._run("ledger anchor", self.svc.ledger_anchor_check):
+            self.last_anchor = self._now()                    # AEGIS wave A F-5: once a day, and at start
         if self.due_watcher() and self._run("watcher", self.svc.watcher_run):
             self.last_watcher = self._now()
             ran = True

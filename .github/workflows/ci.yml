@@ -658,6 +658,8 @@ jobs:
           for ref in golang:1.27.3-bookworm rust:1.99.1-slim-bookworm; do
             echo "$ref $(docker image inspect "$ref" --format '{{index .RepoDigests 0}}' 2>/dev/null || echo unknown)"
           done
+      - name: Digests to paste for every image not yet pinned (AEGIS wave A F-4; docs/ci.md "Pins")
+        run: python3 devtools/check_docker_pins.py --print-digests
       - name: Smoke every container (/health, uid 10001, SIGTERM, fail closed, ledger volume)
         shell: bash
         run: |

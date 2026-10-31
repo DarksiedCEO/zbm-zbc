@@ -32,8 +32,10 @@ class FounderGate:
     @classmethod
     def build(cls, founder_token: Optional[str], service_token: Optional[str],
               other_tokens: Iterable[str] = (), who: str = FOUNDER,
-              founder_sha256: Iterable[str] = ()) -> "FounderGate":
-        secret = token_rotation.Secret([founder_token], founder_sha256)
+              founder_sha256: Iterable[str] = (), founder_next_sha256: Iterable[str] = (),
+              next_until: Optional[float] = None) -> "FounderGate":
+        secret = token_rotation.Secret([founder_token], founder_sha256, next_sha256_hex=founder_next_sha256,
+                                       next_until=next_until)
         if not secret or secret.overlaps([service_token, *other_tokens]):
             return cls(None, who)
         return cls(secret, who)

@@ -135,12 +135,15 @@ Webhook events to subscribe: `checkout.session.completed`, `checkout.session.asy
 
 Fix wave A (ADR 0025): a write interrupted by a crash or a lost ledger answer is rolled back AUTOMATICALLY — at the
 next start, or by the ledger watch while running — when every voidable item was announced by this log's intent
-journal (`<log>.intent`, fsynced before each ruling/anchor/version/lease write). The rollback is the same recorded
+journal (`<log>.intent`, fsynced before each ruling/anchor/version/lease write) AND the write never reached its anchor
+(AEGIS wave A F-2: after the anchor a crash and a restored mid-write snapshot look the same, so that case is held for
+Andre with the code `interrupted_write_anchored`; a restored or cloned volume is `volume_generation_mismatch`).
+Railway health-checks `/livez`, so a held, degraded or reconcile-mode deploy still activates (F-1). The rollback is the same recorded
 reconcile, marked `"automatic": true`, logged as `{"alert":"crash_recovered",…}`. Only residue the journal does not
 explain (another instance, a restored or truncated log, a forged event) still needs Andre, below; the service then
 holds (`/health` 503 `"refused"` with the reason) instead of exiting. `/health` is 503 `"degraded"` with
 `degraded_reasons` while the instance cannot write (ADR 0025 section 2). Token rotation (`FIN_SERVICE_TOKEN_NEXT`,
-`FIN_CALLER_TOKENS_NEXT`, `FIN_ANDRE_APPROVAL_TOKEN_SHA256`, `FIN_ANDRE_APPROVAL_TOKEN_NEXT_SHA256`):
+`FIN_CALLER_TOKENS_NEXT`, `FIN_ANDRE_APPROVAL_TOKEN_SHA256`, `FIN_ANDRE_APPROVAL_TOKEN_NEXT_SHA256`, `FIN_ROTATION_ENDS_AT` (required with any `_NEXT`, at most 14 days ahead)):
 docs/runbooks/token-rotation.md.
 
 Identical to compliance-py / verification-py. If start-up refuses with a VOIDABLE problem (a commit that failed

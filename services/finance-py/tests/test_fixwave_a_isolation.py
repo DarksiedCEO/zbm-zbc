@@ -77,6 +77,11 @@ def _sha(t):
     return hashlib.sha256(t.encode()).hexdigest()
 
 
+def _ends(days=1):
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
 def test_rta5_rotation_window_accepts_current_and_next_tokens():
     import json as _json
 
@@ -84,8 +89,9 @@ def test_rta5_rotation_window_accepts_current_and_next_tokens():
     from helpers import ANDRE_TOKEN, CALLERS, SERVICE_TOKEN, Harness
     nxt_service = "next-fin-service-token-openssl-rand-hex-32-aa"
     nxt_sched = "next-fin-caller-scheduler-token-rand-hex-32-bb"
-    h = Harness(env={"FIN_SERVICE_TOKEN_NEXT": nxt_service,
+    h = Harness(env={"FIN_SERVICE_TOKEN_NEXT": nxt_service, "FIN_ROTATION_ENDS_AT": _ends(),
                      "FIN_CALLER_TOKENS_NEXT": _json.dumps({"scheduler": nxt_sched})})
+    assert h.client.get("/health").json()["rotation_in_progress"] is True
     for bearer, caller in ((SERVICE_TOKEN, CALLERS["scheduler"]), (nxt_service, CALLERS["scheduler"]),
                            (SERVICE_TOKEN, nxt_sched), (nxt_service, nxt_sched)):
         r = h.client.get("/fin/v1/integrity", headers={"Authorization": f"Bearer {bearer}",
@@ -114,7 +120,7 @@ def test_rta5_andres_token_can_be_held_as_a_hash_only():
     # a rotation of Andre's token: the next hash is accepted too
     nxt = "next-andre-approval-token-rand-hex-32-cc"
     h2 = Harness(env={"FIN_ANDRE_APPROVAL_TOKEN": "", "FIN_ANDRE_APPROVAL_TOKEN_SHA256": _sha(ANDRE_TOKEN),
-                      "FIN_ANDRE_APPROVAL_TOKEN_NEXT_SHA256": _sha(nxt)})
+                      "FIN_ANDRE_APPROVAL_TOKEN_NEXT_SHA256": _sha(nxt), "FIN_ROTATION_ENDS_AT": _ends()})
     for tok in (ANDRE_TOKEN, nxt):
         r = h2.client.get("/fin/v1/reconcile", headers={"Authorization": f"Bearer {SERVICE_TOKEN}",
                                                          "X-Andre-Approval-Token": tok})
@@ -123,3 +129,36 @@ def test_rta5_andres_token_can_be_held_as_a_hash_only():
         config_mod.load({**h.env, "FIN_ANDRE_APPROVAL_TOKEN_SHA256": "ABC"})
     with pytest.raises(RuntimeError, match="distinct"):
         config_mod.load({**h.env, "FIN_ANDRE_APPROVAL_TOKEN_SHA256": _sha(SERVICE_TOKEN)})
+
+
+def test_f11_a_rotation_window_has_an_explicit_end():
+    """AEGIS wave A F-11: nothing expired a *_NEXT value, and a plaintext Andre token beside a different hash both
+    worked."""
+    import json as _json
+
+    import config as config_mod
+    import token_rotation as TR
+    from helpers import ANDRE_TOKEN, Harness
+    h = Harness()
+    nxt = "next-fin-service-token-openssl-rand-hex-32-aa"
+    with pytest.raises(RuntimeError, match="ROTATION_ENDS_AT"):
+        config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt})
+    with pytest.raises(RuntimeError, match="14 days"):
+        config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": _ends(30)})
+    with pytest.raises(RuntimeError, match="14 days"):
+        config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": _ends(-1)})
+    with pytest.raises(RuntimeError, match="ROTATION_ENDS_AT"):
+        config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": "2026-11-07T00:00:00"})
+    # the next value is refused once the window has ended
+    t = [1000.0]
+    s = TR.Secret(["current-token-0000000000000000000000"], next_plaintexts=[nxt], next_until=2000.0, clock=lambda: t[0])
+    assert s.matches(nxt) and s.matches("current-token-0000000000000000000000")
+    t[0] = 2000.0
+    assert not s.matches(nxt) and s.matches("current-token-0000000000000000000000")
+    # a plaintext Andre token and a hash of ANOTHER token: refused at start (the old plaintext would keep working)
+    with pytest.raises(RuntimeError, match="different"):
+        config_mod.load({**h.env, "FIN_ANDRE_APPROVAL_TOKEN_SHA256": _sha("another-andre-token-0000000000000000")})
+    # the same token as plaintext and hash (the move to the hash): fine
+    config_mod.load({**h.env, "FIN_ANDRE_APPROVAL_TOKEN_SHA256": _sha(ANDRE_TOKEN)})
+    assert "rotation_in_progress" not in h.client.get("/health").json()
+    assert _json

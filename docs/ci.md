@@ -134,11 +134,21 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
   verified), pytest 9.1.1 (hygiene-static). Language runtimes: Python 3.12 and 3.13 (both, because a 3.13-only
   breakage has been missed before), Go from `go.mod`, Node 22 — and Rust **stable, floating** (not pinned; see above).
   Not pinned either: `registry:2` and `python:3.12-slim` in `delivery-docker-live` (below).
-- Docker base images (fix wave A, RTA-6): every `FROM` must be pinned by digest; `hygiene-static` runs
-  `devtools/check_docker_pins.py` and is RED until the `golang:1.27.3-bookworm` and `rust:1.99.1-slim-bookworm`
-  builder digests are pasted into the three Dockerfiles (the railway-images job's "base images actually used" step
-  prints them; the sandbox that wrote the check could not reach the registry). `.github/dependabot.yml` (docker,
-  weekly) then proposes digest bumps.
+- Docker base images (fix wave A, RTA-6; AEGIS wave A F-4): every image a Dockerfile pulls — `FROM`, `COPY --from=`
+  and `RUN --mount=…from=` — must be pinned by digest; `hygiene-static` runs `devtools/check_docker_pins.py` and is
+  **RED until these four references are pinned** (Docker Hub and ghcr.io were not reachable from the sandbox that wrote
+  the check, so the digests could not be looked up there). The railway-images job's step "Digests to paste for every
+  image not yet pinned" prints each `PASTE in <file>: <image>@sha256:<digest>` line; replace exactly:
+
+  | File | Line | Replace | With |
+  |---|---|---|---|
+  | `services/ledger-rust/Dockerfile` | `FROM rust:1.99.1-slim-bookworm AS build` | `rust:1.99.1-slim-bookworm` | `rust:1.99.1-slim-bookworm@sha256:<digest>` |
+  | `services/orchestrator-go/Dockerfile.orchestrator` | `FROM golang:1.27.3-bookworm AS build` | `golang:1.27.3-bookworm` | `golang:1.27.3-bookworm@sha256:<digest>` |
+  | `services/orchestrator-go/Dockerfile.stripe-gateway` | `FROM golang:1.27.3-bookworm AS build` | `golang:1.27.3-bookworm` | `golang:1.27.3-bookworm@sha256:<digest>` (the same digest) |
+  | `services/delivery-py/docker/Dockerfile` | `COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv` | `ghcr.io/astral-sh/uv:0.8.17` | `ghcr.io/astral-sh/uv:0.8.17@sha256:<digest>` |
+
+  Use the image-index digest the step prints (multi-arch), keep the tag before `@` for readability. The check is not
+  weakened to make the job green. `.github/dependabot.yml` (docker, weekly) then proposes digest bumps.
 - Concurrency: one run per ref; a newer push to a pull request cancels the older run. Pushes to `main` and
   `integration-*` are never cancelled.
 - `permissions: contents: read` for the whole workflow.

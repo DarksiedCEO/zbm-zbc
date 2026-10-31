@@ -1,6 +1,7 @@
 # ADR 0025: platform resilience and service isolation (red team Oct 30-31 2026, fix wave A)
 
-Status: accepted (fix wave A, branch `sec/resilience-isolation-2026-10-31`, local). Inputs: the chaos, access and money
+Status: accepted (fix wave A, branch `sec/resilience-isolation-2026-10-31`, local), amended after the AEGIS review
+of b7108c52 (section 7; `scratchpad/night/aegis-resilience-waveA.md`, F-1..F-15). Inputs: the chaos, access and money
 red-team reports of Oct 30-31 2026 (`redteam-chaos.md` CH-1, CH-2, CH-5, CH-6, CH-11, CH-12; `redteam-access.md`
 RTA-1..RTA-6, RTA-8; `redteam-money.md` RTM-07).
 
@@ -22,7 +23,8 @@ never finished, and none of them was acknowledged (the 2xx is sent only after th
 - **At start:** when every voidable item is in the journal and nothing is fatal, the service rolls the residue back
   itself: the same recorded `reconcile` (ledger event + local line) Andre's route writes, by the evidence intelligence,
   marked `"automatic": true`, then re-assesses against the ledger, which must now be clean, and logs
-  `{"alert":"crash_recovered",…}`. Anything voidable the journal does not announce, or anything fatal, is real
+  `{"alert":"crash_recovered",…}`. Section 7 (AEGIS F-2) narrows this to residue that never reached its
+  anchor. Anything voidable the journal does not announce, or anything fatal, is real
   divergence: start-up still refuses (`StartupHeld`), with `{"alert":"log_divergence",…}` and the reason on /health
   (section 3). The manual reconcile is unchanged for that case.
 - **While running (CH-2):** `LedgerWatch` (a daemon thread `main()` starts) probes the ledger every 15 s; while the
@@ -92,7 +94,7 @@ Railway's deploy healthcheck and the old deployment keeps serving, which is the 
   stored format and every existing hash are unchanged.
 - `GET /ledger/anchor` returns `<entries>:<head_hash>` and, with `LEDGER_HEAD_SIGNING_KEY`, an HMAC-SHA256 signature.
   No Resend adapter exists on the ledger (Rust, no outbound client) and pushes from this repository are not allowed,
-  so the external record is Andre's heartbeat monitor: a daily job stores the anchor where no service can write
+  so the external record was Andre's heartbeat monitor (superseded by section 7, F-5: Compliance stores it): a daily job stores the anchor where no service can write
   (`docs/deploy/railway.md`, Compliance (38), step 3 of the heartbeat check). `LEDGER_ANCHORED_HEAD` makes the ledger refuse to start behind or off the last
   stored anchor.
 
@@ -106,6 +108,65 @@ Railway's deploy healthcheck and the old deployment keeps serving, which is the 
   cannot). `langchain-openai` is NOT unused: deer-flow's `deerflow.models.factory` imports it at module level.
   `langchain-deepseek` is reachable only through a model class path delivery's config never allows; dropping it needs
   `uv lock` with the CI-pinned uv 0.8.17 and a networked resolve, so it is left as a documented follow-up (docs/ci.md).
+
+## 7. Amendments after the AEGIS review (F-1..F-15)
+
+- **F-1, deployability.** `/health` answering 503 in reconcile mode made Andre's recovery deploy unactivatable
+  (Railway activates a deployment only on a 2xx healthcheck). Now: `GET /livez` (200 whenever the process serves,
+  holding app included) is Railway's `healthcheckPath` for finance, legal, compliance and the ledger
+  (`.railway/railway.ts`, `devtools/test_deploy_config.py`); `/health` stays truthful for the heartbeat, and in
+  reconcile mode it is 200 with `reconcile_mode`/`reconcile_required` (the voidable residue Andre is there to fix is
+  not a reason for 503). The two tests loosened in wave A are reverted.
+- **F-2, automatic rollback only when provably safe.** Section 1 claimed a restored older volume is held; a snapshot
+  taken mid-write after which the write was ACKNOWLEDGED was in fact voided. Rule now (`crash_recovery.classify`):
+  roll back automatically only residue that never reached its anchor (no `local_log_appended` and no version event of
+  this log in the void set, no stray anchored line). Without its anchor a line can never have been appended, so nothing
+  in the set was acknowledged. An interrupted write that reached its anchor is held (`interrupted_write_anchored`):
+  a crash after the anchor and a restore look identical here, so Andre decides (Finance's restore lockdown is fix wave
+  B's). The **volume generation marker** is the instance lease every boot writes to the volume's log and the ledger:
+  a ledger lease of this log the volume does not hold (a restored or cloned volume after another boot) is
+  `volume_generation_mismatch`, held. The `crash_recovered` alert names the voided events and their types.
+- **F-3.** The ledger watch reads `/ledger/entries` WITHOUT the service lock, then takes the lock only to check the
+  log and the journal did not move, classify and apply (`crash_recovery.Settler`); a read slower than 20 s is not acted
+  on. A plain request is no longer queued behind a slow ledger read.
+- **F-4.** The pin check covers `COPY --from=<image>` and `RUN --mount=…from=<image>` (stage names and indices exempt);
+  `ghcr.io/astral-sh/uv:0.8.17` (delivery) is flagged with the three builders. CI prints the digests to paste
+  (`check_docker_pins.py --print-digests`, railway-images job); docs/ci.md lists the four replacements. The job stays
+  red until they are pasted.
+- **F-5, the anchor is live, in the IaC.** Compliance's in-process scheduler stores the ledger's anchor daily (and at
+  start) on Compliance's own volume (`ledger_anchor.py`, `ledger_anchors.jsonl`), each record HMAC'd with
+  `COMPLIANCE_LEDGER_ANCHOR_KEY` (a key the ledger never holds) and chained to the previous one. Before storing, it
+  checks with `GET /ledger/anchor?at=<n>` that the ledger still extends the last stored anchor (same hash at entry n,
+  at least n entries); a rollback, a rewrite or a broken store is `ledger_anchor_mismatch` on Compliance's /health
+  (503: the heartbeat stops) with an ALERT. So no anchor is ever copied by hand at a ledger redeploy;
+  `LEDGER_ANCHORED_HEAD` remains an optional start-time floor. `LEDGER_HEAD_SIGNING_KEY` and
+  `COMPLIANCE_LEDGER_ANCHOR_KEY` are `preserve()` in the IaC and in the runbook's Secrets table. Residual: someone with
+  write access to BOTH the ledger's and Compliance's volumes and Compliance's key can still rewrite both.
+- **F-6, time.** `recorded_at` is the wall clock as observed, corrected only where implausible: a forward jump of more
+  than 5 minutes ahead of (previous stamp + real elapsed time, monotonic) is stamped at the plausible time; a previous
+  entry more than 5 minutes in the future (stamped under a bad clock, e.g. before a restart) no longer pins later
+  entries — they take the observed time and ordering is `seq`; a small backward step (≤ 5 min) stays monotonic. Any
+  clock fault logs both readings and shows `"warnings":["clock_skew"]` on the ledger's /health for an hour. Tested for
+  a 100-years-ahead entry, in-process and after a restart.
+- **F-7.** Unauthenticated /health bodies carry fixed codes and counts only: the holding app shows
+  `ledger_unavailable_at_start` / `log_divergence` / `interrupted_write_anchored` / `volume_generation_mismatch`;
+  running services add `divergence:<code>`. The full reason, which can name event ids, is in the log. The ledger's
+  `disk_low` is a fixed code (bytes in the log).
+- **F-8.** Legal refuses Compliance's invalidation of a `FIN-*` target, of a `FIN-*` canonical row, and of any row a
+  `FIN-*` row aliases (FIN-CQ-07/08/15 alias CQ-01/04/07). Rationale corrected: Finance does not read Legal's FIN rows
+  (it has its own rules); the guard protects Legal's record of Andre's Finance determinations.
+- **F-10, one-way ledger change.** With RTA-1 two departments may hold the same `event_id`. The previous ledger
+  binary treats that as corruption and refuses to start, so once such a pair exists **the ledger cannot be rolled
+  back to a pre-wave-A binary** (services/ledger-rust/README.md, "Rollback"). Roll forward instead.
+- **F-11, rotation windows end.** Any `<P>_*_NEXT` value requires `<P>_ROTATION_ENDS_AT` (ISO 8601 with a zone, in the
+  future, at most 14 days ahead); next values are refused after it, and a start with the variable past refuses (the
+  `_NEXT` variable must be removed). `/health` shows `rotation_in_progress` while a window is open. A plaintext Andre
+  token beside a hash of a different token refuses to start, so an old plaintext stops working once a hash is set.
+- **F-12.** Guard tests for mutants M9, M10, M18 in legal-py and compliance-py; ledger mutant R5 (`last_append_failed`
+  ignored) is killed by `health_tests` in `src/bin/server.rs`; only a 201 (a persisted append) clears the flag.
+- **F-13/F-14.** c03's legal half is replaced by `c03L2_kill_legal_approval.py` (a real SIGKILL inside Andre's
+  approval write, deterministic via the fault proxy). c01/c02 run against finance-sim, which has no start-up hold or
+  ledger watch; those are covered in-process and on the production leg (c05).
 
 ## Consequences
 

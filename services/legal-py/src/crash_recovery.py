@@ -1,7 +1,7 @@
 """
 Crash recovery for the record-first services (red team Oct 30-31 2026, CH-1 / CH-2 / CH-6; fix wave A, ADR 0025).
-Shared byte-for-byte by finance-py, legal-py and compliance-py (``tests/test_crash_recovery_shared.py`` in each
-checks the copies are identical).
+Shared byte-for-byte by finance-py, legal-py and compliance-py (devtools/hygiene_check.py L4 checks the copies are
+identical).
 
 The problem. A write records its rulings, then the ``local_log_appended`` anchor, on the evidence ledger BEFORE the
 local line is fsynced (record-first). A SIGKILL / OOM / host loss inside that window, or a ledger answer lost in
@@ -16,10 +16,13 @@ write is committed, its ids are taken out of the journal again. So the journal h
 started and never finished; the caller of every one of them got no 2xx (the answer is only sent after the local
 append). At start (and while running, see ``LedgerWatch``):
 
-- every voidable item of the assessment is in the journal -> it is crash residue: the service voids it itself
-  (roll back), recorded on the ledger and in the local log as a ``reconcile`` with ``"automatic": true``, then
+- every voidable item of the assessment is in the journal AND none of them is an anchor (AEGIS wave A F-2: without
+  its anchor the line can never have been appended, so nothing was acknowledged) -> it is crash residue: the service
+  voids it itself (roll back), recorded on the ledger and in the local log as a ``reconcile`` with ``"automatic": true``, then
   re-assesses against the ledger (it must now be clean) and logs ``crash_recovered``;
-- anything voidable that the journal does NOT announce, or anything fatal -> real divergence (another instance, a
+- an interrupted write that reached its anchor (a crash after the anchor, or a volume restored from a snapshot taken
+  mid-write after which the write was acknowledged: indistinguishable here), a lease the volume does not hold (a
+  restored or cloned volume), anything voidable the journal does NOT announce, or anything fatal -> real divergence (another instance, a
   restored older volume, a truncated or edited log, a forged event): the service keeps refusing, as before, with a
   ``log_divergence`` ALERT line and the reason on /health (``startup_hold``).
 
@@ -140,16 +143,46 @@ def cannot_write(exc: BaseException) -> bool:
     return not str(exc).startswith(_REFUSAL_PREFIXES)
 
 
-def unexplained(assessment, journal: dict[str, str]) -> Optional[str]:
-    """None when every voidable item of ``assessment`` was announced by this log's intent journal (crash residue
-    that may be rolled back automatically); otherwise why it is real divergence."""
+# AEGIS wave A F-2: event types recorded only once the write's local line was prepared AND anchored. If one of them is
+# on the ledger, the line may have been appended and acknowledged before the volume was restored or cloned: never
+# void it automatically.
+ANCHORED_TYPES = frozenset({"local_log_appended", "rules_version_published", "register_version_published"})
+LEASE_TYPE = "instance_lease"
+
+
+def classify(assessment, journal: dict[str, str], ledger_types: dict[str, str]) -> Optional[tuple[str, str]]:
+    """None when automatic rollback is PROVABLY safe; otherwise ``(code, reason)`` (the code goes on /health, the
+    reason to the log). Safe means: nothing fatal, every voidable item was announced by THIS log's intent journal, and
+    none of them is an anchor (or a version published after one). Without its anchor a line can never have been
+    appended (the append happens only after the anchor is recorded), so nothing in the rolled-back set was ever
+    acknowledged. ``ledger_types``: event id -> type for this department's ledger events.
+
+    Codes: ``log_divergence`` (fatal, or residue this log did not announce); ``volume_generation_mismatch`` (the
+    ledger holds an instance lease of this log that the volume does not: the volume was restored or cloned after
+    another instance booted on it -- the lease written at every boot is the volume's generation marker);
+    ``interrupted_write_anchored`` (the interrupted write had reached its anchor: crash or restore cannot be told
+    apart, so Andre decides)."""
     if assessment.fatal:
-        return "; ".join(assessment.fatal)
-    foreign = sorted(e for e in assessment.void_event_ids if e not in journal)
+        return "log_divergence", "; ".join(assessment.fatal)
+    void = sorted(assessment.void_event_ids)
+    foreign = [e for e in void if e not in journal]
+    if any(ledger_types.get(e) == LEASE_TYPE for e in foreign):
+        return ("volume_generation_mismatch", "the ledger holds an instance lease of this log the volume does not "
+                "(a restored or cloned volume, or another instance): " + "; ".join(assessment.voidable))
     if foreign:
-        return (f"{len(foreign)} voidable ledger event(s) were not written by this log (first: {foreign[0]}): "
-                + "; ".join(assessment.voidable))
+        return ("log_divergence", f"{len(foreign)} voidable ledger event(s) were not written by this log (first: "
+                f"{foreign[0]}): " + "; ".join(assessment.voidable))
+    anchored = [e for e in void if (ledger_types.get(e) or journal.get(e)) in ANCHORED_TYPES]
+    if anchored or assessment.void_lines:
+        return ("interrupted_write_anchored", f"an interrupted write had reached its anchor ({len(anchored)} anchored "
+                "event(s)): it may have been committed and acknowledged before a restore, so it is never voided "
+                "automatically: " + "; ".join(assessment.voidable))
     return None
+
+
+def ledger_types(entries: Iterable[dict], department: str) -> dict[str, str]:
+    return {e["event_id"]: str(e.get("event_type")) for e in entries
+            if isinstance(e, dict) and e.get("department") == department and isinstance(e.get("event_id"), str)}
 
 
 def resolved(journal: dict[str, str], assessment, held: set[str], absent_since: dict[str, float], now: float,
@@ -213,6 +246,76 @@ class LedgerWatch:
                 wait = delay
                 delay = min(self.cap_s, delay * 2)
             self._stop.wait(wait)
+
+
+READ_BUDGET_S = 20.0           # a ledger read slower than this is not acted on (the next pass reads again)
+
+
+class Settler:
+    """CH-2 with AEGIS wave A F-3: one pass of the ledger watch over the intent journal. The ledger read runs OUTSIDE
+    the service lock (a slow or hung ``GET /ledger/entries`` never stalls requests); the lock is taken only to check
+    that the log and the journal did not move meanwhile, then to classify, roll back provably-safe residue and forget
+    what is resolved. The service provides: ``lock``, ``log``, ``intent``, ``reconcile_mode``, ``closed``,
+    ``divergence``/``divergence_code``, ``reconcile_required``, ``_absent_since``, ``_ledger_probe_ok`` and
+    ``_auto_reconcile(assessment, when)``."""
+
+    def __init__(self, svc, name: str, department: str, read_entries: Callable[[], list],
+                 assess: Callable[[list], object], errors: tuple, keep: Optional[Callable[[], set]] = None,
+                 clock: Callable[[], float] = time.monotonic):
+        self.svc, self.name, self.department = svc, name, department
+        self.read_entries, self.assess, self.errors = read_entries, assess, errors
+        self.keep = keep or (lambda: set())
+        self.clock = clock
+
+    def _snapshot(self) -> tuple:
+        return len(self.svc.log), tuple(sorted(self.svc.intent.ids()))
+
+    def run(self) -> bool:
+        svc = self.svc
+        with svc.lock:
+            if svc.closed or svc.reconcile_mode or svc.log.in_memory:
+                return not len(svc.intent)
+            if not len(svc.intent) and svc.divergence is None:
+                return True
+            snap = self._snapshot()
+        t0 = self.clock()
+        try:
+            entries = self.read_entries()                     # no lock held here
+        except self.errors as exc:
+            svc._ledger_probe_ok = False
+            alert("ledger_write_pending", self.name, pending=len(svc.intent), reason=type(exc).__name__)
+            return False
+        if self.clock() - t0 > READ_BUDGET_S:
+            alert("ledger_read_slow", self.name, seconds=round(self.clock() - t0, 1))
+            return False
+        with svc.lock:
+            if svc.closed or self._snapshot() != snap:
+                return False                                 # the log or the journal moved: read again next pass
+            try:
+                a = self.assess(entries)
+                journal = svc.intent.ids()
+                verdict = classify(a, journal, ledger_types(entries, self.department)) \
+                    if (a.voidable or a.fatal) else None
+                svc.divergence = verdict[1] if verdict else None
+                svc.divergence_code = verdict[0] if verdict else None
+                if verdict is not None:
+                    alert("log_divergence", self.name, code=verdict[0], pending=len(journal))
+                    return False
+                voided: set = set()
+                if a.voidable:
+                    svc._auto_reconcile(a, "running")
+                    voided = set(a.void_event_ids)
+                held = set(ledger_types(entries, self.department))
+                rest = {k: v for k, v in svc.intent.ids().items() if k not in voided and k not in self.keep()}
+                svc.intent.settle(resolved(rest, a, held, svc._absent_since, self.clock()))
+                svc.reconcile_required = []
+            except self.errors as exc:
+                svc._ledger_probe_ok = False
+                alert("ledger_write_pending", self.name, pending=len(svc.intent), reason=type(exc).__name__)
+                return False
+            if len(svc.intent):
+                alert("ledger_write_pending", self.name, pending=len(svc.intent))
+            return not len(svc.intent)
 
 
 def now_monotonic() -> float:

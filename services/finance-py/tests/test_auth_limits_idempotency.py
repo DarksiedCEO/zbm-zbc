@@ -26,7 +26,7 @@ def _concrete(path: str) -> str:
 def all_routes(h):
     out = []
     for r in h.app.routes:
-        if isinstance(r, APIRoute) and r.path != "/health":
+        if isinstance(r, APIRoute) and r.path not in ("/health", "/livez"):   # AEGIS wave A F-1: /livez is open
             for m in r.methods:
                 out.append((m, _concrete(r.path)))
     return sorted(out)

@@ -30,6 +30,10 @@ const dockerfile = (path: string, watch: string[]) => ({
 // in-process (ADR 0001). ON_FAILURE, not ALWAYS: a refusal to start (a token missing, the ledger's integrity check)
 // exits 1 and is retried at most 10 times; an operator override that exits 0 (LEDGER_ALLOW_RESET,
 // LEDGER_MIGRATE_LEGACY) is not restarted with the override still set.
+// Fix wave A (AEGIS F-1): finance, legal and compliance use "/livez" (200 whenever the process serves). Their /health
+// answers 503 while they cannot write (ledger unreachable, a write pending, a held start), which is right for the
+// heartbeat but must never stop Railway from activating a reconcile-mode or degraded-but-alive deployment (Railway's
+// healthcheck runs only while a deployment starts and needs a 2xx).
 const deploy = (healthcheckPath: string, withVolume: boolean) => ({
   numReplicas: 1,
   restartPolicyType: "ON_FAILURE" as const,
@@ -76,7 +80,7 @@ export default defineRailway(() => {
   const ledger = withDailyBackups(service("ledger", {
     source: source(),
     build: dockerfile("services/ledger-rust/Dockerfile", ["services/ledger-rust/**"]),
-    deploy: deploy("/health", true),
+    deploy: deploy("/livez", true),   // AEGIS wave A F-1/F-15a: a degraded ledger (disk_low) must still redeploy
     volumeMounts: { "/data": ledgerData },
     env: {
       PORT: "8090",
@@ -84,6 +88,8 @@ export default defineRailway(() => {
       LEDGER_LOG_PATH: "/data/ledger/ledger.jsonl",
       RAILWAY_RUN_UID: "0", // the entrypoint hands /data/ledger to uid 10001, then runs the ledger as 10001
       LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope (hashes only, set NOT Sealed); written to LEDGER_CALLERS_FILE
+      // AEGIS wave A F-5: signs GET /ledger/anchor (the daily off-ledger anchor Compliance stores)
+      LEDGER_HEAD_SIGNING_KEY: preserve(),
     },
   }));
 
@@ -91,7 +97,7 @@ export default defineRailway(() => {
   const legal = withDailyBackups(service("legal", {
     source: source(),
     build: dockerfile("services/legal-py/Dockerfile", ["services/legal-py/**", "deploy/python/**"]),
-    deploy: deploy("/health", true),
+    deploy: deploy("/livez", true),   // AEGIS wave A F-1: liveness; /health is the truthful write state
     volumeMounts: { "/data": legalData },
     env: {
       PORT: "8420",
@@ -125,7 +131,7 @@ export default defineRailway(() => {
   const compliance = withDailyBackups(service("compliance", {
     source: source(),
     build: dockerfile("services/compliance-py/Dockerfile", ["services/compliance-py/**", "deploy/python/**"]),
-    deploy: deploy("/health", true),
+    deploy: deploy("/livez", true),   // AEGIS wave A F-1: liveness; /health is the truthful write state
     volumeMounts: { "/data": complianceData },
     env: {
       PORT: "8380",
@@ -147,6 +153,9 @@ export default defineRailway(() => {
       COMPLIANCE_LEGAL_CALLER_TOKEN: preserve(),
       COMPLIANCE_SCHEDULER_ENABLED: "1",
       COMPLIANCE_WATCHER_ENABLED: "1",
+      // AEGIS wave A F-5: the scheduler stores the ledger's anchor daily on THIS volume, HMAC'd with this key (the
+      // ledger never holds it); a rolled-back or rewritten ledger turns compliance /health red the same day
+      COMPLIANCE_LEDGER_ANCHOR_KEY: preserve(),
     },
   }));
 
@@ -185,7 +194,7 @@ export default defineRailway(() => {
   const finance = withDailyBackups(service("finance", {
     source: source(),
     build: dockerfile("services/finance-py/Dockerfile", ["services/finance-py/**", "deploy/python/**"]),
-    deploy: deploy("/health", true),
+    deploy: deploy("/livez", true),   // AEGIS wave A F-1: liveness; /health is the truthful write state
     volumeMounts: { "/data": financeData },
     env: {
       PORT: "8410",

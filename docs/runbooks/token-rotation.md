@@ -11,7 +11,11 @@ Every service accepts, during a rotation window, the current value AND a next va
 | A caller token | `<P>_CALLER_TOKENS` (JSON) | `<P>_CALLER_TOKENS_NEXT` (JSON, only the callers being rotated) |
 | Andre's approval token | `<P>_ANDRE_APPROVAL_TOKEN_SHA256` | `<P>_ANDRE_APPROVAL_TOKEN_NEXT_SHA256` |
 
-A next value must differ from every current value. Every new token is made the same way:
+Every `_NEXT` value needs `<P>_ROTATION_ENDS_AT`, when the window ends (ISO 8601 with a time zone, at most 14 days
+ahead, e.g. `2026-11-07T00:00:00Z`): the next values are refused after it, and a service started with it in the past
+refuses to start until the `_NEXT` variables (and it) are removed. `/health` shows `"rotation_in_progress": true`
+while a window is open (AEGIS wave A F-11). A next value must differ from every current value. Every new token is made
+the same way:
 
 ```sh
 openssl rand -hex 32
@@ -24,7 +28,8 @@ Never paste a token into a chat, an issue or a commit. Set it only in Railway (S
 1. On your own machine: `printf %s "$ANDRE_TOKEN" | sha256sum | cut -d' ' -f1` (64 hex characters).
 2. In Railway, on finance, legal and compliance: set `<P>_ANDRE_APPROVAL_TOKEN_SHA256` to that hash and deploy.
    Check one approval works (your token is compared with the stored hash).
-3. Delete `<P>_ANDRE_APPROVAL_TOKEN` (the plaintext) on each of them and deploy again. From now on no service holds
+3. Delete `<P>_ANDRE_APPROVAL_TOKEN` (the plaintext) on each of them and deploy again. (A plaintext token beside a
+   hash of a DIFFERENT token refuses to start: the old plaintext can never keep working once a hash is set.) From now on no service holds
    your token, only its hash.
 
 ## 1. Planned rotation (no outage)
@@ -64,8 +69,14 @@ Speed beats the overlap: the old value must stop working now.
 5. A leaked Andre token: replace its hash on all three services at once (step 0 with the new token), then check every
    approval since the leak in the audit evidence.
 
+## Rolling the ledger back
+
+Not after fix wave A has written an event id two departments share: the older binary refuses that log
+(services/ledger-rust/README.md, "Rollback"). Roll forward.
+
 ## Deploy order cheat sheet
 
 Accepting side first with `_NEXT` (planned) or with the value replaced (leak); sending side second; then remove
-`_NEXT`. A deploy of finance, legal or compliance never loses a write: an interrupted write is rolled back and
-recorded at the next start (ADR 0025 section 1), and the start-up hold serves 503 until the ledger is reachable.
+`_NEXT`. A deploy of finance, legal or compliance never loses a write: an interrupted write that never reached its
+anchor is rolled back and recorded at the next start; one that did is held for you (ADR 0025 sections 1 and 7). Railway
+health-checks `/livez`, so a deploy activates even when `/health` is 503 (held, degraded, reconcile mode).

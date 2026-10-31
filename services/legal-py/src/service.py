@@ -340,6 +340,7 @@ class LegalService:
         self._ledger_write_error: Optional[str] = None
         self._ledger_probe_ok: Optional[bool] = None
         self.divergence: Optional[str] = None
+        self.divergence_code: Optional[str] = None
         self.watch: Optional[CR.LedgerWatch] = None
         self._replaying = True
         for rec in self.log.iter_records():
@@ -354,12 +355,16 @@ class LegalService:
             raise RuntimeError(f"refusing to start: {len(missing)} blob(s) the log cites are missing from the blob "
                                "store (deleted or moved outside the retention job)")
         if not self.log.in_memory:
+            verdict = None
             try:
-                a = self.assess_log()
-                if a.voidable and not a.fatal and not self.reconcile_mode and \
-                        CR.unexplained(a, self.intent.ids()) is None:
-                    self._auto_reconcile(a, "start")          # CH-1: crash residue of THIS log only
-                    a = self.assess_log()
+                entries = self._ledger_entries()
+                a = self.assess_log(entries)
+                if (a.voidable or a.fatal) and not self.reconcile_mode:
+                    verdict = CR.classify(a, self.intent.ids(), CR.ledger_types(entries, DEPARTMENT))
+                    if verdict is None:
+                        # CH-1: provably-safe crash residue of THIS log (announced, never anchored; ADR 0025 s.1)
+                        self._auto_reconcile(a, "start")
+                        a = self.assess_log()
             except LedgerQueryFailed as exc:
                 raise StartupTransient(f"refusing to start: the local log cannot be verified against the evidence "
                                        f"ledger ({exc})") from None
@@ -370,7 +375,9 @@ class LegalService:
                 hint = ("" if a.fatal or not a.voidable else
                         " -- only Andre can void these: start with LEGAL_RECONCILE_MODE=1 and POST /legal/v1/reconcile "
                         "(README, 'Reconciling the local log with the ledger')")
-                raise StartupHeld("refusing to start: " + "; ".join(a.problems) + hint)
+                code = verdict[0] if verdict else "log_divergence"
+                CR.alert("log_divergence", "legal-py", code=code, when="start")
+                raise StartupHeld("refusing to start: " + "; ".join(a.problems) + hint, code=code)
             self.reconcile_required = list(a.voidable)
         if self.reconcile_mode:
             return
@@ -729,41 +736,19 @@ class LegalService:
                 self._commit(op)
             finally:
                 self._reconciling = False
+            kinds = self.intent.ids()
+            voided = {e: kinds.get(e, "?") for e in payload["void_event_ids"]}
             self.intent.settle(payload["void_event_ids"])
             CR.alert("crash_recovered", "legal-py", when=when, voided=len(payload["void_event_ids"]),
-                     void_lines=payload["void_lines"], reconcile_event_id=eid)
+                     void_lines=payload["void_lines"], reconcile_event_id=eid,
+                     voided_events=voided)                    # AEGIS F-2: which business events, for Andre's check
             return eid
 
     def settle_pending(self) -> bool:
-        """CH-2: finish what the intent journal still holds (see finance-py ``settle_pending``)."""
-        with self.lock:
-            if self._closed or self.reconcile_mode or self.log.in_memory:
-                return not len(self.intent)
-            if not len(self.intent) and self.divergence is None:
-                return True
-            try:
-                entries = self._ledger_entries()
-                a = self.assess_log(entries)
-                journal = self.intent.ids()
-                why = CR.unexplained(a, journal) if a.voidable or a.fatal else None
-                self.divergence = why
-                if why is not None:
-                    CR.alert("log_divergence", "legal-py", reason=why[:500], pending=len(journal))
-                    return False
-                if a.voidable:
-                    self._auto_reconcile(a, "running")
-                    entries = self._ledger_entries()
-                    a = self.assess_log(entries)
-                held = {e.get("event_id") for e in entries if isinstance(e, dict) and e.get("department") == DEPARTMENT}
-                self.intent.settle(CR.resolved(self.intent.ids(), a, held, self._absent_since, CR.now_monotonic()))
-                self.reconcile_required = list(a.voidable)
-            except (LedgerQueryFailed, Unavailable) as exc:
-                self._ledger_probe_ok = False
-                CR.alert("ledger_write_pending", "legal-py", pending=len(self.intent), reason=type(exc).__name__)
-                return False
-            if len(self.intent):
-                CR.alert("ledger_write_pending", "legal-py", pending=len(self.intent))
-            return not len(self.intent)
+        """CH-2: finish what the intent journal still holds (see finance-py ``settle_pending``; the ledger read runs
+        outside the service lock, AEGIS wave A F-3)."""
+        return CR.Settler(self, "legal-py", DEPARTMENT, lambda: self._ledger_entries(), self.assess_log,
+                          (LedgerQueryFailed, Unavailable)).run()
 
     def probe_ledger(self) -> bool:
         """CH-6: can the ledger be reached now (GET /ledger/head, or /ledger/verify for a client without it)?"""
@@ -786,6 +771,8 @@ class LegalService:
             out.append("reconcile_mode")
         if self.reconcile_required or self.divergence:
             out.append("reconcile_required")
+        if self.divergence_code:
+            out.append(f"divergence:{self.divergence_code}")         # a fixed code; the detail is in the log
         if self.log.fault:
             out.append("log_write_fault")
         if self._ledger_probe_ok is False:
@@ -1020,11 +1007,14 @@ class LegalService:
                 coll, k = "register", self.canonical_cq(target)
                 if k is None:
                     raise NotFound("no such counsel-question row")
-                if k.upper().startswith("FIN-"):
-                    # fix wave A (RTA-3): Finance's billing determinations (FIN-CQ-11, the sales-tax memo, among them)
-                    # are Andre's; a compromised Compliance could turn every billing gate red by invalidating them
-                    raise Forbidden("Compliance may not invalidate a Finance determination (FIN-*); only Andre "
-                                    "changes it")
+                fin_aliases = [c for c, row in self.register.items()
+                               if c.upper().startswith("FIN-") and (row.get("alias_of") or c) == k]
+                if target.upper().startswith("FIN-") or k.upper().startswith("FIN-") or fin_aliases:
+                    # fix wave A (RTA-3; AEGIS F-8: aliases resolved first): a FIN-* row records one of Andre's
+                    # Finance determinations (FIN-CQ-11, the sales-tax memo, among them). A compromised Compliance must
+                    # not mark it unverified, directly or through the shared row a FIN alias points to.
+                    raise Forbidden("Compliance may not invalidate a Finance determination (FIN-*, or a row a FIN-* "
+                                    "row aliases); only Andre changes it")
             op = Op(self, f"inv|{request_id}", "compliance_38", target)
             was = getattr(self, coll)[k]["status"]
             op.ev("inv", "register_row_invalidated", target,
@@ -3050,7 +3040,11 @@ class LegalService:
             reasons = self.write_state()
         # fix wave A (CH-2/CH-6): "degraded" (the API answers 503) while this instance cannot write now; reconcile
         # mode is Andre's deliberate state and keeps its own flag
-        degraded = [r for r in reasons if r not in ("reconcile_mode", "closed")]
+        # AEGIS wave A F-1: reconcile mode is Andre's deliberate recovery state; a voidable problem is what it is
+        # there to fix, so it never makes /health 503 (the reconcile deploy must activate). Railway's deploy
+        # healthcheck uses /livez; /health stays truthful for the heartbeat.
+        degraded = [r for r in reasons if r not in ("reconcile_mode", "closed")
+                    and not (self.reconcile_mode and r.startswith(("reconcile_required", "pending_unreconciled", "divergence:")))]
         status = "closed" if self._closed else ("degraded" if self.log.fault or degraded else "ok")   # bug sweep E
         return {"status": status, "write_ok": not reasons, "degraded_reasons": reasons,
                 "service": "legal-py", "rules_version": self.rules_version,

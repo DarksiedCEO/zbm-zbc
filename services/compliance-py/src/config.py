@@ -51,6 +51,8 @@ class Settings:
     reconcile_mode: bool = False
     # ADR 0024: the in-process scheduler (internal controls every interval, the Change Watcher daily) and Legal (37)
     scheduler_enabled: bool = False
+    # AEGIS wave A F-5: the HMAC key of the off-ledger anchor store (ledger_anchor.py); unset = an unkeyed hash chain
+    ledger_anchor_key: Optional[str] = field(default=None, repr=False)
     scheduler_interval_s: int = 21600
     legal_url: Optional[str] = None
     legal_token: Optional[str] = field(default=None, repr=False)
@@ -111,6 +113,13 @@ def hold_data_dir(data_dir: str) -> DataDirLock:
             raise RuntimeError(f"{data_dir}: {exc}") from None
         _HELD[key] = lock
     return lock
+
+def _anchor_key(env: dict) -> Optional[str]:
+    k = env.get("COMPLIANCE_LEDGER_ANCHOR_KEY") or None
+    if k is not None:
+        _rotation_token_check(k, "COMPLIANCE_LEDGER_ANCHOR_KEY")
+    return k
+
 
 def _rotation_token_check(tok: str, what: str) -> None:
     """Fix wave A (RTA-5): a *_NEXT token obeys the caller-token rules (no unresolved reference, length, ASCII)."""
@@ -211,6 +220,7 @@ def load(env: Optional[dict] = None) -> Settings:
         watcher_max_proposals_per_source=_int(env, "COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE", 20, 1, 10_000),
         reconcile_mode=reconcile == "1",
         scheduler_enabled=sched == "1",
+        ledger_anchor_key=_anchor_key(env),
         scheduler_interval_s=_int(env, "COMPLIANCE_SCHEDULER_INTERVAL_SECONDS", 21600, 300, 86400),
         legal_url=legal[0].rstrip("/") if legal[0] else None, legal_token=legal[1], legal_caller_token=legal[2],
     )

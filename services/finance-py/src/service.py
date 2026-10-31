@@ -334,6 +334,7 @@ class FinanceService:
         self._ledger_write_error: Optional[str] = None
         self._ledger_probe_ok: Optional[bool] = None
         self.divergence: Optional[str] = None
+        self.divergence_code: Optional[str] = None
         self.watch: Optional[CR.LedgerWatch] = None
         self._replaying = True
         for rec in self.log.iter_records():
@@ -344,14 +345,20 @@ class FinanceService:
         if problem:
             raise RuntimeError(f"refusing to start: {problem}")
         if not self.log.in_memory:
+            verdict = None
             try:
-                a = self.assess_log()
-                if a.voidable and not a.fatal and not self.reconcile_mode and \
-                        CR.unexplained(a, self.intent.ids()) is None:
-                    # CH-1: only crash residue of THIS log (every item announced by its intent journal): roll it
-                    # back, recorded, and verify again against the ledger
-                    self._auto_reconcile(a, "start")
-                    a = self.assess_log()
+                client = self.recorder.client
+                if not hasattr(client, "entries"):
+                    raise LedgerQueryFailed("this ledger client cannot read entries")
+                entries = client.entries()
+                a = self._assess_entries(entries)
+                if (a.voidable or a.fatal) and not self.reconcile_mode:
+                    verdict = CR.classify(a, self.intent.ids(), CR.ledger_types(entries, i10.DEPT))
+                    if verdict is None:
+                        # CH-1: provably-safe crash residue of THIS log (announced by its intent journal, never
+                        # anchored): roll it back, recorded, and verify again against the ledger
+                        self._auto_reconcile(a, "start")
+                        a = self.assess_log()
             except LedgerQueryFailed as exc:
                 raise StartupTransient(f"refusing to start: the local log cannot be verified against the evidence "
                                        f"ledger ({exc})") from None
@@ -362,7 +369,9 @@ class FinanceService:
                 hint = ("" if a.fatal or not a.voidable else
                         " -- only Andre can void these: start with FIN_RECONCILE_MODE=1 and POST /fin/v1/reconcile "
                         "(README, 'Reconciling the local log with the ledger')")
-                raise StartupHeld("refusing to start: " + "; ".join(a.problems) + hint)
+                code = verdict[0] if verdict else "log_divergence"
+                CR.alert("log_divergence", "finance-py", code=code, when="start")
+                raise StartupHeld("refusing to start: " + "; ".join(a.problems) + hint, code=code)
             self.reconcile_required = list(a.voidable)
         if settings.unmatched_tin_policy == "withhold_24" and not self.counsel_verified("FIN-CQ-06"):
             raise RuntimeError("FIN_UNMATCHED_TIN_POLICY=withhold_24 needs counsel row FIN-CQ-06 verified (spec C.6); "
@@ -845,44 +854,21 @@ class FinanceService:
                 self._commit(op)
             finally:
                 self._reconciling = False
+            kinds = self.intent.ids()
+            voided = {e: kinds.get(e, "?") for e in payload["void_event_ids"]}
             self.intent.settle(payload["void_event_ids"])
             CR.alert("crash_recovered", "finance-py", when=when, voided=len(payload["void_event_ids"]),
-                     void_lines=payload["void_lines"], reconcile_event_id=eid)
+                     void_lines=payload["void_lines"], reconcile_event_id=eid,
+                     voided_events=voided)                    # AEGIS F-2: which business events, for Andre's check
             return eid
 
     def settle_pending(self) -> bool:
-        """CH-2: finish what the intent journal still holds (the ledger watch calls this with backoff). Crash
-        residue is rolled back as at start; what the ledger shows as committed or explained is forgotten; anything
-        the journal cannot explain is real divergence (``divergence``, on /health) and is left for Andre. True when
-        nothing is pending any more."""
-        with self.lock:
-            if self._closed or self.reconcile_mode or self.log.in_memory:
-                return not len(self.intent)
-            if not len(self.intent) and self.divergence is None:
-                return True
-            try:
-                entries = self.recorder.client.entries()
-                a = self._assess_entries(entries)
-                journal = self.intent.ids()
-                why = CR.unexplained(a, journal) if a.voidable or a.fatal else None
-                self.divergence = why
-                if why is not None:
-                    CR.alert("log_divergence", "finance-py", reason=why[:500], pending=len(journal))
-                    return False
-                if a.voidable:
-                    self._auto_reconcile(a, "running")
-                    entries = self.recorder.client.entries()
-                    a = self._assess_entries(entries)
-                held = {e.get("event_id") for e in entries if isinstance(e, dict) and e.get("department") == i10.DEPT}
-                self.intent.settle(CR.resolved(self.intent.ids(), a, held, self._absent_since, CR.now_monotonic()))
-                self.reconcile_required = list(a.voidable)
-            except (LedgerQueryFailed, Unavailable) as exc:
-                self._ledger_probe_ok = False
-                CR.alert("ledger_write_pending", "finance-py", pending=len(self.intent), reason=type(exc).__name__)
-                return False
-            if len(self.intent):
-                CR.alert("ledger_write_pending", "finance-py", pending=len(self.intent))
-            return not len(self.intent)
+        """CH-2: finish what the intent journal still holds (the ledger watch calls this with backoff). The ledger read
+        runs outside the service lock (AEGIS wave A F-3, ``crash_recovery.Settler``); provably-safe residue is rolled
+        back as at start; anything else is divergence (``divergence``/``divergence_code``, on /health) for Andre.
+        True when nothing is pending any more."""
+        return CR.Settler(self, "finance-py", i10.DEPT, lambda: self.recorder.client.entries(), self._assess_entries,
+                          (LedgerQueryFailed, Unavailable)).run()
 
     def probe_ledger(self) -> bool:
         """CH-6: can the ledger be reached now (GET /ledger/head, or /ledger/verify for a client without it)?"""
@@ -905,6 +891,8 @@ class FinanceService:
             out.append("reconcile_mode")
         if self.reconcile_required or self.divergence:
             out.append("reconcile_required")
+        if self.divergence_code:
+            out.append(f"divergence:{self.divergence_code}")         # a fixed code; the detail is in the log
         if self.log.fault:
             out.append("log_write_fault")
         if self._ledger_probe_ok is False:
@@ -1197,7 +1185,10 @@ class FinanceService:
             reasons = self.write_state()
         # fix wave A (CH-2/CH-6): "degraded" (the API answers 503) while this instance cannot write now; reconcile
         # mode is Andre's deliberate state and keeps its own flag
-        degraded = [r for r in reasons if r != "reconcile_mode"]
+        # AEGIS wave A F-1: reconcile mode is Andre's deliberate recovery state; a voidable problem is what it is
+        # there to fix, so it never makes /health 503 (the reconcile deploy must activate). Railway's deploy
+        # healthcheck uses /livez; /health stays truthful for the heartbeat.
+        degraded = [r for r in reasons if r != "reconcile_mode" and not (self.reconcile_mode and r.startswith(("reconcile_required", "pending_unreconciled", "divergence:")))]
         return {"status": "degraded" if degraded else "ok", "write_ok": not reasons, "degraded_reasons": reasons,
                 "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,

@@ -213,6 +213,11 @@ same section) and a voided ruling id is never issued again (the retry gets a new
 Compliance cannot write; seo_02 and revenue_recovery reach only `GET /compliance/v1/clients/{id}/activation` and
 `/health`. Token rotation (`COMPLIANCE_SERVICE_TOKEN_NEXT`, `COMPLIANCE_CALLER_TOKENS_NEXT`,
 `COMPLIANCE_ANDRE_APPROVAL_TOKEN_SHA256`, `COMPLIANCE_ANDRE_APPROVAL_TOKEN_NEXT_SHA256`): docs/runbooks/token-rotation.md.
+AEGIS wave A: `COMPLIANCE_ROTATION_ENDS_AT` ends a rotation window (required with any `_NEXT`); an interrupted write
+that reached its anchor is held for Andre (`interrupted_write_anchored`), never voided; Railway health-checks
+`/livez`. `COMPLIANCE_LEDGER_ANCHOR_KEY`: the HMAC key of the daily off-ledger anchor store
+(`<COMPLIANCE_DATA_DIR>/ledger_anchors.jsonl`, `src/ledger_anchor.py`); a ledger that no longer extends the stored
+anchor turns `/health` 503 (`ledger_anchor_mismatch`) until Andre resolves it (ADR 0025 section 7, F-5).
 
 Every local-log line is anchored on the ledger before it is written. If a
 commit fails after its anchor (disk error, crash, a ledger answer lost), or

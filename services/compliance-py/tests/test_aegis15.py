@@ -81,9 +81,6 @@ def test_n15_1_failed_commit_is_not_withdrawn_by_the_services_own_marker(tmp_pat
     x = _durable(tmp_path)
     x.svc.log.fail_next_append = True
     assert x.rule("client-z", "client", client_facts()).status_code == 503
-    # fix wave A (CH-1): an interrupted write this log announced is rolled back automatically at the next start
-    # (test_fixwave_a_resilience.py); without its intent journal it is still Andre's -- the path kept covered here
-    (tmp_path / "d" / "compliance_log.jsonl.intent").unlink()
     with pytest.raises(RuntimeError, match="refusing to start"):
         _restart(x, tmp_path)
 
@@ -209,9 +206,6 @@ def test_n15_1_decision_whose_version_reached_the_ledger_is_restored_from_the_un
     assert r.status_code == 503
     side = list((tmp_path / "d").glob("compliance_log.jsonl.unwritten-*"))
     assert len(side) == 1
-    # fix wave A (CH-1): an interrupted write this log announced is rolled back automatically at the next start
-    # (test_fixwave_a_resilience.py); without its intent journal it is still Andre's -- the path kept covered here
-    (tmp_path / "d" / "compliance_log.jsonl.intent").unlink()
     with pytest.raises(RuntimeError, match="match no decision in the local log"):
         _restart(x, tmp_path)
     logf = tmp_path / "d" / "compliance_log.jsonl"

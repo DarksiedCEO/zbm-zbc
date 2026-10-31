@@ -202,9 +202,10 @@ class InputLimits:
         await self.app(scope, replay, send)
 
 
-def make_require_auth(required_token: str, next_token: Optional[str] = None) -> Callable:
+def make_require_auth(required_token: str, next_token: Optional[str] = None,
+                      next_until: Optional[float] = None) -> Callable:
     # fix wave A (RTA-5): the current token, and the next one during a rotation window, compared as SHA-256 digests
-    accepted = token_rotation.Secret([required_token, next_token])
+    accepted = token_rotation.Secret([required_token], next_plaintexts=[next_token], next_until=next_until)
 
     def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
         if authorization is None or not authorization.startswith("Bearer "):
@@ -225,17 +226,20 @@ def _digest(token: str) -> bytes:
 
 
 class Callers:
-    def __init__(self, tokens: dict[str, str], next_tokens: Optional[dict] = None):
-        # fix wave A (RTA-5): a caller being rotated is recognised by its current and its next token
-        self._digests = [(name, _digest(tok)) for name, tok in tokens.items()] + \
-            [(name, _digest(tok)) for name, tok in (next_tokens or {}).items()]
+    def __init__(self, tokens: dict[str, str], next_tokens: Optional[dict] = None, next_until: Optional[float] = None):
+        # fix wave A (RTA-5): a caller being rotated is recognised by its current and, until the window's end (AEGIS
+        # wave A F-11), its next token
+        self._digests = [(name, _digest(tok)) for name, tok in tokens.items()]
+        self._next = [(name, _digest(tok)) for name, tok in (next_tokens or {}).items()]
+        self._until = next_until
 
     def identify(self, supplied: Optional[str]) -> Optional[str]:
         if not supplied:
             return None
         d = _digest(supplied)
         found = None
-        for name, dg in self._digests:  # no early exit
+        live = self._next if (self._until is not None and time.time() < self._until) else []
+        for name, dg in self._digests + live:  # no early exit
             if hmac.compare_digest(d, dg):
                 found = name
         return found
@@ -265,10 +269,11 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
                   description="NON-LIVE: V&I, Finance, Legal, sanctions and accessibility providers are fail-closed stand-ins.",
                   version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
     rot = getattr(settings, "rotation", None) or token_rotation.Rotation()   # fix wave A (RTA-5)
-    auth = [Depends(make_require_auth(settings.service_token, rot.service_next))]
-    callers = Callers(settings.caller_tokens, rot.callers_next)
+    auth = [Depends(make_require_auth(settings.service_token, rot.service_next, rot.ends_at))]
+    callers = Callers(settings.caller_tokens, rot.callers_next, rot.ends_at)
     founder = FounderGate.build(settings.andre_token, settings.service_token, settings.caller_tokens.values(),
-                                 founder_sha256=rot.andre_sha256)
+                                 founder_sha256=rot.andre_sha256, founder_next_sha256=rot.andre_next_sha256,
+                                 next_until=rot.ends_at)
     app.state.service = service
     svc = service
 
@@ -338,9 +343,17 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
 
     app.add_middleware(InputLimits)
 
+    @app.get("/livez")
+    async def livez() -> dict:
+        """AEGIS wave A F-1: liveness for Railway's deploy healthcheck (healthcheckPath in .railway/railway.ts): 200
+        whenever this process serves requests, degraded or in reconcile mode. /health is the truthful write state."""
+        return {"status": "alive", "service": 'compliance-py'}
+
     @app.get("/health")
     async def health():
         h = svc.health()
+        if rot.in_progress:
+            h = {**h, "rotation_in_progress": True}      # AEGIS wave A F-11: a *_NEXT window is open
         # AEGIS F-4: a dead or stalled scheduler (no successful controls run for two intervals) is a 503
         return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)
 
@@ -631,6 +644,14 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
         raise
 
 
+def _with_anchor_store(svc, settings) -> None:
+    """AEGIS wave A F-5: the off-ledger anchor store lives on Compliance's volume (not the ledger's)."""
+    if settings.data_dir:
+        import ledger_anchor
+        svc.anchor_store = ledger_anchor.AnchorStore(os.path.join(settings.data_dir, ledger_anchor.FILE),
+                                                     settings.ledger_anchor_key)
+
+
 def _app_from_env():
     """Fix wave A (CH-5, ADR 0025): a ledger that cannot be reached at start, or a log that diverges from it, no
     longer exits the process: ``startup_hold`` serves /health 503 with the reason and retries with backoff; the
@@ -639,7 +660,9 @@ def _app_from_env():
     settings = config_mod.load()
 
     def build():
-        application = create_app(build_service(settings), settings)
+        svc = build_service(settings)
+        _with_anchor_store(svc, settings)
+        application = create_app(svc, settings)
         application.state.settings = settings
         return application
     return startup_hold.supervise("compliance-py", build, on_ready=_on_ready)

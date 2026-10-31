@@ -52,6 +52,8 @@ SERVICES = {
     "seo": ("services/seo-py/Dockerfile", "SEO_PORT", 8500, "seo-py", True),
     "compliance": ("services/compliance-py/Dockerfile", "COMPLIANCE_PORT", 8380, "compliance-py", True),   # ADR 0024
 }
+# fix wave A (AEGIS F-1): Railway's deploy healthcheck path is /livez for these (liveness), /health for the others
+LIVEZ_SERVICES = {"finance", "legal", "compliance", "ledger"}
 PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
                "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",)}
 # ADR 0024: compliance-py's requirements.txt is clipper-network-py's (that suite checks the two are identical) and has
@@ -251,7 +253,10 @@ class RailwayIac(unittest.TestCase):
                 needs_root = has_volume or bool(secret_files(REPO / df))
                 self.assertEqual('RAILWAY_RUN_UID: "0"' in b, needs_root,
                                  "RAILWAY_RUN_UID=0 exactly with a volume or a --secret-file")
-                self.assertIn('deploy("/health", ' + ("true" if has_volume else "false") + ")", b)
+                # fix wave A (AEGIS F-1): the three record-first departments are health-checked on /livez (their
+                # /health is 503 while they cannot write, e.g. in reconcile mode); everything else on /health
+                path = "/livez" if svc in LIVEZ_SERVICES else "/health"
+                self.assertIn(f'deploy("{path}", ' + ("true" if has_volume else "false") + ")", b)
 
     def test_every_secret_file_value_variable_is_preserved(self):
         # an image's --secret-file NAME_FILE is written from the Railway variable NAME; a plan that dropped NAME would

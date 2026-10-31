@@ -36,7 +36,13 @@ class StartupTransient(RuntimeError):
 
 
 class StartupHeld(RuntimeError):
-    """Start-up refused for a reason only an operator can resolve (the local log diverges from the ledger)."""
+    """Start-up refused for a reason only an operator can resolve (the local log diverges from the ledger). ``code``:
+    the fixed reason code /health shows (``log_divergence`` unless a more precise one applies, e.g.
+    ``interrupted_write_anchored`` or ``volume_generation_mismatch``)."""
+
+    def __init__(self, message: str, code: str = "log_divergence"):
+        super().__init__(message)
+        self.code = code
 
 
 class HoldingApp:
@@ -48,6 +54,7 @@ class HoldingApp:
         self.app: Optional[Any] = None
         self.state = "starting"
         self.reason = "starting"
+        self.code = "starting"
         self.attempts = 0
         self.next_retry_s: Optional[float] = None
         self.lock = threading.Lock()
@@ -58,9 +65,11 @@ class HoldingApp:
             self.state = "ok"
 
     def body(self) -> dict:
+        """The unauthenticated /health body: codes and counts only (AEGIS wave A F-7). The full reason, which can name
+        ledger event ids, goes to the log."""
         with self.lock:
             return {"status": self.state, "service": self.service, "write_ok": False, "ready": False,
-                    "degraded_reasons": [self.reason[:500]], "startup_attempts": self.attempts,
+                    "degraded_reasons": [self.code], "startup_attempts": self.attempts,
                     "next_retry_s": self.next_retry_s}
 
     async def __call__(self, scope, receive, send) -> None:
@@ -77,6 +86,13 @@ class HoldingApp:
                     await send({"type": "lifespan.shutdown.complete"})
                     return
         if scope["type"] != "http":
+            return
+        if scope.get("path") == "/livez" and scope.get("method") == "GET":
+            # AEGIS wave A F-1: the process serves (it holds, retrying); Railway's deploy healthcheck uses this
+            data = json.dumps({"status": "alive", "service": self.service, "ready": False}).encode()
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(data)).encode())]})
+            await send({"type": "http.response.body", "body": data})
             return
         if scope.get("path") == "/health" and scope.get("method") == "GET":
             payload = self.body()
@@ -111,6 +127,7 @@ def supervise(service: str, build: Callable[[], Any], on_ready: Optional[Callabl
             hold.attempts += 1
             hold.state = "refused" if held else "starting"
             hold.reason = str(exc)
+            hold.code = getattr(exc, "code", None) or ("log_divergence" if held else "ledger_unavailable_at_start")
             hold.next_retry_s = wait
         alert("log_divergence" if held else "startup_waiting_for_ledger", service, attempt=hold.attempts,
               next_retry_s=wait, reason=str(exc)[:500])

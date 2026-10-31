@@ -181,6 +181,8 @@ be a different value: several services refuse to start when two of their tokens 
 | `ZBM_SERVICE_TOKEN` | `openssl rand -hex 32` | detection | orchestrator `DETECTION_SERVICE_TOKEN` (reference) |
 | `ORCHESTRATOR_SERVICE_TOKEN` | `openssl rand -hex 32` | orchestrator | Vercel `ORCHESTRATOR_SERVICE_TOKEN` (paste the same value; Vercel cannot reference Railway) |
 | `LEDGER_SERVICE_TOKEN` (orchestrator's) | `openssl rand -hex 32` | orchestrator | its SHA-256 goes in `LEDGER_CALLERS` |
+| `LEDGER_HEAD_SIGNING_KEY` | `openssl rand -hex 32` | ledger | signs `GET /ledger/anchor` (fix wave A, RTM-07); keep a copy yourself to check a stored anchor |
+| `COMPLIANCE_LEDGER_ANCHOR_KEY` | `openssl rand -hex 32` | compliance | HMAC of the daily off-ledger anchor store on compliance's volume (AEGIS wave A F-5); the ledger never holds it |
 | `LEDGER_SERVICE_TOKEN` (finance's) | `openssl rand -hex 32` | finance | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (legal's) | `openssl rand -hex 32` | legal | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (seo's) | `openssl rand -hex 32` | seo | its SHA-256 goes in `LEDGER_CALLERS` |
@@ -914,7 +916,10 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 http://legal.railway.internal:8420/health >/dev/null && curl -fsS --max-time 10 http://ledger.railway.internal:8090/health >/dev/null && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
    ```
 
-   Fix wave A (ADR 0025): finance, legal and compliance `/health` now answer **503** `"status":"degraded"` (with
+   Railway's own deploy healthcheck uses `GET /livez` for finance, legal, compliance and the ledger (AEGIS wave A
+   F-1): 200 whenever the process serves, so a reconcile-mode, held or degraded deployment still activates. This
+   heartbeat uses `/health`, which tells the truth:
+   fix wave A (ADR 0025): finance, legal and compliance `/health` answer **503** `"status":"degraded"` (with
    `degraded_reasons`) while they cannot write — ledger unreachable, a ledger write failing or not yet reconciled,
    reconcile required — and `"starting"` / `"refused"` while the start-up hold waits for the ledger or refuses a
    diverged log. The ledger's `/health` is 503 when its last append failed or its disk is below
@@ -928,7 +933,11 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    no payment held by Compliance (`compliance_holds_open` is 0). A 503, a dead or unreachable service, an open hold, or
    the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
    things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
-3. **Daily external anchor of the evidence ledger (fix wave A, RTM-07).** A second cron service from the same image,
+3. **Daily external anchor of the evidence ledger (fix wave A, RTM-07).** AEGIS wave A F-5: this is now automatic and
+   in the IaC — Compliance's scheduler stores the anchor daily on Compliance's volume and checks the ledger still
+   extends it (`ledger_anchor_mismatch` on compliance `/health` otherwise; set `COMPLIANCE_LEDGER_ANCHOR_KEY` and
+   `LEDGER_HEAD_SIGNING_KEY`, Secrets table). The cron below is an optional second, off-Railway copy:
+   a second cron service from the same image,
    schedule `17 9 * * *`, with a Sealed `LEDGER_ANCHOR_TOKEN` (a READ caller in `LEDGER_CALLERS` that reads nothing:
    `{"caller":"anchor","scope":"read","departments":["anchor"]}`) and a Sealed `ANCHOR_SINK_URL` (a second heartbeat
    monitor that keeps each ping's body, e.g. a Healthchecks.io check, whose ping log is outside this system):

@@ -100,14 +100,10 @@ def test_failed_commit_after_anchor_only_andre_reconciles(tmp_path):
                caller="hub")
     assert r.status_code == 503
     assert x.ok(x.get("/legal/v1/integrity"))["status"] == "red"
-    # fix wave A (CH-1): an interrupted write this log announced is rolled back automatically at the next start
-    # (test_fixwave_a_resilience.py). Without its intent journal (lost with the disk, or residue the log never
-    # announced) it is still Andre's to reconcile -- the path this test keeps covering.
-    (tmp_path / "d" / "legal_log.jsonl.intent").unlink()
     with pytest.raises(RuntimeError, match="only Andre"):
         _restart(x, tmp_path)
     y = _restart(x, tmp_path, LEGAL_RECONCILE_MODE="1")
-    assert y.client.get("/health").json()["reconcile_required"] is True
+    assert y.ok(y.client.get("/health"))["reconcile_required"] is True
     assert y.post("/legal/v1/requests", {"request_id": rid(), "channel": "email", "requester_ref": "r",
                                          "kind": "question"}, caller="hub").status_code == 503
     assert y.get("/legal/v1/register").status_code == 200                # reads still answer

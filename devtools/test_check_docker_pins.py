@@ -28,6 +28,19 @@ class Pins(unittest.TestCase):
                 "FROM build AS again\nFROM scratch\nFROM python:3.12-slim@sha256:${BASE_DIGEST}\n")
         self.assertEqual(pins.unpinned(text), [])
 
+    def test_copy_from_and_mount_from_images_are_checked(self):
+        """AEGIS wave A F-4: COPY --from=<image> and RUN --mount=from=<image> pull images too."""
+        self.assertEqual(pins.unpinned("FROM python@sha256:" + DIGEST + "\nCOPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /uv\n"),
+                         ["ghcr.io/astral-sh/uv:0.8.17"])
+        self.assertEqual(pins.unpinned("FROM python@sha256:" + DIGEST + "\nRUN --mount=type=bind,from=alpine:3,target=/a true\n"),
+                         ["alpine:3"])
+        self.assertEqual(pins.unpinned("FROM python@sha256:" + DIGEST + "\nCOPY --chown=1:1 --from=alpine:3 /a /a\n"),
+                         ["alpine:3"])
+        ok = (f"FROM golang@sha256:{DIGEST} AS build\nFROM python@sha256:{DIGEST}\nCOPY --from=build /x /x\n"
+              f"COPY --from=0 /y /y\nCOPY --from=ghcr.io/astral-sh/uv:0.8.17@sha256:{DIGEST} /uv /uv\n"
+              f"RUN --mount=type=cache,target=/c \\\n    --mount=from=build,target=/b true\n")
+        self.assertEqual(pins.unpinned(ok), [])
+
     def test_a_short_or_uppercase_digest_is_refused(self):
         self.assertTrue(pins.unpinned("FROM python:3.12-slim@sha256:abc\n"))
         self.assertTrue(pins.unpinned(f"FROM python:3.12-slim@sha256:{'A' * 64}\n"))

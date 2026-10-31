@@ -26,10 +26,12 @@ class FounderGate:
 
     @classmethod
     def build(cls, founder_token: Optional[str], service_token: Optional[str],
-              caller_tokens: Iterable[str] = (), founder_sha256: Iterable[str] = ()) -> "FounderGate":
+              caller_tokens: Iterable[str] = (), founder_sha256: Iterable[str] = (),
+              founder_next_sha256: Iterable[str] = (), next_until: Optional[float] = None) -> "FounderGate":
         # fix wave A (RTA-5): the accepted values as SHA-256 digests (token_rotation.Secret), never the plaintext;
         # built from the plaintext token and/or *_ANDRE_APPROVAL_TOKEN_SHA256 / _NEXT_SHA256 (a rotation window)
-        secret = token_rotation.Secret([founder_token], founder_sha256)
+        secret = token_rotation.Secret([founder_token], founder_sha256, next_sha256_hex=founder_next_sha256,
+                                       next_until=next_until)
         if not secret or secret.overlaps([service_token, *caller_tokens]):
             return cls(None)
         return cls(secret)

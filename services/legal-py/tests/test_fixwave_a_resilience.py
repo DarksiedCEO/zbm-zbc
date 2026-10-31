@@ -44,25 +44,28 @@ def _crashes(call):
     assert r.status_code == 500, (r.status_code, r.text)
 
 
-@pytest.mark.parametrize("where", ["after_anchor", "before_append"])
-def test_ch1_a_kill_inside_a_write_recovers_by_itself_on_start(tmp_path, monkeypatch, where):
-    x = _durable(tmp_path)
-    if where == "after_anchor":
-        real = x.svc.recorder.record
+def _new_version(x):
+    """A journaled write: Andre approves clipper_agreement 1.1 (document_version_approved is a ruling type)."""
+    return x.approve_doc("clipper_agreement", "clipper agreement text, revised", version="1.1")
 
-        def record(event_id, et, *a, **k):
-            out = real(event_id, et, *a, **k)
-            if et == i10.ANCHOR_TYPE:
-                raise Crash(et)
-            return out
-        monkeypatch.setattr(x.svc.recorder, "record", record)
-    else:
-        def append(*a, **k):
-            raise Crash("append")
-        monkeypatch.setattr(x.svc.log, "append_prepared", append)
-    _crashes(lambda: _request(x))
+
+def test_ch1_a_kill_before_the_anchor_recovers_by_itself_on_start(tmp_path, monkeypatch):
+    x = _durable(tmp_path)
+    real = x.svc.recorder.record
+
+    def record(event_id, et, *a, **k):
+        out = real(event_id, et, *a, **k)
+        if et in i10.RULING_TYPES:
+            raise Crash(et)                          # killed after a ruling, before the anchor
+        return out
+    monkeypatch.setattr(x.svc.recorder, "record", record)
+    x.client = type(x.client)(x.app, raise_server_exceptions=False)
+    try:
+        _new_version(x)
+    except BaseException:  # noqa: BLE001 - the helper asserts on the 500; the kill is what matters
+        pass
     monkeypatch.undo()
-    y = _restart(x, tmp_path)                       # used to refuse: "local log truncated: the ledger anchors line ..."
+    y = _restart(x, tmp_path)
     rec = x.ledger.of_type(i10.RECONCILE_TYPE)
     assert len(rec) == 1 and "Automatic crash recovery" in rec[0]["summary"]
     assert y.ok(y.get("/legal/v1/integrity"))["status"] == "green"
@@ -73,18 +76,41 @@ def test_ch1_a_kill_inside_a_write_recovers_by_itself_on_start(tmp_path, monkeyp
     assert z.ok(z.get("/legal/v1/integrity"))["status"] == "green"
 
 
-def test_ch1_a_failed_local_append_is_residue_too(tmp_path):
-    """A 503 local-disk failure after the anchor was the "only Andre reconciles" case: it was never acknowledged, so
-    the next start rolls it back itself."""
+@pytest.mark.parametrize("where", ["after_anchor", "before_append", "failed_append"])
+def test_f2_an_anchored_interrupted_write_is_held_for_andre_and_reconcile_mode_is_deployable(tmp_path, monkeypatch,
+                                                                                            where):
+    """AEGIS wave A F-2 / F-1: after the anchor a crash and a restored mid-write snapshot look the same, so start-up
+    holds (code interrupted_write_anchored); reconcile mode answers /livez and /health 200."""
     x = _durable(tmp_path)
-    x.svc.log.fail_next_append = True
-    assert _request(x).status_code == 503
-    assert x.client.get("/health").status_code == 503
-    assert x.svc.settle_pending() is True
-    assert x.ok(x.client.get("/health"))["status"] == "ok"
-    assert x.ok(x.get("/legal/v1/integrity"))["status"] == "green"
-    y = _restart(x, tmp_path)
-    assert y.ok(y.get("/legal/v1/integrity"))["status"] == "green"
+    if where == "after_anchor":
+        real = x.svc.recorder.record
+
+        def record(event_id, et, *a, **k):
+            out = real(event_id, et, *a, **k)
+            if et == i10.ANCHOR_TYPE:
+                raise Crash(et)
+            return out
+        monkeypatch.setattr(x.svc.recorder, "record", record)
+        _crashes(lambda: _request(x))
+    elif where == "before_append":
+        def append(*a, **k):
+            raise Crash("append")
+        monkeypatch.setattr(x.svc.log, "append_prepared", append)
+        _crashes(lambda: _request(x))
+    else:
+        x.svc.log.fail_next_append = True
+        assert _request(x).status_code == 503
+        assert x.svc.settle_pending() is False                   # the running watch never voids it either
+        r = x.client.get("/health")
+        assert r.status_code == 503 and "divergence:interrupted_write_anchored" in r.json()["degraded_reasons"]
+    monkeypatch.undo()
+    with pytest.raises(SH.StartupHeld) as held:
+        _restart(x, tmp_path)
+    assert held.value.code == "interrupted_write_anchored"
+    assert x.ledger.of_type(i10.RECONCILE_TYPE) == []
+    y = _restart(x, tmp_path, LEGAL_RECONCILE_MODE="1")
+    assert y.client.get("/livez").status_code == 200
+    assert y.ok(y.client.get("/health"))["reconcile_required"] is True
 
 
 def test_ch1_an_unannounced_stray_anchor_still_refuses(tmp_path):
@@ -121,8 +147,23 @@ def test_ch5_ledger_down_at_start_is_transient(tmp_path):
 
 def test_ch2_watch_step_settles_and_alerts(tmp_path, caplog):
     x = _durable(tmp_path)
-    x.svc.log.fail_next_append = True
-    assert _request(x).status_code == 503
+    real = x.ledger.record_event
+    seen = []
+
+    def record_event(event_id, department, event_type, *a, **k):
+        if event_type in i10.RULING_TYPES:
+            seen.append(event_id)
+        elif event_type == i10.ANCHOR_TYPE and seen:
+            from ledger import LedgerNotRecorded
+            raise LedgerNotRecorded("simulated outage at the anchor (test)")   # the ruling landed, the anchor not
+        return real(event_id, department, event_type, *a, **k)
+    x.ledger.record_event = record_event
+    try:
+        _new_version(x)
+    except AssertionError:
+        pass
+    x.ledger.record_event = real
+    assert seen and len(x.svc.intent)
     w = CR.LedgerWatch("legal-py", x.svc.settle_pending, x.svc.probe_ledger, lambda: len(x.svc.intent))
     with caplog.at_level("WARNING", logger="zbm.alert"):
         assert w.step() is True
@@ -166,7 +207,10 @@ def test_rta3_compliance_cannot_invalidate_a_finance_determination(tmp_path, cap
     assert r.status_code == 403 or "no such" in r.text
     # a non-Finance row is still tightened (the designed "tighten only" path), with an ALERT line for Andre
     with caplog.at_level("WARNING", logger="zbm.alert"):
-        r = _as(x, "compliance_38", "POST", "/legal/v1/register/CQ-01/invalidate",
+        aliased = {r.get("alias_of") for c, r in x.svc.register.items() if c.startswith("FIN-")}
+        plain = next(c for c in sorted(x.svc.register) if not c.startswith("FIN-") and c not in aliased
+                     and not x.svc.register[c].get("alias_of"))
+        r = _as(x, "compliance_38", "POST", f"/legal/v1/register/{plain}/invalidate",
                 {"request_id": rid(), "source_ref": "https://example.gov/x", "detected_change_sha256": "a" * 64})
     assert r.status_code == 200, r.text
     assert any('"register_row_invalidated"' in rec.getMessage() for rec in caplog.records)
@@ -179,7 +223,7 @@ def test_rta5_next_service_token_and_hashed_andre_token():
 
     from helpers import ANDRE_TOKEN, SERVICE_TOKEN
     nxt = "next-legal-service-token-openssl-rand-hex-32-aa"
-    h = Harness(env={"LEGAL_SERVICE_TOKEN_NEXT": nxt, "LEGAL_ANDRE_APPROVAL_TOKEN": "",
+    h = Harness(env={"LEGAL_SERVICE_TOKEN_NEXT": nxt, "LEGAL_ROTATION_ENDS_AT": _ends(), "LEGAL_ANDRE_APPROVAL_TOKEN": "",
                      "LEGAL_ANDRE_APPROVAL_TOKEN_SHA256": hashlib.sha256(ANDRE_TOKEN.encode()).hexdigest()})
     for bearer in (SERVICE_TOKEN, nxt):
         r = h.client.get("/legal/v1/reconcile", headers={"Authorization": f"Bearer {bearer}", "X-Andre-Approval-Token": ANDRE_TOKEN})
@@ -187,3 +231,63 @@ def test_rta5_next_service_token_and_hashed_andre_token():
     r = h.client.get("/legal/v1/reconcile", headers={"Authorization": f"Bearer {nxt}", "X-Andre-Approval-Token": "wrong-" + "0" * 40})
     assert r.status_code == 403
     assert h.settings.andre_token is None and ANDRE_TOKEN not in repr(h.settings)
+
+
+def test_f8_compliance_cannot_invalidate_a_fin_row_through_an_alias(tmp_path):
+    """AEGIS wave A F-8: FIN-CQ-07 is an alias of CQ-01; invalidating it answered 200 {"canonical":"CQ-01"}."""
+    x = _durable(tmp_path)
+    fin_aliases = {c: r["alias_of"] for c, r in x.svc.register.items() if c.startswith("FIN-") and r.get("alias_of")}
+    assert fin_aliases, "the seed has FIN aliases"
+    for alias, canon in sorted(fin_aliases.items())[:3]:
+        for target in (alias, canon):
+            r = _as(x, "compliance_38", "POST", f"/legal/v1/register/{target}/invalidate",
+                    {"request_id": rid(), "source_ref": "https://example.gov/x", "detected_change_sha256": "a" * 64})
+            assert r.status_code == 403, (target, r.status_code, r.text)
+
+
+def _ends(days=1):
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
+def test_f12_rotation_and_hash_guards_hold_here_too():
+    """AEGIS wave A F-12: mutants M9 (NEXT == current accepted) and M10 (Andre's hash == another token's) survived this
+    suite; finance-py alone killed them."""
+    import hashlib
+    import json as _json
+
+    import config as config_mod
+    from helpers import CALLERS, base_env
+    env = base_env()
+    other = next(iter(CALLERS.values()))
+    with pytest.raises(RuntimeError, match="NEXT"):
+        config_mod.load({**env, "LEGAL_SERVICE_TOKEN_NEXT": other, "LEGAL_ROTATION_ENDS_AT": _ends()})
+    with pytest.raises(RuntimeError, match="NEXT"):
+        config_mod.load({**env, "LEGAL_CALLER_TOKENS_NEXT": _json.dumps({"onboarding": env["LEGAL_SERVICE_TOKEN"]}),
+                         "LEGAL_ROTATION_ENDS_AT": _ends()})
+    with pytest.raises(RuntimeError, match="distinct"):
+        config_mod.load({**env, "LEGAL_ANDRE_APPROVAL_TOKEN": "",
+                         "LEGAL_ANDRE_APPROVAL_TOKEN_SHA256": hashlib.sha256(other.encode()).hexdigest()})
+    with pytest.raises(RuntimeError, match="ROTATION_ENDS_AT"):
+        config_mod.load({**env, "LEGAL_SERVICE_TOKEN_NEXT": "next-token-" + "a" * 40})
+
+
+def test_f12_the_holding_app_never_answers_200_on_health():
+    """Mutant M18 (holding app answers 200) survived this suite."""
+    import asyncio
+    import json as _json
+    hold = SH.HoldingApp("legal-py")
+
+    async def call(path):
+        sent = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(m):
+            sent.append(m)
+        await hold({"type": "http", "path": path, "method": "GET", "headers": []}, receive, send)
+        return sent[0]["status"], _json.loads(sent[1]["body"])
+    assert asyncio.run(call("/health"))[0] == 503
+    assert asyncio.run(call("/legal/v1/anything"))[0] == 503
+    assert asyncio.run(call("/livez"))[0] == 200
