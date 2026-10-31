@@ -235,13 +235,12 @@ fn rtm07_external_anchor_is_served_signed_and_enforced_at_start() {
 }
 
 
-/// AEGIS wave A F-6, revised by round 2 N-1: a log whose last entry was stamped 100 years ahead (a bad clock before
-/// a restart). `recorded_at` never goes backwards (N-1), so later entries are stamped just after it, and GET /health
-/// keeps a standing `clock_skew` warning for as long as the log is ahead of the wall clock (not only for an hour),
-/// across restarts, so the operator sees it. In-process a jump like this is never adopted (unit tests), so only a
-/// clock that was already wrong at boot can write such an entry. The chain still verifies.
+/// AEGIS wave A F-6, revised by round 3 (T4): a log whose last entry was stamped 100 years ahead (the host clock was
+/// wrong when it was written). `recorded_at` never goes backwards, so later entries are stamped just after it until
+/// real time catches up: the stamps ARE pinned. That is never silent: GET /health is 503 `ledger_clock_behind_log`
+/// (appends still 201) in every round, across restarts. The chain still verifies.
 #[test]
-fn f6_an_entry_100_years_ahead_does_not_pin_later_timestamps_after_restart() {
+fn f6_a_future_entry_pins_later_stamps_and_health_is_503_ledger_clock_behind_log_across_restarts() {
     use ledger_rust::{EventInput, Ledger, LedgerEntry};
     let log = Scratch::new("f6");
     let mut l = Ledger::new();
@@ -270,8 +269,9 @@ fn f6_an_entry_100_years_ahead_does_not_pin_later_timestamps_after_restart() {
         assert!(at - prev < chrono::Duration::seconds(1), "stamped just after the previous entry: {at}");
         prev = at;
         let (st, h) = http(s.port, "GET", "/health", None, "");
-        assert_eq!(st, 200, "{h}");
-        assert!(h.contains("clock_skew"), "round {round}: {h}");
+        assert_eq!(st, 503, "{h}");
+        assert!(h.contains("ledger_clock_behind_log"), "round {round}: {h}");
+        assert_eq!(http(s.port, "GET", "/livez", None, "").0, 200);
         let (st, v) = http(s.port, "GET", "/ledger/verify", Some(FINANCE_TOKEN), "");
         assert_eq!(st, 200, "{v}");
     }
@@ -299,4 +299,29 @@ fn f5_anchor_at_an_earlier_head() {
     assert_eq!(http(s.port, "GET", "/ledger/anchor?at=9", Some(FINANCE_TOKEN), "").0, 404);
     assert_eq!(http(s.port, "GET", "/ledger/anchor?x=1", Some(FINANCE_TOKEN), "").0, 400);
     assert_eq!(http(s.port, "GET", "/ledger/anchor?at=1", None, "").0, 401);
+}
+
+/// AEGIS round 3 (N3-8 false alarm): a 1-3 s NTP step back is absorbed (+1 µs) and never alarms; GET /health is 200.
+#[test]
+fn r3_a_small_ntp_step_back_never_alarms() {
+    use ledger_rust::{EventInput, Ledger, LedgerEntry};
+    let log = Scratch::new("r3ntp");
+    let mut l = Ledger::new();
+    let mut e = l.build_event_entry(EventInput {
+        event_id: "fin-ntp-0".into(), department: "finance".into(), event_type: "invoice_issued".into(),
+        actor: "oct31_test".into(), subject_id: "inv_1".into(), payload_sha256: "cd".repeat(32), summary: "ntp".into(),
+    });
+    let ahead = chrono::Utc::now() + chrono::Duration::seconds(3);
+    if let LedgerEntry::Event(ev) = &mut e {
+        ev.recorded_at = ahead;
+        ev.hash = sha256_hex(&ledger_rust::event_canonical(ev));
+    }
+    l.push_entry(e);
+    std::fs::write(&log.0, format!("{}\n", serde_json::to_string(&l.entries()[0]).unwrap())).unwrap();
+    common::write_head_for(&log.0);
+    let s = start(&log, &[]);
+    let (st, body) = http(s.port, "POST", "/ledger/events", Some(FINANCE_TOKEN), &event("fin-ntp-1", "finance", "now"));
+    assert_eq!(st, 201, "{body}");
+    let (st, h) = http(s.port, "GET", "/health", None, "");
+    assert_eq!(st, 200, "{h}");
 }

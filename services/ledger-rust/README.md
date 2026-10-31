@@ -39,7 +39,7 @@ Every route except `GET /health` needs `Authorization: Bearer <token>` (401 othe
 | Route | Answers |
 |---|---|
 | `GET /livez` | AEGIS wave A F-1: 200 `{"status":"alive"}` whenever the process serves — Railway's deploy healthcheck (a ledger with `disk_low` must still redeploy). No token. |
-| `GET /health` | 200 `{"status":"ok","service":"ledger-rust"}` (plus `"warnings":["clock_skew"]` for an hour after a clock fault, AEGIS F-6); fix wave A (CH-6): 503 `{"status":"degraded","service":"ledger-rust","reasons":[…]}` while the last append failed to persist (`last_append_failed`, cleared by the next append that persists; an `ALERT ledger_write_failing` line is logged once) or the disk is below `LEDGER_MIN_FREE_BYTES` (`disk_low: …`). |
+| `GET /health` | 200 `{"status":"ok","service":"ledger-rust"}`; 503 `ledger_clock_behind_log` while the newest entry is more than 5 minutes ahead of the host clock (appends still accepted; "Time" below); fix wave A (CH-6): 503 `{"status":"degraded","service":"ledger-rust","reasons":[…]}` while the last append failed to persist (`last_append_failed`, cleared by the next append that persists; an `ALERT ledger_write_failing` line is logged once) or the disk is below `LEDGER_MIN_FREE_BYTES` (`disk_low: …`). |
 | `POST /ledger/append` | A finding. 201 entry; 400 invalid; 413 body over 64 KiB; 500 not recorded. With `Idempotency-Key: <finding_id>` (must equal the body's `finding_id`, else 400): 201 new, 200 identical retry (existing entry), 409 same `finding_id` with different content. Without the header every post is appended (unchanged). |
 | `POST /ledger/events` | A department event, idempotent on `(department, event_id)`: 201 new, 200 identical retry, 409 conflicting content, 400 invalid. Fix wave A (RTA-1): event ids are namespaced per department, so one department's write can never pre-claim (and 409-block) another department's deterministic id; existing logs load unchanged (no migration step). |
 | `GET /ledger/entries` | No query: every entry the caller may read, as a JSON array (the whole ledger for the shared token and `read_all` callers, byte-identical to before). `?after_seq=&limit=&department=&event_type=`: entries with `seq > after_seq`, at most `limit` (default 1000, max 10000), filters match events only; the next page is `after_seq=<last seq>`, and fewer than `limit` entries means the end. Served from a per-department / per-event-type index (a page costs O(page + log n), not a scan). Unknown/repeated/malformed parameters: 400; a `department` outside the caller's read scope: 403. |
@@ -76,21 +76,21 @@ latest `anchor` in that store (`GET` it with your token from Compliance's log li
 
 ## Time (`recorded_at`)
 
-Ordering is `seq`. `recorded_at` **never goes backwards** (CH-12; AEGIS round 2 N-1): each stamp is
-`max(candidate, previous + 1 µs)`. The candidate is the wall clock when it agrees (within 5 minutes) with the last
-trusted wall reading plus elapsed monotonic time, and that plausible time when it does not:
+Ordering is `seq`. One rule, no heuristics (CH-12; AEGIS round 3):
 
-- **Backward step** (a VM restored from a snapshot, a bad NTP source): entries keep following real time, never the
-  past; as soon as the wall clock is corrected it is used again (no lasting offset).
-- **Forward jump**: stamped at the plausible time. A step of at most one day that stays consistent for 2 minutes
-  (a slow clock corrected by NTP, a paused VM resumed; N-5) is adopted as real time. A larger jump (the 100-years-ahead
-  clock of F-6) is never adopted in-process.
-- **After a restart** there is no monotonic baseline: if the last entry is ahead of the wall clock (only possible when
-  the clock was already wrong at boot), new entries are stamped just after it until real time catches up.
-- Every fault is logged with both readings and is a `clock_skew` warning on `/health`: for an hour after the fault,
-  and for as long as the last entry is more than 5 minutes ahead of the wall clock. To resolve a standing warning,
-  fix the host clock; if the log itself carries a far-future entry, that is an incident for Andre (the entries stay
-  verifiable; `seq` is the order of record).
+    recorded_at = max(previous entry + 1 µs, wall clock)
+
+- `recorded_at` never goes backwards. A wall clock that steps back is not used until it passes the newest entry
+  again; until then entries are stamped 1 µs apart after it.
+- A wall clock that jumps forward is stamped as observed. The ledger does not second-guess the host clock.
+- **Alarm, never silent:** while the newest entry is more than 5 minutes ahead of the wall clock (the log is ahead
+  of the host clock), `GET /health` answers **503 `ledger_clock_behind_log`** and each append logs a warning.
+  Appends are still accepted (201). A 1–3 s NTP step back stays under the threshold and does not alarm.
+- **Consequence of a far-future clock:** if the host clock was far ahead while entries were written (for example
+  100 years at boot), every later stamp stays pinned at previous + 1 µs until real time catches up, across restarts,
+  and `/health` stays 503 the whole time. The entries remain verifiable and `seq` remains the order of record; the
+  stamps of that period do not tell the real time. Fix the host clock as soon as the alarm fires
+  (docs/runbooks/held-service-and-ledger-anchor.md, section 5).
 
 ## Rollback (one-way change, AEGIS wave A F-10)
 
