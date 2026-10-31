@@ -287,6 +287,16 @@ approves the client contracts himself and his CQ-19 determination makes such a c
   Runbook step 9 updated.
 - **N4-L5.** A test pins that a Legal 503 (or timeout) is never remembered as dead, on GET and on POST.
 
+## Rebased on ADR 0024 (2026-10-31, feat/compliance-gate-deploy b5730e4a)
+
+- `OPTIONAL_CALLERS` is `("compliance_38", "client_portal")`: both entries are skipped while unset. The compliance
+  branch generalised the behaviour: a route only an unset optional caller may call answers 503, and Legal's
+  `/health` says `"status": "warning"` with `optional_caller_unset:<name>` for each. The portal's own dependency
+  (503 while `client_portal` is unset, whatever token is sent) is kept.
+- Consequence: the compliance heartbeat (docs/deploy/railway.md, which pings only while Legal's `/health` says `ok`)
+  stays red after the first apply until `PORTAL_LEGAL_CALLER_TOKEN` is set and Legal redeployed, as it does for
+  `COMPLIANCE_LEGAL_CALLER_TOKEN`.
+
 ## For Andre's sign-off (the approved clickwrap text is the contract record; its wording is unchanged)
 
 1. **The "Company you are signing for" field.** Not in clickwrap text v1; the build brief asked for it. It must equal

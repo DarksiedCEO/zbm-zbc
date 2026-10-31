@@ -543,7 +543,7 @@ class ClientPortal(unittest.TestCase):
             if target and target not in ("finance", "compliance"):
                 with self.subTest(caller=caller, service=target):
                     self.assertIn(caller, optional, f"{caller} -> {target}: an empty value would stop Legal starting")
-        self.assertEqual(tuple(optional), ("client_portal",))
+        self.assertEqual(tuple(optional), ("compliance_38", "client_portal"))     # ADR 0024 and ADR 0028
         runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
         section = runbook.split("### Client acceptance page (ADR 0028)", 1)[1].split("\n### ", 1)[0]
         self.assertNotIn("**before**", section, "the runbook must not ask for the impossible order (AEGIS M-1)")

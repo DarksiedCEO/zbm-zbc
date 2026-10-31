@@ -50,7 +50,8 @@ def test_an_unset_portal_caller_never_stops_legal_and_its_routes_answer_503(valu
     assert "client_portal" not in s.caller_tokens and s.callers_not_configured == ("client_portal",)
     x = Harness(env={"LEGAL_CALLER_TOKENS": json.dumps(callers)})
     x.approve_rules()
-    assert x.ok(x.client.get("/health"))["status"] in ("ok", "degraded")
+    h = x.ok(x.client.get("/health"))      # rebased on ADR 0024: /health warns about each unset optional caller
+    assert h["status"] == "warning" and h["warnings"] == ["optional_caller_unset:client_portal"], h
     for path, body in (("/legal/v1/portal/invitations/resolve", {"token": "A" * 43}),
                        ("/legal/v1/portal/receipts", {"token": "A" * 43, "request_id": "pa-1",
                                                       "form_sha256": "0" * 64}),
@@ -59,7 +60,7 @@ def test_an_unset_portal_caller_never_stops_legal_and_its_routes_answer_503(valu
         assert r.status_code == 503 and "client_portal" in r.text, (path, r.text)
 
 
-@pytest.mark.parametrize("caller", ["finance_31", "onboarding", "compliance_38"])
+@pytest.mark.parametrize("caller", ["finance_31", "onboarding"])          # compliance_38 is optional too (ADR 0024)
 def test_every_other_caller_entry_is_still_strict(caller):
     callers = dict(CALLERS, **{caller: ""})
     with pytest.raises(RuntimeError):

@@ -958,7 +958,8 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    alerts), and legal's `/health` says `"status": "ok"` (it is `degraded` while a log line the replay did not apply is
    unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
    /legal/v1/replay-quarantine/acknowledgements`, your token; it is `warning` while `COMPLIANCE_LEGAL_CALLER_TOKEN` is
-   unset: finish step D). A 503, a dead or unreachable service, an open hold, or
+   unset: finish step D; and while `PORTAL_LEGAL_CALLER_TOKEN` is unset: finish steps 1-5 of "Client acceptance page
+   (ADR 0028)" below, `optional_caller_unset:client_portal`). A 503, a dead or unreachable service, an open hold, or
    the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
    things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
 3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
@@ -1376,14 +1377,16 @@ every client. Once, after the first deploy that includes `client-portal`:
 
 1. **Apply** (`railway config plan`, read it, `railway config apply`). Legal restarts with the new caller map while
    `PORTAL_LEGAL_CALLER_TOKEN` is still empty: Legal skips that entry, logs `LEGAL_CALLER_TOKENS: client_portal not
-   set`, and keeps running; only the client acceptance page's routes answer 503 (AEGIS M-1). `client-portal` itself
+   set`, keeps running and says `"status": "warning"` with `optional_caller_unset:client_portal` on its `/health`
+   (as for `compliance_38`, step D above); only the client acceptance page's routes answer 503 (AEGIS M-1). `client-portal` itself
    refuses to start until its secrets exist; that touches nothing else.
 2. Generate the secrets of the Secrets table: `LEGAL_LINK_TAG_KEY` on `legal`, `PORTAL_LEGAL_CALLER_TOKEN` and
    `PORTAL_EVIDENCE_KEY` on `client-portal` (all Sealed).
 3. `client-portal` -> Settings -> Networking -> **Generate Domain** (no custom domain is needed). Copy it and set
    `PORTAL_PUBLIC_ORIGIN` to `https://<that domain>` (no path, no trailing slash).
 4. Set `LEGAL_ZBM_FACTS` on `legal` (the entity facts; step 1 of docs/runbooks/client-acceptance.md).
-5. **Redeploy `legal`** (it reads the caller token now: the warning is gone from its log) and then `client-portal`.
+5. **Redeploy `legal`** (it reads the caller token now: the warning is gone from its log, and its `/health` no longer
+   lists `optional_caller_unset:client_portal` under `warnings`) and then `client-portal`.
 6. Check: `curl -sS https://<domain>/health` answers `{"status":"ok"}`; `curl -sSI https://<domain>/accept/x`
    answers 404 with a `content-security-policy` header starting `default-src 'none'`; then run step 8 of the client
    acceptance runbook (the client-address check, mandatory before the first real link).
