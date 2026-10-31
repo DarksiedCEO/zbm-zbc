@@ -36,7 +36,12 @@ Why order matters: every department anchors its local log on the **ledger**.
 ## 2. Taking a consistent backup set (before risky work, and weekly)
 
 About 10 minutes. Finance pauses its writes for the window (Stripe webhooks and fin-cron get a 503 and retry later;
-nothing is lost). Open the finance tunnel and make the header files first, as in docs/deploy/railway.md, Compliance
+nothing is lost: Stripe retries a webhook it could not deliver for up to 3 days, with growing gaps, so a pause of
+minutes only delays them). A pause lasts at most `FIN_BACKUP_PAUSE_MAX_MIN` minutes (default 30, at most 120); a
+longer `minutes` is refused. It always ends on time, also if Finance restarts inside it: the restarted Finance stays
+paused until the window's end, `/health` shows `backup_pause.paused: true`, and finance logs `ALERT finance:
+paused_for_backup` every 5 minutes. A marker still open after its window pauses nothing but logs `ALERT finance:
+backup_marker_left_open` every 5 minutes until you resume it. Open the finance tunnel and make the header files first, as in docs/deploy/railway.md, Compliance
 step I (`ssh -N -L 127.0.0.1:18410:127.0.0.1:8410 <finance-service-instance-id>@ssh.railway.com`; in `~/.zbm-cmp`,
 `fin-auth.hdr` from `FIN_SERVICE_TOKEN` and `fin-andre.hdr` from `FIN_ANDRE_APPROVAL_TOKEN`, both with `read -rs`;
 tokens are never typed on a command line). Below, `F=http://127.0.0.1:18410` and `H='-H @fin-auth.hdr -H
@@ -54,8 +59,9 @@ tokens are never typed on a command line). Below, `F=http://127.0.0.1:18410` and
    ```
    curl -sS -X POST $H $F/fin/v1/backup/resume -d '{"request_id":"bkp-2026-11-07-r","marker_id":"<marker_id>"}'
    ```
-   `"consistent": true` means Finance did not write during the window. `false` (the window ran out, or something
-   wrote): take the set again.
+   `"consistent": true` means Finance did not write during the window. `false` gives a `reason`:
+   `window_expired` or `log_moved` (take the set again), or `restarted_or_restored` (expected after a restore; after a
+   deploy inside the window, take the set again).
 5. Write down in your password manager notes: the date, the marker id, the five backup date stamps. That is one
    **backup set**. Restore only whole sets (section 3).
 
@@ -98,14 +104,17 @@ department. Expect more to re-import (section 5).
    ```
    Without `money_events_acknowledged` Finance answers 409 `RESTORE_GUARD`. With it, the answer says
    `"stripe_reimport_required": true` and names `reimport_break_id`: a high-severity break that stays open until
-   section 5 has covered every day from the backup to today. The break records the backup's point in time
+   section 5 has covered every day from the backup to today and every restore item (below) is settled. The break records the backup's point in time
    (`restore_point`: the restored log's last line, its time and its ledger position) and its day as `since`.
 4. Unset `FIN_RECONCILE_MODE`, redeploy finance. If the backup was taken inside a pause window (section 2), the
-   restored Finance stays paused (every write answers 503 `QUIESCED`): resume that marker now
-   (`POST $F/fin/v1/backup/resume`; it answers `"consistent": false`, which is expected after a restore).
-   Invoices paid after the backup now show `issued`. **Do not chase any client.** Until section 5 is complete, Finance
-   refuses every credit note, void and new Stripe page (409): a void the restore lost must never make an invoice
-   payable, and a credit note number must never be issued twice. Stripe redeliveries of events Finance lost may arrive: a paid Checkout page
+   restored Finance stays paused until the window's end (every write answers 503 `QUIESCED`): resume that marker
+   now (`POST $F/fin/v1/backup/resume`; it answers `"consistent": false`, reason `restarted_or_restored`, which is
+   expected after a restore).
+   Invoices paid after the backup now show `issued`. **Do not chase any client.** The restore break lists **items**:
+   every credit note, void, contract deadline and client email the ledger recorded after the backup. Until an item is
+   rebuilt or settled, Finance refuses a credit note, a void and a new Stripe page (409) on the invoices it touches
+   (`affected_invoices` on the break); every other invoice works normally. A void the restore lost never makes an
+   invoice payable, and credit note numbers go on from the highest number the ledger saw. Stripe redeliveries of events Finance lost may arrive: a paid Checkout page
    Finance no longer knows answers 2xx, opens a `stripe_unknown_session` break and logs `ALERT finance:
    stripe_unknown_session` (CH-4). Leave those breaks; step 5 resolves them.
 
@@ -127,7 +136,12 @@ closes by itself on the run that completes the coverage; nothing else closes it.
    page Finance lost, read back from Stripe), `book_payment`, `book_refund`, `book_dispute`, and
    `rebuild_credit_note` / `rebuild_void`: credit notes and voids made after the backup are not in Stripe, so they are
    rebuilt from their evidence on the ledger (each checked against the payload SHA-256 the ledger holds; same number,
-   same amounts, same refund deadline; the client is not emailed again). Compare with the Stripe Dashboard (Payments, filtered to the same dates). Nothing is
+   same amounts, same refund deadline; the client is emailed only if the original email was never sent). Only
+   effects that took effect are rebuilt: each has an `effect_committed` ledger mark whose HMAC (keyed from
+   `FIN_CONTACT_HASH_KEY`) only this Finance can write, and only events of the `finance` department count. An attempt
+   that answered an error, a mark that is missing or does not verify, a contract deadline (`deadline_recorded`) and a
+   client email that was queued but whose parent is not rebuilt are never booked: they are items with status
+   `needs_review` and a `why` (step 3). Compare with the Stripe Dashboard (Payments, filtered to the same dates). Nothing is
    booked by a dry run.
 2. Real run, naming the dry run's plan:
    ```
@@ -141,9 +155,17 @@ closes by itself on the run that completes the coverage; nothing else closes it.
    `breaks_resolved` names the restore break, the paid invoices show `paid`
    again, and the next reconciliation (fin-cron at 07:xx, or `POST /fin/v1/reconciliations/run`) shows Stripe
    balance leg L3 in balance. A `failed` item: fix its cause (usually Stripe unreachable) and run steps 1-2 again. A
-   `rebuild_*` item that fails ("the ledger's evidence does not verify", "the restored books cannot carry it") is not
-   retried into success: re-issue that credit note or void by hand after reading the ledger event, and keep the break
-   open until you have.
+   `rebuild_*` action that fails ("the invoice is not in the restored books", "the ledger's evidence does not verify")
+   becomes a `needs_review` item and does not stop the run from counting. For each `needs_review` item (`GET
+   $F/fin/v1/breaks`, the restore break's `items`): read its ledger event, then either re-issue it by hand (re-record
+   the deadline with `sow-ended` or `acknowledgements`, issue the credit note, void the invoice) and record
+   ```
+   curl -sS -X POST $H $F/fin/v1/restore/items/<event_id>/disposition \
+     -d '{"request_id":"disp-1","disposition":"reissued","reason":"...","reissued_as":"<credit note, voided invoice, break or mail id>"}'
+   ```
+   or, when it never happened or no longer applies (an invoice issued and voided after the backup), `"disposition":
+   "lost"` with the reason. The answer says `break_closed` when that was the last open item and the coverage is done.
+   `POST /fin/v1/breaks/<id>/resolution` refuses the restore break (and every deadline break); nothing else closes it.
 4. Anything Stripe does not know (a wire, an ACH credit to the bank) is not re-imported: re-post those bank lines
    through the bank feed as usual.
 
@@ -153,4 +175,4 @@ The red team requires one drill before real money is booked. On a **test-mode** 
 take a backup set (section 2), pay two invoices with Stripe test mode, make one Dashboard refund, restore the set
 (section 3), reconcile (section 4), re-import (section 5). Include one credit note and one void made after the
 backup. Pass: the invoices are `paid` again, the refund is booked, the credit note (same number) and the void are
-back, the restore break is resolved, L3 is in balance, Finance integrity is green. Record the date and result in your notes.
+back, any item you disposed of is recorded, the restore break is resolved, L3 is in balance, Finance integrity is green. Record the date and result in your notes.

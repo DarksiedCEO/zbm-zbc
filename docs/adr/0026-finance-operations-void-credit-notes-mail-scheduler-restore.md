@@ -97,6 +97,25 @@ The contracts promise things Finance could not do:
     F3 (the SEO SOW text says card is not available) is a contract change for Andre, not code: until SOW 4.3 is
     amended, SEO audit invoices are drafted without `card`.
 
+15. **AEGIS round 2 (Oct 31 2026).** (R2-1) A rebuild books only effects that took effect: `_commit` writes an
+    `effect_committed` mark (line seq, line SHA-256, HMAC keyed from `FIN_CONTACT_HASH_KEY` with domain separation)
+    for every credit note, void, deadline and client-mail intent in the line; a mark that cannot be written alerts
+    and the hourly job retries it. An intent without a valid mark (an operation that answered 503 and was retried, a
+    forged event) is a restore item for Andre, never booked. (R2-5) Only `finance` department events count; the MAC
+    means another holder of a finance-scoped ledger token still cannot make an event rebuildable. (R2-2) An item
+    that cannot be rebuilt blocks only the invoices it touches; Andre disposes of it (`POST
+    /fin/v1/restore/items/{event_id}/disposition`, `lost` or `reissued`); the break closes when coverage is complete
+    and every item is rebuilt or disposed. A failed rebuild does not stop a run's window from counting (its item
+    stays open instead). (R2-3) The generic break resolution refuses the restore break and every deadline leg.
+    (R2-4) Deadlines and queued client mail recorded after the backup are items too, and count for the reconcile
+    guard. (R2-6) A pause lasts at most `FIN_BACKUP_PAUSE_MAX_MIN` minutes, also after a restart; a paused Finance
+    answers 503 to everything (Stripe retries webhooks for up to 3 days), `/health` reports it, and an ALERT line
+    repeats every 5 minutes; resume returns a reason code. (Lows) `refund_due_from` / `sow_ended_on` lie between the
+    invoice's issue day and today and at most 400 days back; cancel-or-credit closes on a void or a credit leaving
+    nothing owed, or Andre's `POST /fin/v1/deadlines/{break_id}/close` with a reason (which also records an
+    acknowledgement sent outside Finance); refund totals on a rebuild come only from verified `stripe_refund_booked`
+    events; credit note numbers go on from the highest number seen (also on the ledger), never the count.
+
 ## Consequences
 
 - New ledger event types: `invoice_voided`, `credit_note_issued`, `credit_note_refund_linked`, `client_contact_recorded`,
@@ -114,5 +133,6 @@ The contracts promise things Finance could not do:
 
 Finance tests: test_credit_notes.py, test_client_mail.py, test_seo_audit_card_and_webhooks.py,
 test_restore_reimport.py (the red team's restore scenario, end to end with the simulated Stripe),
-test_ops_cron_caller.py, test_business_tz.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
+test_ops_cron_caller.py, test_business_tz.py, test_aegis_waveB_fixes.py, test_aegis_waveB_r2.py (AEGIS's round-2
+attacks kept as regressions), test_finance_ops_r2.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
 against the real Stripe or Resend APIs.

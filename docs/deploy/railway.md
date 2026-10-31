@@ -592,6 +592,7 @@ Set by IaC or by you:
 | `FIN_STRIPE_CANCEL_URL` | yes | no | `https://zbestmedia.example/payment/cancelled` (you) | |
 | `FIN_CARD_PREPAYMENTS` | yes | no | `1` (IaC; founder Oct 30 2026) | card next to ACH on Revenue Recovery and SEO audit (`seo_audit_services`) invoices up to `FIN_CARD_MAX_INVOICE`; no surcharge; `0` turns cards off (the hourly job then closes pages offering a card) |
 | `FIN_BUSINESS_TZ` | yes | no | `America/Los_Angeles` (IaC; the default) | CH-10: invoice due dates count from this zone's date; an unknown zone refuses start |
+| `FIN_BACKUP_PAUSE_MAX_MIN` | no | no | unset (default 30; 5-120) | the longest backup pause (`POST /fin/v1/backup/quiesce` refuses a longer one); a paused Finance always reopens when it ends, also after a restart |
 | `MAIL_FROM` | yes | no | `Z Best Media <billing@zbestmedia.com>` (IaC) | the only sender allowed (any other address refuses start); alone it does not switch mail on |
 | `RESEND_API_KEY` | to send client email | yes | (you; Resend) | becomes `RESEND_API_KEY_FILE`. With `MAIL_FROM`, client email is ON (receipts, credit notes, refund confirmations, acknowledgements); unset = OFF, nothing is sent and nothing alerts |
 | `RESEND_API_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself; set without `MAIL_FROM` refuses start |
@@ -1272,13 +1273,18 @@ from it, and the client's email shows the same date. If that date has already pa
 
 **An SOW ended while its invoice is unpaid** (MSA 4.12(g)): record it the day you learn it,
 `POST $F/fin/v1/invoices/<id>/sow-ended` with `{"request_id", "sow_ended_on": "2026-11-01"}`. A
-`cancel_or_credit_due` break opens, due 10 business days later; the void or credit note on that invoice closes it.
+`cancel_or_credit_due` break opens, due 10 business days later; the void, or a credit note that leaves nothing owed,
+closes it. Credited down only to the work done (something is still owed)? Close it yourself with the reason:
+`POST $F/fin/v1/deadlines/<break id>/close` with `{"request_id", "basis": "closed_by_andre", "reason": "..."}`.
+`sow_ended_on` must be on or after the invoice's issue day and not in the future.
 
 **Acknowledge a client request within 2 business days** (MSA 4.12(f)): `POST $F/fin/v1/clients/<client id>/acknowledgements`
 with `{"request_id", "topic": "refund_request" | "cancellation" | "billing_dispute" | "payment_question",
 "received_on": "2026-11-02", "invoice_id": "<optional>"}`. The answer gives `acknowledge_by` and says `late` if that date has passed.
 An `acknowledgement_due` break stays open until the acknowledgement email is actually sent (so record the billing
-contact first, and switch mail on). The hourly fin-cron run turns every contract deadline that has passed (refund,
+contact first, and switch mail on). Mail off, or you acknowledged by phone or from your own mailbox? Record it:
+`POST $F/fin/v1/deadlines/<break id>/close` with `{"request_id", "basis": "acknowledged_outside_finance", "reason":
+"...", "done_on": "2026-11-03"}`; any queued acknowledgement email is cancelled, never sent twice. The hourly fin-cron run turns every contract deadline that has passed (refund,
 acknowledgement, cancel-or-credit) high severity and logs `ALERT finance: deadline_overdue`.
 
 **Client email** (off until configured). One time, in Resend: add and verify the domain `zbestmedia.com` (Resend shows
