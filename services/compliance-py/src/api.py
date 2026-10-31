@@ -354,6 +354,8 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         h = svc.health()
         if rot.in_progress:
             h = {**h, "rotation_in_progress": True}      # AEGIS wave A F-11: a *_NEXT window is open
+        if rot.expired:                                  # AEGIS round 2 N-4: NEXT values left after the window
+            h = {**h, "rotation_expired": True, "warnings": [*h.get("warnings", []), "rotation_expired"]}
         # AEGIS F-4: a dead or stalled scheduler (no successful controls run for two intervals) is a 503
         return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)
 

@@ -41,6 +41,24 @@ class Pins(unittest.TestCase):
               f"RUN --mount=type=cache,target=/c \\\n    --mount=from=build,target=/b true\n")
         self.assertEqual(pins.unpinned(ok), [])
 
+    def test_onbuild_escape_and_syntax_directives(self):
+        """AEGIS round 2 N-9: `ONBUILD COPY --from=<image>` and a `# escape=` directive with backtick continuations were
+        not detected; a `# syntax=<image>` directive pulls the BuildKit frontend image (also a base image)."""
+        base = f"FROM python@sha256:{DIGEST}\n"
+        self.assertEqual(pins.unpinned(base + "ONBUILD COPY --from=alpine:3 /a /a\n"), ["alpine:3"])
+        self.assertEqual(pins.unpinned(base + "onbuild RUN --mount=from=alpine:3,target=/a true\n"), ["alpine:3"])
+        text = "# escape=`\n" + base + "COPY `\n  --from=alpine:3 /a /a\n"
+        self.assertEqual(pins.unpinned(text), ["alpine:3"])
+        text = "# escape=`\nFROM `\n  golang:1.27\n"
+        self.assertEqual(pins.unpinned(text), ["golang:1.27"])
+        # a backslash is NOT a continuation under escape=` (and the directive only counts at the very top)
+        self.assertEqual(pins.unpinned("RUN true\n# escape=`\n" + base), [])
+        self.assertEqual(pins.unpinned("# syntax=docker/dockerfile:1.7\n" + base), ["docker/dockerfile:1.7"])
+        self.assertEqual(pins.unpinned(f"# syntax=docker/dockerfile:1.7@sha256:{DIGEST}\n" + base), [])
+        self.assertEqual(pins.unpinned("#syntax = docker/dockerfile:1\n" + base), ["docker/dockerfile:1"])
+        # a syntax line after the first instruction is a plain comment
+        self.assertEqual(pins.unpinned(base + "# syntax=docker/dockerfile:1\n"), [])
+
     def test_a_short_or_uppercase_digest_is_refused(self):
         self.assertTrue(pins.unpinned("FROM python:3.12-slim@sha256:abc\n"))
         self.assertTrue(pins.unpinned(f"FROM python:3.12-slim@sha256:{'A' * 64}\n"))

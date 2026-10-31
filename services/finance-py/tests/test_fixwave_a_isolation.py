@@ -145,8 +145,6 @@ def test_f11_a_rotation_window_has_an_explicit_end():
         config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt})
     with pytest.raises(RuntimeError, match="14 days"):
         config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": _ends(30)})
-    with pytest.raises(RuntimeError, match="14 days"):
-        config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": _ends(-1)})
     with pytest.raises(RuntimeError, match="ROTATION_ENDS_AT"):
         config_mod.load({**h.env, "FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": "2026-11-07T00:00:00"})
     # the next value is refused once the window has ended
@@ -162,3 +160,38 @@ def test_f11_a_rotation_window_has_an_explicit_end():
     config_mod.load({**h.env, "FIN_ANDRE_APPROVAL_TOKEN_SHA256": _sha(ANDRE_TOKEN)})
     assert "rotation_in_progress" not in h.client.get("/health").json()
     assert _json
+
+
+def test_n4_an_expired_rotation_window_never_stops_a_start(caplog):
+    """AEGIS round 2 N-4/N-8: after <P>_ROTATION_ENDS_AT any restart (an OOM, a host move, a redeploy for another
+    variable) refused to start: a crash loop of the money path. Now the service starts, the *_NEXT values are ignored
+    (the current tokens keep working), every start logs a warning, /health shows `rotation_expired` (a warning the
+    heartbeat alerts on), and `rotation_in_progress` is false once the window has ended."""
+    import time as _time
+
+    import token_rotation as TR
+    import config as config_mod
+    from helpers import CALLERS, SERVICE_TOKEN, Harness
+    nxt = "next-fin-service-token-openssl-rand-hex-32-aa"
+    with caplog.at_level(logging.WARNING):
+        h = Harness(env={"FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": _ends(-1)})
+    assert any("ROTATION_ENDS_AT" in r.getMessage() and "expired" in r.getMessage() for r in caplog.records), \
+        [r.getMessage() for r in caplog.records]
+    assert nxt not in caplog.text
+    hb = h.client.get("/health")
+    assert hb.status_code == 200, hb.text
+    body = hb.json()
+    assert body.get("rotation_expired") is True and "rotation_expired" in body.get("warnings", []), body
+    assert not body.get("rotation_in_progress"), body
+    hdr = {"X-FIN-Caller-Token": CALLERS["scheduler"]}
+    assert h.client.get("/fin/v1/integrity", headers={"Authorization": f"Bearer {nxt}", **hdr}).status_code == 401
+    assert h.client.get("/fin/v1/integrity", headers={"Authorization": f"Bearer {SERVICE_TOKEN}", **hdr}).status_code == 200
+    # a window that ends while the service runs: in progress before, expired (not in progress) after (N-8)
+    r = TR.Rotation(service_next=nxt, ends_at=_time.time() + 3600)
+    assert r.in_progress and not r.expired
+    r = TR.Rotation(service_next=nxt, ends_at=_time.time() - 1)
+    assert r.expired and not r.in_progress
+    assert not TR.Rotation(ends_at=_time.time() - 1).expired          # no next value: nothing to expire
+    # a garbage ROTATION_ENDS_AT is a deploy-time error even without a NEXT value (N-8: it was accepted silently)
+    with pytest.raises(RuntimeError, match="ROTATION_ENDS_AT"):
+        config_mod.load({**h.env, "FIN_ROTATION_ENDS_AT": "garbage"})

@@ -168,6 +168,47 @@ Railway's deploy healthcheck and the old deployment keeps serving, which is the 
   approval write, deterministic via the fault proxy). c01/c02 run against finance-sim, which has no start-up hold or
   ledger watch; those are covered in-process and on the production leg (c05).
 
+## 8. Amendments after AEGIS round 2 (N-1..N-10)
+
+Round 2 (`scratchpad/night/aegis-resilience-waveA-r2.md`, subject 34841fbd). Where this section and section 7
+disagree, this section holds.
+
+- **N-1/N-5, time never goes backwards (supersedes the F-6 restart rule).** Each stamp is
+  `max(candidate, previous + 1 µs)`. The candidate is the wall clock when it agrees (within 5 minutes) with the last
+  *trusted* wall reading plus elapsed monotonic time, and that plausible time otherwise. Only trusted readings move
+  the baseline (round 2 found one bad reading kept every later stamp 3 days behind until a restart). A backward step
+  keeps following real time and the wall clock is used again once corrected; a forward step of at most a day that
+  stays consistent for 2 minutes (a slow clock corrected, a paused VM) is adopted; a larger jump never is. After a
+  restart there is no baseline: an entry ahead of the wall clock is never undercut (new entries follow it), and
+  `/health` keeps the `clock_skew` warning for as long as the log is ahead. CH-12's 3-day test is restored, with the
+  2-minute, correction and forward cases.
+- **N-2/N-6, the anchor job fails loud.** A torn last line of `ledger_anchors.jsonl` is cut back to the last whole
+  record (ALERT `ledger_anchor_store_repaired`). Any failure other than a ledger read is `anchor_check_failing`
+  (503) until a run succeeds; no anchor stored or confirmed for 26 h is `ledger_anchor_stale` (503); a mismatch is
+  kept in `ledger_anchor_state.json` across restarts; a store without `COMPLIANCE_LEDGER_ANCHOR_KEY` is the warning
+  `ledger_anchor_unkeyed`. Resolution steps: docs/runbooks/held-service-and-ledger-anchor.md, section 4.
+- **N-3, `/health` is never "ok" in reconcile mode (supersedes F-1's "200 in reconcile mode").** Reconcile mode is
+  503 `"status":"maintenance"`; Railway's deploy healthcheck is `/livez`, so the reconcile deploy still activates.
+  The heartbeat: the curl check in docs/deploy/railway.md now fails on maintenance too, and
+  `services/finance-py/src/health_poll.py` (with tests) is the poll the `ops-alerts` cron job of fix wave C (ADR
+  0027, `founder_alerts.FounderAlerts.run`) calls at integration: a service non-ok for 10 minutes (no answer, not
+  200, a status other than ok, `write_ok` false, or any warning) becomes the founder alert `service_unhealthy` with a
+  fixed code. The ops-alerts service itself is in wave C's IaC.
+- **N-4/N-8, an ended rotation window never stops a start (supersedes F-11's refusal).** After
+  `<P>_ROTATION_ENDS_AT` the `_NEXT` values are ignored, every start logs a warning, and `/health` shows
+  `rotation_expired` (a warning) until they are removed. `rotation_in_progress` is true only while the window is
+  open. A `<P>_ROTATION_ENDS_AT` that is not ISO 8601 with a zone refuses the deploy, with or without a `_NEXT`.
+- **N-7, the FIN guard blocks only FIN-owned rows (supersedes F-8's alias rule).** Legal refuses Compliance's
+  invalidation of a `FIN-*` target or a `FIN-*` canonical row. The shared Legal rows a FIN alias points to (CQ-01,
+  CQ-04, CQ-07; CQ-01 is the AB 5 clipper-classification row) are Compliance's to tighten: tightening one also shows
+  on its FIN alias, which can only become stricter (unverified), never looser.
+- **N-9.** The pin check also reads `ONBUILD COPY --from` / `ONBUILD RUN --mount=from`, a `# escape=` directive with
+  backtick continuations, and the `# syntax=` frontend image. No Dockerfile in the repository uses them today. The
+  four builder digests are still to be pasted from CI (docs/ci.md); that job stays red until then.
+- **N-10, the cost of F-2.** A SIGKILL between the ledger recording an anchor and the service seeing the answer
+  holds that service for writes until Andre reconciles. Manual recovery: docs/runbooks/held-service-and-ledger-anchor.md,
+  section 1.
+
 ## Consequences
 
 - A kill or a blip inside a write costs one rolled-back operation, recorded on the ledger, instead of an outage until

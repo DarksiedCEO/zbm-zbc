@@ -420,6 +420,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         h = svc.health()
         if rot.in_progress:
             h = {**h, "rotation_in_progress": True}      # AEGIS wave A F-11: a *_NEXT window is open
+        if rot.expired:                                  # AEGIS round 2 N-4: NEXT values left after the window
+            h = {**h, "rotation_expired": True, "warnings": [*h.get("warnings", []), "rotation_expired"]}
         # fix wave A (CH-2/CH-6): 503 while this instance cannot write (ledger unreachable, a write failing or not
         # yet reconciled, a log fault); the body says why
         return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)

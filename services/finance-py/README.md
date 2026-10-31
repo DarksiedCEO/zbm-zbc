@@ -138,7 +138,9 @@ next start, or by the ledger watch while running — when every voidable item wa
 journal (`<log>.intent`, fsynced before each ruling/anchor/version/lease write) AND the write never reached its anchor
 (AEGIS wave A F-2: after the anchor a crash and a restored mid-write snapshot look the same, so that case is held for
 Andre with the code `interrupted_write_anchored`; a restored or cloned volume is `volume_generation_mismatch`).
-Railway health-checks `/livez`, so a held, degraded or reconcile-mode deploy still activates (F-1). The rollback is the same recorded
+Railway health-checks `/livez`, so a held, degraded or reconcile-mode deploy still activates (F-1); `/health` is
+503 `"maintenance"` in reconcile mode (AEGIS round 2 N-3; docs/runbooks/held-service-and-ledger-anchor.md, which also
+covers the manual recovery of a write held after its anchor). The rollback is the same recorded
 reconcile, marked `"automatic": true`, logged as `{"alert":"crash_recovered",…}`. Only residue the journal does not
 explain (another instance, a restored or truncated log, a forged event) still needs Andre, below; the service then
 holds (`/health` 503 `"refused"` with the reason) instead of exiting. `/health` is 503 `"degraded"` with

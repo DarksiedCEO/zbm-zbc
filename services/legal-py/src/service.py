@@ -1007,14 +1007,14 @@ class LegalService:
                 coll, k = "register", self.canonical_cq(target)
                 if k is None:
                     raise NotFound("no such counsel-question row")
-                fin_aliases = [c for c, row in self.register.items()
-                               if c.upper().startswith("FIN-") and (row.get("alias_of") or c) == k]
-                if target.upper().startswith("FIN-") or k.upper().startswith("FIN-") or fin_aliases:
-                    # fix wave A (RTA-3; AEGIS F-8: aliases resolved first): a FIN-* row records one of Andre's
-                    # Finance determinations (FIN-CQ-11, the sales-tax memo, among them). A compromised Compliance must
-                    # not mark it unverified, directly or through the shared row a FIN alias points to.
-                    raise Forbidden("Compliance may not invalidate a Finance determination (FIN-*, or a row a FIN-* "
-                                    "row aliases); only Andre changes it")
+                if target.upper().startswith("FIN-") or k.upper().startswith("FIN-"):
+                    # fix wave A (RTA-3; AEGIS F-8: the target is checked, not only its canonical row): a FIN-* row
+                    # records one of Andre's Finance determinations (FIN-CQ-11, the sales-tax memo, among them). A
+                    # compromised Compliance must not mark it unverified. AEGIS round 2 N-7: a shared Legal row a FIN
+                    # alias points to (CQ-01, CQ-04, CQ-07) is Compliance's to tighten and stays allowed; tightening it
+                    # also shows on the FIN alias, which is only ever stricter (ADR 0025 section 7).
+                    raise Forbidden("Compliance may not invalidate a Finance determination (a FIN-* row); only Andre "
+                                    "changes it")
             op = Op(self, f"inv|{request_id}", "compliance_38", target)
             was = getattr(self, coll)[k]["status"]
             op.ev("inv", "register_row_invalidated", target,
@@ -3046,6 +3046,10 @@ class LegalService:
         degraded = [r for r in reasons if r not in ("reconcile_mode", "closed")
                     and not (self.reconcile_mode and r.startswith(("reconcile_required", "pending_unreconciled", "divergence:")))]
         status = "closed" if self._closed else ("degraded" if self.log.fault or degraded else "ok")   # bug sweep E
+        # AEGIS round 2 N-3: reconcile mode refuses every write, so /health is never "ok" there: "maintenance" (503).
+        # Railway's deploy healthcheck is /livez, so Andre's reconcile deploy still activates.
+        if status == "ok" and (self.reconcile_mode or reasons):
+            status = "maintenance"
         return {"status": status, "write_ok": not reasons, "degraded_reasons": reasons,
                 "service": "legal-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned,

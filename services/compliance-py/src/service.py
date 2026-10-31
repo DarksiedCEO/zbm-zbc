@@ -607,19 +607,50 @@ class ComplianceService:
 
     def ledger_anchor_check(self, _run_id: Optional[str] = None) -> Optional[str]:
         """AEGIS wave A F-5 (ledger_anchor.py): store today's ledger anchor off the ledger's volume after checking that
-        the ledger still extends the last one stored. A mismatch stays on /health (``ledger_anchor_mismatch``) until
-        Andre resolves it; a ledger that cannot be read raises (the scheduler retries)."""
+        the ledger still extends the last one stored. A mismatch stays on /health (``ledger_anchor_mismatch``, kept
+        beside the store across restarts) until Andre resolves it. AEGIS round 2 N-2: a ledger that cannot be read
+        raises (the scheduler retries; after 26 h without a good run /health says ``ledger_anchor_stale``); any other
+        failure is ``anchor_check_failing`` on /health until a run succeeds."""
         import ledger_anchor
         store = getattr(self, "anchor_store", None)
         if store is None or not hasattr(self.recorder.client, "anchor"):
             return None
-        problem, rec = ledger_anchor.check(store, self.recorder.client, iso(self._now()))
+        now = self._now()
+        store.reasons(now)                                       # starts the staleness clock at the first run
+        try:
+            cut = store.repair()
+            if cut:
+                CR.alert("ledger_anchor_store_repaired", "compliance-py", torn_bytes_removed=cut)
+            problem, rec = ledger_anchor.check(store, self.recorder.client, iso(now))
+        except (LedgerQueryFailed, Unavailable):
+            raise                                                # the ledger could not be read: retried, not a fault
+        except Exception as exc:  # noqa: BLE001 - a fault of the job itself: loud on /health, never silent
+            store.failing = type(exc).__name__
+            CR.alert("anchor_check_failing", "compliance-py", error=type(exc).__name__)
+            self._save_anchor_state(store)
+            raise
+        store.failing = None
         if problem:
-            self.anchor_problem = problem
+            store.mismatch = problem[:300]
             CR.alert("ledger_anchor_mismatch", "compliance-py", reason=problem[:300])
-        elif rec is not None:
-            CR.alert("ledger_anchor_stored", "compliance-py", anchor=rec["anchor"])
+        else:
+            store.last_ok = iso(now)
+            if rec is not None:
+                CR.alert("ledger_anchor_stored", "compliance-py", anchor=rec["anchor"])
+        self._save_anchor_state(store)
         return problem
+
+    @staticmethod
+    def _save_anchor_state(store) -> None:
+        try:
+            store.save_state()
+        except OSError as exc:
+            CR.alert("anchor_state_write_failed", "compliance-py", error=type(exc).__name__)
+
+    @property
+    def anchor_problem(self) -> Optional[str]:
+        store = getattr(self, "anchor_store", None)
+        return store.mismatch if store is not None else None
 
     def probe_ledger(self) -> bool:
         """CH-6: can the ledger be reached now (GET /ledger/head, or /ledger/verify for a client without it)?"""
@@ -644,8 +675,9 @@ class ComplianceService:
             out.append("reconcile_required")
         if self.divergence_code:
             out.append(f"divergence:{self.divergence_code}")         # a fixed code; the detail is in the log
-        if getattr(self, "anchor_problem", None):
-            out.append("ledger_anchor_mismatch")                     # AEGIS wave A F-5
+        store = getattr(self, "anchor_store", None)
+        if store is not None:
+            out.extend(store.reasons(self._now()))                   # AEGIS wave A F-5, round 2 N-2
         if self.log.fault:
             out.append("log_write_fault")
         if self._ledger_probe_ok is False:
@@ -2027,12 +2059,22 @@ class ComplianceService:
         # healthcheck uses /livez; /health stays truthful for the heartbeat.
         degraded = [r for r in reasons if r != "reconcile_mode" and not (self.reconcile_mode and r.startswith(("reconcile_required", "pending_unreconciled", "divergence:")))]
         status = "unhealthy" if not healthy else ("degraded" if degraded else "ok")
+        # AEGIS round 2 N-3: reconcile mode refuses every write, so /health is never "ok" there: "maintenance" (503).
+        # Railway's deploy healthcheck is /livez, so Andre's reconcile deploy still activates.
+        if status == "ok" and (self.reconcile_mode or reasons):
+            status = "maintenance"
         return {"status": status, "write_ok": not reasons, "degraded_reasons": reasons,
                 "service": "compliance-py", "rules_expiring": rules_expiring,
                 "register_version_in_force": self.version_number,
                 "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
-                "log_write_fault": bool(self.log.fault), "scheduler": sched}
+                "log_write_fault": bool(self.log.fault), "scheduler": sched,
+                **({"warnings": w} if (w := self.health_warnings()) else {})}
+
+    def health_warnings(self) -> list[str]:
+        """Codes that do not stop a write but need Andre (AEGIS round 2 N-6: an anchor store without its key)."""
+        store = getattr(self, "anchor_store", None)
+        return ["ledger_anchor_unkeyed"] if store is not None and not store.keyed else []
 
 
 def canonical_jurisdiction(j: Optional[dict]) -> Optional[str]:

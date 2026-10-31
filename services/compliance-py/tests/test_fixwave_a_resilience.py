@@ -135,8 +135,8 @@ def test_f2_an_anchored_interrupted_ruling_is_held_and_reconcile_mode_is_deploya
     assert held.value.code == "interrupted_write_anchored"
     y = _restart(x, tmp_path, COMPLIANCE_RECONCILE_MODE="1")
     assert y.client.get("/livez").status_code == 200
-    h = y.client.get("/health")
-    assert h.status_code == 200 and h.json()["reconcile_required"] is True, h.text
+    h = y.client.get("/health")                                        # AEGIS round 2 N-3: never "ok" here
+    assert h.status_code == 503 and h.json()["status"] == "maintenance" and h.json()["reconcile_required"] is True, h.text
 
 
 def test_ch1_an_unannounced_ruling_still_refuses(tmp_path):
@@ -257,6 +257,111 @@ def test_f5_a_mismatch_turns_compliance_health_red_and_is_scheduled_daily(tmp_pa
     assert "rolled back" in x.svc.ledger_anchor_check()
     r = x.client.get("/health")
     assert r.status_code == 503 and "ledger_anchor_mismatch" in r.json()["degraded_reasons"]
+
+
+def _sched(x):
+    import scheduler
+    lines = []
+    return scheduler.Scheduler(x.svc, interval_s=21600, clock=x.clock, out=lines.append), lines
+
+
+def test_n2_a_torn_last_line_is_repaired_and_a_rollback_behind_it_is_still_caught(tmp_path):
+    """AEGIS round 2 N-2 (test_B1): a torn last line in the anchor store raised JSONDecodeError on every run, the
+    scheduler swallowed it, and a rolled-back ledger stayed hidden behind /health 200 for days. The torn tail is now
+    cut back to the last complete record (with an alert), and the check goes on."""
+    import ledger_anchor as LA
+    x = _durable(tmp_path)
+    p = tmp_path / "d" / LA.FILE
+    x.svc.anchor_store = LA.AnchorStore(str(p), "k" * 40)
+    led = _AnchorLedger(["b1" * 32, "b2" * 32])
+    x.svc.recorder.client.anchor = led.anchor
+    s, lines = _sched(x)
+    s.tick()
+    assert len(x.svc.anchor_store.records()) == 1
+    with open(p, "ab") as fh:
+        fh.write(b'{"anchor":"3:b3b3')                       # crash mid-append
+    led.hashes = led.hashes[:1]                              # AND the ledger is rolled back
+    x.clock.advance(hours=25)
+    s.tick()
+    assert p.read_bytes().endswith(b"\n") and len(LA.AnchorStore(str(p), "k" * 40).records()) == 1
+    h = x.client.get("/health")
+    assert h.status_code == 503 and "ledger_anchor_mismatch" in h.json()["degraded_reasons"], h.text
+
+
+def test_n2_a_broken_store_or_a_failing_check_is_loud(tmp_path):
+    """AEGIS round 2 N-2: any failure of the check other than a ledger read is `anchor_check_failing` (503), not a
+    log line; it clears on the next run that succeeds."""
+    import ledger_anchor as LA
+    x = _durable(tmp_path)
+    p = tmp_path / "d" / LA.FILE
+    x.svc.anchor_store = LA.AnchorStore(str(p), "k" * 40)
+    led = _AnchorLedger(["c1" * 32])
+    x.svc.recorder.client.anchor = led.anchor
+    x.svc.ledger_anchor_check()
+    good = p.read_bytes()
+    p.write_bytes(b"not json at all\n" + good)                # a garbage COMPLETE line: not a torn tail
+    with pytest.raises(Exception):
+        x.svc.ledger_anchor_check()
+    h = x.client.get("/health")
+    assert h.status_code == 503 and "anchor_check_failing" in h.json()["degraded_reasons"], h.text
+    p.write_bytes(good)
+    x.svc.ledger_anchor_check()
+    assert x.client.get("/health").status_code == 200
+
+
+def test_n2_a_ledger_unreadable_for_more_than_26_hours_is_stale(tmp_path):
+    """AEGIS round 2 N-2 (test_B3): GET /ledger/anchor failing every day (a 403 after a token change, the ledger
+    down) left /health 200 forever. A ledger read failure is retried, but with no anchor stored or confirmed for
+    more than 26 hours /health is 503 `ledger_anchor_stale`."""
+    import ledger as L
+    import ledger_anchor as LA
+    x = _durable(tmp_path)
+    x.svc.anchor_store = LA.AnchorStore(str(tmp_path / "d" / LA.FILE), "k" * 40)
+    led = _AnchorLedger(["d1" * 32])
+    x.svc.recorder.client.anchor = led.anchor
+    x.svc.ledger_anchor_check()
+
+    def down(at=None):
+        raise L.LedgerQueryFailed("ledger anchor could not be read: HTTP 403")
+    x.svc.recorder.client.anchor = down
+    s, _ = _sched(x)
+    for _ in range(5):
+        x.clock.advance(hours=5)
+        s.last_anchor = None
+        s.tick()
+    assert x.client.get("/health").status_code == 200                       # 25 h: a retry, not yet stale
+    x.clock.advance(hours=2)
+    s.last_anchor = None
+    s.tick()
+    h = x.client.get("/health")
+    assert h.status_code == 503 and "ledger_anchor_stale" in h.json()["degraded_reasons"], h.text
+    x.svc.recorder.client.anchor = led.anchor                                 # the ledger answers again
+    s.last_anchor = None
+    s.tick()
+    assert x.client.get("/health").status_code == 200
+
+
+def test_n6_a_mismatch_survives_a_restart_and_a_missing_key_is_a_warning(tmp_path):
+    """AEGIS round 2 N-6 (test_B4): the mismatch flag lived in memory, so a restart showed /health 200 until the next
+    run. It is now kept beside the store. And a store without COMPLIANCE_LEDGER_ANCHOR_KEY is a `/health` warning."""
+    import ledger_anchor as LA
+    x = _durable(tmp_path)
+    p = str(tmp_path / "d" / LA.FILE)
+    x.svc.anchor_store = LA.AnchorStore(p, "k" * 40)
+    led = _AnchorLedger(["e1" * 32, "e2" * 32])
+    x.svc.recorder.client.anchor = led.anchor
+    x.svc.ledger_anchor_check()
+    led.hashes = led.hashes[:1]
+    assert x.svc.ledger_anchor_check()
+    x.svc.close()
+    y = _restart(x, tmp_path)
+    y.svc.anchor_store = LA.AnchorStore(p, "k" * 40)                         # what a restart builds
+    h = y.client.get("/health")
+    assert h.status_code == 503 and "ledger_anchor_mismatch" in h.json()["degraded_reasons"], h.text
+    z = _durable(tmp_path / "unkeyed")
+    z.svc.anchor_store = LA.AnchorStore(str(tmp_path / "unkeyed" / "d" / LA.FILE), None)
+    h = z.client.get("/health")
+    assert h.status_code == 200 and "ledger_anchor_unkeyed" in h.json().get("warnings", []), h.text
 
 
 def _ends(days=1):

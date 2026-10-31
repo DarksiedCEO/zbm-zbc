@@ -133,7 +133,8 @@ def test_failed_commit_after_anchor_only_andre_reconciles(tmp_path):
     with pytest.raises(RuntimeError, match="only Andre"):
         _restart(x, tmp_path)
     y = _restart(x, tmp_path, FIN_RECONCILE_MODE="1")
-    assert y.ok(y.get("/health"))["reconcile_required"] is True
+    h = y.ok(y.get("/health"), 503)                                    # AEGIS round 2 N-3: reconcile mode is
+    assert h["reconcile_required"] is True and h["status"] == "maintenance"   # never "ok"
     r = y.post("/fin/v1/payees", {"request_id": rid(), "payee_id": "k8", "kind": "clipper", "declared_country": "US"},
                caller="onboarding")
     assert r.status_code == 503                                        # nothing else runs in reconcile mode

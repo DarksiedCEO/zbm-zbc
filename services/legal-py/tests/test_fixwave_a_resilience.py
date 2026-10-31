@@ -80,7 +80,7 @@ def test_ch1_a_kill_before_the_anchor_recovers_by_itself_on_start(tmp_path, monk
 def test_f2_an_anchored_interrupted_write_is_held_for_andre_and_reconcile_mode_is_deployable(tmp_path, monkeypatch,
                                                                                             where):
     """AEGIS wave A F-2 / F-1: after the anchor a crash and a restored mid-write snapshot look the same, so start-up
-    holds (code interrupted_write_anchored); reconcile mode answers /livez and /health 200."""
+    holds (code interrupted_write_anchored); reconcile mode answers /livez 200 and /health 503 "maintenance" (AEGIS round 2 N-3)."""
     x = _durable(tmp_path)
     if where == "after_anchor":
         real = x.svc.recorder.record
@@ -110,7 +110,8 @@ def test_f2_an_anchored_interrupted_write_is_held_for_andre_and_reconcile_mode_i
     assert x.ledger.of_type(i10.RECONCILE_TYPE) == []
     y = _restart(x, tmp_path, LEGAL_RECONCILE_MODE="1")
     assert y.client.get("/livez").status_code == 200
-    assert y.ok(y.client.get("/health"))["reconcile_required"] is True
+    h = y.ok(y.client.get("/health"), 503)                             # AEGIS round 2 N-3
+    assert h["reconcile_required"] is True and h["status"] == "maintenance"
 
 
 def test_ch1_an_unannounced_stray_anchor_still_refuses(tmp_path):
@@ -234,15 +235,30 @@ def test_rta5_next_service_token_and_hashed_andre_token():
 
 
 def test_f8_compliance_cannot_invalidate_a_fin_row_through_an_alias(tmp_path):
-    """AEGIS wave A F-8: FIN-CQ-07 is an alias of CQ-01; invalidating it answered 200 {"canonical":"CQ-01"}."""
+    """AEGIS wave A F-8: FIN-CQ-07 is an alias of CQ-01; invalidating it answered 200 {"canonical":"CQ-01"}.
+    AEGIS round 2 N-7: the fix also refused Compliance on the shared rows it owns (CQ-01, CQ-04, CQ-07: CQ-01 is the
+    AB 5 clipper-classification row). Only FIN-owned rows are refused: a FIN-* target, or a FIN-* canonical row."""
     x = _durable(tmp_path)
     fin_aliases = {c: r["alias_of"] for c, r in x.svc.register.items() if c.startswith("FIN-") and r.get("alias_of")}
     assert fin_aliases, "the seed has FIN aliases"
+    fin_owned = sorted(c for c, r in x.svc.register.items() if c.startswith("FIN-") and not r.get("alias_of"))
+    assert fin_owned, "the seed has FIN-owned rows"
+
+    def inv(target):
+        return _as(x, "compliance_38", "POST", f"/legal/v1/register/{target}/invalidate",
+                   {"request_id": rid(), "source_ref": "https://example.gov/x", "detected_change_sha256": "a" * 64})
     for alias, canon in sorted(fin_aliases.items())[:3]:
-        for target in (alias, canon):
-            r = _as(x, "compliance_38", "POST", f"/legal/v1/register/{target}/invalidate",
-                    {"request_id": rid(), "source_ref": "https://example.gov/x", "detected_change_sha256": "a" * 64})
-            assert r.status_code == 403, (target, r.status_code, r.text)
+        assert not canon.startswith("FIN-")
+        r = inv(alias)
+        assert r.status_code == 403, (alias, r.status_code, r.text)
+        r = inv(canon)                                       # the shared row Compliance owns: allowed (N-7)
+        assert r.status_code == 200 and r.json()["canonical"] == canon, (canon, r.status_code, r.text)
+        assert x.svc.register[canon]["status"] == "unverified"
+    for target in fin_owned[:3]:
+        r = inv(target)
+        assert r.status_code == 403, (target, r.status_code, r.text)
+    for alias, canon in sorted(fin_aliases.items())[:1]:     # a FIN alias in another case is still a FIN target
+        assert inv(alias.lower()).status_code in (403, 404, 422)          # never 200
 
 
 def _ends(days=1):

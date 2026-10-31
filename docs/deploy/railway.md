@@ -922,8 +922,19 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    fix wave A (ADR 0025): finance, legal and compliance `/health` answer **503** `"status":"degraded"` (with
    `degraded_reasons`) while they cannot write — ledger unreachable, a ledger write failing or not yet reconciled,
    reconcile required — and `"starting"` / `"refused"` while the start-up hold waits for the ledger or refuses a
-   diverged log. The ledger's `/health` is 503 when its last append failed or its disk is below
-   `LEDGER_MIN_FREE_BYTES`. `curl -f` fails on every 503, so each of these stops the pings. The services also log one
+   diverged log, and **503** `"status":"maintenance"` in reconcile mode (AEGIS round 2 N-3: a forgotten
+   `<P>_RECONCILE_MODE=1` refuses every write and used to pass this check). The ledger's `/health` is 503 when its
+   last append failed or its disk is below `LEDGER_MIN_FREE_BYTES`. `curl -f` fails on every 503, so each of these
+   stops the pings. A `warnings` list (`rotation_expired`, `ledger_anchor_unkeyed`, the ledger's `clock_skew`) stays
+   200 and does not stop the pings; the ops-alerts job reads it (below). What to do for each code:
+   docs/runbooks/held-service-and-ledger-anchor.md.
+
+   **ops-alerts health poll (AEGIS round 2 N-3).** `services/finance-py/src/health_poll.py` polls each service's
+   `/health` and reports a service that is non-ok (no answer, not 200, a status other than `ok`, `write_ok` false, or
+   any warning) for 10 minutes without a break, as the founder-alert category `service_unhealthy` with a fixed code.
+   It is wired into the `ops-alerts` cron service of fix wave C (ADR 0027, `founder_alerts.FounderAlerts.run`) at
+   integration, with `OPS_HEALTH_URLS=finance=http://finance.railway.internal:8410,legal=http://legal.railway.internal:8420,compliance=http://compliance.railway.internal:8380,ledger=http://ledger.railway.internal:8090`.
+   Until then this curl heartbeat is the check. The services also log one
    JSON line per event (`{"alert":"ledger_unreachable"|"ledger_write_pending"|"crash_recovered"|"log_divergence"|
    "startup_waiting_for_ledger"|"register_row_invalidated",…}`, logger `zbm.alert`): a Railway log alert on
    `"alert":` catches them.
@@ -935,8 +946,10 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
 3. **Daily external anchor of the evidence ledger (fix wave A, RTM-07).** AEGIS wave A F-5: this is now automatic and
    in the IaC — Compliance's scheduler stores the anchor daily on Compliance's volume and checks the ledger still
-   extends it (`ledger_anchor_mismatch` on compliance `/health` otherwise; set `COMPLIANCE_LEDGER_ANCHOR_KEY` and
-   `LEDGER_HEAD_SIGNING_KEY`, Secrets table). The cron below is an optional second, off-Railway copy:
+   extends it (`ledger_anchor_mismatch` on compliance `/health` otherwise; `anchor_check_failing` when the job itself
+   fails and `ledger_anchor_stale` after 26 h without a good run, AEGIS round 2 N-2; set
+   `COMPLIANCE_LEDGER_ANCHOR_KEY` before the first run, and `LEDGER_HEAD_SIGNING_KEY`, Secrets table; resolving a
+   mismatch: docs/runbooks/held-service-and-ledger-anchor.md, section 4). The cron below is an optional second, off-Railway copy:
    a second cron service from the same image,
    schedule `17 9 * * *`, with a Sealed `LEDGER_ANCHOR_TOKEN` (a READ caller in `LEDGER_CALLERS` that reads nothing:
    `{"caller":"anchor","scope":"read","departments":["anchor"]}`) and a Sealed `ANCHOR_SINK_URL` (a second heartbeat

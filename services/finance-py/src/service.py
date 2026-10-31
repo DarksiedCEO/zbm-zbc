@@ -1189,7 +1189,10 @@ class FinanceService:
         # there to fix, so it never makes /health 503 (the reconcile deploy must activate). Railway's deploy
         # healthcheck uses /livez; /health stays truthful for the heartbeat.
         degraded = [r for r in reasons if r != "reconcile_mode" and not (self.reconcile_mode and r.startswith(("reconcile_required", "pending_unreconciled", "divergence:")))]
-        return {"status": "degraded" if degraded else "ok", "write_ok": not reasons, "degraded_reasons": reasons,
+        # AEGIS round 2 N-3: reconcile mode refuses every write, so /health is never "ok" there: "maintenance" (503).
+        # Railway's deploy healthcheck is /livez, so Andre's reconcile deploy still activates.
+        status = "degraded" if degraded else ("maintenance" if self.reconcile_mode or reasons else "ok")
+        return {"status": status, "write_ok": not reasons, "degraded_reasons": reasons,
                 "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,

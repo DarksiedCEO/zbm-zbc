@@ -40,9 +40,30 @@ def dockerfiles(root: Path = REPO) -> list[Path]:
     return out
 
 
+DIRECTIVE = re.compile(r"^#\s*([a-z]+)\s*=\s*(\S+)\s*$", re.I)
+
+
+def _directives(text: str) -> dict:
+    """Parser directives (``# syntax=``, ``# escape=``): only comment lines at the very top of the file count."""
+    out: dict = {}
+    for line in text.splitlines():
+        m = DIRECTIVE.match(line.strip())
+        if not m:
+            break
+        out.setdefault(m.group(1).lower(), m.group(2))
+    return out
+
+
 def _logical_lines(text: str) -> list[str]:
-    """Dockerfile lines with backslash continuations joined."""
-    return re.sub(r"\\\n", " ", text).splitlines()
+    """Dockerfile lines with continuations joined (AEGIS round 2 N-9: the escape character may be a backtick), and an
+    ``ONBUILD`` prefix removed (its instruction pulls images when the image is used as a base)."""
+    esc = _directives(text).get("escape", "\\")
+    esc = esc if esc in ("\\", "`") else "\\"
+    lines = text.splitlines(keepends=True)
+    while lines and DIRECTIVE.match(lines[0].strip()):
+        lines.pop(0)                 # a directive line is never continued (its own value may be the escape char)
+    joined = re.sub(re.escape(esc) + r"[ \t]*\r?\n", " ", "".join(lines))
+    return [re.sub(r"^\s*ONBUILD\s+", "", ln, flags=re.I) for ln in joined.splitlines()]
 
 
 def unpinned(text: str) -> list[str]:
@@ -59,6 +80,9 @@ def unpinned(text: str) -> list[str]:
         if not PINNED.fullmatch(image):
             bad.append(image)
 
+    syntax = _directives(text).get("syntax")
+    if syntax:
+        check(syntax)            # AEGIS round 2 N-9: the BuildKit frontend image is pulled like a base image
     for line in _logical_lines(text):
         m = FROM.match(line)
         if m:

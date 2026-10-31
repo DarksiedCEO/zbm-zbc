@@ -217,7 +217,10 @@ AEGIS wave A: `COMPLIANCE_ROTATION_ENDS_AT` ends a rotation window (required wit
 that reached its anchor is held for Andre (`interrupted_write_anchored`), never voided; Railway health-checks
 `/livez`. `COMPLIANCE_LEDGER_ANCHOR_KEY`: the HMAC key of the daily off-ledger anchor store
 (`<COMPLIANCE_DATA_DIR>/ledger_anchors.jsonl`, `src/ledger_anchor.py`); a ledger that no longer extends the stored
-anchor turns `/health` 503 (`ledger_anchor_mismatch`) until Andre resolves it (ADR 0025 section 7, F-5).
+anchor turns `/health` 503 (`ledger_anchor_mismatch`) until Andre resolves it (ADR 0025 section 7, F-5); a failing
+job is `anchor_check_failing`, 26 h without a good run `ledger_anchor_stale`, a store without the key the warning
+`ledger_anchor_unkeyed`, and reconcile mode is 503 `maintenance` (ADR 0025 section 8;
+docs/runbooks/held-service-and-ledger-anchor.md).
 
 Every local-log line is anchored on the ledger before it is written. If a
 commit fails after its anchor (disk error, crash, a ledger answer lost), or

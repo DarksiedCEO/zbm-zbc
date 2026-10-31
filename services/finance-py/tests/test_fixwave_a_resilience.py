@@ -109,7 +109,7 @@ def test_ch1_a_kill_inside_a_write_recovers_by_itself_on_start(tmp_path, monkeyp
 def test_f2_an_interrupted_write_that_reached_its_anchor_is_never_voided_automatically(tmp_path, monkeypatch, where):
     """AEGIS wave A F-2: after the anchor, a crash and a restored mid-write snapshot look the same; only the second
     can have been acknowledged, so start-up holds with a fixed reason code and Andre's reconcile mode is reachable:
-    /livez (Railway's deploy healthcheck) and /health are 200 there (AEGIS F-1)."""
+    /livez (Railway's deploy healthcheck) is 200 there (AEGIS F-1); /health is 503 "maintenance" (round 2 N-3)."""
     x = _durable(tmp_path)
     if where == "after_anchor":
         _kill_when(x, monkeypatch, i10.ANCHOR_TYPE)
@@ -123,8 +123,8 @@ def test_f2_an_interrupted_write_that_reached_its_anchor_is_never_voided_automat
     assert _reconciles(x.ledger) == []
     y = _restart(x, tmp_path, FIN_RECONCILE_MODE="1")
     assert y.client.get("/livez").status_code == 200
-    h = y.ok(y.get("/health"))
-    assert h["reconcile_mode"] is True and h["reconcile_required"] is True
+    h = y.ok(y.get("/health"), 503)                                  # AEGIS round 2 N-3: never "ok" here
+    assert h["status"] == "maintenance" and h["reconcile_mode"] is True and h["reconcile_required"] is True
     plan = y.ok(y.client.get("/fin/v1/reconcile", headers=y.headers(andre=ANDRE_TOKEN)))
     assert y.ok(y.post("/fin/v1/reconcile", {"request_id": rid("rec"), "head_sha256": plan["head_sha256"],
                                              "void_lines": plan["voidable"]["lines"],
@@ -350,9 +350,11 @@ def test_shared_modules_are_identical_across_the_three_services():
         assert len(set(copies.values())) == 1, f"{name} differs between {sorted(copies)}"
 
 
-def test_f1_reconcile_mode_is_deployable_livez_and_health_are_200(tmp_path):
+def test_f1_reconcile_mode_is_deployable_livez_200_and_health_says_maintenance(tmp_path):
     """AEGIS test_A6: in reconcile mode /health was 503, so Railway (healthcheckPath) never activated Andre's
-    recovery deploy. Railway now checks /livez; /health is 200 in reconcile mode with the flags."""
+    recovery deploy. Railway now checks /livez (200). AEGIS round 2 N-3 (A15): /health then said 200 "ok" in
+    reconcile mode even on a clean log where every write is refused, so a forgotten FIN_RECONCILE_MODE=1 passed the
+    heartbeat forever. /health is now 503 with status "maintenance" whenever reconcile mode is on."""
     x = _durable(tmp_path)
     x.ledger.record_event("fin-je-" + "ab" * 20, "finance", "journal_entry_posted", "intel_01_journal", "x",
                           {"forged": 1}, "forged ruling")
@@ -360,7 +362,15 @@ def test_f1_reconcile_mode_is_deployable_livez_and_health_are_200(tmp_path):
     y = _restart(x, tmp_path, FIN_RECONCILE_MODE="1")
     assert y.client.get("/livez").status_code == 200
     h = y.get("/health")
-    assert h.status_code == 200 and h.json()["reconcile_required"] is True, h.text
+    assert h.status_code == 503 and h.json()["status"] == "maintenance", h.text
+    assert h.json()["reconcile_required"] is True and h.json()["write_ok"] is False
+    # a clean log in reconcile mode (nothing to reconcile, every write refused): never "ok"
+    c = _durable(tmp_path / "clean")
+    c.svc.close()
+    z = _restart(c, tmp_path / "clean", FIN_RECONCILE_MODE="1")
+    h = z.get("/health")
+    assert h.status_code == 503 and h.json()["status"] == "maintenance" and h.json()["write_ok"] is False, h.text
+    assert z.client.get("/livez").status_code == 200
 
 
 def test_f3_a_plain_read_is_not_delayed_behind_a_slow_ledger_read(tmp_path):

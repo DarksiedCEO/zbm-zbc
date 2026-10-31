@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -83,8 +84,19 @@ class Rotation:
     ends_at: Optional[float] = None                              # epoch seconds; None = no window open
 
     @property
-    def in_progress(self) -> bool:
+    def has_next(self) -> bool:
         return bool(self.service_next or self.callers_next or self.andre_next_sha256)
+
+    @property
+    def in_progress(self) -> bool:
+        """A window is open now (AEGIS round 2 N-8: false once ``ends_at`` has passed)."""
+        return self.has_next and self.ends_at is not None and time.time() < self.ends_at
+
+    @property
+    def expired(self) -> bool:
+        """AEGIS round 2 N-4: *_NEXT values are still set but their window has ended. They are ignored (``Secret``
+        honours a next value only until ``ends_at``); /health shows ``rotation_expired`` until they are removed."""
+        return self.has_next and self.ends_at is not None and time.time() >= self.ends_at
 
 
 def load(env: dict, prefix: str, caller_names: Iterable[str], check_token: Callable[[str, str], None],
@@ -138,20 +150,31 @@ def load(env: dict, prefix: str, caller_names: Iterable[str], check_token: Calla
     if any(digest(t).hex() in hashes for t in [*others, *new] if t):
         raise RuntimeError(f"{prefix}_ANDRE_APPROVAL_TOKEN*_SHA256 is the hash of a service or caller token; Andre's "
                            "token must be distinct")
+    raw_end = (env.get(f"{prefix}_ROTATION_ENDS_AT") or "").strip()
     ends_at = None
-    if nxt or callers or next_hash:
-        raw_end = (env.get(f"{prefix}_ROTATION_ENDS_AT") or "").strip()
+    if raw_end:
+        # AEGIS round 2 N-8: a value that is not ISO 8601 with a time zone is a deploy-time error, NEXT or not
+        from datetime import datetime
         try:
-            from datetime import datetime
-            ends_at = datetime.fromisoformat(raw_end.replace("Z", "+00:00")).timestamp() if raw_end else None
-            if raw_end and datetime.fromisoformat(raw_end.replace("Z", "+00:00")).tzinfo is None:
-                ends_at = None
+            when = datetime.fromisoformat(raw_end.replace("Z", "+00:00"))
         except ValueError:
-            ends_at = None
+            when = None
+        if when is None or when.tzinfo is None:
+            raise RuntimeError(f"{prefix}_ROTATION_ENDS_AT must be ISO 8601 with a time zone, e.g. "
+                               "2026-11-07T00:00:00Z (docs/runbooks/token-rotation.md)")
+        ends_at = when.timestamp()
+    if nxt or callers or next_hash:
         if ends_at is None:
             raise RuntimeError(f"a *_NEXT token is set: {prefix}_ROTATION_ENDS_AT must say when the window ends "
                                "(ISO 8601 with a time zone, e.g. 2026-11-07T00:00:00Z); the next values are refused "
                                "after it (docs/runbooks/token-rotation.md)")
-        if not (time.time() < ends_at <= time.time() + MAX_WINDOW_S):
-            raise RuntimeError(f"{prefix}_ROTATION_ENDS_AT must be in the future and at most 14 days ahead")
+        if ends_at > time.time() + MAX_WINDOW_S:
+            raise RuntimeError(f"{prefix}_ROTATION_ENDS_AT must be at most 14 days ahead")
+        if ends_at <= time.time():
+            # AEGIS round 2 N-4: an ended window must never stop a restart (a crash loop of the money path). The
+            # next values are ignored; this warning is logged at every start and /health shows rotation_expired.
+            logging.getLogger("token_rotation").warning(
+                "%s_ROTATION_ENDS_AT has passed: the rotation window is expired and the *_NEXT values are ignored "
+                "(the current tokens stay in force). Finish or abandon the rotation and remove the *_NEXT variables "
+                "and %s_ROTATION_ENDS_AT (docs/runbooks/token-rotation.md)", prefix, prefix)
     return Rotation(nxt, dict(callers), cur_hash, next_hash, ends_at)
