@@ -68,7 +68,9 @@ def test_seo_02_reaches_health_only_as_the_anonymous_get():
     assert set(anon.json()) == {"status", "service", "rules_version", "in_memory", "rules_pinned", "production",
                                 "entities", "reconcile_mode", "reconcile_required", "log_write_fault",
                                 "stripe_incoming", "compliance_holds_open",   # AEGIS r5 C2: a count only
-                                "backup_pause"}                                # AEGIS wave B R2-6: no client data
+                                "backup_pause",                                # AEGIS wave B R2-6: no client data
+                                "restore_lockdown", "commit_marks_pending",    # AEGIS r3: flags and counts only
+                                "restore_rebuild_unavailable", "restore_rebuild"}
     assert h.client.get("/health", headers=h.headers(caller="seo_02")).json() == anon.json()
     for method, path in (("POST", "/health"), ("PUT", "/health"), ("DELETE", "/health"), ("GET", "/health/"),
                          ("GET", "/Health"), ("GET", "/health/x")):

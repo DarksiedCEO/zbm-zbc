@@ -166,6 +166,8 @@ class Settings:
     resend_api_key: Optional[Secret] = field(default=None, repr=False)
     # AEGIS F8: the per-deployment key of the HMAC that stands for a billing contact's address on the ledger
     contact_hash_key: Optional[bytes] = field(default=None, repr=False)
+    # AEGIS R3-9: earlier keys, kept to VERIFY commit marks only (FIN_CONTACT_HASH_KEY lists the current key first)
+    contact_hash_old_keys: tuple = field(default=(), repr=False)
     # AEGIS R2-6: the longest backup pause (minutes); a pause always ends
     backup_pause_max_min: int = 30
 
@@ -417,7 +419,7 @@ def load(env: Optional[dict] = None) -> Settings:
         media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 2, 2, 10),
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
         business_tz=_tz(env, "FIN_BUSINESS_TZ", "America/Los_Angeles"),
-        **stripe, **_mail(env), contact_hash_key=_contact_key(env),
+        **stripe, **_mail(env), **_contact_keys(env),
         backup_pause_max_min=_int(env, "FIN_BACKUP_PAUSE_MAX_MIN", 30, 5, 120),
     )
     # the flock last: every other refusal above leaves the directory untouched
@@ -443,18 +445,23 @@ MAIL_SENDER = "billing@zbestmedia.com"
 _MAIL_FROM = re.compile(r"(?:[A-Za-z0-9 .,'&-]{1,60} <billing@zbestmedia\.com>|billing@zbestmedia\.com)")
 
 
-def _contact_key(env) -> Optional[bytes]:
+def _contact_keys(env) -> dict:
     """AEGIS F8: FIN_CONTACT_HASH_KEY (64 hex characters, `openssl rand -hex 32`), written to FIN_CONTACT_HASH_KEY_FILE
-    by the entrypoint. Without it no billing contact is recorded, and client email cannot be switched on."""
+    by the entrypoint. Without it no billing contact is recorded, and client email cannot be switched on.
+    AEGIS R3-9 (rotation): the value may list up to two older keys after the first, joined by underscores
+    (``<new>_<old>``); the first is the current key (contact hashes and new commit marks), the others only verify
+    commit marks written before the rotation."""
     if not (env.get("FIN_CONTACT_HASH_KEY_FILE") or "").strip():
         if (env.get("RESEND_API_KEY_FILE") or "").strip():
             raise RuntimeError("client email is on (RESEND_API_KEY) but FIN_CONTACT_HASH_KEY is not set: the billing "
                                "contact's ledger hash needs it; refusing to start")
-        return None
+        return {"contact_hash_key": None}
     v = _secret_file(env, "FIN_CONTACT_HASH_KEY_FILE", tuple("0123456789abcdef")).reveal()
-    if not re.fullmatch(r"[0-9a-f]{64}", v):
-        raise RuntimeError("FIN_CONTACT_HASH_KEY_FILE must hold 64 lowercase hex characters (openssl rand -hex 32)")
-    return bytes.fromhex(v)
+    keys = v.strip().split("_")
+    if not keys or len(keys) > 3 or any(not re.fullmatch(r"[0-9a-f]{64}", k) for k in keys) or len(set(keys)) != len(keys):
+        raise RuntimeError("FIN_CONTACT_HASH_KEY_FILE must hold 64 lowercase hex characters (openssl rand -hex 32), "
+                           "optionally followed by up to two older keys, each joined by an underscore, each once")
+    return {"contact_hash_key": bytes.fromhex(keys[0]), "contact_hash_old_keys": tuple(bytes.fromhex(k) for k in keys[1:])}
 
 
 def _mail(env) -> dict:

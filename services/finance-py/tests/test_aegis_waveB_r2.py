@@ -12,7 +12,7 @@ from ledger import payload_sha256
 from svc_credits import credit_note_payload, credit_note_summary
 from test_credit_notes import CLIENT, credit
 from test_reconcile_anchor import RECONCILE, _plan
-from test_restore_reimport import durable, pay, reimport, restart, restore, sim_balance, snapshot
+from test_restore_reimport import durable, lift, pay, reimport, restart, restore, sim_balance, snapshot
 from test_restore_rebuild import _full_reimport, _restore_cycle, _state, _void
 from test_stripe_incoming import checkout, keys, rr_invoice  # noqa: F401
 
@@ -58,7 +58,7 @@ def test_a1b_a_retried_credit_note_after_a_503_is_rebuilt_twice(keys, tmp_path):
     z, out = _restore_cycle(x, tmp_path)
     dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     print("A1b plan:", [y["action"] for y in dry["plan"]["actions"]], "failed", real["failed"],
-          "resolved", real["breaks_resolved"])
+          "resolved", real["ready_to_lift"])
     after = _state(z, [a["invoice_id"]])
     print("A1b before 2050", before[2]["2050"], "after 2050", after[2]["2050"], "cns", len(after[1]))
     assert after == before
@@ -210,7 +210,7 @@ def test_a6b_a_restored_backup_taken_inside_its_quiesce_window_boots_paused_and_
     print("A6b resume:", res.status_code, res.text[:200])
     assert r.status_code == 200 and res.status_code == 200
     _d, real = _full_reimport(z, "2026-10-02", "2026-10-02")
-    assert real["breaks_resolved"]
+    assert real["ready_to_lift"]
 
 
 # ---------------------------------------------------------------- A7 refund_due_from
@@ -293,7 +293,7 @@ def test_a9_reimport_replayed_and_rerun_never_rebuilds_twice(keys, tmp_path):  #
     # a second restore from the same backup and a second rebuild
     z2, out2 = _restore_cycle(w, tmp_path)
     _d, real = _full_reimport(z2, "2026-10-02", "2026-10-02")
-    print("A9 second restore:", real["failed"], real["breaks_resolved"], len(z2.svc.db["credit_notes"]))
+    print("A9 second restore:", real["failed"], real["ready_to_lift"], len(z2.svc.db["credit_notes"]))
     assert _state(z2, [a["invoice_id"]]) == before
 
 
@@ -333,23 +333,24 @@ def test_a11_a_rebuild_that_cannot_succeed_deadlocks_new_stripe_pages(keys, tmp_
         dry, real = _full_reimport(z, day, day)
         print("A11 run", day, [(r["action"], r["result"], r.get("why", "")[:70]) for r in real["results"]],
               "clean", real["clean"])
-    z.clock.advance(days=30)
-    print("A11 break 30 days later:", z.svc.db["breaks"][out["reimport_break_id"]]["status"])
+    # AEGIS r3 (the coordinator's direction): during the restore lockdown NO money goes out, for any invoice;
+    # the lockdown never deadlocks: Andre settles the lost item and lifts it
     r = checkout(z, c["invoice_id"])
-    print("A11 new Stripe page for an untouched invoice:", r.status_code, r.text[:140])
     r2 = credit(z, z.svc.db["invoices"][c["invoice_id"]], "10.00", refund_due_from=None)
-    z.clock.advance(days=-30)
-    print("A11 the runbook's 're-issue by hand':", r2.status_code)
-    assert r.status_code == 200, "one unrebuildable void blocks every new payment page indefinitely"
-    assert r2.status_code == 201                                             # the untouched invoice is credited
+    assert r.status_code == 409 and "RESTORE_LOCKDOWN" in r.text and r2.status_code == 409
     brk = z.svc.db["breaks"][out["reimport_break_id"]]
     (it,) = [i for i in brk["items"].values() if i["kind"] == "void"]
     assert it["status"] == "needs_review" and "not in the restored books" in it["why"]
-    assert checkout(z, b["invoice_id"]).status_code in (404, 409)            # the lost invoice is not payable
+    lift(z, status=409)                                                      # an item is not settled
     d = z.ok(z.post(f"/fin/v1/restore/items/{it['event_id']}/disposition",
                     {"request_id": rid(), "disposition": "lost", "reason": "invoice issued and voided after the backup"},
                     andre=ANDRE_TOKEN))
-    assert d["break_closed"] is True and z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "resolved"
+    assert d["ready_to_lift"] is True
+    lift(z)
+    assert z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "resolved"
+    assert checkout(z, c["invoice_id"]).status_code == 200                   # the untouched invoice is payable
+    assert checkout(z, b["invoice_id"]).status_code in (404, 409)            # the lost invoice never is
+    z.ok(credit(z, z.svc.db["invoices"][c["invoice_id"]], "10.00", refund_due_from=None), 201)
 
 
 def test_a1c_a_void_that_never_took_effect_is_rebuilt(keys, tmp_path):  # noqa: F811
@@ -365,7 +366,7 @@ def test_a1c_a_void_that_never_took_effect_is_rebuilt(keys, tmp_path):  # noqa: 
     z, out = _restore_cycle(x, tmp_path)
     _d, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     print("A1c invoice A after rebuild:", z.svc.db["invoices"][a["invoice_id"]]["status"], "resolved",
-          real["breaks_resolved"])
+          real["ready_to_lift"])
     assert z.svc.db["invoices"][a["invoice_id"]]["status"] == "issued", "a void that never happened was rebuilt"
 
 
@@ -385,10 +386,10 @@ def test_a6c_late_evening_backup_with_resume(keys, tmp_path):  # noqa: F811
     brk = z.svc.db["breaks"][out["reimport_break_id"]]
     print("A6c since", brk["since"], "opened_on", brk["opened_on"])
     _d, r1 = _full_reimport(z, "2026-10-03", "2026-10-03")
-    print("A6c Oct3 only resolved:", r1["breaks_resolved"], "clean", r1["clean"])
+    print("A6c Oct3 only resolved:", r1["ready_to_lift"], "clean", r1["clean"])
     _d, r2 = _full_reimport(z, "2026-10-02", "2026-10-02")
-    print("A6c +Oct2 resolved:", r2["breaks_resolved"])
-    assert brk["since"] == "2026-10-02" and not r1["breaks_resolved"] and r2["breaks_resolved"]
+    print("A6c +Oct2 resolved:", r2["ready_to_lift"])
+    assert brk["since"] == "2026-10-02" and not r1["ready_to_lift"] and r2["ready_to_lift"]
     assert z.bal("1060", None, "zbm") == sim_balance(z)
 
 

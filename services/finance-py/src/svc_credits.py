@@ -345,7 +345,7 @@ class CreditsMixin:
             if m and int(m.group(1)) == year:
                 top = max(top, int(m.group(2)))
         # AEGIS R2-11/N11: never below a number a restore saw on the ledger (even one still being rebuilt)
-        top = max(top, self._cn_number_floor())
+        top = max(top, self._cn_number_floor(year))
         return f"CN-{year}-{top + 1:04d}"
 
     def _book_credit_note(self, op: Op, inv: dict, amount: Decimal, split: dict, body: dict, request_id: str, *,
@@ -499,9 +499,15 @@ class CreditsMixin:
             done_on = body.get("done_on") or self._business_today()
             if done_on > self._business_today():
                 raise Invalid("done_on is in the future")
+            # AEGIS R3-8: never before the deadline began (the SOW's end, the request's receipt)
+            began = b.get("since") or b.get("opened_on")
+            if began and done_on.isoformat() < began:
+                raise Invalid(f"done_on is before this deadline began ({began})")
             op = Op(self, f"ddlclose|{request_id}", "andre", break_id)
-            res = {"basis": body["basis"], "reason_sha256": sha_text(body["reason"]), "done_on": done_on.isoformat(),
-                   "evidence_sha256": body.get("evidence_sha256"), "by": "andre"}
+            # the reason text stays in Finance's own store (length-limited by the request model); the ledger keeps
+            # only its hash
+            res = {"basis": body["basis"], "reason": body["reason"], "reason_sha256": sha_text(body["reason"]),
+                   "done_on": done_on.isoformat(), "evidence_sha256": body.get("evidence_sha256"), "by": "andre"}
             op.put("breaks", break_id, {**b, "status": "resolved", "resolved_at": iso(self._now()), "resolution": res,
                                         "met_late": bool(b.get("due_by")) and done_on.isoformat() > b["due_by"]})
             if b["leg"] == "acknowledgement_due" and b.get("mail_id"):
@@ -509,7 +515,8 @@ class CreditsMixin:
                 if m is not None and m["status"] in ("pending", "send_failed"):
                     op.put("mail_outbox", m["mail_id"], {**m, "status": "cancelled_sent_outside"})
             op.record(derived_id("ddlclose", break_id), "deadline_closed_by_andre", "andre", break_id,
-                      {"break_id": break_id, "leg": b["leg"], **res}, f"Deadline {b['leg']} closed by Andre")
+                      {"break_id": break_id, "leg": b["leg"], **{k: v for k, v in res.items() if k != "reason"}},
+                      f"Deadline {b['leg']} closed by Andre")
             resp = self._idem_add(op, key, h, {"break_id": break_id, "resolution": res, "ledger_event_ids": op.events,
                                                "request_id": request_id})
             self._commit(op)
@@ -539,6 +546,7 @@ class CreditsMixin:
                                    "opened_on": self._today_la().isoformat(), "owner": "andre",
                                    "explanation_code": "timing", "status": "open", "receipt_id": None,
                                    "invoice_id": invoice_id, "due_by": due.isoformat(), "deadline": "MSA 4.12(g)",
+                                   "since": ended.isoformat(),
                                    "late": due < self._business_today(), "resolution": None,
                                    "note": f"the SOW ended {ended.isoformat()}: void this invoice or credit it down to "
                                            f"the work done by {due.isoformat()} (MSA 4.12(g))"})

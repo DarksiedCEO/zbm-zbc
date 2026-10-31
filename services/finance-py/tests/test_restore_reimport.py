@@ -77,6 +77,13 @@ def reimport(hr, dry=True, plan=None, since=TODAY, until=TODAY):
     return hr.post("/fin/v1/stripe/reimport", body, andre=ANDRE_TOKEN)
 
 
+def lift(hr, reason="re-import complete and every restore item settled", status=200):
+    """AEGIS r3: Andre lifts the restore lockdown (refused, 409, until everything is done)."""
+    r = hr.post("/fin/v1/restore/lockdown/lift", {"request_id": rid(), "reason": reason}, andre=ANDRE_TOKEN)
+    assert r.status_code == status, (r.status_code, r.text)
+    return r.json()
+
+
 def test_ch3_restore_never_silently_voids_paid_invoices_and_the_reimport_rebuilds_them(keys, tmp_path, caplog):  # noqa: F811
     x = durable(keys, tmp_path)
     a = rr_invoice(x, "1000.00")
@@ -140,7 +147,7 @@ def test_ch3_restore_never_silently_voids_paid_invoices_and_the_reimport_rebuild
     assert reimport(z, dry=False).status_code == 409                              # no plan named
     assert reimport(z, dry=False, plan="f" * 64).status_code == 409               # not the dry run's plan
     real = z.ok(reimport(z, dry=False, plan=dry["plan"]["plan_sha256"]))
-    assert real["failed"] == 0 and out["reimport_break_id"] in real["breaks_resolved"]
+    assert real["failed"] == 0 and out["reimport_break_id"] in real["ready_to_lift"]
     assert {k: z.svc.db["invoices"][i["invoice_id"]]["status"] for k, i in (("a", a), ("b", b), ("c", c))} == \
         {"a": "paid", "b": "paid", "c": "paid"}
     assert z.svc.db["invoices"][a["invoice_id"]]["refunded"] == "250.00"
@@ -150,6 +157,10 @@ def test_ch3_restore_never_silently_voids_paid_invoices_and_the_reimport_rebuild
     again = z.ok(reimport(z))
     assert again["plan"]["actions"] == []
     assert z.ok(z.get("/fin/v1/integrity"))["status"] == "green"
+    # AEGIS r3: the lockdown stays on until Andre lifts it, explicitly
+    assert z.svc.restore_lockdown() is not None and z.ok(z.get("/health"))["status"] == "degraded"
+    lift(z)
+    assert z.svc.restore_lockdown() is None and z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "resolved"
 
 
 def test_ch3_quiesce_refuses_writes_and_resume_reports_consistency(keys, tmp_path):  # noqa: F811

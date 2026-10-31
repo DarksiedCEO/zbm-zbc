@@ -166,18 +166,28 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   (verified against the ledger's payload SHA-256), in ledger order with the payments and refunds. AEGIS r2: only an
   effect that took effect is rebuilt (each committed credit note, void and client email gets an `effect_committed`
   ledger mark with an HMAC keyed from `FIN_CONTACT_HASH_KEY`; an attempt without a valid mark, a deadline or an
-  unproven email becomes a restore **item** for Andre, never booked). Only the invoices a restore item touches are
-  refused a credit note, void or Stripe page; `POST /fin/v1/restore/items/{event_id}/disposition` (Andre: `lost` with
-  a reason, or `reissued` naming what was re-issued) settles an item. The restore break closes when verified-clean
-  runs cover every day from the backup's day to the day it opened and every item is rebuilt or disposed; the generic
-  break resolution refuses it and every deadline. A backup pause lasts at most `FIN_BACKUP_PAUSE_MAX_MIN` (default
-  30, 5-120) minutes, also after a restart inside the window (then every write, Stripe webhooks included, answers
-  503, `/health` shows `backup_pause`, and an `ALERT finance:` line repeats every 5 minutes); a marker left open
-  after its window pauses nothing and keeps alerting until resumed. docs/runbooks/restore-and-reimport.md.
+  unproven email becomes a restore **item** for Andre, never booked). AEGIS r3, the **restore lockdown**: a restore's
+  reconcile first writes `restore_lockdown.json` in the data directory (write-ahead), then commits itself and the
+  restore break in one line. While the lockdown is on, every credit note, void, Stripe page, payout run or release,
+  refund and vendor payment is refused (409 `RESTORE_LOCKDOWN`; money in is still booked), `/health` is `degraded`
+  and an ALERT repeats every 5 minutes (a watch thread). A failed ledger read leaves the item list
+  `build_incomplete` (every re-import reads it again first). Items the re-import cannot rebuild are disposed of with
+  `POST /fin/v1/restore/items/{event_id}/disposition` (Andre: `lost`, `reissued` naming a later invoice or credit
+  note of the same client, or `reissue_after_lift`); a rebuildable item cannot be. Only Andre lifts the lockdown,
+  `POST /fin/v1/restore/lockdown/lift`, refused until the list is complete, every day from the backup is covered and
+  every item is settled. At start the lockdown is read from disk; ledger anchors the local log lacks turn it on.
+  Owed commit marks are written from the local log at start and hourly (`commit_marks_pending` on `/health`); marks
+  carry a key id and `FIN_CONTACT_HASH_KEY` may list old keys (`<new>_<old>`) to verify older marks
+  (`restore_rebuild_unavailable` on `/health` without a key). A backup pause lasts at most
+  `FIN_BACKUP_PAUSE_MAX_MIN` (default 30, 5-120) minutes on the wall and the monotonic clock, also after a restart
+  inside the window (then every write, Stripe webhooks included, answers 503 and `/health` shows `backup_pause`); a
+  marker left open after its window pauses nothing and keeps alerting until resumed.
+  docs/runbooks/restore-and-reimport.md.
 - Deadlines (AEGIS r2): `refund_due_from` and `sow_ended_on` must lie between the invoice's issue day and today (and
   at most 400 days back). Cancel-or-credit closes on a void or a credit that leaves nothing owed; otherwise, and for an
-  acknowledgement sent outside Finance (mail off), `POST /fin/v1/deadlines/{break_id}/close` (Andre, with a reason;
-  an acknowledgement's queued email is then cancelled). Refund deadlines never close by hand.
+  acknowledgement sent outside Finance (mail off), `POST /fin/v1/deadlines/{break_id}/close` (Andre, with a reason,
+  kept in Finance's store; `done_on` between the deadline's start and today; an acknowledgement's queued email is
+  then cancelled). Refund deadlines never close by hand.
 - CH-4: a paid Checkout page Finance does not know is answered 2xx with a `stripe_unknown_session` break and an
   `ALERT finance:` log line. CH-10: due dates count from the `FIN_BUSINESS_TZ` date (default America/Los_Angeles).
 

@@ -17,7 +17,7 @@ from decimal import Decimal
 from helpers import ANDRE_TOKEN, rid
 from test_credit_notes import CLIENT, credit
 from test_reconcile_anchor import RECONCILE, _plan
-from test_restore_reimport import durable, pay, reimport, restart, restore, sim_balance, snapshot
+from test_restore_reimport import lift, durable, pay, reimport, restart, restore, sim_balance, snapshot
 from test_stripe_incoming import checkout, keys, rr_invoice, sent  # noqa: F401  (keys: a fixture)
 
 
@@ -68,12 +68,12 @@ def test_f1_the_break_dates_the_backup_and_a_one_day_reimport_does_not_close_a_m
     assert brk["restore_point"]["log_head_seq"] >= 1 and brk["restore_point"]["at"].startswith("2026-10-02")
     # AEGIS's repro: a re-import of a single day does not close it
     _dry, real = _full_reimport(z, "2026-10-04", "2026-10-04")
-    assert out["reimport_break_id"] not in real["breaks_resolved"]
+    assert out["reimport_break_id"] not in real["ready_to_lift"]
     assert z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "open"
     _dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
-    assert out["reimport_break_id"] not in real["breaks_resolved"]                 # Oct 3 is still not covered
+    assert out["reimport_break_id"] not in real["ready_to_lift"]                 # Oct 3 is still not covered
     _dry, real = _full_reimport(z, "2026-10-03", "2026-10-03")
-    assert out["reimport_break_id"] in real["breaks_resolved"]                     # the runs now cover Oct 2..4
+    assert out["reimport_break_id"] in real["ready_to_lift"]                     # the runs now cover Oct 2..4
     assert {z.svc.db["invoices"][i["invoice_id"]]["status"] for i in (a, b)} == {"paid"}
     assert z.bal("1060", None, "zbm") == sim_balance(z)
 
@@ -91,7 +91,7 @@ def test_f1_a_window_that_still_misses_money_does_not_close(keys, tmp_path):  # 
     assert reimport(z, dry=False, plan=dry["plan"]["plan_sha256"]).status_code == 409
     assert z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "open"
     _dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
-    assert out["reimport_break_id"] in real["breaks_resolved"]
+    assert out["reimport_break_id"] in real["ready_to_lift"]
     assert z.bal("1060", None, "zbm") == sim_balance(z)
 
 
@@ -109,7 +109,7 @@ def test_f2_a_credit_note_survives_a_restore_with_its_number_and_its_refund_obli
     assert cn["credit_note_id"] not in z.svc.db["credit_notes"]                   # lost by the restore...
     dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     assert [x_["action"] for x_ in dry["plan"]["actions"]] == ["rebuild_credit_note"]
-    assert real["failed"] == 0 and out["reimport_break_id"] in real["breaks_resolved"]
+    assert real["failed"] == 0 and out["reimport_break_id"] in real["ready_to_lift"]
     assert _state(z, [a["invoice_id"]]) == before                                 # ...and rebuilt exactly
     assert z.bal("2050", f"client:{CLIENT}", "zbm") == Decimal("300.00")
     due = [b for b in z.svc.db["breaks"].values() if b["leg"] == "credit_note_refund_due" and b["status"] == "open"]
@@ -117,6 +117,8 @@ def test_f2_a_credit_note_survives_a_restore_with_its_number_and_its_refund_obli
     # the credit note's email was never sent before the restore: it is queued again, once (AEGIS R2-4)
     assert len([m for m in z.svc.db["mail_outbox"].values() if m["ref"] == cn["credit_note_id"]
                 and m["status"] == "pending"]) == 1
+    assert credit(z, z.svc.db["invoices"][a["invoice_id"]], "50.00").status_code == 409   # AEGIS r3: lockdown
+    lift(z)
     nxt = z.ok(credit(z, z.svc.db["invoices"][a["invoice_id"]], "50.00", refund_due_from="2026-10-02"), 201)
     assert cn["number"] == "CN-2026-0001" and nxt["credit_note"]["number"] == "CN-2026-0002"
 
@@ -155,7 +157,7 @@ def test_f2_backup_then_credit_note_and_void_then_restore_and_reimport_equals_be
     dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     assert [y["action"] for y in dry["plan"]["actions"]] == [
         "relink_page", "book_payment", "rebuild_credit_note", "book_refund", "rebuild_void", "rebuild_credit_note"]
-    assert real["failed"] == 0 and out["reimport_break_id"] in real["breaks_resolved"]
+    assert real["failed"] == 0 and out["reimport_break_id"] in real["ready_to_lift"]
     assert _state(z, [a["invoice_id"], b["invoice_id"]]) == before
     assert z.bal("1060", None, "zbm") == sim_balance(z)
     assert z.ok(z.get("/fin/v1/integrity"))["status"] == "green"
@@ -175,7 +177,7 @@ def test_f2_evidence_that_does_not_verify_is_not_rebuilt_and_the_break_stays_ope
     (cn_item,) = [i for i in items.values() if i["kind"] == "credit_note"]
     assert cn_item["status"] == "needs_review" and "hash" in cn_item["why"]
     _dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
-    assert out["reimport_break_id"] not in real["breaks_resolved"]
+    assert out["reimport_break_id"] not in real["ready_to_lift"]
     assert not z.svc.db["credit_notes"]
     assert z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "open"
 

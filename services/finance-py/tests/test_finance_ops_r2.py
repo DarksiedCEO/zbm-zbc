@@ -16,12 +16,13 @@ N11   credit note numbers go on from the highest number, never from the count.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 
 from helpers import ANDRE_TOKEN, Harness, rid
 from test_client_mail import harness, run_mail, set_contact
 from test_credit_notes import CLIENT, ach_invoice, credit, dashboard_refund, stripe_paid
-from test_restore_reimport import durable, pay, snapshot
-from test_restore_rebuild import _full_reimport, _restore_cycle, _void
+from test_restore_reimport import durable, lift, pay, snapshot
+from test_restore_rebuild import _full_reimport, _restore_cycle
 from test_stripe_incoming import keys, make, rr_invoice  # noqa: F401
 
 import mail as MAIL
@@ -122,9 +123,10 @@ def test_n11_credit_note_numbers_go_on_from_the_highest_not_the_count():
     del hr.svc.db["credit_notes"][first]                         # a gap (e.g. one not yet rebuilt after a restore)
     assert hr.svc._next_credit_note_number() == "CN-2026-0003"    # count + 1 would reuse 0002
     hr.svc.db["breaks"]["fin-brk-FLOOR00000000000000000000"] = {"break_id": "fin-brk-FLOOR00000000000000000000",
-                                                                "leg": "restore_reimport_required", "status": "open",
-                                                                "cn_number_floor": 9}
-    assert hr.svc._next_credit_note_number() == "CN-2026-0010"    # never below a number the ledger saw
+                                                                "leg": "restore_reimport_required",
+                                                                "status": "resolved",
+                                                                "cn_number_floor": {"2026": 9, "2025": 70}}
+    assert hr.svc._next_credit_note_number() == "CN-2026-0010"    # never below a number the ledger saw (that year)
 
 
 # --------------------------------------------------------------------------------------------- N10
@@ -138,38 +140,55 @@ def test_n10_a_window_closes_only_when_a_fresh_plan_for_it_is_empty(keys, tmp_pa
     monkeypatch.setattr(z.svc, "_reimport_one", lambda request_id, action: "booked")   # claims it, books nothing
     dry, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     assert dry["plan"]["actions"] and real["failed"] == 0
-    assert real["clean"] is False and out["reimport_break_id"] not in real["breaks_resolved"]
+    assert real["clean"] is False and out["reimport_break_id"] not in real["ready_to_lift"]
     b = z.svc.db["breaks"][out["reimport_break_id"]]
     assert b["status"] == "open" and b["covered"] == []
 
 
 # --------------------------------------------------------------------------------------------- R2-2
 
-def test_r2_2_dispositions_are_andre_only_name_the_reissue_and_close_the_break(keys, tmp_path):  # noqa: F811
+def test_r3_3_dispositions_only_for_what_cannot_be_rebuilt_bound_to_the_client(keys, tmp_path):  # noqa: F811
     x = durable(keys, tmp_path)
-    c = rr_invoice(x, "700.00")
+    paid_inv = rr_invoice(x, "900.00")
+    pay(x, paid_inv)
     snapshot(tmp_path)
-    b = rr_invoice(x, "500.00")
-    x.ok(_void(x, b))
+    x.ok(credit(x, x.svc.db["invoices"][paid_inv["invoice_id"]], "600.00"), 201)   # rebuildable: verified + marked
+    x.ok(x.post(f"/fin/v1/clients/{CLIENT}/acknowledgements",                      # a deadline: never rebuilt
+                {"request_id": rid(), "topic": "refund_request", "received_on": "2026-10-02"}, andre=ANDRE_TOKEN), 201)
     z, out = _restore_cycle(x, tmp_path)
-    _full_reimport(z, "2026-10-02", "2026-10-02")
-    brk = z.svc.db["breaks"][out["reimport_break_id"]]
-    (it,) = [i for i in brk["items"].values() if i["kind"] == "void"]
-    p = f"/fin/v1/restore/items/{it['event_id']}/disposition"
-    body = {"request_id": rid(), "disposition": "reissued", "reason": "re-issued and voided by hand"}
-    assert z.post(p, {**body, "reissued_as": c["invoice_id"]}).status_code in (401, 403)
-    assert z.post(p, {**body, "reissued_as": c["invoice_id"]}, caller="ops_cron").status_code in (401, 403)
-    assert z.post(p, {**body, "reissued_as": "fin-cn-NOPE"}, andre=ANDRE_TOKEN).status_code == 409
-    assert z.post(p, {**body, "reissued_as": c["invoice_id"]}, andre=ANDRE_TOKEN).status_code == 409  # not void
-    assert z.post("/fin/v1/restore/items/fin-invv-0000000000000000000000000000000000000000/disposition",
-                  {**body, "request_id": rid(), "disposition": "lost"}, andre=ANDRE_TOKEN).status_code == 404
-    z.ok(_void(z, z.svc.db["invoices"][c["invoice_id"]]))         # Andre re-issues the void on a live invoice
-    d = z.ok(z.post(p, {**body, "request_id": rid(), "reissued_as": c["invoice_id"]}, andre=ANDRE_TOKEN))
-    assert d["break_closed"] is True
-    done = z.svc.db["breaks"][out["reimport_break_id"]]
-    assert done["status"] == "resolved" and done["items"][it["event_id"]]["status"] == "disposed"
+    items = z.svc.db["breaks"][out["reimport_break_id"]]["items"]
+    (cn,) = [i for i in items.values() if i["kind"] == "credit_note"]
+    (ddl,) = [i for i in items.values() if i["kind"] == "deadline"]
+    assert cn["status"] == "pending" and ddl["status"] == "needs_review" and ddl["client_id"] == CLIENT
+    lost = {"request_id": rid(), "disposition": "lost", "reason": "typo"}
+    # a verified, rebuildable refund obligation is never disposed of (AEGIS B5/B5b)
+    assert z.post(f"/fin/v1/restore/items/{cn['event_id']}/disposition", lost, andre=ANDRE_TOKEN).status_code == 409
+    p = f"/fin/v1/restore/items/{ddl['event_id']}/disposition"
+    body = {"disposition": "reissued", "reason": "acknowledged again by phone"}
+    assert z.post(p, {**body, "request_id": rid(), "reissued_as": paid_inv["invoice_id"]}).status_code in (401, 403)
+    assert z.post(p, {**body, "request_id": rid(), "reissued_as": out["reimport_break_id"]},
+                  andre=ANDRE_TOKEN).status_code == 409                               # never a break id
+    assert z.post(p, {**body, "request_id": rid(), "reissued_as": paid_inv["invoice_id"]},
+                  andre=ANDRE_TOKEN).status_code == 409                               # made before the item
+    other = ach_invoice(z, "50.00", client="zbm-client-8")
+    assert z.post(p, {**body, "request_id": rid(), "reissued_as": other["invoice_id"]},
+                  andre=ANDRE_TOKEN).status_code == 409                               # another client's
+    assert z.post("/fin/v1/restore/items/fin-ddl-0000000000000000000000000000000000000000/disposition",
+                  {**lost, "request_id": rid()}, andre=ANDRE_TOKEN).status_code == 404
+    mine = ach_invoice(z, "60.00")                                                 # same client, after the item
+    d = z.ok(z.post(p, {**body, "request_id": rid(), "reissued_as": mine["invoice_id"]}, andre=ANDRE_TOKEN))
+    assert d["ready_to_lift"] is False                                             # coverage still missing
+    assert z.post(p, {**body, "request_id": rid(), "reissued_as": mine["invoice_id"]},
+                  andre=ANDRE_TOKEN).status_code == 409                               # disposed of once only
     assert z.ledger.of_type("restore_item_disposed")
-    assert z.post(p, {**body, "request_id": rid(), "disposition": "lost"}, andre=ANDRE_TOKEN).status_code == 404
+    for m in [i for i in items.values() if i["kind"] == "mail" and i["status"] == "needs_review"]:
+        z.ok(z.post(f"/fin/v1/restore/items/{m['event_id']}/disposition",
+                    {"request_id": rid(), "disposition": "lost", "reason": "acknowledged by phone instead"},
+                    andre=ANDRE_TOKEN))
+    _, real = _full_reimport(z, "2026-10-02", "2026-10-02")
+    assert real["failed"] == 0 and out["reimport_break_id"] in real["ready_to_lift"]
+    assert z.bal("2050", f"client:{CLIENT}", "zbm") == Decimal("600.00")            # the obligation came back
+    lift(z)
 
 
 # --------------------------------------------------------------------------------------------- R2-1 commit marks
@@ -198,7 +217,7 @@ def test_r2_1_a_restore_before_the_mark_is_written_asks_andre_and_books_nothing(
     _, real = _full_reimport(z, "2026-10-02", "2026-10-02")
     assert not z.svc.db["credit_notes"] and not any(r["action"] == "rebuild_credit_note" for r in real["results"])
     (it,) = [i for i in z.svc.db["breaks"][out["reimport_break_id"]]["items"].values() if i["kind"] == "credit_note"]
-    assert it["status"] == "needs_review" and "no commit mark" in it["why"]
+    assert it["status"] == "needs_review" and "possibly committed" in it["why"]   # its line's anchor exists
     assert z.svc.db["breaks"][out["reimport_break_id"]]["status"] == "open"
 
 

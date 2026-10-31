@@ -122,6 +122,7 @@ class MailMixin:
                                    "opened_on": self._today_la().isoformat(), "owner": "andre",
                                    "explanation_code": "timing", "status": "open", "receipt_id": None,
                                    "mail_id": mid, "due_by": due.isoformat(), "deadline": "MSA 4.12(f)", "late": late,
+                                   "since": received.isoformat(),
                                    "severity": "high" if late else "normal", "resolution": None,
                                    "note": f"acknowledge the client's {body['topic'].replace('_', ' ')} by "
                                            f"{due.isoformat()} (MSA 4.12(f)): closed when the email is sent"})

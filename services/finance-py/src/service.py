@@ -345,6 +345,7 @@ class FinanceService:
                         "(README, 'Reconciling the local log with the ledger')")
                 raise RuntimeError("refusing to start: " + "; ".join(a.problems) + hint)
             self.reconcile_required = list(a.voidable)
+        self._restore_boot()                 # AEGIS r3: the restore lockdown (from disk, or detected) and owed marks
         if settings.unmatched_tin_policy == "withhold_24" and not self.counsel_verified("FIN-CQ-06"):
             raise RuntimeError("FIN_UNMATCHED_TIN_POLICY=withhold_24 needs counsel row FIN-CQ-06 verified (spec C.6); "
                                "refusing to start")
@@ -783,21 +784,30 @@ class FinanceService:
             payload = i10.reconcile_payload(plan["epoch"], self.rules_version, plan["head_seq"], plan["head_sha256"],
                                             void_lines, void_event_ids)
             eid = i10.reconcile_id(plan["epoch"], plan["head_seq"], payload)
+            # AEGIS r3 R3-1/R3-2: a restore's reconcile first writes the lockdown to disk (write-ahead: if that fails
+            # nothing is done), then commits the reconcile AND the restore break in ONE line (or fails with 503)
+            reimport_break, brk = None, None
+            if plan["money_at_risk"]:
+                reimport_break, brk = self._restore_break_row(plan)
+                self._lockdown_enter(plan, reimport_break, brk.get("build_incomplete", True))
             self._reconciling = True
-            reimport_break = None
             try:
                 op = Op(self, f"reconcile|{eid}", "andre", i10.LOG_SUBJECT)
                 op.record(eid, i10.RECONCILE_TYPE, "andre", i10.LOG_SUBJECT, payload,
                           f"Andre reconciled the local log at line {plan['head_seq']}: "
                           f"{len(payload['void_event_ids'])} ledger event(s) declared void", raw=True)
                 op.add("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": request_id})
+                if brk is not None and reimport_break not in self.db["breaks"]:
+                    op.put("breaks", reimport_break, brk)
+                    op.record(derived_id("brk", reimport_break), "break_opened", "intel_07_reconciliation",
+                              reimport_break, {"break_id": reimport_break, "leg": "restore_reimport_required",
+                                               "difference": "0.00"},
+                              "Break opened: restored from a backup; restore lockdown on")
                 self._commit(op)
-                try:
-                    reimport_break = self._restore_reimport_break(plan)  # CH-3: open until a re-import ran
-                except Unavailable:
-                    reimport_break = None       # the reconcile stands; the response still says a re-import is due
             finally:
                 self._reconciling = False
+            if brk is None:
+                self._lockdown_clear_after_reconcile()
             left = self.assess_log()
             self.reconcile_required = list(left.voidable)
             resp = {"reconcile_event_id": eid, "voided": payload["void_event_ids"], "void_lines": payload["void_lines"],

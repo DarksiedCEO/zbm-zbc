@@ -687,9 +687,15 @@ class DeadlineClose(Strict):
 class RestoreDisposition(Strict):
     """AEGIS R2-2: Andre's decision on one lost item a restore's re-import does not rebuild."""
     request_id: Id
-    disposition: Literal["lost", "reissued"]
+    disposition: Literal["lost", "reissued", "reissue_after_lift"]
     reason: Note
     reissued_as: Optional[Id] = None
+
+
+class LockdownLift(Strict):
+    """AEGIS r3: Andre lifts the restore lockdown (refused until the re-import and every restore item are done)."""
+    request_id: Id
+    reason: Note
 
 
 class QuiesceRequest(Strict):

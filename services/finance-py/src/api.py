@@ -256,6 +256,10 @@ CRON_ROUTES = (re.compile(r"/fin/v1/jobs/(%s)/run" % "|".join(re.escape(j) for j
                re.compile(r"/fin/v1/reconciliations/run"))
 # CH-3: while Finance is quiesced for a backup only reads and the resume are answered
 QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume|/fin/v1/reconcile")     # reconcile: restoring a paused backup
+# AEGIS r3: money OUT, refused while the restore lockdown is on (money IN, e.g. Stripe webhooks, is still booked)
+LOCKDOWN_REFUSED = re.compile(r"/fin/v1/invoices/[^/]+/(void|credit-notes|stripe-checkout)|/fin/v1/payout-runs|"
+                              r"/fin/v1/payout-batches/[^/]+/(decision|second-approval|release)|/fin/v1/payout-handoffs|"
+                              r"/fin/v1/refunds/[^/]+(/decision)?|/fin/v1/media-buys/[^/]+/vendor-payments")
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -404,6 +408,15 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return await call_next(request)
 
     @app.middleware("http")
+    async def _lockdown(request: Request, call_next):
+        if request.method == "POST" and LOCKDOWN_REFUSED.fullmatch(request.url.path) \
+                and not request.url.path.endswith("/repay") and svc.restore_lockdown() is not None:
+            return JSONResponse(status_code=409, content={"detail": "RESTORE_LOCKDOWN: Finance was restored from a "
+                                                                    "backup; no money goes out until Andre lifts the "
+                                                                    "lockdown (POST /fin/v1/restore/lockdown/lift)"})
+        return await call_next(request)
+
+    @app.middleware("http")
     async def _quiesce(request: Request, call_next):
         # CH-3: a backup window. Every write waits (503: Stripe and the cron service retry); reads still answer
         if request.method not in ("GET", "HEAD") and not QUIESCE_EXEMPT.fullmatch(request.url.path) \
@@ -427,6 +440,15 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     async def health() -> dict:
         out = svc.health()
         out["backup_pause"] = svc.pause_status()          # AEGIS R2-6: paused, or a marker left open
+        # AEGIS r3: the restore lockdown (degraded while on), commit marks still owed, and whether a restore can
+        # rebuild anything (flags and counts only)
+        out["restore_lockdown"] = svc.lockdown_status()
+        out["commit_marks_pending"] = len(getattr(svc, "_unmarked", []) or [])
+        rb = svc.restore_rebuild_status()
+        out["restore_rebuild_unavailable"] = rb["unavailable"]
+        out["restore_rebuild"] = {"key_id": rb["key_id"], "old_key_ids": rb["old_key_ids"], "reason": rb["reason"]}
+        if out["restore_lockdown"]["on"] and out.get("status") == "ok":
+            out["status"] = "degraded"
         return out
 
     @app.get("/fin/v1/intelligences", dependencies=auth)
@@ -612,6 +634,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def restore_disposition(event_id: str, _: str = Depends(andre("restore/items/disposition")),
                             req: m.RestoreDisposition = Depends(body(m.RestoreDisposition))) -> dict:
         return svc.restore_item_disposition(req.request_id, _id(event_id), dump(req))
+
+    @app.post("/fin/v1/restore/lockdown/lift", dependencies=auth)
+    def restore_lift(_: str = Depends(andre("restore/lockdown/lift")),
+                     req: m.LockdownLift = Depends(body(m.LockdownLift))) -> dict:
+        return svc.restore_lockdown_lift(req.request_id, dump(req))
 
     @app.post("/fin/v1/backup/quiesce", dependencies=auth)
     def backup_quiesce(_: str = Depends(andre("backup/quiesce")),
@@ -1019,6 +1046,7 @@ def main() -> None:
 
     host = os.environ.get("FIN_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("FIN_PORT", "8410"))
+    app.state.service.start_watch()             # AEGIS R3-7: pause and lockdown ALERTs without needing a request
     serve.run(app, host=host, port=port)
 
 
