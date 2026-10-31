@@ -161,10 +161,26 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   `matched_held_unverified`): no client receipt, no campaign funded, the same `held_compliance` and break as Stripe.
   A deposit hold released on a current ALLOW funds the campaign then. A bank-path hold has no refund release (a wire
   return is not built): it leaves with `compliance_allow` or an OFAC ground only.
-- **Money out (R9-1).** Every route that sends a client's money out asks Compliance at that moment: a media vendor
-  payment (`record_vendor_payment`), a campaign deposit refund (proposal, Andre's approval, and its payment). A refusal,
-  an unreachable Compliance, or any open hold on one of the client's invoices refuses the outflow; on a sanctions
-  ground Andre's approval shows him an OFAC warning (his token only; others read "compliance hold").
+- **Money out (R9-1, R10-1).** Every route that sends a client's money out, spends it or commits it asks Compliance
+  at that moment, outside the lock: a media vendor payment (`record_vendor_payment`); a campaign deposit refund
+  (proposal, Andre's approval, re-payment, and every transfer attempt, retries included); and every step that pays
+  creators from a brand's deposit: the creator accrual (`payout-handoffs` and the accrual job), the payout run, Andre's
+  approval and the second approval, the rail funding (proposal, Andre's decision and every execution attempt) and the
+  release. Each asks about the brand whose deposit the payable draws on. A refusal, an unreachable Compliance, or any
+  open hold on one of the client's invoices refuses (the accrual stays pending and is retried; the run and the release
+  exclude the item); on a sanctions ground Andre's approval and funding decision show him an OFAC warning (his token
+  only; others read "compliance hold"). `tests/test_money_out_invariant_r10.py` classifies every state-changing Finance
+  route (money out, money in, not client money) and fails when one that moves, commits or applies a client's money
+  does not reach the activation check, or when a new route is not classified. The hourly `stripe-sessions` job also
+  asks about every client with a funded campaign and pushes Andre (his channel only) when one is no longer allowed.
+- **Unapplied money of a refused client (R10-4).** Money that names a client (a bank line's invoice token with the
+  wrong amount or for a paid invoice; a Stripe payment whose metadata names an invoice) is booked as unapplied cash
+  and, while Compliance does not ALLOW the client, held like a matched payment: the receipt carries the hold (its
+  sanctions ground included) and a Compliance break; the answer is `unapplied_held_compliance` /
+  `unapplied_held_unverified`, the same for any refusal. A Dashboard refund or a bank return of held money (matched or
+  unapplied) is an OFAC-held refund for Andre: the hold's break and the refund's own break go high severity with a
+  note naming the rejected-transaction path, and Andre is pushed. A held invoice refunded at Stripe stays paid-held
+  until Andre releases the hold on the refund (RTM-05); a failed refund rewrites the hold's note.
 - **Stripe edge cases.** A refund that later fails at Stripe (an ACH refund returned: `amount_refunded` goes down) is
   booked back (F7r reversed, once per cumulative total) with a `stripe_refund_reversed` break; `refund.*` events are read
   back like `charge.refunded` (RTM-02). Checkout pins `adaptive_pricing[enabled]=false` and the read-back refuses a
@@ -180,7 +196,12 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   compliance break's leg, note, note hash and severity are generic outside Andre's token. The leak test compares, with
   and without a sanctions upgrade, the id prefixes and shapes, the break legs, the key shape of every exported record
   and break row, and the job summary keys. A hold that changes state still adds one generic hold event; the same
-  happens when an unverified hold is converted or a second payment supersedes a hold.
+  happens when an unverified hold is converted or a second payment supersedes a hold. AEGIS r10 R10-2: the job also
+  re-reads sanctions-match holds, and every refused hold it re-reads writes what an upgrade writes (the invoice, its
+  break and one hold event), so a plain refusal, an upgrade and a match from the start give the same job summary,
+  exported lines, generic evidence and `/integrity` to a non-Andre reader. The job's hold part runs whether or not
+  Stripe incoming is on (bank-path holds, R10-6), and a held deposit released on an ALLOW funds its campaign only while
+  its receipt is still matched (R10-5).
 - **The rejected exit re-reads Compliance (R9-3).** `ofac_rejected_return` asks Compliance at release time: a refusal
   that now rests on a sanctions match upgrades the hold to `match` and refuses; no answer refuses.
   `GET /fin/v1/invoices/{id}/compliance-hold` (Andre's token only, read-only) shows the stored ground, Compliance's
@@ -188,7 +209,12 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
 - **Compliance's own answer (R9-4).** `GET /compliance/v1/clients/{id}/activation` gives the reasons and the sanctions
   ground to `finance_31` (the money gate, which shows them only to Andre) and to Andre's token. `seo_02`,
   `revenue_recovery` and `onboarding` need only the decision: a refusal reads "the client is not activated (the reasons
-  go to Andre)" with `sanctions_grounded` and `sanctions_ground` null, the same for every reason.
+  go to Andre)" with `sanctions_grounded` and `sanctions_ground` null, the same for every reason. AEGIS r10 R10-3:
+  `ruling_id`, `evaluated_at`, `jurisdiction` and `valid_until` are null too, so every refusal is byte-identical;
+  `GET /compliance/v1/holds` is Andre's in full and `finance_31`'s as generic `compliance_hold` rows (other callers
+  403); `/audit/export` and `/audit/evidence` are Andre's only; an activation ruling answered to a caller
+  (`/rule`, `/gates/activation`, `/rulings/{id}`) shows its screening (HR-14) and hold items as one generic
+  `andre_review` item.
 - **Rule expiry early warning (RTM-06).** Compliance's readiness lists `expiry_warnings` (rules expiring within 30, 14
   and 7 days, and those a client's activation relies on), prints a WARNING line at each start and run, and `/health`
   carries `rules_expiring`; Finance's billing readiness shows Andre `compliance_rule_expiry`.
@@ -198,7 +224,10 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   byte), refuses a body that is not JSON, and its forward limit always fits the largest valid body.
 - **Acceptances (RTM-13, legal-py).** The onboarding token records a standard form's acceptance for a client only with
   an invitation Andre issued for that client (`POST /legal/v1/acceptance-invitations`, valid 14 days); otherwise
-  `ACCEPTANCE_NOT_INVITED`.
+  `ACCEPTANCE_NOT_INVITED`. AEGIS r10 R10-L1/L2/L3: an `invitation_id` from any caller must be that invitation (this
+  party, document and version, unused, unexpired), else 409 with nothing written; only the onboarding path records a
+  `client:*` acceptance (`hub` and `clipper_network` are refused); the commit refuses an update of a record that does
+  not exist, and a replay quarantines (and `/health` flags) a record it cannot apply instead of refusing to start.
 
 ### 5. Readiness: which rules are expired and what they block
 

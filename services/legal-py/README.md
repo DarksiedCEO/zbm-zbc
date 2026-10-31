@@ -56,7 +56,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `GET .../versions/{v}/text` | Andre | the text |
 | `POST /legal/v1/documents/{doc_id}/versions` | Andre (upload; `bump: major` optional) or scheduler (template fill with `party_ref`); anyone else uploading -> 403 | new draft; Legal assigns the version number |
 | `POST .../versions/{v}/counsel-review`, `/counsel-signoff`, `/decision` | Andre | package; sign-off record; approve / retire / withdraw |
-| `POST /legal/v1/acceptances`; `GET /legal/v1/acceptances/{id}` | hub, clipper_network, onboarding; readers | clickwrap evidence |
+| `POST /legal/v1/acceptances`; `GET /legal/v1/acceptances/{id}` | hub, clipper_network, onboarding (a `client:*` acceptance: onboarding only, AEGIS r10); readers | clickwrap evidence |
 | `POST /legal/v1/envelopes`; `POST /legal/v1/esign/events` | Andre; esign_gateway | envelopes (provider not wired) |
 | `POST /legal/v1/playbooks/proposals`, `/decisions`; `GET /legal/v1/playbooks/{doc_type}` | Andre; any | playbooks |
 | `POST /legal/v1/playbooks/{doc_type}/reviews` | onboarding, scheduler, Andre | deviation classes |
