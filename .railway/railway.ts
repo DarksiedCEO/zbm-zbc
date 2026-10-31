@@ -80,11 +80,15 @@ export default defineRailway(() => {
       LEDGER_BIND_ADDR: "[::]",
       LEDGER_LOG_PATH: "/data/ledger/ledger.jsonl",
       RAILWAY_RUN_UID: "0", // the entrypoint hands /data/ledger to uid 10001, then runs the ledger as 10001
-      LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope; written to LEDGER_CALLERS_FILE
+      LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope (hashes only, set NOT Sealed); written to LEDGER_CALLERS_FILE
     },
   }));
 
   // ------------------------------------------------------------------------------------------------ detection
+  // No volume (it keeps no state: snapshots are in memory, evidence on the ledger). The Revenue Recovery store
+  // connector's three inputs are files the entrypoint writes from variables (--secret-file in the image), which needs
+  // root at start: RAILWAY_RUN_UID=0, the service itself still runs as uid 10001 (runbook, "Revenue Recovery:
+  // connecting a real store"). Every one of them unset = the connector stays off (NOT_CONNECTED / LEDGER_UNAVAILABLE).
   const detection = service("detection", {
     source: source(),
     build: dockerfile("services/detection-py/Dockerfile", ["services/detection-py/**", "deploy/python/**", "fixtures/*.json"]),
@@ -92,7 +96,13 @@ export default defineRailway(() => {
     env: {
       PORT: "8000",
       DETECTION_BIND_ADDR: "::",
+      RAILWAY_RUN_UID: "0", // secret files only: the entrypoint writes them as root, then runs detection as 10001
       ZBM_SERVICE_TOKEN: preserve(),
+      DETECTION_LEDGER_URL: PRIVATE("ledger", 8090),
+      DETECTION_LEDGER_TOKEN: preserve(), // detection's own ledger caller (rr_store); written to DETECTION_LEDGER_TOKEN_FILE
+      RR_STORE_CONNECTIONS: preserve(), // Andre's approved connections JSON; written to RR_STORE_CONNECTIONS_FILE
+      RR_STORE_SECRET_1: preserve(), // a store credential; written to /run/zbm-secrets/rr-store-secret-1-file
+      RR_STORE_SECRET_2: preserve(), // a store credential; written to /run/zbm-secrets/rr-store-secret-2-file
       // Revenue Recovery store kill switches (runbook env table): set by hand to stop store reads; declared so a later
       // apply cannot release them. Unset/empty = off.
       RR_STORE_READS_DISABLED: preserve(),
@@ -115,7 +125,11 @@ export default defineRailway(() => {
       LEDGER_SERVICE_TOKEN: preserve(), // legal's own ledger caller token
       LEGAL_SERVICE_TOKEN: preserve(),
       LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
-      LEGAL_CALLER_TOKENS: '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}"}',
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (records a client's clickwrap
+      // acceptance, POST /legal/v1/acceptances); `${{VARIABLE}}` is Railway's same-service reference
+      LEGAL_CALLER_TOKENS:
+        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}"}',
+      LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
     },
   }));
 
@@ -134,8 +148,11 @@ export default defineRailway(() => {
       LEDGER_SERVICE_TOKEN: preserve(), // finance's own ledger caller token
       FIN_SERVICE_TOKEN: preserve(),
       FIN_ANDRE_APPROVAL_TOKEN: preserve(),
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (drafts invoices,
+      // POST /fin/v1/invoices); `${{VARIABLE}}` is Railway's same-service reference
       FIN_CALLER_TOKENS:
-        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}"}',
+        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}"}',
+      FIN_ONBOARDING_CALLER_TOKEN: preserve(),
       FIN_LEGAL_URL: PRIVATE("legal", 8420),
       FIN_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
       FIN_LEGAL_CALLER_TOKEN: preserve(),
@@ -200,6 +217,9 @@ export default defineRailway(() => {
       SEO_ANDRE_APPROVAL_TOKEN: preserve(),
       SEO_CALLER_TOKENS: preserve(),
       SEO_LOG_HASH_KEY: preserve(), // written to SEO_LOG_HASH_KEY_FILE by the entrypoint
+      // Optional: the Search Console service-account JSON key, written to SEO_GSC_SERVICE_ACCOUNT_FILE by the entrypoint.
+      // Unset or empty = no file, Search Console NOT_CONNECTED (runbook, Secrets table).
+      SEO_GSC_SERVICE_ACCOUNT: preserve(),
       SEO_FINANCE_URL: PRIVATE("finance", 8410),
       SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       SEO_FINANCE_CALLER_TOKEN: preserve(),

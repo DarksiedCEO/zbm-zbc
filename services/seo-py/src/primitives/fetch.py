@@ -8,7 +8,8 @@ SSRF-safe by construction:
     metadata address 169.254.169.254, CGNAT, multicast, reserved, unspecified, IPv4-mapped / 6to4 / NAT64 IPv6
     embedding any of those: refused), and the connection is made to the CHECKED address (the URL carries the IP
     literal, Host and TLS SNI carry the name), so a DNS answer that changes between check and connect (rebinding)
-    is never used;
+    is never used; the checked addresses are tried IPv4 first, at most MAX_ADDRESS_ATTEMPTS, the next only when no
+    connection to the previous one was made (AEGIS A2 H-1: a host with no outbound IPv6 still reaches dual-stack sites);
   - numeric host spellings (``2130706433``, ``0x7f.1``, ``017700000001``) resolve to their address and are refused
     by the same check;
   - redirects are followed by hand, at most ``max_redirects``, every hop checked again;
@@ -66,6 +67,9 @@ _BLOCKED_V6 = (ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("64:ff
                ipaddress.ip_network("2002::/16"), ipaddress.ip_network("2001::/32"),
                ipaddress.ip_network("fec0::/10"))                      # deprecated site-local (AEGIS L1)
 _BLOCKED_V4 = (ipaddress.ip_network("192.88.99.0/24"),)                # 6to4 relay anycast (AEGIS L1)
+# AEGIS A2 H-1: a host's vetted addresses are tried in turn (IPv4 first, families alternating), at most this many, and
+# the next one only when no TCP connection to the previous one was made (nothing was sent to it).
+MAX_ADDRESS_ATTEMPTS = 4
 
 
 def public_address(ip: str) -> bool:
@@ -135,6 +139,18 @@ class _Refused(Exception):
         self.detail = detail
 
 
+class _NotConnected(_Refused):
+    """No TCP connection to this address was made, so nothing was sent to it: the next vetted address may be tried."""
+
+
+def _connect_order(addrs: list[str]) -> list[str]:
+    """IPv4 first, then the families alternate (RFC 8305 section 4 style), each family in the resolver's order."""
+    v4 = [a for a in addrs if ":" not in a]
+    v6 = [a for a in addrs if ":" in a]
+    out = [a for pair in zip(v4, v6) for a in pair] + v4[len(v6):] + v6[len(v4):]
+    return list(dict.fromkeys(out))
+
+
 def _content_type(headers: dict) -> tuple[Optional[str], Optional[str]]:
     raw = headers.get("content-type")
     if not raw:
@@ -160,6 +176,7 @@ def _content_type(headers: dict) -> tuple[Optional[str], Optional[str]]:
 class _Budget(threading.local):
     deadline: Optional[float] = None
     guard: Optional[Callable] = None
+    connected: bool = False          # a TCP connection of the current address attempt is up (AEGIS A2 H-1)
 
 
 _BUDGET = _Budget()
@@ -209,8 +226,9 @@ class _DeadlineBackend(httpcore.NetworkBackend):
 
     def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         _guard_check()
-        return _DeadlineStream(self._b.connect_tcp(host, port, _left(timeout, httpcore.ConnectTimeout), local_address,
-                                                   socket_options))
+        stream = self._b.connect_tcp(host, port, _left(timeout, httpcore.ConnectTimeout), local_address, socket_options)
+        _BUDGET.connected = True
+        return _DeadlineStream(stream)
 
     def connect_unix_socket(self, path, timeout=None, socket_options=None):
         raise httpcore.ConnectError("unix sockets are never used")
@@ -362,9 +380,30 @@ class Fetcher:
 
     def _one(self, url: str, target: tuple, ua: str, deadline: float, accept: str
              ) -> tuple[int, dict, Optional[bytes], str]:
-        """One request to the address ``target`` already vetted (resolved once per hop: no second answer is used)."""
-        scheme, host, port, path, addrs = target
-        ip = addrs[0]
+        """One request to an address of ``target``, every one already vetted (resolved once per hop: no second answer
+        is used). AEGIS A2 H-1: the addresses are tried IPv4 first, families alternating, at most MAX_ADDRESS_ATTEMPTS;
+        the next only when no TCP connection to the previous one was made (refused, unreachable, connect timeout:
+        nothing was sent) and only while the fetch's one deadline has time left. Each attempt's connect timeout is a
+        share of the time left, so every address tried gets a turn and the deadline is never exceeded. An HTTP answer
+        of any status, a TLS failure, or any failure after the connection is up ends the request: no other address."""
+        order = _connect_order(target[4])[:MAX_ADDRESS_ATTEMPTS]
+        last: Optional[_Refused] = None
+        for i, ip in enumerate(order):
+            left = deadline - time.monotonic()
+            if i and left <= 0:
+                break
+            connect_s = min(self.timeout_s, left / (len(order) - i)) if left > 0 else self.timeout_s
+            try:
+                return self._attempt(url, target, ip, ua, deadline, accept, connect_s)
+            except _NotConnected as exc:
+                last = exc
+        raise _Refused(last.state, last.detail)
+
+    def _attempt(self, url: str, target: tuple, ip: str, ua: str, deadline: float, accept: str, connect_s: float
+                 ) -> tuple[int, dict, Optional[bytes], str]:
+        """One request to the vetted address ``ip`` of ``target`` (the URL carries the IP literal; Host and SNI the
+        name). Raises _NotConnected when no TCP connection was made."""
+        scheme, host, port, path, _addrs = target
         lit = f"[{ip}]" if ":" in ip else ip
         default = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
         target = f"{scheme}://{lit}:{port}{path}"
@@ -373,7 +412,8 @@ class Fetcher:
         headers = {"Host": host_header, "User-Agent": ua, "Accept": accept,
                    "Accept-Encoding": "gzip, deflate", "Connection": "close"}
         ext = {"sni_hostname": host} if scheme == "https" else {}
-        t = httpx.Timeout(self.timeout_s)
+        t = httpx.Timeout(self.timeout_s, connect=connect_s)
+        _BUDGET.connected = False
         try:
             transport = self.transport or install_deadline_backend(httpx.HTTPTransport(verify=self.verify,
                                                                                        trust_env=False))
@@ -412,13 +452,17 @@ class Fetcher:
             # ``１２７.０.０.１``, ``xn--``) is a URL problem, not a connection failure. Nothing was connected to: the
             # request goes to the CHECKED address only, and a Location is followed only after _target re-checks it
             raise _Refused("REFUSED_URL", "the target or redirect target is not a valid URL") from None
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as exc:
+            if isinstance(exc, httpx.ConnectTimeout) and not _BUDGET.connected:
+                raise _NotConnected("TIMEOUT", "timed out") from None
             raise _Refused("TIMEOUT", "timed out") from None
         except MemoryError:
             raise _Refused("RESOURCE_LIMIT", "the response exhausted memory; refused") from None
         except httpx.ConnectError as exc:
             if isinstance(exc.__cause__, ssl.SSLError) or "SSL" in str(exc) or "certificate" in str(exc).lower():
                 raise _Refused("TLS_FAILED", "TLS handshake or certificate check failed") from None
+            if not _BUDGET.connected:
+                raise _NotConnected("CONNECT_FAILED", "connection failed") from None
             raise _Refused("CONNECT_FAILED", "connection failed") from None
         except httpx.RemoteProtocolError as exc:
             if "location header" in str(exc).lower():       # httpx refuses to parse the redirect target itself

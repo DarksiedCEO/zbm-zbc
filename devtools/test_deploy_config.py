@@ -8,18 +8,26 @@ it in the `hygiene-static` job, and `python -m pytest devtools/` collects it:
   variable the service's code actually reads;
 - the Python images install only deploy/python/requirements.lock.txt, with hashes, and its direct pins are the
   services' requirements.txt pins without pytest;
-- .railway/railway.ts deploys exactly these Dockerfiles, one replica each, RAILWAY_RUN_UID=0 on every service with a
-  volume, a daily backup schedule on every volume, a PORT equal to the port the CI smoke uses, and holds no secret
-  value (secrets are preserve() or references);
+- .railway/railway.ts deploys exactly these Dockerfiles, one replica each, RAILWAY_RUN_UID=0 on exactly the services
+  with a volume or a --secret-file in their image, a daily backup schedule on every volume, a PORT equal to the port
+  the CI smoke uses, every --secret-file value variable declared preserve(), and holds no secret value (secrets are
+  preserve() or references);
 - the CI job builds every one of them and the smoke script covers every one;
 - docs/deploy/railway.md names every environment variable the deployed code reads (Python, Go, Rust and the
-  dashboard), every variable the IaC sets, and every Dockerfile.
+  dashboard), every variable the IaC sets, and every Dockerfile;
+- the runbook's store credential paths (per JSON field) and its kill-file path (variable table, step 8, Stop) agree
+  with the entrypoint and with each other, and its LEDGER_CALLERS steps use devtools/ledger_callers.py with that
+  script's grants (devtools/test_ledger_callers.py tests the script itself).
 """
 from __future__ import annotations
 
 import ast
 import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -75,6 +83,17 @@ def instructions(path: Path) -> list[str]:
 def entrypoint_args(path: Path) -> list[str]:
     line = next(i for i in instructions(path) if i.upper().startswith("ENTRYPOINT"))
     return ast.literal_eval(line.split(None, 1)[1])
+
+
+def secret_files(path: Path) -> list[str]:
+    """The *_FILE settings an image's entrypoint writes from Railway variables (--secret-file NAME)."""
+    args = entrypoint_args(path)
+    return [args[i + 1] for i, a in enumerate(args[:args.index("--")]) if a == "--secret-file"]
+
+
+def entrypoint_secret_path(file_var: str) -> str:
+    """Where zbm-entrypoint writes --secret-file NAME: $SECRET_DIR/ + NAME lower-cased with _ as - (write_secret)."""
+    return "/run/zbm-secrets/" + file_var.lower().replace("_", "-")
 
 
 def code_variables() -> dict[str, set[str]]:
@@ -180,7 +199,8 @@ class Dockerfiles(unittest.TestCase):
         self.assertTrue(ENTRY.stat().st_mode & 0o111, "deploy/docker/zbm-entrypoint.sh must be executable")
 
 
-REF = re.compile(r"\$\{\{[a-z][a-z0-9-]*\.[A-Z][A-Z0-9_]*\}\}")
+# `${{service.VARIABLE}}` (another service's variable) or `${{VARIABLE}}` (the same service's; docs.railway.com/variables)
+REF = re.compile(r"\$\{\{(?:[a-z][a-z0-9-]*\.)?[A-Z][A-Z0-9_]*\}\}")
 
 
 def secret_value_ok(value: str) -> bool:
@@ -212,8 +232,34 @@ class RailwayIac(unittest.TestCase):
                 self.assertIn(f'dockerfile("{df}"', b)
                 self.assertIn(f'PORT: "{port}"', b)
                 self.assertEqual(f'"/data":' in b, has_volume)
-                self.assertEqual('RAILWAY_RUN_UID: "0"' in b, has_volume, "RAILWAY_RUN_UID=0 exactly with a volume")
+                # root at start is needed to hand a root-owned volume to uid 10001 and to write a secret file the
+                # service cannot read back from /proc/1/environ (AEGIS L3); nowhere else (AEGIS A2 H-2: detection)
+                needs_root = has_volume or bool(secret_files(REPO / df))
+                self.assertEqual('RAILWAY_RUN_UID: "0"' in b, needs_root,
+                                 "RAILWAY_RUN_UID=0 exactly with a volume or a --secret-file")
                 self.assertIn('deploy("/health", ' + ("true" if has_volume else "false") + ")", b)
+
+    def test_every_secret_file_value_variable_is_preserved(self):
+        # an image's --secret-file NAME_FILE is written from the Railway variable NAME; a plan that dropped NAME would
+        # delete the secret on the next apply (and with it the feature: a ledger caller, a Stripe key, a store)
+        for svc, (df, *_r) in SERVICES.items():
+            for file_var in secret_files(REPO / df):
+                with self.subTest(service=svc, variable=file_var):
+                    self.assertTrue(file_var.endswith("_FILE"))
+                    self.assertTrue(self._declared_preserved(svc, file_var[:-len("_FILE")]),
+                                    f"{file_var[:-5]} is not preserve() on {svc}")
+
+    def test_detection_store_connector_is_wired_without_a_volume(self):
+        # AEGIS A2 H-2: the store connector needs its ledger token, the connections JSON and the credential files; the
+        # service keeps no state (snapshots in memory), so no volume and no secret on a backed-up disk
+        want = ["DETECTION_LEDGER_TOKEN_FILE", "RR_STORE_CONNECTIONS_FILE", "RR_STORE_SECRET_1_FILE",
+                "RR_STORE_SECRET_2_FILE"]
+        self.assertEqual(secret_files(REPO / SERVICES["detection"][0]), want)
+        b = self.blocks["detection"]
+        self.assertIn('DETECTION_LEDGER_URL: PRIVATE("ledger", 8090),', b)
+        self.assertNotIn("volumeMounts", b)
+        self.assertNotRegex(re.sub(r"//[^\n]*", "", b), r"\bRR_STORE_CONNECTIONS_FILE\s*:|\bDETECTION_LEDGER_TOKEN_FILE\s*:",
+                            "the *_FILE settings are the entrypoint's; setting one next to its value refuses the start")
 
     def test_every_volume_has_a_daily_backup_schedule(self):
         # AEGIS L6: each service with a volume goes through withDailyBackups (backupSchedules ["DAILY"] on its attachment)
@@ -297,15 +343,55 @@ class RailwayIac(unittest.TestCase):
     def test_the_secret_check_refuses_a_literal_inside_a_reference_map(self):
         q = lambda body: "'" + body + "'"   # noqa: E731  the map as it appears in railway.ts, single-quoted
         good = ["preserve()", "finance.env.FIN_SERVICE_TOKEN",
-                q('{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_X}}"}')]
+                q('{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_X}}"}'),
+                q('{"finance_31": "${{finance.FIN_X}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}"}')]
         bad = [q('{"a": "${{x.Y}}", "b": "a-literal-secret-value"}'), q('{"a": "prefix-${{x.Y}}"}'),
                q('{"a": "${{x.Y}}${{x.Z}}"}'), q("{}"), q('{"a": "${{x.Y}}", "b": {"c": "literal"}}'),
                q("{... ${{x.Y}} ...}"), '"a-literal-secret"', "ctx.randomString('x')",
-               q('{"a": "${{x.Y}}"}') + " + secret"]
+               q('{"a": "${{x.Y}}"}') + " + secret", q('{"a": "${{lower_case}}"}'), q('{"a": "${{ Y }}"}')]
         for v in good:
             self.assertTrue(secret_value_ok(v), v)
         for v in bad:
             self.assertFalse(secret_value_ok(v), v)
+
+
+    def _caller_map(self, svc: str, name: str) -> dict:
+        m = re.search(rf"^\s+{name}:\s*'(\{{[^']*\}})',", self.blocks[svc], re.M)
+        self.assertIsNotNone(m, f"{name} on {svc} is not a single-quoted JSON map literal")
+        return json.loads(m.group(1))   # the services' parsers need a JSON object (a ValueError fails the test)
+
+    def test_caller_maps_resolve_and_use_only_names_the_service_accepts(self):
+        # A map entry whose reference points nowhere would reach the service as the literal "${{...}}" text, and a
+        # name outside the service's CALLER_NAMES makes it refuse to start (config._tokens). Each reference must name
+        # a variable declared in the service it points at (the same service for `${{VARIABLE}}`).
+        maps = {"finance": ("FIN_CALLER_TOKENS", "services/finance-py/src/config.py"),
+                "legal": ("LEGAL_CALLER_TOKENS", "services/legal-py/src/config.py")}
+        for svc, (name, config_py) in maps.items():
+            tree = ast.parse((REPO / config_py).read_text())
+            accepted = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                            and any(getattr(t, "id", None) == "CALLER_NAMES" for t in n.targets))
+            mapping = self._caller_map(svc, name)
+            refs = list(mapping.values())
+            self.assertEqual(len(set(refs)), len(refs), f"{name}: two callers would share one token (refused)")
+            for caller, ref in mapping.items():
+                with self.subTest(service=svc, caller=caller):
+                    self.assertIn(caller, accepted, f"{svc} refuses to start on caller name {caller!r}")
+                    target, _, var = ref[3:-2].rpartition(".")
+                    target = target or svc
+                    self.assertIn(target, self.blocks, f"{ref}: no Railway service {target!r}")
+                    self.assertTrue(self._declared_preserved(target, var), f"{ref}: {var} is not preserve() on {target}")
+
+    def test_onboarding_caller_is_wired_with_one_operator_held_token_per_service(self):
+        # AEGIS A1 C1: POST /fin/v1/invoices needs `onboarding` (or `scheduler`) and POST /legal/v1/acceptances needs
+        # `onboarding` (or hub / clipper_network); without them no invoice can be drafted on Railway. Until an
+        # onboarding service exists Andre holds the two tokens; each lives on the service that checks it.
+        for svc, name, var in (("finance", "FIN_CALLER_TOKENS", "FIN_ONBOARDING_CALLER_TOKEN"),
+                               ("legal", "LEGAL_CALLER_TOKENS", "LEGAL_ONBOARDING_CALLER_TOKEN")):
+            with self.subTest(service=svc):
+                self.assertEqual(self._caller_map(svc, name).get("onboarding"), "${{" + var + "}}")
+                self.assertTrue(self._declared_preserved(svc, var), f"{var} is not preserve() on {svc}")
+        self.assertNotIn("scheduler", self._caller_map("finance", "FIN_CALLER_TOKENS"),
+                         "scheduler reaches payout runs, releases, refunds and sweeps: not for a hand-held token")
 
 
 class CiAndSmoke(unittest.TestCase):
@@ -367,11 +453,211 @@ class Runbook(unittest.TestCase):
             names |= {args[i + 1][:-len("_FILE")] for i, a in enumerate(args) if a == "--secret-file"}
         self.assertEqual(sorted(n for n in names if not self.named(n)), [])
 
+    def test_the_store_credential_paths_in_the_runbook_are_where_the_entrypoint_writes(self):
+        # the connections JSON names the credential files by path; a path that drifted from the entrypoint's naming
+        # rule would make every sync STORE_CREDENTIAL_UNREADABLE
+        entry = ENTRY.read_text()
+        self.assertIn("SECRET_DIR=/run/zbm-secrets\n", entry)
+        self.assertIn("""target="$SECRET_DIR/$(printf '%s' "$file_var" | tr 'A-Z_' 'a-z-')\"""", entry)
+        section = self.doc.split("### Revenue Recovery: connecting a real store\n", 1)[1].split("\n## ", 1)[0]
+        for slot in ("RR_STORE_SECRET_1_FILE", "RR_STORE_SECRET_2_FILE"):
+            with self.subTest(slot=slot):
+                self.assertIn(f'"{entrypoint_secret_path(slot)}"', section)
+        self.assertIn(entrypoint_secret_path("RR_STORE_CONNECTIONS_FILE"), self.doc)
+
+    def store_section(self) -> str:
+        return self.doc.split("### Revenue Recovery: connecting a real store\n", 1)[1].split("\n## ", 1)[0]
+
+    def test_every_store_credential_path_in_the_runbook_json_is_its_slots(self):
+        # AEGIS detection-branch M-4 (mutants M4, M11): each path is checked where it is used, per field, so one right
+        # occurrence elsewhere cannot hide a wrong one
+        blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", self.store_section(), re.S)]
+        creds = [b["connections"][0]["credential"] if "connections" in b else b for b in blocks]
+        kinds = sorted(c["kind"] for c in creds)
+        self.assertEqual(kinds, ["client_credentials", "static_token"], "the step-9 JSON and the static-token example")
+        want = {"client_id_file": entrypoint_secret_path("RR_STORE_SECRET_1_FILE"),
+                "client_secret_file": entrypoint_secret_path("RR_STORE_SECRET_2_FILE"),
+                "token_file": entrypoint_secret_path("RR_STORE_SECRET_1_FILE")}
+        for c in creds:
+            for field, path in c.items():
+                if field != "kind":
+                    with self.subTest(kind=c["kind"], field=field):
+                        self.assertEqual(path, want[field])
+        self.assertNotRegex(self.store_section(), r'"kind": "static_token", "token_file":\s*\n',
+                            "every static-token credential is in a JSON block (checked above), none inline")
+
+    def test_the_kill_file_path_is_one_path_everywhere(self):
+        # AEGIS detection-branch M-4 (mutants M9, M10) and L-7: the variable table, step 8 (required) and the Stop
+        # section name the same file; otherwise the at-once stop touches a file detection never checks
+        table = re.search(r"^\| `RR_STORE_KILL_SWITCH_FILE` \|[^\n]*set it to `([^`]+)`[^\n]*`touch ([^`]+)`", self.doc, re.M)
+        self.assertIsNotNone(table, "the detection variable table row")
+        section = self.store_section()
+        step8 = re.search(r"^8\. .*?(?=^9\. )", section, re.M | re.S).group(0)
+        self.assertIn("**Required,\n   not optional:**", step8)
+        in_step8 = re.findall(r"`RR_STORE_KILL_SWITCH_FILE` = `([^`]+)`", step8)
+        stop = section.split("**Stop / disconnect.**", 1)[1]
+        in_stop = re.findall(r"`touch ([^`]+)`", stop.split("\n\n", 1)[0])
+        paths = {table.group(1), table.group(2), *in_step8, *in_stop}
+        self.assertEqual(len(in_step8), 1)
+        self.assertEqual(len(in_stop), 1)
+        self.assertEqual(len(paths), 1, f"kill-file paths differ: {sorted(paths)}")
+        anywhere = set(re.findall(r"/[A-Za-z0-9_./-]*\.kill\b", self.doc, re.I))
+        self.assertEqual(anywhere, paths, "every kill-file path in the runbook")
+
+    def test_ledger_callers_come_from_the_script_with_its_grants(self):
+        # AEGIS detection-branch M-2 / M-4: the runbook runs devtools/ledger_callers.py (no inline copy that could
+        # drift), and what it tells Andre each caller may do is the script's table
+        import sys
+        sys.path.insert(0, str(REPO / "devtools"))
+        import ledger_callers as lc
+        self.assertNotIn("hashlib.sha256(", self.doc, "no inline LEDGER_CALLERS generator")
+        flat = " ".join(self.doc.split())
+        rec_dep = "--current ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json"
+        for cmd in ("devtools/ledger_callers.py new --out ~/zbm/ledger-callers.json",
+                    "devtools/ledger_callers.py check --current ~/zbm/ledger-callers.json",
+                    f"devtools/ledger_callers.py compare {rec_dep}",
+                    f"devtools/ledger_callers.py rotate seo-py {rec_dep} --out ~/zbm/ledger-callers.next.json"):
+            self.assertIn(cmd, flat)
+        adds = re.findall(r"ledger_callers\.py add detection-py (--[^`]*?)(?=`)", flat)
+        self.assertEqual(adds, [f"{rec_dep} --out ~/zbm/ledger-callers.next.json"] * 2,
+                         "both add commands pass the record AND the deployed copy (N-M1)")
+        for caller, (dept, _where) in lc.CALLERS.items():
+            with self.subTest(caller=caller):
+                self.assertRegex(self.doc, rf"\n- {re.escape(caller)} writes `{dept}`[;,]")
+        self.assertIn("(caller `detection-py`, department `rr_store`)", self.doc)
+        smoke = re.search(r"the callers listed \(([^)]*), each with its one department\)", self.doc).group(1)
+        self.assertEqual([c.strip() for c in smoke.split(",")], list(lc.CALLERS))
+        probe_rows = re.findall(r"^\| [a-z-]+ \| `([a-z_]+)` \|$", self.doc, re.M)
+        self.assertEqual(sorted(probe_rows), sorted(lc.KNOWN_DEPARTMENTS), "the per-department check covers each one")
+        self.assertIn(f'open("{entrypoint_secret_path("DETECTION_LEDGER_TOKEN_FILE")}")', self.doc)
+
+    def test_ledger_callers_is_not_sealed_and_the_deployed_value_is_the_truth(self):
+        # AEGIS ledger-callers N-M1: LEDGER_CALLERS holds hashes only, so it is set NOT Sealed and read back; every
+        # change starts by copying the deployed value and comparing the record with it
+        flat = " ".join(self.doc.split())
+        self.assertIn("except `LEDGER_CALLERS`: it holds hashes only and is set **not** Sealed", flat)
+        self.assertIn("| `LEDGER_CALLERS` | yes | no (hashes only; set **not** Sealed) |", self.doc)
+        self.assertIn("(keep the file it writes; **not** Sealed: it holds hashes only)", flat)
+        self.assertIn("**Already Sealed?**", self.doc)
+        self.assertIn("Railway cannot unseal a variable", flat)
+        self.assertIn("Do not recreate it from a record you cannot prove is current", flat)
+        change = self.doc.split("#### Changing `LEDGER_CALLERS`", 1)[1].split("**If the new ledger deployment", 1)[0]
+        steps = re.findall(r"^(\d)\. \*\*([^*]+)\*\*", change, re.M)
+        self.assertEqual([n for n, _t in steps], list("12345678"))
+        self.assertTrue(steps[0][1].startswith("Copy the deployed value and compare"), steps[0])
+        self.assertTrue(steps[1][1].startswith("Baseline"), steps[1])
+        cflat = " ".join(change.split())
+        self.assertIn("the deployed value wins", cflat)
+        self.assertIn("refuse, before asking for any token, unless the record equals the deployed copy", cflat)
+        self.assertIn("Copy it now, in this session; never reuse an old copy", cflat)
+
+    def test_post_change_checks_do_not_roll_back_a_correct_change(self):
+        # AEGIS ledger-callers N-M2: a baseline before any change; after the ledger redeploy only the UNCHANGED callers
+        # decide a rollback; the changed caller's 401 / no-token is expected until its own redeploy, and a 401 after
+        # that is fixed on that service, never by a ledger rollback
+        change = self.doc.split("#### Changing `LEDGER_CALLERS`", 1)[1].split("**If the new ledger deployment", 1)[0]
+        cflat = " ".join(change.split())
+        step = {n: " ".join(body.split()) for n, body in
+                re.findall(r"^(\d)\. (.*?)(?=^\d\. |^What each check must print)", change, re.M | re.S)}
+        self.assertIn("Every one must print `200`. Anything else: **stop**", step["2"])
+        self.assertIn("whose token you did *not* change", step["6"])
+        self.assertIn("Any `401` or `403`: **roll back**", step["6"])
+        self.assertIn("that is not a reason to roll back", step["6"])
+        self.assertIn("A rotated service prints `401`", step["6"])
+        self.assertIn("`rr_store no-token`", step["6"])
+        self.assertIn("Make the new value the record", step["7"])
+        self.assertIn("Fix **that service's token**, **not** with a ledger rollback", step["8"])
+        self.assertNotIn("roll back", step["8"].split("`403`")[0].lower(), "a 401 after its redeploy is not a rollback")
+        rows = {r[0]: r for r in re.findall(r"^\| (step \d[^|]*) \| ([^|]*) \| ([^|]*) \| ([^|]*) \|$", change, re.M)}
+        self.assertEqual(len(rows), 3)
+        base, after_ledger, after_service = (rows[k] for k in sorted(rows))
+        self.assertIn("else stop", base[1])
+        self.assertIn("else roll back", after_ledger[1])
+        self.assertIn("not a rollback", after_ledger[2])
+        self.assertIn("not a rollback", after_ledger[3])
+        self.assertIn("fix its token, not the ledger", after_service[2])
+        self.assertIn('raise SystemExit(d + " no-token")', self.doc, "no traceback for a missing token file")
+        self.assertIn("**Rollback** (step 6 only, before step 7)", cflat)
+        self.assertIn("pass on 3.9 to 3.13", " ".join(self.doc.split()))
+        self.assertIn("`getpass` shows what you type when it is not attached to a terminal", " ".join(self.doc.split()))
+
     def test_every_dockerfile_and_the_unverified_xff_note(self):
         for df, *_r in SERVICES.values():
             self.assertIn(df, self.doc)
         self.assertRegex(self.doc, r"DASHBOARD_TRUSTED_PROXY_HOPS[^\n]*\n?[^\n]*UNVERIFIED")
         self.assertIn("/webhooks/stripe", self.doc)
+
+
+# A fake Search Console key shaped like the real download (multi-line JSON, ~2.3 KB, a PEM with \n escapes) plus the
+# characters a careless write would mangle (%, $, backquote, backslash, quotes). Not a key: the PEM body is a word.
+FAKE_GSC_KEY = (
+    '{\n  "type": "service_account",\n  "project_id": "fake-project",\n'
+    '  "private_key_id": "0123456789abcdef0123456789abcdef01234567",\n'
+    '  "private_key": "-----BEGIN ' + 'PRIVATE KEY-----\\nFAKE-NOT-A-KEY\\n-----END ' + 'PRIVATE KEY-----\\n",\n'
+    '  "client_email": "fake@example.iam.gserviceaccount.com",\n'
+    '  "token_uri": "https://oauth2.googleapis.com/token",\n'
+    '  "note": "%s %d $HOME `id` \\\\ \\" \' -n",\n'
+    '  "padding": "' + "x" * 1900 + '"\n}'
+)
+GSC_CHILD = ('if [ -n "${SEO_GSC_SERVICE_ACCOUNT+x}" ]; then echo VALUE-LEAKED; exit 3; fi; '
+             'if [ -z "${SEO_GSC_SERVICE_ACCOUNT_FILE+x}" ]; then echo NO-FILE-VARIABLE; exit 0; fi; '
+             'stat -c "%u %a" "$SEO_GSC_SERVICE_ACCOUNT_FILE" >&2; cat "$SEO_GSC_SERVICE_ACCOUNT_FILE"')
+
+
+class SeoSearchConsoleKey(unittest.TestCase):
+    """golive-gsc: on Railway the Search Console key is a variable; the seo image has the entrypoint write it to the
+    file seo reads (SEO_GSC_SERVICE_ACCOUNT -> SEO_GSC_SERVICE_ACCOUNT_FILE), and an unset key still starts seo
+    (NOT_CONNECTED). The entrypoint is run for real, with only its secret directory moved into a temporary one."""
+
+    def test_the_seo_image_maps_the_gsc_key_file_and_the_iac_preserves_its_variable(self):
+        args = entrypoint_args(REPO / SERVICES["seo"][0])
+        files = [args[i + 1] for i, a in enumerate(args) if a == "--secret-file"]
+        self.assertIn("SEO_GSC_SERVICE_ACCOUNT_FILE", files)
+        self.assertIn("SEO_LOG_HASH_KEY_FILE", files)
+        self.assertLess(args.index("SEO_GSC_SERVICE_ACCOUNT_FILE"), args.index("--"))
+        block = iac_services()["seo"]
+        self.assertRegex(block, r"(?m)^\s+SEO_GSC_SERVICE_ACCOUNT:\s*preserve\(\)")
+        self.assertNotRegex(block, r"(?m)^\s+SEO_GSC_SERVICE_ACCOUNT_FILE:")  # set by the entrypoint, never Railway
+        self.assertRegex(block, r'(?m)^\s+RAILWAY_RUN_UID:\s*"0"')  # the entrypoint writes secrets only as root
+        doc = DOC.read_text()
+        self.assertIn("| `SEO_GSC_SERVICE_ACCOUNT` (optional) | `SEO_GSC_SERVICE_ACCOUNT_FILE` | seo |", doc)
+        self.assertNotIn("Search Console is NOT_CONNECTED on Railway", doc)  # the open item is closed
+        # seo's own reader: the file is optional and may be up to 16 KiB (a real key is ~2.3 KB)
+        cfg = (REPO / "services" / "seo-py" / "src" / "config.py").read_text()
+        self.assertIn('_secret_file_bytes(env, "SEO_GSC_SERVICE_ACCOUNT_FILE", max_bytes=16 * 1024)', cfg)
+        self.assertIn('if not (env.get("SEO_GSC_SERVICE_ACCOUNT_FILE") or "").strip():\n        return', cfg)
+
+    def run_entrypoint(self, extra_env: dict[str, str]) -> subprocess.CompletedProcess:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        tmp.chmod(0o711)                                   # uid 10001 must reach the secret directory inside
+        secret_dir = tmp / "zbm-secrets"
+        secret_dir.mkdir(mode=0o700)                       # the image creates it (seo Dockerfile)
+        text = ENTRY.read_text()
+        self.assertEqual(text.count("SECRET_DIR=/run/zbm-secrets\n"), 1)
+        script = tmp / "zbm-entrypoint.sh"
+        script.write_text(text.replace("SECRET_DIR=/run/zbm-secrets\n", f"SECRET_DIR={secret_dir}\n"))
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), **extra_env}
+        return subprocess.run(["sh", str(script), "--secret-file", "SEO_GSC_SERVICE_ACCOUNT_FILE", "--",
+                               "sh", "-c", GSC_CHILD], env=env, capture_output=True, timeout=30)
+
+    def test_no_key_set_starts_without_a_file(self):
+        for extra in ({}, {"SEO_GSC_SERVICE_ACCOUNT": ""}):
+            with self.subTest(env=extra):
+                r = self.run_entrypoint(extra)
+                self.assertEqual((r.returncode, r.stdout), (0, b"NO-FILE-VARIABLE\n"), r.stderr)
+
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0 and shutil.which("setpriv"),
+                         "writes a secret only as root (the railway-images smoke covers it in CI)")
+    def test_a_multi_line_json_key_reaches_the_file_byte_exact_owner_only(self):
+        r = self.run_entrypoint({"SEO_GSC_SERVICE_ACCOUNT": FAKE_GSC_KEY})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr.decode().strip(), "10001 600")   # owned by the service user, mode 0600
+        self.assertGreater(len(FAKE_GSC_KEY), 2000)
+        self.assertEqual(r.stdout, FAKE_GSC_KEY.encode())         # byte-identical, value not in the child's env
+        # trailing newlines are dropped (shell command substitution); seo strips the key file's whitespace anyway
+        r = self.run_entrypoint({"SEO_GSC_SERVICE_ACCOUNT": FAKE_GSC_KEY + "\n"})
+        self.assertEqual((r.returncode, r.stdout), (0, FAKE_GSC_KEY.encode()), r.stderr)
 
 
 if __name__ == "__main__":

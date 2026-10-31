@@ -42,9 +42,10 @@ calls (`POST /webhooks/stripe`); it holds no Stripe secret and forwards the raw 
 its own Railway service from its own Dockerfile.
 
 **The revenue recovery service is detection-py**, run behind orchestrator-go with ledger-rust as its evidence store
-(root README; ADR 0001 decisions 2-3 and "Scope boundary"). The scan's only data source is the repository's fixture
-pool (`fixtures/*.json`, copied into the detection image); a real-store translation layer is not built (ADR 0001
-decision 5).
+(root README; ADR 0001 decisions 2-3 and "Scope boundary"). A scan's data source is one connected Shopify store's
+snapshot, read by detection's read-only store connector (ADR 0020); the fixture pool (`fixtures/*.json`, copied into
+the detection image) is refused on Railway (`FIXTURE_SCAN_DISABLED`). Connecting a store is Andre's step:
+[Revenue Recovery: connecting a real store](#revenue-recovery-connecting-a-real-store).
 
 **One replica everywhere.** The ledger and the three departments each hold a single-writer lock on their data
 directory (`<log>.lock` for the ledger, an flock in each department's data directory), and Railway does not allow
@@ -124,8 +125,8 @@ What "without the value variable" does and does not cover (AEGIS L3): the servic
 hold the value, but the value stays (1) a Railway variable — visible in the dashboard and to anyone with `railway ssh`
 on the service — and (2) in the entrypoint's own initial environment, `/proc/1/environ`, for the life of the
 container. Only a different uid keeps the service from reading (2): the entrypoint runs as root and the service as
-uid 10001. So the entrypoint writes a secret file only when it runs as root (`RAILWAY_RUN_UID=0`, which the three
-services with these secrets — ledger, finance, seo — already set for their volume); started as any other user with a
+uid 10001. So the entrypoint writes a secret file only when it runs as root (`RAILWAY_RUN_UID=0`, which every service
+with these secrets sets: ledger, finance and seo also for their volume, detection for its secret files only); started as any other user with a
 value variable set, it refuses with `--secret-file <NAME>_FILE: <NAME> is set but this container runs as uid ...,
 not root`. The CI smoke starts seo-py as root for this reason and checks that the file is 0600/10001, that the value
 is not in the service's environment, that uid 10001 cannot read `/proc/1/environ`, and that the non-root start
@@ -136,27 +137,40 @@ refuses.
 | `FIN_STRIPE_SECRET_KEY` | `FIN_STRIPE_SECRET_KEY_FILE` | finance |
 | `FIN_STRIPE_WEBHOOK_SECRET` | `FIN_STRIPE_WEBHOOK_SECRET_FILE` | finance |
 | `SEO_LOG_HASH_KEY` | `SEO_LOG_HASH_KEY_FILE` | seo |
+| `SEO_GSC_SERVICE_ACCOUNT` (optional) | `SEO_GSC_SERVICE_ACCOUNT_FILE` | seo |
 | `LEDGER_CALLERS` | `LEDGER_CALLERS_FILE` | ledger |
+| `DETECTION_LEDGER_TOKEN` | `DETECTION_LEDGER_TOKEN_FILE` | detection |
+| `RR_STORE_CONNECTIONS` | `RR_STORE_CONNECTIONS_FILE` (`/run/zbm-secrets/rr-store-connections-file`) | detection |
+| `RR_STORE_SECRET_1` | `RR_STORE_SECRET_1_FILE` (`/run/zbm-secrets/rr-store-secret-1-file`) | detection, through the connections JSON |
+| `RR_STORE_SECRET_2` | `RR_STORE_SECRET_2_FILE` (`/run/zbm-secrets/rr-store-secret-2-file`) | detection, through the connections JSON |
+
+The written path is fixed: `/run/zbm-secrets/` plus the `*_FILE` name in lower case with `_` as `-`. detection-py does
+not read `RR_STORE_SECRET_1_FILE` / `RR_STORE_SECRET_2_FILE` itself: the connections JSON names those two paths as a
+connection's `token_file` (or `client_id_file` + `client_secret_file`), so the JSON holds references and the
+credential stays a sealed variable. `RR_STORE_CONNECTIONS` holds no secret; it goes through the same mechanism because
+detection-py reads the connections only from a file.
 
 `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed to `SEO_GSC_SERVICE_ACCOUNT_FILE`) and `SEO_BING_WEBMASTER_KEY_FILE`
 belong to a port that is not built (or a retired name): setting one refuses the start. Leave them unset.
 
-Three built settings are `*_FILE` settings this deploy does **not** map (no `--secret-file` in their image), so on
-Railway they stay unset and their feature stays off, fail closed:
+A value variable that is unset or empty writes no file and leaves its `*_FILE` setting unset, so the service starts
+exactly as if the feature were never configured (`SEO_GSC_SERVICE_ACCOUNT` relies on this: no key, Search Console
+`NOT_CONNECTED`). The value is written with `printf '%s'`, so a multi-line value (the Search Console JSON key, its
+PEM with `\n` escapes) reaches the file unchanged, except that trailing newlines are dropped (shell command
+substitution); seo strips surrounding whitespace from the key file anyway.
+
+One built setting is a `*_FILE` setting this deploy does **not** map (no `--secret-file` in its image), so on
+Railway it stays unset and its feature stays off, fail closed:
 
 - `SEO_PERPLEXITY_API_KEY_FILE`: not needed on Railway. seo reads the same key from the plain variable
   `SEO_PERPLEXITY_API_KEY` (ADR 0017 W4; setting both refuses the start).
-- `SEO_GSC_SERVICE_ACCOUNT_FILE` (the Search Console service-account JSON key): unmapped, so Search Console is
-  `NOT_CONNECTED` on Railway until the seo image maps it (open item below).
-- `DETECTION_LEDGER_TOKEN_FILE` (with `DETECTION_LEDGER_URL`; the Revenue Recovery store connector's ledger, ADR
-  0020): unmapped, and detection does not run as root, so every store read fails closed (`LEDGER_UNAVAILABLE`) on
-  Railway until it is wired (open item below).
 
 ## Secrets
 
 Generate every token on your own machine and paste it straight into Railway (or Vercel). Never commit one, never put
-one in a chat or a ticket. Mark each one **Sealed** in Railway (its value is then hidden after it is set). Each must
+one in a chat or a ticket. Mark each one **Sealed** in Railway (its value is then hidden after it is set), except
+`LEDGER_CALLERS`: it holds hashes only and is set **not** Sealed, so it can be read back (see below). Each must
 be a different value: several services refuse to start when two of their tokens are equal.
 
 | Secret | Generate with | Set on (owner) | Also used by (references, not copies) |
@@ -167,19 +181,26 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEDGER_SERVICE_TOKEN` (finance's) | `openssl rand -hex 32` | finance | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (legal's) | `openssl rand -hex 32` | legal | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (seo's) | `openssl rand -hex 32` | seo | its SHA-256 goes in `LEDGER_CALLERS` |
-| `LEDGER_CALLERS` | the script below (hashes only, no token) | ledger | — |
+| `DETECTION_LEDGER_TOKEN` | `openssl rand -hex 32` | detection | its SHA-256 goes in `LEDGER_CALLERS` (caller `detection-py`, department `rr_store`); becomes `DETECTION_LEDGER_TOKEN_FILE` |
+| `LEDGER_CALLERS` | `devtools/ledger_callers.py` (below; hashes only, no token; **not Sealed**) | ledger | you: keep the file it writes (`~/zbm/ledger-callers.json`), your record of the value |
 | `FIN_SERVICE_TOKEN` | `openssl rand -hex 32` | finance | stripe-gateway `STRIPE_GATEWAY_FINANCE_TOKEN`, seo `SEO_FINANCE_TOKEN` (references) |
 | `FIN_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | finance | you (keep it in your password manager) |
 | `STRIPE_GATEWAY_CALLER_TOKEN` | `openssl rand -hex 32` | stripe-gateway | finance `FIN_CALLER_TOKENS` (`rail_gateway`, interpolated) |
 | `SEO_FINANCE_CALLER_TOKEN` | `openssl rand -hex 32` | seo | finance `FIN_CALLER_TOKENS` (`seo_02`, interpolated) |
 | `FIN_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | finance | legal `LEGAL_CALLER_TOKENS` (`finance_31`, interpolated) |
+| `FIN_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` | finance | finance `FIN_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-FIN-Caller-Token` (keep it in your password manager) |
 | `LEGAL_SERVICE_TOKEN` | `openssl rand -hex 32` | legal | finance `FIN_LEGAL_TOKEN` (reference) |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | legal | you |
+| `LEGAL_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` (a different value from `FIN_ONBOARDING_CALLER_TOKEN`) | legal | legal `LEGAL_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-LEGAL-Caller-Token` |
 | `SEO_SERVICE_TOKEN` | `openssl rand -hex 32` | seo | — |
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
 | `SEO_LOG_HASH_KEY` | `openssl rand -hex 32` | seo | — (becomes `SEO_LOG_HASH_KEY_FILE`) |
+| `RR_STORE_CONNECTIONS` (only to connect a store) | the JSON in [Revenue Recovery: connecting a real store](#revenue-recovery-connecting-a-real-store) (references, no secret; setting it is your approval) | detection | — (becomes `RR_STORE_CONNECTIONS_FILE`) |
+| `RR_STORE_SECRET_1` (only to connect a store) | the store's Dev Dashboard app **Client ID** (or a legacy custom app's Admin API access token) | detection | — (becomes `/run/zbm-secrets/rr-store-secret-1-file`) |
+| `RR_STORE_SECRET_2` (only to connect a store) | the store's Dev Dashboard app **Client secret** (leave unset for a legacy token) | detection | — (becomes `/run/zbm-secrets/rr-store-secret-2-file`) |
 | `SEO_PERPLEXITY_API_KEY` (optional) | Perplexity → API settings (only when you turn the engine on; set the four budgets too) | seo | — |
+| `SEO_GSC_SERVICE_ACCOUNT` (optional) | Google Cloud → IAM & Admin → Service accounts → the account → Keys → Add key → JSON (only when you connect Search Console; steps below) | seo | — (becomes `SEO_GSC_SERVICE_ACCOUNT_FILE`) |
 | `FIN_STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys → create a **restricted** key (test mode first: `rk_test_...`) with write on Checkout Sessions and read on PaymentIntents, Charges, Disputes, Payouts and Balance | finance | — (becomes `FIN_STRIPE_SECRET_KEY_FILE`) |
 | `FIN_STRIPE_WEBHOOK_SECRET` | Stripe, when you register the webhook endpoint (step 7): the endpoint's signing secret, `whsec_...` | finance | — (becomes `FIN_STRIPE_WEBHOOK_SECRET_FILE`) |
 | `DASHBOARD_SESSION_SECRET` | `openssl rand -hex 32` | Vercel | — |
@@ -189,29 +210,256 @@ be a different value: several services refuse to start when two of their tokens 
 the ledger and the orchestrator cannot rate-limit guesses, so the token's entropy is the defence.
 
 **`LEDGER_CALLERS`** (per-caller ledger tokens with department scopes; services/ledger-rust/README.md). It holds the
-SHA-256 of each caller's token, never a token. Run this on your machine; it asks for the four ledger tokens without
-echoing them and prints the JSON to paste into the ledger's `LEDGER_CALLERS`:
+SHA-256 of each caller's token, never a token. `devtools/ledger_callers.py` builds it. Run it on your machine from a
+checkout (Python 3.9 or newer, standard library only; its tests pass on 3.9 to 3.13). Run it in a real terminal
+window (Terminal, iTerm), not piped or in an editor's output pane: Python's `getpass` shows what you type when it is
+not attached to a terminal (it warns `GetPassWarning: Can not control echo`; if you see that, stop and close the
+window). It asks for each token without echoing it, twice, and refuses:
+
+- an empty token, whitespace in a token, or a token under the ledger's 32 bytes;
+- the same token for two callers (the ledger would refuse the start; a hand-made map would silently drop one);
+- a caller or department it does not know, so a typo cannot cut a department off;
+- anything else the ledger refuses at start.
+
+Its table is the only place that sets what each caller may do:
+
+- orchestrator-go writes `revenue_recovery`;
+- finance-py writes `finance`;
+- legal-py writes `legal`;
+- seo-py writes `seo`;
+- detection-py writes `rr_store`, its store-read evidence (ADR 0020 section 7). It neither writes nor reads
+  `revenue_recovery` (the orchestrator's findings).
+
+Each caller reads only its own department: no `read_departments`, no `read_all`. Every command prints one line per
+caller: its name, what it writes and what it reads. It never prints a token, and never a hash outside the value it
+writes.
+
+First time (step 5), after the five ledger tokens are set on their services:
 
 ```bash
-python3 - <<'PY'
-import getpass, hashlib, json
-callers = [("orchestrator-go", "revenue_recovery"), ("finance-py", "finance"), ("legal-py", "legal"), ("seo-py", "seo")]
-out = {}
-for name, department in callers:
-    token = getpass.getpass(f"LEDGER_SERVICE_TOKEN you set on {name.split('-')[0]}: ")
-    out[hashlib.sha256(token.encode()).hexdigest()] = {"caller": name, "departments": [department], "scope": "write"}
-print(json.dumps(out))
+mkdir -p ~/zbm && chmod 700 ~/zbm
+python3 devtools/ledger_callers.py new --out ~/zbm/ledger-callers.json
+```
+
+Check it with `python3 devtools/ledger_callers.py check --current ~/zbm/ledger-callers.json`, then paste the file's
+content into `LEDGER_CALLERS` on the ledger (macOS: `pbcopy < ~/zbm/ledger-callers.json`) and **do not mark it
+Sealed**. **Keep the file.** It is your record of the value and your rollback. It holds hashes only: with it, adding
+or rotating one caller needs only that caller's new token, never the others (which stay Sealed on their services).
+
+Why `LEDGER_CALLERS` is not Sealed (AEGIS ledger-callers N-M1):
+
+- It holds no secret. Each key is the SHA-256 of a 256-bit random token, which cannot be reversed or guessed, and the
+  ledger hashes whatever it is given, so a key presented as a token is refused (401). The rest is caller names and
+  departments, which this page already lists. People who can see the ledger's variables can also change them.
+- Sealing it only made the deployed value unreadable ("Sealed variables cannot be un-sealed"; not shown by the
+  dashboard, the API, `railway variables` or `railway run`). A record that no longer equals the deployed value could
+  then not be caught: `add` or `rotate` would drop a live caller's hash and cut that department off, and pasting the
+  record back would not restore it. Read back, the deployed value is the source of truth: every change starts by
+  copying it and checking the record against it.
+- Nothing else changes: the image still writes it to `/run/zbm-secrets/ledger-callers-file` (0600) and removes it
+  from the ledger's environment, as it does for `RR_STORE_CONNECTIONS`, which holds no secret either.
+
+**Already Sealed?** (Earlier versions of this page said to seal it.) Railway cannot unseal a variable. Recreate it,
+not Sealed, with the same value, and only with a value you know is the deployed one:
+
+1. `railway ssh` into the ledger and run `cat /run/zbm-secrets/ledger-callers-file`. UNVERIFIED: whether the
+   `railway ssh` user can read that file (mode 0600, owner uid 10001). Save what it prints as
+   `~/zbm/ledger-callers.deployed.json` (`chmod 600`). It is hashes only, so it shows no token on your screen.
+2. Run `python3 devtools/ledger_callers.py compare --current ~/zbm/ledger-callers.json --deployed
+   ~/zbm/ledger-callers.deployed.json`. If it is refused, or you have no record, the deployed file is the value: run
+   `check` on it and copy it over the record (`cp ~/zbm/ledger-callers.deployed.json ~/zbm/ledger-callers.json`).
+3. Run the baseline per-department check ("Changing `LEDGER_CALLERS`", step 2): every caller 200.
+4. On the ledger's Variables tab, delete `LEDGER_CALLERS` and add it again, not Sealed, with exactly the content of
+   `~/zbm/ledger-callers.json`, both before you deploy. Then redeploy the ledger and run the log check ("Changing
+   `LEDGER_CALLERS`", step 5) and the per-department check for every caller: all `200`. Anything else: stop and bring
+   the output back (the value is the one that was deployed, so the cause is elsewhere). If Railway deploys between
+   the delete and the add, the ledger refuses to start (no callers file and no shared token): it fails closed. Add
+   the variable and redeploy.
+5. **Cannot read the file?** Do not recreate it from a record you cannot prove is current. A stale record would cut a
+   department off with no way back to the Sealed value. Rotate every caller instead: new tokens for all five, `new`,
+   the value set not Sealed, each new token set on its service, then the ledger and every service redeployed. Ledger
+   writes fail until each service runs with its new token.
+
+With `LEDGER_CALLERS` set and no `LEDGER_SERVICE_TOKEN` on the ledger, there is no shared token: each service can
+write and read only its own department.
+
+#### Changing `LEDGER_CALLERS` (adding a caller, rotating one token)
+
+Every change replaces the whole value and needs a ledger redeploy. A wrong value either stops the ledger (every
+department's ledger writes then fail closed) or quietly cuts one department off. The value the ledger runs on is the
+source of truth, not your file. So:
+
+1. **Copy the deployed value and compare your record with it.** Copy it now, in this session; never reuse an old copy.
+   - Dashboard: ledger → Variables → `LEDGER_CALLERS` → copy the value. Then, on macOS:
+     `(umask 077; pbpaste > ~/zbm/ledger-callers.deployed.json)`.
+   - Or the CLI, with the project linked to production: `(umask 077; railway variables --service ledger --json |
+     python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["LEDGER_CALLERS"])' >
+     ~/zbm/ledger-callers.deployed.json)`. UNVERIFIED: that `--json` prints one flat object of name → value. Nothing
+     reaches your screen either way.
+   - Run `python3 devtools/ledger_callers.py compare --current ~/zbm/ledger-callers.json --deployed
+     ~/zbm/ledger-callers.deployed.json`. It checks that both hold the same callers, the same hashes and the same
+     grants (order and spacing do not matter to the ledger). It never prints a hash: a difference is named by caller.
+   - **Refused** (or no record): the deployed value wins, because it is what the ledger runs on. Run `check` on the
+     deployed file and do step 2 against it. If every caller answers 200, make it the record:
+     `mv ~/zbm/ledger-callers.json ~/zbm/ledger-callers.stale.json; cp ~/zbm/ledger-callers.deployed.json
+     ~/zbm/ledger-callers.json`. Then run `compare` again. Find out how the two drifted (a hand edit in Railway, a
+     rotation done another way, an old copy of the file) before you go on.
+   - **The value is empty or hidden** (still Sealed): see "Already Sealed?" above first.
+   - `add` and `rotate` (step 3) run the same comparison themselves and refuse, before asking for any token, unless
+     the record equals the deployed copy.
+2. **Baseline: every caller in the deployed value reaches the ledger now.** Run the per-department check (below) on
+   each service whose caller the `compare` summary lists (to add detection: the other four). Every one must print
+   `200`. Anything else: **stop**. Something is already wrong before you changed anything, and a change now would
+   hide it. Bring the output back.
+3. **Build the new value from the record.** It is written to a new file; the record stays as it is for rollback.
+   - Add detection: `python3 devtools/ledger_callers.py add detection-py --current ~/zbm/ledger-callers.json
+     --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json`. It asks only for
+     `DETECTION_LEDGER_TOKEN`; the other four entries are copied, not re-typed.
+   - Rotate one (generate its new token first): `python3 devtools/ledger_callers.py rotate seo-py --current
+     ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json`.
+   - Read the summary: every caller listed, each with its one department.
+4. **Set the new token on its service** (detection's `DETECTION_LEDGER_TOKEN`, or the rotated service's
+   `LEDGER_SERVICE_TOKEN`, Sealed). Do not deploy that service yet. For a rotation, that department's ledger writes
+   fail closed from the ledger redeploy (step 5) until its own redeploy (step 8), so do it when nothing of that
+   department is running.
+5. **Replace `LEDGER_CALLERS`** on the ledger (not Sealed) with the content of `~/zbm/ledger-callers.next.json` and
+   redeploy the ledger. Wait for it to be Active. Its log must show:
+   - `listening on [::]:8090`;
+   - no `REFUSING TO START`;
+   - `per-caller tokens from /run/zbm-secrets/ledger-callers-file:` listing the same callers and departments as the
+     summary from step 3.
+6. **Check the unchanged departments.** Run the per-department check on every service whose token you did *not*
+   change. Each must print `200`. Any `401` or `403`: **roll back** (below). The service you are changing is expected
+   to fail this check now, and that is not a reason to roll back. A rotated service prints `401`, because it still
+   runs with its old token. Detection, being added, prints `rr_store no-token` (or `401`), or is not running yet.
+7. **Make the new value the record.** The ledger now runs it, so it is the deployed value:
+   `mv ~/zbm/ledger-callers.json ~/zbm/ledger-callers.prev.json && mv ~/zbm/ledger-callers.next.json
+   ~/zbm/ledger-callers.json`, then `rm ~/zbm/ledger-callers.deployed.json` (out of date now; step 1 always copies a
+   fresh one).
+8. **Deploy the changed service and check it.** It must print `200`.
+   - `401`: the token on that service is not the one you gave the script. Fix **that service's token**, **not** with a
+     ledger rollback: the ledger value is right, and step 6 showed every other department still works. Set on the
+     service exactly the token you gave the script, and redeploy it. If you no longer have that token, start again at
+     step 1 with `rotate` for that caller (a fresh token).
+   - `403`: the token is there with another department. That cannot come from the script's table: roll back (paste
+     `~/zbm/ledger-callers.prev.json`) and bring the output back.
+
+What each check must print:
+
+| when | unchanged callers | rotated caller | added caller (detection) |
+|---|---|---|---|
+| step 2, before any change | `200`, else stop | `200`, else stop | not checked (not in the value yet) |
+| step 6, after the ledger redeploy | `200`, else roll back | `401` expected (old token): not a rollback | `rr_store no-token` or `401` expected: not a rollback |
+| step 8, after its own redeploy | — | `200`; `401` → fix its token, not the ledger | `200`; `401` → fix its token, not the ledger |
+
+**Per-department check** (read-only; it writes nothing to the append-only ledger). `railway ssh` into each service in
+turn and paste this with that service's department as `D`:
+
+| service | `D` |
+|---|---|
+| orchestrator | `revenue_recovery` |
+| finance | `finance` |
+| legal | `legal` |
+| seo | `seo` |
+| detection | `rr_store` |
+
+```sh
+D=finance python3 - <<'PY'
+import os, urllib.error, urllib.request
+d = os.environ["D"]
+if d == "rr_store":
+    url = os.environ["DETECTION_LEDGER_URL"]
+    try:
+        tok = os.environ.get("DETECTION_LEDGER_TOKEN") or open("/run/zbm-secrets/detection-ledger-token-file").read().strip()
+    except FileNotFoundError:
+        raise SystemExit(d + " no-token")
+else:
+    url, tok = os.environ["LEDGER_SERVICE_URL"], os.environ["LEDGER_SERVICE_TOKEN"]
+req = urllib.request.Request(f"{url}/ledger/entries?department={d}&limit=1", headers={"Authorization": "Bearer " + tok})
+try:
+    print(d, urllib.request.urlopen(req, timeout=15).status)
+except urllib.error.HTTPError as e:
+    print(d, e.code)
 PY
 ```
 
-With `LEDGER_CALLERS` set and no `LEDGER_SERVICE_TOKEN` on the ledger, there is no shared token: each service can
-write and read only its own department. Rotating one: new token on the service, re-run the script, update
-`LEDGER_CALLERS`, redeploy the ledger, then the service.
+It prints the department and an HTTP status, never the token:
+
+- `200`: the service's own token is in `LEDGER_CALLERS` with that department. In the script's table each department
+  is readable only by its one write caller, so this is that caller's write grant.
+- `401`: its token is not in the value. For a service you did not change: a typo, or the caller was dropped; roll
+  back. For the service you are changing: expected until it is redeployed (step 6); after that, fix its token (step 8).
+- `403`: the token is there, but with another department. Roll back.
+- `rr_store no-token`: detection runs without a ledger token file. Expected while detection is being added (step 6);
+  at any other time, set `DETECTION_LEDGER_TOKEN` on detection and redeploy it.
+- `KeyError`: the ssh session does not have the service's variables (UNVERIFIED Railway behaviour). Fall back:
+  - orchestrator: the smoke check `GET /revenue-recovery/findings` → 200 with `"ledger_verify": {"valid": true}`;
+  - finance, legal, seo: no `ledger refused` / `HTTP 401` line in their log at their next recorded operation;
+  - detection: a store sync that does not answer `LEDGER_UNAVAILABLE`.
+
+**Rollback** (step 6 only, before step 7). Paste `~/zbm/ledger-callers.json` (the record, unchanged, which step 1
+proved equal to the value the ledger ran on) back into `LEDGER_CALLERS` and redeploy the ledger. Then run the
+per-department check again: every caller from step 2 must print `200`. A caller you were adding then fails closed on
+the ledger until you try again (detection: `LEDGER_UNAVAILABLE`). Railway's Rollback on an earlier ledger deployment
+may also work. UNVERIFIED: whether it restores that deployment's variables. Re-pasting the record is the rollback
+this page relies on.
+
+**If the new ledger deployment fails its healthcheck.** The ledger has a volume. Railway's healthcheck docs say three
+things:
+
+- a new deployment is made active only after its healthcheck passes;
+- "we prevent multiple deployments from being active and mounted to the same service";
+- "there will be a small amount of downtime when re-deploying a service that has a volume attached".
+
+UNVERIFIED: whether the old ledger deployment is still running when the new one fails, or was already stopped. Assume
+the ledger is down until you see it Active. While it is down:
+
+- the other services keep running (nothing restarts them), but every ledger write fails closed;
+- orchestrator scans, and the finance, legal and seo operations that are recorded first, are refused;
+- detection syncs answer `LEDGER_UNAVAILABLE`;
+- nothing is written half-way and nothing on the ledger is lost.
+
+Roll back at once. Do not redeploy finance, legal or seo while the ledger is down: they refuse to start without a
+reachable ledger (their local log is checked against it).
 
 **Interpolated maps.** `FIN_CALLER_TOKENS` and `LEGAL_CALLER_TOKENS` are JSON maps built by `.railway/railway.ts`
 from other services' variables with Railway's reference syntax, e.g.
-`{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}"}`.
-You never type those two; you set the tokens they point at.
+`{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}"}`
+(`${{VARIABLE}}` with no service name is the same service's variable). You never type those two; you set the tokens
+they point at. Finance and Legal refuse to start when a token value still holds `${{` or `{{` (a reference Railway
+did not resolve, left as literal text): the error names the setting, never the value (AEGIS night review M-2).
+
+**The `onboarding` caller is you, for now** (AEGIS A1 C1). Drafting an invoice (`POST /fin/v1/invoices`) needs the
+`onboarding` (or `scheduler`) caller, and recording a client's acceptance (`POST /legal/v1/acceptances`) needs
+`onboarding` (or `hub` / `clipper_network`); none of those services is deployed. Until an onboarding service exists
+you hold `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN` yourself: generate each on your own
+machine with `openssl rand -hex 32` (two different values; each service refuses to start when a caller token is under
+32 printable characters or equals another of its tokens), paste it into the variable on its service, mark it
+**Sealed**, and keep it in your password manager. Two tokens, not one, so either can be revoked alone and a leaked
+Finance token does not record contract acceptances.
+
+> **Warning: set BOTH tokens BEFORE `railway config apply`** (AEGIS night review M-1). `FIN_CALLER_TOKENS` and
+> `LEGAL_CALLER_TOKENS` reference `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN`. If either is
+> missing when the IaC is applied, that map's `onboarding` entry is empty or unresolved and **finance and legal refuse
+> to start** on their next deploy. On a project that is already running, that is an outage of both services, not a
+> first-deploy hiccup. So: set `FIN_ONBOARDING_CALLER_TOKEN` on finance and `LEGAL_ONBOARDING_CALLER_TOKEN` on legal
+> (both Sealed) first; then run `railway config plan` and read it; only then `railway config apply`.
+
+What it means:
+- **You become maker and checker.** You draft the invoice with the onboarding token and approve it with
+  `FIN_ANDRE_APPROVAL_TOKEN`: the code still needs two different tokens and pins the approval to the draft's
+  `content_sha256`, but one person holds both, so it is a self-review step, not an independent check (FIN-19's
+  separation of duties is nominal until an onboarding service holds the token). Finance's audit trail records the
+  draft as `onboarding`, not as you.
+- **An acceptance is a claim that the client clicked.** Legal's acceptance route takes only
+  `method: clickwrap_unticked_box` with the exact text shown and an affirmative act. Record one only for an
+  acceptance the client actually made, with its evidence; never to unblock an invoice.
+- **More than the two routes.** `onboarding` also reaches, at Finance, `POST /fin/v1/payees`, `GET
+  .../billing-readiness`, `GET /fin/v1/media-buys/{id}`, the Stripe checkout create/view (which your approval token
+  already reaches) and every read open to any caller (treasury, journal, audit export, ...); at Legal,
+  `PUT /legal/v1/contracts/{client_id}/terms`, `POST .../obligations/{id}/done`, `POST .../playbooks/{type}/reviews`,
+  `POST /legal/v1/requests` and every read open to any caller. Do not use it for those. It is still the narrowest
+  caller that can draft or record: `scheduler` reaches payout runs, releases, refunds and sweeps.
 
 ## Environment variables
 
@@ -230,7 +478,7 @@ otherwise. Examples are never real values.
 | `LEDGER_BIND_ADDR` | yes | no | `[::]` (IaC) | default `127.0.0.1` |
 | `LEDGER_LOG_PATH` | yes | no | `/data/ledger/ledger.jsonl` (IaC; image default) | on the volume; `<log>.lock`, `<log>.head` next to it |
 | `RAILWAY_RUN_UID` | yes | no | `0` (IaC) | entrypoint starts as root to hand `/data/ledger` to uid 10001 |
-| `LEDGER_CALLERS` | yes | yes | (you; script above) | becomes `LEDGER_CALLERS_FILE` |
+| `LEDGER_CALLERS` | yes | no (hashes only; set **not** Sealed) | (you; `devtools/ledger_callers.py`, see Secrets) | becomes `LEDGER_CALLERS_FILE`; changing it: "Changing `LEDGER_CALLERS`" |
 | `LEDGER_CALLERS_FILE` | — | — | (set by the entrypoint) | do not set yourself |
 | `LEDGER_SERVICE_TOKEN` | no | yes | **leave unset** | the shared token; unset = only per-caller tokens work |
 | `LEDGER_ALLOW_SHARED_TOKEN` | no | no | unset | `1` would accept the shared token next to the callers file; not needed |
@@ -249,10 +497,16 @@ otherwise. Examples are never real values.
 | `ZBM_SERVICE_TOKEN` | yes | yes | (you) | the token the orchestrator presents; refuses to start without it |
 | `DETECTION_SWITCH_INTERVAL_SECONDS` | no | no | `0.001` | launcher tuning, 0.0001..0.05 |
 | `DETECTION_DRAINS_MAX` | no | no | `512` | concurrent graceful-close drains |
-| `DETECTION_LEDGER_URL`, `DETECTION_LEDGER_TOKEN_FILE` | no | token yes | unset | the Revenue Recovery store connector's evidence ledger (ADR 0020; `*_FILE` rules). Unset: every store read fails closed (record-first). Not mapped by this deploy (see "How `*_FILE` secrets map onto Railway") |
-| `RR_STORE_CONNECTIONS_FILE` | no | file holds secret references | unset (**this deploy: unset — the store connector is OFF**) | the approved Shopify connections (ADR 0020 section 3). Unset: no client is registered, every `/stores/*` call answers `NOT_CONNECTED` and no outbound call is made. The store connector is **not wired on Railway yet** (see "Open items and risks") |
-| `RR_STORE_READS_DISABLED` | no | no | unset | Revenue Recovery kill switch 1: `1` stops every store sync and snapshot (`STORE_READS_DISABLED`). Read when detection starts, so changing it needs a redeploy of detection |
-| `RR_STORE_KILL_SWITCH_FILE` | no | no | unset | Revenue Recovery kill switch 2: a path; while a file exists there every sync stops (a running one at its next page) and held snapshots are not served, with no restart. On Railway it needs a path the service can write (a volume, or `railway ssh` + `touch`); detection has no volume in this deploy |
+| `RAILWAY_RUN_UID` | yes | no | `0` (IaC) | the entrypoint starts as root only to write the secret files below, then runs detection as uid 10001 (no volume) |
+| `DETECTION_LEDGER_URL` | for store reads | no | `http://ledger.railway.internal:8090` (IaC) | the Revenue Recovery store connector's evidence ledger (ADR 0020 section 7) |
+| `DETECTION_LEDGER_TOKEN` | for store reads | yes | (you; `openssl rand -hex 32`) | detection's own ledger caller token (`rr_store` in `LEDGER_CALLERS`); becomes `DETECTION_LEDGER_TOKEN_FILE`. Unset: every store read fails closed (`LEDGER_UNAVAILABLE`, record-first). Read once when detection starts |
+| `DETECTION_LEDGER_TOKEN_FILE` | — | — | (set by the entrypoint) | do not set yourself on Railway (setting both refuses the start) |
+| `RR_STORE_CONNECTIONS` | to connect a store | references only | unset (**the store connector is OFF until you set it**) | the approved Shopify connections JSON (ADR 0020 section 3); setting it is your approval. Becomes `RR_STORE_CONNECTIONS_FILE`. Unset: no client is registered, every `/stores/*` call answers `NOT_CONNECTED` and no outbound call is made. Changing it redeploys detection (held snapshots are dropped) |
+| `RR_STORE_CONNECTIONS_FILE` | — | — | (set by the entrypoint) | do not set yourself on Railway (setting both refuses the start); off Railway, the path of the connections file |
+| `RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` | to connect a store | yes | (you) | the two credential slots, written to `/run/zbm-secrets/rr-store-secret-1-file` and `/run/zbm-secrets/rr-store-secret-2-file`, which the connections JSON names. One store at a time on Railway: one Dev Dashboard app's client ID + secret, or one legacy token in slot 1 |
+| `RR_STORE_SECRET_1_FILE`, `RR_STORE_SECRET_2_FILE` | — | — | (set by the entrypoint) | not read by detection-py; the paths are fixed and named in the connections JSON |
+| `RR_STORE_READS_DISABLED` | no | no | unset | Revenue Recovery kill switch 1: `1` stops every store sync and snapshot (`STORE_READS_DISABLED`). Read when detection starts, so changing it needs a redeploy of detection. The stop that survives a restart |
+| `RR_STORE_KILL_SWITCH_FILE` | no | no | unset; set it to `/tmp/rr-store.KILL` | Revenue Recovery kill switch 2: a path; while a file exists there every sync stops (a running one at its next page) and held snapshots are not served, with no restart. Stop at once: `railway ssh` into detection, `touch /tmp/rr-store.KILL`. detection has no volume, so the file is gone after a restart or redeploy: use kill switch 1 for a stop that must survive one |
 | `RR_STORE_MAX_CONCURRENT_SYNCS` | no | no | `2` | store syncs at once across all clients, clamped 1..16 |
 | `RR_STORE_SYNC_DEADLINE_SECONDS` | no | no | `120` | hard deadline per sync, clamped 10..600 |
 
@@ -299,7 +553,8 @@ Set by IaC or by you:
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | finance's own ledger caller token |
 | `FIN_SERVICE_TOKEN` | yes | yes | (you) | ≥ 32 printable characters |
 | `FIN_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | header `X-Andre-Approval-Token` |
-| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02` | other callers (`scheduler`, `onboarding`, ...) are not deployed yet |
+| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02`, `onboarding` | `onboarding` is your operator-held token (Secrets); other callers (`scheduler`, ...) are not deployed yet |
+| `FIN_ONBOARDING_CALLER_TOKEN` | yes to draft invoices | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
 | `FIN_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal. Without Legal no invoice can issue |
 | `FIN_LEGAL_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
 | `FIN_LEGAL_CALLER_TOKEN` | yes | yes | (you) | Finance's `finance_31` caller token at Legal |
@@ -350,7 +605,8 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | legal's own ledger caller token |
 | `LEGAL_SERVICE_TOKEN` | yes | yes | (you) | |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | |
-| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31` | |
+| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding` | `onboarding` is your operator-held token (Secrets) |
+| `LEGAL_ONBOARDING_CALLER_TOKEN` | yes to record acceptances | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
 | `LEGAL_COMPLIANCE_URL` / `LEGAL_COMPLIANCE_TOKEN` / `LEGAL_COMPLIANCE_CALLER_TOKEN` | no | — | unset | Compliance is not deployed: the stand-in (proposals stay `pending_delivery`) |
 | `LEGAL_COUNSEL_CHANNEL`, `LEGAL_ESIGN_PROVIDER` | no | — | unset | not built: setting either refuses to start |
 | `LEGAL_PORTAL_FAQ` | no | no | `0` | `1` refuses to start |
@@ -386,7 +642,8 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_LOG_MAX_BYTES`, `SEO_LOG_RETENTION_DAYS`, `SEO_LOG_MAX_OPEN_INGESTS`, `SEO_LOG_MAX_INGESTS`, `SEO_LOG_TENANT_BYTES` | no | no | 256 MiB, `90`, `2`, `30`, 1 GiB | log ingests |
 | `SEO_BOT_VERIFY_DNS`, `SEO_BOT_VERIFY_MAX` | no | no | `0`, `200` | |
 | `SEO_SCHEDULE_BUDGET_RUNS`, `SEO_SCHEDULE_PERIOD_DAYS`, `SEO_FINANCE_TIMEOUT_SECONDS` | no | no | `8`, `30`, `5` | |
-| `SEO_GSC_SERVICE_ACCOUNT_FILE` | no | yes | unset | Search Console: the Google service-account JSON key file (owner-only, ≤ 16 KiB). Unset = `NOT_CONNECTED`, no call ever made. Not mapped by this deploy (see "How `*_FILE` secrets map onto Railway") |
+| `SEO_GSC_SERVICE_ACCOUNT` | no | yes | unset | Search Console: the whole Google service-account JSON key (you). Becomes `SEO_GSC_SERVICE_ACCOUNT_FILE`. Unset = `NOT_CONNECTED`, no call ever made |
+| `SEO_GSC_SERVICE_ACCOUNT_FILE` | — | — | (set by the entrypoint) | the key file (owner-only, ≤ 16 KiB); never set it on Railway (setting it and `SEO_GSC_SERVICE_ACCOUNT` refuses the start) |
 | `SEO_GSC_WINDOW_DAYS`, `SEO_GSC_PAGE_ROWS`, `SEO_GSC_MAX_PAGES`, `SEO_GSC_MAX_ROWS` | no | no | `28`, `5000`, `10`, `50000` | Search Console read window and pagination caps (seo-py README) |
 | `SEO_GSC_MAX_REQUESTS`, `SEO_GSC_TIMEOUT_SECONDS`, `SEO_GSC_DEADLINE_SECONDS` | no | no | `30`, `10`, `60` | requests per read (must cover the page caps, else start is refused), per-attempt timeout, whole-read deadline |
 | `SEO_GSC_READS_PER_DAY`, `SEO_GSC_RETENTION_DAYS` | no | no | `4`, `90` | reads per tenant per 24 h; days before breakdowns are served as totals only |
@@ -426,6 +683,16 @@ Do these in order. Nothing in the repository creates anything; each step is your
 3. **Project.** In the Railway dashboard create an empty project (name `zbm-zbc`) and give Railway's GitHub app access
    to `DarksiedCEO/zbm-zbc`. In your checkout: `railway link` (pick the project and the `production` environment).
 4. **Plan and apply the infrastructure.**
+
+   > **Warning — on a project that already exists** (finance and legal already deployed), set BOTH
+   > `FIN_ONBOARDING_CALLER_TOKEN` (on finance) and `LEGAL_ONBOARDING_CALLER_TOKEN` (on legal) in Railway **before**
+   > `railway config apply`: a service whose onboarding token is missing refuses to start on its next deploy (finance
+   > without the first, legal without the second; their caller maps reference those variables; see [Secrets](#secrets)).
+   > Finance also refuses to start when any reference to another service's token (e.g. `FIN_LEGAL_TOKEN`) is
+   > unresolved. Generate every token with `openssl rand -hex 32` (a hand-made token containing `{{` is refused).
+   > Always run `railway config plan` first and read it;
+   > never `apply` without a plan you have read. The same holds for every later re-apply (step 13 included).
+
    ```bash
    cd .railway && npm ci && cd ..
    railway config plan      # read it: 7 services, 4 volumes, every variable; secrets show as preserved
@@ -435,8 +702,9 @@ Do these in order. Nothing in the repository creates anything; each step is your
    because a preserved variable has no value yet (behaviour not documented by Railway; see Open items), stop there and
    bring the exact message back.
 5. **Secrets.** Generate each value from [Secrets](#secrets) on your machine and set it in the Railway dashboard on the
-   service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the four ledger tokens first, then
-   `LEDGER_CALLERS` on the ledger with the script. When Railway offers to deploy the changes, wait until step 8.
+   service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the five ledger tokens first, then
+   `LEDGER_CALLERS` on the ledger with `devtools/ledger_callers.py new` (keep the file it writes; **not** Sealed: it
+   holds hashes only). When Railway offers to deploy the changes, wait until step 8.
 6. **Public domains.** orchestrator → Settings → Networking → Generate Domain (port 8080). stripe-gateway → Generate
    Domain (port 8470). No other service gets a public domain.
 7. **Stripe (test mode).** Create the restricted key and set `FIN_STRIPE_SECRET_KEY` on finance; set
@@ -466,11 +734,33 @@ Do these in order. Nothing in the repository creates anything; each step is your
 12. **Smoke test** — the checklist below.
 13. **Going live with Stripe** (later, after the test-mode smoke passes): live restricted key into
     `FIN_STRIPE_SECRET_KEY`, a new live-mode webhook endpoint (same URL, same events) and its secret into
-    `FIN_STRIPE_WEBHOOK_SECRET`, `FIN_STRIPE_LIVE=1` (in `.railway/railway.ts`, then `railway config apply`), redeploy
-    finance.
+    `FIN_STRIPE_WEBHOOK_SECRET`, `FIN_STRIPE_LIVE=1` (in `.railway/railway.ts`, then `railway config plan`, read it,
+    then `railway config apply`; both onboarding caller tokens must already be set, see step 4), redeploy finance.
 
 Operating the private services (your approval routes on finance, legal and seo) goes through `railway ssh` into that
 service and a request to `127.0.0.1:<port>` from inside it; there is deliberately no public route to them.
+
+### Connecting Search Console (optional)
+
+Search Console stays `NOT_CONNECTED` until you do this; seo starts and runs normally without it.
+
+1. Create the Google Cloud project, enable the Google Search Console API and create the service account and its
+   **JSON** key: ADR 0017 GSC-10 steps 1-3 (docs/adr/0017-seo-answer-intelligence-department-architecture.md).
+2. Railway → `seo` → Variables → New Variable: name **`SEO_GSC_SERVICE_ACCOUNT`**, value: open the downloaded `.json`
+   file in a text editor and paste **the whole file** as it is (from the first `{` to the last `}`; do not
+   base64-encode it, do not edit the `\n` sequences in `private_key`). Mark it **Sealed**. Do not create
+   `SEO_GSC_SERVICE_ACCOUNT_FILE`: the entrypoint sets it (setting both refuses the start). Do not change the start
+   command (ADR 0017 GSC-9's start-command form is superseded: it would bypass the entrypoint that runs seo as uid
+   10001).
+3. Deploy seo. At start the entrypoint writes the key to `/run/zbm-secrets/seo-gsc-service-account-file` (0600, owned
+   by uid 10001) and seo loads it; a key it cannot parse refuses the start with
+   `SEO_GSC_SERVICE_ACCOUNT_FILE: <reason>` (the key itself is never printed).
+4. Check `GET /seo/v1/status` (through `railway ssh`, as in the other approval routes): `search_console.state` is
+   `connected` and `search_console.service_account` is the key's `client_email`.
+5. Delete the downloaded `.json` from your machine; then ADR 0017 GSC-10 steps 6-7 for each client.
+
+To disconnect: delete the variable (or empty it) and redeploy; seo then reports `NOT_CONNECTED` again. To rotate:
+create a new key in Google Cloud, replace the variable's value, redeploy, then delete the old key in Google Cloud.
 
 ### Delivering an SEO client report from Railway (AEGIS final go-live M-1)
 
@@ -541,13 +831,149 @@ Railway yet. CI covers the command against a loopback service (seo-py tests and 
 Railway's, as documented above. If the tunnel is refused, do not fall back to a hand-made request. Stop, and treat
 delivery as blocked.
 
+### Revenue Recovery: connecting a real store
+
+AEGIS A2 H-2: before this, detection on Railway could not read any store (no ledger credential, no connections file,
+no credential file). The image now maps four `*_FILE` settings from sealed variables (table in "How `*_FILE` secrets
+map onto Railway"), with `RAILWAY_RUN_UID=0` so the entrypoint writes them as root and runs detection as uid 10001.
+Detection keeps no state, so it has **no volume**: the connections JSON and the credentials are sealed Railway
+variables, not files on a backed-up disk. Every one of them unset = the connector stays off (`NOT_CONNECTED`; with
+connections but no ledger token, `LEDGER_UNAVAILABLE` before any byte goes to Shopify).
+
+How the pieces fit (ADR 0020): you call detection's `POST /stores/sync` (private: SSH tunnel), which records
+`rr_store_read_requested` on the ledger, reads the store's orders read-only and keeps a minimised snapshot **in
+memory**; then the orchestrator's `POST /revenue-recovery/scan?client_id=<id>` (public, bearer) takes that snapshot,
+runs the agents and records the findings on the ledger; the dashboard's Revenue Recovery view reads them back through
+`GET /revenue-recovery/findings`. That route returns **every** client's findings (AEGIS A2 M-1): the dashboard must
+stay Andre-only.
+
+**Shopify side (your own store; a client's store follows ADR 0020 section 9).** Read this first: the documented
+path below works only if the store is in the same Shopify organization as the app (step 4). Whether a live merchant
+store such as PCA can be is UNVERIFIED. If it cannot, use the fallback after step 5 (a custom-distribution app and a
+static token). Admin-created ("legacy") custom apps
+can no longer be created (shopify.dev, "Generate access tokens for admin-created custom apps": "You can no longer create
+new admin-created custom apps"; existing ones keep working). The documented path for your own store is a Dev
+Dashboard app with the client credentials grant (shopify.dev, "Create apps using the Dev Dashboard" and "Authenticate
+an app for stores in your organization"):
+
+1. Open the Dev Dashboard (dev.shopify.com) and create an app (the "Dev Dashboard" path, not Shopify CLI).
+2. On its **Versions** page create a version: Scopes = **`read_orders` only** (no other scope, no `write_` scope:
+   detection refuses the credential with `STORE_TOKEN_EXCESS_SCOPE` / `STORE_TOKEN_HAS_WRITE_SCOPE`, before reading
+   any order). The App URL can stay the default. Select **Release**. (`read_orders` covers orders from the last 60
+   days, which is the default `lookback_days`.)
+3. **Install** it: Installs card → Install app → pick your store → Install, approving the scope.
+4. Check that the store is in the **same organization** as the app: Dev Dashboard → the store must be listed there.
+   Shopify: "Owning a store or having it installed doesn't automatically place it in your org"; if it is not, the token
+   exchange fails (`shop_not_permitted`) and detection answers `STORE_AUTH_REFUSED`. UNVERIFIED how a live merchant
+   store (not a dev store) is placed in the app's organization; if this check fails, use the fallback below.
+5. App settings → copy the **Client ID** and **Client secret** into your password manager. Never into chat or email.
+
+**If step 4 fails (fallback, AEGIS detection-branch M-3).** This is the case when the store is not in the app's
+organization: no store listed, or `STORE_AUTH_REFUSED` at step 12. A live store such as PCA may well land here. Do not
+try to force the client credentials grant. Shopify's documented route for such a store (shopify.dev, "Authenticate an
+app for stores in your organization"): "The client credentials grant can't reach a store outside your organization,
+including a client's store", so "Distribute your app to that store with custom distribution so that a merchant
+installs it", then "the authorization code grant if it runs outside" the Shopify admin.
+
+- a. **Partner organization.** Custom distribution needs one. shopify.dev, "Select a distribution method": "The
+  Distribution card appears only for apps that belong to a Partner organization". UNVERIFIED: whether you already
+  have a Partner account, and what creating one involves.
+- b. **Install.** In the app: Distribution → **Custom distribution** → enter the store's `*.myshopify.com` domain →
+  **Generate link**. Open the link as the store owner and install, approving `read_orders` only.
+- c. **Token.** Get an offline access token with the authorization code grant. Leave `expiring` at its default `0`,
+  which gives a non-expiring token. shopify.dev, "Offline access tokens": "Non-expiring offline tokens grant permanent
+  access until the app is uninstalled or the secret is revoked". The rule that public apps must use expiring tokens
+  "doesn't apply to custom apps or apps created by merchants". Detection never refreshes a token, so an expiring
+  (1 hour) token would work for one hour only. UNVERIFIED: the exact manual steps of that grant for an app with no
+  server of its own (redirect URL, `state`, the HMAC check). Do it with someone who has done it before, and never
+  paste the code or the token into a chat.
+- d. **Railway.** Put the token in `RR_STORE_SECRET_1` (Sealed) and leave `RR_STORE_SECRET_2` unset. In step 9, use
+  the static-token credential below in place of the `client_credentials` one, and skip the Client ID/secret in step 8.
+  Keep `RR_STORE_KILL_SWITCH_FILE` in step 8: it is required here too.
+
+The static-token credential (detection's `StaticTokenRef`, services/detection-py/src/store_connector/config.py):
+
+```json
+{"kind": "static_token", "token_file": "/run/zbm-secrets/rr-store-secret-1-file"}
+```
+
+What detection does with it, as for the client credentials token:
+
+- reads it from that file (owner-only, uid 10001);
+- checks its scopes against the store before reading any order: `read_orders` / `read_all_orders` only, no `write_`
+  (`STORE_TOKEN_EXCESS_SCOPE` / `STORE_TOKEN_HAS_WRITE_SCOPE`);
+- never stores or logs it.
+
+The token does not expire. To revoke it, uninstall the app from the store or rotate the app's client secret.
+
+An existing legacy custom app with **only** `read_orders` also works the same way: its Admin API access token goes in
+`RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` stays unset, and the credential is the static-token one above. Do not reuse
+an app that has any other scope.
+
+**Railway side.** Merge first: `railway config plan` must show on `detection` the new `RAILWAY_RUN_UID=0`,
+`DETECTION_LEDGER_URL` and the preserved `DETECTION_LEDGER_TOKEN`, `RR_STORE_CONNECTIONS`, `RR_STORE_SECRET_1`,
+`RR_STORE_SECRET_2`; then `railway config apply`.
+
+6. Generate `DETECTION_LEDGER_TOKEN` (`openssl rand -hex 32`) and set it on **detection** (Sealed).
+7. Add detection's caller with "Changing `LEDGER_CALLERS`" (Secrets), its steps 1 to 7: copy the deployed value and
+   compare, the baseline check on the other four, then `python3 devtools/ledger_callers.py add detection-py --current
+   ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json`
+   (asks only for the token from step 6; the four Sealed tokens are not needed). Replace `LEDGER_CALLERS` on the
+   **ledger**, redeploy it, wait for Active, run the log check and the four unchanged departments' checks, and make
+   the new value the record. Detection's own check (that section's step 8: `rr_store 200`) comes after it is deployed
+   in step 9.
+8. On **detection** set (Sealed): `RR_STORE_SECRET_1` = Client ID, `RR_STORE_SECRET_2` = Client secret. **Required,
+   not optional:** also set `RR_STORE_KILL_SWITCH_FILE` = `/tmp/rr-store.KILL` (not a secret). Without it the
+   at-once stop below does nothing (nothing defaults it).
+9. On **detection** set `RR_STORE_CONNECTIONS` (this is your approval; `shop` is the store's `*.myshopify.com` handle,
+   not its custom domain; `client_id` is the id you will scan under):
+   ```json
+   {"version": 1, "connections": [{"client_id": "pca", "platform": "shopify",
+     "shop": "<handle>.myshopify.com",
+     "credential": {"kind": "client_credentials",
+                    "client_id_file": "/run/zbm-secrets/rr-store-secret-1-file",
+                    "client_secret_file": "/run/zbm-secrets/rr-store-secret-2-file"},
+     "approval": {"approved_by": "andre", "approved_on": "<YYYY-MM-DD>", "approval_ref": "pca-rr-test-1"},
+     "budget": {"syncs_per_day": 4, "max_orders": 1000, "lookback_days": 60, "snapshot_max_age_hours": 24}}]}
+   ```
+   Deploy detection. Its log must show it listening, and no `REFUSING TO START` line. Then run the per-department
+   check on detection ("Changing `LEDGER_CALLERS`", step 8): `rr_store 200`. A `401` there means detection's token
+   is not the one you gave the script: fix detection's `DETECTION_LEDGER_TOKEN`, not the ledger.
+10. Open a tunnel to detection (as for seo above) and leave it running:
+    `ssh -N -L 127.0.0.1:18000:127.0.0.1:8000 <detection-service-instance-id>@ssh.railway.com`.
+    Put `Authorization: Bearer <ZBM_SERVICE_TOKEN>` in a file only you can read (`chmod 600`), e.g. `~/zbm/det.hdr`,
+    so the token is never on a command line.
+11. Status (no outbound call): `curl -sS -H @$HOME/zbm/det.hdr http://127.0.0.1:18000/stores/pca/status` →
+    `"connected": true`, `"kill_switch": false`.
+12. Sync (the only call that reaches Shopify): `curl -sS -X POST -H @$HOME/zbm/det.hdr -H 'Content-Type:
+    application/json' -d '{"client_id": "pca"}' http://127.0.0.1:18000/stores/sync` → 200 with `snapshot_id`,
+    `orders_read`, `orders_analysed`. A reason code instead: `LEDGER_UNAVAILABLE` (step 6/7), `STORE_AUTH_REFUSED`
+    (step 4/5; the store is not in the app's organization: the fallback after step 5), `STORE_SCOPE_MISSING` / `STORE_TOKEN_EXCESS_SCOPE` (step 2), `STORE_CONFIG_INVALID` (step 9 JSON),
+    `STORE_CREDENTIAL_UNREADABLE` (step 8).
+13. Scan, within 24 hours of the sync and with no detection redeploy in between (the snapshot lives in memory):
+    with `Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>` in `~/zbm/orch.hdr`,
+    `curl -sS -X POST -H @$HOME/zbm/orch.hdr "https://<orchestrator domain>/revenue-recovery/scan?client_id=pca" -o
+    ~/zbm/scan-pca.json`.
+14. Read it: the dashboard's Revenue Recovery view (findings recorded on the ledger), and the client-style report
+    from a checkout of the commit detection runs: `python3 services/detection-py/devtools/rr_report.py
+    ~/zbm/scan-pca.json --md ~/zbm/report-pca.md`. Review before anyone else sees it.
+
+What the first run can show: only the discount-misuse check is fed by Shopify orders (seven agents are NOT COVERED by
+this source), and orders with automatic discounts or refunds are left out (ADR 0020 Limitations). A store with few or
+no orders in the window gives few or no findings; the run still proves the path (ledger records, scopes, snapshot).
+
+**Stop / disconnect.** At once: `railway ssh` into detection, `touch /tmp/rr-store.KILL` (gone after a restart).
+Durable: `RR_STORE_READS_DISABLED=1` on detection (redeploys it). Disconnect: delete `RR_STORE_CONNECTIONS`,
+`RR_STORE_SECRET_1`, `RR_STORE_SECRET_2` (redeploys detection; snapshots are dropped), then uninstall the app in the
+store or rotate its client secret in the Dev Dashboard.
+
 ## Smoke-test checklist
 
 Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the stripe-gateway's domain.
 
 - [ ] Every service is Active and passed its healthcheck (`/health`).
 - [ ] ledger log: `ledger_created` on the first deploy, the callers listed (orchestrator-go, finance-py, legal-py,
-      seo-py, each with its one department), no shared-token warning.
+      seo-py, detection-py, each with its one department), no shared-token warning.
 - [ ] finance, legal, seo logs: no `REFUSING TO START` / `refusing to start`.
 - [ ] SEO report delivery path: open the seo tunnel (steps 1-2 of "Delivering an SEO client report from Railway"),
       `curl -sS http://127.0.0.1:18500/health` → 200 `{"status":"ok"}`, then close it.
@@ -561,10 +987,22 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
       `client_id` against production as a test: the ledger is append-only.
 - [ ] `curl -sS https://$GW/health` → 200.
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$GW/webhooks/stripe -d '{}'` → `400` (no signature).
-- [ ] Stripe CLI, test mode: `stripe trigger payment_intent.succeeded` → Stripe dashboard → the webhook endpoint shows
-      the delivery answered `200`. (A `400` means Finance refused the signature: re-check `FIN_STRIPE_WEBHOOK_SECRET`.
-      A `503` means Finance could not read Stripe back or was unreachable: check finance's log and the key's
-      permissions.)
+- [ ] Stripe webhook, **no money**: resend one existing **`checkout.session.*`** event, and only that type, to this
+      endpoint: `stripe events resend evt_… --webhook-endpoint we_…` (the `we_…` id is on the endpoint's page; the
+      flag syntax is unverified, so the fallback is the **Resend** button on that event under the endpoint's Event
+      deliveries) → the delivery answers `200` `{"result":"received"}`. Finance answers it `unknown_session`: it reads
+      the session and its PaymentIntent back with the restricted key and writes only a `stripe_event_applied` evidence
+      event, no journal entry and no break. (A `400` means the Finance rules are not approved yet or Finance refused the
+      signature: re-check `FIN_STRIPE_WEBHOOK_SECRET`. A `503` means Finance could not read Stripe back or was
+      unreachable: check finance's log and the key's permissions.) If the sandbox has no `checkout.session.*` event
+      yet, skip this line; the unsigned `400` check above and finance's `/health` below still prove the wiring.
+      **Never run `stripe trigger` (or resend a `payment_intent.*` / `charge.*` event) against the sandbox production
+      uses.** Finance has one journal per volume and no test/live split: once the Finance rules are approved, a
+      triggered `payment_intent.succeeded` has no Finance invoice, so it books unapplied cash into the production
+      books for good (Dr 1060 / Cr 2070, the fee, and an open `unapplied_cash` break that blocks payouts), and the
+      ledger is append-only. Every enabled endpoint in a sandbox receives that sandbox's events, so a `stripe trigger`
+      that should exercise the whole payment path belongs in a staging environment wired to its **own** separate
+      Stripe sandbox, with the Stripe CLI logged in to that sandbox.
 - [ ] finance `/health` from inside (`railway ssh` → `python3 -c "import urllib.request as u;
       print(u.urlopen('http://127.0.0.1:8410/health').read())"`): `"in_memory": false`,
       `"stripe_incoming": {"wired": true, "livemode": false}`.
@@ -611,7 +1049,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   variable to `0.0.0.0`.
 - **Railway behaviours taken from the docs or the SDK types, not observed:** `preserve()` on a variable that does not
   exist yet (first apply); `${{service.VARIABLE}}` interpolation inside the two JSON maps, including the hyphen in
-  `stripe-gateway`; `requiredMountPath` (an SDK field, not described in the docs); `RAILWAY_RUN_UID=0`;
+  `stripe-gateway`, and the same-service `${{VARIABLE}}` form for the two `onboarding` entries (and the reference
+  resolving to a Sealed variable); `requiredMountPath` (an SDK field, not described in the docs); `RAILWAY_RUN_UID=0`;
   `checkSuites: true` (wait for CI); `railway ssh` sessions having the service's variables; the CLI applying
   `backupSchedules` from a volume attachment (the SDK types it and emits it in the graph; checked by evaluating the
   file, not by a plan).
@@ -623,18 +1062,15 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   tenant; a fixture scan is refused unless `ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1` (never set here; L-2).
 - **No scheduler is deployed.** Finance's daily reconciliation and Stripe-session job, Legal's daily jobs and seo's
   schedule tick need a `scheduler` caller (and a cron service) that this deploy does not include.
-- **Detection's store connector is not wired on Railway** (ADR 0020, golive-rr): the orchestrator's scans still use
-  the fixture pool; the Shopify store connector needs `DETECTION_LEDGER_URL` and `DETECTION_LEDGER_TOKEN_FILE`, which
-  this deploy does not set (detection runs non-root and maps no secret file), so every store read fails closed with
-  `LEDGER_UNAVAILABLE`. Wiring it needs a ledger caller for detection in `LEDGER_CALLERS`, a `--secret-file` in the
-  detection image and `RAILWAY_RUN_UID=0` for it. This deploy also sets no `RR_STORE_CONNECTIONS_FILE`, so no store
-  is registered and the connector is **off**: every `/stores/*` call is `NOT_CONNECTED`. When it is wired, the two
-  stops are `RR_STORE_READS_DISABLED=1` (then redeploy detection) and the file named by `RR_STORE_KILL_SWITCH_FILE`
-  (takes effect at once; needs a writable path, which detection does not have today). Both are in the detection
-  table above.
-- **Search Console is NOT_CONNECTED on Railway** (golive-gsc): the seo image maps no `SEO_GSC_SERVICE_ACCOUNT_FILE`.
-  Turning it on needs `--secret-file SEO_GSC_SERVICE_ACCOUNT_FILE` in the seo image (the value variable would be
-  `SEO_GSC_SERVICE_ACCOUNT`, the JSON key) and Andre's steps in ADR 0017 "Search Console".
+- **Detection's store connector on Railway: wired, off until Andre connects a store** (AEGIS A2 H-2). The image maps
+  four secret files and detection runs with `RAILWAY_RUN_UID=0` (root only in the entrypoint); the IaC sets
+  `DETECTION_LEDGER_URL`. Not yet observed on Railway: the first real sync is the first end-to-end check of the
+  connector against Shopify (ADR 0020 Limitations), and the detection secret-file start is checked by running the
+  entrypoint locally, not by the CI smoke (which starts detection as uid 10001 with no store values). Residual risks:
+  `GET /revenue-recovery/findings` returns every client's findings (AEGIS A2 M-1), so the dashboard must stay
+  Andre-only; one store at a time (two credential slots); a connections or credential change redeploys detection and
+  drops held snapshots; the per-day sync budget resets on restart (in memory, ADR 0020); the approval is the
+  `RR_STORE_CONNECTIONS` variable itself, so anyone who can edit detection's variables can register a store.
 - **Dashboard login limiter** depends on `DASHBOARD_TRUSTED_PROXY_HOPS` and an unverified Vercel behaviour (above).
 - **Version skew.** CI installs each service's `requirements.txt`, whose transitive dependencies float; the images
   install the hash lock. They can differ (the lock already takes certifi 2026.10.19 for PYSEC-2026-4320). `audit-python`
