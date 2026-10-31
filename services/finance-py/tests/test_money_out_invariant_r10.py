@@ -5,8 +5,11 @@ must reach Compliance's client activation, ``_activation``), MONEY_IN_GATED (app
 it too, RTM-01) or NOT_CLIENT_MONEY (with the reason). A new route that is in none of the tables fails the first test,
 so it cannot skip the question by being forgotten; a classified route whose service method no longer reaches
 ``_activation`` (statically, through ``self.<method>`` references across the service mixins) fails the second.
-The behaviour behind each MONEY_OUT route is exercised end to end in test_compliance_payouts_r10.py,
-test_compliance_outflows_r9.py and test_compliance_bank_rtm.py; this file guards the inventory.
+AEGIS r11 R11-7: routes are discovered from the LIVE app (``create_app(...).routes``: any declaration form, ``path=``
+and ``api_route`` included), and every money route is paired with behavioural tests (BEHAVIOUR) that drive it with a
+refused client and assert that THAT client's money does not move (source and target client for a receipt applied to
+an invoice); the pairing is checked and those tests are run, so an ask on one branch only, or about the wrong client,
+fails here too.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ MONEY_OUT = {
     ("POST", "/fin/v1/refunds/{refund_id}/repay"): "Andre pays a deposit refund again",
     ("POST", "/fin/v1/media-buys/{buy_id}/vendor-payments"): "pays a media vendor from the client's prepayment",
     ("POST", "/fin/v1/invoices/{invoice_id}/compliance-hold/release"): "releases held money to the client's account",
+    ("POST", "/fin/v1/receipts/{receipt_id}/compliance-hold/release"): "releases held unapplied money (AEGIS r11 R11-2)",
     ("POST", "/fin/v1/jobs/{job}/run"): "the accrual job accrues; rail-sync retries transfers; stripe-sessions "
                                         "releases holds",
 }
@@ -79,6 +83,50 @@ NOT_CLIENT_MONEY = {
     ("POST", "/fin/v1/rules/decisions"): "rules",
     ("POST", "/fin/v1/tax/readiness"): "tax filing readiness",
     ("POST", "/fin/v1/reconcile"): "local-log / ledger reconcile",
+    ("POST", "/fin/v1/refunds/{refund_id}/cancel"): "an UNPAID refund back to the campaign's deposit (2050 to 2010); "
+                                                    "nothing leaves",
+}
+# AEGIS r11 R11-7: each money route's behavioural proof (a refused client's money does not move through it)
+_P10, _R9, _BANK, _R11 = ("test_compliance_payouts_r10.py", "test_compliance_outflows_r9.py",
+                          "test_compliance_bank_rtm.py", "test_aegis_r11_fin.py")
+BEHAVIOUR = {
+    ("POST", "/fin/v1/payout-handoffs"): [f"{_P10}::test_aegis_r10_1_probe_a_sanctioned_brands_deposit_pays_no_creator"],
+    ("POST", "/fin/v1/payout-runs"): [f"{_P10}::test_a_payout_run_excludes_payables_of_a_brand_that_is_no_longer_allowed",
+                                      f"{_P10}::test_another_brands_refusal_does_not_block_this_brands_creators"],
+    ("POST", "/fin/v1/payout-batches/{batch_id}/decision"): [
+        f"{_P10}::test_andres_approval_is_refused_with_the_ofac_warning_after_a_match"],
+    ("POST", "/fin/v1/payout-batches/{batch_id}/second-approval"): [f"{_P10}::test_the_second_approver_is_refused_too"],
+    ("POST", "/fin/v1/payout-batches/{batch_id}/release"): [
+        f"{_P10}::test_the_release_excludes_an_item_whose_brand_was_matched_after_approval_and_funding",
+        f"{_R11}::test_r11_5_p5_a_hold_booked_while_the_release_gathers_excludes_the_item"],
+    ("POST", "/fin/v1/treasury/funding"): [
+        f"{_P10}::test_rail_funding_is_refused_after_a_match_at_proposal_and_at_andres_decision"],
+    ("POST", "/fin/v1/treasury/funding/{op_id}/decision"): [
+        f"{_P10}::test_rail_funding_approved_while_allowed_is_refused_at_execution_after_a_match"],
+    ("POST", "/fin/v1/refunds/{campaign_id}"): [f"{_R9}::test_aegis_r9_probe_a_sanctioned_clients_deposit_is_never_refunded"],
+    ("POST", "/fin/v1/refunds/{refund_id}/decision"): [
+        f"{_R9}::test_a_refund_proposed_while_allowed_is_refused_at_approval_with_an_ofac_warning_for_andre"],
+    ("POST", "/fin/v1/refunds/{refund_id}/repay"): [
+        f"{_P10}::test_o4_a_refund_is_not_paid_again_after_the_client_becomes_an_ofac_match"],
+    ("POST", "/fin/v1/media-buys/{buy_id}/vendor-payments"): [
+        f"{_BANK}::test_a_vendor_payment_reads_the_clients_activation_at_the_moment_of_payment",
+        f"{_BANK}::test_rtm01b_no_vendor_is_paid_from_a_sanctioned_clients_wire"],
+    ("POST", "/fin/v1/invoices/{invoice_id}/compliance-hold/release"): [
+        "test_compliance_hold_r5.py::test_a_sanctions_hold_is_marked_and_never_released_by_refund_or_allow"],
+    ("POST", "/fin/v1/receipts/{receipt_id}/compliance-hold/release"): [
+        f"{_R11}::test_r11_2_the_receipt_release_is_andre_only_and_refuses_a_plain_hold_while_still_refused"],
+    ("POST", "/fin/v1/jobs/{job}/run"): [
+        f"{_P10}::test_an_accrual_job_retry_accrues_only_once_the_brand_is_allowed_again"],
+    ("POST", "/fin/v1/bank/events"): [f"{_BANK}::test_rtm01a_a_wire_from_a_sanctioned_client_is_booked_but_held"],
+    ("POST", "/fin/v1/receipts/{receipt_id}/apply"): [
+        f"{_R11}::test_r11_1_p2_held_unapplied_money_is_never_applied_to_another_clients_invoice",
+        f"{_R11}::test_r11_1_an_unheld_receipt_whose_source_client_is_refused_now_is_not_applied_elsewhere"],
+    ("POST", "/fin/v1/stripe/events"): [
+        "test_compliance_gate_adr0024.py::test_a_payment_from_a_client_refused_at_booking_is_booked_and_held"],
+    ("POST", "/fin/v1/invoices/{invoice_id}/decision"): [
+        "test_compliance_gate_adr0024.py::test_a_refused_or_lapsed_activation_refuses_the_invoice"],
+    ("POST", "/fin/v1/invoices/{invoice_id}/stripe-checkout"): [
+        "test_compliance_gate_adr0024.py::test_no_stripe_page_without_a_current_allow"],
 }
 # the jobs route dispatches by name: these jobs move or commit client money and must each reach Compliance
 JOBS_MONEY_OUT = ("job_accrual", "job_rail_sync", "job_stripe_sessions")
@@ -87,19 +135,22 @@ NOT_ACTIONS = ("founder_refused",)
 
 
 def _routes() -> dict[tuple[str, str], set[str]]:
-    """(method, path) -> the ``svc.<name>`` service methods its handler calls (parsed from api.py)."""
-    tree = ast.parse((SRC / "api.py").read_text())
+    """(method, path) -> the ``svc.<name>`` service methods its handler calls. AEGIS r11 R11-7: discovered from the
+    LIVE app's routes (every declaration form), each handler's own source parsed for ``svc.<name>(...)`` calls."""
+    import inspect
+    import textwrap
+
+    from helpers import Harness
     out: dict[tuple[str, str], set[str]] = {}
-    for f in ast.walk(tree):
-        if not isinstance(f, ast.FunctionDef):
+    for r in Harness().app.routes:
+        methods = set(getattr(r, "methods", None) or ()) & {"POST", "PUT", "PATCH", "DELETE"}
+        if not methods:
             continue
-        for d in f.decorator_list:
-            if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and isinstance(d.func.value, ast.Name) \
-                    and d.func.value.id == "app" and d.func.attr in ("post", "put", "patch", "delete") and d.args:
-                calls = {n.func.attr for n in ast.walk(f) if isinstance(n, ast.Call)
-                         and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
-                         and n.func.value.id == "svc"}
-                out[(d.func.attr.upper(), d.args[0].value)] = calls
+        tree = ast.parse(textwrap.dedent(inspect.getsource(r.endpoint)))
+        calls = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) and n.func.value.id == "svc"}
+        for m in methods:
+            out[(m, r.path)] = calls
     return out
 
 
@@ -175,3 +226,26 @@ def test_the_invariant_catches_a_route_that_stops_asking():
     assert _reaches(g, "propose_refund")
     g2 = {k: (v - {"_outflow_reasons"} if k == "propose_refund" else v) for k, v in g.items()}
     assert not _reaches(g2, "propose_refund")
+
+
+def test_every_money_route_is_paired_with_behavioural_tests_that_pass():
+    """AEGIS r11 R11-7: each money route has behavioural proof that the REFUSED client's money does not move through
+    it (the right client asked, on every branch to the effect); the named tests exist and are run here."""
+    import re
+    import subprocess
+    import sys
+    from pathlib import Path as P
+    here = P(__file__).resolve().parent
+    money = set(MONEY_OUT) | set(MONEY_IN_GATED)
+    assert set(BEHAVIOUR) == money, ("money routes without behavioural proof", sorted(money - set(BEHAVIOUR)),
+                                     "stale", sorted(set(BEHAVIOUR) - money))
+    ids = []
+    for key, tests in sorted(BEHAVIOUR.items()):
+        assert tests, key
+        for t in tests:
+            mod, fn = t.split("::")
+            assert re.search(rf"^def {re.escape(fn)}\(", (here / mod).read_text(), re.M), (key, t)
+            ids.append(str(here / mod) + "::" + fn)
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *sorted(set(ids))],
+                       cwd=str(here.parent), capture_output=True, text=True, timeout=900)
+    assert r.returncode == 0, (r.stdout[-3000:], r.stderr[-1000:])
