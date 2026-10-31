@@ -1218,6 +1218,145 @@ Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands hav
 them under `thresholds.check_before_first_client` ("local gross receipts/business tax — check before first client")
 and flags any of them with a sale. Do that check before the first client there.
 
+### Founder contract approval (ADR 0022)
+
+Your ruling (Oct 30 2026): you approve the client contracts yourself. For `client_msa`, the SOWs (`sow`,
+`sow_seo_audit`, `sow_revenue_recovery`) and `zbc_order_form` only, you approve each version as founder and make the
+CQ-19 determination yourself, so a client's clickwrap acceptance counts. Both are recorded as yours
+(`approval_basis: founder_approval`, `evidence_basis: founder_determination`). Every other document is unchanged.
+None of this clears Finance's sales-tax row FIN-CQ-11. That row still blocks every invoice until you amend it (finance
+README, "First steps for Andre", step 2).
+
+You need: the legal service's **service instance ID** (dashboard → `legal` → `Ctrl+K` / `Cmd+K` → **Copy Service
+Instance ID**), a checkout of the commit legal runs, and the three values from legal's Variables tab:
+`LEGAL_SERVICE_TOKEN`, `LEGAL_ANDRE_APPROVAL_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN`. Pick each `request_id` once
+(`[A-Za-z0-9._:-]`, at most 128 characters). Re-sending the same body with the same id within 15 minutes returns the
+same answer and records nothing twice.
+
+1. **Tunnel and header files.** In its own terminal, leave this running:
+   `ssh -N -L 127.0.0.1:18420:127.0.0.1:8420 <legal-service-instance-id>@ssh.railway.com`.
+   In a second terminal, write each token into a header file that only you can read. Paste the value; do not echo it
+   on a command line:
+
+   ```sh
+   umask 077 && mkdir -p ~/zbm && cd ~/zbm
+   printf 'Authorization: Bearer %s\n' "$(cat)" > legal-svc.hdr       # paste LEGAL_SERVICE_TOKEN, Enter, Ctrl-D
+   printf 'X-Andre-Approval-Token: %s\n' "$(cat)" > legal-andre.hdr   # paste LEGAL_ANDRE_APPROVAL_TOKEN, Enter, Ctrl-D
+   printf 'X-LEGAL-Caller-Token: %s\n' "$(cat)" > legal-onb.hdr       # paste LEGAL_ONBOARDING_CALLER_TOKEN, Enter, Ctrl-D
+   L=http://127.0.0.1:18420; A="-H @$HOME/zbm/legal-svc.hdr -H @$HOME/zbm/legal-andre.hdr"
+   curl -sS $L/health                                                  # 200 {"status":"ok",...}
+   ```
+
+2. **LG-20 must be in force.** Run `curl -sS $A $L/legal/v1/rules > rules.json`. Then:
+   - `rules_version` is `null`: approve the seed. Its rows include LG-20. Take `proposal_id` and `content_sha256` of
+     the `open_proposals` entry with `"kind": "seed"` and send
+     `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "legal-seed-1", "decisions": [{"proposal_id": "<proposal_id>", "content_sha256": "<content_sha256>", "decision": "approve"}]}' $L/legal/v1/rules/decisions`.
+   - A version is in force but `rules` has no `"rule_id": "LG-20"` (approved before ADR 0022): add it. This is not a
+     weakening. From the checkout, run:
+     ```sh
+     python3 -c 'import json,sys; r=[x for x in json.load(open(sys.argv[1]))["rows"] if x["rule_id"]=="LG-20"][0]; print(json.dumps({"request_id": "lg20-add-1", "kind": "add", "proposed_row": r}))' \
+       services/legal-py/seed/legal_rules_seed.json > ~/zbm/lg20-add.json
+     curl -sS $A -H 'Content-Type: application/json' -d @$HOME/zbm/lg20-add.json $L/legal/v1/rules/proposals
+     ```
+     The answer's `proposal` must show `"weakening": false`. Approve it with its `proposal_id` and `content_sha256`:
+     `-d '{"request_id": "lg20-add-1-dec", "decisions": [{"proposal_id": "<proposal_id>", "content_sha256": "<content_sha256>", "decision": "approve", "note": "ADR 0022"}]}'`
+     to `$L/legal/v1/rules/decisions`.
+   - LG-20 is listed with `"status": "verified"`: nothing to do.
+3. **Upload the MSA** (your final text, one plain-text file, no `{{placeholders}}`; a standard form any client may
+   accept). Legal assigns the version number.
+   ```sh
+   python3 -c 'import json,sys; print(json.dumps({"request_id": "msa-upload-1", "entity": "zbm", "text": open(sys.argv[1], encoding="utf-8").read()}))' ~/zbm/msa.txt > ~/zbm/msa-upload.json
+   curl -sS $A -H 'Content-Type: application/json' -d @$HOME/zbm/msa-upload.json $L/legal/v1/documents/client_msa/versions
+   ```
+   → 201 `{"version": "1.0", "sha256": "<64 hex>", "status": "draft", ...}`. Keep `version` and `sha256`. If the
+   MSA carries the CCPA clause, add `"clause_ids": [{"clause_id": "MSA-CCPA-01", "position": "standard"}]` to the
+   body. Use
+   `"entity": "zbc"` for a ZBC document. `zbc_order_form` is ZBC only.
+4. **Approve it as founder:**
+   `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "msa-fap-1", "version_sha256": "<sha256>", "rationale": "<your reason, 20-2000 characters>", "founder_confirms": true}' $L/legal/v1/documents/client_msa/versions/<version>/founder-approval`
+   → 200 with `"status": "approved"`, `"approval_basis": "founder_approval"` and `"review_by"`, its renewal date
+   (90 days by default). Optional `"effective_at": "<RFC 3339>"` delays it.
+   Your rationale can be read back at any time:
+   `curl -sS $A $L/legal/v1/documents/client_msa/versions/<version>/founder-approval/rationale`.
+   Refusals:
+   - `UNFILLED_PLACEHOLDER`: a placeholder is left; fill it and upload again. Any `[...]` counts (`[FEE]`, `[ ]`,
+     `[●]`, `[30]`, `[Client Name]`), and so do `<<...>>`, `{client_name}`, `___`, `$X,XXX` and `TBD`/`TBA`. Only
+     standard lines such as `[SIGNATURE PAGE FOLLOWS]`, `[Remainder of page intentionally left blank.]`,
+     `[EXHIBIT A-1]` or `[N/A]`, footnotes `[^1]`, signature lines exactly like `By: ______`, and links to a web
+     address are fine (ADR 0022 lists them exactly). The check is a backstop, not a guarantee: it does not see
+     a bare `CLIENT NAME` or `(CLIENT NAME)`, so read the text before you approve it.
+   - `HASH_MISMATCH`: wrong sha256.
+   - `FOUNDER_PATH_NOT_IN_FORCE`: step 2 was not done.
+   - `FOUNDER_PATH_NOT_ALLOWED`: not one of the three documents.
+   - `VERSION_NOT_APPROVABLE`: the version is not a draft.
+5. **SOW templates** (one document each, so both are live together): `sow_seo_audit` and `sow_revenue_recovery`.
+   Upload each template as in step 3, adding its variable schema. Every `{{name}}` in the text needs an entry, and
+   no `[BRACKET]` may be left: Legal refuses to make a version current while one remains (`UNFILLED_PLACEHOLDER`).
+   ```sh
+   python3 -c 'import json,sys; print(json.dumps({"request_id": "sow-seo-upload-1", "entity": "zbm", "text": open(sys.argv[1], encoding="utf-8").read(), "template_variables": json.load(open(sys.argv[2]))}))' ~/zbm/sow-seo.txt ~/zbm/sow-seo-vars.json > ~/zbm/sow-seo-upload.json
+   curl -sS $A -H 'Content-Type: application/json' -d @$HOME/zbm/sow-seo-upload.json $L/legal/v1/documents/sow_seo_audit/versions
+   ```
+   `sow-seo-vars.json` maps each placeholder to a type, for example
+   `{"client_legal_name": {"type": "string", "max_length": 200}, "audit_fee_usd": {"type": "string", "max_length": 20}}`
+   (types: `string` with `max_length` ≤ 500, `date`, `int` with `min`/`max`, `enum` with `values`). Founder-approve
+   the template (step 4, at `.../sow_seo_audit/versions/<version>/founder-approval`). A template is never acceptable
+   itself. **Per client:** fill it with your token, then approve that client's fill:
+   `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "sow-seo-<client_id>-1", "entity": "zbm", "party_ref": "client:<client_id>", "variables": {"client_legal_name": "...", "audit_fee_usd": "..."}}' $L/legal/v1/documents/sow_seo_audit/versions`
+   → 201 with the fill's `version` and `sha256`. Then step 4 on that version, with a one-line rationale (the client
+   and the price). Only that client can accept it. The same goes for `sow_revenue_recovery`.
+6. **CQ-19 founder determination** (once; it lasts `LEGAL_MEMO_REVIEW_DAYS`, 90 by default):
+   `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "cq19-fdt-1", "rationale": "<how the client sees and ticks the box, and what is kept>", "founder_confirms": true}' $L/legal/v1/register/CQ-19/founder-determination`
+   → 200 `"founder_determination": {"status": "active", "renew_by": "<date>", ...}`.
+   `curl -sS $A $L/legal/v1/register/CQ-19` shows it at any time.
+7. **Record a client's acceptance**, only after the client actually ticked the unticked box next to exactly that
+   text (railway.md, "The `onboarding` caller is you, for now"). Use the onboarding token, not your approval token:
+   `curl -sS -H @$HOME/zbm/legal-svc.hdr -H @$HOME/zbm/legal-onb.hdr -H 'Content-Type: application/json' -d '{"request_id": "acc-<client_id>-msa-1", "party_ref": "client:<client_id>", "signer_identity_ref": "<signer ref>", "doc_id": "client_msa", "version": "<version>", "doc_sha256": "<sha256>", "presented_sha256": "<sha256 of the exact text shown>", "method": "clickwrap_unticked_box", "presentation": "scroll_to_accept", "affirmative_act": true}' $L/legal/v1/acceptances`
+   → 201 with `"evidence_sufficient": true`, `"evidence_basis": "founder_determination"`. Keep
+   `acceptance_id`.
+   - `presentation`: one of `scroll_to_accept`, `link` or `inline`.
+   - `signer_identity_ref`: 1-200 characters of `[A-Za-z0-9._:/-]`. No `@`, so no email address. Use your own
+     reference for the person, such as `signer:acme-owner-1`.
+   - Never put an IP address, user agent or device detail anywhere in the body: it is refused 422.
+   - `presented_sha256` must equal `doc_sha256`.
+
+   Refusals:
+   - `VERSION_NOT_IN_FORCE`: step 4 was not done (for a SOW: on that client's fill).
+   - `ACCEPTANCE_HASH_MISMATCH`: wrong sha256.
+   - `INSTANCE_NOT_BOUND`: the SOW is bound to another client.
+   - `TEMPLATE_NOT_ACCEPTABLE`: you sent the template, not the client's fill.
+
+   For a client's SOW, send the same body with `"doc_id": "sow_seo_audit"` (or `sow_revenue_recovery`) and the
+   version and sha256 of THAT client's approved fill. An acceptance recorded
+   before step 6 stays insufficient (records never change): record it again with a new request_id after step 6.
+8. **What Finance gets.** The contract reference for Finance's billing profile (`msa`) and an invoice's `legal_ref` is
+   `{"doc_id": "client_msa", "version": "<version>", "doc_sha256": "<sha256>", "acceptance_id": "<acceptance_id>"}`
+   (or the SOW's). Finance no longer refuses on Legal. FIN-CQ-11 still does until you amend it. Finance's
+   `GET /fin/v1/clients/<client_id>/billing-readiness` shows the MSA's renewal date under `contract_renewal`.
+9. **Renewal.** An approval must be renewed by its `review_by` date (90 days by default), and the CQ-19 determination
+   by its `renew_by`. Finance's billing-readiness shows `contract_renewal.MSA.renew_by` and `renewal_due_soon: true`
+   in the last 14 days. After the date, Finance refuses with "...renewal date passed on <date>: Andre renews it at
+   Legal". To renew,
+   re-read the version (`curl -sS $A $L/legal/v1/documents/client_msa/versions/<version>`; the `sha256` must be the
+   one you approved) and send step 4 again with a new `request_id` and rationale. If you already approved a newer
+   version of the same document, renewal is refused (`VERSION_SUPERSEDED`); add `"renew_superseded": true` only if
+   you really mean to bring the older one back. The version, its hash and every
+   client acceptance stay the same; only `review_by` moves. Send step 6 again with a new request_id. Acceptances
+   already recorded stay sufficient.
+10. **To stop the founder path:** amend LG-20 to `"status": "unverified"`. Send it as a rules proposal
+    (`"kind": "amend"`, `"target_id": "LG-20"`, the row from `rules.json` with only `status` changed, and no
+    `in_force` key), then approve it. This is a tightening. It takes every founder-approved version out of force at
+    once, and acceptances resting on the CQ-19 determination stop counting: Finance then refuses invoices under them.
+    Reopening the path after that needs a code change.
+    If Compliance invalidates CQ-19 and you record a new determination later, acceptances recorded before the
+    invalidation do not count again: those clients accept again. If you retire a SOW template, its client fills can
+    no longer be accepted or renewed; acceptances already recorded run until the fill's renewal date.
+
+Clean up: close the tunnel (Ctrl-C) and `rm ~/zbm/legal-*.hdr`. The request bodies of steps 2 (seed), 3, 4, 6, 7
+and 8 ran end to end on Oct 30 2026 against a local stack: the real ledger-rust binary, plus legal-py and finance-py
+started through their production entrypoints. The LG-20 add (step 2) and the stop (step 10) are covered by legal-py's
+tests. The tunnel, the header files and these exact curl lines have not been run, and nothing here has been run
+against Railway.
+
 ### Connecting Search Console (optional)
 
 Search Console stays `NOT_CONNECTED` until you do this; seo starts and runs normally without it.

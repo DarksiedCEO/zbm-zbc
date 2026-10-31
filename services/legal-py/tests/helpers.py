@@ -200,6 +200,13 @@ class Harness:
         if doc_id == "clipper_agreement":
             body["esign_consent"] = {"disclosure_version": "1.0", "consented_at": "2026-10-01T16:59:00Z",
                                      "access_demonstrated": True}
+        if caller == "onboarding" and party.startswith("client:") and "invitation_id" not in over:
+            # merge of ADR 0022 into the RTM-13 branch: a client's acceptance on the onboarding path names Andre's
+            # invitation for that client, document and version; the helper asks for one when it can be issued
+            inv = self.apost("/legal/v1/acceptance-invitations", {"request_id": rid("inv"), "doc_id": doc_id,
+                                                                  "version": version, "party_ref": party})
+            if inv.status_code == 201:
+                body["invitation_id"] = inv.json()["invitation_id"]
         body.update(over)
         return self.ok(self.post("/legal/v1/acceptances", body, caller=caller), code)
 

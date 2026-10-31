@@ -411,6 +411,18 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         return _echo(req.request_id, svc.decide_version(req.request_id, _id(doc_id, DOC_ID), _id(version, VERSION),
                                                         req.model_dump()))
 
+    @app.get("/legal/v1/documents/{doc_id}/versions/{version}/founder-approval/rationale", dependencies=auth)
+    def doc_founder_rationale(doc_id: str, version: str, _: str = Depends(andre("documents/founder-rationale"))) -> dict:
+        """AEGIS M4: Andre reads back his founder-approval rationale; nobody else can."""
+        return svc.version_rationale(_id(doc_id, DOC_ID), _id(version, VERSION))
+
+    @app.post("/legal/v1/documents/{doc_id}/versions/{version}/founder-approval", dependencies=auth)
+    def doc_founder_approval(doc_id: str, version: str, _: str = Depends(andre("documents/founder-approval")),
+                             req: m.FounderApproval = Depends(body(m.FounderApproval))) -> dict:
+        """LG-20 / ADR 0022: Andre approves a client commercial contract as founder."""
+        return _echo(req.request_id, svc.founder_approve_version(req.request_id, _id(doc_id, DOC_ID),
+                                                                 _id(version, VERSION), req.model_dump()))
+
     # --- acceptances and envelopes -------------------------------------------------------------------------------
 
     @app.post("/legal/v1/acceptances", dependencies=auth, status_code=201)
@@ -517,6 +529,17 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     def register_row(cq_id: str, _: str = Depends(reader)) -> dict:
         with svc.lock:
             return svc.register_row_view(_id(cq_id, CQ_OR_TARGET))
+
+    @app.get("/legal/v1/register/{cq_id}/founder-determination/rationale", dependencies=auth)
+    def founder_determination_rationale(cq_id: str, _: str = Depends(andre("register/founder-determination/rationale"))
+                                        ) -> dict:
+        return svc.determination_rationale(_id(cq_id, CQ_OR_TARGET))
+
+    @app.post("/legal/v1/register/{cq_id}/founder-determination", dependencies=auth)
+    def founder_determination(cq_id: str, _: str = Depends(andre("register/founder-determination")),
+                              req: m.FounderDetermination = Depends(body(m.FounderDetermination))) -> dict:
+        """LG-20 / ADR 0022: Andre's founder determination on CQ-19 (client commercial contracts only)."""
+        return _echo(req.request_id, svc.founder_determine(req.request_id, _id(cq_id, CQ_OR_TARGET), req.model_dump()))
 
     @app.post("/legal/v1/register/{cq_id}/invalidate", dependencies=auth)
     def invalidate(cq_id: str, _: str = Depends(caller("compliance_38")),

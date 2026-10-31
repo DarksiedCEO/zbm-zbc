@@ -96,8 +96,10 @@ def test_s4_clickwrap_insufficient_until_cq19_then_sufficient_for_new_acceptance
     assert a2["evidence_sufficient"] is True
     old = he.ok(he.get(f"/legal/v1/acceptances/{a1['acceptance_id']}", caller="finance_31"))
     assert old["evidence_sufficient"] is False          # a record never changes after the fact
+    # ADR 0022: evidence_basis says why evidence counts (a memo verifying CQ-19, or Andre's founder determination)
     assert set(old) == {"acceptance_id", "doc_id", "version", "doc_sha256", "accepted_at", "method",
-                        "evidence_sufficient", "party_ref", "rules_pinned"}
+                        "evidence_sufficient", "party_ref", "evidence_basis", "basis_in_force", "rules_pinned"}
+    assert old["evidence_basis"] is None and a2["evidence_basis"] == "memo"
     # ADR 0024 (HR-15): Compliance reads the same answer to confirm a client's acceptance at activation
     assert he.ok(he.get(f"/legal/v1/acceptances/{a2['acceptance_id']}", caller="compliance_38")) == \
         he.ok(he.get(f"/legal/v1/acceptances/{a2['acceptance_id']}", caller="finance_31"))

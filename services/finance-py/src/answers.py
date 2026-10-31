@@ -163,6 +163,10 @@ class LegalAnswerM(_S):
     current: bool
     acceptance_matches: bool
     reason: Reason = ""
+    renew_by: Optional[Annotated[str, StringConstraints(max_length=40)]] = None       # ADR 0022
+    renewal_lapsed: Optional[bool] = None
+    version_basis_in_force: Optional[bool] = None                                     # AEGIS r2 N6
+    acceptance_basis_in_force: Optional[bool] = None
 
 
 class RailAccountM(_S):

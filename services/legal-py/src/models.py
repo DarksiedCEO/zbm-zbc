@@ -125,6 +125,29 @@ class DocDecision(Strict):
     effective_at: Optional[Timestamp] = None
 
 
+# LG-20 / ADR 0022: Andre's written reason for a founder approval or determination (stored as a blob, only its
+# SHA-256 reaches the ledger and the exports). At least 20 characters, so an empty or token reason is refused.
+Rationale = Annotated[str, StringConstraints(min_length=20, max_length=2000), AfterValidator(_multiline)]
+
+
+class FounderApproval(Strict):
+    """Andre approves a client commercial contract version as founder (LG-20, ADR 0022), with an explicit
+    confirmation."""
+    request_id: Id
+    version_sha256: Sha256
+    rationale: Rationale
+    founder_confirms: Literal[True]
+    effective_at: Optional[Timestamp] = None
+    renew_superseded: bool = False           # AEGIS L1: renew a version a newer approved one replaced, explicitly
+
+
+class FounderDetermination(Strict):
+    """Andre's founder determination on CQ-19 (LG-20, ADR 0022; CQ-19 only), recorded as a founder determination."""
+    request_id: Id
+    rationale: Rationale
+    founder_confirms: Literal[True]
+
+
 # --- acceptances and envelopes ------------------------------------------------------------------------------
 
 class EsignConsent(Strict):

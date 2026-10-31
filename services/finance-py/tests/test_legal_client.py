@@ -6,7 +6,7 @@ The answers below have legal-py's exact shapes (``version_view`` and ``acceptanc
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -153,3 +153,110 @@ def test_legal_settings_come_as_a_set():
     assert isinstance(api.build_ports(s).legal, HttpLegal)
     with pytest.raises(RuntimeError):
         config_mod.load({**base, "FIN_LEGAL_URL": "http://x", "FIN_LEGAL_TOKEN": "t" * 40})
+
+
+# --- ADR 0022: a founder-approved contract passes; Finance shows only its renewal date ----------------------------------
+
+FOUNDER_VERSION = {"approval_basis": "founder_approval", "review_label": "founder_approval",
+                   "founder_rationale_sha256": "e" * 64}
+FOUNDER_ACCEPTANCE = {"evidence_basis": "founder_determination"}
+
+
+def test_a_founder_approved_contract_passes_and_only_its_renewal_date_is_carried():
+    ans = ask(client(version=version_doc(**FOUNDER_VERSION), acceptance=acceptance_doc(**FOUNDER_ACCEPTANCE)))
+    assert (ans.available, ans.current, ans.acceptance_matches) == (True, True, True)
+    assert (ans.renew_by, ans.renewal_lapsed) == ("2027-10-01T00:00:00+00:00", False)
+    assert A.check(ans, LegalAnswer(False)) is ans
+    assert set(vars(ans)) == {"available", "current", "acceptance_matches", "reason", "renew_by", "renewal_lapsed",
+                              "version_basis_in_force", "acceptance_basis_in_force"}
+
+
+def test_readiness_and_the_issued_invoice_carry_no_approval_or_evidence_basis():
+    hr = Harness().ready()
+    hr.svc.ports.legal = client(version=version_doc(**FOUNDER_VERSION), acceptance=acceptance_doc(**FOUNDER_ACCEPTANCE))
+    msa = {"doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA, "acceptance_id": ACC}
+    hr.ok(hr.put("/fin/v1/clients/zbm-client-1/billing-profile",
+                 {"request_id": rid(), "entity": "zbm", "payment_method": "ach", "msa": msa}, andre=ANDRE_TOKEN))
+    rd = hr.ok(hr.get("/fin/v1/clients/zbm-client-1/billing-readiness", caller="onboarding"))
+    assert rd["allowed"] is True, rd["unmet"]
+    assert rd["contract_renewal"] == {"MSA": {"renew_by": "2027-10-01T00:00:00+00:00", "renewal_due_soon": False,
+                                              "renewal_lapsed": False}}
+    body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
+            "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "100.00"}],
+            "payment_methods": ["ach"], "legal_ref": msa}
+    inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
+    out = issue(hr, inv)
+    assert out["status"] == "issued"
+    text = str(rd) + str(out)
+    for word in ("founder", "approval_basis", "evidence_basis", "review_label"):
+        assert word not in text, word
+
+
+def test_a_lapsed_renewal_date_is_named_plainly_and_a_close_one_is_flagged():
+    lapsed = ask(client(version=version_doc(**FOUNDER_VERSION, review_by="2026-10-02T00:00:00+00:00")))
+    assert lapsed.available and not lapsed.current and lapsed.renewal_lapsed is True
+    hr = Harness().ready()
+    msa = {"doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA, "acceptance_id": ACC}
+    hr.ok(hr.put("/fin/v1/clients/zbm-client-1/billing-profile",
+                 {"request_id": rid(), "entity": "zbm", "payment_method": "ach", "msa": msa}, andre=ANDRE_TOKEN))
+    now = hr.svc._now()
+    for renew_by, allowed, soon in ((now.replace(year=now.year + 1), True, False),
+                                    (now + timedelta(days=3), True, True),
+                                    (now - timedelta(days=1), False, None)):
+        hr.svc.ports.legal = HttpLegal("http://legal.internal", "s" * 40, "c" * 40, timeout=2, now=lambda: now,
+                                       transport=httpx.MockTransport(lambda req, rb=renew_by: httpx.Response(
+                                           200, json=version_doc(**FOUNDER_VERSION, review_by=rb.isoformat())
+                                           if "/versions/" in req.url.path else acceptance_doc(**FOUNDER_ACCEPTANCE))))
+        rd = hr.ok(hr.get("/fin/v1/clients/zbm-client-1/billing-readiness", caller="onboarding"))
+        assert rd["allowed"] is allowed and rd["contract_renewal"]["MSA"]["renewal_due_soon"] is soon, rd
+        if not allowed:
+            assert rd["contract_renewal"]["MSA"]["renewal_lapsed"] is True
+            assert any("renewal date passed on" in u and "Andre renews it at Legal" in u for u in rd["unmet"])
+
+
+def test_the_sales_tax_row_is_named_neutrally_with_the_same_rule_and_code():
+    hr = Harness().ready(("FIN-CQ-01",))                  # FIN-CQ-11 not on file
+    hr.svc.ports.legal = client(version=version_doc(**FOUNDER_VERSION), acceptance=acceptance_doc(**FOUNDER_ACCEPTANCE))
+    msa = {"doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA, "acceptance_id": ACC}
+    hr.ok(hr.put("/fin/v1/clients/zbm-client-1/billing-profile",
+                 {"request_id": rid(), "entity": "zbm", "payment_method": "ach", "msa": msa}, andre=ANDRE_TOKEN))
+    rd = hr.ok(hr.get("/fin/v1/clients/zbm-client-1/billing-readiness", caller="onboarding"))
+    want = ("sales-tax determination FIN-CQ-11 is not verified: Andre amends FIN-CQ-11 to verified with the memo "
+            "reference")
+    assert rd["allowed"] is False and rd["unmet"] == [f"fin/FIN-27/TAX_TREATMENT_UNVERIFIED: {want}"]
+    body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
+            "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "100.00"}],
+            "payment_methods": ["ach"], "legal_ref": msa}
+    inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/decision",
+                {"request_id": rid(), "content_sha256": inv["content_sha256"], "decision": "approve"}, andre=ANDRE_TOKEN)
+    assert r.status_code == 409
+    reasons = r.json()["reasons"]
+    assert [(x["code"], x["rule_id"], x["message"]) for x in reasons] == [("TAX_TREATMENT_UNVERIFIED", "FIN-27", want)]
+
+
+@pytest.mark.parametrize("version_over,acceptance_over", [({"basis_in_force": False}, {}),
+                                                          ({}, {"basis_in_force": False}),
+                                                          ({"basis_in_force": "yes"}, {}),
+                                                          ({}, {"basis_in_force": None})])
+def test_aegis_m2_a_basis_legal_no_longer_holds_is_refused_at_invoice_issue(version_over, acceptance_over):
+    ans = ask(client(version=version_doc(**FOUNDER_VERSION, **version_over),
+                     acceptance=acceptance_doc(**FOUNDER_ACCEPTANCE, **acceptance_over)))
+    assert ans.available and not (ans.current and ans.acceptance_matches)
+    hr = Harness().ready()
+    msa = {"doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA, "acceptance_id": ACC}
+    body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
+            "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "100.00"}],
+            "payment_methods": ["ach"], "legal_ref": msa}
+    hr.svc.ports.legal = client(version=version_doc(**FOUNDER_VERSION), acceptance=acceptance_doc(**FOUNDER_ACCEPTANCE))
+    inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
+    # Legal changes its answer between drafting and issue: the issue-time check is what counts
+    hr.svc.ports.legal = client(version=version_doc(**FOUNDER_VERSION, **version_over),
+                                acceptance=acceptance_doc(**FOUNDER_ACCEPTANCE, **acceptance_over))
+    r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/decision",
+                {"request_id": rid(), "content_sha256": inv["content_sha256"], "decision": "approve"}, andre=ANDRE_TOKEN)
+    assert r.status_code == 409 and "LEGAL_NOT_CURRENT" in r.text
+    msgs = [x["message"] for x in r.json()["reasons"] if x["code"] == "LEGAL_NOT_CURRENT"]
+    # AEGIS r2 N6: say plainly that Legal's basis is out of force, never a hash/document mismatch that is not there
+    assert msgs and all("basis is not in force at Legal" in m for m in msgs), msgs
+    assert not any("does not match" in m or "is not current at Legal" in m for m in msgs), msgs
