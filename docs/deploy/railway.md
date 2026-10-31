@@ -963,7 +963,10 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
 
    Keep the `attestation_id` it prints.
 3. The client's MSA acceptance at Legal (the acceptance you record today with `LEGAL_ONBOARDING_CALLER_TOKEN`): note
-   its `acceptance_id`, the `version` and the document's `doc_sha256`.
+   its `acceptance_id`, the `version` and the document's `doc_sha256`. The onboarding token records a standard form's
+   acceptance only with an invitation you issued for that client first (`POST /legal/v1/acceptance-invitations` with
+   your Legal approval token and `{"request_id", "doc_id", "version", "party_ref": "client:<client id>"}`, valid 14
+   days); the acceptance names its `invitation_id`, otherwise Legal answers `ACCEPTANCE_NOT_INVITED` (RTM-13).
 4. Run the activation (edit the values in `<...>`; the state is the client's ISO 3166-2 code: `US-CA`, `US-NY`;
    a territory `PR`, `GU`, `VI`, `AS` or `MP`; set a flag `true` only if it is true of the client):
 
@@ -983,8 +986,11 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
                           "acceptance_id": "<lg-acc-...>"}]}}
    JSON
    curl -sS -H @auth.hdr -H @caller.hdr -H 'Content-Type: application/json' --data @rule.json $C/compliance/v1/rule
-   curl -sS -H @auth.hdr -H @caller.hdr $C/compliance/v1/clients/$CLIENT/activation
+   curl -sS -H @auth.hdr -H @andre.hdr $C/compliance/v1/clients/$CLIENT/activation
    ```
+
+   Read the status with your Andre header (`andre.hdr`): it shows the reasons. With the onboarding token a refusal
+   reads only "the client is not activated (the reasons go to Andre)" (AEGIS r9 R9-4).
 
    For a territory use `"declared_country": "PR"` (or `"GU"`, `"VI"`, `"AS"`, `"MP"`), `"declared_region": null` and
    `"target_jurisdictions": ["PR"]` (the same code). `allowed: false` lists every unmet item with the rule it cites; fix it and run
@@ -1004,8 +1010,10 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    A checkout request repeated with the same `request_id` after a client is re-activated returns its earlier answer
    (a page now expired); use a new `request_id` for a new page.
 
-   **A payment Compliance holds.** When a client's payment is booked, Finance asks Compliance first. If the answer is
-   REFUSE, or Compliance cannot be reached, Finance still books the payment (the money arrived) but holds it: the
+   **A payment Compliance holds.** When a client's payment is booked (a Stripe payment, a wire or ACH line from the
+   bank feed, your application of an unapplied receipt, a ZBC campaign deposit), Finance asks Compliance first. If the
+   answer is REFUSE, or Compliance cannot be reached, Finance still books the payment (the money arrived) but holds it:
+   the
    invoice carries `held_compliance` (`kind` `refused` or `unverified`, and `sanctions` true or false), no receipt goes
    to the client, no media vendor is paid for it, the invoice status seo reads says `held: true` (seo refuses the run
    with `INVOICE_HELD`), and a break opens for you (`compliance_hold` or `compliance_unverified`). These breaks do not
@@ -1016,8 +1024,24 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    that a payment is held, never whether it is a sanctions hold, including in the audit export and evidence and in
    the reasons of a refused checkout or billing readiness, which say only "compliance hold"): `curl -sS -H @fin-auth.hdr -H @fin-andre.hdr
    http://127.0.0.1:18410/fin/v1/breaks`. The hourly job asks Compliance again about every held client and marks a hold
-   `sanctions: true` as soon as Compliance says the refusal rests on sanctions; a hold never loses that mark. What to do
-   depends on why it is held:
+   `sanctions: true` as soon as Compliance says the refusal rests on sanctions; a hold never loses that mark (its
+   summary counts every change as `holds_changed`). While any of the client's invoices is held, or Compliance does not
+   ALLOW the client, Finance also refuses every payment out for that client: a media vendor payment and a campaign
+   deposit refund (proposal, your approval and its payment); your approval shows an OFAC warning on a sanctions
+   ground. A held ZBC deposit does not fund its campaign until the hold is released on a current ALLOW. If a held
+   payment is refunded at Stripe anyway, Finance books the refund as it happened, keeps the hold, and marks the
+   hold's break (high severity and an OFAC note on a sanctions ground: report it and contact Stripe at once).
+
+   **Read the hold's live ground** (your token only) at any time, and always immediately before you refund anything
+   at Stripe:
+
+   ```sh
+   curl -sS -H @fin-auth.hdr -H @fin-andre.hdr http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold
+   ```
+
+   It shows the stored `sanctions_ground`, Compliance's answer now (`compliance_now`), the merged `ground_now`, and
+   `rejected_return_possible` (true only for a `place` Compliance confirms now). What to do depends on why it is
+   held:
 
    - **`sanctions: true` (an OFAC match or potential match, or a place or campaign target under OFAC comprehensive
      sanctions). Do not refund, return or move the money: it is blocked unless OFAC tells you otherwise in
@@ -1058,12 +1082,15 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
          OFAC's notice of the removal.
      - **Rejected (only a `place` hold, only with OFAC's written guidance).** If OFAC has told you in writing that the
        payment is to be rejected, it is returned to the sender (FAQ 36: "rejected and returned to the originator").
-       Refund it to the client in the Stripe Dashboard, file a report of the rejected transaction through ORS
-       **within 10 business days** (501.604), keep the ORS confirmation, and release with basis
+       **Immediately before refunding**, read the hold's live ground (above): refund only if
+       `rejected_return_possible` is `true`; if `compliance_now` is unavailable or `ground_now` is `match`, stop: the
+       payment is blocked. Refund it to the client in the Stripe Dashboard, file a report of the rejected transaction
+       through ORS **within 10 business days** (501.604), keep the ORS confirmation, and release with basis
        `ofac_rejected_return`: the refund's `F7r` journal entry, kind `rejected_transaction_report`, the
        confirmation's SHA-256, and `ofac_guidance_sha256`, the SHA-256 of OFAC's written guidance. Finance refuses it
        for a `match`, without the guidance hash, or unless the refund is this very payment's, booked after it,
-       covering it.
+       covering it; it asks Compliance again at release and refuses (and marks the hold `match`) if the refusal now
+       rests on a match, or if Compliance cannot answer.
      - **Stripe.** Stripe screens too and may block, hold or report the same payment on its side. Contact Stripe
        support, tell them what you found and what you decided, and coordinate so neither side moves the money in a
        way the other did not expect.
@@ -1080,11 +1107,11 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
      ```
 
    - **`sanctions: false`, `kind: refused`** (out of the service area, re-screen overdue, documents not current...):
-     refunding is the normal path. **Immediately before refunding at Stripe**, read the client's activation status at
-     Compliance (step G.4) and check `sanctions_grounded` is `false`: if it is now `true`, follow the sanctions case
-     instead. Refund the payment in the Stripe Dashboard; Finance books the refund from Stripe's event (an `F7r` journal
-     entry). Then release the hold with that entry (Finance asks Compliance again and refuses if the refusal now rests
-     on sanctions, or if Compliance cannot answer):
+     refunding is the normal path. **Immediately before refunding at Stripe**, read the hold's live ground (above) and
+     check `compliance_now` is available with `sanctions_ground` null: if it names a ground, follow the sanctions case
+     instead; if Compliance is unavailable, wait. Refund the payment in the Stripe Dashboard; Finance books the refund
+     from Stripe's event (an `F7r` journal entry). Then release the hold with that entry (Finance asks Compliance again
+     and refuses if the refusal now rests on sanctions, or if Compliance cannot answer):
 
      ```sh
      curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
@@ -1097,6 +1124,9 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
      issued invoice yet, so note it for your accountant until that exists. If instead the client is re-activated at
      Compliance and you keep the payment, release with `{"basis": "compliance_allow"}`: it is refused unless Compliance
      answers a current ALLOW now, and the held receipt then goes out (none if anything was refunded).
+   - **A wire or ACH payment** (the bank path) cannot be refunded through Finance: there is no wire-return flow yet.
+     It leaves with `compliance_allow` once the client is re-activated, or with an OFAC ground; for a non-sanctions
+     refusal you want to return, make the return at the bank by hand and note it for your accountant.
    - **`kind: unverified`**: the hourly `stripe-sessions` job asks Compliance again for each such payment just before
      acting. A current ALLOW releases the hold and the receipt goes out; a REFUSE turns it into a `refused` hold (with
      `sanctions` set as Compliance says). Nothing to do unless Compliance stays down.
@@ -1117,6 +1147,11 @@ curl -sS -H @auth.hdr -H @caller.hdr $C/compliance/v1/inbox > inbox.json
 python3 -c 'import json,sys; p=[x for x in json.load(open("inbox.json")) if x["kind"]=="reverify" and x["target_id"]==sys.argv[1]][0]; print(json.dumps({"request_id": "rv-"+p["proposal_id"], "decisions": [{"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"], "decision": "approve"}]}))' $ID > decide.json
 curl -sS -H @auth.hdr -H @andre.hdr -H 'Content-Type: application/json' --data @decide.json $C/compliance/v1/register/decisions
 ```
+
+**Early warning (RTM-06).** Compliance's readiness answer carries `expiry_warnings` (rules expiring within 30, 14 and 7
+days, and separately those a client's activation relies on, with the next one), every start and scheduled run prints
+a `WARNING` line for them, compliance's `/health` carries `rules_expiring`, and Finance's billing readiness shows you
+`compliance_rule_expiry` (your token only). Check it weekly with the heartbeat check; re-verify at the 30-day warning.
 
 The scheduler also drafts these by itself when the Change Watcher fetched the row's page in the last 2 days and the
 rule expires within 7 days: they appear in the inbox; approve them the same way. Checklist (dates on the seed approved

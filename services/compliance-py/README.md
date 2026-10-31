@@ -72,7 +72,8 @@ round 14"):
 - **Client activation** also needs HR-14 (Andre's recorded OFAC search: `POST /compliance/v1/sanctions/attestations`,
   Andre only; fact `sanctions_attestation_id`) and HR-15 (Legal confirms the accepted `client_msa` is current and the
   client's; fact `legal_documents`; `src/legal_client.py`, `COMPLIANCE_LEGAL_*`).
-- **`GET /compliance/v1/clients/{client_id}/activation`** (`finance_31`, `seo_02`, `revenue_recovery`, `onboarding`):
+- **`GET /compliance/v1/clients/{client_id}/activation`** (`finance_31`, `seo_02`, `revenue_recovery`, `onboarding`,
+  or Andre's token):
   the client's CURRENT decision, ALLOW or REFUSE with reasons and the recorded jurisdiction, re-evaluated on every call
   (rule fingerprints, the service area in force now, holds, C-11, the OFAC search's age and lane).
   `sanctions_grounded` is true when a refusal rests on sanctions (an open sanctions_match hold, or the client's place
@@ -80,6 +81,13 @@ round 14"):
   `sanctions_ground` says which: `match` (an OFAC list match) or `place` (a sanctioned place or target); match wins. Finance (invoices,
   billing readiness, Stripe pages), seo (client runs and reports) and detection (store reads) refuse anything but a
   current ALLOW.
+  AEGIS r9 R9-4: the reasons and both sanctions fields go to `finance_31` and Andre's token only; `seo_02`,
+  `revenue_recovery` and `onboarding` get one generic refusal reason and null sanctions fields
+  (`api.generic_activation`).
+- **Rule expiry early warning** (money red team RTM-06): readiness `expiry_warnings` (30 / 14 / 7 days, and the rules a
+  client's activation relies on, with the next one), a `WARNING` line at each start and run, `rules_expiring` in
+  `/health`.
+- **Identity before body** (RTM-11): every route's caller and Andre dependencies run before its body is validated.
 - **`GET /compliance/v1/readiness`** (any caller) and the lines printed at start: expired rules and the gates they
   affect, what closes every gate, and a plain US web client's rule set with its expiry dates (`src/readiness.py`).
 - **`GET /compliance/v1/sanctions/status`** (`finance_31`, `onboarding`): a payee's latest screen and its freshness.
@@ -135,7 +143,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `POST /compliance/v1/sanctions/screen` | onboarding, finance_31 | screen a payee or owner (DOB goes to the provider, never stored) |
 | `POST /compliance/v1/sanctions/attestations` | Andre only | ADR 0024: record his OFAC search for a client (HR-14); a hit opens a permanent hold |
 | `GET /compliance/v1/sanctions/status` | finance_31, onboarding | ADR 0024: a payee's latest screen and its freshness |
-| `GET /compliance/v1/clients/{client_id}/activation` | `finance_31`, `seo_02`, `revenue_recovery`, `onboarding` | ADR 0024: the client's current activation decision |
+| `GET /compliance/v1/clients/{client_id}/activation` | `finance_31`, `seo_02`, `revenue_recovery`, `onboarding`, Andre | ADR 0024: the client's current activation decision (reasons: Finance and Andre only) |
 | `GET /compliance/v1/readiness` | any caller | ADR 0024: expired rules and the gates they affect |
 | `POST /compliance/v1/accessibility/checks` | creative_production | run the checker for an exact content hash |
 | `POST /compliance/v1/jurisdictions/resolve` | any caller | resolver answer (recorded) |
