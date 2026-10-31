@@ -452,3 +452,35 @@ def test_main_starts_the_scheduler_before_serving(monkeypatch):
     api.main()
     assert [x[0] for x in order] == ["start", "serve"]
     assert order[0][1] is h.svc and order[0][2] is h.settings
+
+
+# --- AEGIS r5 C1: the status says when a refusal is grounded in sanctions (Finance must not refund those) ---------------
+
+def test_a_sanctions_hit_marks_the_refusal_as_sanctions_grounded():
+    h = harness()
+    activate(h, "client-web")
+    assert status(h)["sanctions_grounded"] is False
+    attest(h, "client-web", result="potential_match")
+    s = status(h)
+    assert s["decision"] == "REFUSE" and s["sanctions_grounded"] is True
+
+
+def test_a_sanctioned_region_is_sanctions_grounded_but_an_unlisted_one_is_not():
+    h = harness()
+    activate(h, "client-fl", region="US-FL")
+    activate(h, "client-tx", region="US-TX")
+    _amend(h, "HR-07", refuse=[*_row(h, "HR-07")["parameters"]["refuse"], "US-FL"])       # on the sanctions list
+    _amend(h, "HR-05", operate=[c for c in _row(h, "HR-05")["parameters"]["operate"] if c != "US-TX"])  # out of area
+    fl, tx = status(h, "client-fl"), status(h, "client-tx")
+    assert fl["decision"] == "REFUSE" and fl["sanctions_grounded"] is True
+    assert tx["decision"] == "REFUSE" and tx["sanctions_grounded"] is False
+
+
+def test_other_refusals_are_not_sanctions_grounded():
+    from datetime import timedelta
+    h = harness()
+    activate(h, "client-web")
+    h.clock.at = h.clock.at + timedelta(days=91)                  # re-screen due: not a sanctions finding
+    s = status(h)
+    assert s["decision"] == "REFUSE" and s["sanctions_grounded"] is False
+    assert status(h, "client-none")["sanctions_grounded"] is False

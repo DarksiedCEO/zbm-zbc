@@ -180,7 +180,7 @@ class FakeCompliance:
             return ClientActivation(False)
         a = (self.activations or {}).get(client_id, {"allowed": True, "jurisdiction": "US-CA"})
         return ClientActivation(True, a["allowed"], a.get("ruling_id", f"cmp-rul-{client_id}"), a.get("jurisdiction"),
-                                tuple(a.get("reasons", ())))
+                                tuple(a.get("reasons", ())), sanctions=bool(a.get("sanctions")))
 
     def row_parameters(self, oid):
         from ports import RegisterParameters

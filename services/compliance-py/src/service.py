@@ -1212,6 +1212,19 @@ class ComplianceService:
                 out.append(f"campaign target {tr.code} is {tr.cls} under the service area in force: {tr.reason}")
         return out
 
+    @staticmethod
+    def _on_sanctions_list(prof: dict, rows: dict) -> bool:
+        """AEGIS r5 C1: the client's recorded jurisdiction or a campaign target resolves to a code on HR-07's refuse list
+        (the OFAC comprehensive sanctions list), as opposed to merely outside the US service area."""
+        hr07 = rows.get("HR-07") or {}
+        if hr07.get("status") == "superseded":
+            return False
+        listed = set((hr07.get("parameters") or {}).get("refuse") or [])
+        params = i07_jurisdiction.Params.from_rows(rows)
+        codes = [i07_jurisdiction.resolve_person(prof.get("jurisdiction"), params, "client").code]
+        codes += [i07_jurisdiction.resolve_target(t, params).code for t in prof.get("target_jurisdictions") or []]
+        return any(c in listed for c in codes if c)
+
     def activation_status(self, client_id: str, lane: str = "client") -> dict:
         """ADR 0024: the client's CURRENT activation decision, for Finance, SEO and Revenue Recovery (read-only).
         ALLOW only when every one holds now: the latest activation ruling for (lane, client) allowed it; every rule
@@ -1226,7 +1239,11 @@ class ComplianceService:
             today = now.date()
             out = {"client_id": client_id, "lane": lane, "decision": "REFUSE", "current": False, "ruling_id": None,
                    "evaluated_at": None, "register_version": self.version_number, "jurisdiction": None,
-                   "valid_until": None, "reasons": [], "seed_pinned": self.seed_pinned}
+                   "valid_until": None, "reasons": [], "seed_pinned": self.seed_pinned,
+                   # AEGIS r5 C1: the refusal rests on sanctions (an open sanctions_match hold, or the client's
+                   # recorded place on HR-07's sanctions list); Finance never refunds such a payment
+                   "sanctions_grounded": any(hh["status"] == "open" and hh["subject_id"] == client_id
+                                             and hh["kind"] == "sanctions_match" for hh in self.holds.values())}
             reasons = out["reasons"]
             rows = self.rows_by_id()
             if rows is None:
@@ -1256,6 +1273,8 @@ class ComplianceService:
                 elif prints is not None and prints.get(oid) != rule_fingerprint(row):
                     reasons.append(f"{oid} changed since the ruling (approved amendment): re-activate")
             reasons += self._area_now(prof, rows)
+            if self._on_sanctions_list(prof, rows):
+                out["sanctions_grounded"] = True
             old = next((v for v in self.versions if v.version == r["register_version"]), None)
             old_ids = {x["id"] for x in old.rows} if old else set()
             gained = sorted(oid for oid, row in rows.items() if "activation" in row["gates"] and oid not in old_ids
@@ -1278,7 +1297,7 @@ class ComplianceService:
                 elif att is not None:
                     out["valid_until"] = iso(parse_iso(att["searched_at"]) + timedelta(days=params["rescreen_after_days"]))
             if not reasons:
-                out.update(decision="ALLOW", current=True)
+                out.update(decision="ALLOW", current=True, sanctions_grounded=False)
             return out
 
     def readiness(self) -> dict:

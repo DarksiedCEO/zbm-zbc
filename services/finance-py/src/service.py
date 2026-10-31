@@ -1060,11 +1060,15 @@ class FinanceService:
                 "offset": offset, "log_lines": len(raw), "epoch": epoch}
 
     def health(self) -> dict:
+        with self.lock:
+            holds = sum(1 for i in self.db["invoices"].values() if i.get("held_compliance"))
         return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,
                 "reconcile_required": bool(self.reconcile_required), "log_write_fault": bool(self.log.fault),
-                "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode}}
+                "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode},
+                # AEGIS r5 C2: a count only (no ids): the private heartbeat check pings only while this is 0
+                "compliance_holds_open": holds}
 
 
 from svc_books import BooksMixin  # noqa: E402

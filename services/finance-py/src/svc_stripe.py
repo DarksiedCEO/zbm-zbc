@@ -384,7 +384,7 @@ class StripeMixin:
         ga = Gather(self, f"{prefix}|activation", ACTOR, "stripe-sessions")
         refused_ids: set[str] = set()
         refused_clients = unknown = 0
-        settle: list[tuple[str, str, Optional[str], str]] = []    # (invoice, "release" | "convert", ruling, why)
+        settle: list[tuple[str, str, str, str, bool]] = []    # (invoice, client, "release" | "convert", why, sanctions)
         for cid in clients:
             act = self._activation(ga, cid)
             if not act.available:
@@ -393,25 +393,35 @@ class StripeMixin:
                 refused_clients += 1
                 refused_ids.update(s["session_id"] for s in open_by_client.get(cid, []))
                 why = self._activation_reasons(act)[0]["message"]
-                settle += [(i, "convert", None, why) for i in unverified.get(cid, [])]
+                settle += [(i, cid, "convert", why, act.sanctions) for i in unverified.get(cid, [])]
             else:
-                settle += [(i, "release", act.ruling_id, "") for i in unverified.get(cid, [])]
+                settle += [(i, cid, "release", "", False) for i in unverified.get(cid, [])]
         released = converted = 0
-        if settle:
+        for iid, cid, what, why, sanctions in settle:
+            g_h = Gather(self, f"{prefix}|hold|{iid}", ACTOR, iid)
+            ruling = None
+            if what == "release":
+                # AEGIS r5 R5-3: Compliance is read again for THIS hold immediately before it is released
+                act = self._activation(g_h, cid)
+                if not act.available:
+                    continue
+                if not act.allowed:
+                    what, why, sanctions = "convert", self._activation_reasons(act)[0]["message"], act.sanctions
+                ruling = act.ruling_id
             with self.lock:
-                op_h = Op(self, f"{prefix}|holds", ACTOR, "stripe-sessions", ga)
-                for iid, what, ruling, why in settle:
-                    hold = (op_h.get("invoices", iid) or {}).get("held_compliance") or {}
-                    if hold.get("kind") != "unverified":
-                        continue
-                    if what == "release":
-                        self._release_compliance_hold(op_h, iid, "compliance_allow", {"ruling_id": ruling}, ACTOR)
-                        released += 1
-                    else:
-                        self._release_compliance_hold(op_h, iid, "converted_to_refused", {}, ACTOR)
-                        self._open_compliance_hold(op_h, iid, "refused", why, hold["receipt_id"], hold["amount"],
-                                        hold["payment_entry_id"], hold["method_label"], hold["value_date"])
-                        converted += 1
+                hold = (self.db["invoices"].get(iid) or {}).get("held_compliance") or {}
+                if hold.get("kind") != "unverified":
+                    continue        # released or changed meanwhile (Andre, another run): nothing to do (R5-4)
+                op_h = Op(self, f"{prefix}|hold|{iid}", ACTOR, iid, g_h)
+                if what == "release":
+                    self._release_compliance_hold(op_h, iid, "compliance_allow", {"ruling_id": ruling}, ACTOR)
+                    released += 1
+                else:
+                    self._release_compliance_hold(op_h, iid, "converted_to_refused", {}, ACTOR)
+                    self._open_compliance_hold(op_h, iid, "refused", why, hold["receipt_id"], hold["amount"],
+                                               hold["payment_entry_id"], hold["method_label"], hold["value_date"],
+                                               sanctions=sanctions)
+                    converted += 1
                 self._commit(op_h)
         if clients:
             self._activation_sweep_cursor = clients[-1]
@@ -646,24 +656,32 @@ class StripeMixin:
             return None
         act = self._activation(g, inv["client_id"])
         if not act.available:
-            return ("unverified", "Compliance (38) could not confirm the client's activation when the payment was booked")
+            return ("unverified", "Compliance (38) could not confirm the client's activation when the payment was booked",
+                    False)
         if not act.allowed:
-            return ("refused", self._activation_reasons(act)[0]["message"])
+            return ("refused", self._activation_reasons(act)[0]["message"], act.sanctions)
         return None
 
     HOLD_NOTE = {"refused": ("compliance_hold", "payment from a client Compliance refuses: refund it at Stripe, then "
                                                 "release the hold with the refund's journal entry"),
+                 "sanctions": ("compliance_hold", "payment from a client refused on SANCTIONS grounds: do not refund or "
+                                                  "move it; report to OFAC within 10 business days (31 CFR 501.603)"),
                  "unverified": ("compliance_unverified", "payment booked while Compliance was unreachable: held until "
                                                          "the hourly job (or Andre) gets a current answer")}
 
     def _open_compliance_hold(self, op: Op, invoice_id: str, kind: str, why: str, rct: str, amount: str,
-                              payment_entry_id: str, method_label: str, value_date: str) -> dict:
-        leg, note = self.HOLD_NOTE[kind]
+                              payment_entry_id: str, method_label: str, value_date: str, *,
+                              sanctions: bool = False) -> dict:
+        if (op.get("invoices", invoice_id) or {}).get("held_compliance"):
+            # AEGIS r5 R5-2: a second held payment on the same invoice: the first hold goes to history and its break
+            # is closed as superseded (the new hold, and its break, keep the invoice held)
+            self._release_compliance_hold(op, invoice_id, "superseded_by_new_hold", {"new_receipt_id": rct}, ACTOR)
+        leg, note = self.HOLD_NOTE["sanctions" if sanctions else kind]
         cur = op.get("invoices", invoice_id)
         bid = self._compliance_break(op, leg, cur, rct, amount, note)
-        hold = {"kind": kind, "reason": why[:200], "break_id": bid, "since": iso(self._now()), "receipt_id": rct,
-                "amount": amount, "payment_entry_id": payment_entry_id, "method_label": method_label,
-                "value_date": value_date}
+        hold = {"kind": kind, "sanctions": bool(sanctions), "reason": why[:200], "break_id": bid,
+                "since": iso(self._now()), "receipt_id": rct, "amount": amount, "payment_entry_id": payment_entry_id,
+                "method_label": method_label, "value_date": value_date}
         op.put("invoices", invoice_id, {**cur, "held_compliance": hold})
         op.record(derived_id("hold", invoice_id, kind, rct), "compliance_hold_opened", ACTOR, invoice_id,
                   {"invoice_id": invoice_id, "kind": kind, "receipt_id": rct, "amount": amount, "break_id": bid},
@@ -683,11 +701,29 @@ class StripeMixin:
                                                                   "basis": basis, **detail}]
         new = {k: v for k, v in cur.items() if k != "held_compliance"}
         op.put("invoices", invoice_id, {**new, "held_compliance_history": hist})
-        if basis == "compliance_allow":
+        rc = op.get("receipts", hold["receipt_id"]) or {}
+        if basis == "compliance_allow" and rc.get("status") == "matched" \
+                and M.D((rc.get("stripe") or {}).get("refunded") or "0.00") == 0:
+            # AEGIS r5 R5-1: a receipt only for money that is still the client's payment (none after any refund)
             self._client_receipt(op, hold["receipt_id"], new, hold["amount"], hold["value_date"], hold["method_label"])
         op.record(derived_id("holdrel", invoice_id, hold["receipt_id"], hold["kind"]), "compliance_hold_released",
                   actor, invoice_id, {"invoice_id": invoice_id, "kind": hold["kind"], "basis": basis, **detail},
                   f"Payment hold released ({basis})")
+
+    @staticmethod
+    def _release_ground_ok(hold: dict, basis: str, body: dict) -> None:
+        """AEGIS r5 C1: a hold grounded in sanctions is never refunded or released on an ALLOW: OFAC's blocking rules
+        apply (report within 10 business days, 31 CFR 501.603 / 501.604), and only Andre's release recording the OFAC
+        authorization or reference clears it. That ground is for sanctions holds only."""
+        if hold.get("sanctions"):
+            if basis != "ofac_authorization":
+                raise Conflict("this payment is held on SANCTIONS grounds: it is not refunded or released on an ALLOW; "
+                               "it is reported to OFAC and released only with an OFAC authorization "
+                               "(basis ofac_authorization, ofac_authorization_sha256)")
+            if not body.get("ofac_authorization_sha256"):
+                raise Conflict("an OFAC release names the SHA-256 of the OFAC authorization (ofac_authorization_sha256)")
+        elif basis == "ofac_authorization":
+            raise Conflict("ofac_authorization releases a sanctions hold only; this hold is not grounded in sanctions")
 
     def compliance_hold_release(self, request_id: str, invoice_id: str, body: dict) -> dict:
         """AEGIS r4 R4-2: Andre releases a held payment, on one of two grounds only.
@@ -695,11 +731,13 @@ class StripeMixin:
           in the journal (journal order, never timestamps), and the refunds booked on the receipt cover the held
           amount. The client gets no receipt.
         - ``compliance_allow``: Compliance (38) answers a current ALLOW for the client now (read before the lock). The
-          held-back client receipt is prepared."""
+          held-back client receipt is prepared (unless anything was refunded).
+        - ``ofac_authorization``: a sanctions hold only, with the SHA-256 of the OFAC authorization (AEGIS r5 C1)."""
         basis = body["basis"]
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"compliance-hold/{invoice_id}",
-                                     {"basis": basis, "entry_id": body.get("entry_id")})
+                                     {"basis": basis, "entry_id": body.get("entry_id"),
+                                      "ofac_authorization_sha256": body.get("ofac_authorization_sha256")})
             if ent:
                 return ent["response"]
             inv = self.db["invoices"].get(invoice_id)
@@ -707,6 +745,7 @@ class StripeMixin:
                 raise NotFound("no such invoice")
             if not inv.get("held_compliance"):
                 raise Conflict("this invoice has no Compliance hold")
+            self._release_ground_ok(inv["held_compliance"], basis, body)
             client = inv["client_id"]
         g = Gather(self, f"holdrel|{request_id}", "andre", invoice_id)
         detail: dict = {}
@@ -722,6 +761,9 @@ class StripeMixin:
             hold = inv.get("held_compliance")
             if not hold:
                 raise Conflict("this invoice has no Compliance hold")
+            self._release_ground_ok(hold, basis, body)
+            if basis == "ofac_authorization":
+                detail = {"ofac_authorization_sha256": body["ofac_authorization_sha256"]}
             if basis == "refund":
                 eid = body.get("entry_id")
                 if not eid:
@@ -827,9 +869,9 @@ class StripeMixin:
                 # while Compliance does not currently ALLOW the client (refused) or could not say (unverified): the
                 # invoice is held, no client receipt goes out, a media buy's vendor is not paid, the invoice status
                 # SEO reads says held. Released only by compliance_hold_release (a refund, or a fresh ALLOW).
-                kind, why = check
+                kind, why, sanctions = check
                 self._open_compliance_hold(op, inv["invoice_id"], kind, why, rct, M.fmt(gross), e["entry_id"],
-                                METHOD_LABEL.get(p.method, "Stripe"), value_date)
+                                           METHOD_LABEL.get(p.method, "Stripe"), value_date, sanctions=sanctions)
                 status = f"matched_held_{'compliance' if kind == 'refused' else 'unverified'}"
             else:
                 self._client_receipt(op, rct, inv, M.fmt(gross), value_date, METHOD_LABEL.get(p.method, "Stripe"))
