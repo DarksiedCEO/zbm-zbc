@@ -102,11 +102,16 @@ export default defineRailway(() => {
       LEDGER_SERVICE_TOKEN: preserve(), // legal's own ledger caller token
       LEGAL_SERVICE_TOKEN: preserve(),
       LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
-      // `onboarding`: Andre's operator-held token until an onboarding service exists (records a client's clickwrap
-      // acceptance, POST /legal/v1/acceptances); `${{VARIABLE}}` is Railway's same-service reference
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (contract terms, obligations;
+      // never a client's acceptance: ADR 0028); `client_portal`: the client acceptance page, which reaches only
+      // Legal's two portal routes (its value is set once, on client-portal); `${{VARIABLE}}` is Railway's same-service
+      // reference
       LEGAL_CALLER_TOKENS:
-        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}", "compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}"}',
+        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}", "compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}", "client_portal": "${{client-portal.PORTAL_LEGAL_CALLER_TOKEN}}"}',
       LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
+      // ADR 0028, AEGIS r2 N-M1: tags client acceptance link tokens; client-portal reads it (a reference) to refuse
+      // junk links without asking Legal. Unset: Legal runs and issues no link (503)
+      LEGAL_LINK_TAG_KEY: preserve(),
       // ADR 0024: Legal delivers counsel-memo register proposals to Compliance (caller legal_37). Compliance's service
       // token is set once, on compliance; Legal is declared before it (compliance reads Legal's token as code), so it
       // takes it through Railway's own reference syntax
@@ -299,8 +304,31 @@ export default defineRailway(() => {
     },
   }));
 
+  // ------------------------------------------------------------------------------------------------ client-portal
+  // ADR 0028: the client acceptance page. Public: Andre generates its Railway domain once (runbook, "Client acceptance
+  // page (ADR 0028)") and sets PORTAL_PUBLIC_ORIGIN to it; nothing else of this project gains a domain. Stateless: no
+  // volume, no ledger; it holds Legal's service token (a reference), its own client_portal caller token at Legal and
+  // its evidence key (HMAC of the client's IP address and user agent), and reaches Legal only, over the private network.
+  // Declared after legal (it reads Legal's service token).
+  const clientPortal = service("client-portal", {
+    source: source(),
+    build: dockerfile("services/client-portal-py/Dockerfile", ["services/client-portal-py/**", "deploy/python/**"]),
+    deploy: deploy("/health", false),
+    env: {
+      PORT: "8480",
+      PORTAL_BIND_ADDR: "::",
+      PORTAL_LEGAL_URL: PRIVATE("legal", 8420),
+      PORTAL_LEGAL_SERVICE_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
+      PORTAL_LEGAL_CALLER_TOKEN: preserve(), // Legal's client_portal caller token (read by legal's LEGAL_CALLER_TOKENS map)
+      PORTAL_EVIDENCE_KEY: preserve(), // HMAC key: client IP and user agent, form signatures; set once, rotate on suspicion
+      PORTAL_LINK_TAG_KEY: legal.env.LEGAL_LINK_TAG_KEY, // AEGIS r2 N-M1: refuse a link Legal did not mint, locally
+      PORTAL_PUBLIC_ORIGIN: preserve(), // https://<this service's Railway domain>, set by hand after the domain exists
+      PORTAL_TRUSTED_PROXY_HOPS: "1", // Railway's edge adds the client to X-Forwarded-For (UNVERIFIED, runbook)
+    },
+  });
+
   return project("zbm-zbc", {
     resources: [ledgerData, legalData, financeData, seoData, complianceData, ledger, detection, legal, compliance, finance,
-      orchestrator, stripeGateway, seo],
+      orchestrator, stripeGateway, seo, clientPortal],
   });
 });

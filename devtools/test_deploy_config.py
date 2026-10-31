@@ -25,6 +25,7 @@ import ast
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -51,13 +52,14 @@ SERVICES = {
                        "stripe-gateway", False),
     "seo": ("services/seo-py/Dockerfile", "SEO_PORT", 8500, "seo-py", True),
     "compliance": ("services/compliance-py/Dockerfile", "COMPLIANCE_PORT", 8380, "compliance-py", True),   # ADR 0024
+    "client-portal": ("services/client-portal-py/Dockerfile", "PORTAL_PORT", 8480, "client-portal-py", False),  # ADR 0028
 }
 PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
-               "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",)}
+               "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",), "client-portal-py": ("PORTAL_",)}
 # ADR 0024: compliance-py's requirements.txt is clipper-network-py's (that suite checks the two are identical) and has
 # no use for cryptography; its pins must be a SUBSET of requirements.in, each locked at its pin. The image installs the
 # whole lock, like every Python image.
-LOCK_SUBSET = {"compliance-py"}
+LOCK_SUBSET = {"compliance-py", "client-portal-py"}   # ADR 0028: uvicorn and httpx only
 # AEGIS final go-live M-2: the prefix scan alone missed detection-py's RR_STORE_* variables (both Revenue Recovery
 # kill switches among them). Besides the prefixes, any upper-case name in an environment-read position is collected
 # whatever its prefix: os.environ.get("X"), os.environ["X"], os.getenv("X"), env.get("X"), env["X"] (the services'
@@ -493,6 +495,79 @@ class ComplianceGate(unittest.TestCase):
         self.assertIn("complianceData", names)
 
 
+class ClientPortal(unittest.TestCase):
+    """ADR 0028: the client acceptance page is a separate, stateless service. Its only secrets are Legal's service
+    token (a reference), its own client_portal caller token at Legal and its evidence key; it reaches Legal only, over
+    the private network; it holds no ledger, Finance or Compliance credential and no volume."""
+
+    def setUp(self):
+        self.blocks = iac_services()
+        self.text = IAC.read_text()
+        self.b = self.blocks["client-portal"]
+        self.code = re.sub(r"//[^\n]*", "", self.b)
+
+    def test_the_portal_is_stateless_and_wired_to_legal_only(self):
+        for line in ('PORT: "8480",', 'PORTAL_BIND_ADDR: "::",', 'PORTAL_LEGAL_URL: PRIVATE("legal", 8420),',
+                     "PORTAL_LEGAL_SERVICE_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,", 'PORTAL_TRUSTED_PROXY_HOPS: "1",'):
+            self.assertIn(line, self.b)
+        for name in ("PORTAL_LEGAL_CALLER_TOKEN", "PORTAL_EVIDENCE_KEY", "PORTAL_PUBLIC_ORIGIN"):
+            self.assertRegex(self.code, rf"(?m)^\s+{name}:\s*preserve\(\)", f"{name} is not preserve()")
+        self.assertNotIn("volumeMounts", self.code)
+        self.assertNotIn("RAILWAY_RUN_UID", self.code)
+        names = set(re.findall(r"(?m)^\s+([A-Z][A-Z0-9_]+):", self.code))
+        self.assertEqual({n for n in names if not n.startswith("PORTAL_")}, {"PORT"},
+                         "the portal gets no ledger, Finance, Compliance or other service variable")
+        self.assertNotRegex(self.code, r"(ledger|finance|compliance|seo|detection)\.env\.")
+        self.assertEqual(set(re.findall(r"\b([a-z]+)\.env\.([A-Z_]+)", self.code)),
+                         {("legal", "LEGAL_SERVICE_TOKEN"), ("legal", "LEGAL_LINK_TAG_KEY")})
+
+    def test_legal_accepts_the_portal_caller_from_the_portal_service(self):
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        callers = json.loads(m.group(1))
+        self.assertEqual(callers.get("client_portal"), "${{client-portal.PORTAL_LEGAL_CALLER_TOKEN}}")
+        for svc in ("finance", "compliance"):
+            mm = re.search(r"_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks[svc])
+            self.assertNotIn("client-portal", mm.group(1), f"{svc} must not accept the portal")
+
+    def test_a_first_deploy_cannot_take_legal_down(self):
+        """AEGIS M-1: Legal's caller map names client-portal's preserve()d token, which is empty until Andre sets it
+        after the first apply. Legal must skip that entry (OPTIONAL_CALLERS in its config.py: the portal routes
+        answer 503) instead of refusing to start. Generally: an entry referencing a service this change adds (any
+        service other than those already deployed or ordered by their own runbook: finance, compliance) must be
+        optional in Legal."""
+        tree = ast.parse((REPO / "services/legal-py/src/config.py").read_text())
+        optional = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                        and any(getattr(t, "id", None) == "OPTIONAL_CALLERS" for t in n.targets))
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        for caller, ref in json.loads(m.group(1)).items():
+            target = ref[3:-2].rpartition(".")[0]
+            if target and target not in ("finance", "compliance"):
+                with self.subTest(caller=caller, service=target):
+                    self.assertIn(caller, optional, f"{caller} -> {target}: an empty value would stop Legal starting")
+        self.assertEqual(tuple(optional), ("compliance_38", "client_portal"))     # ADR 0024 and ADR 0028
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        section = runbook.split("### Client acceptance page (ADR 0028)", 1)[1].split("\n### ", 1)[0]
+        self.assertNotIn("**before**", section, "the runbook must not ask for the impossible order (AEGIS M-1)")
+        self.assertIn("answer 503", section)
+
+    def test_the_link_tag_key_is_set_once_on_legal_and_referenced_by_the_portal(self):
+        """AEGIS r2 N-M1: the portal refuses junk links with Legal's tag key; one value, owned by Legal (which issues
+        no link without it and keeps running), read by the portal as a reference."""
+        self.assertRegex(re.sub(r"//[^\n]*", "", self.blocks["legal"]), r"(?m)^\s+LEGAL_LINK_TAG_KEY:\s*preserve\(\)")
+        self.assertIn("PORTAL_LINK_TAG_KEY: legal.env.LEGAL_LINK_TAG_KEY,", self.b)
+
+    def test_declared_after_legal_and_listed_once(self):
+        self.assertLess(self.text.index('service("legal",'), self.text.index('service("client-portal",'))
+        res = re.search(r"resources:\s*\[([^\]]*)\]", self.text).group(1)
+        self.assertEqual([x.strip() for x in res.split(",")].count("clientPortal"), 1)
+
+    def test_the_runbook_says_how_the_public_domain_is_made(self):
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        self.assertIn("### Client acceptance page (ADR 0028)", runbook)
+        self.assertIn("docs/runbooks/client-acceptance.md", runbook)
+        self.assertTrue((REPO / "docs" / "runbooks" / "client-acceptance.md").is_file())
+
+
 class CiAndSmoke(unittest.TestCase):
     def test_ci_builds_every_dockerfile_and_the_smoke_covers_it(self):
         ci = CI.read_text()
@@ -521,7 +596,7 @@ class VariableScan(unittest.TestCase):
         """Every upper-case name a Python service reads in an environment-read position is either under the
         service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
         outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set(),
-                            "compliance-py": set()}
+                            "compliance-py": set(), "client-portal-py": set()}
         for svc, prefixes in PY_SERVICES.items():
             found = set()
             for p in (REPO / "services" / svc / "src").rglob("*.py"):
@@ -758,6 +833,81 @@ class SeoSearchConsoleKey(unittest.TestCase):
         # trailing newlines are dropped (shell command substitution); seo strips the key file's whitespace anyway
         r = self.run_entrypoint({"SEO_GSC_SERVICE_ACCOUNT": FAKE_GSC_KEY + "\n"})
         self.assertEqual((r.returncode, r.stdout), (0, FAKE_GSC_KEY.encode()), r.stderr)
+
+
+class Heartbeat(unittest.TestCase):
+    """AEGIS rebase review RB-L1: the cron heartbeat (railway.md step E.2) is the only push alarm for a payment held by
+    Compliance (a sanctions hold carries a 10-business-day OFAC deadline). An optional caller token left unset (Legal's
+    /health ``warning`` whose ONLY warnings are ``optional_caller_unset:*``) must not silence that alarm; it is reported
+    by a second ping (HEARTBEAT_CONFIG_URL) instead. The command is run as written in the runbook, with a fake curl."""
+
+    FAKE_CURL = r"""#!/bin/sh
+for a in "$@"; do url="$a"; done
+case "$url" in
+  *legal.railway.internal*) [ -n "$LEGAL_BODY" ] || exit 22; printf %s "$LEGAL_BODY";;
+  *compliance.railway.internal*) [ -n "$COMPLIANCE_UP" ] || exit 22; printf %s '{"status":"ok"}';;
+  *finance.railway.internal*) printf %s "$FIN_BODY";;
+  *) echo "$url" >> "$PINGS";;
+esac
+"""
+
+    def command(self) -> str:
+        text = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = text.split("**E. ", 1)[1].split("**F. ", 1)[0]
+        lines = [ln.strip() for ln in step.splitlines() if ln.strip().startswith("sh -c '") and "HEARTBEAT_URL" in ln]
+        self.assertEqual(len(lines), 1, "step E.2 has exactly one heartbeat start command")
+        return lines[0]
+
+    def run_with(self, legal, holds=0, compliance=True) -> list:
+        d = Path(tempfile.mkdtemp())
+        try:
+            curl = d / "curl"
+            curl.write_text(self.FAKE_CURL)
+            curl.chmod(0o755)
+            pings = d / "pings"
+            env = {"PATH": f"{d}:/usr/bin:/bin", "PINGS": str(pings),
+                   "HEARTBEAT_URL": "https://hb.example/alive", "HEARTBEAT_CONFIG_URL": "https://hb.example/config",
+                   # compact JSON, as FastAPI answers
+                   "LEGAL_BODY": json.dumps(legal, separators=(",", ":")) if legal is not None else "",
+                   "COMPLIANCE_UP": "1" if compliance else "",
+                   "FIN_BODY": json.dumps({"status": "ok", "compliance_holds_open": holds}, separators=(",", ":"))}
+            argv = shlex.split(self.command())             # exactly as Railway runs the start command
+            self.assertEqual(argv[:2], ["sh", "-c"])
+            subprocess.run(argv, env=env, capture_output=True, timeout=30)
+            return sorted(pings.read_text().split()) if pings.exists() else []
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_an_unset_optional_caller_never_silences_the_hold_alarm(self):
+        alive, config = "https://hb.example/alive", "https://hb.example/config"
+        ok = {"status": "ok", "link_tags": {"status": "ok"}}
+        one = {"status": "warning", "warnings": ["optional_caller_unset:client_portal"]}
+        both = {"status": "warning", "warnings": ["optional_caller_unset:compliance_38",
+                                                  "optional_caller_unset:client_portal"]}
+        cases = [
+            ("all ok", ok, 0, True, [alive, config]),
+            ("portal caller unset", one, 0, True, [alive]),
+            ("both optional callers unset", both, 0, True, [alive]),
+            ("an open hold", ok, 1, True, []),
+            ("an open hold while a caller is unset", one, 2, True, []),
+            ("legal degraded", {"status": "degraded"}, 0, True, []),
+            ("legal degraded while a caller is unset", {**one, "status": "degraded"}, 0, True, []),
+            ("a warning that is not an optional caller", {"status": "warning", "warnings": ["something_else"]}, 0,
+             True, []),
+            ("a mixed warning", {"status": "warning", "warnings": ["optional_caller_unset:client_portal", "x"]}, 0,
+             True, []),
+            ("legal unreachable", None, 0, True, []),
+            ("compliance down", ok, 0, False, []),
+        ]
+        for name, legal, holds, comp, want in cases:
+            with self.subTest(name):
+                self.assertEqual(self.run_with(legal, holds, comp), sorted(want))
+
+    def test_the_runbook_names_both_monitors(self):
+        text = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = text.split("**E. ", 1)[1].split("**F. ", 1)[0]
+        self.assertIn("HEARTBEAT_CONFIG_URL", step)
+        self.assertIn("optional_caller_unset", step)
 
 
 if __name__ == "__main__":

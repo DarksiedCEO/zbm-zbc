@@ -8,7 +8,7 @@ What is in the repository:
 
 | Piece | Where |
 |---|---|
-| One production Dockerfile per Railway service | `services/ledger-rust/Dockerfile`, `services/detection-py/Dockerfile`, `services/finance-py/Dockerfile`, `services/legal-py/Dockerfile`, `services/seo-py/Dockerfile`, `services/compliance-py/Dockerfile`, `services/orchestrator-go/Dockerfile.orchestrator`, `services/orchestrator-go/Dockerfile.stripe-gateway` |
+| One production Dockerfile per Railway service | `services/ledger-rust/Dockerfile`, `services/detection-py/Dockerfile`, `services/finance-py/Dockerfile`, `services/legal-py/Dockerfile`, `services/seo-py/Dockerfile`, `services/compliance-py/Dockerfile`, `services/client-portal-py/Dockerfile`, `services/orchestrator-go/Dockerfile.orchestrator`, `services/orchestrator-go/Dockerfile.stripe-gateway` |
 | The entrypoint every image starts with | `deploy/docker/zbm-entrypoint.sh` |
 | The Python images' dependency lock (every transitive package, with hashes) | `deploy/python/requirements.in` → `deploy/python/requirements.lock.txt` |
 | Railway infrastructure as code | `.railway/railway.ts` (SDK pinned in `.railway/package.json` + lockfile) |
@@ -34,6 +34,7 @@ typechecks and evaluates to the intended configuration with that SDK.
 | `stripe-gateway` | `services/orchestrator-go`, `cmd/stripe-gateway` | `services/orchestrator-go/Dockerfile.stripe-gateway` | 8470 | **public** (Stripe calls it) | — | 1 |
 | `seo` | `services/seo-py` (Search & Answer Intelligence 2) | `services/seo-py/Dockerfile` | 8500 | private network | `seo-data` at `/data` | 1 |
 | `compliance` | `services/compliance-py` (Compliance 38: the hard gate before a client is served, ADR 0024) | `services/compliance-py/Dockerfile` | 8380 | private network only (no domain) | `compliance-data` at `/data` | 1 |
+| `client-portal` | `services/client-portal-py` (the client acceptance page, ADR 0028) | `services/client-portal-py/Dockerfile` | 8480 | **public** (clients open their acceptance link); reaches Legal only | — | 1 |
 | dashboard | `apps/dashboard-ts` (Next.js) | — (Vercel builds it) | — | public, password session | — | Vercel |
 
 **The Stripe gateway is in orchestrator-go — verified.** `services/orchestrator-go/cmd/stripe-gateway/main.go` is a
@@ -196,6 +197,9 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEGAL_SERVICE_TOKEN` | `openssl rand -hex 32` | legal | finance `FIN_LEGAL_TOKEN` (reference) |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | legal | you |
 | `LEGAL_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` (a different value from `FIN_ONBOARDING_CALLER_TOKEN`) | legal | legal `LEGAL_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-LEGAL-Caller-Token` |
+| `PORTAL_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | client-portal | legal `LEGAL_CALLER_TOKENS` (`client_portal`, interpolated). Nobody else holds it: it reaches only Legal's two portal routes (ADR 0028) |
+| `LEGAL_LINK_TAG_KEY` | `openssl rand -hex 32` | legal | client-portal `PORTAL_LINK_TAG_KEY` (reference). Tags every client acceptance link (AEGIS r2 N-M1): the page refuses a link without a valid tag before spending anything. Must differ from every other secret (else Legal refuses to start). Unset or malformed: Legal still runs and issues no link (503; `/health` `link_tags.status` says why). Rotating it kills every open link: set it on legal, redeploy legal, then client-portal, compare Legal's `/health` `link_tags.key_id` with the key id in client-portal's startup log line, resend open links (runbook `client-acceptance.md` step 9) |
+| `PORTAL_EVIDENCE_KEY` | `openssl rand -hex 32` | client-portal | nobody: the page's HMAC key for the client's IP address and user agent, its form signatures and retry keys. Keep a copy in your password manager: it is the only way to check later whether an IP address matches an acceptance's HMAC |
 | `SEO_SERVICE_TOKEN` | `openssl rand -hex 32` | seo | — |
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
@@ -445,8 +449,9 @@ they point at. Finance and Legal refuse to start when a token value still holds 
 did not resolve, left as literal text): the error names the setting, never the value (AEGIS night review M-2).
 
 **The `onboarding` caller is you, for now** (AEGIS A1 C1). Drafting an invoice (`POST /fin/v1/invoices`) needs the
-`onboarding` (or `scheduler`) caller, and recording a client's acceptance (`POST /legal/v1/acceptances`) needs
-`onboarding` (or `hub` / `clipper_network`); none of those services is deployed. Until an onboarding service exists
+`onboarding` (or `scheduler`) caller, and Legal's contract terms and obligations routes need `onboarding`; no
+onboarding service is deployed. (A client's acceptance is not recorded with this token: only the client acceptance
+page records it, ADR 0028 and docs/runbooks/client-acceptance.md.) Until an onboarding service exists
 you hold `FIN_ONBOARDING_CALLER_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN` yourself: generate each on your own
 machine with `openssl rand -hex 32` (two different values; each service refuses to start when a caller token is under
 32 printable characters or equals another of its tokens), paste it into the variable on its service, mark it
@@ -628,8 +633,10 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | legal's own ledger caller token |
 | `LEGAL_SERVICE_TOKEN` | yes | yes | (you) | |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | |
-| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding`, `compliance_38` | `onboarding` is your operator-held token (Secrets); `compliance_38` reads a client's acceptances (ADR 0024, HR-15) |
-| `LEGAL_ONBOARDING_CALLER_TOKEN` | yes to record acceptances | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
+| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding`, `compliance_38`, `client_portal` | `onboarding` is your operator-held token (Secrets); `compliance_38` reads a client's acceptances (ADR 0024, HR-15); `client_portal` is the client acceptance page (ADR 0028): it reaches only Legal's two `/legal/v1/portal/...` routes |
+| `LEGAL_ONBOARDING_CALLER_TOKEN` | yes for contract terms and obligations | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters. It never records a client's acceptance (ADR 0028: only the client acceptance page does) |
+| `LEGAL_LINK_TAG_KEY` | yes to issue client acceptance links | yes | (you) | ADR 0028, AEGIS r2 N-M1 / r3 N3-L4: ≥ 32 printable characters, different from every other secret Legal holds (else it refuses to start); the client-portal service reads the same value (reference). Unset or malformed: Legal runs, link creation and the portal routes answer 503, `/health` `link_tags.status` starts `off:` |
+| `LEGAL_ZBM_FACTS` | yes before you fill a template that names a `{{zbm_*}}` fact | no | `{"zbm_legal_entity_name": "...", "zbm_entity_type_and_state": "...", "zbm_street_address": "...", "zbm_zip": "..."}` | ADR 0028: ZBM's own entity facts, filled into every client fill from here (never from a request, never hard-coded); a fact a template names that is missing here refuses the fill; a malformed value refuses the start. docs/runbooks/client-acceptance.md, step 1 |
 | `LEGAL_COMPLIANCE_URL` | yes | no | `http://compliance.railway.internal:8380` (IaC) | ADR 0024: counsel-memo register proposals are delivered to Compliance's inbox |
 | `LEGAL_COMPLIANCE_TOKEN` | yes | yes | interpolated `${{compliance.COMPLIANCE_SERVICE_TOKEN}}` (IaC) | an unresolved reference refuses the start |
 | `LEGAL_COMPLIANCE_CALLER_TOKEN` | yes | yes | (you) | Legal's `legal_37` caller token at Compliance |
@@ -714,6 +721,27 @@ them, services/compliance-py/README.md).
 | `COMPLIANCE_SEED_PATH`, `COMPLIANCE_SEED_SHA256`, `COMPLIANCE_ALLOW_UNPINNED_SEED` | no | no | the image's pinned seed, unset, unset | an unpinned seed is non-production (every caller refuses its answers) |
 | `COMPLIANCE_RECONCILE_MODE` | no | no | unset | `1` only while reconciling after a refused start (compliance README) |
 | `COMPLIANCE_REQUEST_HEAD_TIMEOUT_SECONDS`, `COMPLIANCE_KEEP_ALIVE_TIMEOUT_SECONDS`, `COMPLIANCE_LIMIT_CONCURRENCY`, `COMPLIANCE_SWITCH_INTERVAL_SECONDS`, `COMPLIANCE_DRAINS_MAX` | no | no | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
+
+### client-portal (client-portal-py)
+
+ADR 0028. Public: the only domain is the one you generate for it (step "Client acceptance page"). Stateless: no
+volume, no ledger, no `RAILWAY_RUN_UID`.
+
+| Variable | Required | Secret | Value / example | Notes |
+|---|---|---|---|---|
+| `PORT` | yes | no | `8480` (IaC) | copied to `PORTAL_PORT` |
+| `PORTAL_PORT` | — | no | (from `PORT`) | |
+| `PORTAL_BIND_ADDR` | yes | no | `::` (IaC) | default `127.0.0.1` |
+| `PORTAL_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal; plain http only to `*.railway.internal` or localhost |
+| `PORTAL_LEGAL_SERVICE_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
+| `PORTAL_LEGAL_CALLER_TOKEN` | yes | yes | (you) | the `client_portal` caller token at Legal |
+| `PORTAL_LINK_TAG_KEY` | yes | yes | ref `legal.LEGAL_LINK_TAG_KEY` (IaC) | AEGIS r2 N-M1: a link token whose tag does not verify is refused here (the same 404) before any rate-limit budget is spent or Legal is asked |
+| `PORTAL_EVIDENCE_KEY` | yes | yes | (you) | ≥ 32 printable characters; HMAC key (client IP address and user agent, form signatures). Rotating it invalidates open forms and changes `hmac_key_id` on later acceptances |
+| `PORTAL_PUBLIC_ORIGIN` | yes | no | `https://client-portal-production-xxxx.up.railway.app` (you, after the domain exists) | the page's exact origin; a submission whose `Origin` differs is refused. Unset or not `https://` refuses the start |
+| `PORTAL_CLIENT_IP_HEADER` | no | no | `x-real-ip` (default) | AEGIS M-3: the header Railway's edge sets to the client's address (a Railway moderator states the edge overwrites `X-Real-IP` and `X-Forwarded-For`; **UNVERIFIED**, not a documented contract). `none` = do not read one |
+| `PORTAL_TRUSTED_PROXY_HOPS` | yes | no | `1` (IaC) | fallback when the header above is absent or not an address: the `X-Forwarded-For` entry this many from the END (never the left-most, which a client can write); 0 = the socket peer. Set from the client acceptance runbook, step 8 (mandatory). IPv6 clients are counted per /64 |
+| `PORTAL_RATE_LEGAL_PER_MINUTE` | no | no | `300` | AEGIS M-3: every call to Legal (resolve, accept, receipt), all clients together, charged before the call |
+| `PORTAL_RATE_IP_PER_MINUTE`, `PORTAL_RATE_TOKEN_PER_HOUR`, `PORTAL_RATE_NOT_FOUND_PER_MINUTE`, `PORTAL_FORM_MAX_AGE_SECONDS`, `PORTAL_LEGAL_TIMEOUT_SECONDS`, `PORTAL_DISPLAY_TZ` | no | no | `30`, `40`, `120`, `14400`, `5`, `America/Los_Angeles` | services/client-portal-py/README.md |
 
 ### dashboard (apps/dashboard-ts, on Vercel)
 
@@ -914,25 +942,38 @@ curl -sS $C/health                                             # register_versio
 Railway checks `/health` only while a deployment starts, and compliance has no public domain, so an outside uptime
 monitor cannot reach it directly. Set up a **private check with a heartbeat** (once, about 20 minutes):
 
-1. At an uptime service that offers heartbeat (dead-man) monitors (for example Better Stack or Healthchecks.io), make a
-   heartbeat monitor with a 15-minute period and a 15-minute grace, alerting your phone/email. Copy its ping URL
-   (treat it as a secret).
+1. At an uptime service that offers heartbeat (dead-man) monitors (for example Better Stack or Healthchecks.io), make
+   **two** heartbeat monitors, each with a 15-minute period and a 15-minute grace, alerting your phone/email: **alive
+   and holds** (the alarm for a payment Compliance holds) and **configuration** (a deploy step left half-done). Copy
+   both ping URLs (treat them as secrets).
 2. In the Railway project, add a service from the public `curlimages/curl` image (pin its digest), no domain, no volume,
    with a cron schedule `*/10 * * * *` and the start command
 
    ```sh
-   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 http://legal.railway.internal:8420/health | grep -Eq "\"status\": ?\"ok\"" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
+   sh -c 'L=$(curl -fsS --max-time 10 http://legal.railway.internal:8420/health | tr -d " "); W=$(printf %s "$L" | sed -n "s/.*\"warnings\":\[\([^]]*\)\].*/\1/p" | tr "," "\n" | grep -v "^\"optional_caller_unset:[a-z0-9_]*\"$"); printf %s "$L" | grep -Eq "\"status\":\"(ok|warning)\"" && [ -z "$W" ] && curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null && { printf %s "$L" | grep -q "\"status\":\"ok\"" && curl -fsS --max-time 10 "$HEARTBEAT_CONFIG_URL" >/dev/null || true; }'
    ```
 
-   and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance and finance over the private network
-   (`/health` needs no token) and pings the monitor only while compliance's `/health` answers 200 **and** finance has
-   no payment held by Compliance (`compliance_holds_open` is 0: held invoices, held unapplied money and open founder
-   alerts), and legal's `/health` says `"status": "ok"` (it is `degraded` while a log line the replay did not apply is
-   unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
-   /legal/v1/replay-quarantine/acknowledgements`, your token; it is `warning` while `COMPLIANCE_LEGAL_CALLER_TOKEN` is
-   unset: finish step D). A 503, a dead or unreachable service, an open hold, or
-   the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
-   things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
+   and two Sealed variables: `HEARTBEAT_URL` (the alive-and-holds ping URL) and `HEARTBEAT_CONFIG_URL` (the
+   configuration ping URL). It reaches legal, compliance and finance over the private network (`/health` needs no
+   token).
+   - **Alive and holds** (`HEARTBEAT_URL`) is pinged only while compliance's `/health` answers 200, finance has no
+     payment held by Compliance (`compliance_holds_open` is 0: held invoices, held unapplied money and open founder
+     alerts), and legal's `/health` says `"status": "ok"`, or `"warning"` whose **only** warnings are
+     `optional_caller_unset:<name>` (AEGIS RB-L1: a caller token not set yet must never silence the hold alarm, which
+     guards a 10-business-day OFAC reporting deadline). Legal `degraded` (a log line the replay did not apply is
+     unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
+     /legal/v1/replay-quarantine/acknowledgements`, your token), any other warning, a 503, a dead or unreachable
+     service, an open hold, or the check itself failing all stop this ping.
+   - **Configuration** (`HEARTBEAT_CONFIG_URL`) is pinged only after the first ping, and only while legal's
+     `/health` says exactly `"status": "ok"`. It alerts while an optional caller token is unset:
+     `optional_caller_unset:compliance_38` (`COMPLIANCE_LEGAL_CALLER_TOKEN`: finish step D) or
+     `optional_caller_unset:client_portal` (`PORTAL_LEGAL_CALLER_TOKEN`: finish steps 1-5 of "Client acceptance page
+     (ADR 0028)" below). It also alerts whenever the first one does.
+
+   An **alive and holds** alert therefore means one of three things: look at compliance's `/health`, then at
+   finance's `/fin/v1/breaks` (step G, "A payment Compliance holds"), then at legal's `/health` (`degraded`: the
+   replay quarantine above; another warning: read it). A **configuration** alert alone means a caller token is
+   still unset: legal's `/health` `warnings` names it.
 3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
    existing, not created twice), or leave it as the one hand-made service and note it in your Railway checklist.
 
@@ -976,11 +1017,9 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    ```
 
    Keep the `attestation_id` it prints.
-3. The client's MSA acceptance at Legal (the acceptance you record today with `LEGAL_ONBOARDING_CALLER_TOKEN`): note
-   its `acceptance_id`, the `version` and the document's `doc_sha256`. The onboarding token records a standard form's
-   acceptance only with an invitation you issued for that client first (`POST /legal/v1/acceptance-invitations` with
-   your Legal approval token and `{"request_id", "doc_id", "version", "party_ref": "client:<client id>"}`, valid 14
-   days); the acceptance names its `invitation_id`, otherwise Legal answers `ACCEPTANCE_NOT_INVITED` (RTM-13).
+3. The client's MSA acceptance at Legal, made by the client on the client acceptance page (ADR 0028;
+   docs/runbooks/client-acceptance.md, steps 4-6): note its `acceptance_id`, the `version` and the document's
+   `doc_sha256` (the link's `GET .../evidence` lists them). Legal records a client's acceptance in no other way.
 4. Run the activation (edit the values in `<...>`; the state is the client's ISO 3166-2 code: `US-CA`, `US-NY`;
    a territory `PR`, `GU`, `VI`, `AS` or `MP`; set a flag `true` only if it is true of the client):
 
@@ -1217,6 +1256,154 @@ calendar year or the previous calendar year; Hawaii, Nevada and Puerto Rico also
 Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands have no threshold number: the report lists
 them under `thresholds.check_before_first_client` ("local gross receipts/business tax — check before first client")
 and flags any of them with a sale. Do that check before the first client there.
+
+### Founder contract approval (ADR 0022)
+
+Your ruling (Oct 30 2026): you approve the client contracts yourself. For `client_msa`, the SOWs (`sow`,
+`sow_seo_audit`, `sow_revenue_recovery`) and `zbc_order_form` only, you approve each version as founder and make the
+CQ-19 determination yourself, so a client's clickwrap acceptance counts. Both are recorded as yours
+(`approval_basis: founder_approval`, `evidence_basis: founder_determination`). Every other document is unchanged.
+None of this clears Finance's sales-tax row FIN-CQ-11. That row still blocks every invoice until you amend it (finance
+README, "First steps for Andre", step 2).
+
+You need: the legal service's **service instance ID** (dashboard → `legal` → `Ctrl+K` / `Cmd+K` → **Copy Service
+Instance ID**), a checkout of the commit legal runs, and the three values from legal's Variables tab:
+`LEGAL_SERVICE_TOKEN`, `LEGAL_ANDRE_APPROVAL_TOKEN` and `LEGAL_ONBOARDING_CALLER_TOKEN`. Pick each `request_id` once
+(`[A-Za-z0-9._:-]`, at most 128 characters). Re-sending the same body with the same id within 15 minutes returns the
+same answer and records nothing twice.
+
+1. **Tunnel and header files.** In its own terminal, leave this running:
+   `ssh -N -L 127.0.0.1:18420:127.0.0.1:8420 <legal-service-instance-id>@ssh.railway.com`.
+   In a second terminal, write each token into a header file that only you can read. Paste the value; do not echo it
+   on a command line:
+
+   ```sh
+   umask 077 && mkdir -p ~/zbm && cd ~/zbm
+   printf 'Authorization: Bearer %s\n' "$(cat)" > legal-svc.hdr       # paste LEGAL_SERVICE_TOKEN, Enter, Ctrl-D
+   printf 'X-Andre-Approval-Token: %s\n' "$(cat)" > legal-andre.hdr   # paste LEGAL_ANDRE_APPROVAL_TOKEN, Enter, Ctrl-D
+   printf 'X-LEGAL-Caller-Token: %s\n' "$(cat)" > legal-onb.hdr       # paste LEGAL_ONBOARDING_CALLER_TOKEN, Enter, Ctrl-D
+   L=http://127.0.0.1:18420; A="-H @$HOME/zbm/legal-svc.hdr -H @$HOME/zbm/legal-andre.hdr"
+   curl -sS $L/health                                                  # 200 {"status":"ok",...}
+   ```
+
+2. **LG-20 must be in force.** Run `curl -sS $A $L/legal/v1/rules > rules.json`. Then:
+   - `rules_version` is `null`: approve the seed. Its rows include LG-20. Take `proposal_id` and `content_sha256` of
+     the `open_proposals` entry with `"kind": "seed"` and send
+     `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "legal-seed-1", "decisions": [{"proposal_id": "<proposal_id>", "content_sha256": "<content_sha256>", "decision": "approve"}]}' $L/legal/v1/rules/decisions`.
+   - A version is in force but `rules` has no `"rule_id": "LG-20"` (approved before ADR 0022): add it. This is not a
+     weakening. From the checkout, run:
+     ```sh
+     python3 -c 'import json,sys; r=[x for x in json.load(open(sys.argv[1]))["rows"] if x["rule_id"]=="LG-20"][0]; print(json.dumps({"request_id": "lg20-add-1", "kind": "add", "proposed_row": r}))' \
+       services/legal-py/seed/legal_rules_seed.json > ~/zbm/lg20-add.json
+     curl -sS $A -H 'Content-Type: application/json' -d @$HOME/zbm/lg20-add.json $L/legal/v1/rules/proposals
+     ```
+     The answer's `proposal` must show `"weakening": false`. Approve it with its `proposal_id` and `content_sha256`:
+     `-d '{"request_id": "lg20-add-1-dec", "decisions": [{"proposal_id": "<proposal_id>", "content_sha256": "<content_sha256>", "decision": "approve", "note": "ADR 0022"}]}'`
+     to `$L/legal/v1/rules/decisions`.
+   - LG-20 is listed with `"status": "verified"`: nothing to do.
+3. **Upload the MSA** (your final text, one plain-text file, no `{{placeholders}}`; a standard form any client may
+   accept). Legal assigns the version number.
+   ```sh
+   python3 -c 'import json,sys; print(json.dumps({"request_id": "msa-upload-1", "entity": "zbm", "text": open(sys.argv[1], encoding="utf-8").read()}))' ~/zbm/msa.txt > ~/zbm/msa-upload.json
+   curl -sS $A -H 'Content-Type: application/json' -d @$HOME/zbm/msa-upload.json $L/legal/v1/documents/client_msa/versions
+   ```
+   → 201 `{"version": "1.0", "sha256": "<64 hex>", "status": "draft", ...}`. Keep `version` and `sha256`. If the
+   MSA carries the CCPA clause, add `"clause_ids": [{"clause_id": "MSA-CCPA-01", "position": "standard"}]` to the
+   body. Use
+   `"entity": "zbc"` for a ZBC document. `zbc_order_form` is ZBC only.
+4. **Approve it as founder:**
+   `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "msa-fap-1", "version_sha256": "<sha256>", "rationale": "<your reason, 20-2000 characters>", "founder_confirms": true}' $L/legal/v1/documents/client_msa/versions/<version>/founder-approval`
+   → 200 with `"status": "approved"`, `"approval_basis": "founder_approval"` and `"review_by"`, its renewal date
+   (90 days by default). Optional `"effective_at": "<RFC 3339>"` delays it.
+   Your rationale can be read back at any time:
+   `curl -sS $A $L/legal/v1/documents/client_msa/versions/<version>/founder-approval/rationale`.
+   Refusals:
+   - `UNFILLED_PLACEHOLDER`: a placeholder is left; fill it and upload again. Any `[...]` counts (`[FEE]`, `[ ]`,
+     `[●]`, `[30]`, `[Client Name]`), and so do `<<...>>`, `{client_name}`, `___`, `$X,XXX` and `TBD`/`TBA`. Only
+     standard lines such as `[SIGNATURE PAGE FOLLOWS]`, `[Remainder of page intentionally left blank.]`,
+     `[EXHIBIT A-1]` or `[N/A]`, footnotes `[^1]`, signature lines exactly like `By: ______`, and links to a web
+     address are fine (ADR 0022 lists them exactly). The check is a backstop, not a guarantee: it does not see
+     a bare `CLIENT NAME` or `(CLIENT NAME)`, so read the text before you approve it.
+   - `HASH_MISMATCH`: wrong sha256.
+   - `FOUNDER_PATH_NOT_IN_FORCE`: step 2 was not done.
+   - `FOUNDER_PATH_NOT_ALLOWED`: not one of the three documents.
+   - `VERSION_NOT_APPROVABLE`: the version is not a draft.
+5. **SOW templates** (one document each, so both are live together): `sow_seo_audit` and `sow_revenue_recovery`.
+   Upload each template as in step 3, adding its variable schema. Every `{{name}}` in the text needs an entry, and
+   no `[BRACKET]` may be left: Legal refuses to make a version current while one remains (`UNFILLED_PLACEHOLDER`).
+   ```sh
+   python3 -c 'import json,sys; print(json.dumps({"request_id": "sow-seo-upload-1", "entity": "zbm", "text": open(sys.argv[1], encoding="utf-8").read(), "template_variables": json.load(open(sys.argv[2]))}))' ~/zbm/sow-seo.txt ~/zbm/sow-seo-vars.json > ~/zbm/sow-seo-upload.json
+   curl -sS $A -H 'Content-Type: application/json' -d @$HOME/zbm/sow-seo-upload.json $L/legal/v1/documents/sow_seo_audit/versions
+   ```
+   `sow-seo-vars.json` maps each placeholder to a type, for example
+   `{"client_legal_name": {"type": "string", "max_length": 200}, "audit_fee_usd": {"type": "string", "max_length": 20}}`
+   (types: `string` with `max_length` ≤ 500, `date`, `int` with `min`/`max`, `enum` with `values`). Founder-approve
+   the template (step 4, at `.../sow_seo_audit/versions/<version>/founder-approval`). A template is never acceptable
+   itself. **Per client:** fill it with your token, then approve that client's fill:
+   `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "sow-seo-<client_id>-1", "entity": "zbm", "party_ref": "client:<client_id>", "variables": {"client_legal_name": "...", "audit_fee_usd": "..."}}' $L/legal/v1/documents/sow_seo_audit/versions`
+   → 201 with the fill's `version` and `sha256`. Then step 4 on that version, with a one-line rationale (the client
+   and the price). Only that client can accept it. The same goes for `sow_revenue_recovery`.
+6. **CQ-19 founder determination** (once; it lasts `LEGAL_MEMO_REVIEW_DAYS`, 90 by default):
+   `curl -sS $A -H 'Content-Type: application/json' -d '{"request_id": "cq19-fdt-1", "rationale": "<how the client sees and ticks the box, and what is kept>", "founder_confirms": true}' $L/legal/v1/register/CQ-19/founder-determination`
+   → 200 `"founder_determination": {"status": "active", "renew_by": "<date>", ...}`.
+   `curl -sS $A $L/legal/v1/register/CQ-19` shows it at any time.
+7. **The client accepts on the client acceptance page** (ADR 0028), never through `POST /legal/v1/acceptances`:
+   Legal refuses that route for every client, your onboarding token included. You create a link for the client's
+   approved fills (the MSA and the SOW), the client accepts on the page, and Legal records one acceptance per
+   document with `"via": "client_portal"`. Every step: docs/runbooks/client-acceptance.md. Legal issues no link
+   while step 6 is missing (`EVIDENCE_INSUFFICIENT`).
+8. **What Finance gets.** The contract reference for Finance's billing profile (`msa`) and an invoice's `legal_ref` is
+   `{"doc_id": "client_msa", "version": "<version>", "doc_sha256": "<sha256>", "acceptance_id": "<acceptance_id>"}`
+   (or the SOW's). Finance no longer refuses on Legal. FIN-CQ-11 still does until you amend it. Finance's
+   `GET /fin/v1/clients/<client_id>/billing-readiness` shows the MSA's renewal date under `contract_renewal`.
+9. **Renewal.** An approval must be renewed by its `review_by` date (90 days by default), and the CQ-19 determination
+   by its `renew_by`. Finance's billing-readiness shows `contract_renewal.MSA.renew_by` and `renewal_due_soon: true`
+   in the last 14 days. After the date, Finance refuses with "...renewal date passed on <date>: Andre renews it at
+   Legal". To renew,
+   re-read the version (`curl -sS $A $L/legal/v1/documents/client_msa/versions/<version>`; the `sha256` must be the
+   one you approved) and send step 4 again with a new `request_id` and rationale. If you already approved a newer
+   version of the same document, renewal is refused (`VERSION_SUPERSEDED`); add `"renew_superseded": true` only if
+   you really mean to bring the older one back. The version, its hash and every
+   client acceptance stay the same; only `review_by` moves. Send step 6 again with a new request_id. Acceptances
+   already recorded stay sufficient.
+10. **To stop the founder path:** amend LG-20 to `"status": "unverified"`. Send it as a rules proposal
+    (`"kind": "amend"`, `"target_id": "LG-20"`, the row from `rules.json` with only `status` changed, and no
+    `in_force` key), then approve it. This is a tightening. It takes every founder-approved version out of force at
+    once, and acceptances resting on the CQ-19 determination stop counting: Finance then refuses invoices under them.
+    Reopening the path after that needs a code change.
+    If Compliance invalidates CQ-19 and you record a new determination later, acceptances recorded before the
+    invalidation do not count again: those clients accept again. If you retire a SOW template, its client fills can
+    no longer be accepted or renewed; acceptances already recorded run until the fill's renewal date.
+
+Clean up: close the tunnel (Ctrl-C) and `rm ~/zbm/legal-*.hdr`. The request bodies of steps 2 (seed), 3, 4, 6, 7
+and 8 ran end to end on Oct 30 2026 against a local stack: the real ledger-rust binary, plus legal-py and finance-py
+started through their production entrypoints. The LG-20 add (step 2) and the stop (step 10) are covered by legal-py's
+tests. The tunnel, the header files and these exact curl lines have not been run, and nothing here has been run
+against Railway.
+
+### Client acceptance page (ADR 0028)
+
+The only way a client's acceptance of the MSA or a SOW is recorded: you create a link at Legal, the client accepts on
+the page, Finance's contract gate counts it. `POST /legal/v1/acceptances` with your onboarding token is refused for
+every client. Once, after the first deploy that includes `client-portal`:
+
+1. **Apply** (`railway config plan`, read it, `railway config apply`). Legal restarts with the new caller map while
+   `PORTAL_LEGAL_CALLER_TOKEN` is still empty: Legal skips that entry, logs `LEGAL_CALLER_TOKENS: client_portal not
+   set`, keeps running and says `"status": "warning"` with `optional_caller_unset:client_portal` on its `/health`
+   (as for `compliance_38`, step D above); only the client acceptance page's routes answer 503 (AEGIS M-1). `client-portal` itself
+   refuses to start until its secrets exist; that touches nothing else.
+2. Generate the secrets of the Secrets table: `LEGAL_LINK_TAG_KEY` on `legal`, `PORTAL_LEGAL_CALLER_TOKEN` and
+   `PORTAL_EVIDENCE_KEY` on `client-portal` (all Sealed).
+3. `client-portal` -> Settings -> Networking -> **Generate Domain** (no custom domain is needed). Copy it and set
+   `PORTAL_PUBLIC_ORIGIN` to `https://<that domain>` (no path, no trailing slash).
+4. Set `LEGAL_ZBM_FACTS` on `legal` (the entity facts; step 1 of docs/runbooks/client-acceptance.md).
+5. **Redeploy `legal`** (it reads the caller token now: the warning is gone from its log, and its `/health` no longer
+   lists `optional_caller_unset:client_portal` under `warnings`) and then `client-portal`.
+6. Check: `curl -sS https://<domain>/health` answers `{"status":"ok"}`; `curl -sSI https://<domain>/accept/x`
+   answers 404 with a `content-security-policy` header starting `default-src 'none'`; then run step 8 of the client
+   acceptance runbook (the client-address check, mandatory before the first real link).
+
+Every link after that: docs/runbooks/client-acceptance.md (invite, send, verify, revoke, the confirmation email).
 
 ### Connecting Search Console (optional)
 
@@ -1455,6 +1642,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - [ ] finance, legal, seo logs: no `REFUSING TO START` / `refusing to start`.
 - [ ] SEO report delivery path: open the seo tunnel (steps 1-2 of "Delivering an SEO client report from Railway"),
       `curl -sS http://127.0.0.1:18500/health` → 200 `{"status":"ok"}`, then close it.
+- [ ] Client acceptance page (`$PORTAL` = its domain): `curl -sS https://$PORTAL/health` → 200 `{"status":"ok"}`;
+      `curl -sS -o /dev/null -w '%{http_code}\n' https://$PORTAL/accept/x` → `404`; no other path answers 200.
 - [ ] `curl -sS https://$ORCH/health` → 200 `{"status":"ok","service":"orchestrator-go"}`.
 - [ ] `curl -sS -o /dev/null -w '%{http_code}\n' https://$ORCH/revenue-recovery/findings` → `401` (no token).
 - [ ] `curl -sS -H "Authorization: Bearer <ORCHESTRATOR_SERVICE_TOKEN>" https://$ORCH/revenue-recovery/findings` → 200,

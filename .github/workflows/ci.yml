@@ -162,6 +162,7 @@ jobs:
           - bizdev-py
           - seo-py
           - ooh-py
+          - client-portal-py
         # macOS (Apple Silicon): every service once, on Python 3.13
         include:
           - {os: macos-26, python: "3.13", service: detection-py}
@@ -180,6 +181,7 @@ jobs:
           - {os: macos-26, python: "3.13", service: bizdev-py}
           - {os: macos-26, python: "3.13", service: seo-py}
           - {os: macos-26, python: "3.13", service: ooh-py}
+          - {os: macos-26, python: "3.13", service: client-portal-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -199,6 +201,11 @@ jobs:
           workspaces: services/ledger-rust -> target
       - name: Install pinned requirements
         run: python -m pip install -r services/${{ matrix.service }}/requirements.txt
+      # ADR 0028: client-portal-py's end-to-end contract (tests/contract_e2e_real.py) runs the REAL legal-py and
+      # finance-py apps in its process; their pins (identical files) are installed for that suite only
+      - name: Install the peer services' pins (client-portal-py end-to-end contract)
+        if: matrix.service == 'client-portal-py'
+        run: python -m pip install -r services/legal-py/requirements.txt
       # Annotated (see "Reading a red job" in docs/ci.md): the output is tee'd to $RUNNER_TEMP (outside the checkout,
       # /tmp and the wrapper's private TMPDIR) and devtools/ci_annotate.py turns it into check-run annotations; the step
       # exits with the suite's own code. -rfEs: FAILED/ERROR summary lines as well as the skips. faulthandler_timeout
@@ -644,6 +651,7 @@ jobs:
             docker build -f services/legal-py/Dockerfile -t zbm-ci/legal-py:ci .
             docker build -f services/seo-py/Dockerfile -t zbm-ci/seo-py:ci .
             docker build -f services/compliance-py/Dockerfile -t zbm-ci/compliance-py:ci .
+            docker build -f services/client-portal-py/Dockerfile -t zbm-ci/client-portal-py:ci .
             docker build -f services/orchestrator-go/Dockerfile.orchestrator -t zbm-ci/orchestrator:ci .
             docker build -f services/orchestrator-go/Dockerfile.stripe-gateway -t zbm-ci/stripe-gateway:ci .
           } 2>&1 | tee "$RUNNER_TEMP/railway-build.log"

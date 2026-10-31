@@ -23,6 +23,7 @@ NOW = datetime(2026, 10, 1, 17, 0, tzinfo=timezone.utc)
 SERVICE_TOKEN = "test-legal-service-token-do-not-use-0123"
 ANDRE_TOKEN = "test-andre-approval-token-legal-do-not-use-01"
 CALLERS = {n: f"test-legal-caller-{n}-0123456789abcdefghij" for n in config_mod.CALLER_NAMES}
+LINK_TAG_KEY = "test-link-tag-key-shared-with-the-portal-do-not-use"   # ADR 0028, AEGIS r2 N-M1
 COUNSEL_REF = "eng-counsel-1"
 _ids = itertools.count(1)
 
@@ -43,7 +44,7 @@ def sha(data) -> str:
 
 def base_env(**over) -> dict:
     env = {"LEGAL_SERVICE_TOKEN": SERVICE_TOKEN, "LEGAL_ANDRE_APPROVAL_TOKEN": ANDRE_TOKEN,
-           "LEGAL_CALLER_TOKENS": json.dumps(CALLERS)}
+           "LEGAL_CALLER_TOKENS": json.dumps(CALLERS), "LEGAL_LINK_TAG_KEY": LINK_TAG_KEY}
     env.update({k: v for k, v in over.items() if v is not None})
     return {k: v for k, v in env.items() if v != "__unset__"}
 
@@ -200,8 +201,68 @@ class Harness:
         if doc_id == "clipper_agreement":
             body["esign_consent"] = {"disclosure_version": "1.0", "consented_at": "2026-10-01T16:59:00Z",
                                      "access_demonstrated": True}
+        # AEGIS L-5: no silent rerouting. A client's acceptance is recorded only through the client acceptance page;
+        # a test that means the page calls client_page_accept, and a test of a refusal names another caller
+        assert not (caller == "onboarding" and party.startswith("client:")), \
+            "a client's acceptance goes through the page: call client_page_accept"
         body.update(over)
         return self.ok(self.post("/legal/v1/acceptances", body, caller=caller), code)
+
+    COMPANION_SOW = "Statement of Work (test companion): no fees, no fields."
+    COMPANION_MSA = "Z Best Media Master Services Agreement (test companion): the same terms for every client."
+
+    def _companion(self, doc_id, text):
+        """A standard form (no party, no fields) the page needs next to the document under test: the page is an MSA
+        with a SOW (clickwrap text v1 Part B), so a test about one of them pairs it with a standard other half."""
+        cur = self.svc._current(doc_id)
+        if cur is not None and not cur.get("template_variables"):
+            return {"doc_id": doc_id, "version": cur["version"], "doc_sha256": cur["sha256"]}
+        v = self.ok(self.apost(f"/legal/v1/documents/{doc_id}/versions",
+                               {"request_id": rid("cmp"), "entity": "zbm", "text": text, "bump": "major"
+                                if self.svc._versions_of(doc_id) else "minor"}), 201)
+        self.ok(self.apost(f"/legal/v1/documents/{doc_id}/versions/{v['version']}/founder-approval",
+                           {"request_id": rid("cfap"), "version_sha256": v["sha256"], "founder_confirms": True,
+                            "rationale": "Test companion standard form, approved by me as founder."}))
+        return {"doc_id": doc_id, "version": v["version"], "doc_sha256": v["sha256"]}
+
+    def client_page_accept(self, doc_id, version, doc_sha, party, code=201, companion=None, **over):
+        """ADR 0028: a client's acceptance through the client acceptance page, explicitly: Andre's link for the client
+        (the document under test, paired with a standard companion so the link is the page Legal renders: an MSA with a
+        SOW), the page text Legal renders, the client-portal caller's recording. A refused link answers its refusal.
+        Returns the acceptance of the document under test."""
+        target = {"doc_id": doc_id, "version": version, "doc_sha256": doc_sha}
+        docs = [target]
+        companion = code == 201 if companion is None else companion     # a refusal test checks the document alone
+        if companion and doc_id == "client_msa":
+            docs.append(self._companion("sow", self.COMPANION_SOW))
+        elif companion and doc_id in ("sow", "sow_seo_audit", "sow_revenue_recovery"):
+            docs.insert(0, self._companion("client_msa", self.COMPANION_MSA))
+        inv = self.apost("/legal/v1/client-acceptance-invitations", {
+            "request_id": rid("cinv"), "party_ref": party, "documents": docs,
+            "display": {"client_legal_name": "Client LLC", "notice_email": "legal@client.example",
+                        "sow_number": "SOW-1", "sow_title": "Statement of Work"}})
+        if inv.status_code != 201:
+            return self.ok(inv, code)
+        import clickwrap_page as CP
+        res = self.post("/legal/v1/portal/invitations/resolve", {"token": inv.json()["token"]}, caller="client_portal")
+        bl = res.json().get("blocks") if res.status_code == 200 else None
+        page = (CP.page_text(bl) if bl else f"acceptance page for {doc_id} {version}\n").encode("utf-8")
+        presented, act = over.pop("presented_sha256", doc_sha), over.pop("affirmative_act", True)
+        over.pop("signer_identity_ref", None)
+        assert not over, f"client_page_accept: no page field for {sorted(over)}"
+        body = {"request_id": rid("pacc"), "token": inv.json()["token"],
+                "documents": [{**d, "presented_sha256": presented if d is target else d["doc_sha256"],
+                               "affirmative_act": act if d is target else True} for d in docs],
+                "presentation": "inline", "page_sha256": sha(page), "page_text_b64": b64(page),
+                "form_sha256": sha("form " + inv.json()["token"]),
+                "signatory": {"full_name": "Sam Signer", "title": "Owner", "company": "Client LLC"},
+                "ip_hmac_sha256": "e" * 64, "user_agent_hmac_sha256": "f" * 64, "hmac_key_id": "0" * 16}
+        r = self.ok(self.post("/legal/v1/portal/acceptances", body, caller="client_portal"), code)
+        if code != 201:
+            return r
+        mine = next(a for a in r["acceptances"] if a["doc_id"] == doc_id)
+        return {**mine, "obligation_ids": r["obligation_ids"], "reasons": [], "reason_lines": [],
+                "request_id": r["request_id"], "invitation_id": r["invitation_id"]}
 
     def job(self, name):
         return self.ok(self.post(f"/legal/v1/jobs/{name}/run", {"request_id": rid("job")}, caller="scheduler"))

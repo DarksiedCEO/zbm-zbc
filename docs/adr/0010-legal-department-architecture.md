@@ -51,8 +51,8 @@ wall-clock deadline.
 
 | File | SHA-256 |
 |---|---|
-| `legal_rules_seed.json` | `cebb5b1418eee245a472d040bfd8795ce3d93338902c4939b0454655f90afe9b` |
-| `documents.json` | `c4819ab8017e4d563a776b0e57964ff821b69f000ec5189581be858fb933f823` |
+| `legal_rules_seed.json` | `140a118216b8c0d1a3baee93daa261affe3058733cb9f97fe1f8c0bf99735ff4` (ADR 0022: + LG-20; was `cebb5b14…afe9b`) |
+| `documents.json` | `2073717e838b2ddec39027d8c4b68ed91ebdc1df683621faef72dc199939afbe` (ADR 0022: + `founder_approval_allowed`, + `sow_seo_audit` / `sow_revenue_recovery`; was `c4819ab8…3f823`) |
 | `counsel_questions.json` | `8a00b2912611547fe7d38c3f9d3794824df804168aa2673cd1532cb666da2778` |
 | `retention.json` | `712efb7a7ed72bdd5896c47f51f9f1cd9fcc7503383ced80568b1385d80ae286` |
 | `signoff_topics.json` | `3651fc599248be8656e83fcffc9c5b66d48a0d9712437c316f6678c95a9ab590` |
@@ -304,7 +304,8 @@ Branch `fix18-fin-legal` from `integration-2026-09-24` @ `680c289`. Tests: `test
    AP-15..AP-22 (Spanish, German/French/Portuguese, Chinese, conditional, recommendation, imperative, third-person,
    assurance phrasings) and a normalizer that keeps letters of every script; the round-17 list goes from 30 missed
    of 38 to 0 of 38, and the 1,000-sentence benign set still has 0 false positives. Pinned seed hashes:
-   `documents.json` `c4819ab8017e4d563a776b0e57964ff821b69f000ec5189581be858fb933f823`, `advice_patterns.json`
+   `documents.json` `c4819ab8017e4d563a776b0e57964ff821b69f000ec5189581be858fb933f823` (at that time; now
+   `2073717e838b2ddec39027d8c4b68ed91ebdc1df683621faef72dc199939afbe`, ADR 0022, see the pin table), `advice_patterns.json`
    `cf43405ee79ac0779ac466605b31e7ea6e61fa9ba9a7af1ca3e7a440a1719be3`.
 5. **Memo -> Compliance proposal (N17-8).** Two steps: `POST /legal/v1/memos` files the memo (answers carry no
    rows; a Compliance-owned question it answers is `awaiting_proposal`), then

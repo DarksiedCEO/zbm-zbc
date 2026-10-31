@@ -115,6 +115,18 @@ RULES = [
     rule("LG-19", "Outbound DMCA notices",
          "An outbound notice needs Andre's token as the authorized signer and counsel review first when a licence "
          "or fair use is possible (512(f)).", "research", [USC512]),
+    # ADR 0022 (Andre's ruling, 2026-10-30): Andre approves the client commercial contracts himself. This founder rule
+    # states that path as a rule of its own; LG-01, LG-02, LG-07 and LG-18 are unchanged and still govern every other
+    # document and every other use of a CQ row.
+    rule("LG-20", "Client commercial contracts: founder approval (ADR 0022)",
+         "For the documents marked founder_approval_allowed (client_msa, the SOWs, zbc_order_form) only, and in place "
+         "of the LG-02 sign-off record: Andre's token may approve a version on its content hash with a written "
+         "rationale; the version is recorded with approval_basis founder_approval. Andre's token may also record a "
+         "founder determination on CQ-19 with a written rationale: while it is in force, a clickwrap_unticked_box "
+         "acceptance of those documents with every LG-03 field is evidence-sufficient, recorded with evidence_basis "
+         "founder_determination. LG-01, LG-02, LG-07 and LG-18 govern every other document and every other use of a "
+         "CQ row.",
+         "founder", []),
 ]
 
 # §D. counsel_required per the "Counsel drafts/approves v1" column; "template only", "approve once",
@@ -123,10 +135,17 @@ ESIGNABLE = ("client_msa", "sow", "zbc_order_form", "clipper_agreement", "ic_agr
              "dpa")
 
 
+# ADR 0022 / LG-20 (Andre, 2026-10-30): the client-facing commercial contracts Andre approves as founder. Every other
+# document (clipper/creator and IC agreements, NDAs, privacy policy, terms, DMCA, the engagement letter, ...) keeps
+# its LG-02 gate unchanged.
+FOUNDER_APPROVABLE = ("client_msa", "sow", "sow_seo_audit", "sow_revenue_recovery", "zbc_order_form")
+
+
 def doc(doc_id, title, doc_type, entities, counsel_required, blocked_by=(), required_clauses=()):
     return {"doc_id": doc_id, "title": title, "doc_type": doc_type, "entities": list(entities),
             "counsel_required": counsel_required, "approval_blocked_by": list(blocked_by),
-            "required_clause_ids": list(required_clauses), "esign_allowed": doc_type in ESIGNABLE}
+            "required_clause_ids": list(required_clauses), "esign_allowed": doc_type in ESIGNABLE,
+            "founder_approval_allowed": doc_id in FOUNDER_APPROVABLE}
 
 
 DOCUMENTS = [
@@ -134,6 +153,10 @@ DOCUMENTS = [
     # AEGIS N17-7: no SOW exception -- a SOW (fills included) needs counsel's sign-off on its exact hash like
     # every other document (ADR 0010 amendment)
     doc("sow", "SOW / campaign brief", "sow", ("zbm", "zbc"), True),
+    # ADR 0022: one document id per SOW template, so the SEO audit and the Revenue Recovery templates are both live
+    # at once (a fill uses the highest in-force template OF ITS DOCUMENT). doc_type stays "sow".
+    doc("sow_seo_audit", "SOW: SEO / AI-visibility audit", "sow", ("zbm",), True),
+    doc("sow_revenue_recovery", "SOW: Revenue Recovery", "sow", ("zbm",), True),
     doc("zbc_order_form", "ZBC campaign order form", "zbc_order_form", ("zbc",), True),
     doc("clipper_agreement", "Clipper / creator agreement", "clipper_agreement", ("zbc",), True),
     doc("ic_agreement", "Independent-contractor agreement", "ic_agreement", ("zbm", "zbc"), True, ("CQ-17",)),

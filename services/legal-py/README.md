@@ -26,7 +26,10 @@ cd src && python3 -m api                             # LEGAL_BIND_ADDR (127.0.0.
 ```
 
 Caller names: `compliance_38`, `clipper_network`, `verification_integrity`, `creative_production`, `onboarding`,
-`finance_31`, `hub`, `esign_gateway`, `scheduler`. Headers: `Authorization: Bearer <service token>` on every route
+`finance_31`, `hub`, `esign_gateway`, `scheduler`, `client_portal` (ADR 0028: reaches only its three
+`/legal/v1/portal/...` routes: `invitations/resolve`, `receipts`, `acceptances`; never a generic reader route).
+Optional callers (an empty or unresolved entry is skipped, the routes only it may call answer 503, `/health` says
+`warning` with `optional_caller_unset:<name>`): `compliance_38` (ADR 0024) and `client_portal` (ADR 0028). Headers: `Authorization: Bearer <service token>` on every route
 but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for Andre.
 
 | Setting | Default | Notes |
@@ -39,6 +42,8 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `LEGAL_FILING_ALERT_DAYS` | 60 | |
 | `LEGAL_ESIGN_CONSENT_REQUIRED` | 1 | clipper agreements need the ESIGN §7001(c) block |
 | `LEGAL_BUSINESS_TZ` | `America/Los_Angeles` | the calendar dates Legal counts in |
+| `LEGAL_LINK_TAG_KEY` | unset | ADR 0028, AEGIS r2 N-M1 / r3 N3-L4: >= 32 printable characters, the same value as the client-portal service's `PORTAL_LINK_TAG_KEY`, different from every other secret Legal holds (equal: refuses start). A link token is base64url(version 1 byte + 32 random bytes + the first 16 bytes of HMAC-SHA256(key, `zbm-link` 0x1F version 0x1F random)), 66 characters (`src/link_tag.py`, byte-identical in client-portal-py). Unset or malformed: Legal starts, link creation and the portal routes answer 503 with the reason, `/health` `link_tags.status` starts `off:`; set: `link_tags` = `{"status": "ok", "version": 1, "key_id": <8 hex of the key's SHA-256>}`. A token whose tag does not verify is the 404 before any record is read |
+| `LEGAL_ZBM_FACTS` | unset | ADR 0028: JSON object of ZBM's own entity facts (`{"zbm_legal_entity_name": "...", "zbm_street_address": "..."}`), names `zbm_[a-z0-9_]{1,36}`, values 1-500 printable characters without `{{ }}`. A template fill takes every `{{zbm_*}}` variable from here (a request supplying one is a 422; a fact missing here refuses the fill with `ZBM_FACT_MISSING`). A malformed value refuses start |
 | `LEGAL_RECONCILE_MODE` | 0 | see "Reconciling" |
 | `LEGAL_COUNSEL_CHANNEL`, `LEGAL_ESIGN_PROVIDER` | unset | not built: setting either refuses start |
 | `LEGAL_PORTAL_FAQ` | 0 | 1 refuses start (route only, CQ-15) |
@@ -54,10 +59,13 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `GET /legal/v1/documents/{doc_id}/current` | any | protocol answer for Compliance / Clipper Network |
 | `GET /legal/v1/documents/{doc_id}`, `.../versions/{v}` | any | register view (no text) |
 | `GET .../versions/{v}/text` | Andre | the text |
-| `POST /legal/v1/documents/{doc_id}/versions` | Andre (upload; `bump: major` optional) or scheduler (template fill with `party_ref`); anyone else uploading -> 403 | new draft; Legal assigns the version number |
+| `POST /legal/v1/documents/{doc_id}/versions` | Andre (upload; `bump: major` optional; or a template fill with `variables` + `party_ref`, ADR 0022) or scheduler (template fill with `party_ref`); anyone else uploading -> 403 | new draft; Legal assigns the version number |
 | `POST .../versions/{v}/counsel-review`, `/counsel-signoff`, `/decision` | Andre | package; sign-off record; approve / retire / withdraw |
-| `POST /legal/v1/acceptances`; `GET /legal/v1/acceptances/{id}` | hub, clipper_network, onboarding (a `client:*` acceptance: onboarding only, AEGIS r10); readers | clickwrap evidence |
+| `POST .../versions/{v}/founder-approval` | Andre | client_msa / sow / sow_seo_audit / sow_revenue_recovery / zbc_order_form only: founder approval, or renewal of a founder-approved version (LG-20, ADR 0022) |
+| `POST /legal/v1/acceptances`; `GET /legal/v1/acceptances/{id}` | hub, clipper_network, onboarding (never a `client:*` party, for any caller: ADR 0028); readers | clickwrap evidence |
 | `GET /legal/v1/replay-quarantine`; `POST /legal/v1/replay-quarantine/acknowledgements` | Andre only | log lines a replay did not apply (a write whose caller was told it failed, AEGIS r11 R11-6); acknowledging them returns `/health` to ok |
+| `POST /legal/v1/client-acceptance-invitations`; `GET .../{id}`; `GET .../{id}/evidence`; `POST .../{id}/revoke` | Andre | ADR 0028: a client acceptance link for one client and these document versions (the token is in this answer only); its status; the signatory, page text and HMACs of a used link; revoke before use |
+| `POST /legal/v1/portal/invitations/resolve`; `POST /legal/v1/portal/acceptances`; `POST /legal/v1/portal/receipts` | client_portal (503 while its token is not set) | ADR 0028: the page Legal renders for a token (every unusable token: the same 404); record the client's acceptance (the only way a client's acceptance is recorded); the receipt of the submission that used a link (same token and request id; else 404) |
 | `POST /legal/v1/envelopes`; `POST /legal/v1/esign/events` | Andre; esign_gateway | envelopes (provider not wired) |
 | `POST /legal/v1/playbooks/proposals`, `/decisions`; `GET /legal/v1/playbooks/{doc_type}` | Andre; any | playbooks |
 | `POST /legal/v1/playbooks/{doc_type}/reviews` | onboarding, scheduler, Andre | deviation classes |
@@ -65,6 +73,8 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `POST /legal/v1/obligations/{id}/done`, `/waive` | owner department; Andre | |
 | `GET`, `PUT /legal/v1/contracts/{client_id}/terms` | onboarding | ContractTerms storage |
 | `GET /legal/v1/register`, `/register/{cq_id}`; `POST /register/{id}/invalidate` | any; compliance_38 | counsel-question mirror |
+| `POST /legal/v1/register/CQ-19/founder-determination` | Andre | CQ-19 for client commercial contracts only (LG-20, ADR 0022) |
+| `GET .../versions/{v}/founder-approval/rationale`, `GET /legal/v1/register/CQ-19/founder-determination/rationale` | Andre | his own rationale text, read back (ADR 0022) |
 | `POST /legal/v1/memos`; `GET /legal/v1/memos/{id}` | Andre; any | memo intake |
 | `POST /legal/v1/memos/{memo_id}/compliance-proposals` | Andre | step 2: Compliance proposals backed by the filed memo |
 | `POST /legal/v1/requests`; `GET /legal/v1/matters/{id}`; `POST .../close` | any; any; Andre | matters |
@@ -101,6 +111,103 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 6. Every document, fills and SOWs included, needs counsel's sign-off on its exact hash (no SOW exception). The
    advice-text guard is defense in depth, not the control (ADR 0010 amendment). No IP address is accepted in any
    string of any write route (IPv4/IPv6, embedded, with a port, URL-encoded).
+
+## Founder path for client contracts (LG-20, ADR 0022)
+
+Andre's ruling of Oct 30 2026: he approves the client commercial contracts himself. For `client_msa`, the SOWs (`sow`,
+`sow_seo_audit`, `sow_revenue_recovery`) and `zbc_order_form` only (`founder_approval_allowed` in
+`seed/documents.json`), LG-20 applies in place of item 6 above:
+
+- `POST /legal/v1/documents/{doc_id}/versions/{v}/founder-approval` (Andre): `version_sha256`, `rationale` (20-2000
+  characters), `founder_confirms: true`. The version shows `approval_basis: founder_approval`,
+  `review_label: founder_approval`.
+- `POST /legal/v1/register/CQ-19/founder-determination` (Andre): `rationale`, `founder_confirms: true`. A clickwrap
+  acceptance of those documents is then evidence-sufficient with `evidence_basis: founder_determination`; the row's
+  own status and memo list are untouched. The determination carries a `renew_by` date (`LEGAL_MEMO_REVIEW_DAYS`), as
+  a version carries `review_by`. Re-sending a founder approval on an approved founder-approved version renews it
+  with the same hash, so acceptances stay valid.
+- SOW templates: one document per template (`sow_seo_audit`, `sow_revenue_recovery`), so both are live at once. Each
+  client's fill (Andre's token: `variables` + `party_ref`) is a draft that Andre founder-approves before the client
+  can accept it.
+- Approval refuses a text holding a detected placeholder form (`UNFILLED_PLACEHOLDER`, any document). The guard
+  is a backstop to Andre's own reading, not a guarantee. Square brackets (and every Unicode bracket pair) are
+  deny-by-default: any `[...]` or unclosed `[` counts except an exact list of boilerplate phrases, numbered
+  footnotes, positioned list markers, and links to a URL or an existing anchor. `<<..>>`, identifier braces,
+  undeclared `{{...}}`, `___` blanks outside an exact signature line, X-amounts and TBD/TBA/TODO also count, and
+  so do `XXXX`, `(insert ...)`, `%%..%%`, `__FEE__`, `#FEE#`, `Lorem ipsum`, `PLACEHOLDER`, `??`, `TK` and `Fee: —`. ADR 0022
+  lists exactly what is detected and what is not (bare `CLIENT NAME`, `(CLIENT NAME)`, ...). It is linear (measured
+  under 1 s of CPU per 1 MB stress text, about 1.1 s for a 5 MB worst case), runs outside the service lock, and
+  skips replayed requests.
+- Retiring a template stops new approvals, renewals and acceptances of its fills (`TEMPLATE_NOT_IN_FORCE`). An
+  acceptance recorded under a CQ-19 determination that was later invalidated never counts again.
+- `GET .../current` never names a version bound to one party. Closing LG-20 takes founder-approved versions out of
+  force, and acceptances resting on the CQ-19 determination stop counting (`basis_in_force: false`).
+- Both need LG-20 `verified` in the rule version in force. Every other document and CQ row is unchanged. Andre's
+  steps: `docs/deploy/railway.md`, "Founder contract approval (ADR 0022)".
+
+## Client acceptance page (ADR 0028)
+
+A client accepts the MSA and a SOW on the client acceptance page (`services/client-portal-py`), never through
+`POST /legal/v1/acceptances` (refused for every `client:*` party, whatever the caller), and a client acceptance not
+recorded by the page never counts as evidence. Andre's steps: `docs/runbooks/client-acceptance.md`.
+
+- **The link.** `POST /legal/v1/client-acceptance-invitations` (Andre): `party_ref` (`client:*`), `documents` (the
+  MSA, one SOW, or both: `doc_id`, `version`, `doc_sha256`), `display` (`client_legal_name`, `notice_email`, optional
+  `contact_first_name`, `sow_number`, `sow_title`; a blob, only its hash is in the record), `expires_in_days` (1-14,
+  default 14). Each document must be one this client can validly accept now (approved, in force, this hash, bound to
+  this client or the current standard form, its template in force, CQ-19 evidence basis in force). The answer carries
+  `token` and `accept_path` (`/accept/<token>`) ONCE: 32 random bytes; only the token's SHA-256 is kept, and an
+  idempotent replay answers with `token: null`. `page`: `first_engagement` (MSA + SOW), `new_sow` (a SOW alone) or
+  `msa_only` (not served by the page; `warnings` says so).
+- **Resolve.** `POST /legal/v1/portal/invitations/resolve` (`client_portal`): `{"token"}` -> the documents' exact
+  registered text with version and hash, the display block and the client's latest counted MSA acceptance. Unknown,
+  malformed, expired, revoked or used, or any document no longer valid to accept: always `404 {"detail": "not
+  found"}`. Every stored token hash is compared in constant time with no early exit.
+- **Accept.** `POST /legal/v1/portal/acceptances` (`client_portal`): the token, each document with
+  `presented_sha256` and its own `affirmative_act`, `presentation: inline`, the page text as shown (`page_text_b64`,
+  checked against `page_sha256`), the signatory (`full_name`, `title`, `company`), and `ip_hmac_sha256`,
+  `user_agent_hmac_sha256` and `hmac_key_id`: HMAC-SHA256 values the portal computes with its own key, so Legal never
+  receives an IP address or a user agent (G6 and N17-6 still refuse both). One operation records one acceptance per
+  document (`via: client_portal`, `invitation_id`), stores the signatory and the page text as blobs (records, ledger
+  and export carry only hashes) and uses the link up: exactly once under the service lock; a retry of the same
+  submission answers from its idempotency record; a refused submission does not use the link up.
+- **Andre.** `GET /legal/v1/client-acceptance-invitations/{id}`: `status` (`open`, `accepted`, `revoked`,
+  `expired`), `usable` with the reasons when an open link no longer works (a retired template, a newer MSA), and the
+  acceptance ids. `POST .../revoke` before use; an accepted link cannot be revoked.
+- **ZBM's facts.** Template variables named `zbm_*` are ZBM's own entity facts, filled from `LEGAL_ZBM_FACTS` at
+  fill time.
+- **AEGIS r1 fixes (aegis-client-acceptance.md).**
+  - M-1: an empty or unresolved `client_portal` entry in `LEGAL_CALLER_TOKENS` is skipped with a start-up warning
+    (the first deploy sets that token after Legal restarts); the portal routes answer 503 until it is set. Since the rebase on ADR 0024, `compliance_38` is optional
+    the same way; every other caller entry, and a set but short optional value, still refuses the start.
+  - M-2: `POST /legal/v1/portal/receipts` `{"token", "request_id"}` answers the receipt (documents, display,
+    acceptances) only to the submission that used the link; the portal shows it on a retry or a refresh.
+  - M-5: Legal renders the page itself (`src/clickwrap_page.py`: clickwrap text v1 Parts B/C as blocks;
+    `resolve` returns `blocks` and `page_sha256`) and refuses a submission whose page text is not that text
+    (`PRESENTED_TEXT_MISMATCH`) or whose company is not the client's legal name (`COMPANY_MISMATCH`). An MSA-only
+    link, or a SOW alone for a client with no counted MSA acceptance, has no page and cannot be accepted.
+  - L-1: the typed signatory refuses bidi, zero-width and other invisible or control characters (after NFKC).
+  - L-2(e): a SOW's `msa_version` value must be the MSA of the same link, or (a SOW alone) the MSA version the
+    client accepted (`MSA_VERSION_MISMATCH`).
+  - L-3: approving a newer fill of a client document revokes that client's open links to other versions of it
+    (`reason: newer_fill_approved`).
+  - L-4: `POST /legal/v1/acceptance-invitations` refuses a `client:*` party.
+- **AEGIS r2 fixes (aegis-client-acceptance-r2.md).** Self-authenticating link tokens (`LEGAL_LINK_TAG_KEY`, N-M1);
+  a client legal name must be its own NFKC form (N-L1); a link names only the client's latest approved fill of each
+  document (`VERSION_SUPERSEDED`, N-L2); Default_Ignorable_Code_Point characters, the Hangul fillers and U+2800 are
+  refused in typed names (N-L3); the receipt also needs `form_sha256`, the hash of the form signature the accepted
+  submission carried (recorded at acceptance; N-L4); views carry `time_zone` and `time_zone_label` (N-L5); a SOW
+  whose stored fill values cannot be read fails the MSA-version rule closed (N-L8).
+- **AEGIS r4 fixes.** A token is valid only in the one spelling that re-encodes to itself (N4-L1); on
+  `POST /legal/v1/portal/invitations/resolve` and `/portal/acceptances`, a 404 carries `"final": true` when the link
+  is unknown, used, expired or revoked (never for documents that cannot be served now), and a blob that exists but
+  cannot be read is a 503 (`StoreReadError`), never a 404 (N4-L2); `/health` `link_tags.foreign_versions_seen` counts
+  tokens of another format version that reached Legal (N4-L3).
+- **AEGIS r3 fixes.** Link tokens carry a format version byte and `/health` reports `link_tags` (N3-L4); a malformed
+  or unset key turns links off (503) without stopping Legal; a key equal to another secret refuses start (N3-L1);
+  every link view carries `log_fingerprint`, and `GET /legal/v1/client-acceptance-invitations/by-fingerprint/{fp}`
+  (Andre only, 8 lower-case hex) finds the link a client-portal log line names (N3-M1); typed names holding a blank
+  glyph (Unicode name `FILLER`, `BLANK`, `NULL NOTEHEAD`) or no letter or digit are refused (N3-L3).
 
 ## Data directory and the local log (bug sweep E)
 

@@ -209,6 +209,14 @@ class LegalAnswer:
     current: bool = False
     acceptance_matches: bool = False
     reason: str = ""
+    # ADR 0022 (renewal reminder, never a pass on its own): the date Legal's approval of the version must be renewed
+    # by, and whether that date has passed (then the version is not current until Andre renews it at Legal)
+    renew_by: Optional[str] = None
+    renewal_lapsed: Optional[bool] = None
+    # AEGIS r2 N6: False when Legal says the basis the version was approved on / the acceptance's evidence basis no
+    # longer holds (LG-20 closed, CQ-19 determination ended), so the refusal can say so; None = not reported
+    version_basis_in_force: Optional[bool] = None
+    acceptance_basis_in_force: Optional[bool] = None
 
 
 class LegalPort(Protocol):

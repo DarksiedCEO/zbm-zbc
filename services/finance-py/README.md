@@ -54,6 +54,9 @@ every variable it reads is also named here (wave 25: 35 were not, `tests/test_en
 1. `GET /fin/v1/rules` → approve the seed proposal: `POST /fin/v1/rules/decisions` quoting its `content_sha256`.
 2. Counsel/CPA memos become rows: amend `FIN-CQ-01` / `FIN-CQ-11` with `status: verified` and
    `parameters.memo_ref`, approve with `acknowledge_weakening: true`.
+   Contracts Andre approves at Legal as founder (ADR 0022) clear Legal's side of an invoice; `billing-readiness`
+   shows each contract's renewal date under `contract_renewal`. Steps: `docs/deploy/railway.md`, "Founder contract
+   approval (ADR 0022)".
 3. `POST /fin/v1/controls/FC-05/results` — the token-roster access review (every 90 days).
 4. Rate cards: `POST /fin/v1/rate-cards/proposals` then `/decisions`; profiles: `PUT /fin/v1/campaigns/{id}/commercial-profile`.
 
@@ -158,3 +161,8 @@ is 19450-19453, as above).
 
 `devtools/live_server.py` runs the service with the test fakes and a settable clock (devtools only, never
 production). `devtools/gen_rules_seed.py` regenerates the seed (its SHA-256 is pinned).
+
+## Test clients (ADR 0028)
+
+A client id starting `zz-test-` is a test client (the client acceptance runbook, step 8): Finance refuses its
+billing profile, any invoice draft and any invoice approval (409).

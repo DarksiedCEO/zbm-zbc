@@ -67,22 +67,27 @@ def test_a_bogus_invitation_id_is_a_4xx_for_every_caller_and_the_service_restart
     assert not y.svc.acceptances
 
 
-def test_no_caller_can_burn_another_clients_invitation():
+def test_no_caller_can_burn_another_partys_invitation():
     x, v = _setup()
     cv = _clipper_doc(x)
-    inv = _invite(x, "client:acme")
-    r = _accept(x, cv["sha256"], "clipper:cn-clp-1", caller="clipper_network", doc_id="clipper_agreement",
+    assert x.apost("/legal/v1/acceptance-invitations", {"request_id": rid("inv"), "doc_id": "client_msa",
+                                                         "version": "1.0", "party_ref": "client:acme"}).status_code == 409
+    inv = _invite(x, "clipper:cn-clp-1", doc_id="clipper_agreement")
+    r = _accept(x, cv["sha256"], "clipper:cn-clp-2", caller="clipper_network", doc_id="clipper_agreement",
                 invitation_id=inv["invitation_id"])
     assert r.status_code == 409 and r.json()["detail"] == "ACCEPTANCE_NOT_INVITED", r.text
     assert x.svc.invitations[inv["invitation_id"]]["used_by"] is None
-    ok = _accept(x, v["sha256"], "client:acme", invitation_id=inv["invitation_id"])     # acme's own acceptance
+    ok = _accept(x, cv["sha256"], "clipper:cn-clp-1", caller="clipper_network", doc_id="clipper_agreement",
+                 invitation_id=inv["invitation_id"])
     assert ok.status_code == 201, ok.text
 
 
-def test_an_invitation_for_another_client_or_document_is_refused_and_stays_unused():
+def test_an_invitation_for_another_party_or_document_is_refused_and_stays_unused():
     x, v = _setup()
-    inv = _invite(x, "client:acme")
-    r = _accept(x, v["sha256"], "client:globex", invitation_id=inv["invitation_id"])
+    cv = _clipper_doc(x)
+    inv = _invite(x, "clipper:cn-clp-1", doc_id="clipper_agreement")
+    r = _accept(x, cv["sha256"], "clipper:cn-clp-9", caller="clipper_network", doc_id="clipper_agreement",
+                invitation_id=inv["invitation_id"])
     assert r.status_code == 409
     assert x.svc.invitations[inv["invitation_id"]]["used_by"] is None
 
@@ -92,11 +97,10 @@ def test_only_the_onboarding_path_records_a_clients_acceptance(caller):
     x, v = _setup()
     r = _accept(x, v["sha256"], "client:acme", caller=caller)
     assert r.status_code == 409 and r.json()["detail"] == "ACCEPTANCE_NOT_INVITED", r.text
-    inv = _invite(x, "client:acme")
-    r = _accept(x, v["sha256"], "client:acme", caller=caller, invitation_id=inv["invitation_id"])
-    assert r.status_code == 409, r.text                          # not even with a valid invitation
-    assert not x.svc.acceptances
-    assert x.svc.invitations[inv["invitation_id"]]["used_by"] is None
+    # AEGIS L-4 (ADR 0028): no invitation is even issued for a client on this path
+    assert x.apost("/legal/v1/acceptance-invitations", {"request_id": rid("inv"), "doc_id": "client_msa",
+                                                         "version": "1.0", "party_ref": "client:acme"}).status_code == 409
+    assert not x.svc.acceptances and not x.svc.invitations
 
 
 def test_the_clipper_network_still_records_a_clippers_standard_agreement():
@@ -109,9 +113,11 @@ def test_the_clipper_network_still_records_a_clippers_standard_agreement():
 def test_l5_the_invitation_names_its_version():
     """AEGIS r10 mutant l5: an invitation for version 1.0 does not admit an acceptance of an EXISTING version 1.1."""
     x, v = _setup()
-    v11 = x.approve_doc("client_msa", "Client MSA v1.1: still one text for every client.", version="1.1")
-    inv = _invite(x, "client:acme", version="1.0")
-    r = _accept(x, v11["sha256"], "client:acme", version="1.1", invitation_id=inv["invitation_id"])
+    _clipper_doc(x)
+    v11 = x.approve_doc("clipper_agreement", "clipper agreement text v1.1", version="1.1")
+    inv = _invite(x, "clipper:cn-clp-1", doc_id="clipper_agreement", version="1.0")
+    r = _accept(x, v11["sha256"], "clipper:cn-clp-1", caller="clipper_network", doc_id="clipper_agreement",
+                version="1.1", invitation_id=inv["invitation_id"])
     assert r.status_code == 409 and r.json()["detail"] == "ACCEPTANCE_NOT_INVITED", r.text
     assert x.svc.invitations[inv["invitation_id"]]["used_by"] is None
 
@@ -131,9 +137,11 @@ def test_a_poisoned_log_line_never_stops_the_start_it_is_quarantined_and_flagged
     h = y.ok(y.client.get("/health"))
     assert h["replay_quarantined"] == 1 and h["status"] == "degraded", h
     assert y.svc.replay_quarantine[0]["kind"] == "update" and "invitations" in y.svc.replay_quarantine[0]["detail"]
-    # the service works: a real acceptance is recorded after the restart
-    inv = _invite(y, "client:acme")
-    assert _accept(y, v["sha256"], "client:acme", invitation_id=inv["invitation_id"]).status_code == 201
+    # the service works: a real acceptance is recorded after the restart (a clipper's standard agreement; a client's
+    # acceptance is recorded only on the client acceptance page, ADR 0028)
+    cv = _clipper_doc(y)
+    assert _accept(y, cv["sha256"], "clipper:cn-clp-1", caller="clipper_network",
+                   doc_id="clipper_agreement").status_code == 201
 
 
 def test_the_commit_refuses_an_update_of_a_missing_record_before_anything_is_written():

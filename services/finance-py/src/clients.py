@@ -339,24 +339,36 @@ class HttpLegal(_Base):
             return LegalAnswer(False, reason="Legal could not be read (or has no such version)")
         try:
             now = self._now()
+            lapsed = (v["status"] == "approved" and isinstance(v.get("review_by"), str)
+                      and parse_iso(v["review_by"]) <= now)
+            v_basis = v.get("basis_in_force", True) is True
             current = (v["doc_id"] == doc_id and v["version"] == ver and v["sha256"] == doc_sha256
                        and v["status"] == "approved" and isinstance(v.get("effective_at"), str)
                        and isinstance(v.get("review_by"), str)
                        and parse_iso(v["effective_at"]) <= now < parse_iso(v["review_by"])
-                       and (entity is None or v["entity"] == entity))
+                       and (entity is None or v["entity"] == entity)
+                       # AEGIS M2: Legal says whether the basis the version was approved on still holds (absent =
+                       # a Legal from before ADR 0022, which has no such basis); anything but true/absent is a NO
+                       and v_basis)
         except (KeyError, TypeError, ValueError):
             return LegalAnswer(False, reason="Legal's version answer was not understood")
+        # ADR 0022: the renewal date (Legal's review_by of the version), for Andre's reminder
+        renew_by = v["review_by"] if isinstance(v.get("review_by"), str) and len(v["review_by"]) <= 40 else None
         if not (isinstance(acceptance_id, str) and _LEGAL_ACC.fullmatch(acceptance_id)):
-            return LegalAnswer(True, current, False, reason="not a Legal acceptance id")
+            return LegalAnswer(True, current, False, reason="not a Legal acceptance id", renew_by=renew_by,
+                               renewal_lapsed=lapsed, version_basis_in_force=v_basis)
         a = self._get(f"/legal/v1/acceptances/{acceptance_id}")
         if not isinstance(a, dict):
             return LegalAnswer(False, reason="Legal could not be read (or has no such acceptance)")
         try:
             if a["rules_pinned"] is not True:
                 return LegalAnswer(False, reason="Legal is running on an unpinned (non-production) rules seed")
+            a_basis = a.get("basis_in_force", True) is True
             accepted = (a["acceptance_id"] == acceptance_id and a["doc_id"] == doc_id and a["version"] == ver
                         and a["doc_sha256"] == doc_sha256 and a["evidence_sufficient"] is True
-                        and (party_ref is None or a["party_ref"] == party_ref))
+                        and (party_ref is None or a["party_ref"] == party_ref)
+                        and a_basis)
         except (KeyError, TypeError):
             return LegalAnswer(False, reason="Legal's acceptance answer was not understood")
-        return LegalAnswer(True, current, accepted)
+        return LegalAnswer(True, current, accepted, renew_by=renew_by, renewal_lapsed=lapsed,
+                           version_basis_in_force=v_basis, acceptance_basis_in_force=a_basis)

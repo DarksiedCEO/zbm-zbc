@@ -564,7 +564,11 @@ def test_a11_compliance_down_memo_filed_proposal_pending_row_unverified(he):
 def test_a12_onboarding_put_signed_without_executed_evidence(he):
     r = he.put("/legal/v1/contracts/acme/terms", {"request_id": rid(), "terms": terms()}, caller="onboarding")
     assert r.status_code == 422                                          # today's onboarding put (no executed block)
-    fill, acc = executed_msa(he, verify_cq19=False)
+    # ADR 0028: an insufficient client acceptance can no longer be recorded at all; this one stops counting after
+    # the fact (recorded under Andre's CQ-19 determination, which Compliance then invalidates)
+    fill, acc = executed_msa(he, verify_cq19=False, founder_cq19=True)
+    he.ok(he.post("/legal/v1/register/CQ-19/invalidate", {"request_id": rid(), "source_ref": "urn:x:1",
+                                                          "detected_change_sha256": "c" * 64}, caller="compliance_38"))
     r = he.put("/legal/v1/contracts/acme/terms", {"request_id": rid(), "terms": terms(ccpa=False), "executed": {
         "doc_id": "client_msa", "version": "1.1", "doc_sha256": fill["sha256"], "acceptance_id": acc["acceptance_id"]}},
         caller="onboarding")
