@@ -193,24 +193,32 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    - **Money that went out** (`kind` `money_out`: a transfer, payout item, payout release, refund payment or vendor
      payment the ledger saw after the backup; `in_flight`: a transfer or payout item the restored books hold as
      approved / executing / submitting): check the bank or the rail, then record
-     - `moved` with `provider_ref` (the bank or rail reference), `moved_amount` and `counterparty` (the campaign or
-       client of a refund, the payee of a payout item, the batch of a release or funding). The old ids stay
-       **fenced** for good (never transferred, submitted, released or repaid again), and the same counterparty and
-       amount are refused under any new id until you book it with a **restore correction**:
+     - `moved` with `provider_ref` (the bank or rail reference). The amount and the counterparty come from the lost
+       ledger event itself (it carries them, checked against the ledger's payload SHA-256); if you also type them
+       they must agree. Only when the event cannot be verified do you give `moved_amount` and `counterparty`. The old
+       ids stay **fenced** for good (never transferred, submitted, released or repaid again). The counterparty (the
+       payee of a payout, the campaign and client of a refund; a release, a funding transfer or a vendor payment is
+       fenced by its id only) receives **no money at all, in any amount**, until the debt is booked with the
+       **restore correction**:
        ```
-       curl -sS -X POST $H $F/fin/v1/restore/items/<event_id>/correction -d '{"request_id":"rc-1","entity":"zbc",
-         "provider_ref":"<the same reference>","lines":[{"account":"2020","subledger":"payee:<payee>","debit":"29.01",
-         "credit":"0.00"},{"account":"1040","subledger":null,"debit":"0.00","credit":"29.01"}],
-         "payable_ids":["<the payables it paid>"]}'
+       curl -sS -X POST $H $F/fin/v1/restore/items/<event_id>/correction \
+         -d '{"request_id":"rc-1","provider_ref":"<the same reference>","payable_ids":["<the payables it paid>"]}'
        ```
-       Debits and credits must each equal the moved amount; it may touch restricted cash (flow FRC, only here). A
-       payout names its payables (they become settled); a refund names `refund_campaign_id` (the refund is recorded
-       paid). It resolves the reconciliation breaks on the accounts it touches. Typical lines: a funding transfer
-       Dr 1040 / Cr 1020; a payout the rail paid Dr 2020 payee / Cr 1040; a refund the bank paid Dr 2010 campaign /
-       Cr 1020.
-     - `not_moved`: for a payout item Finance asks the rail itself (by idempotency key): if the rail has it, this is
-       refused (record it as moved). For bank money, give your attestation: `provider_ref` (the statement reference)
-       and `statement_date`. An item a restore named is always looked up at the rail before it is ever submitted.
+       The entry is **derived** from the lost event (accounts, amounts, entity, counterparty); you never type lines.
+       A payout must name its payables (mandatory: the payee's, adding up to the item's net, the item's own if the
+       restored books hold it); they become settled. A refund must name `refund_campaign_id` (its campaign); it is
+       recorded paid, and its own transfer item is booked by the same correction (a refund's transfer item is never
+       corrected on its own). A funding transfer needs nothing more. A release or a vendor payment has nothing to
+       book (the money is on its payout items / the vendor record). It may touch restricted cash (flow FRC, only
+       here) and resolves the reconciliation breaks on the accounts it touches. The counterparty's fence ends when
+       its payables are settled / its refund is recorded paid, never earlier.
+     - `not_moved`: for ANY payout (held by the restored books or not) Finance asks the rail by the idempotency key
+       the lost event carries: found -> refused (record it as moved); the rail unreachable -> 503, nothing recorded;
+       not found -> the answer is `pending_not_moved` with `retry_after`: ask again after 24 h (a second lookup) with
+       `provider_ref` (the rail statement reference) and `statement_date`. A release is not_moved only through its
+       payout items' keys. A rail event for a lost payout is not_moved only if the rail itself said failed or
+       returned. For bank money, give your attestation: `provider_ref` (the statement reference) and
+       `statement_date`. An item a restore named is always looked up at the rail before it is ever submitted.
    - `reissue_after_lift`: a credit note or void you must issue again; the lockdown refuses it now, so the lift opens
      a high-severity `restore_reissue_due` break with the item's number, amounts and refund date; issue it right after
      the lift, then resolve that break.
@@ -220,11 +228,18 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
      you handled it outside Finance (a deadline re-recorded with `sow-ended` / `acknowledgements`, an email re-sent).
    `POST /fin/v1/breaks/<id>/resolution` refuses the restore break (and every deadline break).
 4. Anything Stripe does not know (a wire, an ACH credit to the bank) is not re-imported: re-post those bank lines
-   through the bank feed as usual, for every day from `since` to `opened_on`, then confirm it:
+   through the bank feed as usual (`POST /fin/v1/bank/events`), for every day from `since` to `opened_on`, then
+   confirm it with the statement's figures for EVERY business day and every bank account (zbc 1020, zbc 1010,
+   zbm 1010): the number of credit lines and their total, 0 and 0.00 for a day without activity:
    ```
-   curl -sS -X POST $H $F/fin/v1/restore/bank-refeed -d '{"request_id":"rf-1","since":"2026-11-07","until":"2026-11-09","statement_ref":"<statement id>"}'
+   curl -sS -X POST $H $F/fin/v1/restore/bank-refeed -d '{"request_id":"rf-1","since":"2026-11-07","until":"2026-11-09",
+     "statement_ref":"<statement id>","statement_days":[{"day":"2026-11-07","entity":"zbc","account":"1020",
+     "credit_lines":2,"credit_total":"1500.00"}, ...]}'
    ```
-   The lift (and the MSA 4.12(g) exception) needs this confirmation.
+   Finance compares each day with the bank lines it has booked; any difference is refused (409
+   `RESTORE_REFEED_MISMATCH`, listing the days): feed the missing lines and confirm again. The lift and the MSA
+   4.12(g) exception need this confirmation, and the exception is refused for an invoice any bank line since the
+   backup refers to (matched or not).
 5. **Lift the lockdown** (only you, explicitly):
    ```
    curl -sS -X POST $H $F/fin/v1/restore/lockdown/lift -d '{"request_id":"lift-1","reason":"re-import 11-07..11-09 clean; 2 items disposed"}'
@@ -237,9 +252,12 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    **After the lift money out still waits** (`/health` `restore_lockdown.post_restore_reconcile_required: true`):
    every bank transfer, rail submit, release and refund payment answers 409 `POST_RESTORE_RECONCILE_REQUIRED` until a
    reconciliation run AFTER the lift (`POST /fin/v1/reconciliations/run`, or fin-cron's daily run) matches every leg
-   (bank, rails, Stripe, sub-ledgers) and leaves no reconciliation break open. Book every `moved` item with its
-   restore correction first; the parked rail events are applied at the lift. Then money out resumes. Client email
-   resumes too; a message the ledger shows Resend accepted after the backup is marked sent, never sent again.
+   (bank, rails, Stripe, sub-ledgers) and leaves no reconciliation break open. No other reconcile ends this phase
+   (a second restore during it stacks a new lockdown, then this phase again). Book every `moved` item with its
+   restore correction first; the parked rail events are applied at the lift in the order they arrived (one that does
+   not apply yet, e.g. a return before its payment, stays held until it does). Then money out resumes. Client email
+   resumes too; a message or client receipt the ledger shows was sent after the backup is marked sent, never sent
+   again.
 
 ## Commit marks and the key (FIN_CONTACT_HASH_KEY)
 

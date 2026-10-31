@@ -169,6 +169,21 @@ The contracts promise things Finance could not do:
     hand-written allowlist. Design choice: the subject fence lifts once the correction books the money (its payables
     settled or its refund recorded), so the same creator can be paid again for new work; the old ids stay fenced.
 
+19. **AEGIS round 6 (Oct 31 2026): bound to the obligation.** `item_submitted`, `treasury_posting_committed` and
+    `refund_paid` now carry their whole payload in a verifiable summary (`restore_evidence.py`: payee, rail, batch,
+    idempotency key; flow, accounts, amount, reference; campaign and client). A restore correction is DERIVED from
+    the lost event (no typed lines, entity or accounts); a payout must name its payables (the payee's, adding up to
+    the net, the item's own when held), a refund its campaign; they are settled / recorded paid in the same line. A
+    `moved` counterparty (payee; campaign and client) receives no money in any amount until that debt is settled;
+    releases, funding and vendor payments are fenced by id only. The post-restore phase ends only on a clean
+    reconciliation after the lift. The bank re-feed confirmation carries the statement's per-day credit counts and
+    totals for every bank account and business day and must equal the booked lines; the 4.12(g) exception also
+    refuses an invoice a bank line since the backup refers to. `not_moved` for any payout needs a rail lookup by the
+    lost event's key, then a 24 h wait, a second lookup and Andre's statement reference. Parked rail events replay in
+    arrival order and stay held while not applicable. Client receipts are deduplicated after a restore like mail.
+    Consequence: the summaries of those three events changed format (older ledgers' events of that kind do not
+    verify, so they derive nothing: fail closed; no restore has run in production).
+
 ## Consequences
 
 - New ledger event types: `invoice_voided`, `credit_note_issued`, `credit_note_refund_linked`, `client_contact_recorded`,
@@ -187,5 +202,5 @@ The contracts promise things Finance could not do:
 Finance tests: test_credit_notes.py, test_client_mail.py, test_seo_audit_card_and_webhooks.py,
 test_restore_reimport.py (the red team's restore scenario, end to end with the simulated Stripe),
 test_ops_cron_caller.py, test_business_tz.py, test_aegis_waveB_fixes.py, test_aegis_waveB_r2.py (AEGIS's round-2
-attacks kept as regressions), test_finance_ops_r2.py, test_finance_ops_r3.py, test_finance_ops_r4.py, test_finance_ops_r5.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
+attacks kept as regressions), test_finance_ops_r2.py, test_finance_ops_r3.py, test_finance_ops_r4.py, test_finance_ops_r5.py, test_finance_ops_r6.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
 against the real Stripe or Resend APIs.
