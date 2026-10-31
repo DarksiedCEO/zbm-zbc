@@ -857,8 +857,10 @@ destroy, delete or a change to an existing volume: **stop** and bring the plan b
 railway config apply
 ```
 
-**D. Deploy order.** ledger (with the new `LEDGER_CALLERS`), then legal, then compliance, then detection, finance and
-seo. compliance's log prints its readiness at start (`compliance readiness ...`, `register not in force` until step
+**D. Deploy order.** ledger (with the new `LEDGER_CALLERS`), then legal, then compliance, then detection, then seo,
+then finance. seo must run this version **before or together with** finance: this finance adds `held` to the invoice
+status seo reads, and an older seo refuses any field it does not know (`FINANCE_RESPONSE_INVALID` on every paid run:
+safe, but an outage until seo is updated). compliance's log prints its readiness at start (`compliance readiness ...`, `register not in force` until step
 E) and `compliance scheduler: controls every 21600 s; Change Watcher every 24 h`.
 
 **E. Approve the register (seed v2).** Read ADR 0024, decision 1 (what changed from v1), then open a tunnel and
@@ -908,16 +910,20 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    with a cron schedule `*/10 * * * *` and the start command
 
    ```sh
-   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
+   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
    ```
 
-   and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance over the private network (`/health`
-   needs no token) and pings the monitor only while `/health` answers 200: a 503, a dead or unreachable compliance, or
-   the check itself failing all stop the pings, and the monitor alerts you.
+   and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance and finance over the private network
+   (`/health` needs no token) and pings the monitor only while compliance's `/health` answers 200 **and** finance has
+   no payment held by Compliance (`compliance_holds_open` is 0). A 503, a dead or unreachable service, an open hold, or
+   the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
+   things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
 3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
    existing, not created twice), or leave it as the one hand-made service and note it in your Railway checklist.
 
-Until it exists, check `/health` through the tunnel whenever you check readiness (step F).
+Until it exists, and as a fallback when it does: **every day**, through the tunnels, check compliance's `/health` and
+finance's `compliance_holds_open` (`curl -sS http://127.0.0.1:18410/health`). A hold grounded in sanctions has a
+10-business-day OFAC reporting deadline, so a hold must not wait for a weekly look.
 
 ```sh
 ```
@@ -998,20 +1004,35 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    (a page now expired); use a new `request_id` for a new page.
 
    **A payment Compliance holds.** When a client's payment is booked, Finance asks Compliance first. If the answer is
-   REFUSE (for example an OFAC hit after the page was opened), or Compliance cannot be reached, Finance still books
-   the payment (the money arrived) but holds it: the invoice carries `held_compliance` (`kind` `refused` or
-   `unverified`), no receipt goes to the client, no media vendor is paid for it, the invoice status seo reads says
-   `held: true` (seo refuses the run with `INVOICE_HELD`), and a break opens for you (`compliance_hold` or
-   `compliance_unverified`). These breaks do not turn FC-02 red: they hold this client's money only, not everyone's
-   payouts. See them through the finance tunnel of step I:
-   `curl -sS -H @fin-auth.hdr -H @fin-onboarding.hdr http://127.0.0.1:18410/fin/v1/breaks`.
+   REFUSE, or Compliance cannot be reached, Finance still books the payment (the money arrived) but holds it: the
+   invoice carries `held_compliance` (`kind` `refused` or `unverified`, and `sanctions` true or false), no receipt goes
+   to the client, no media vendor is paid for it, the invoice status seo reads says `held: true` (seo refuses the run
+   with `INVOICE_HELD`), and a break opens for you (`compliance_hold` or `compliance_unverified`). These breaks do not
+   turn FC-02 red (they hold this client's money only); the private heartbeat check above alerts on them. See them
+   through the finance tunnel of step I: `curl -sS -H @fin-auth.hdr -H @fin-onboarding.hdr
+   http://127.0.0.1:18410/fin/v1/breaks`. For a release you need a header file for your Finance approval token, made
+   as in step E (`read -rs T && printf 'X-Andre-Approval-Token: %s\n' "$T" > fin-andre.hdr && unset T`, paste
+   `FIN_ANDRE_APPROVAL_TOKEN`). What to do depends on why it is held:
 
-   - `unverified`: the hourly `stripe-sessions` job asks Compliance again. A current ALLOW releases the hold and the
-     receipt goes out; a REFUSE turns it into a `refused` hold. Nothing to do unless Compliance stays down.
-   - `refused`: refund the payment in the Stripe Dashboard. Finance books the refund from Stripe's event (an `F7r`
-     journal entry). Then release the hold with that entry, with a header file for your Finance approval token made
-     as in step E (`read -rs T && printf 'X-Andre-Approval-Token: %s\n' "$T" > fin-andre.hdr && unset T`, paste
-     `FIN_ANDRE_APPROVAL_TOKEN`):
+   - **`sanctions: true` (an OFAC match or potential match, or a place under OFAC comprehensive sanctions). Do not
+     refund, return or move the money.** Under OFAC's rules the funds of a blocked person are held and reported, and
+     returning them can itself be a prohibited transaction. Leave the payment held (Finance refuses a refund release and
+     an ALLOW release for it). Within **10 business days** file a report with OFAC through the OFAC Reporting System:
+     a report of blocked property (31 CFR 501.603, https://www.law.cornell.edu/cfr/text/31/501.603), or a report of a
+     rejected transaction (31 CFR 501.604) if the funds were rejected rather than blocked (OFAC's reporting FAQ:
+     https://ofac.treasury.gov/faqs/topic/1606). Contact OFAC (https://ofac.treasury.gov/contact-ofac) for guidance
+     before any money moves. A refund made at Stripe anyway is booked truthfully, but it does not release this hold.
+     The hold is released only with OFAC's written authorization: keep the document, and release with its SHA-256:
+
+     ```sh
+     curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
+       --data "{\"request_id\": \"rel-<invoice>-1\", \"basis\": \"ofac_authorization\", \"ofac_authorization_sha256\": \"$(shasum -a 256 <the OFAC document> | cut -d' ' -f1)\"}" \
+       http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold/release
+     ```
+
+   - **`sanctions: false`, `kind: refused`** (out of the service area, re-screen overdue, documents not current...):
+     refunding is the normal path. Refund the payment in the Stripe Dashboard; Finance books the refund from Stripe's
+     event (an `F7r` journal entry). Then release the hold with that entry:
 
      ```sh
      curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
@@ -1021,10 +1042,12 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
 
      It is refused unless the entry is a refund of this very payment, booked after it, and the refunds cover the held
      amount. After the refund the invoice is `issued` again (the client owes it on paper): there is no void for an
-     issued invoice yet, so note it for your accountant until that exists.
-   - If the client is re-activated at Compliance and you decide to keep the payment, release with
-     `{"basis": "compliance_allow"}` instead: it is refused unless Compliance answers a current ALLOW now, and the
-     held receipt then goes out.
+     issued invoice yet, so note it for your accountant until that exists. If instead the client is re-activated at
+     Compliance and you keep the payment, release with `{"basis": "compliance_allow"}`: it is refused unless Compliance
+     answers a current ALLOW now, and the held receipt then goes out (none if anything was refunded).
+   - **`kind: unverified`**: the hourly `stripe-sessions` job asks Compliance again for each such payment just before
+     acting. A current ALLOW releases the hold and the receipt goes out; a REFUSE turns it into a `refused` hold (with
+     `sanctions` set as Compliance says). Nothing to do unless Compliance stays down.
    - `POST /fin/v1/breaks/{break_id}/resolution` refuses these breaks; only the release above clears a hold.
 5. Close the tunnel (Ctrl-C) when done; delete `~/.zbm-cmp/*.hdr` if you do not activate another client today.
 
