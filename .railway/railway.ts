@@ -109,6 +109,9 @@ export default defineRailway(() => {
       LEGAL_CALLER_TOKENS:
         '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}", "compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}", "client_portal": "${{client-portal.PORTAL_LEGAL_CALLER_TOKEN}}"}',
       LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
+      // ADR 0028, AEGIS r2 N-M1: tags client acceptance link tokens; client-portal reads it (a reference) to refuse
+      // junk links without asking Legal. Unset: Legal runs and issues no link (503)
+      LEGAL_LINK_TAG_KEY: preserve(),
       // ADR 0024: Legal delivers counsel-memo register proposals to Compliance (caller legal_37). Compliance's service
       // token is set once, on compliance; Legal is declared before it (compliance reads Legal's token as code), so it
       // takes it through Railway's own reference syntax
@@ -318,6 +321,7 @@ export default defineRailway(() => {
       PORTAL_LEGAL_SERVICE_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
       PORTAL_LEGAL_CALLER_TOKEN: preserve(), // Legal's client_portal caller token (read by legal's LEGAL_CALLER_TOKENS map)
       PORTAL_EVIDENCE_KEY: preserve(), // HMAC key: client IP and user agent, form signatures; set once, rotate on suspicion
+      PORTAL_LINK_TAG_KEY: legal.env.LEGAL_LINK_TAG_KEY, // AEGIS r2 N-M1: refuse a link Legal did not mint, locally
       PORTAL_PUBLIC_ORIGIN: preserve(), // https://<this service's Railway domain>, set by hand after the domain exists
       PORTAL_TRUSTED_PROXY_HOPS: "1", // Railway's edge adds the client to X-Forwarded-For (UNVERIFIED, runbook)
     },

@@ -131,43 +131,47 @@ $L/legal/v1/client-acceptance-invitations/<invitation_id>/revoke` -> `"status": 
 stands. To end a contract, follow the contract's own terms; to stop a template being accepted again, retire it
 (`decision: retire`), which also stops every open link that names one of its fills.
 
-## 8. Once, after the first deploy: check the client address the page records
+## 8. After the first deploy, before the first real link: check the client address the page records (mandatory)
 
-The page keys its per-address rate limit and the recorded IP HMAC on `X-Real-IP` (Railway's edge sets it; a Railway
-moderator says the edge overwrites it and `X-Forwarded-For`, which is **not a documented contract**), falling back to
-the last `X-Forwarded-For` entry. Two checks, from your own machine, against the page's domain (`$PORTAL`).
+The page records the client's address (as an HMAC) and keys its per-address limit on it. It reads `X-Real-IP` first
+(`PORTAL_CLIENT_IP_HEADER`), else the `X-Forwarded-For` entry `PORTAL_TRUSTED_PROXY_HOPS` from the end. What Railway's
+edge puts in those headers is **not documented**: public reports disagree (a moderator says both are overwritten;
+a user measured `X-Forwarded-For` as `[client, infrastructure hop]`; on CDN-routed traffic `X-Real-IP` was reported
+to be the CDN's address). Junk links cannot use up the page's limits any more (they are refused by their tag before
+anything is counted), so this check is about the **evidence**: which address an acceptance records.
 
-**A. Can a client choose its address?** Send 40 requests in under a minute, each with a different spoofed
-`X-Real-IP` and `X-Forwarded-For` (junk links; nothing is recorded):
-
-```sh
-for i in $(seq 1 40); do
-  curl -s -o /dev/null -w '%{http_code}\n' -H "X-Real-IP: 192.0.2.$i" -H "X-Forwarded-For: 192.0.2.$i" \
-    "https://$PORTAL/accept/$(printf 'Z%.0s' $(seq 1 43))"
-done | sort | uniq -c
-```
-
-- Some `429` after about 30 requests: the edge **replaced** the spoofed values with your real address (or appended
-  it, and the page read the last entry). Good: nothing to change.
-- Only `404`: the page took the spoofed values (the edge **passed them through**). Then set
-  `PORTAL_CLIENT_IP_HEADER=none` and `PORTAL_TRUSTED_PROXY_HOPS=0` on `client-portal` (every request keys on the
-  edge's own address: one shared per-address limit) and tell the next build session. Either way the page's global
-  ceilings (`PORTAL_RATE_LEGAL_PER_MINUTE`, `PORTAL_RATE_NOT_FOUND_PER_MINUTE`) still bound what reaches Legal.
-
-**B. Is the recorded address yours?** Create a link for the **test client** `client:zz-test-andre` (fills of the
-standard templates, fee 0.00; the `zz-test-` prefix marks it as a test client in Legal's records, never billed: give
-Finance no billing profile for it), open it from your phone on mobile data with a spoofed header if your browser
-allows it (or plainly), accept it, and read its evidence (step 6.2). Compute the HMAC of your phone's public IP
-address (any "what is my IP" page at that moment) with the evidence key:
+You need: a test client `client:zz-test-andre` (Finance refuses to bill any `zz-test-` client: no billing profile, no
+invoice), a link for it (fills of the standard templates), your phone on **mobile data** (Wi-Fi off), a computer on
+another network, and the evidence key (`PORTAL_EVIDENCE_KEY`). This command prints the HMAC the page would record
+for an address:
 
 ```sh
-python3 -c 'import hmac,hashlib,sys; k=sys.stdin.readline().strip().encode(); print(hmac.new(k, b"ip-v1\x1f" + sys.argv[1].encode(), hashlib.sha256).hexdigest())' <your phone's IP>
+python3 -c 'import hmac,hashlib,sys; k=sys.stdin.readline().strip().encode(); print(hmac.new(k, b"ip-v1\x1f" + sys.argv[1].encode(), hashlib.sha256).hexdigest())' <address>
 # paste PORTAL_EVIDENCE_KEY, Enter
 ```
 
-Equal to the evidence's `ip_hmac_sha256`: right. Equal to the HMAC of a spoofed value (`192.0.2.1`): the edge
-passes client values through; do as in A. Equal to neither: the page records the edge's address; tell the next
-build session. The same command, with a disputed IP address, answers whether that address submitted an acceptance.
+**B (decisive). Which address is recorded.** On the phone, note its public address (any "what is my IP" page), open
+the test link, accept it, and read the link's evidence (step 6.2). Compute the HMAC of the phone's address:
+
+| `ip_hmac_sha256` equals | Meaning | Set on `client-portal` |
+|---|---|---|
+| the phone's address | the edge sets `X-Real-IP` to the client | nothing (the defaults) |
+| neither | `X-Real-IP` is not the client (for example a CDN or edge address). Try the forwarded list: set `PORTAL_CLIENT_IP_HEADER=none` with `PORTAL_TRUSTED_PROXY_HOPS=1`, redeploy, repeat B with a new link; if still neither, `2`, then `3` | the first setting that records the phone's address |
+| neither, with every setting | the edge gives the page no client address | `PORTAL_CLIENT_IP_HEADER=none` and `PORTAL_TRUSTED_PROXY_HOPS=1`, and record in ADR 0028 that acceptances then record the edge's address, not the client's: the HMAC proves nothing about who submitted, and the electronic-records statement ("we will record ... your IP address") is then not met. Tell the next build session |
+
+Never set `PORTAL_TRUSTED_PROXY_HOPS=0` on the public deploy: every client would share the edge's address.
+
+**A (spoofing).** From the computer, open the test link (a new one: the first is used) with a spoofed header, e.g.
+`curl -s -o /dev/null -H 'X-Real-IP: 192.0.2.1' -H 'X-Forwarded-For: 192.0.2.1' https://$PORTAL/accept/<token>`,
+then accept it in a browser with the same headers if you can (a header-editing extension), or skip the accept and
+rely on B. If an acceptance's `ip_hmac_sha256` equals the HMAC of `192.0.2.1`, the edge passes client values
+through: switch to the first setting from B's table that does not, and tell the next build session.
+
+**A2 (independent buckets).** From the computer and from the phone at the same time, each open a test link 20 times
+in a minute: neither should see 429 (each has its own 30-a-minute bucket). If both get 429 together, they share an
+address: B's table applies.
+
+Keep the results (the three HMACs and the settings) with your records.
 
 ## What the page does and does not do
 
@@ -180,8 +184,12 @@ build session. The same command, with a disputed IP address, answers whether tha
   retired or superseded after you created the link makes it stop working, and approving a newer fill of the MSA or a
   SOW for the same client revokes that client's open links to the older fill.
 - A client who refreshes the confirmation, or whose connection dropped after **Accept and sign**, sees the same
-  confirmation again (the page asks Legal for the receipt of that exact submission); a different submission on a
-  used link sees "This link cannot be used".
+  confirmation again (the page asks Legal for the receipt of that exact submission and that exact form); a different
+  submission on a used link sees "This link cannot be used".
+- A link always names the client's latest approved fill: once you approve a newer fill, a link to the older one can
+  neither be created nor used.
+- The client's legal name must be written the way a client can type it back (no ™ sign, full-width letters,
+  superscripts or non-breaking spaces: write `TM`, plain letters and digits); Legal refuses the link otherwise.
 - Legal renders the page's words itself and refuses any other page text, and refuses a company that is not the
   client's legal name on the link.
 - No confirmation email is sent automatically yet (step 6.3).

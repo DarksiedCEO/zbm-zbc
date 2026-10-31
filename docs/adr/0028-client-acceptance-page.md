@@ -183,6 +183,46 @@ approves the client contracts himself and his CQ-19 determination makes such a c
   test with a standard companion so the link is a page Legal renders). L-7: an explicit `:443` in
   `PORTAL_PUBLIC_ORIGIN` is normalized; the test client in runbook step 8 is named `client:zz-test-andre`.
 
+## AEGIS r2 fixes (2026-10-31, report `aegis-client-acceptance-r2.md` at 591161b0)
+
+- **N-M1, junk refused without Legal.** A link token is self-authenticating: 32 random bytes followed by the first 16
+  bytes of HMAC-SHA256(key, `zbm-link-v1` 0x1F random), base64url (64 characters). Legal mints it with
+  `LEGAL_LINK_TAG_KEY`; the portal holds the same value (`PORTAL_LINK_TAG_KEY`, a Railway reference to Legal's) and
+  the same 30-line function (`src/link_tag.py`, byte-identical in both services, a test checks it). The portal
+  checks the tag first, in constant time: a token without a valid tag gets the same 404 page and spends **nothing**:
+  no per-address, Legal-call or not-found budget, no Legal call. Only tag-valid tokens are counted toward the
+  Legal-call ceiling. Legal also refuses a bad tag before reading any record, and issues no link while its key is
+  unset. IPv6 clients are counted per /64; IPv4-mapped addresses as IPv4.
+  **Attacker cost after the change.** Without the key, no request the attacker can make costs the page anything but
+  one HMAC; the per-address bucket of a client (even one shared edge address) cannot be filled with junk. Forging a
+  tag is a 128-bit search; the key itself is held only by Legal and the portal. The attacks left need a real link (a
+  client's, or a leaked one): its holder can use that link's own 40-an-hour allowance and the address limit, and by
+  sending a used or expired link (still tag-valid) it can spend the not-found ceiling (120 a minute, then 429 on
+  not-found answers only; a working link is unaffected) and up to the Legal-call ceiling (300 a minute, then 429 for
+  every client until the minute ends). That last case needs a real link and is visible to Andre (revoke it). Edge
+  flood protection remains Railway's (UNVERIFIED).
+- **N-M2.** Runbook step 8 is mandatory before the first real link. Check B (the recorded HMAC against the phone's
+  real address) decides the setting, with a table: the defaults; else the forwarded list at 1, 2 or 3 hops from the
+  end; else, honestly, the page records the edge's address, which proves nothing about who submitted and does not meet
+  the electronic-records statement, and Andre is told so. `hops=0` is never recommended. Checks A (spoofed headers)
+  and A2 (two networks, independent buckets) back it up.
+- **N-L1.** The client's legal name must be its own NFKC form (Legal refuses the link otherwise: ™, full-width,
+  superscripts, NBSP), and the company match is one function on both sides (NFKC, case, spaces, punctuation).
+- **N-L2.** A link names only the client's latest approved fill of each document; an older fill is refused at
+  creation and at every use (`VERSION_SUPERSEDED`).
+- **N-L3.** Unicode Default_Ignorable_Code_Point characters (U+3164, U+115F, U+1160, U+FFA0 among them) and U+2800 are
+  refused in the typed fields, by the same table in both services (a test compares them over U+0000-U+2FFF and the
+  supplementary cases).
+- **N-L4.** Legal records the hash of the form signature the accepted submission carried; the receipt needs it with
+  the request id. After a link is used no new form can be issued for it, so guessed names, titles and companies
+  cannot confirm anything.
+- **N-L5.** Legal's views carry `time_zone` and `time_zone_label`; the confirmation uses them ("Eastern Time" for
+  `America/New_York`), and the zone's own name otherwise.
+- **N-L6.** Tests now cover the portal refusing a laid-out page that differs from Legal's (503) and a forged
+  document block whose page hash was recomputed.
+- **N-L7.** Finance refuses a billing profile, an invoice draft and an invoice approval for any `zz-test-` client.
+- **N-L8.** A SOW whose stored fill values are missing or unreadable fails the MSA-version rule closed.
+
 ## For Andre's sign-off (the approved clickwrap text is the contract record; its wording is unchanged)
 
 1. **The "Company you are signing for" field.** Not in clickwrap text v1; the build brief asked for it. It must equal

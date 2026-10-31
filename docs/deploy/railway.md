@@ -198,6 +198,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | legal | you |
 | `LEGAL_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` (a different value from `FIN_ONBOARDING_CALLER_TOKEN`) | legal | legal `LEGAL_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-LEGAL-Caller-Token` |
 | `PORTAL_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | client-portal | legal `LEGAL_CALLER_TOKENS` (`client_portal`, interpolated). Nobody else holds it: it reaches only Legal's two portal routes (ADR 0028) |
+| `LEGAL_LINK_TAG_KEY` | `openssl rand -hex 32` | legal | client-portal `PORTAL_LINK_TAG_KEY` (reference). Tags every client acceptance link (AEGIS r2 N-M1): the page refuses a link without a valid tag before spending anything. Unset: Legal issues no link (503). Rotating it kills every open link (send new ones) |
 | `PORTAL_EVIDENCE_KEY` | `openssl rand -hex 32` | client-portal | nobody: the page's HMAC key for the client's IP address and user agent, its form signatures and retry keys. Keep a copy in your password manager: it is the only way to check later whether an IP address matches an acceptance's HMAC |
 | `SEO_SERVICE_TOKEN` | `openssl rand -hex 32` | seo | — |
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
@@ -634,6 +635,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | |
 | `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding`, `compliance_38`, `client_portal` | `onboarding` is your operator-held token (Secrets); `compliance_38` reads a client's acceptances (ADR 0024, HR-15); `client_portal` is the client acceptance page (ADR 0028): it reaches only Legal's two `/legal/v1/portal/...` routes |
 | `LEGAL_ONBOARDING_CALLER_TOKEN` | yes for contract terms and obligations | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters. It never records a client's acceptance (ADR 0028: only the client acceptance page does) |
+| `LEGAL_LINK_TAG_KEY` | yes to issue client acceptance links | yes | (you) | ADR 0028, AEGIS r2 N-M1: ≥ 32 printable characters; the client-portal service reads the same value (reference). Unset: Legal runs, and `POST /legal/v1/client-acceptance-invitations` answers 503 |
 | `LEGAL_ZBM_FACTS` | yes before you fill a template that names a `{{zbm_*}}` fact | no | `{"zbm_legal_entity_name": "...", "zbm_entity_type_and_state": "...", "zbm_street_address": "...", "zbm_zip": "..."}` | ADR 0028: ZBM's own entity facts, filled into every client fill from here (never from a request, never hard-coded); a fact a template names that is missing here refuses the fill; a malformed value refuses the start. docs/runbooks/client-acceptance.md, step 1 |
 | `LEGAL_COMPLIANCE_URL` | yes | no | `http://compliance.railway.internal:8380` (IaC) | ADR 0024: counsel-memo register proposals are delivered to Compliance's inbox |
 | `LEGAL_COMPLIANCE_TOKEN` | yes | yes | interpolated `${{compliance.COMPLIANCE_SERVICE_TOKEN}}` (IaC) | an unresolved reference refuses the start |
@@ -733,10 +735,11 @@ volume, no ledger, no `RAILWAY_RUN_UID`.
 | `PORTAL_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal; plain http only to `*.railway.internal` or localhost |
 | `PORTAL_LEGAL_SERVICE_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
 | `PORTAL_LEGAL_CALLER_TOKEN` | yes | yes | (you) | the `client_portal` caller token at Legal |
+| `PORTAL_LINK_TAG_KEY` | yes | yes | ref `legal.LEGAL_LINK_TAG_KEY` (IaC) | AEGIS r2 N-M1: a link token whose tag does not verify is refused here (the same 404) before any rate-limit budget is spent or Legal is asked |
 | `PORTAL_EVIDENCE_KEY` | yes | yes | (you) | ≥ 32 printable characters; HMAC key (client IP address and user agent, form signatures). Rotating it invalidates open forms and changes `hmac_key_id` on later acceptances |
 | `PORTAL_PUBLIC_ORIGIN` | yes | no | `https://client-portal-production-xxxx.up.railway.app` (you, after the domain exists) | the page's exact origin; a submission whose `Origin` differs is refused. Unset or not `https://` refuses the start |
 | `PORTAL_CLIENT_IP_HEADER` | no | no | `x-real-ip` (default) | AEGIS M-3: the header Railway's edge sets to the client's address (a Railway moderator states the edge overwrites `X-Real-IP` and `X-Forwarded-For`; **UNVERIFIED**, not a documented contract). `none` = do not read one |
-| `PORTAL_TRUSTED_PROXY_HOPS` | yes | no | `1` (IaC) | fallback when the header above is absent or not an address: the `X-Forwarded-For` entry this many from the END (never the left-most, which a client can write); 0 = the socket peer. Check both once after deploy (client acceptance runbook, step 8): if a client could choose its address, the per-address limit is bypassable and only the global ceilings below bound the load |
+| `PORTAL_TRUSTED_PROXY_HOPS` | yes | no | `1` (IaC) | fallback when the header above is absent or not an address: the `X-Forwarded-For` entry this many from the END (never the left-most, which a client can write); 0 = the socket peer. Set from the client acceptance runbook, step 8 (mandatory). IPv6 clients are counted per /64 |
 | `PORTAL_RATE_LEGAL_PER_MINUTE` | no | no | `300` | AEGIS M-3: every call to Legal (resolve, accept, receipt), all clients together, charged before the call |
 | `PORTAL_RATE_IP_PER_MINUTE`, `PORTAL_RATE_TOKEN_PER_HOUR`, `PORTAL_RATE_NOT_FOUND_PER_MINUTE`, `PORTAL_FORM_MAX_AGE_SECONDS`, `PORTAL_LEGAL_TIMEOUT_SECONDS`, `PORTAL_DISPLAY_TZ` | no | no | `30`, `40`, `120`, `14400`, `5`, `America/Los_Angeles` | services/client-portal-py/README.md |
 
@@ -1375,15 +1378,15 @@ every client. Once, after the first deploy that includes `client-portal`:
    `PORTAL_LEGAL_CALLER_TOKEN` is still empty: Legal skips that entry, logs `LEGAL_CALLER_TOKENS: client_portal not
    set`, and keeps running; only the client acceptance page's routes answer 503 (AEGIS M-1). `client-portal` itself
    refuses to start until its secrets exist; that touches nothing else.
-2. Generate the two secrets of the Secrets table (`PORTAL_LEGAL_CALLER_TOKEN`, `PORTAL_EVIDENCE_KEY`) and set them on
-   `client-portal` (Sealed).
+2. Generate the secrets of the Secrets table: `LEGAL_LINK_TAG_KEY` on `legal`, `PORTAL_LEGAL_CALLER_TOKEN` and
+   `PORTAL_EVIDENCE_KEY` on `client-portal` (all Sealed).
 3. `client-portal` -> Settings -> Networking -> **Generate Domain** (no custom domain is needed). Copy it and set
    `PORTAL_PUBLIC_ORIGIN` to `https://<that domain>` (no path, no trailing slash).
 4. Set `LEGAL_ZBM_FACTS` on `legal` (the entity facts; step 1 of docs/runbooks/client-acceptance.md).
 5. **Redeploy `legal`** (it reads the caller token now: the warning is gone from its log) and then `client-portal`.
 6. Check: `curl -sS https://<domain>/health` answers `{"status":"ok"}`; `curl -sSI https://<domain>/accept/x`
    answers 404 with a `content-security-policy` header starting `default-src 'none'`; then run step 8 of the client
-   acceptance runbook once (the client-address check).
+   acceptance runbook (the client-address check, mandatory before the first real link).
 
 Every link after that: docs/runbooks/client-acceptance.md (invite, send, verify, revoke, the confirmation email).
 

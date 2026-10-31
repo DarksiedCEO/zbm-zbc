@@ -517,6 +517,8 @@ class ClientPortal(unittest.TestCase):
         self.assertEqual({n for n in names if not n.startswith("PORTAL_")}, {"PORT"},
                          "the portal gets no ledger, Finance, Compliance or other service variable")
         self.assertNotRegex(self.code, r"(ledger|finance|compliance|seo|detection)\.env\.")
+        self.assertEqual(set(re.findall(r"\b([a-z]+)\.env\.([A-Z_]+)", self.code)),
+                         {("legal", "LEGAL_SERVICE_TOKEN"), ("legal", "LEGAL_LINK_TAG_KEY")})
 
     def test_legal_accepts_the_portal_caller_from_the_portal_service(self):
         m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
@@ -546,6 +548,12 @@ class ClientPortal(unittest.TestCase):
         section = runbook.split("### Client acceptance page (ADR 0028)", 1)[1].split("\n### ", 1)[0]
         self.assertNotIn("**before**", section, "the runbook must not ask for the impossible order (AEGIS M-1)")
         self.assertIn("answer 503", section)
+
+    def test_the_link_tag_key_is_set_once_on_legal_and_referenced_by_the_portal(self):
+        """AEGIS r2 N-M1: the portal refuses junk links with Legal's tag key; one value, owned by Legal (which issues
+        no link without it and keeps running), read by the portal as a reference."""
+        self.assertRegex(re.sub(r"//[^\n]*", "", self.blocks["legal"]), r"(?m)^\s+LEGAL_LINK_TAG_KEY:\s*preserve\(\)")
+        self.assertIn("PORTAL_LINK_TAG_KEY: legal.env.LEGAL_LINK_TAG_KEY,", self.b)
 
     def test_declared_after_legal_and_listed_once(self):
         self.assertLess(self.text.index('service("legal",'), self.text.index('service("client-portal",'))
