@@ -1012,42 +1012,59 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    checkout page is made on an invoice that carries a hold. Make a header file for your Finance approval token, as in
    step E (`read -rs T && printf 'X-Andre-Approval-Token: %s\n' "$T" > fin-andre.hdr && unset T`, paste
    `FIN_ANDRE_APPROVAL_TOKEN`), and read the holds through the finance tunnel of step I with it (other tokens see only
-   that a payment is held, never whether it is a sanctions hold): `curl -sS -H @fin-auth.hdr -H @fin-andre.hdr
+   that a payment is held, never whether it is a sanctions hold, including in the audit export and evidence): `curl -sS -H @fin-auth.hdr -H @fin-andre.hdr
    http://127.0.0.1:18410/fin/v1/breaks`. The hourly job asks Compliance again about every held client and marks a hold
    `sanctions: true` as soon as Compliance says the refusal rests on sanctions; a hold never loses that mark. What to do
    depends on why it is held:
 
    - **`sanctions: true` (an OFAC match or potential match, or a place or campaign target under OFAC comprehensive
-     sanctions). Do not refund, return or move the money.** Finance refuses a refund release and an ALLOW release for
-     it, and a refund made at Stripe anyway is booked truthfully but does not release it. The primary sources: 31 CFR
-     501.603 (https://www.law.cornell.edu/cfr/text/31/501.603), 31 CFR 501.604, and OFAC's reporting FAQs
-     (https://ofac.treasury.gov/faqs/topic/1606: FAQs 49, 50 and 1196).
-     - **Blocked or rejected.** Property in which a blocked person (for example someone on the SDN List) has an
-       interest is *blocked*: it is frozen where it is and stays there until OFAC authorizes otherwise. A transaction
-       that is not blocked but would be prohibited if it went through (under some programs, for example, a payment for
-       services tied to a comprehensively sanctioned place) is *rejected*: it is not processed. Which one applies
-       depends on the sanctions program involved; read that program's rules on ofac.treasury.gov, and when unsure ask
-       OFAC (https://ofac.treasury.gov/contact-ofac) before any money moves.
-     - **Within 10 business days** file through the OFAC Reporting System (ORS) a report of blocked property
-       (501.603(b)(1)) or a report of the rejected transaction (501.604), with copies of the documents behind it.
-     - **Every year**, if you still hold blocked property on **June 30**, file the Annual Report of Blocked Property by
-       **September 30** (501.603(b)(2); form TD F 90-22.50 through ORS, FAQ 50).
-     - **Stripe.** Stripe screens too and may block, hold or report the same payment on its side. Contact Stripe
-       support, tell them what you found, and coordinate so the funds are not moved or refunded by either side.
-     - **Leaving the hold** needs one OFAC document, kept in your evidence folder; you release with its SHA-256 and its
-       kind:
+     sanctions). Do not refund, return or move the money until you have decided below whether it is blocked or
+     rejected.** Finance refuses a refund release and an ALLOW release for it; a refund made at Stripe is booked
+     truthfully but releases nothing by itself. You run these steps yourself. Primary sources: 31 CFR 501.603
+     (https://www.law.cornell.edu/cfr/text/31/501.603) and 501.604; OFAC's FAQs on blocking and rejecting
+     (https://ofac.treasury.gov/faqs/topic/1601: FAQs 32, 35, 36, 53) and on reporting
+     (https://ofac.treasury.gov/faqs/topic/1606: FAQs 49, 50, 1196).
+     - **Decide: blocked or rejected.** OFAC's rule of thumb (FAQ 36, FAQ 53): if a *blocked person* (someone on the
+       SDN List, or an entity they own) has an interest in the payment, it is **blocked**. If the payment is prohibited
+       but no blocked person has an interest in it (FAQ 36's example: a payment for a non-blocked person in Tehran;
+       FAQ 35: a program that prohibits transactions without blocking them), it is **rejected**. An OFAC match on the
+       client (`hold open: sanctions_match`) points to blocked; a sanctioned place or campaign target with no match
+       points to rejected. When the facts are unclear, ask OFAC (https://ofac.treasury.gov/contact-ofac) before
+       acting, and keep their answer.
+     - **Blocked.** The money stays frozen. FAQ 32 says blocked funds are held in a separate interest-earning account;
+       31 CFR 501.603 lists "a blocked, interest-bearing account" as the usual place, and each program's own
+       regulation sets the rule (for example 31 CFR 510.203, North Korea: funds are held in a blocked interest-bearing
+       account located in the United States; https://www.law.cornell.edu/cfr/text/31/510.203). Ask your bank to open
+       such a blocked account and move the funds there only as that regulation directs. File a report of blocked
+       property through the OFAC Reporting System (ORS) **within 10 business days** (501.603(b)(1)), and every year
+       you still hold it on **June 30**, the Annual Report of Blocked Property by **September 30** (501.603(b)(2);
+       form TD F 90-22.50 through ORS, FAQ 50). The hold leaves only with one OFAC document, kept in your evidence
+       folder, released with basis `ofac_authorization`, its SHA-256 and its kind:
        - `license`: a specific license or other written authorization from OFAC;
-       - `unblocking_report`: the match was a **false positive** (mistaken identity, a name that only looked alike):
-         per OFAC FAQ 1196 you may unblock it yourself and file an unblocking report within 10 business days
-         (501.603(b)(3)), citing FAQ 1196 as the authorization; the filed report is the document. FAQ 1196 is for
-         cases of error only: property that was correctly blocked needs a license;
-       - `compliance_release`: OFAC's Compliance Release under 31 CFR 501.806 (mistaken identity or a similar error).
-       If OFAC removes the person from the SDN List, no license is needed to unblock (FAQ 1196); keep OFAC's notice
-       and use it as a `license` document.
+       - `unblocking_report`: the match was a **false positive** (mistaken identity): per FAQ 1196 you may unblock it
+         and file an unblocking report within 10 business days (501.603(b)(3)), citing FAQ 1196 as the authorization.
+         For error cases only: a payment correctly blocked needs a license;
+       - `compliance_release`: OFAC's Compliance Release under 31 CFR 501.806 (mistaken identity or a similar error);
+       - `delisting`: OFAC removed the person from the SDN List; no license is needed to unblock (FAQ 1196). Keep
+         OFAC's notice of the removal.
+     - **Rejected.** The payment is not processed: it is returned to the sender (FAQ 36: "rejected and returned to the
+       originator"). Refund it to the client in the Stripe Dashboard, file a report of the rejected transaction through
+       ORS **within 10 business days** (501.604), keep the ORS confirmation, and release with basis
+       `ofac_rejected_return`, the refund's `F7r` journal entry, kind `rejected_transaction_report` and the
+       confirmation's SHA-256. Finance refuses it unless the refund is this very payment's, booked after it, covering
+       it.
+     - **Stripe.** Stripe screens too and may block, hold or report the same payment on its side. Contact Stripe
+       support, tell them what you found and what you decided, and coordinate so neither side moves the money in a
+       way the other did not expect.
 
      ```sh
+     # blocked, leaving with an OFAC document
      curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
-       --data "{\"request_id\": \"rel-<invoice>-1\", \"basis\": \"ofac_authorization\", \"ofac_document_kind\": \"<license|unblocking_report|compliance_release>\", \"ofac_authorization_sha256\": \"$(shasum -a 256 <the OFAC document> | cut -d' ' -f1)\"}" \
+       --data "{\"request_id\": \"rel-<invoice>-1\", \"basis\": \"ofac_authorization\", \"ofac_document_kind\": \"<license|unblocking_report|compliance_release|delisting>\", \"ofac_authorization_sha256\": \"$(shasum -a 256 <the OFAC document> | cut -d' ' -f1)\"}" \
+       http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold/release
+     # rejected, returned to the sender and reported
+     curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
+       --data "{\"request_id\": \"rel-<invoice>-1\", \"basis\": \"ofac_rejected_return\", \"entry_id\": \"<the F7r entry id>\", \"ofac_document_kind\": \"rejected_transaction_report\", \"ofac_authorization_sha256\": \"$(shasum -a 256 <the ORS confirmation> | cut -d' ' -f1)\"}" \
        http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold/release
      ```
 
