@@ -161,3 +161,8 @@ is 19450-19453, as above).
 
 `devtools/live_server.py` runs the service with the test fakes and a settable clock (devtools only, never
 production). `devtools/gen_rules_seed.py` regenerates the seed (its SHA-256 is pinned).
+
+## Test clients (ADR 0028)
+
+A client id starting `zz-test-` is a test client (the client acceptance runbook, step 8): Finance refuses its
+billing profile, any invoice draft and any invoice approval (409).

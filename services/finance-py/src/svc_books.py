@@ -39,6 +39,8 @@ def legal_version(v) -> str:
 _RATIO = Decimal("0.0001")
 
 
+TEST_CLIENT_PREFIX = "zz-test-"        # ADR 0028, AEGIS r2 N-L7: test clients are never billed
+
 class BooksMixin:
     # ================================================================== rate cards (§B.3)
 
@@ -225,7 +227,16 @@ class BooksMixin:
             self._commit(op)
             return resp
 
+    @staticmethod
+    def _refuse_test_client(client_id: str) -> None:
+        """ADR 0028, AEGIS r2 N-L7: a ``zz-test-`` client (the client acceptance runbook's test client) is never
+        billed."""
+        if str(client_id).startswith(TEST_CLIENT_PREFIX):
+            raise Conflict(f"{TEST_CLIENT_PREFIX}* is a test client: it is never billed (no billing profile, no "
+                           "invoice)")
+
     def put_billing_profile(self, request_id: str, client_id: str, body: dict) -> dict:
+        self._refuse_test_client(client_id)
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"billing/{client_id}", body)
             if ent:
@@ -485,6 +496,7 @@ class BooksMixin:
     # ================================================================== invoices (§B.9, §C.2)
 
     def draft_invoice(self, principal: str, request_id: str, body: dict) -> dict:
+        self._refuse_test_client(body.get("client_id"))
         with self.lock:
             key, h, ent = self._idem(principal, request_id, "invoices", body)
             if ent:
@@ -549,6 +561,8 @@ class BooksMixin:
         inv = self.db["invoices"].get(invoice_id)
         if inv is None:
             raise NotFound("no such invoice")
+        if body["decision"] == "approve":
+            self._refuse_test_client(inv["client_id"])
         g = Gather(self, f"invdec|{request_id}", "intel_02_receivables", invoice_id)
         reasons = list(self._rules_reasons())
         act = ClientActivation(False)
