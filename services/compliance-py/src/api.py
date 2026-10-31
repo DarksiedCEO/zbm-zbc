@@ -230,6 +230,17 @@ class Callers:
         return found
 
 
+GENERIC_REFUSAL = "the client is not activated (the reasons go to Andre)"
+
+
+def generic_activation(out: dict) -> dict:
+    """AEGIS r9 R9-4: the activation answer for a department that only needs the decision: a refusal carries one
+    generic reason and no sanctions marker, so it reads the same whatever the reason."""
+    if out.get("decision") == "ALLOW":
+        return {**out, "sanctions_grounded": None, "sanctions_ground": None}
+    return {**out, "reasons": [GENERIC_REFUSAL], "sanctions_grounded": None, "sanctions_ground": None}
+
+
 def _sanitize(errors: list[dict]) -> dict:
     out = []
     for e in errors[:ERROR_MAX_ERRORS]:
@@ -368,16 +379,27 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         """ADR 0024 (HR-14): Andre records the OFAC search he made for a client (date, list version, result)."""
         return svc.record_attestation(req.request_id, req.model_dump())
 
+    activation_callers = caller("finance_31", "seo_02", "revenue_recovery", "onboarding")
+
+    def activation_reader(x_compliance_caller_token: Optional[str] = Header(default=None),
+                          x_andre_approval_token: Optional[str] = Header(default=None)) -> str:
+        """AEGIS r9 R9-4: Andre's token, or one of the departments that act on the decision."""
+        if x_andre_approval_token is not None:
+            return andre("clients/activation")(x_andre_approval_token)
+        return activation_callers(x_compliance_caller_token)
+
     @app.get("/compliance/v1/clients/{client_id}/activation", dependencies=auth)
-    def client_activation(client_id: str,
-                          _: str = Depends(caller("finance_31", "seo_02", "revenue_recovery", "onboarding")),
+    def client_activation(client_id: str, who: str = Depends(activation_reader),
                           lane: str = Query(default="client", pattern=r"^(client|zbc_brand)$")) -> dict:
         """ADR 0024: the client's current activation decision (ALLOW / REFUSE with reasons), for Finance, SEO and
         Revenue Recovery (detection-py reads as revenue_recovery) and onboarding. Read-only; anything but a current
-        ALLOW is a refusal for the caller. Other callers get 403 (AEGIS F-9)."""
+        ALLOW is a refusal for the caller. Other callers get 403 (AEGIS F-9). AEGIS r9 R9-4: the reasons and the
+        sanctions ground go to Finance (the money gate, which shows them only to Andre) and to Andre's token; SEO,
+        Revenue Recovery and onboarding get one generic refusal, the same whatever the reason."""
         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", client_id):
             raise Invalid("client id format")
-        return svc.activation_status(client_id, lane)
+        out = svc.activation_status(client_id, lane)
+        return out if who in ("finance_31", "andre") else generic_activation(out)
 
     @app.get("/compliance/v1/readiness", dependencies=auth)
     def readiness(_: str = Depends(caller())) -> dict:
