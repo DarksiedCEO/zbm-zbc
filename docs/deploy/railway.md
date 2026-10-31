@@ -608,6 +608,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `FIN_PAYEE_CHANGE_COOLING_OFF_H`, `FIN_RELEASE_DELAY_H`, `FIN_APPROVAL_TTL_H` | `72`, `12`, `48` | hours |
 | `FIN_ACCESS_REVIEW_DAYS`, `FIN_OFAC_MAX_AGE_DAYS`, `FIN_CLAWBACK_WRITEOFF_MIN_DAYS`, `FIN_EVIDENCE_RETENTION_DAYS` | `90`, `1`, `180`, `2557` | days |
 | `FIN_MAX_RATE_PER_1000`, `FIN_MAX_CERTIFIED_VIEWS`, `FIN_WITHHOLDING_BASIS` | `1000.00`, 10^12, `gross` | |
+| `FIN_MAX_INVOICE_TOTAL` | `250000.00` | the largest invoice Finance drafts (RTM-09) |
 | `FIN_MEDIA_DEFAULT_MARKUP_PCT`, `FIN_MEDIA_MAX_MARKUP_PCT`, `FIN_MEDIA_RELEASE_HOLD_BD` | `15.00`, `100.00`, `2` | media buys |
 | `FIN_CARD_PREPAYMENTS`, `FIN_CARD_MAX_INVOICE` | off, `5000.00` | card rule (founder M10) |
 | `FIN_SEED_PATH`, `FIN_SEED_SHA256`, `FIN_ALLOW_UNPINNED_SEED` | the image's pinned seed, unset, unset | an unpinned seed is non-production only |
