@@ -411,11 +411,12 @@ def test_r7_7_a_receipt_the_ledger_shows_sent_is_never_sent_again():
     hr.svc.db["client_receipts"]["fin-crc-7"] = rec
     hr.ledger.record_event("fin-crcs-" + hashlib.sha256(b"x").hexdigest()[:40], "finance", "client_receipt_sent",
                            i10.ACTOR, "fin-crc-7", {"x": 1}, "Client receipt sent")
+    # (the ledger is read once per process, at the first send: both sends were recorded before this process)
+    hr.ledger.record_event("fin-crcs-" + hashlib.sha256(b"y").hexdigest()[:40], "finance", "client_receipt_sent",
+                           i10.ACTOR, "fin-crc-8", {"x": 2}, "Client receipt sent")
     hr.post("/fin/v1/client-receipts/fin-crc-7/send", {"request_id": rid()}, caller="scheduler")
     assert fx.delivered == [] and hr.svc.db["client_receipts"]["fin-crc-7"]["status"] == "sent"
     hr.svc.db["client_receipts"]["fin-crc-8"] = {**rec, "client_receipt_id": "fin-crc-8"}
-    hr.ledger.record_event("fin-crcs-" + hashlib.sha256(b"y").hexdigest()[:40], "finance", "client_receipt_sent",
-                           i10.ACTOR, "fin-crc-8", {"x": 2}, "Client receipt sent")
     hr.ok(hr.post("/fin/v1/jobs/client-mail/run", {"request_id": rid()}, caller="ops_cron"))
     assert fx.delivered == [] and hr.svc.db["client_receipts"]["fin-crc-8"]["status"] == "sent"
 

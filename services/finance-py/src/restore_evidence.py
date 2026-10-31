@@ -24,6 +24,9 @@ ITEM_SUMMARY = re.compile(rf"Payout sent ([a-z]{{1,20}}) (\d{{1,12}}\.\d{{2}}) p
                           rf"l (\d{{1,9}})")
 XFER_SUMMARY = re.compile(rf"([a-z_]{{1,20}}) posted a(\d{{1,6}}) (F\w{{1,4}}) (\d{{1,12}}\.\d{{2}}) dr (\d{{4}}) ({_SUB}) "
                           rf"cr (\d{{4}}) ({_SUB}) r (-|{_ID}) l (\d{{1,9}})")
+# AEGIS r8 R8-2: a refund's transfer written in an older summary format still names the refund (an id Finance minted);
+# used only to group it with its refund (one movement, one booking), never to derive an amount or an account
+OLD_REFUND_XFER = re.compile(r"^refund_payment\b.*?\b(fin-rfd-[0-9A-Z]{26})\b")
 REFUND_PAID_SUMMARY = re.compile(rf"Refund paid (\d{{1,12}}\.\d{{2}}) c ({_ID}) k ({_CLIENT}) l (\d{{1,9}})")
 
 

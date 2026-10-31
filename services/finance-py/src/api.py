@@ -263,6 +263,7 @@ QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume|/fin/v1/reconcile")     # re
 LOCKDOWN_ALLOWED = re.compile(
     r"/fin/v1/(stripe/events|bank/events|rails/[^/]+/events|reconcile|stripe/reimport"
     r"|restore/items/[^/]+/disposition|restore/items/[^/]+/correction|restore/items/[^/]+/correction/reversal"
+    r"|restore/items/[^/]+/disposition/undo"
     r"|restore/items/[^/]+/manual-booking|restore/bank-refeed"
     r"|restore/lockdown/lift|deadlines/[^/]+/close|clients/[^/]+/acknowledgements|invoices/[^/]+/sow-ended"
     r"|invoices/[^/]+/void|invoices/[^/]+/credit-notes|backup/quiesce|backup/resume|jobs/client-mail/run)")
@@ -659,6 +660,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def restore_corr_rev(event_id: str, _: str = Depends(andre("restore/items/correction/reversal")),
                          req: m.RestoreBookingReversal = Depends(body(m.RestoreBookingReversal))) -> dict:
         return svc.restore_booking_reversal(req.request_id, _id(event_id), dump(req))
+
+    @app.post("/fin/v1/restore/items/{event_id}/disposition/undo", dependencies=auth)
+    def restore_disp_undo(event_id: str, _: str = Depends(andre("restore/items/disposition/undo")),
+                          req: m.RestoreBookingReversal = Depends(body(m.RestoreBookingReversal))) -> dict:
+        return svc.restore_disposition_undo(req.request_id, _id(event_id), dump(req))
 
     @app.post("/fin/v1/rail-events/{rail}/{event_id}/disposition", dependencies=auth)
     def rail_event_disp(rail: str, event_id: str, _: str = Depends(andre("rail-events/disposition")),

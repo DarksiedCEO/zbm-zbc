@@ -294,6 +294,8 @@ class MailMixin:
                     op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
                                                      "resolution": {"basis": "acknowledgement_sent"}})
             self._commit(op)
+            if out.outcome == "sent":
+                self._note_mail_sent(mail_id)            # AEGIS r8 R8-9: the sent index stays current
             return out.outcome
 
     def job_client_mail(self, prefix: str) -> dict:

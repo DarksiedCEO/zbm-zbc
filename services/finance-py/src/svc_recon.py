@@ -118,6 +118,15 @@ class ReconMixin:
             def bank_leg(leg_id, ent_, acct):
                 b = obs[(ent_, acct)]
                 ok = isinstance(b, BankBalance) and b.available and self._fresh(b.as_of, 26)
+                dec = None if ok or (isinstance(b, BankBalance) and b.available) else self._declared_balance(ent_, acct)
+                if dec is not None:
+                    # AEGIS r8 R8-1: no bank feed is wired: during a restore's post-lift phase the bank side is the
+                    # closing balance Andre declared from his statement (the re-feed), less money moved and unbooked
+                    legs.append(I7.leg(leg_id, f"{ent_}:{acct}", self.bal(acct, entity=ent_),
+                                       M.D(dec["balance"]), dec["evidence_sha256"],
+                                       f"declared by Andre (statement {dec['statement_ref']} as of {dec['as_of']}); "
+                                       "no bank feed is wired"))
+                    return
                 legs.append(I7.leg(leg_id, f"{ent_}:{acct}", self.bal(acct, entity=ent_),
                                    M.D(b.balance) if ok else None, b.source_sha256 if ok else None,
                                    "" if ok else "bank feed unavailable or stale (stand-in)"))
@@ -177,7 +186,7 @@ class ReconMixin:
                         continue
                     legs.append(I7.leg("L4", f"zbm:{acct}:{s}"[:160], j, e, sha({"records": f"zbm:{acct}", "sub": s}),
                                        "media sub-ledger vs the media buy records"))
-            ind = T.independent(M.D(obs[("zbc", "1020")].balance) if legs[0]["status"] != "source_unavailable" else None,
+            ind = T.independent(M.D(legs[0]["observed"]) if legs[0]["observed"] is not None else None,   # r8 R8-1
                                 {r: M.D(rail_obs[r].balance) for r in self.cfg.rails
                                  if isinstance(rail_obs[r], RailBalance) and rail_obs[r].available}, self.balances)
             pos = T.view(T.position(self.balances))

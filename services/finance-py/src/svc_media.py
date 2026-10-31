@@ -508,4 +508,6 @@ class MediaMixin:
             resp = self._idem_add(op, key, h, {"client_receipt": new, "sent": sent, "detail": detail,
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
+            if sent:
+                self._note_mail_sent(crid)               # AEGIS r8 R8-9: the sent index stays current
             return resp

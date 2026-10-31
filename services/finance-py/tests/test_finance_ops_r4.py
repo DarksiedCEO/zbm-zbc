@@ -40,7 +40,8 @@ EXPECTED_ALLOWED = {
     "/fin/v1/stripe/events", "/fin/v1/bank/events", "/fin/v1/rails/x1/events",           # money in, rail status
     "/fin/v1/reconcile", "/fin/v1/stripe/reimport", "/fin/v1/restore/items/x1/disposition",
     "/fin/v1/restore/items/x1/correction", "/fin/v1/restore/items/x1/correction/reversal",
-    "/fin/v1/restore/items/x1/manual-booking", "/fin/v1/restore/bank-refeed", "/fin/v1/restore/lockdown/lift",
+    "/fin/v1/restore/items/x1/manual-booking", "/fin/v1/restore/items/x1/disposition/undo",
+    "/fin/v1/restore/bank-refeed", "/fin/v1/restore/lockdown/lift",
     "/fin/v1/deadlines/x1/close", "/fin/v1/clients/x1/acknowledgements", "/fin/v1/invoices/x1/sow-ended",
     "/fin/v1/invoices/x1/void", "/fin/v1/invoices/x1/credit-notes",                      # service-checked (4.12(g))
     "/fin/v1/backup/quiesce", "/fin/v1/backup/resume", "/fin/v1/jobs/client-mail/run"}

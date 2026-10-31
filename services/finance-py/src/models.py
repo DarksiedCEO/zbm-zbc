@@ -744,6 +744,9 @@ class BankRefeed(Strict):
     until: date
     statement_ref: Id
     statement_days: list[StatementDay] = Field(min_length=1, max_length=400)
+    # AEGIS r8 R8-1: the SHA-256 of the statement file; required when no bank feed is wired (the declared closing
+    # balances are then the bank side, recorded as declared by Andre)
+    evidence_sha256: Optional[Sha] = None
 
 
 class RestoreCorrection(Strict):
