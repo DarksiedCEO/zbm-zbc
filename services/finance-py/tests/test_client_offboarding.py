@@ -137,6 +137,23 @@ def test_an_open_stripe_dispute_on_the_clients_payment_blocks():
     assert dry(hr)["blockers"] == []
 
 
+def test_sanctions_records_are_kept_10_years_and_financial_records_7():
+    hr = harness()
+    set_contact(hr)
+    inv = paid(hr)
+    hr.svc.db["invoices"][inv["invoice_id"]] = {
+        **hr.svc.db["invoices"][inv["invoice_id"]],
+        "held_compliance_history": [{"kind": "refused", "sanctions": True, "sanctions_ground": "match",
+                                     "released_at": "2026-10-02T17:00:00Z"}]}
+    held = {h["kind"]: h for h in dry(hr)["held"]}
+    assert held["sanctions_transaction_records"]["count"] == 1
+    assert held["sanctions_transaction_records"]["action"] == "keep_10_years"
+    assert held["sanctions_transaction_records"]["retention"].startswith("10 years")
+    assert "31 CFR 501.601" in held["sanctions_transaction_records"]["retention"]
+    for k in ("invoices", "payment_records", "journal_entries"):
+        assert held[k]["retention"].startswith("7 years"), k
+
+
 # --------------------------------------------------------------------------------------------- the real run
 
 def test_the_real_run_deletes_the_contact_keeps_the_books_and_certifies(tmp_path):

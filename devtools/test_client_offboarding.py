@@ -50,7 +50,9 @@ class Fake:
         svc = "compliance" if "/compliance/" in url else "finance"
         if b["dry_run"]:
             return 200, {"dry_run": True, "plan_sha256": svc[0] * 64, "blockers": [], "warnings": [],
-                         "held": [{"kind": "x", "count": 1, "action": "keep_7_years"}]}
+                         "held": [{"kind": "x", "count": 1, "action": "keep_7_years", "retention": "7 years (test)"},
+                                  {"kind": "y", "count": 2, "action": "keep_10_years",
+                                   "retention": "10 years (test)"}]}
         cert = CERT_C if svc == "compliance" else CERT_F
         return 200, {"certificate": cert, "certificate_sha256": OFF.sha(cert)}
 
@@ -103,6 +105,8 @@ class ClientOffboarding(unittest.TestCase):
         for m, url, _h, body in fake.calls:
             if m == "POST":
                 self.assertIs(body["dry_run"], True)
+        self.assertIn("keep_10_years  10 years (test)", text)
+        self.assertIn("keep_7_years  7 years (test)", text)
         for secret in ("f" * 64, "c" * 64 + "\n", ANDRE, "s" * 64, "d" * 64):
             self.assertNotIn(secret, text)
 

@@ -30,6 +30,9 @@ def test_dry_run_then_real_run_closes_the_activation_and_keeps_the_ofac_records(
     held = {x["kind"]: x for x in p["held"]}
     assert held["ofac_searches"]["count"] == 4 and held["ofac_searches"]["action"] == "keep_10_years"
     assert held["ownership_record"]["count"] == 1 and held["activation"]["action"] == "close"
+    for k in ("ofac_searches", "ownership_record"):                    # MSA 15.5(a), changelog 46
+        assert held[k]["retention"].startswith("10 years") and "MSA 15.5(a)" in held[k]["retention"], k
+    assert held["activation_rulings"]["retention"].startswith("7 years")
     r = h.post(OFFB, {"request_id": rid(), "dry_run": False, "plan_sha256": p["plan_sha256"]}, andre=ANDRE_TOKEN)
     assert r.status_code == 200, r.text
     out = r.json()

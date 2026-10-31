@@ -170,7 +170,8 @@ def cmd_plan(args, call, out) -> int:
     _write_private(args.out, plan)
     for svc, p in plan["services"].items():
         for h in p.get("held") or []:
-            print(f"{svc:<11} {h.get('kind', ''):<26} {h.get('count', 0):>5}  {h.get('action', '')}", file=out)
+            ret = f"  {h['retention']}" if h.get("retention") else ""
+            print(f"{svc:<11} {h.get('kind', ''):<30} {h.get('count', 0):>5}  {h.get('action', '')}{ret}", file=out)
         for t in p.get("tenants") or []:
             print(f"{svc:<11} tenant {t['tenant_id']}: {t['audits']} audit(s), Search Console bound: "
                   f"{t['gsc_property_bound']}", file=out)

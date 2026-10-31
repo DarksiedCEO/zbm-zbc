@@ -12,7 +12,8 @@ the end of the tax year they relate to; red team OPS-H8).
   every money record, and records a hash-only DELETION CERTIFICATE on the ledger (``client_offboarded``), with the
   certificate hashes of the other services' runs (``peer_certificates``) when the offboarding devtool passes them.
 
-Never deleted here (kept 7 years, MSA 15.5(a)): invoices, receipts, credit notes, refunds, disputes, Stripe payment
+Never deleted here: records of a payment held on sanctions grounds (a blocked or rejected transaction) are kept 10
+years (MSA 15.5(a), changelog 46; 31 CFR 501.601); everything else below is kept 7 years (MSA 15.5(a)): invoices, receipts, credit notes, refunds, disputes, Stripe payment
 records (ids only), the client's tax jurisdiction (nexus records) and every journal entry. They hold no personal
 information by design (ids, amounts, codes, dates). The ledger and the log are append-only: personal information is
 never written there (the contact vault, ``pii_vault``), and the run checks the log for the contact it deletes.
@@ -35,6 +36,8 @@ from ledger import derived_id
 from service import Op, rid, sha
 
 KEEP = "7 years after the end of the tax year (MSA 15.5(a))"
+# MSA 15.5(a), changelog 46: records of sanctions screening and of any blocked or rejected transaction
+KEEP_SANCTIONS = "10 years (MSA 15.5(a); 31 CFR 501.601)"
 UNSENT = ("pending", "pending_send", "send_failed")
 
 
@@ -80,6 +83,11 @@ class OffboardingMixin:
             {"kind": "journal_entries", "count": len(entries), "action": "keep_7_years", "retention": KEEP},
             {"kind": "tax_jurisdiction", "count": 1 if client_id in self.db["client_profiles"] else 0,
              "action": "keep_7_years", "retention": KEEP},
+            # a payment Compliance held on sanctions grounds (open or released): a blocked or rejected transaction
+            {"kind": "sanctions_transaction_records",
+             "count": sum(1 for v in invs.values() if (v.get("held_compliance") or {}).get("sanctions")
+                          or any(x.get("sanctions") for x in v.get("held_compliance_history") or [])),
+             "action": "keep_10_years", "retention": KEEP_SANCTIONS},
         ]
         blockers, warnings = [], []
         held_cmp = sorted(k for k, v in invs.items() if v.get("held_compliance"))
@@ -141,8 +149,8 @@ class OffboardingMixin:
             if crec or deleted:
                 op.put("client_contacts", client_id, {"client_id": client_id, "contact_ref": None,
                                                       "erased_at": iso(now), "erased_by": "andre"})
-            kept = {h_["kind"]: {"count": h_["count"], "retention": KEEP} for h_ in plan["held"]
-                    if h_["action"] == "keep_7_years"}
+            kept = {h_["kind"]: {"count": h_["count"], "retention": h_["retention"]} for h_ in plan["held"]
+                    if h_["action"].startswith("keep_")}
             cert = {"certificate_version": 1, "service": "finance", "client_id_sha256": plan["client_id_sha256"],
                     "executed_at": iso(now), "executed_by": "andre", "plan_sha256": plan["plan_sha256"],
                     "deleted": {"billing_contact": deleted}, "withdrawn": {"unsent_client_email": withdrawn},

@@ -91,8 +91,10 @@ when a 10-14 business-day window starts reaching 2031. Open item.
   services' certificate hashes) as ledger event `client_offboarded`.
 - **Compliance** `POST /compliance/v1/clients/{id}/offboarding` (Andre): same dry run / plan shape; the real run closes
   the activation (the status refuses until a NEW activation ruling after it) and certifies. It deletes nothing: OFAC
-  screening records are kept 10 years (31 CFR 501.601 as amended effective March 21, 2025; the brief said 7: the law's
-  longer period governs, MSA 15.5(d)); rulings 7 years.
+  screening records are kept 10 years (MSA 15.5(a), changelog 46; 31 CFR 501.601 as amended effective March 21,
+  2025); rulings 7 years. Finance likewise keeps the records of a payment held on sanctions grounds (a blocked or
+  rejected transaction) 10 years and every other financial record 7 years; the plan and the certificate name each
+  kind's retention.
 - **The tool.** `devtools/client_offboarding.py plan` runs the dry runs (and reads SEO's tenants for the client), writes
   one private plan file, and prints the manual steps; `run` runs Compliance, then Finance with Compliance's certificate
   hash, and writes the combined certificate (hashes and counts only).

@@ -183,7 +183,7 @@ Keep a spreadsheet or text file `~/zbm/ofac/screening-log.csv` (backed up). One 
 date_utc,client_id,role(client|dba|owner),owner_id,name_searched,lists,list_date,result(no_results|cleared_fp|likely_match|match),evidence_file,evidence_sha256,compliance_attestation_id,notes
 ```
 
-**Retention: 10 years.** OFAC extended its recordkeeping requirement (31 CFR 501.601) from five to ten years
+**Retention: 10 years** (MSA 15.5(a), changelog 46; the same for records of any blocked or rejected transaction). OFAC extended its recordkeeping requirement (31 CFR 501.601) from five to ten years
 (interim final rule Sept. 2024, adopted as final effective March 21, 2025). Keep the log and every evidence PDF for
 10 years after the search, even after the client's other data is deleted ([client-offboarding.md](client-offboarding.md)).
 

@@ -9,7 +9,7 @@ Compliance deletes nothing: everything it holds about a client is a record the l
 decision, and none of it is personal information by design (names are stored only as SHA-256 hashes, places as codes):
 
 - OFAC screening records (the client's and its owners' recorded searches, the ownership record): kept 10 years
-  (31 CFR 501.601, as amended effective March 21, 2025); the MSA's 7-year floor is exceeded by law (MSA 15.5(d));
+  (MSA 15.5(a), changelog 46; 31 CFR 501.601, as amended effective March 21, 2025);
 - activation rulings (the decisions money and work relied on): kept 7 years with the financial records they gate.
 
 An open hold on the client blocks the run (a sanctions hold's records are never touched while it is open).
@@ -24,7 +24,7 @@ from clock import iso
 from errors import Conflict
 from ledger import derived_id
 
-KEEP_OFAC = "10 years after the search (31 CFR 501.601)"
+KEEP_OFAC = "10 years after the search (MSA 15.5(a); 31 CFR 501.601)"
 KEEP_RULINGS = "7 years (MSA 15.5(a), with the financial records they gate)"
 
 

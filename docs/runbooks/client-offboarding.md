@@ -38,7 +38,8 @@ is working copies and third parties).
 | **Invoices, payment records, receipts, journal entries, Stripe records** | — | Yes, §15.5(a) | **7 years** (ZBM's tax-record policy; the IRS's periods are 3 to 7 years depending on the case, so 7 covers them) |
 | **The client's acceptance of the MSA and each SOW** | — | Yes, §15.5(b) | 7 years after the engagement ends |
 | **Ledger entries** (identifiers, codes, counts, amounts, timestamps, hashes; no page contents, names or contact details) | Shopify order references and amounts: deleted or made unidentifiable under RR SOW §6.3(d) | Everything else, §15.5(c) | Life of the ledger |
-| **OFAC screening log and evidence PDFs; Compliance's recorded searches and the ownership record** (names stored only as hashes) | — | Yes, §15.5(d) (required by law) | **10 years** (31 CFR 501.601) |
+| **OFAC screening log and evidence PDFs; Compliance's recorded searches and the ownership record** (names stored only as hashes) | — | Yes, §15.5(a) (sanctions screening records; 31 CFR 501.601) | **10 years** (31 CFR 501.601) |
+| **Records of a blocked or rejected transaction** (a payment Finance held on sanctions grounds, its report to OFAC) | — | Yes, §15.5(a) (31 CFR 501.601) | **10 years** |
 | **Compliance's activation rulings** | — | Yes, §15.5(a) (they gate the financial records) | 7 years |
 | Incident logs that mention the client | — | Yes, §15.5(d) where required | 7 years |
 
@@ -179,7 +180,8 @@ Deadlines: RR creds 5 bd -> <date>   Data 30 d -> <date>   Reminder day 20 -> <d
 [ ] AI-tool conversations with Client Data deleted
 [ ] Neon lead row deleted (or kept because: <...>)
 [ ] Tool: plan read, run done, certificate saved (Finance certificate sha: <first 16>), pii_left_in_log = 0
-[ ] Kept: invoices/payments (7 y), acceptance (7 y), ledger entries (no PI), OFAC records (10 y)
+[ ] Kept: invoices/payments (7 y), acceptance (7 y), ledger entries (no PI), OFAC screening and blocked/rejected
+    transaction records (10 y, MSA 15.5(a))
 [ ] Confirmation sent (<date>)
 ```
 
