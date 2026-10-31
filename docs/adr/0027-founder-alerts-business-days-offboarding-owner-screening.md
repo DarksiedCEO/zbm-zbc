@@ -69,6 +69,39 @@ holiday moves to the Friday, so for example July 3, 2026 is a holiday there and 
 Reserve rule ZBM is never later than the other reading by more than that one Friday; the Friday-observed reading
 gives the client one more day. This ADR follows the instruction (Federal Reserve schedule); Legal is unchanged.
 
+### 3. Client offboarding: a dry run, then a certified run; personal information never in the append-only stores
+
+- **Redaction by design.** The ledger and every department's record log are append-only and hash-chained: they cannot
+  forget. So personal information must never be written there. Finance's billing contact (added in wave B, not yet
+  deployed) moves to a **contact vault**, one file per client (`pii/<sha256(client id)>.json`, 0600, atomic replace):
+  the log and the ledger hold a `contact_ref`; the idempotency hash covers an HMAC keyed by a per-client salt kept in
+  the same file, so deleting the file leaves nothing that links back (the earlier plain SHA-256 of the address is
+  gone from the ledger payload). A test reads every log line and every ledger payload for the address, the name and
+  their plain hashes. Compliance already stored names as hashes only; Legal stores references.
+- **Finance** `POST /fin/v1/clients/{id}/offboarding` (Andre): the dry run lists what Finance holds (billing contact,
+  unsent client email, invoices, payment records, credit notes and refunds, journal entries, tax jurisdiction), the
+  action for each and a `plan_sha256`, and writes nothing. The real run names that hash (409 when anything changed),
+  is blocked by an open Compliance hold or an open Stripe dispute, deletes the vault file first, then in one anchored
+  commit withdraws unsent mail, marks the contact erased and records the **deletion certificate**: hash-only (client
+  id hash, plan hash, counts deleted / withdrawn / kept with their retention, `pii_left_in_log`, and the peer
+  services' certificate hashes) as ledger event `client_offboarded`.
+- **Compliance** `POST /compliance/v1/clients/{id}/offboarding` (Andre): same dry run / plan shape; the real run closes
+  the activation (the status refuses until a NEW activation ruling after it) and certifies. It deletes nothing: OFAC
+  screening records are kept 10 years (31 CFR 501.601 as amended effective March 21, 2025; the brief said 7: the law's
+  longer period governs, MSA 15.5(d)); rulings 7 years.
+- **The tool.** `devtools/client_offboarding.py plan` runs the dry runs (and reads SEO's tenants for the client), writes
+  one private plan file, and prints the manual steps; `run` runs Compliance, then Finance with Compliance's certificate
+  hash, and writes the combined certificate (hashes and counts only).
+- **Not covered by a route** (manual, in the runbook): SEO (unbind Search Console, pause schedules; audit records stay
+  in seo's append-only log), Revenue Recovery store data (detection has no volume; its finding records on the ledger
+  carry Shopify order references: RR SOW 6.3(e) notice path), Legal (acceptances kept 7 years), delivery (not
+  deployed), working copies, Gmail, Neon, Resend.
+
+Open item (High, not built here): the department logs can only forget through a **log compaction** that rewrites a
+log without a client's lines and re-anchors it on the ledger. Until then, data a department wrote into its log (SEO
+domains and audit summaries; Revenue Recovery finding references on the ledger) is retained in that log and its
+backups. It is business data, not personal information, but it is Client Data under MSA 15.5.
+
 ### 4. OFAC owner screening and the 50 Percent Rule in the client activation gate
 
 - **Owner records (Andre enters them; clients attest).** `PUT /compliance/v1/clients/{id}/ownership` (Andre only):
@@ -110,10 +143,14 @@ routes); railway.md step G points to it.
   `FOUNDER_ALERT_EMAIL`, `FOUNDER_ALERT_FROM`, `FIN_ALERT_WINDOW_MIN`, `FIN_ALERT_REMIND_HOURS`,
   `FIN_ALERT_LEDGER_DOWN_MIN`, `FIN_ALERT_MAX_PER_DAY`. Runbook: docs/runbooks/founder-alerts.md.
 - Refund and acknowledgement due dates move later by each bank holiday they span (never earlier).
+- New Finance collection `client_offboardings`, new files under `FIN_DATA_DIR/pii/`, new ledger event types
+  `client_offboarded` (Finance, Compliance) and `client_ownership_recorded` (Compliance). Runbook:
+  docs/runbooks/client-offboarding.md (from the draft on `docs/ops-runbooks-2026-10-30`, now with the tool).
 
 ## Verification
 
 finance-py: tests/test_founder_alerts.py, tests/test_bizdays.py; devtools/test_deploy_config.py (OpsAlerts).
-compliance-py: tests/test_owner_screening.py (and the activation helpers in test_service_area_gate.py now record a
-default ownership). Nothing
+compliance-py: tests/test_owner_screening.py, tests/test_client_offboarding.py (and the activation helpers in
+test_service_area_gate.py now record a default ownership). finance-py: tests/test_client_offboarding.py.
+devtools/test_client_offboarding.py. Nothing
 has run on Railway or against the real Resend API.

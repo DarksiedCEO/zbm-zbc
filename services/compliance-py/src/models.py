@@ -100,6 +100,21 @@ class OwnershipAttestation(Strict):
     attestation_ref: Id
 
 
+class OffboardingRequest(Strict):
+    """ADR 0027 (MSA 15.5): a dry run first; the real run names the dry run's plan_sha256."""
+
+    request_id: Id
+    lane: Literal["client", "zbc_brand"] = "client"
+    dry_run: StrictBool
+    plan_sha256: Optional[Sha] = None
+
+    @model_validator(mode="after")
+    def _plan_named(self):
+        if not self.dry_run and self.plan_sha256 is None:
+            raise ValueError("the real run names the dry run's plan_sha256")
+        return self
+
+
 class OwnershipRequest(Strict):
     request_id: Id
     lane: Literal["client", "zbc_brand"]

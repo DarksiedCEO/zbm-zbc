@@ -57,7 +57,9 @@ COLLECTIONS = ("rc_proposals", "rate_cards", "profiles", "client_profiles", "pay
                "integrity_checks", "clawbacks", "offboarding", "shortfalls", "media_buys", "client_receipts",
                "stripe_sessions", "stripe_events", "stripe_disputes", "stripe_payouts",
                # ADR 0026: credit notes, client billing contacts, the client-mail outbox, backup markers, Stripe imports
-               "credit_notes", "client_contacts", "mail_outbox", "backup_markers", "stripe_imports")
+               "credit_notes", "client_contacts", "mail_outbox", "backup_markers", "stripe_imports",
+               # ADR 0027: client offboarding runs (each with its hash-only deletion certificate)
+               "client_offboardings")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -1098,8 +1100,9 @@ from svc_credits import CreditsMixin  # noqa: E402
 from svc_mail import MailMixin  # noqa: E402
 from svc_restore import RestoreMixin  # noqa: E402
 from svc_alerts import AlertsMixin  # noqa: E402
+from svc_offboarding import OffboardingMixin  # noqa: E402
 
 
-class Service(BooksMixin, MediaMixin, StripeMixin, CreditsMixin, MailMixin, RestoreMixin, AlertsMixin, PayablesMixin,
-              PayeesMixin, PayoutsMixin, ReconMixin, FinanceService):
+class Service(BooksMixin, MediaMixin, StripeMixin, CreditsMixin, MailMixin, RestoreMixin, AlertsMixin, OffboardingMixin,
+              PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin, FinanceService):
     """The assembled Finance service."""

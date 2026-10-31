@@ -45,6 +45,7 @@ from ports import (A11yAnswer, AccessibilityChecker, AgeAttestation, ClientDocum
 import readiness as readiness_mod
 from register import Version, effective_status, rows_sha256, sha256_text
 from store import DataDirBusy, RecordLog, StoreWriteError
+from svc_offboarding import OffboardingMixin
 from svc_owners import OwnersMixin
 from textguard import injection_rules_in
 
@@ -210,7 +211,7 @@ class GateEnv:
         return self.activation(lane, subject_id)[1]
 
 
-class ComplianceService(OwnersMixin):
+class ComplianceService(OwnersMixin, OffboardingMixin):
     def __init__(self, config: Config, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str = SPEC_SEED_SHA256, ports: Optional[Ports] = None,
                  clock: Optional[Clock] = None, sources: Optional[list[Source]] = None, reconcile_mode: bool = False,
@@ -559,6 +560,8 @@ class ComplianceService(OwnersMixin):
             self.attestations[r["attestation_id"]] = r
         elif kind == "ownership":
             self._apply_ownership(r)
+        elif kind == "client_offboarded":
+            self._apply_offboarded(r)
         elif kind == "a11y":
             self.a11y.setdefault(r["content_sha256"], []).append(r)
         elif kind == "control_result":
@@ -1296,6 +1299,8 @@ class ComplianceService(OwnersMixin):
             if not r["allowed"]:
                 reasons.append("the latest activation ruling refused this client: fix the unmet items and re-activate")
                 return out
+            # ADR 0027: an offboarded client is closed until a NEW activation after the offboarding
+            reasons += self.offboarded_reason(lane, client_id, rid)
             prints = r.get("rule_fingerprints")
             if not isinstance(prints, dict):
                 reasons.append("the ruling carries no rule fingerprints (it predates them): re-activate")

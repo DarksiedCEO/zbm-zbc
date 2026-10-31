@@ -388,6 +388,15 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
             raise Invalid("client id format")
         return svc.put_ownership(req.request_id, client_id, req.model_dump())
 
+    @app.post("/compliance/v1/clients/{client_id}/offboarding", dependencies=auth)
+    def client_offboarding(client_id: str, _: str = Depends(andre("clients/offboarding")),
+                           req: m.OffboardingRequest = Depends(body(m.OffboardingRequest))) -> dict:
+        """ADR 0027 (MSA 15.5): a dry run lists what Compliance holds; the real run closes the client's activation and
+        records a hash-only deletion certificate. OFAC records are kept (31 CFR 501.601). Andre only."""
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", client_id):
+            raise Invalid("client id format")
+        return svc.offboard_client(req.request_id, client_id, req.model_dump())
+
     @app.get("/compliance/v1/clients/{client_id}/ownership", dependencies=auth)
     def ownership_get(client_id: str, _: str = Depends(andre("clients/ownership")),
                       lane: str = Query(default="client", pattern=r"^(client|zbc_brand)$")) -> dict:

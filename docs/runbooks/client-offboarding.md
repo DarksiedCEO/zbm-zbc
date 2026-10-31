@@ -15,7 +15,8 @@ or when a Shopify client uninstalls the app or tells you ZBM's access has ended.
 
 Count from the right day and write the deadline in the calendar **today**, with a reminder at day 20.
 
-**Time: about 1.5 hours per client.**
+**Time: about 1.5 hours per client** (the tool in B.1a does the Finance and Compliance part in 10 minutes; the rest
+is working copies and third parties).
 
 ---
 
@@ -30,11 +31,15 @@ Count from the right day and write the deadline in the calendar **today**, with 
 | Search Console link and service-account access | Yes | — | — |
 | SEO audit records' page extracts | Yes, or wait out the retention (below) | — | — |
 | Lead row for this client in Neon | Yes, unless still needed for an open matter | — | — |
+| **Billing contact (email address, name) in Finance** | Yes: the tool deletes it (it lives only in Finance's contact vault, never in the log or the ledger) | — | — |
+| Client email not yet sent (receipts, acknowledgements) | Withdrawn by the tool | — | — |
+| **The client's activation in Compliance** | Closed by the tool (every department then refuses the client until a new activation) | — | — |
 | Email threads that discuss the work | Delete attachments and Client Data; keep the thread only if it is a tax/accounting record or the acceptance record | (a), (b) | — |
 | **Invoices, payment records, receipts, journal entries, Stripe records** | — | Yes, §15.5(a) | **7 years** (ZBM's tax-record policy; the IRS's periods are 3 to 7 years depending on the case, so 7 covers them) |
 | **The client's acceptance of the MSA and each SOW** | — | Yes, §15.5(b) | 7 years after the engagement ends |
 | **Ledger entries** (identifiers, codes, counts, amounts, timestamps, hashes; no page contents, names or contact details) | Shopify order references and amounts: deleted or made unidentifiable under RR SOW §6.3(d) | Everything else, §15.5(c) | Life of the ledger |
-| **OFAC screening log and evidence PDFs** | — | Yes, §15.5(d) (required by law) | **10 years** (31 CFR 501.601) |
+| **OFAC screening log and evidence PDFs; Compliance's recorded searches and the ownership record** (names stored only as hashes) | — | Yes, §15.5(d) (required by law) | **10 years** (31 CFR 501.601) |
+| **Compliance's activation rulings** | — | Yes, §15.5(a) (they gate the financial records) | 7 years |
 | Incident logs that mention the client | — | Yes, §15.5(d) where required | 7 years |
 
 Everything kept stays confidential under MSA §§7-8 for as long as it is kept.
@@ -55,6 +60,36 @@ the live system therefore disappears from these copies on their own schedules, a
 2. If the client still owes money, keep the invoice open; offboarding does not cancel it.
 3. If any Compliance hold is open on this client, **stop** and resolve it first ([ofac-owner-screening.md](ofac-owner-screening.md),
    [chargebacks-and-disputes.md](chargebacks-and-disputes.md)). Never delete records connected to a sanctions hold.
+   (The tool refuses anyway: an open hold or an open Stripe dispute is a blocker.)
+
+### B.1a The offboarding tool: Finance and Compliance (10 min)
+
+`devtools/client_offboarding.py` (ADR 0027) runs a **dry run** in each service, shows you everything held, then runs
+for real only with the plan you read. Set up once: a config file `~/zbm/offboarding.json` (mode 600) naming each
+tunnel and the header files you already use (the docstring at the top of the tool shows the shape; the SEO entry
+uses its dashboard caller header, read-only). Open the finance, compliance and seo tunnels (`docs/deploy/railway.md`).
+
+```sh
+mkdir -p ~/zbm/offb && chmod 700 ~/zbm/offb
+python3 devtools/client_offboarding.py plan --config ~/zbm/offboarding.json --client <client id> \
+  --out ~/zbm/offb/<client id>-plan.json
+```
+
+Read the output: one line per kind of record with its count and what happens to it (`delete`, `withdraw`, `close`,
+`keep_7_years`, `keep_10_years`), the SEO tenants, any `BLOCKED:` line and any `warning:` (unpaid invoices are never
+cancelled by offboarding: void or credit them first if that is the deal; a refund still owed is paid to the original
+payment method). If something is blocked, resolve it and plan again. Then:
+
+```sh
+python3 devtools/client_offboarding.py run --config ~/zbm/offboarding.json \
+  --plan ~/zbm/offb/<client id>-plan.json --out ~/zbm/offb/<client id>-certificate.json
+```
+
+It runs Compliance first (closes the activation; certifies), then Finance (deletes the billing contact, withdraws
+unsent email, keeps the money records; records the **deletion certificate** on the ledger, which carries
+Compliance's certificate hash too). If either service says the plan changed, nothing after it ran: plan again. The
+certificate file holds hashes and counts only; keep it in the client file. `pii_left_in_log` in Finance's certificate
+must be `0` (a contact recorded before ADR 0027 would show here).
 
 ### B.2 Revenue Recovery clients (Shopify): within 5 business days of the last read (20 min)
 
@@ -80,14 +115,16 @@ the live system therefore disappears from these copies on their own schedules, a
 
 ### B.4 SEO audit clients: within 30 days (15 min)
 
-1. Remove the link between the client's Search Console property and ZBM's system on `seo` (UNVERIFIED: the tenant
-   route that removes it; check `services/seo-py/src/api.py` for the tenant's Search Console link and use the Andre
-   approval token). If no such route exists, remove the property from the service account's configuration and record
-   that in the client file.
+1. Remove the link between the client's Search Console property and ZBM's system on `seo`: for each tenant the plan
+   lists, `POST /seo/v1/tenants/<tenant id>/gsc-property` with `{"request_id": "...", "property": null}` and your seo
+   Andre header (the route exists: `services/seo-py/src/api.py`, "gsc-property"; not yet run against Railway).
 2. Ask the client to remove ZBM's service account from the property (template E.2): Search Console → Settings →
    **Users and permissions** → the service account → **Remove access**.
 3. SEO audit records are kept by `seo` with a time-based retention (after 90 days the Search Console part is reduced
-   to window totals). Page contents and answer text are never stored. Nothing else to delete there.
+   to window totals **in what the service shows**). Page contents and answer text are never stored. Be aware: seo's
+   record log is append-only like every department's, so the older lines stay on its volume (and in its backups)
+   until a log compaction exists (not built; ADR 0027, open item). Domains and audit summaries are business data,
+   not personal information; say so if the client asks.
 
 ### B.5 Every client: working copies (20 min)
 
@@ -141,6 +178,7 @@ Deadlines: RR creds 5 bd -> <date>   Data 30 d -> <date>   Reminder day 20 -> <d
 [ ] Gmail attachments deleted, trash emptied; Drive cleaned, trash emptied
 [ ] AI-tool conversations with Client Data deleted
 [ ] Neon lead row deleted (or kept because: <...>)
+[ ] Tool: plan read, run done, certificate saved (Finance certificate sha: <first 16>), pii_left_in_log = 0
 [ ] Kept: invoices/payments (7 y), acceptance (7 y), ledger entries (no PI), OFAC records (10 y)
 [ ] Confirmation sent (<date>)
 ```
@@ -212,6 +250,8 @@ Checked on 2026-10-30.
 
 - MSA §15.5 (deletion within 30 days; what may be kept), RR SOW §§6.3-6.4, SEO SOW §7.3: `scratchpad/legal/`
   (contract text, not in this repo).
+- The tool and what each service does: ADR 0027 decision 3, `devtools/client_offboarding.py`,
+  `services/finance-py/src/svc_offboarding.py`, `services/compliance-py/src/svc_offboarding.py`.
 - Shopify API License and Terms of Use §6.2.3 (delete Merchant Data within 30 days of uninstall, no longer needed, or
   an enforceable request; promptly notify Shopify if you cannot): https://www.shopify.com/legal/api-terms
 - Railway backup retention (daily 6 days): https://docs.railway.com/volumes/backups.md

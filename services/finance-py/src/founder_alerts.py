@@ -237,7 +237,7 @@ def ledger_probe(url: Optional[str], transport: Optional[httpx.BaseTransport] = 
     if not url:
         return None
     try:
-        with httpx.Client(timeout=httpx.Timeout(5.0), transport=transport, follow_redirects=False,
+        with httpx.Client(timeout=httpx.Timeout(5), transport=transport, follow_redirects=False,
                           trust_env=False) as c:
             r = c.get(url.rstrip("/") + "/health")
         return r.status_code == 200 and isinstance(r.json(), dict) and r.json().get("status") == "ok"

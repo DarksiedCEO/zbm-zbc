@@ -144,6 +144,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `POST /compliance/v1/sanctions/attestations` | Andre only | ADR 0024: record his OFAC search for a client (HR-14); a hit opens a permanent hold. ADR 0027: with `owner_id`, the search of one of the client's disclosed owners (a hit holds the client) |
 | `PUT /compliance/v1/clients/{id}/ownership` | Andre only | ADR 0027: who owns the client (owners, shares in basis points, chains, the client's attestation; name hashes only) |
 | `GET /compliance/v1/clients/{id}/ownership` | Andre only | ADR 0027: the record, effective shares, each owner's latest search, the blocked share (50 Percent Rule), what is missing |
+| `POST /compliance/v1/clients/{id}/offboarding` | Andre only | ADR 0027 (MSA 15.5): dry run, then the real run naming its `plan_sha256`: closes the client's activation, keeps OFAC records (10 years) and rulings (7), records a hash-only certificate; an open hold blocks |
 | `GET /compliance/v1/sanctions/status` | finance_31, onboarding | ADR 0024: a payee's latest screen and its freshness |
 | `GET /compliance/v1/clients/{client_id}/activation` | `finance_31`, `seo_02`, `revenue_recovery`, `onboarding`, Andre | ADR 0024: the client's current activation decision (reasons: Finance and Andre only) |
 | `GET /compliance/v1/readiness` | any caller | ADR 0024: expired rules and the gates they affect |

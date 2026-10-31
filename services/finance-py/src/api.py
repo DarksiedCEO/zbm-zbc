@@ -583,6 +583,14 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def credit_note_get(credit_note_id: str, _: str = Depends(andre("credit-notes/get"))) -> dict:
         return svc.get_credit_note(_id(credit_note_id))
 
+    @app.post("/fin/v1/clients/{client_id}/offboarding", dependencies=auth)
+    def client_offboarding(client_id: str, _: str = Depends(andre("clients/offboarding")),
+                           req: m.Offboarding = Depends(body(m.Offboarding))) -> dict:
+        """ADR 0027 (MSA 15.5): a dry run lists what Finance holds for the client; the real run (naming the dry run's
+        plan_sha256) deletes the billing contact, withdraws unsent client email, keeps the money records 7 years and
+        records a hash-only deletion certificate on the ledger. Andre only."""
+        return svc.offboard_client(req.request_id, _client(client_id), dump(req))
+
     @app.put("/fin/v1/clients/{client_id}/billing-contact", dependencies=auth)
     def billing_contact(client_id: str, _: str = Depends(andre("billing-contact")),
                         req: m.BillingContact = Depends(body(m.BillingContact))) -> dict:

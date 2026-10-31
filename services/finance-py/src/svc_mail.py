@@ -28,7 +28,7 @@ from errors import Conflict, NotFound
 from intelligences import i02_receivables as I2
 from ledger import derived_id
 from ports import MailOutcome
-from service import Gather, Op, rid, sha_text
+from service import Gather, Op, rid
 from svc_credits import add_business_days
 
 alert_log = logging.getLogger("finance.alert")
@@ -47,31 +47,53 @@ class MailMixin:
 
     # ================================================================== billing contacts
 
+    @property
+    def vault(self):
+        """ADR 0027: the contact vault, the only home of a client's address and name (pii_vault)."""
+        v = getattr(self, "_contact_vault", None)
+        if v is None:
+            from pii_vault import ContactVault
+            v = self._contact_vault = ContactVault(self.cfg.data_dir)
+        return v
+
     def put_billing_contact(self, request_id: str, client_id: str, body: dict) -> dict:
+        """ADR 0027 (redaction by design): the address and the name go to the contact vault only. The log and the
+        ledger get a ``contact_ref``; the idempotency hash sees an HMAC keyed by the client's vault salt, never the
+        address or a plain hash of it, so deleting the vault file (offboarding) leaves nothing that links back."""
         with self.lock:
-            key, h, ent = self._idem("andre", request_id, f"billing-contact/{client_id}", body)
+            email, name = body["email"], body.get("name")
+            salt = self.vault.salt(client_id)
+            shadow = {"email_hmac": self.vault.digest(salt, email), "name_hmac": self.vault.digest(salt, name)}
+            key, h, ent = self._idem("andre", request_id, f"billing-contact/{client_id}", shadow)
             if ent:
                 return ent["response"]
-            email = body["email"]
-            rec = {"client_id": client_id, "email": email, "name": body.get("name"), "email_sha256": sha_text(email),
-                   "set_at": iso(self._now()), "set_by": "andre"}
+            contact_ref = rid("contact", client_id, request_id)
+            self.vault.put(client_id, contact_ref, email, name, salt)       # first: the address lives only there
+            rec = {"client_id": client_id, "contact_ref": contact_ref, "set_at": iso(self._now()), "set_by": "andre"}
             op = Op(self, f"contact|{request_id}", "andre", client_id)
-            op.record(derived_id("contact", client_id, rec["email_sha256"]), "client_contact_recorded", "andre",
-                      client_id, {"client_id": client_id, "email_sha256": rec["email_sha256"]},
+            op.record(derived_id("contact", client_id, contact_ref), "client_contact_recorded", "andre",
+                      client_id, {"client_id": client_id, "contact_ref": contact_ref},
                       "Andre recorded a client's billing contact")
             op.put("client_contacts", client_id, rec)
             b = self.db["breaks"].get(rid("brk", "client_mail_no_contact", client_id))
             if b is not None and b["status"] != "resolved":
                 op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
                                                  "resolution": {"basis": "contact_recorded"}})
-            resp = self._idem_add(op, key, h, {"client_id": client_id, "email_sha256": rec["email_sha256"],
+            resp = self._idem_add(op, key, h, {"client_id": client_id, "contact_ref": contact_ref,
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
             return resp
 
     def _contact(self, client_id: str) -> Optional[str]:
         rec = self.db["client_contacts"].get(client_id)
-        return rec["email"] if rec else None
+        if not rec:
+            return None
+        if rec.get("email") and not rec.get("contact_ref"):
+            return rec["email"]                 # a record written before ADR 0027 (address in the log; offboarding says so)
+        if not rec.get("contact_ref"):
+            return None                         # erased by offboarding
+        v = self.vault.get(client_id)
+        return v["email"] if v and v.get("contact_ref") == rec["contact_ref"] else None
 
     # ================================================================== the outbox
 
@@ -286,7 +308,7 @@ class MailMixin:
             if needs_contact:
                 def known(k, coll):
                     r = self.db[coll][k]
-                    return r["client_id"] in self.db["client_contacts"] or not r.get("waiting_for")
+                    return self._contact(r["client_id"]) is not None or not r.get("waiting_for")
                 receipts = [x for x in receipts if known(x[1], "client_receipts")]
                 outbox = [x for x in outbox if known(x[1], "mail_outbox")]
         todo = ([("receipt", k) for _, k in receipts] + [("outbox", k) for _, k in outbox])[:MAIL_BATCH]

@@ -176,6 +176,15 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   off and the job's answer says why (never a refusal to start). Runbook: docs/runbooks/founder-alerts.md.
 - **Business days** (refunds 10, acknowledgements 2, billing disputes 15) skip weekends and US federal bank holidays
   on the Federal Reserve's schedule, computed for any year (`bizdays.py`).
+- **Client offboarding** (MSA 15.5): `POST /fin/v1/clients/{id}/offboarding` (Andre). `{"dry_run": true}` lists what
+  Finance holds and what happens to each kind; the real run names the dry run's `plan_sha256` (409 if anything changed;
+  blocked by an open Compliance hold or Stripe dispute), deletes the billing contact, withdraws unsent client email,
+  keeps every money record 7 years and records a hash-only deletion certificate (`client_offboarded`) with the other
+  services' certificate hashes (`peer_certificates`). `devtools/client_offboarding.py` drives it with Compliance's.
+- **Redaction by design.** The billing contact (address, name) lives only in the contact vault
+  (`FIN_DATA_DIR/pii/<sha256(client id)>.json`, 0600): the log and the ledger hold a `contact_ref`, the idempotency
+  hash an HMAC keyed by a per-client salt in the same file. tests/test_client_offboarding.py checks the log and ledger
+  line by line.
 
 ## Reconciling the local log with the ledger
 

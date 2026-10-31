@@ -41,7 +41,7 @@ The contracts promise things Finance could not do:
    credit notes) is what a Stripe page asks for and what a payment must equal to match.
 4. **Client email.** A Resend adapter (`mail.ResendClientMail`), sender billing@zbestmedia.com only (config refuses any
    other `MAIL_FROM`), one recipient: the billing contact Andre records (`PUT /fin/v1/clients/{id}/billing-contact`;
-   the ledger keeps only its SHA-256). Plain text plus simple HTML built from a fixed field list per kind: no images,
+   the ledger keeps only its SHA-256; amended by ADR 0027: the address lives only in a deletable contact vault and the log and ledger keep a `contact_ref`, never a hash of it). Plain text plus simple HTML built from a fixed field list per kind: no images,
    links, remote resources or tracking (Resend's domain-level open and click tracking stay off, runbook); a hold, its
    reason or a sanctions marker can never reach a template. Messages are queued in the same commit as the booking and
    sent by the repeatable `client-mail` job outside every lock: mail never blocks or undoes bookkeeping. Idempotency key
@@ -80,7 +80,7 @@ The contracts promise things Finance could not do:
 - New collections in Finance's log: `credit_notes`, `client_contacts`, `mail_outbox`, `backup_markers`,
   `stripe_imports`. Older logs replay unchanged (the collections start empty).
 - The client's email address is stored in Finance's volume (and therefore its backups). Deleting a client's data must
-  include it (privacy runbook, open item).
+  include it (done in ADR 0027: the contact vault and the offboarding route).
 - Existing reconcile callers that void money evidence must now acknowledge it.
 - Not done here: sales-tax lines on invoices (OPS-M2); a ZBM "apply an unapplied Stripe receipt" route (a re-imported
   payment whose page cannot be re-linked stays unapplied cash with a break); legal/seo cron entries; a log-based alert

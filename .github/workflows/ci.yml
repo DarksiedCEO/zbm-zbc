@@ -897,6 +897,15 @@ jobs:
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-ledger-callers.log" --code "$code" \
             --suite "devtools:test_ledger_callers"
           exit "$code"
+      - name: The client offboarding tool runs Compliance then Finance and never prints a token (devtools/client_offboarding.py)
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest devtools/test_client_offboarding.py -v 2>&1 | tee "$RUNNER_TEMP/test-client-offboarding.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-client-offboarding.log" --code "$code" \
+            --suite "devtools:test_client_offboarding"
+          exit "$code"
       - name: The annotation converter's own self-test (every log format, escaping, caps, redaction, ci.yml wiring)
         shell: bash
         run: |

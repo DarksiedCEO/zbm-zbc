@@ -17,7 +17,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated, Any, Literal, Optional, Union
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, StrictInt, StrictStr, StringConstraints
+from pydantic import (AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, StrictBool, StrictInt,
+                      StrictStr, StringConstraints, model_validator)
 
 import money as M
 from textguard import has_control_chars, ip_in, iter_strings
@@ -664,6 +665,28 @@ class Acknowledgement(Strict):
     topic: Literal["refund_request", "cancellation", "billing_dispute", "payment_question"]
     received_on: date
     invoice_id: Optional[Id] = None
+
+
+class PeerCertificate(Strict):
+    """ADR 0027: another service's deletion certificate, by hash only (the offboarding devtool passes them)."""
+    service: Literal["compliance", "legal", "seo", "detection", "delivery"]
+    certificate_sha256: Sha
+
+
+class Offboarding(Strict):
+    """ADR 0027 (MSA 15.5): a dry run first; the real run names the dry run's plan_sha256."""
+    request_id: Id
+    dry_run: StrictBool
+    plan_sha256: Optional[Sha] = None
+    peer_certificates: list[PeerCertificate] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def _plan_named(self):
+        if not self.dry_run and self.plan_sha256 is None:
+            raise ValueError("the real run names the dry run's plan_sha256")
+        if self.dry_run and self.peer_certificates:
+            raise ValueError("peer_certificates go with the real run")
+        return self
 
 
 class QuiesceRequest(Strict):
