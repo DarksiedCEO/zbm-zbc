@@ -266,7 +266,8 @@ class HttpCompliance(_Base):
                        and isinstance(d["ruling_id"], str) and juris is not None)
             if d["decision"] == "ALLOW" and d["seed_pinned"] is not True:
                 reasons += ("Compliance is running on an unpinned (non-production) seed",)
-            return ClientActivation(True, allowed, d.get("ruling_id"), juris, reasons)
+            return ClientActivation(True, allowed, d.get("ruling_id"), juris, reasons,
+                                    sanctions=d.get("sanctions_grounded") is True and not allowed)
         except (KeyError, TypeError):
             return ClientActivation(False, reason="Compliance's activation answer was not understood")
 

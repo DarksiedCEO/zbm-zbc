@@ -138,6 +138,7 @@ class ClientActivationM(_S):
     jurisdiction: Optional[Annotated[str, StringConstraints(pattern=r"^(US-[A-Z]{2}|PR|GU|VI|AS|MP)$")]] = None
     reasons: tuple[Annotated[str, StringConstraints(max_length=200)], ...] = Field(default=(), max_length=21)
     reason: Reason = ""
+    sanctions: bool = False
 
 
 class RegisterParametersM(_S):

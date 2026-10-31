@@ -121,6 +121,7 @@ class ClientActivation:
     jurisdiction: Optional[str] = None
     reasons: tuple = ()
     reason: str = ""
+    sanctions: bool = False      # AEGIS r5 C1: Compliance says the refusal rests on sanctions (never refunded)
 
 
 @dataclass(frozen=True)

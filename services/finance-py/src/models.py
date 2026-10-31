@@ -504,8 +504,11 @@ class BreakResolution(Strict):
 class ComplianceHoldRelease(Strict):
     """AEGIS r4 R4-2: release a payment held by Compliance: by its refund (the F7r entry) or a current ALLOW."""
     request_id: Id
-    basis: Literal["refund", "compliance_allow"]
+    basis: Literal["refund", "compliance_allow", "ofac_authorization"]
     entry_id: Optional[Id] = None
+    # AEGIS r5 C1: the SHA-256 of the OFAC authorization (license or written guidance) that allows releasing a
+    # sanctions hold; the document itself stays in Andre's evidence folder (references are never stored in clear)
+    ofac_authorization_sha256: Optional[Sha] = None
 
 
 class RefundRepay(Strict):
