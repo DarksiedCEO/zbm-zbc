@@ -508,7 +508,9 @@ def _main(work: Path) -> int:
         check("S: reconciliation after Stripe: every leg matched", rs["fc01"])
         tb_before = B.get("/fin/v1/journal/zbc/trial-balance")
         check("B: ZBC trial balance difference 0.00", tb_before["difference"] == "0.00")
-        integ = B.get("/fin/v1/integrity")
+        integ = B.get("/fin/v1/integrity", caller=None, andre=True)   # AEGIS r12 R12-1: the counters are Andre's
+        check("B: integrity for a non-Andre caller is the verdict only (no counters)",
+              set(B.get("/fin/v1/integrity")) == {"status", "checked_at"})
         check("B: integrity green before restart (chain + anchors + /ledger/verify)", integ["status"] == "green")
         say(f"B: journal entries {integ['journal_entries']}, log lines {integ['log_lines']}")
         stop(fb, "finance_b")
