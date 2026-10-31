@@ -27,6 +27,7 @@ cd src && python3 -m api                                # PORTAL_BIND_ADDR (127.
 | `PORTAL_LEGAL_URL` | required | Legal's base URL; on Railway `http://legal.railway.internal:8420` |
 | `PORTAL_LEGAL_SERVICE_TOKEN` | required | Legal's service token (bearer) |
 | `PORTAL_LEGAL_CALLER_TOKEN` | required | this service's `client_portal` caller token at Legal: it reaches only Legal's two `/legal/v1/portal/...` routes |
+| `PORTAL_LINK_TAG_KEY` | required | Legal's `LEGAL_LINK_TAG_KEY` (a Railway reference): a link token whose tag does not verify is the 404, refused before any budget is spent or Legal is asked (AEGIS r2 N-M1; `src/link_tag.py` is byte-identical to legal-py's) |
 | `PORTAL_EVIDENCE_KEY` | required | >= 32 printable characters. HMAC key for the client's IP address and user agent (recorded at Legal as HMACs only), the form signature and the retry key. Rotating it invalidates open forms (the client reloads) and changes `hmac_key_id` on later acceptances; keep the old value offline to verify old HMACs |
 | `PORTAL_PUBLIC_ORIGIN` | required | the exact origin the page is served from (`https://<domain>`); a POST whose `Origin` differs is refused |
 | `PORTAL_CLIENT_IP_HEADER` | `x-real-ip` | the header Railway's edge sets to the client address (**UNVERIFIED**: a moderator's statement, not a documented contract; runbook step 8); `none` = do not read one |
@@ -75,8 +76,13 @@ serve) gets the same 404 page.
 - **Exactly once, and a retry sees its confirmation.** Legal uses the link up in the same operation that records the
   acceptances. A refresh or a retry after a lost response (the same form) gets the confirmation from Legal's receipt
   for that submission's request id (AEGIS M-2); any other submission on a used link gets the 404.
-- **Typed fields** are NFKC-normalized; bidi, zero-width and other invisible or control characters are refused here
-  and at Legal (AEGIS L-1).
+- **Typed fields** are NFKC-normalized; bidi, zero-width, default-ignorable, blank-filler and other invisible or
+  control characters are refused here and at Legal, with the same rule (AEGIS L-1, r2 N-L3); the company match is
+  legal-py's normalization on both sides (r2 N-L1).
+- **Junk costs nothing** (AEGIS r2 N-M1): a link token carries an HMAC tag under the key Legal mints with; a token
+  without a valid tag is refused before the per-address limit, the Legal-call ceiling or the not-found ceiling is
+  charged. IPv6 clients are counted per /64. The receipt lookup carries the hash of the form signature this page
+  issued (r2 N-L4); the confirmation's time-zone label is Legal's zone's (r2 N-L5).
 - **Nothing logged** but the route name, the status and the time taken: never a token, a name, an email, an IP
   address or a user agent. uvicorn's access log is off.
 - **Accessible.** Every field and box has a label; errors are listed in an alert summary linking to each field, and

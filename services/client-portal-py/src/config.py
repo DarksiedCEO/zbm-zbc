@@ -38,6 +38,7 @@ class Settings:
     not_found_per_minute: int = 120
     legal_per_minute: int = 300
     client_ip_header: str = "x-real-ip"
+    link_tag_key: bytes = field(default=b"", repr=False)       # AEGIS r2 N-M1: = Legal's LEGAL_LINK_TAG_KEY
     form_max_age_s: int = 4 * 3600
     display_tz: str = "America/Los_Angeles"
 
@@ -112,8 +113,10 @@ def load(env: Optional[dict] = None) -> Settings:
     service = _secret(env, "PORTAL_LEGAL_SERVICE_TOKEN", TOKEN_MIN)
     caller = _secret(env, "PORTAL_LEGAL_CALLER_TOKEN", TOKEN_MIN)
     key = _secret(env, "PORTAL_EVIDENCE_KEY", KEY_MIN)
-    if len({service, caller, key}) != 3:
-        raise RuntimeError("PORTAL_LEGAL_SERVICE_TOKEN, PORTAL_LEGAL_CALLER_TOKEN and PORTAL_EVIDENCE_KEY must differ")
+    tag_key = _secret(env, "PORTAL_LINK_TAG_KEY", KEY_MIN)
+    if len({service, caller, key, tag_key}) != 4:
+        raise RuntimeError("PORTAL_LEGAL_SERVICE_TOKEN, PORTAL_LEGAL_CALLER_TOKEN, PORTAL_EVIDENCE_KEY and "
+                           "PORTAL_LINK_TAG_KEY must differ")
     tz = (env.get("PORTAL_DISPLAY_TZ") or "America/Los_Angeles").strip()
     try:
         from zoneinfo import ZoneInfo
@@ -132,6 +135,7 @@ def load(env: Optional[dict] = None) -> Settings:
         not_found_per_minute=_int(env, "PORTAL_RATE_NOT_FOUND_PER_MINUTE", 120, 1, 100_000),
         legal_per_minute=_int(env, "PORTAL_RATE_LEGAL_PER_MINUTE", 300, 1, 100_000),
         client_ip_header=_header_name(env),
+        link_tag_key=tag_key.encode("ascii"),
         form_max_age_s=_int(env, "PORTAL_FORM_MAX_AGE_SECONDS", 4 * 3600, 300, 24 * 3600),
         display_tz=tz,
     )

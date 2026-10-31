@@ -67,6 +67,8 @@ class PortalView:
     msa_accepted_at: Optional[str]
     blocks: tuple = ()
     page_sha256: Optional[str] = None
+    time_zone: Optional[str] = None                 # AEGIS r2 N-L5: the zone Legal dates in, and its label
+    time_zone_label: Optional[str] = None
 
     @property
     def page_text(self) -> str:
@@ -95,6 +97,8 @@ class Receipt:
     documents: tuple
     acceptances: tuple
     accepted_at: str
+    time_zone: Optional[str] = None
+    time_zone_label: Optional[str] = None
 
     def doc(self, kind: str) -> Optional[Document]:
         for d in self.documents:
@@ -158,8 +162,9 @@ class LegalClient:
             raise LegalUnavailable(f"Legal answered {r.status_code}")
         return parse_view(self._json(r))
 
-    def receipt(self, token: str, request_id: str) -> Optional["Receipt"]:
-        r = self._post("/legal/v1/portal/receipts", {"token": token, "request_id": request_id})
+    def receipt(self, token: str, request_id: str, form_sha256: str) -> Optional["Receipt"]:
+        r = self._post("/legal/v1/portal/receipts", {"token": token, "request_id": request_id,
+                                                     "form_sha256": form_sha256})
         if r.status_code == 404:
             return None
         if r.status_code != 200:
@@ -241,6 +246,18 @@ def _display(disp: Any) -> Display:
                    _s(disp, "sow_title", 200, True))
 
 
+def _zone(data: dict) -> tuple:
+    tz, label = data.get("time_zone"), data.get("time_zone_label")
+    if tz is None:
+        return None, None
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(_s(data, "time_zone", 64))
+    except Exception:  # noqa: BLE001 - any unknown zone: not understood
+        raise LegalUnavailable("Legal's answer: time_zone not understood") from None
+    return tz, _s(data, "time_zone_label", 60) if label is not None else None
+
+
 def parse_receipt(data: Any) -> Receipt:
     if not isinstance(data, dict):
         raise LegalUnavailable("Legal's answer is not an object")
@@ -249,7 +266,7 @@ def parse_receipt(data: Any) -> Receipt:
                           {"documents": [{"doc_id": d.doc_id, "version": d.version, "doc_sha256": d.doc_sha256}
                                          for d in docs]})
     return Receipt(_match(_LG_ID, data.get("invitation_id"), "invitation_id"), _display(data.get("display")),
-                   tuple(docs), accs.acceptances, _match(_TS, data.get("accepted_at"), "accepted_at"))
+                   tuple(docs), accs.acceptances, _match(_TS, data.get("accepted_at"), "accepted_at"), *_zone(data))
 
 
 def parse_view(data: Any) -> PortalView:
@@ -273,7 +290,7 @@ def parse_view(data: Any) -> PortalView:
         ma = _match(_TS, msa.get("accepted_at"), "msa_acceptance.accepted_at")
     return PortalView(_match(_LG_ID, data.get("invitation_id"), "invitation_id"), page,
                       _match(_TS, data.get("expires_at"), "expires_at"), display, tuple(docs), mv, ma,
-                      blocks, page_sha if blocks else None)
+                      blocks, page_sha if blocks else None, *_zone(data))
 
 
 def parse_accepted(data: Any, body: dict) -> AcceptOutcome:

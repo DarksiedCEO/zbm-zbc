@@ -230,6 +230,13 @@ def changed_page(token: str) -> Page:
                         link=(f"/accept/{token}", "Open the page again"))
 
 
+def zone_of(view, display_tz: str) -> tuple[str, str]:
+    """AEGIS r2 N-L5: the zone Legal names for the link (else this service's setting) and its label."""
+    tz = getattr(view, "time_zone", None) or display_tz
+    label = getattr(view, "time_zone_label", None) if getattr(view, "time_zone", None) else None
+    return tz, label or {"America/Los_Angeles": "Pacific Time"}.get(tz, f"{tz} time")
+
+
 def confirmation_page(view, accepted: tuple, full_name: str, title: str, display_tz: str,
                       emailed: bool) -> Page:
     """``view``: the link's PortalView, or Legal's Receipt for a retry (AEGIS M-2)."""
@@ -243,7 +250,8 @@ def confirmation_page(view, accepted: tuple, full_name: str, title: str, display
         label = doc_label(view, kind)
         pg.add(f"<h2>{e(label)}, version {e(a.version)}</h2>", f"{label}, version {a.version}")
         pg.p(f"SHA-256 fingerprint: {a.doc_sha256}", "meta")
-        pg.p(f"Accepted: {local_time(a.accepted_at, display_tz)} (Pacific Time) by {full_name}, {title}")
+        tz, label = zone_of(view, display_tz)
+        pg.p(f"Accepted: {local_time(a.accepted_at, tz)} ({label}) by {full_name}, {title}")
         pg.p(f"Acceptance reference: {a.acceptance_id}")
         doc = by_id[a.doc_id]
         pg.add(f"<details><summary>Full text of {e(label)}</summary><div class=\"doc\"><pre>{e(doc.text)}</pre></div>"
@@ -267,7 +275,8 @@ def confirmation_email(view, accepted: tuple, full_name: str, title: str, displa
     for a in accepted:
         label = doc_label(view, "msa" if a.doc_id == "client_msa" else "sow")
         lines += [f"- {label}, version {a.version}", f"  SHA-256 fingerprint: {a.doc_sha256}",
-                  f"  Accepted: {local_time(a.accepted_at, display_tz)} (Pacific Time) by {full_name}, {title}",
+                  f"  Accepted: {local_time(a.accepted_at, zone_of(view, display_tz)[0])} "
+                  f"({zone_of(view, display_tz)[1]}) by {full_name}, {title}",
                   f"  Acceptance reference: {a.acceptance_id}"]
     lines += ["", "A copy of each document is attached as a text file. The fingerprint lets anyone check that the "
               "attached copy is exactly the version you accepted: the SHA-256 of the attached file will match the "

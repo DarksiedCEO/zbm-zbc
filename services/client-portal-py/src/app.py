@@ -42,6 +42,7 @@ import unicodedata
 from typing import Callable, Optional
 from urllib.parse import parse_qs
 
+import link_tag as LT
 import render as V
 from config import Settings
 from legal_client import AcceptOutcome, LegalClient, LegalUnavailable, PortalView
@@ -50,7 +51,6 @@ from ratelimit import Limiter
 
 log = logging.getLogger("client_portal")
 
-TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 ACCEPT_RE = re.compile(r"^/accept/([^/]{1,200})$")
 DOC_RE = re.compile(r"^/accept/([^/]{1,200})/document/([12])(/download)?$")
 MAX_TARGET = 2048
@@ -82,7 +82,21 @@ def _mac(key: bytes, *parts: str) -> str:
 
 
 def _norm_company(s: str) -> str:
-    return "".join(ch for ch in s.casefold() if ch.isalnum())
+    """AEGIS r2 N-L1: legal-py's ``clickwrap_page.norm_company`` exactly (NFKC, case, spaces and punctuation)."""
+    return "".join(ch for ch in unicodedata.normalize("NFKC", s).casefold() if ch.isalnum())
+
+
+def rate_key(ip: str) -> str:
+    """AEGIS r2 N-M1: an IPv6 client is counted per /64 (one end site), an IPv4 client per address."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if addr.version == 6:
+        if addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
 
 
 class PortalApp:
@@ -186,11 +200,13 @@ class PortalApp:
             return ("method", 405, [(b"allow", ", ".join(allowed).encode())], b"")
         token = (m_doc or m_acc).group(1)
         name = "document" if m_doc else ("accept_post" if method == "POST" else "accept_get")
-        ok_ip, retry_ip = self.by_ip.hit(_mac(self.s.evidence_key, "rl-ip", self._client_ip(scope)))
+        if not LT.valid(token, self.s.link_tag_key):
+            # AEGIS r2 N-M1: a token Legal did not mint (junk, forged, mistyped) is refused here, before any budget is
+            # charged or Legal is asked: the same 404 page, at the cost of one HMAC
+            return (name, *self._page(404, V.NOT_FOUND))
+        ok_ip, retry_ip = self.by_ip.hit(_mac(self.s.evidence_key, "rl-ip", rate_key(self._client_ip(scope))))
         if not ok_ip:
             return (name, *self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry_ip).encode())]))
-        if not TOKEN_RE.fullmatch(token):
-            return (name, *self._not_found())
         if method == "POST":
             return (name, *await self._post(scope, receive, token))
         view = await self._resolve(token)
@@ -224,12 +240,12 @@ class PortalApp:
             log.error("confirmation mail failed: %s", type(exc).__name__)
             return False
 
-    async def _receipt_or(self, token: str, rid: str, state: "V.FormState", otherwise):
+    async def _receipt_or(self, token: str, rid: str, form_sha: str, state: "V.FormState", otherwise):
         limited = self._legal_limited()
         if limited:
             return limited
         try:
-            rec = await asyncio.to_thread(self.legal.receipt, token, rid)
+            rec = await asyncio.to_thread(self.legal.receipt, token, rid, form_sha)
         except LegalUnavailable:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         if rec is None:
@@ -261,8 +277,8 @@ class PortalApp:
         """The link's view, or the answer to send (uniform 404, 429, 503). Pages the portal does not serve (an
         MSA-only link, or a SOW-only link for a client with no counted MSA acceptance: Legal renders no blocks) are the
         same 404."""
-        if not TOKEN_RE.fullmatch(token):
-            return self._not_found()
+        if not LT.valid(token, self.s.link_tag_key):
+            return self._page(404, V.NOT_FOUND)
         limited = self._legal_limited()
         if limited:
             return limited
@@ -361,6 +377,7 @@ class PortalApp:
         if not hmac.compare_digest(sig, self._sign(token, page_sha, issued)) \
                 or issued > now + 60 or now - issued > self.s.form_max_age_s:
             return self._page(403, V.FORM_REFUSED)
+        form_sha = hashlib.sha256(sig.encode("ascii")).hexdigest()     # AEGIS r2 N-L4: binds the receipt to THIS form
         state = V.FormState(*(_typed(one.get(k, ""))[:FIELD_MAX[k] + 1] for k in ("full_name", "title", "company")))
         sig_block = {"full_name": state.full_name, "title": state.title, "company": state.company}
         rid = "pa-" + _mac(self.s.evidence_key, "request-v1", hashlib.sha256(token.encode()).hexdigest(), page_sha,
@@ -370,7 +387,7 @@ class PortalApp:
             if view[0] == 404:
                 # AEGIS M-2: the link is used. If THIS submission used it (a lost response, a refresh), Legal's
                 # receipt answers and the client sees the confirmation again; anything else stays the 404
-                return await self._receipt_or(token, rid, state, view)
+                return await self._receipt_or(token, rid, form_sha, state, view)
             return view
         limited = self._link_limited(token)
         if limited:
@@ -412,13 +429,13 @@ class PortalApp:
                "page_text_b64": base64.b64encode(page_text).decode("ascii"), "signatory": sig_block,
                "ip_hmac_sha256": _mac(self.s.evidence_key, "ip-v1", self._client_ip(scope)),
                "user_agent_hmac_sha256": _mac(self.s.evidence_key, "ua-v1", ua),
-               "hmac_key_id": self.s.key_id}
+               "hmac_key_id": self.s.key_id, "form_sha256": form_sha}
         try:
             out: AcceptOutcome = await asyncio.to_thread(self.legal.accept, req)
         except LegalUnavailable:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         if out.kind == "not_found":
-            return await self._receipt_or(token, rid, state, self._not_found())
+            return await self._receipt_or(token, rid, form_sha, state, self._not_found())
         if out.kind != "accepted":
             return self._page(409, V.changed_page(token))
         emailed = self._send_confirmation(view, out, state)
@@ -434,9 +451,17 @@ def _typed(v: str) -> str:
     return unicodedata.normalize("NFKC", v).strip()
 
 
+# AEGIS r2 N-L3: legal-py's DEFAULT_IGNORABLE (clickwrap_page.py), the same ranges (a test checks the two agree)
+_IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+              (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+              (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+              (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF), (0x2800, 0x2800))
+
+
 def _invisible(v: str) -> bool:
-    """AEGIS L-1: bidi controls, zero-width and other invisible or control characters."""
-    return any(unicodedata.category(ch) in _INVISIBLE for ch in v)
+    """AEGIS L-1 / r2 N-L3: bidi controls, zero-width, default-ignorable, blank fillers, other invisible characters."""
+    return any(unicodedata.category(ch) in _INVISIBLE or any(lo <= ord(ch) <= hi for lo, hi in _IGNORABLE)
+               for ch in v)
 
 
 def _attachments(view: PortalView, accepted) -> tuple:

@@ -9,6 +9,7 @@ import pytest
 
 import render as V
 from helpers import (DISPLAY, MSA_TEXT, SOW_TEXT, TOKEN, FakeLegal, call, hidden, make, sha, view)
+from helpers import tok as mint_tok
 from legal_client import Display, Document
 
 CLICKWRAP_B = [
@@ -102,10 +103,10 @@ def test_a_malformed_token_is_the_uniform_404_without_asking_legal(token):
 
 
 def test_unknown_used_msa_only_and_unservable_links_are_the_same_404():
-    unknown = "Z" * 43
-    msa_only = "M" * 43
-    sow_no_msa = "S" * 43
-    no_sow_title = "T" * 43
+    unknown = mint_tok("Z")
+    msa_only = mint_tok("M")
+    sow_no_msa = mint_tok("S")
+    no_sow_title = mint_tok("T")
     legal = FakeLegal(views={
         TOKEN: view(),
         msa_only: view(page="msa_only", docs=[Document("client_msa", "1.0", sha(MSA_TEXT), MSA_TEXT)]),
@@ -125,7 +126,7 @@ def test_unknown_used_msa_only_and_unservable_links_are_the_same_404():
 
 
 def test_the_new_sow_page_is_part_c():
-    tok = "N" * 43
+    tok = mint_tok("N")
     v = view(page="new_sow", docs=[Document("sow", "1.2", sha(SOW_TEXT), SOW_TEXT)],
              msa_acc=("1.0", "2026-09-02T18:00:00Z"))
     app, *_ = make(FakeLegal(views={tok: v}))
@@ -173,7 +174,7 @@ def test_rate_limits_per_client_address_per_link_and_for_not_found():
     assert len(legal.resolves) == n + 3 and len(app.by_token._hits) == 1
     mono.t += 61
     # not-found answers have a global ceiling (distributed guessing): 3 per minute, then 429
-    codes = [call(app, "GET", f"/accept/{c * 43}", client=(f"192.0.2.{i}", 1)).status
+    codes = [call(app, "GET", f"/accept/{mint_tok(c)}", client=(f"192.0.2.{i}", 1)).status
              for i, c in enumerate("BCDEF")]
     assert codes == [404, 404, 404, 429, 429]
 
@@ -182,7 +183,7 @@ def test_a_global_ceiling_on_legal_calls_is_charged_before_calling_legal():
     """AEGIS M-3: a client that can choose its address (a spoofed header) bypasses the per-address limit; every call
     to Legal still counts against one ceiling, charged BEFORE the call, so Legal sees at most that many."""
     app, legal, clock, mono = make(env={"PORTAL_RATE_LEGAL_PER_MINUTE": "4", "PORTAL_RATE_NOT_FOUND_PER_MINUTE": "1000"})
-    codes = [call(app, "GET", f"/accept/{chr(66 + i % 20) * 43}", {"x-real-ip": f"203.0.113.{i}"}).status
+    codes = [call(app, "GET", f"/accept/{mint_tok(str(i))}", {"x-real-ip": f"203.0.113.{i}"}).status
              for i in range(10)]
     assert codes == [404] * 4 + [429] * 6 and len(legal.resolves) == 4
     mono.t += 61
@@ -256,7 +257,7 @@ def test_a_page_never_logs_the_token_or_the_client(caplog):
     app, *_ = make()
     with caplog.at_level("INFO", logger="client_portal"):
         call(app, "GET", f"/accept/{TOKEN}", {"user-agent": "UA-SECRET-1"}, client=("203.0.113.99", 1))
-        call(app, "GET", "/accept/" + "Q" * 43)
+        call(app, "GET", "/accept/" + mint_tok("Q"))
     logged = "\n".join(r.getMessage() for r in caplog.records)
-    assert logged and TOKEN not in logged and "Q" * 43 not in logged
+    assert logged and TOKEN not in logged and mint_tok("Q") not in logged
     assert "203.0.113.99" not in logged and "UA-SECRET-1" not in logged and "accept_get" in logged

@@ -196,7 +196,8 @@ def main() -> int:
                           {**sow2_ref, "doc_sha256": "e" * 64, "presented_sha256": "e" * 64, "affirmative_act": True}],
             "presentation": "inline", "page_sha256": LH.sha(b"p"), "page_text_b64": LH.b64(b"p"),
             "signatory": {"full_name": "Mallory", "title": "CEO", "company": "Acme LLC"},
-            "ip_hmac_sha256": "1" * 64, "user_agent_hmac_sha256": "2" * 64, "hmac_key_id": "0" * 16}
+            "ip_hmac_sha256": "1" * 64, "user_agent_hmac_sha256": "2" * 64, "hmac_key_id": "0" * 16,
+            "form_sha256": "3" * 64}
     r = x.post("/legal/v1/portal/acceptances", body, caller="client_portal")
     out["tampered_hash_accept"] = [r.status_code, x.svc.client_invitations[link2["invitation_id"]]["used_at"]]
     # AEGIS M-5: the portal caller cannot record a page Legal did not render, nor another company

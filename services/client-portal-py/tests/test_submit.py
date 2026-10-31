@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 import pytest
 
 import render as V
-from helpers import (ENV, MSA_TEXT, ORIGIN, SOW_TEXT, TOKEN, FakeLegal, call, form_post, hidden, make, sha, view)
+from helpers import (ENV, MSA_TEXT, ORIGIN, SOW_TEXT, TOKEN, FakeLegal, call, form_post, hidden, make, sha, tok, view)
 from legal_client import Document
 
 
@@ -75,7 +75,7 @@ def test_a_missing_sec_fetch_site_is_accepted_with_a_matching_origin():
 
 @pytest.mark.parametrize("change", ["sig", "issued", "page_sha256", "drop_sig", "token_swap"])
 def test_a_forged_or_replayed_form_is_refused(change):
-    other = "O" * 43
+    other = tok("O")
     app, legal, *_ = make(FakeLegal(views={TOKEN: view(), other: view()}))
     page = call(app, "GET", f"/accept/{TOKEN}")
     h = hidden(page.text)

@@ -22,14 +22,28 @@ _spec = importlib.util.spec_from_file_location(
     "legal_clickwrap_page", Path(__file__).resolve().parents[2] / "legal-py" / "src" / "clickwrap_page.py")
 CP = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(CP)
+_spec2 = importlib.util.spec_from_file_location(
+    "legal_link_tag", Path(__file__).resolve().parents[2] / "legal-py" / "src" / "link_tag.py")
+LEGAL_LT = importlib.util.module_from_spec(_spec2)
+_spec2.loader.exec_module(LEGAL_LT)
 
 ORIGIN = "https://accept.zbm.example"
+LINK_TAG_KEY = "test-link-tag-key-shared-with-the-portal-do-not-use"     # = legal-py tests' LEGAL_LINK_TAG_KEY
 ENV = {"PORTAL_LEGAL_URL": "http://legal.railway.internal:8420",
        "PORTAL_LEGAL_SERVICE_TOKEN": "test-portal-legal-service-token-do-not-use",
        "PORTAL_LEGAL_CALLER_TOKEN": "test-portal-legal-caller-token-do-not-use-0",
        "PORTAL_EVIDENCE_KEY": "test-portal-evidence-key-do-not-use-0123456789",
-       "PORTAL_PUBLIC_ORIGIN": ORIGIN}
-TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE"
+       "PORTAL_PUBLIC_ORIGIN": ORIGIN, "PORTAL_LINK_TAG_KEY": LINK_TAG_KEY}
+def tok(seed: str, key: str = LINK_TAG_KEY) -> str:
+    """A link token as Legal mints it (32 random bytes + the 16-byte tag), from a seed so tests can name links."""
+    import base64
+    import hmac
+    rnd = hashlib.sha256(seed.encode()).digest()
+    tag = hmac.new(key.encode(), b"zbm-link-v1\x1f" + rnd, hashlib.sha256).digest()[:16]
+    return base64.urlsafe_b64encode(rnd + tag).decode().rstrip("=")
+
+
+TOKEN = tok("the link")
 MSA_TEXT = "# Z Best Media Master Services Agreement\n\n1. Services. ZBM provides the services in each SOW.\n"
 SOW_TEXT = "# Statement of Work SOW-2026-001\n\nFee: 1,500.00 USD, due in 15 days.\n"
 DISPLAY = Display("Acme LLC", "legal@acme.example", "Pat", "SOW-2026-001", "SEO and AI Visibility Audit")
@@ -39,7 +53,8 @@ def sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def view(page="first_engagement", docs=None, display=DISPLAY, msa_acc=(None, None)) -> PortalView:
+def view(page="first_engagement", docs=None, display=DISPLAY, msa_acc=(None, None),
+         time_zone="America/Los_Angeles") -> PortalView:
     """A link as Legal answers it: Legal renders blocks only for a page it serves (an MSA and a SOW; a SOW alone for
     a client with a counted MSA acceptance), and only with the SOW's number and title."""
     docs = docs if docs is not None else [Document("client_msa", "1.0", sha(MSA_TEXT), MSA_TEXT),
@@ -57,7 +72,8 @@ def view(page="first_engagement", docs=None, display=DISPLAY, msa_acc=(None, Non
                              {"version": msa_acc[0], "accepted_at": msa_acc[1]} if msa_acc[0] else None))
     page_sha = hashlib.sha256(CP.page_text(list(bl)).encode()).hexdigest() if bl else None
     return PortalView("lg-cin-" + "A" * 26, page, "2026-10-15T17:00:00Z", display, tuple(docs), *msa_acc,
-                      blocks=bl, page_sha256=page_sha)
+                      blocks=bl, page_sha256=page_sha, time_zone=time_zone,
+                      time_zone_label=CP.zone_label(time_zone))
 
 
 @dataclass
@@ -79,16 +95,17 @@ class FakeLegal:
             return None
         return self.views.get(token)
 
-    def receipt(self, token: str, request_id: str):
-        """Legal's receipt: only for the submission (request id) that used this link."""
-        self.receipts.append((token, request_id))
+    def receipt(self, token: str, request_id: str, form_sha256: str = ""):
+        """Legal's receipt: only for the submission (request id AND form) that used this link."""
+        self.receipts.append((token, request_id, form_sha256))
         if self.unavailable:
             raise LegalUnavailable("down")
         got = self.used_by.get(token)
-        if not got or got[0] != request_id:
+        if not got or got[0] != request_id or got[2] != form_sha256:
             return None
         v = self.views[token]
-        return Receipt(v.invitation_id, v.display, v.documents, got[1].acceptances, "2026-10-01T17:05:00Z")
+        return Receipt(v.invitation_id, v.display, v.documents, got[1].acceptances, "2026-10-01T17:05:00Z",
+                       v.time_zone, v.time_zone_label)
 
     def accept(self, body: dict) -> AcceptOutcome:
         self.accepts.append(body)
@@ -105,7 +122,7 @@ class FakeLegal:
         out = AcceptOutcome("accepted", tuple(
             Accepted("lg-acc-" + str(i) * 26, d["doc_id"], d["version"], d["doc_sha256"], "2026-10-01T17:05:00Z")
             for i, d in enumerate(body["documents"], start=1)))
-        self.used_by.setdefault(body["token"], (body["request_id"], out))
+        self.used_by.setdefault(body["token"], (body["request_id"], out, body["form_sha256"]))
         return out
 
 
