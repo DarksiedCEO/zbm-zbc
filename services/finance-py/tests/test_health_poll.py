@@ -42,8 +42,8 @@ def test_n3_readings_turn_every_non_ok_health_into_a_fixed_code():
     got = {r.name: (r.ok, r.code) for r in HP.poll({n: f"http://{n}:8080" for n in
                                                      ("ok", "maint", "deg", "held", "warn", "writes", "idleak",
                                                       "badwarn", "warns", "html", "down")}, t)}
-    assert got == {"ok": (True, "ok"), "maint": (False, "maintenance"), "deg": (False, "degraded"),
-                   "held": (False, "starting"), "warn": (False, "warning:rotation_expired"),
+    assert got == {"ok": (True, "ok"), "maint": (False, "reconcile_mode"), "deg": (False, "ledger_unreachable"),
+                   "held": (False, "interrupted_write_anchored"), "warn": (False, "warning:rotation_expired"),
                    "writes": (False, "write_refused"), "idleak": (False, "bad_status"),
                    "badwarn": (False, "warning:bad_warning"), "html": (False, "http_502"),
                    "warns": (False, "warning:ledger_anchor_unkeyed,rotation_expired"),     # every code (N3-8)
@@ -73,7 +73,7 @@ def test_n3_a_forgotten_reconcile_mode_is_caught(tmp_path):
         r = y.client.get(req.url.path)
         return httpx.Response(r.status_code, content=r.content, headers={"content-type": "application/json"})
     (r,) = HP.poll({"finance": "http://finance.railway.internal:8080"}, httpx.MockTransport(handler))
-    assert r == HP.Reading("finance", False, "maintenance")
+    assert r == HP.Reading("finance", False, "reconcile_mode")      # the reason code (N4-3)
     assert y.client.get("/livez").status_code == 200                           # Railway's healthcheck still passes
 
 
@@ -122,3 +122,39 @@ def test_n3_8_one_call_does_everything_and_an_empty_config_alerts(caplog):
     assert HP.run(st, env, T0, transport=t) == []
     got = HP.run(st, {"OPS_HEALTH_URLS": "finance"}, T0)          # malformed: an alert, never an exception
     assert got == [("health_poll_unconfigured", "ops-alerts", "malformed")]
+
+
+@pytest.mark.parametrize("pattern,alerts", [
+    ([0, 1] * 12, True),                  # down at every other poll (50%): P6
+    ([0, 1, 1, 0, 1] * 5, True),          # 40%: P7
+    ([1, 1, 1, 1, 1, 0] * 4, False),      # one blip in six: not flapping
+])
+def test_n4_2_flapping_catches_40_to_50_percent(pattern, alerts):
+    """AEGIS round 4 N4-2: alternating ok/down for 4 h gave 0 alerts (it needed strictly more than half)."""
+    st: dict = {}
+    out = []
+    for k, up in enumerate(pattern):
+        out += HP.track(st, [HP.Reading("finance", bool(up), "ok" if up else "unreachable")],
+                        T0 + timedelta(minutes=5 * k))
+    assert any(c[0] == "service_flapping" for c in out) is alerts, out
+
+
+def test_n4_3_the_code_is_the_set_of_reason_codes_so_a_worse_fault_is_a_new_alert():
+    """AEGIS round 4 N4-3: every 503 read `degraded`, so a second, worse fault on an alerting service was masked
+    (wave C keys a condition by source:category:ref). The code is now the sorted set of reason codes."""
+    t = _transport({
+        "a": (503, {"status": "degraded", "reasons": ["ledger_clock_behind_log"]}),
+        "b": (503, {"status": "degraded", "reasons": ["ledger_clock_behind_log", "disk_low: 1234 bytes free"]}),
+        "c": (503, {"status": "degraded", "degraded_reasons": ["rotation_expired_unpromoted", "ledger_unreachable",
+                                                              "pending_unreconciled_writes:3"]}),
+        "d": (503, {"status": "maintenance", "degraded_reasons": ["reconcile_mode"]}),
+    })
+    got = {r.name: r.code for r in HP.poll({n: f"http://{n}:80" for n in "abcd"}, t)}
+    assert got == {"a": "ledger_clock_behind_log", "b": "disk_low,ledger_clock_behind_log",
+                   "c": "ledger_unreachable,pending_unreconciled_writes,rotation_expired_unpromoted",
+                   "d": "reconcile_mode"}, got
+    st: dict = {}
+    assert HP.track(st, [HP.Reading("ledger", False, got["a"])], T0) == []
+    first = HP.track(st, [HP.Reading("ledger", False, got["a"])], T0 + timedelta(minutes=10))
+    worse = HP.track(st, [HP.Reading("ledger", False, got["b"])], T0 + timedelta(minutes=15))
+    assert first and worse and first[0][2] != worse[0][2], (first, worse)

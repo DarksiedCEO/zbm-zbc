@@ -49,10 +49,38 @@ accepted by Legal in `LEGAL_CALLER_TOKENS`).
 4. On legal: put `<NEW>` into `LEGAL_CALLER_TOKENS` for `finance_31`, delete `LEGAL_CALLER_TOKENS_NEXT`, deploy.
    The old value is now refused everywhere.
 
-A service bearer token is the same with `<P>_SERVICE_TOKEN_NEXT`: set it on the service, then move every caller of
-that service to the new value (the Finance service token is used by stripe-gateway and seo; the Compliance service
-token by finance, legal, seo and detection — see `.railway/railway.ts`), then make it `<P>_SERVICE_TOKEN` and delete
-the `_NEXT` variable.
+### 1a. A service bearer token (callers hold an IaC reference to it)
+
+Every caller of a service bearer is a **reference** in `.railway/railway.ts` to the accepting service's variable, not
+a value of its own (AEGIS round 4 N4-6):
+
+| Accepting service | Its variable | Callers' references |
+|---|---|---|
+| finance | `FIN_SERVICE_TOKEN` | stripe-gateway `STRIPE_GATEWAY_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN`; seo `SEO_FINANCE_TOKEN` |
+| compliance | `COMPLIANCE_SERVICE_TOKEN` | finance `FIN_COMPLIANCE_TOKEN`, detection `DETECTION_COMPLIANCE_TOKEN`, legal `LEGAL_COMPLIANCE_TOKEN` (`${{compliance.COMPLIANCE_SERVICE_TOKEN}}`), seo |
+| legal | `LEGAL_SERVICE_TOKEN` | finance `FIN_LEGAL_TOKEN`, compliance `COMPLIANCE_LEGAL_TOKEN` |
+
+So the reference itself moves during the window. Five steps, each a deploy (example: finance; tested in
+`services/finance-py/tests/test_fixwave_a_isolation.py::test_n4_6_stripe_gateway_to_finance_across_a_service_token_rotation`):
+
+1. finance: set `FIN_SERVICE_TOKEN_NEXT=<NEW>` and `FIN_ROTATION_ENDS_AT` (a few days ahead); deploy. Old and new
+   both work.
+2. `.railway/railway.ts`: change every caller's reference from `finance.env.FIN_SERVICE_TOKEN` to
+   `finance.env.FIN_SERVICE_TOKEN_NEXT` (for a `${{…}}` string, `${{finance.FIN_SERVICE_TOKEN_NEXT}}`); apply. Each
+   caller redeploys and sends the new value. Check each caller once (stripe-gateway: a test webhook from Stripe's
+   dashboard answers 200).
+3. finance: set `FIN_SERVICE_TOKEN=<NEW>` and keep `FIN_SERVICE_TOKEN_NEXT=<NEW>` (equal values are accepted as
+   "promoted"); deploy. The old value is refused from now on.
+4. `.railway/railway.ts`: change the references back to `finance.env.FIN_SERVICE_TOKEN`; apply.
+5. finance: delete `FIN_SERVICE_TOKEN_NEXT` and `FIN_ROTATION_ENDS_AT`; deploy.
+
+Never delete a `_NEXT` variable while a reference still points at it (the caller would get an empty value). If the
+window ends before step 3, only the new value works and finance's `/health` is 503 `rotation_expired_unpromoted`, with
+one ALERT `rotation_expired_unpromoted` per start and one `rotation_old_token_refused` per refused request: a caller
+still on the old value is loud, never a silent 401. **Stripe webhooks:** Stripe retries a refused delivery with
+backoff for up to 3 days. Finish steps 2–5 (or move the reference) within that time, then in Stripe's dashboard
+(Developers → Webhooks → the endpoint) resend any event still marked failed; finance's webhook handling is idempotent,
+so a resend of an event that did arrive is harmless.
 
 Andre's token: make a new one, set `<P>_ANDRE_APPROVAL_TOKEN_NEXT_SHA256` to its hash on the three services, deploy,
 check an approval with the new token, then move that hash to `<P>_ANDRE_APPROVAL_TOKEN_SHA256` and delete the

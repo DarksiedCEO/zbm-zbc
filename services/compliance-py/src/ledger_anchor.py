@@ -56,6 +56,20 @@ class StoreMissing(Exception):
     """The anchor store is missing, empty or shorter than the state file says it was (AEGIS round 3 N3-7)."""
 
 
+class StateInvalid(Exception):
+    """The state file is missing beside a store with history, unsigned, or does not verify (AEGIS round 4 N4-5)."""
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """AEGIS round 4 N4-4: os.write may write fewer bytes (ENOSPC mid-record); loop, and raise when nothing moves."""
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        if n <= 0:
+            raise OSError("short write")
+        view = view[n:]
+
+
 def _canon(rec: dict) -> bytes:
     return json.dumps({k: v for k, v in rec.items() if k != "mac"}, sort_keys=True, separators=(",", ":")).encode()
 
@@ -65,7 +79,7 @@ class AnchorStore:
         self.path = path
         self.key = (key or "").encode()
         self.state_path = os.path.join(os.path.dirname(path) or ".", STATE_FILE)
-        st = self._load_state()
+        st, self.state_invalid = self._load_state()
         self.mismatch: Optional[str] = st.get("mismatch")      # sticky until Andre resolves it (survives restarts)
         self.failing: Optional[str] = st.get("failing")        # a run failed (not a ledger read); clears on success
         self.last_ok: Optional[str] = st.get("last_ok")        # ISO time of the last run that stored or confirmed
@@ -76,25 +90,41 @@ class AnchorStore:
     def keyed(self) -> bool:
         return bool(self.key)
 
-    # --- state beside the store ---------------------------------------------------------------------------------
+    # --- state beside the store (AEGIS round 4 N4-5: signed with the anchor key) ----------------------------------
 
-    def _load_state(self) -> dict:
+    def _store_has_history(self) -> bool:
+        try:
+            return os.stat(self.path).st_size > 0
+        except FileNotFoundError:
+            return False
+
+    def _load_state(self) -> tuple[dict, bool]:
+        """(state, invalid). Invalid: missing beside a store with history, unreadable, unsigned or a bad MAC."""
         try:
             with open(self.state_path, "rb") as fh:
                 st = json.loads(fh.read())
-            return st if isinstance(st, dict) else {"failing": "state file is not an object"}
         except FileNotFoundError:
-            return {}
+            return {}, self._store_has_history()
         except (OSError, ValueError):
-            return {"failing": "state file unreadable"}
+            return {}, True
+        if not isinstance(st, dict) or not isinstance(st.get("mac"), str):
+            return {}, True
+        body = {k: v for k, v in st.items() if k != "mac"}
+        if not hmac.compare_digest(st["mac"], self._mac(body)):
+            return {}, True
+        return body, False
 
     def save_state(self) -> None:
+        """Signed, written to a temp file, fsynced and renamed (atomic)."""
+        if self.state_invalid:
+            raise StateInvalid("the anchor state file is invalid; run `ledger_anchor.py resync` after review")
+        body = {"mismatch": self.mismatch, "failing": self.failing, "last_ok": self.last_ok,
+                "first_seen": self.first_seen, "size": self.size}
+        data = json.dumps({**body, "mac": self._mac(body)}, sort_keys=True).encode()
         tmp = self.state_path + ".tmp"
-        data = json.dumps({"mismatch": self.mismatch, "failing": self.failing, "last_ok": self.last_ok,
-                           "first_seen": self.first_seen, "size": self.size}, sort_keys=True).encode()
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         try:
-            os.write(fd, data)
+            _write_all(fd, data)
             os.fsync(fd)
         finally:
             os.close(fd)
@@ -111,6 +141,8 @@ class AnchorStore:
 
     def reasons(self, now: datetime) -> list[str]:
         """/health codes (empty: nothing wrong)."""
+        if self.state_invalid:
+            return ["anchor_state_invalid"]
         if self.first_seen is None and self.last_ok is None:
             self.first_seen = now.isoformat()
             try:
@@ -201,6 +233,10 @@ class AnchorStore:
         return None
 
     def append(self, anchor: dict, at: str) -> dict:
+        """Appends one record. AEGIS round 4 N4-4: every byte is written and fsynced, or the file is cut back to its
+        size before the append and the run raises (never reported as stored)."""
+        if self.state_invalid:
+            raise StateInvalid("the anchor state file is invalid; run `ledger_anchor.py resync` after review")
         if self.missing():
             raise StoreMissing("the anchor store is missing, empty or shorter than the state file says")
         self.repair()
@@ -209,19 +245,30 @@ class AnchorStore:
                "ledger_at": anchor.get("at"), "ledger_signature": anchor.get("signature"), "stored_at": at,
                "prev": recs[-1]["mac"] if recs else None}
         rec["mac"] = self._mac(rec)
+        line = json.dumps(rec, sort_keys=True, separators=(",", ":")).encode() + b"\n"
         fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
-            os.write(fd, json.dumps(rec, sort_keys=True, separators=(",", ":")).encode() + b"\n")
-            os.fsync(fd)
-            self.size = os.fstat(fd).st_size
+            before = os.fstat(fd).st_size
+            try:
+                _write_all(fd, line)
+                os.fsync(fd)
+                after = os.fstat(fd).st_size
+                if after != before + len(line):
+                    raise OSError(f"anchor record length {after - before} != {len(line)}")
+            except OSError:
+                os.ftruncate(fd, before)
+                os.fsync(fd)
+                raise
+            self.size = after
         finally:
             os.close(fd)
         return rec
 
-
 def check(store: AnchorStore, client, now_iso: str) -> tuple[Optional[str], Optional[dict]]:
     """One run: ``(problem, appended record)``. ``client`` has ``anchor(at=None) -> dict`` (raises when the ledger
     cannot be read: the caller retries later, that is not a mismatch)."""
+    if store.state_invalid:
+        raise StateInvalid("the anchor state file is invalid; run `ledger_anchor.py resync` after review")
     if store.missing():
         raise StoreMissing("the anchor store is missing, empty or shorter than the state file says")
     broken = store.verify()
@@ -242,3 +289,38 @@ def check(store: AnchorStore, client, now_iso: str) -> tuple[Optional[str], Opti
         if cur["anchor"] == last["anchor"]:
             return None, None                                    # nothing new since the last run
     return None, store.append(cur, now_iso)
+
+
+def resync(data_dir: str, key: Optional[str]) -> dict:
+    """AEGIS round 4 N4-5: the explicit, one-time rebuild of a signed state file from the store's own history (the
+    migration of a pre-round state, or the repair after a restore). Never discards a record: a torn tail is cut back
+    to the last valid record, every remaining record must verify, and the state is re-signed with ``size`` = the
+    store's size. A mismatch recorded in an old state is kept. Run by an operator only:
+    ``COMPLIANCE_LEDGER_ANCHOR_KEY=… python3 src/ledger_anchor.py resync <COMPLIANCE_DATA_DIR>``."""
+    store = AnchorStore(os.path.join(data_dir, FILE), key)
+    old: dict = {}
+    try:
+        with open(store.state_path, "rb") as fh:
+            old = json.loads(fh.read()) or {}
+    except (OSError, ValueError):
+        old = {}
+    store.repair()
+    broken = store.verify()
+    if broken:
+        raise StateInvalid(f"cannot resync: {broken}")
+    recs = store.records()
+    store.state_invalid = False
+    store.mismatch = old.get("mismatch") if isinstance(old, dict) else None
+    store.failing = None
+    store.last_ok = (old.get("last_ok") if isinstance(old, dict) else None) or (recs[-1]["stored_at"] if recs else None)
+    store.first_seen = old.get("first_seen") if isinstance(old, dict) else None
+    store.size = os.stat(store.path).st_size if recs else 0
+    store.save_state()
+    return {"records": len(recs), "size": store.size, "mismatch": bool(store.mismatch)}
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 3 or sys.argv[1] != "resync":
+        sys.exit("usage: COMPLIANCE_LEDGER_ANCHOR_KEY=... python3 ledger_anchor.py resync <COMPLIANCE_DATA_DIR>")
+    print(json.dumps(resync(sys.argv[2], os.environ.get("COMPLIANCE_LEDGER_ANCHOR_KEY"))))

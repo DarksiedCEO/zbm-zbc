@@ -215,3 +215,45 @@ def test_n4_an_expired_rotation_window_never_stops_a_start_and_fails_closed(capl
     # a garbage ROTATION_ENDS_AT is a deploy-time error even without a NEXT value (N-8: it was accepted silently)
     with pytest.raises(RuntimeError, match="ROTATION_ENDS_AT"):
         config_mod.load({**h.env, "FIN_ROTATION_ENDS_AT": "garbage"})
+
+
+def test_n4_6_stripe_gateway_to_finance_across_a_service_token_rotation(caplog):
+    """AEGIS round 4 N4-6: stripe-gateway's STRIPE_GATEWAY_FINANCE_TOKEN is an IaC reference to finance's current
+    FIN_SERVICE_TOKEN, so it could never move to the new value before promotion, and fail-closed expiry then 401'd
+    webhooks silently. The runbook's five steps (docs/runbooks/token-rotation.md, 1a), each a deploy; at every step
+    the value the gateway's reference resolves to is accepted. A forgotten promotion is loud: /health 503 and a
+    `rotation_old_token_refused` alert for every refused old value."""
+    from helpers import CALLERS, SERVICE_TOKEN, Harness
+    old, new = SERVICE_TOKEN, "next-fin-service-token-openssl-rand-hex-32-aa"
+    gw = CALLERS.get("rail_gateway")
+    assert gw, "the harness has the stripe-gateway caller"
+
+    def gateway_call(h, bearer):
+        return h.client.post("/fin/v1/stripe/events", content=b"{}",
+                             headers={"Authorization": f"Bearer {bearer}", "X-FIN-Caller-Token": gw,
+                                      "Content-Type": "application/json"}).status_code
+    steps = [
+        # (finance env, the value the gateway's reference resolves to)
+        ({"FIN_SERVICE_TOKEN_NEXT": new, "FIN_ROTATION_ENDS_AT": _ends()}, old),   # 1. NEXT set on finance
+        ({"FIN_SERVICE_TOKEN_NEXT": new, "FIN_ROTATION_ENDS_AT": _ends()}, new),   # 2. reference -> ..._NEXT
+        ({"FIN_SERVICE_TOKEN": new, "FIN_SERVICE_TOKEN_NEXT": new,                 # 3. promoted (NEXT == current)
+          "FIN_ROTATION_ENDS_AT": _ends()}, new),
+        ({"FIN_SERVICE_TOKEN": new, "FIN_SERVICE_TOKEN_NEXT": new,                 # 4. reference back to the
+          "FIN_ROTATION_ENDS_AT": _ends()}, new),                                  #    current variable
+        ({"FIN_SERVICE_TOKEN": new}, new),                                         # 5. NEXT and ENDS_AT deleted
+    ]
+    for i, (env, sent) in enumerate(steps, 1):
+        h = Harness(env=env)
+        assert gateway_call(h, sent) != 401, f"step {i}: the gateway's value is refused"
+        assert h.client.get("/health").status_code == 200, f"step {i}"
+        if i >= 3:
+            assert gateway_call(h, old) == 401, f"step {i}: the old value still works"
+    # forgotten promotion: the window ended with the gateway still on the old value
+    with caplog.at_level(logging.WARNING):
+        h = Harness(env={"FIN_SERVICE_TOKEN_NEXT": new, "FIN_ROTATION_ENDS_AT": _ends(-1)})
+        assert gateway_call(h, old) == 401
+    assert h.client.get("/health").status_code == 503
+    alerts = [r.getMessage() for r in caplog.records if r.name == "zbm.alert"]
+    assert any("rotation_expired_unpromoted" in a for a in alerts), alerts
+    assert any("rotation_old_token_refused" in a and "service_token" in a for a in alerts), alerts
+    assert old not in caplog.text and new not in caplog.text

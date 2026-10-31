@@ -12,6 +12,7 @@ dev/testing convenience only and are explicitly labeled non-live.
 
 from __future__ import annotations
 
+import access_redact
 import asyncio
 import functools
 import hmac
@@ -674,3 +675,8 @@ def store_snapshot(req: StoreRequest = Depends(wire_body(StoreRequest))) -> Resp
         return Response(STORE.snapshot(req.client_id), media_type="application/json")
     except StoreError as e:
         return _store_error(e)
+
+
+# AEGIS round 4 N4-8: client slugs in path positions never reach the access log (route words only). Last, after every
+# route is defined.
+access_redact.register_routes(app)

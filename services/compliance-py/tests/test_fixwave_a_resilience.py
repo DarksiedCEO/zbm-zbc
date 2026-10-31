@@ -6,6 +6,7 @@ request_id) recorded and returned that same id as the live ruling."""
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -455,6 +456,96 @@ def test_n3_6_a_restart_does_not_reset_the_staleness_clock(tmp_path):
     later = LA.AnchorStore(str(tmp_path / "z" / "d" / LA.FILE), "k" * 40)
     from datetime import timedelta as _td
     assert "ledger_anchor_stale" in later.reasons(z.clock.now() + _td(hours=27))
+
+
+def _run_check(x):
+    try:
+        return ("ok", x.svc.ledger_anchor_check())
+    except Exception as exc:  # noqa: BLE001
+        return ("raised", type(exc).__name__)
+
+
+def _health(x):
+    h = x.client.get("/health")
+    return h.status_code, h.json().get("degraded_reasons")
+
+
+def test_n4_4_a_short_write_is_never_reported_as_stored(tmp_path, monkeypatch):
+    """AEGIS round 4 N4-4 (R4A1): os.write returned a short count (ENOSPC mid-record) and the run said stored: last_ok
+    advanced, size recorded the torn length, and the next run was 503 anchor_store_missing for good."""
+    import ledger_anchor as LA
+    x = _durable(tmp_path)
+    p = _store(x, tmp_path)
+    led = _AnchorLedger(["a1" * 32])
+    x.svc.recorder.client.anchor = led.anchor
+    assert _run_check(x) == ("ok", None)
+    before_size, before_state = p.stat().st_size, (tmp_path / "d" / LA.STATE_FILE).read_bytes()
+    led.hashes.append("a2" * 32)
+    real = os.write
+
+    calls = []
+
+    def short(fd, data):                                       # ENOSPC mid-record: a short write, then the error
+        data = bytes(data)
+        if b'"stored_at"' in data or calls:
+            calls.append(1)
+            if len(calls) == 1:
+                return real(fd, data[: len(data) // 2])
+            raise OSError(28, "No space left on device")
+        return real(fd, data)
+    monkeypatch.setattr(LA.os, "write", short)
+    assert _run_check(x)[0] == "raised"
+    monkeypatch.undo()
+    assert p.stat().st_size == before_size, "the partial record is rolled back"
+    st = json.loads((tmp_path / "d" / LA.STATE_FILE).read_text())
+    assert st["size"] == json.loads(before_state)["size"] and st["last_ok"] == json.loads(before_state)["last_ok"]
+    assert _run_check(x) == ("ok", None) and _health(x)[0] == 200
+    assert len(x.svc.anchor_store.records()) == 2
+
+
+def test_n4_5_the_state_file_is_signed_and_an_invalid_one_is_loud(tmp_path):
+    """AEGIS round 4 N4-5 (R4A5, R4A6): the state file had no MAC, so `size` edited to 0 (or a pre-round-3 state
+    without `size`) hid a deleted store. The state is now HMAC'd with the anchor key; a missing or unsigned state
+    when the store has history, or an edited one, is `anchor_state_invalid` (503) and no chain is written over it.
+    A pre-round state is migrated once, explicitly (`ledger_anchor.py resync`)."""
+    import ledger_anchor as LA
+    x = _durable(tmp_path)
+    p = _store(x, tmp_path)
+    sp = tmp_path / "d" / LA.STATE_FILE
+    led = _AnchorLedger(["e1" * 32, "e2" * 32])
+    x.svc.recorder.client.anchor = led.anchor
+    _run_check(x)
+    assert "mac" in json.loads(sp.read_text())
+    good_state = sp.read_bytes()
+
+    def reopen():
+        x.svc.anchor_store = LA.AnchorStore(str(p), "k" * 40)
+    # an edited size
+    st = json.loads(good_state)
+    st["size"] = 0
+    sp.write_text(json.dumps(st))
+    reopen()
+    assert _health(x) == (503, ["anchor_state_invalid"]) or "anchor_state_invalid" in _health(x)[1]
+    assert _run_check(x)[0] == "raised" and len(x.svc.anchor_store.records()) == 1
+    # a missing state beside a store with history
+    sp.unlink()
+    reopen()
+    assert "anchor_state_invalid" in _health(x)[1]
+    # a pre-round-3 state (unsigned, no size): invalid until migrated explicitly
+    sp.write_text(json.dumps({"mismatch": None, "failing": None, "last_ok": "2026-10-31T00:00:00+00:00"}))
+    reopen()
+    assert "anchor_state_invalid" in _health(x)[1]
+    assert LA.resync(str(tmp_path / "d"), "k" * 40)["records"] == 1
+    reopen()
+    assert _health(x)[0] == 200 and json.loads(sp.read_text())["size"] == p.stat().st_size
+    # after migration a deleted store is caught again
+    p.unlink()
+    reopen()
+    assert "anchor_store_missing" in _health(x)[1]
+    # a different key cannot sign a state the service accepts
+    sp.write_bytes(good_state)
+    x.svc.anchor_store = LA.AnchorStore(str(p), "other-key" * 5)
+    assert "anchor_state_invalid" in _health(x)[1]
 
 
 def _ends(days=1):

@@ -291,7 +291,8 @@ def load(env: Optional[dict] = None) -> Settings:
     specials = [t for t in (token, andre, second) if t]
     if len(set(specials)) != len(specials) or any(t in every for t in specials):
         raise RuntimeError("the service, Andre, second-approver and caller tokens must all be distinct (spec §D)")
-    rotation = token_rotation.load(env, "FIN", CALLER_NAMES, _check_token, [token, *every, second], andre)
+    rotation = token_rotation.load(env, "FIN", CALLER_NAMES, _check_token, [token, *every, second], andre,
+                                   current_service=token, current_callers=callers)
     # --- founder-locked model and custody (D1, FIN-CQ-01/02) ---
     _only(env, "FIN_REVENUE_MODEL", ("principal",), "principal", "spec D1: Model A, ZBC sells verified views as principal")
     _only(env, "FIN_CUSTODY_MODEL", ("own_deposit",), "own_deposit",

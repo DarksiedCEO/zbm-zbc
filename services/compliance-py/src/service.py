@@ -627,6 +627,9 @@ class ComplianceService:
         except ledger_anchor.StoreMissing:
             CR.alert("anchor_store_missing", "compliance-py")    # AEGIS round 3 N3-7: never a silent new chain
             raise
+        except ledger_anchor.StateInvalid:
+            CR.alert("anchor_state_invalid", "compliance-py")    # AEGIS round 4 N4-5: never a silent new chain
+            raise
         except Exception as exc:  # noqa: BLE001 - a fault of the job itself: loud on /health, never silent
             store.failing = type(exc).__name__
             CR.alert("anchor_check_failing", "compliance-py", error=type(exc).__name__)
@@ -647,7 +650,7 @@ class ComplianceService:
     def _save_anchor_state(store) -> None:
         try:
             store.save_state()
-        except OSError as exc:
+        except Exception as exc:  # noqa: BLE001 - OSError, or StateInvalid (never overwritten; resync is explicit)
             CR.alert("anchor_state_write_failed", "compliance-py", error=type(exc).__name__)
 
     @property

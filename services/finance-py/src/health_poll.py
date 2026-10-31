@@ -19,13 +19,15 @@ with ``SEVERITY`` / ``WHAT_TO_DO`` entries for ``service_unhealthy`` (high), ``s
 and ``"health_hist"`` keys in it). Conditions (AEGIS round 3 N3-8):
 
 * ``service_unhealthy``: non-ok for ``DOWN_MIN`` (10) minutes without a break;
-* ``service_flapping``: non-ok in more than half of at least ``FLAP_MIN_POLLS`` polls over ``FLAP_WINDOW_MIN`` (30)
-  minutes (a crash loop that is up at one poll in three);
+* ``service_flapping``: non-ok in at least 3 of the last 6 polls, or in more than 30% of at least ``FLAP_MIN_POLLS``
+  polls over ``FLAP_WINDOW_MIN`` (30) minutes (AEGIS round 4 N4-2: a service down at every other poll);
 * ``health_poll_unconfigured``: ``OPS_HEALTH_URLS`` empty or malformed (``ops-alerts``), or one of ``REQUIRED``
   missing from it (the service's name); also logged as a warning on every run.
 
 What counts as non-ok: no answer, an HTTP status other than 200, a ``status`` other than ``"ok"``, ``write_ok`` false,
-or any entry in ``warnings``. Only fixed codes leave this module (``unreachable``, ``http_503``, ``maintenance``,
+or any entry in ``warnings``. The code is the sorted SET of the body's reason codes (``reasons`` /
+``degraded_reasons``, text after a ``:`` dropped), so a new or worse reason on a service that is already alerting is a
+new condition (AEGIS round 4 N4-3: wave C keys a condition by source, category and ref). Only fixed codes leave this module (``unreachable``, ``http_503``, ``maintenance``,
 ``degraded``, ``write_refused``, ``warning:ledger_anchor_unkeyed`` ...): a value that is not a short lowercase code is
 replaced by ``bad_status``/``bad_warning``, so no id or free text from a body can reach an email.
 
@@ -48,6 +50,8 @@ import httpx
 DOWN_MIN = 10
 FLAP_WINDOW_MIN = 30
 FLAP_MIN_POLLS = 4
+FLAP_LAST_N, FLAP_LAST_K = 6, 3          # AEGIS round 4 N4-2: non-ok in at least 3 of the last 6 polls ...
+FLAP_FRACTION = 0.3                      # ... or in more than 30% of at least FLAP_MIN_POLLS polls over 30 minutes
 CATEGORY = "service_unhealthy"
 FLAPPING = "service_flapping"
 UNCONFIGURED = "health_poll_unconfigured"
@@ -106,6 +110,11 @@ def probe(name: str, base_url: str, transport: Optional[httpx.BaseTransport] = N
         return Reading(name, False, f"http_{r.status_code}" if r.status_code != 200 else "bad_body")
     status = body.get("status")
     if r.status_code != 200 or status != "ok":
+        raw = body.get("reasons") or body.get("degraded_reasons")
+        if isinstance(raw, list) and raw:
+            codes = sorted({_code(x.split(":", 1)[0].strip() if isinstance(x, str) else None, "bad_reason")
+                            for x in raw[:16]})
+            return Reading(name, False, ",".join(codes))
         if status != "ok" and status is not None:
             return Reading(name, False, _code(status, "bad_status"))
         return Reading(name, False, f"http_{r.status_code}")
@@ -146,7 +155,7 @@ def track(state: dict, readings: Iterable[Reading], now: datetime, down_min: int
     for r in readings:
         seen.add(r.name)
         polls = [p for p in hist.get(r.name, []) if isinstance(p, list) and len(p) == 2
-                 and (t := _parse(p[0])) is not None and now - t < window]
+                 and (t := _parse(p[0])) is not None and now - t < 2 * window][-(FLAP_LAST_N * 2):]
         polls.append([now.isoformat(), bool(r.ok)])
         hist[r.name] = polls
         if r.ok:
@@ -158,12 +167,21 @@ def track(state: dict, readings: Iterable[Reading], now: datetime, down_min: int
             since = now
         if now - since >= timedelta(minutes=down_min):
             out.append((CATEGORY, r.name, r.code))
-        elif len(polls) >= FLAP_MIN_POLLS and sum(1 for p in polls if not p[1]) * 2 > len(polls):
+        elif _flapping(polls, now, window):
             out.append((FLAPPING, r.name, r.code))
     for d in (st, hist):
         for name in [n for n in d if n not in seen]:
             d.pop(name, None)
     return out
+
+
+def _flapping(polls: list, now: datetime, window: timedelta) -> bool:
+    last = polls[-FLAP_LAST_N:]
+    if sum(1 for p in last if not p[1]) >= FLAP_LAST_K:
+        return True
+    recent = [p for p in polls if now - _parse(p[0]) < window]
+    bad = sum(1 for p in recent if not p[1])
+    return len(recent) >= FLAP_MIN_POLLS and bad > FLAP_FRACTION * len(recent)
 
 
 def run(state: dict, env, now: datetime, transport: Optional[httpx.BaseTransport] = None) -> list[tuple[str, str, str]]:

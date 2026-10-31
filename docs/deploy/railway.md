@@ -182,6 +182,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `ORCHESTRATOR_SERVICE_TOKEN` | `openssl rand -hex 32` | orchestrator | Vercel `ORCHESTRATOR_SERVICE_TOKEN` (paste the same value; Vercel cannot reference Railway) |
 | `LEDGER_SERVICE_TOKEN` (orchestrator's) | `openssl rand -hex 32` | orchestrator | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_HEAD_SIGNING_KEY` | `openssl rand -hex 32` | ledger | signs `GET /ledger/anchor` (fix wave A, RTM-07); keep a copy yourself to check a stored anchor |
+| `LEDGER_ANDRE_APPROVAL_TOKEN_SHA256` | `printf %s "$ANDRE_TOKEN" \| sha256sum` | ledger | AEGIS round 4 N4-1: the only credential that can acknowledge a known clock jump (`POST /ledger/clock/acknowledge`); unset = nobody can |
 | `COMPLIANCE_LEDGER_ANCHOR_KEY` | `openssl rand -hex 32` | compliance | HMAC of the daily off-ledger anchor store on compliance's volume (AEGIS wave A F-5); the ledger never holds it |
 | `LEDGER_SERVICE_TOKEN` (finance's) | `openssl rand -hex 32` | finance | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (legal's) | `openssl rand -hex 32` | legal | its SHA-256 goes in `LEDGER_CALLERS` |

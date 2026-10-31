@@ -325,3 +325,18 @@ def test_f15b_a_lowercase_word_in_an_id_position_never_reaches_the_access_log(tm
             "/legal/v1/documents/:id/versions/:id/decision"
     finally:
         access_redact.register_routes(None)                    # back to the plain-word rule for other tests
+
+
+def test_n4_7_a_refused_andre_header_records_the_route_template_never_the_raw_path(tmp_path):
+    """AEGIS round 4 N4-7: refusing an Andre header on GET /legal/v1/acceptances/<id> wrote the raw request path
+    (`far|/legal/v1/acceptances/<word>`) into the durable, hash-chained log: any 64 path characters a bearer holder
+    chose. The record now carries the route template only."""
+    from helpers import SERVICE_TOKEN
+    x = _durable(tmp_path)
+    word = "fixaprobelowercasesecretword"
+    r = x.client.get(f"/legal/v1/acceptances/{word}x", headers={"Authorization": f"Bearer {SERVICE_TOKEN}",
+                                                                 "X-Andre-Approval-Token": "not-andre-" + "0" * 30})
+    assert r.status_code == 403, r.text
+    logs = "".join(p.read_text(errors="replace") for p in (tmp_path / "d").rglob("*") if p.is_file())
+    assert word not in logs
+    assert "/legal/v1/acceptances/{acceptance_id}" in logs

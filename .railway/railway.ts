@@ -90,6 +90,7 @@ export default defineRailway(() => {
       LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope (hashes only, set NOT Sealed); written to LEDGER_CALLERS_FILE
       // AEGIS wave A F-5: signs GET /ledger/anchor (the daily off-ledger anchor Compliance stores)
       LEDGER_HEAD_SIGNING_KEY: preserve(),
+      LEDGER_ANDRE_APPROVAL_TOKEN_SHA256: preserve(), // AEGIS round 4 N4-1: Andre's hash; only it can acknowledge a clock jump
     },
   }));
 

@@ -245,6 +245,8 @@ def make_require_auth(required_token: str, next_token: Optional[str] = None,
                                 headers={"WWW-Authenticate": "Bearer"})
         supplied = authorization.removeprefix("Bearer ")
         valid = accepted.matches(supplied)   # non-ASCII token: invalid (401), never a 500
+        if not valid and accepted.retired(supplied):
+            token_rotation.refused_old("legal-py", "service_token")   # AEGIS round 4 N4-6: loud, not a silent 401
         if not valid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
                                 headers={"WWW-Authenticate": "Bearer"})
@@ -277,6 +279,10 @@ class Callers:
         for name, dg in current + live:  # no early exit
             if hmac.compare_digest(d, dg):
                 found = name
+        if found is None and expired:
+            for name, dg in self._digests:
+                if name in rotated and hmac.compare_digest(d, dg):
+                    token_rotation.refused_old("legal-py", f"caller_token:{name}")   # AEGIS round 4 N4-6
         return found
 
 
@@ -333,7 +339,9 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         """A recognised caller token (in ``allowed`` when given); with ``andre_ok`` Andre's token also passes."""
         def dep(request: Request) -> str:
             if andre_ok and request.headers.get(FOUNDER_HEADER) is not None:
-                return _andre(route or request.url.path[:64], request.headers.get(FOUNDER_HEADER))
+                # AEGIS round 4 N4-7: the route TEMPLATE, never the raw request path (a durable, hash-chained record)
+                template = getattr(request.scope.get("route"), "path", None) or "unknown"
+                return _andre(route or template[:64], request.headers.get(FOUNDER_HEADER))
             name = callers.identify(request.headers.get(CALLER_HEADER))
             if name is None:
                 raise Forbidden("caller token missing or not recognised")

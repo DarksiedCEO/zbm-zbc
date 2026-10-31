@@ -470,6 +470,38 @@ struct App {
     health: HealthState,
     /// RTM-07: LEDGER_HEAD_SIGNING_KEY, when set (signs GET /ledger/anchor).
     head_key: Option<Vec<u8>>,
+    /// AEGIS round 4 N4-1: LEDGER_ANDRE_APPROVAL_TOKEN_SHA256 (the SHA-256 of Andre's approval token), when set.
+    andre_sha256: Option<[u8; 32]>,
+    /// AEGIS round 4 N4-1: the latest `clock_ahead_acknowledged` on the ledger: (through_seq, its recorded_at).
+    clock_ack: std::sync::Mutex<Option<(u64, chrono::DateTime<chrono::Utc>)>>,
+}
+
+/// AEGIS round 4 N4-1: the department and event type of Andre's clock acknowledgement (an entry on the ledger).
+const CLOCK_ACK_DEPARTMENT: &str = "ledger";
+const CLOCK_ACK_EVENT: &str = "clock_ahead_acknowledged";
+
+/// The latest acknowledgement recorded in `entries` (restart-safe: the ledger itself is the record).
+fn find_clock_ack(entries: &[LedgerEntry]) -> Option<(u64, chrono::DateTime<chrono::Utc>)> {
+    entries.iter().rev().find_map(|e| {
+        let ev = e.as_event()?;
+        if ev.department != CLOCK_ACK_DEPARTMENT || ev.event_type != CLOCK_ACK_EVENT {
+            return None;
+        }
+        let n: u64 = ev.subject_id.strip_prefix("seq-")?.parse().ok()?;
+        entries.get(n as usize).map(|t| (n, t.recorded_at()))
+    })
+}
+
+/// The newest entry is ahead of the wall clock only because of the acknowledged pinned run: its stamp is at most
+/// the acknowledged stamp plus 1 µs per entry since (the max rule while pinned). A further jump is not covered.
+fn ack_covers(ack: Option<(u64, chrono::DateTime<chrono::Utc>)>, last_seq: u64, last: chrono::DateTime<chrono::Utc>) -> bool {
+    match ack {
+        Some((n, x)) if last_seq >= n => {
+            let k = i64::try_from(last_seq - n).unwrap_or(i64::MAX / 2);
+            last <= x + chrono::Duration::microseconds(k)
+        }
+        _ => false,
+    }
 }
 
 /// CH-6 (red team c04 L1): with the log's disk full every append answered 500 while GET /health stayed 200, so
@@ -529,15 +561,83 @@ fn free_bytes(dir: &Path) -> Option<u64> {
 
 fn health(app: &App) -> (u16, String) {
     let mut reasons = app.health.reasons();
+    let mut warnings: Vec<&str> = Vec::new();
     // CH-12 / AEGIS round 3: the log is ahead of the host clock by more than 5 minutes. Appends are still accepted
-    // (stamped previous + 1 µs); a human must fix the clock, so this is a 503, never a silent warning.
-    if app.gate.read(&app.ledger, |l| ledger_rust::clock_behind_log(l.entries().last().map(|e| e.recorded_at()), chrono::Utc::now())) {
-        reasons.push("ledger_clock_behind_log".to_string());
+    // (stamped previous + 1 µs); a human must fix the clock, so this is a 503, never a silent warning. It clears by
+    // itself once the wall clock reaches the newest stamp (AEGIS round 4 N4-1), or turns into a 200 warning while an
+    // Andre acknowledgement (POST /ledger/clock/acknowledge) covers the same pinned run.
+    let last = app.gate.read(&app.ledger, |l| l.entries().last().map(|e| (e.seq(), e.recorded_at())));
+    if let Some((seq, at)) = last {
+        if ledger_rust::clock_behind_log(Some(at), chrono::Utc::now()) {
+            let ack = *app.clock_ack.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if ack_covers(ack, seq, at) {
+                warnings.push("ledger_clock_behind_log_acknowledged");
+            } else {
+                reasons.push("ledger_clock_behind_log".to_string());
+            }
+        }
     }
-    if reasons.is_empty() {
+    if !reasons.is_empty() {
+        (503, serde_json::json!({"status": "degraded", "service": "ledger-rust", "reasons": reasons}).to_string())
+    } else if warnings.is_empty() {
         (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string())
     } else {
-        (503, serde_json::json!({"status": "degraded", "service": "ledger-rust", "reasons": reasons}).to_string())
+        (200, serde_json::json!({"status": "ok", "service": "ledger-rust", "warnings": warnings}).to_string())
+    }
+}
+
+/// AEGIS round 4 N4-1: POST /ledger/clock/acknowledge `{"through_seq": N}` with Andre's X-Andre-Approval-Token.
+/// N must be the newest entry and the log must be ahead of the wall clock now. Records `clock_ahead_acknowledged`
+/// (department `ledger`, subject `seq-N`) on the ledger; /health then reports the pinned run as a 200 warning.
+/// Stamps are unchanged (the max rule).
+fn clock_acknowledge(app: &App, through_seq: u64) -> (u16, String) {
+    let now = chrono::Utc::now();
+    let r = app.gate.write(&app.ledger, |l| {
+        let last = l.entries().last().map(|e| (e.seq(), e.recorded_at()));
+        match last {
+            Some((seq, at)) if seq == through_seq && ledger_rust::clock_behind_log(Some(at), now) => {
+                let payload = format!("{through_seq}|{}|{}", at.to_rfc3339(), now.to_rfc3339());
+                let input = EventInput {
+                    event_id: format!("ledger-clock-ack-{through_seq}"),
+                    department: CLOCK_ACK_DEPARTMENT.to_string(),
+                    event_type: CLOCK_ACK_EVENT.to_string(),
+                    actor: "andre".to_string(),
+                    subject_id: format!("seq-{through_seq}"),
+                    payload_sha256: hex::encode(Sha256::digest(payload.as_bytes())),
+                    summary: format!("Andre acknowledged that entries through seq {through_seq} are stamped ahead of the host clock"),
+                };
+                let out = handle_event(l, input);
+                if out.0 == 201 || out.0 == 200 {
+                    ledger_log!("ledger-rust: ALERT clock_ahead_acknowledged through seq {through_seq} (stamp {}, wall clock {})",
+                                at.to_rfc3339(), now.to_rfc3339());
+                    (out, Some((through_seq, at)))
+                } else {
+                    (out, None)
+                }
+            }
+            Some((seq, _)) if seq != through_seq => (error_json(409, format!("through_seq must be the newest entry ({seq})")), None),
+            _ => (error_json(409, "the log is not ahead of the wall clock; nothing to acknowledge".to_string()), None),
+        }
+    });
+    let (out, ack) = r;
+    if let Some(a) = ack {
+        *app.clock_ack.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(a);
+    }
+    app.health.note_write(out.0);
+    out
+}
+
+fn andre_ok(app: &App, supplied: Option<&str>) -> bool {
+    match (app.andre_sha256, supplied) {
+        (Some(want), Some(tok)) if !tok.is_empty() => {
+            let got: [u8; 32] = Sha256::digest(tok.as_bytes()).into();
+            let mut diff = 0u8;
+            for (x, y) in got.iter().zip(want.iter()) {
+                diff |= x ^ y;
+            }
+            diff == 0
+        }
+        _ => false,
     }
 }
 
@@ -1137,6 +1237,29 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
                     app.health.note_write(r.0);
                     r
                 }
+            }
+        }
+
+        (Method::POST, "/ledger/clock/acknowledge", None) => {
+            let supplied = request.headers().get("x-andre-approval-token").and_then(|v| v.to_str().ok()).map(str::to_string);
+            if !andre_ok(&app, supplied.as_deref()) {
+                ledger_log!("ledger-rust: ALERT founder_approval_refused on clock/acknowledge");
+                return forbidden("Andre's approval token is required (LEDGER_ANDRE_APPROVAL_TOKEN_SHA256)".to_string());
+            }
+            let body = match read_body(request).await {
+                Ok(b) => b,
+                Err(resp) => return resp,
+            };
+            let n = serde_json::from_str::<serde_json::Value>(&body).ok().and_then(|v| {
+                let o = v.as_object()?;
+                if o.len() != 1 {
+                    return None;
+                }
+                o.get("through_seq")?.as_u64()
+            });
+            match n {
+                None => error_json(400, "body must be {\"through_seq\": <seq>}".to_string()),
+                Some(n) => on_blocking(&app, move |app| clock_acknowledge(app, n)).await,
             }
         }
 
@@ -1829,6 +1952,23 @@ fn load_min_free_bytes() -> u64 {
     }
 }
 
+/// AEGIS round 4 N4-1: LEDGER_ANDRE_APPROVAL_TOKEN_SHA256 (optional; 64 lowercase hex), the only credential that can
+/// acknowledge a clock jump.
+fn load_andre_sha256() -> Option<[u8; 32]> {
+    match std::env::var("LEDGER_ANDRE_APPROVAL_TOKEN_SHA256") {
+        Err(_) => None,
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => {
+            let ok = v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            match (ok, hex::decode(&v)) {
+                (true, Ok(b)) => Some(b.try_into().expect("32 bytes")),
+                _ => refuse("LEDGER_ANDRE_APPROVAL_TOKEN_SHA256 must be the 64-character lowercase hex SHA-256 of \
+                             Andre's token (printf %s \"$TOKEN\" | sha256sum)".to_string()),
+            }
+        }
+    }
+}
+
 /// RTM-07: LEDGER_HEAD_SIGNING_KEY (optional, at least MIN_TOKEN_BYTES bytes).
 fn load_head_key() -> Option<Vec<u8>> {
     match std::env::var("LEDGER_HEAD_SIGNING_KEY") {
@@ -1999,6 +2139,7 @@ fn main() {
     // The whole chain was verified by open: GET /ledger/verify starts from here.
     let head = ledger.head();
     let verified = Verified { len: head.entries as usize, hash: head.head_hash };
+    let clock_ack = find_clock_ack(ledger.entries());
     let app = Arc::new(App {
         ledger: Mutex::new(ledger),
         gate: WriterPriority::new(),
@@ -2016,6 +2157,8 @@ fn main() {
             disk_low_logged: std::sync::atomic::AtomicBool::new(false),
         },
         head_key,
+        andre_sha256: load_andre_sha256(),
+        clock_ack: std::sync::Mutex::new(clock_ack),
     });
     runtime.block_on(serve(listener, app, max_connections));
 }
@@ -2024,6 +2167,22 @@ fn main() {
 #[cfg(test)]
 mod health_tests {
     use super::*;
+
+    /// AEGIS round 4 N4-1: the 503 clears by itself once the wall clock is within 5 minutes of the newest stamp
+    /// (expected recovery time: the size of the jump, minus 5 minutes); an ack covers the same pinned run only.
+    #[test]
+    fn n4_1_the_alarm_clears_when_real_time_reaches_the_stamp_and_an_ack_covers_only_its_run() {
+        let t = chrono::Utc::now() + chrono::Duration::hours(2);
+        assert!(ledger_rust::clock_behind_log(Some(t), t - chrono::Duration::minutes(6)));
+        assert!(!ledger_rust::clock_behind_log(Some(t), t - chrono::Duration::minutes(4)), "clears 5 min before");
+        assert!(!ledger_rust::clock_behind_log(Some(t), t + chrono::Duration::seconds(1)));
+        let us = chrono::Duration::microseconds;
+        assert!(ack_covers(Some((10, t)), 10, t));
+        assert!(ack_covers(Some((10, t)), 13, t + us(3)), "pinned entries after the ack");
+        assert!(!ack_covers(Some((10, t)), 13, t + chrono::Duration::days(1)), "a new jump is not covered");
+        assert!(!ack_covers(Some((10, t)), 9, t), "an ack of a later seq does not cover an earlier head");
+        assert!(!ack_covers(None, 10, t));
+    }
 
     fn state(min_free: u64) -> HealthState {
         HealthState {

@@ -66,10 +66,11 @@ restart does not hide it.
      stored time and the entry count) and compare `GET /ledger/anchor` with the last record in
      `ledger_anchors.jsonl` and with your off-Railway copy (railway.md, "Daily external anchor").
   2. If the ledger was restored from a backup **on purpose** (you know why entries are missing), record that decision
-     in your notes. Then, on Compliance's volume (`railway ssh` into compliance), move both files aside with today's
-     date: `mv ledger_anchors.jsonl ledger_anchors.<date>.jsonl` and `mv ledger_anchor_state.json
-     ledger_anchor_state.<date>.json`, and redeploy compliance. The next run starts a new chain from today's head;
-     the old files stay as evidence.
+     in your notes. Then, on Compliance's volume (`railway ssh` into compliance), **copy** both files to dated
+     archives (`cp ledger_anchors.jsonl ledger_anchors.<date>.jsonl`, `cp ledger_anchor_state.json
+     ledger_anchor_state.<date>.json`; never delete them: they are the history), then move the live pair aside and
+     redeploy compliance. The next run starts a new chain from today's head; the archived chain stays verifiable with
+     the same key.
   3. If you did not restore the ledger: someone rewrote it. Keep both volumes as they are, take snapshots, and treat
      the ledger as untrusted from the stored entry onward.
 - **`anchor_check_failing`**: the job itself failed (a garbage record inside the store, a state file Compliance cannot
@@ -77,9 +78,19 @@ restart does not hide it.
   next successful run (daily, and at every start). A garbage record in the middle of the store is not repaired by
   itself: move the store aside as in step 2 above after checking it.
 - **`anchor_store_missing`**: the state file says anchors were stored, but `ledger_anchors.jsonl` is gone, empty or
-  shorter than it was. No new chain is started over it. Find out why (a volume restore, a deletion); restore the file
-  from a volume backup, or, after Andre's review, move `ledger_anchor_state.json` aside as in step 2 above so a new
-  chain starts.
+  shorter than it was. No new chain is started over it. Find out why (a volume restore, a deletion). Restore
+  `ledger_anchors.jsonl` **and** `ledger_anchor_state.json` together from the same volume backup (a store restored
+  alone is older than the state and stays red). If only the store survives, keep it: after Andre's review run the
+  one-time resync below; it rebuilds the state from the store's own verified records and discards nothing.
+- **`anchor_state_invalid`** (AEGIS round 4 N4-5): the state file is missing beside a store with history, is unsigned
+  (every state written before round 4: the first start after the upgrade shows this once), or does not verify with
+  `COMPLIANCE_LEDGER_ANCHOR_KEY` (edited, or another key). Nothing is written over it. After checking why, run once on
+  compliance (`railway ssh`):
+  `COMPLIANCE_LEDGER_ANCHOR_KEY=<the key> python3 src/ledger_anchor.py resync "$COMPLIANCE_DATA_DIR"`. It repairs a
+  torn tail back to the last valid record, verifies every record, keeps any recorded mismatch, and writes a signed
+  state. If a record does not verify it refuses; treat that as a mismatch (above).
+- **A failed append** (ENOSPC mid-record) is cut back to the size before it and the run fails
+  (`anchor_check_failing`); it is never reported as stored. Free space; the next run stores the anchor.
 - **`ledger_anchor_stale`**: no anchor stored or confirmed for more than 26 hours, counted from the last good run
   kept in the state file (a restart does not reset it). Usually Compliance cannot read
   `GET /ledger/anchor` (its ledger token changed, or the ledger is down). Check Compliance's log for
@@ -98,7 +109,11 @@ restart does not hide it.
   set. Only the new values work now; the old ones are refused. Promote each `_NEXT` value to current, delete the
   `_NEXT` variables and `<P>_ROTATION_ENDS_AT`, deploy (docs/runbooks/token-rotation.md).
 - **`ledger_clock_behind_log`** (ledger): the newest entry is more than 5 minutes ahead of the host clock. New entries
-  are stamped 1 µs after it (never backwards) until real time catches up. Fix the host clock. If an entry was written
+  are stamped 1 µs after it (never backwards) until real time catches up. Fix the host clock. The 503 clears by
+  itself after (size of the jump − 5 minutes) of real time. When the jump is known and understood (for example a VM
+  that booted with a wrong clock), acknowledge it: `POST /ledger/clock/acknowledge` `{"through_seq": <newest seq>}`
+  with a ledger bearer and your `X-Andre-Approval-Token`. It is recorded on the ledger and turns the 503 into the
+  200 warning `ledger_clock_behind_log_acknowledged` for that pinned run only; another jump is a 503 again. If an entry was written
   under a clock far in the future (for example at boot), the stamps stay pinned and the alarm stays on until real
   time passes that entry: note the `seq` of the first wrong entry; `seq` is the order of record and the chain stays
   verifiable (services/ledger-rust/README.md, "Time").
@@ -108,3 +123,4 @@ restart does not hide it.
 | Warning | Where | What to do |
 |---|---|---|
 | `ledger_anchor_unkeyed` | compliance | Section 4. |
+| `ledger_clock_behind_log_acknowledged` | ledger | Section 5: a pinned run you acknowledged; it ends when real time passes the newest stamp. |

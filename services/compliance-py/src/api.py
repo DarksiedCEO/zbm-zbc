@@ -215,6 +215,8 @@ def make_require_auth(required_token: str, next_token: Optional[str] = None,
                                 headers={"WWW-Authenticate": "Bearer"})
         supplied = authorization.removeprefix("Bearer ")
         valid = accepted.matches(supplied)   # non-ASCII token: invalid (401), never a 500
+        if not valid and accepted.retired(supplied):
+            token_rotation.refused_old("compliance-py", "service_token")   # AEGIS round 4 N4-6: loud, not a silent 401
         if not valid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
                                 headers={"WWW-Authenticate": "Bearer"})
@@ -247,6 +249,10 @@ class Callers:
         for name, dg in current + live:  # no early exit
             if hmac.compare_digest(d, dg):
                 found = name
+        if found is None and expired:
+            for name, dg in self._digests:
+                if name in rotated and hmac.compare_digest(d, dg):
+                    token_rotation.refused_old("compliance-py", f"caller_token:{name}")   # AEGIS round 4 N4-6
         return found
 
 

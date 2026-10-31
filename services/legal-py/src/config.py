@@ -174,7 +174,7 @@ def load(env: Optional[dict] = None) -> Settings:
     if token in every or (andre and andre in every):
         raise RuntimeError("a caller token equals the service or Andre token")
     rotation = token_rotation.load(env, "LEGAL", CALLER_NAMES, _check_token,
-                                   [token, *every], andre)
+                                   [token, *every], andre, current_service=token, current_callers=callers)
     _off(env, "LEGAL_COUNSEL_CHANNEL", "a counsel channel (spec D1: engagement letter TBD)")
     _off(env, "LEGAL_ESIGN_PROVIDER", "an e-sign provider (spec D2, LR decision 7)")
     if _flag(env, "LEGAL_PORTAL_FAQ", False):

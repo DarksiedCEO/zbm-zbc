@@ -159,7 +159,7 @@ def load(env: Optional[dict] = None) -> Settings:
         if len(set(callers.values())) != len(callers):
             raise RuntimeError("COMPLIANCE_CALLER_TOKENS: caller tokens must all be distinct")
     rotation = token_rotation.load(env, "COMPLIANCE", CALLER_NAMES, _rotation_token_check, [token, *callers.values()],
-                                   andre)
+                                   andre, current_service=token, current_callers=callers)
     for name in ("COMPLIANCE_SANCTIONS_PROVIDER", "COMPLIANCE_A11Y_PROVIDER"):
         v = (env.get(name) or "").strip().lower()
         if v not in ("", "none"):

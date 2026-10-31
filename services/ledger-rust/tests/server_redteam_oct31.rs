@@ -126,7 +126,11 @@ fn refused(log: &Scratch, env: &[(&str, &str)]) -> Result<i32, String> {
 }
 
 fn http(port: u16, method: &str, path: &str, token: Option<&str>, body: &str) -> (u16, String) {
-    let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
+    http_h(port, method, path, token, "", body)
+}
+
+fn http_h(port: u16, method: &str, path: &str, token: Option<&str>, extra: &str, body: &str) -> (u16, String) {
+    let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n{extra}")).unwrap_or_default();
     let raw = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\n\
          Connection: close\r\n\r\n{body}",
@@ -324,4 +328,58 @@ fn r3_a_small_ntp_step_back_never_alarms() {
     assert_eq!(st, 201, "{body}");
     let (st, h) = http(s.port, "GET", "/health", None, "");
     assert_eq!(st, 200, "{h}");
+}
+
+/// AEGIS round 4 N4-1: one transient forward jump pinned the 503 for as long as the bad stamp is ahead, with no way
+/// to clear it. Andre (and only Andre: X-Andre-Approval-Token against LEDGER_ANDRE_APPROVAL_TOKEN_SHA256) can
+/// acknowledge the pinned run through a seq: the ack is recorded on the ledger itself (`clock_ahead_acknowledged`),
+/// /health turns into 200 with the warning `ledger_clock_behind_log_acknowledged` while that same pinned run lasts,
+/// across restarts; stamps keep the max rule. A NEW jump beyond the acknowledged one is 503 again.
+#[test]
+fn n4_1_andre_can_acknowledge_a_known_clock_jump_and_it_is_audited() {
+    use ledger_rust::{EventInput, Ledger, LedgerEntry};
+    let andre = "andre-ledger-approval-token-0123456789abcdef";
+    let andre_hash = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(andre.as_bytes()));
+    let env = [("LEDGER_ANDRE_APPROVAL_TOKEN_SHA256", andre_hash.as_str())];
+    let log = Scratch::new("n41");
+    let mut l = Ledger::new();
+    let mut e = l.build_event_entry(EventInput {
+        event_id: "fin-jump-0".into(), department: "finance".into(), event_type: "invoice_issued".into(),
+        actor: "oct31_test".into(), subject_id: "inv_1".into(), payload_sha256: "cd".repeat(32), summary: "jump".into(),
+    });
+    if let LedgerEntry::Event(ev) = &mut e {
+        ev.recorded_at = chrono::Utc::now() + chrono::Duration::days(36525);
+        ev.hash = sha256_hex(&ledger_rust::event_canonical(ev));
+    }
+    l.push_entry(e);
+    std::fs::write(&log.0, format!("{}\n", serde_json::to_string(&l.entries()[0]).unwrap())).unwrap();
+    common::write_head_for(&log.0);
+    let s = start(&log, &env);
+    assert_eq!(http(s.port, "GET", "/health", None, "").0, 503);
+    let ack = |hdr: &str, seq: u64| http_h(s.port, "POST", "/ledger/clock/acknowledge", Some(FINANCE_TOKEN), hdr,
+                                             &json!({"through_seq": seq}).to_string());
+    assert_eq!(ack("", 0).0, 403, "no Andre header");
+    assert_eq!(ack("X-Andre-Approval-Token: not-andre-0000000000000000000000\r\n", 0).0, 403);
+    let hdr = format!("X-Andre-Approval-Token: {andre}\r\n");
+    assert_eq!(ack(&hdr, 5).0, 409, "through_seq must be the newest entry");
+    let (st, body) = ack(&hdr, 0);
+    assert_eq!(st, 201, "{body}");
+    let (st, h) = http(s.port, "GET", "/health", None, "");
+    assert_eq!(st, 200, "{h}");
+    assert!(h.contains("ledger_clock_behind_log_acknowledged"), "{h}");
+    // audited: the ack is an entry on the ledger itself (department `ledger`; a finance-scoped reader does not see it)
+    let (_, head) = http(s.port, "GET", "/ledger/head", Some(FINANCE_TOKEN), "");
+    assert!(head.contains("\"entries\":2"), "{head}");
+    let raw = std::fs::read_to_string(&log.0).unwrap();
+    assert!(raw.contains("\"event_type\":\"clock_ahead_acknowledged\"") && raw.contains("\"subject_id\":\"seq-0\""), "{raw}");
+    assert_eq!(http(s.port, "POST", "/ledger/events", Some(FINANCE_TOKEN), &event("fin-after-ack", "finance", "x")).0, 201);
+    assert_eq!(http(s.port, "GET", "/health", None, "").0, 200, "the same pinned run stays acknowledged");
+    drop(s);
+    let s = start(&log, &env);
+    assert_eq!(http(s.port, "GET", "/health", None, "").0, 200, "the ack survives a restart");
+    drop(s);
+    // without the Andre hash configured, the route is closed
+    let s = start(&log, &[]);
+    assert_eq!(http_h(s.port, "POST", "/ledger/clock/acknowledge", Some(FINANCE_TOKEN),
+                      &format!("X-Andre-Approval-Token: {andre}\r\n"), &json!({"through_seq": 2}).to_string()).0, 403);
 }

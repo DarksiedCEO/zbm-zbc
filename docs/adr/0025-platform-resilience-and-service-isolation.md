@@ -182,7 +182,12 @@ disagree, this section holds.
   while entries were written (e.g. 100 years at boot) pins every later stamp at previous + 1 µs until real time
   catches up, across restarts, and the alarm stays on the whole time: an accepted, documented consequence of
   "never backwards", never silent. The stamps of such a period do not tell real time; `seq` and the hash chain stay
-  the record. No service decides anything from the ledger's `recorded_at`.
+  the record. No money, compliance or legal decision reads the ledger's `recorded_at`; the one reader is the
+  orchestrator's `unfinishedStatus`, which labels a scan with no completion record `abandoned` or `incomplete` from
+  its start event's `recorded_at` (both are excluded scans; under a pinned future stamp a dead scan stays labelled
+  `incomplete`, a label only). Round 4 (N4-1): the 503 clears by itself after (jump − 5 minutes) of real time, and
+  Andre can acknowledge a known pinned run (`POST /ledger/clock/acknowledge`, Andre's token only, recorded on the
+  ledger as `clock_ahead_acknowledged`), which turns it into a 200 warning for that run only.
 - **N-2/N-6, the anchor job fails loud.** A torn last line of `ledger_anchors.jsonl` is cut back to the last whole
   record (ALERT `ledger_anchor_store_repaired`). Any failure other than a ledger read is `anchor_check_failing`
   (503) until a run succeeds; no anchor stored or confirmed for 26 h is `ledger_anchor_stale` (503); a mismatch is
@@ -191,7 +196,14 @@ disagree, this section holds.
   Round 3 (N3-6, N3-7): staleness is counted from the last good run (or, before any, the first time the store was
   seen) kept in the state file, so a restart never resets it; a last record that is complete and MAC-valid and only
   lacks its newline is kept (newline added); a store that is missing, empty or shorter than the state file recorded
-  is `anchor_store_missing` (503) and no new chain is started over it.
+  is `anchor_store_missing` (503) and no new chain is started over it. Round 4 (N4-4, N4-5): an anchor record is
+  written whole and fsynced or cut back and the run fails (never reported as stored); the state file is HMAC'd with
+  the anchor key and written by temp-file-and-rename; a missing state beside a store with history, an unsigned state
+  (every pre-round-4 state) or an edited one is `anchor_state_invalid` (503) and nothing is written over it until the
+  operator runs the one-time `python3 src/ledger_anchor.py resync <COMPLIANCE_DATA_DIR>`, which rebuilds the signed
+  state from the store's own verified records (no record is ever discarded). Residual: an actor who deletes BOTH files
+  (or loses the volume) starts a fresh chain; the ledger's `LEDGER_ANCHORED_HEAD` floor and the off-Railway copy are
+  the controls for that.
 - **N-3, `/health` is never "ok" in reconcile mode (supersedes F-1's "200 in reconcile mode").** Reconcile mode is
   503 `"status":"maintenance"`; Railway's deploy healthcheck is `/livez`, so the reconcile deploy still activates.
   The heartbeat: the curl check in docs/deploy/railway.md now fails on maintenance too, and
@@ -202,12 +214,18 @@ disagree, this section holds.
   is the whole call site; it also reports `service_flapping` (non-ok in more than half of at least 4 polls over 30
   minutes), every warning code, and `health_poll_unconfigured` (an empty, malformed or incomplete
   `OPS_HEALTH_URLS`, also logged as a warning). Until that wiring, the curl heartbeat in docs/deploy/railway.md is
-  the only live detector; every alarm that matters is a 503, which it catches.
+  the only live detector; every alarm that matters is a 503, which it catches. Round 4 (N4-2, N4-3): flapping is
+  non-ok in at least 3 of the last 6 polls, or in more than 30% of at least 4 polls over 30 minutes; a 503's code is
+  the sorted set of its reason codes, so a new or worse reason on an alerting service is a new condition.
 - **N-4/N-8, N3-9, an ended rotation window never stops a start and fails closed (supersedes F-11's refusal).**
   After `<P>_ROTATION_ENDS_AT` only the `_NEXT` values are accepted and the old ones are refused (a rotation is often
   a compromise of the old value); every start logs a warning, and `/health` is 503 `rotation_expired_unpromoted`
   until the operator promotes each `_NEXT` value to current and removes the variables (`/livez` stays 200, so there is
-  no crash loop). `rotation_in_progress` is true only while the window is open. A `<P>_ROTATION_ENDS_AT` that is not
+  no crash loop). `rotation_in_progress` is true only while the window is open. Round 4 (N4-6): callers reference the
+  accepting service's variables in the IaC, so the runbook moves the reference to `<P>_SERVICE_TOKEN_NEXT` during the
+  window; a `_NEXT` value equal to the same slot's current value is accepted as "promoted" so the reference can be
+  moved back without a gap; every old value refused after the window logs a `rotation_old_token_refused` alert and
+  every start with an unpromoted window logs `rotation_expired_unpromoted`. A `<P>_ROTATION_ENDS_AT` that is not
   ISO 8601 with a zone refuses the deploy, with or without a `_NEXT`.
 - **N-7, the FIN guard blocks only FIN-owned rows (supersedes F-8's alias rule).** Legal refuses Compliance's
   invalidation of a `FIN-*` target or a `FIN-*` canonical row. The shared Legal rows a FIN alias points to (CQ-01,
@@ -216,7 +234,9 @@ disagree, this section holds.
   gate passed first) by the chaos probe `probe_n7.py`.
 - **F-15b (round 3).** Finance, Legal and Compliance register their routes with `access_redact.register_routes(app)`:
   the access log then keeps only the static words of route templates, so a lowercase word in an id position is
-  `:id`. The other services keep the plain-word rule (the shared module is byte-identical in all 17).
+  `:id`. The other services keep the plain-word rule (the shared module is byte-identical in all 17). Round 4
+  (N4-7, N4-8): seo and detection register their routes too; Legal's refused-Andre-header record carries the route
+  template, never the raw request path.
 - **N-9.** The pin check also reads `ONBUILD COPY --from` / `ONBUILD RUN --mount=from`, a `# escape=` directive with
   backtick continuations, and the `# syntax=` frontend image. No Dockerfile in the repository uses them today. The
   four builder digests are still to be pasted from CI (docs/ci.md); that job stays red until then.

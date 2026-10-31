@@ -91,6 +91,15 @@ Ordering is `seq`. One rule, no heuristics (CH-12; AEGIS round 3):
   and `/health` stays 503 the whole time. The entries remain verifiable and `seq` remains the order of record; the
   stamps of that period do not tell the real time. Fix the host clock as soon as the alarm fires
   (docs/runbooks/held-service-and-ledger-anchor.md, section 5).
+- **Recovery time (AEGIS round 4 N4-1):** the 503 clears by itself once the wall clock is within 5 minutes of the
+  newest stamp, i.e. after (size of the jump − 5 minutes) of real time. A 10-minute jump clears in about 5 minutes;
+  a one-day jump in about a day; a 100-year jump never in practice.
+- **Acknowledge a known jump:** `POST /ledger/clock/acknowledge` `{"through_seq": <newest seq>}` with a bearer token
+  and `X-Andre-Approval-Token` (checked against `LEDGER_ANDRE_APPROVAL_TOKEN_SHA256`; unset = refused). It is
+  recorded on the ledger itself (`clock_ahead_acknowledged`, department `ledger`, subject `seq-<n>`) and turns the
+  503 into a 200 warning `ledger_clock_behind_log_acknowledged` for that same pinned run, across restarts. Stamps are
+  unchanged (the max rule). A further jump beyond the acknowledged run is a 503 again. 403 without Andre's token, 409
+  when `through_seq` is not the newest entry or the log is not ahead of the clock.
 
 ## Rollback (one-way change, AEGIS wave A F-10)
 

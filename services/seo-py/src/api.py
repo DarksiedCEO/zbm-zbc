@@ -17,6 +17,7 @@ bearer and caller blocks are bizdev-py's (itself service-py's / security-py's / 
 from __future__ import annotations
 
 import asyncio
+import access_redact
 import hashlib
 import hmac
 import logging
@@ -569,6 +570,7 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         """The evidence view Compliance (38) and auditors use (R6-M1): unanchored evidence = attempted, not done."""
         return svc.audit_evidence(limit, offset, event_type)
 
+    access_redact.register_routes(app)                   # AEGIS round 4 N4-8: tenant slugs never reach the access log
     return app
 
 

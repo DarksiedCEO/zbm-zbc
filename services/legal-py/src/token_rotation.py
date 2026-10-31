@@ -58,6 +58,20 @@ class Secret:
             return self.digests + self.next_digests
         return self.next_digests
 
+    def retired(self, supplied: Optional[str]) -> bool:
+        """AEGIS round 4 N4-6: ``supplied`` is an OLD value refused because the window ended unpromoted (a caller that
+        was never moved to the new value). The caller logs a ``rotation_old_token_refused`` alert, never silent."""
+        if not supplied or not self.next_digests or self.next_until is None or self.clock() < self.next_until:
+            return False
+        try:
+            d = digest(supplied)
+        except (TypeError, AttributeError):
+            return False
+        hit = False
+        for x in self.digests:
+            hit |= hmac.compare_digest(d, x)
+        return hit
+
     def matches(self, supplied: Optional[str]) -> bool:
         accepted = self._accepted()
         if not supplied or not accepted:
@@ -104,8 +118,15 @@ class Rotation:
         return self.has_next and self.ends_at is not None and time.time() >= self.ends_at
 
 
+def refused_old(service: str, what: str) -> None:
+    """One ``rotation_old_token_refused`` alert line (no token, no digest; AEGIS round 4 N4-6)."""
+    import crash_recovery as CR
+    CR.alert("rotation_old_token_refused", service, credential=what)
+
+
 def load(env: dict, prefix: str, caller_names: Iterable[str], check_token: Callable[[str, str], None],
-         others: Iterable[Optional[str]], andre: Optional[str] = None) -> Rotation:
+         others: Iterable[Optional[str]], andre: Optional[str] = None, current_service: Optional[str] = None,
+         current_callers: Optional[dict] = None) -> Rotation:
     """Reads and checks the rotation variables. ``others``: every current token of this service that is NOT Andre's
     (service, callers, a second approver); ``andre``: Andre's plaintext token when it is still set. No next value may
     equal a current one or another next value, and Andre's hash may not be the hash of any other token."""
@@ -147,6 +168,22 @@ def load(env: dict, prefix: str, caller_names: Iterable[str], check_token: Calla
                            f"tokens; delete {prefix}_ANDRE_APPROVAL_TOKEN (the hash replaces it)")
     if next_hash and not (cur_hash or andre):
         raise RuntimeError(f"{prefix}_ANDRE_APPROVAL_TOKEN_NEXT_SHA256 needs a current Andre token or hash")
+    # AEGIS round 4 N4-6: a NEXT value equal to the SAME slot's current value is a rotation already promoted while
+    # the callers' IaC references are switched back (docs/runbooks/token-rotation.md): accepted, ignored, logged.
+    promoted = []
+    if nxt is not None and current_service is not None and nxt == current_service:
+        nxt = None
+        promoted.append(f"{prefix}_SERVICE_TOKEN_NEXT")
+    for k in [k for k, v in callers.items() if current_callers and current_callers.get(k) == v]:
+        del callers[k]
+        promoted.append(f"{prefix}_CALLER_TOKENS_NEXT[{k}]")
+    if next_hash and cur_hash and next_hash == cur_hash:
+        next_hash = ()
+        promoted.append(f"{prefix}_ANDRE_APPROVAL_TOKEN_NEXT_SHA256")
+    if promoted:
+        logging.getLogger("token_rotation").warning(
+            "%s equal the current values (the rotation is promoted); delete them and %s_ROTATION_ENDS_AT",
+            ", ".join(promoted), prefix)
     new = [t for t in [nxt, *callers.values()] if t]
     cur = [t for t in [*others, andre] if t]
     if len(set(new)) != len(new) or any(t in cur for t in new):
@@ -179,6 +216,8 @@ def load(env: dict, prefix: str, caller_names: Iterable[str], check_token: Calla
             # AEGIS round 2 N-4: an ended window must never stop a restart (a crash loop of the money path).
             # Round 3 N3-9: only the next values are accepted from now on; this warning is logged at every start and
             # /health is 503 rotation_expired_unpromoted.
+            import crash_recovery as CR
+            CR.alert("rotation_expired_unpromoted", prefix.lower())   # AEGIS round 4 N4-6: an alert at every start
             logging.getLogger("token_rotation").warning(
                 "%s_ROTATION_ENDS_AT has passed: the rotation window is expired; ONLY the *_NEXT values are accepted "
                 "now and the old values are refused (fail closed). Promote each *_NEXT value to current and remove "
