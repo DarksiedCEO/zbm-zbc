@@ -942,26 +942,38 @@ curl -sS $C/health                                             # register_versio
 Railway checks `/health` only while a deployment starts, and compliance has no public domain, so an outside uptime
 monitor cannot reach it directly. Set up a **private check with a heartbeat** (once, about 20 minutes):
 
-1. At an uptime service that offers heartbeat (dead-man) monitors (for example Better Stack or Healthchecks.io), make a
-   heartbeat monitor with a 15-minute period and a 15-minute grace, alerting your phone/email. Copy its ping URL
-   (treat it as a secret).
+1. At an uptime service that offers heartbeat (dead-man) monitors (for example Better Stack or Healthchecks.io), make
+   **two** heartbeat monitors, each with a 15-minute period and a 15-minute grace, alerting your phone/email: **alive
+   and holds** (the alarm for a payment Compliance holds) and **configuration** (a deploy step left half-done). Copy
+   both ping URLs (treat them as secrets).
 2. In the Railway project, add a service from the public `curlimages/curl` image (pin its digest), no domain, no volume,
    with a cron schedule `*/10 * * * *` and the start command
 
    ```sh
-   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 http://legal.railway.internal:8420/health | grep -Eq "\"status\": ?\"ok\"" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
+   sh -c 'L=$(curl -fsS --max-time 10 http://legal.railway.internal:8420/health | tr -d " "); W=$(printf %s "$L" | sed -n "s/.*\"warnings\":\[\([^]]*\)\].*/\1/p" | tr "," "\n" | grep -v "^\"optional_caller_unset:[a-z0-9_]*\"$"); printf %s "$L" | grep -Eq "\"status\":\"(ok|warning)\"" && [ -z "$W" ] && curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null && { printf %s "$L" | grep -q "\"status\":\"ok\"" && curl -fsS --max-time 10 "$HEARTBEAT_CONFIG_URL" >/dev/null || true; }'
    ```
 
-   and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance and finance over the private network
-   (`/health` needs no token) and pings the monitor only while compliance's `/health` answers 200 **and** finance has
-   no payment held by Compliance (`compliance_holds_open` is 0: held invoices, held unapplied money and open founder
-   alerts), and legal's `/health` says `"status": "ok"` (it is `degraded` while a log line the replay did not apply is
-   unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
-   /legal/v1/replay-quarantine/acknowledgements`, your token; it is `warning` while `COMPLIANCE_LEGAL_CALLER_TOKEN` is
-   unset: finish step D; and while `PORTAL_LEGAL_CALLER_TOKEN` is unset: finish steps 1-5 of "Client acceptance page
-   (ADR 0028)" below, `optional_caller_unset:client_portal`). A 503, a dead or unreachable service, an open hold, or
-   the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
-   things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
+   and two Sealed variables: `HEARTBEAT_URL` (the alive-and-holds ping URL) and `HEARTBEAT_CONFIG_URL` (the
+   configuration ping URL). It reaches legal, compliance and finance over the private network (`/health` needs no
+   token).
+   - **Alive and holds** (`HEARTBEAT_URL`) is pinged only while compliance's `/health` answers 200, finance has no
+     payment held by Compliance (`compliance_holds_open` is 0: held invoices, held unapplied money and open founder
+     alerts), and legal's `/health` says `"status": "ok"`, or `"warning"` whose **only** warnings are
+     `optional_caller_unset:<name>` (AEGIS RB-L1: a caller token not set yet must never silence the hold alarm, which
+     guards a 10-business-day OFAC reporting deadline). Legal `degraded` (a log line the replay did not apply is
+     unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
+     /legal/v1/replay-quarantine/acknowledgements`, your token), any other warning, a 503, a dead or unreachable
+     service, an open hold, or the check itself failing all stop this ping.
+   - **Configuration** (`HEARTBEAT_CONFIG_URL`) is pinged only after the first ping, and only while legal's
+     `/health` says exactly `"status": "ok"`. It alerts while an optional caller token is unset:
+     `optional_caller_unset:compliance_38` (`COMPLIANCE_LEGAL_CALLER_TOKEN`: finish step D) or
+     `optional_caller_unset:client_portal` (`PORTAL_LEGAL_CALLER_TOKEN`: finish steps 1-5 of "Client acceptance page
+     (ADR 0028)" below). It also alerts whenever the first one does.
+
+   An **alive and holds** alert therefore means one of three things: look at compliance's `/health`, then at
+   finance's `/fin/v1/breaks` (step G, "A payment Compliance holds"), then at legal's `/health` (`degraded`: the
+   replay quarantine above; another warning: read it). A **configuration** alert alone means a caller token is
+   still unset: legal's `/health` `warnings` names it.
 3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
    existing, not created twice), or leave it as the one hand-made service and note it in your Railway checklist.
 

@@ -25,6 +25,7 @@ import ast
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -832,6 +833,81 @@ class SeoSearchConsoleKey(unittest.TestCase):
         # trailing newlines are dropped (shell command substitution); seo strips the key file's whitespace anyway
         r = self.run_entrypoint({"SEO_GSC_SERVICE_ACCOUNT": FAKE_GSC_KEY + "\n"})
         self.assertEqual((r.returncode, r.stdout), (0, FAKE_GSC_KEY.encode()), r.stderr)
+
+
+class Heartbeat(unittest.TestCase):
+    """AEGIS rebase review RB-L1: the cron heartbeat (railway.md step E.2) is the only push alarm for a payment held by
+    Compliance (a sanctions hold carries a 10-business-day OFAC deadline). An optional caller token left unset (Legal's
+    /health ``warning`` whose ONLY warnings are ``optional_caller_unset:*``) must not silence that alarm; it is reported
+    by a second ping (HEARTBEAT_CONFIG_URL) instead. The command is run as written in the runbook, with a fake curl."""
+
+    FAKE_CURL = r"""#!/bin/sh
+for a in "$@"; do url="$a"; done
+case "$url" in
+  *legal.railway.internal*) [ -n "$LEGAL_BODY" ] || exit 22; printf %s "$LEGAL_BODY";;
+  *compliance.railway.internal*) [ -n "$COMPLIANCE_UP" ] || exit 22; printf %s '{"status":"ok"}';;
+  *finance.railway.internal*) printf %s "$FIN_BODY";;
+  *) echo "$url" >> "$PINGS";;
+esac
+"""
+
+    def command(self) -> str:
+        text = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = text.split("**E. ", 1)[1].split("**F. ", 1)[0]
+        lines = [ln.strip() for ln in step.splitlines() if ln.strip().startswith("sh -c '") and "HEARTBEAT_URL" in ln]
+        self.assertEqual(len(lines), 1, "step E.2 has exactly one heartbeat start command")
+        return lines[0]
+
+    def run_with(self, legal, holds=0, compliance=True) -> list:
+        d = Path(tempfile.mkdtemp())
+        try:
+            curl = d / "curl"
+            curl.write_text(self.FAKE_CURL)
+            curl.chmod(0o755)
+            pings = d / "pings"
+            env = {"PATH": f"{d}:/usr/bin:/bin", "PINGS": str(pings),
+                   "HEARTBEAT_URL": "https://hb.example/alive", "HEARTBEAT_CONFIG_URL": "https://hb.example/config",
+                   # compact JSON, as FastAPI answers
+                   "LEGAL_BODY": json.dumps(legal, separators=(",", ":")) if legal is not None else "",
+                   "COMPLIANCE_UP": "1" if compliance else "",
+                   "FIN_BODY": json.dumps({"status": "ok", "compliance_holds_open": holds}, separators=(",", ":"))}
+            argv = shlex.split(self.command())             # exactly as Railway runs the start command
+            self.assertEqual(argv[:2], ["sh", "-c"])
+            subprocess.run(argv, env=env, capture_output=True, timeout=30)
+            return sorted(pings.read_text().split()) if pings.exists() else []
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_an_unset_optional_caller_never_silences_the_hold_alarm(self):
+        alive, config = "https://hb.example/alive", "https://hb.example/config"
+        ok = {"status": "ok", "link_tags": {"status": "ok"}}
+        one = {"status": "warning", "warnings": ["optional_caller_unset:client_portal"]}
+        both = {"status": "warning", "warnings": ["optional_caller_unset:compliance_38",
+                                                  "optional_caller_unset:client_portal"]}
+        cases = [
+            ("all ok", ok, 0, True, [alive, config]),
+            ("portal caller unset", one, 0, True, [alive]),
+            ("both optional callers unset", both, 0, True, [alive]),
+            ("an open hold", ok, 1, True, []),
+            ("an open hold while a caller is unset", one, 2, True, []),
+            ("legal degraded", {"status": "degraded"}, 0, True, []),
+            ("legal degraded while a caller is unset", {**one, "status": "degraded"}, 0, True, []),
+            ("a warning that is not an optional caller", {"status": "warning", "warnings": ["something_else"]}, 0,
+             True, []),
+            ("a mixed warning", {"status": "warning", "warnings": ["optional_caller_unset:client_portal", "x"]}, 0,
+             True, []),
+            ("legal unreachable", None, 0, True, []),
+            ("compliance down", ok, 0, False, []),
+        ]
+        for name, legal, holds, comp, want in cases:
+            with self.subTest(name):
+                self.assertEqual(self.run_with(legal, holds, comp), sorted(want))
+
+    def test_the_runbook_names_both_monitors(self):
+        text = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = text.split("**E. ", 1)[1].split("**F. ", 1)[0]
+        self.assertIn("HEARTBEAT_CONFIG_URL", step)
+        self.assertIn("optional_caller_unset", step)
 
 
 if __name__ == "__main__":

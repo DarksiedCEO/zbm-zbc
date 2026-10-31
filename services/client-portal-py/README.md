@@ -26,7 +26,7 @@ cd src && python3 -m api                                # PORTAL_BIND_ADDR (127.
 |---|---|---|
 | `PORTAL_LEGAL_URL` | required | Legal's base URL; on Railway `http://legal.railway.internal:8420` |
 | `PORTAL_LEGAL_SERVICE_TOKEN` | required | Legal's service token (bearer) |
-| `PORTAL_LEGAL_CALLER_TOKEN` | required | this service's `client_portal` caller token at Legal: it reaches only Legal's two `/legal/v1/portal/...` routes |
+| `PORTAL_LEGAL_CALLER_TOKEN` | required | this service's `client_portal` caller token at Legal: it reaches only Legal's three `/legal/v1/portal/...` routes (`invitations/resolve`, `receipts`, `acceptances`) |
 | `PORTAL_LINK_TAG_KEY` | required | Legal's `LEGAL_LINK_TAG_KEY` (a Railway reference): a link token whose tag does not verify is the 404, refused before any budget is spent or Legal is asked (AEGIS r2 N-M1; `src/link_tag.py` is byte-identical to legal-py's) |
 | `PORTAL_EVIDENCE_KEY` | required | >= 32 printable characters. HMAC key for the client's IP address and user agent (recorded at Legal as HMACs only), the form signature and the retry key. Rotating it invalidates open forms (the client reloads) and changes `hmac_key_id` on later acceptances; keep the old value offline to verify old HMACs |
 | `PORTAL_PUBLIC_ORIGIN` | required | the exact origin the page is served from (`https://<domain>`); a POST whose `Origin` differs is refused |

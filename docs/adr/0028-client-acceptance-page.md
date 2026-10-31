@@ -293,9 +293,14 @@ approves the client contracts himself and his CQ-19 determination makes such a c
   branch generalised the behaviour: a route only an unset optional caller may call answers 503, and Legal's
   `/health` says `"status": "warning"` with `optional_caller_unset:<name>` for each. The portal's own dependency
   (503 while `client_portal` is unset, whatever token is sent) is kept.
-- Consequence: the compliance heartbeat (docs/deploy/railway.md, which pings only while Legal's `/health` says `ok`)
-  stays red after the first apply until `PORTAL_LEGAL_CALLER_TOKEN` is set and Legal redeployed, as it does for
-  `COMPLIANCE_LEGAL_CALLER_TOKEN`.
+- Consequence, and AEGIS RB-L1: the cron heartbeat (docs/deploy/railway.md step E.2) is split. Its **alive and
+  holds** ping (the only push alarm for a payment Compliance holds) treats a Legal `warning` whose only warnings are
+  `optional_caller_unset:*` as alive, so a caller token not set yet never silences the hold alarm; its
+  **configuration** ping (`HEARTBEAT_CONFIG_URL`) needs Legal's `"status": "ok"` and alerts until both caller tokens
+  are set and Legal redeployed. A deploy-config test runs the runbook's command against a fake `curl`.
+- RB-L2, RB-L3, RB-I1: tests pin that no non-portal caller records any client's acceptance (a party-bound filled SOW
+  included), that a `degraded` Legal `/health` is never softened to `warning`, and that the portal routes answer
+  503 to another configured caller's token while `client_portal` is unset.
 
 ## For Andre's sign-off (the approved clickwrap text is the contract record; its wording is unchanged)
 

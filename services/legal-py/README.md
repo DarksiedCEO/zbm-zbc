@@ -26,8 +26,10 @@ cd src && python3 -m api                             # LEGAL_BIND_ADDR (127.0.0.
 ```
 
 Caller names: `compliance_38`, `clipper_network`, `verification_integrity`, `creative_production`, `onboarding`,
-`finance_31`, `hub`, `esign_gateway`, `scheduler`, `client_portal` (ADR 0028: reaches only its two
-`/legal/v1/portal/...` routes, never a generic reader route). Headers: `Authorization: Bearer <service token>` on every route
+`finance_31`, `hub`, `esign_gateway`, `scheduler`, `client_portal` (ADR 0028: reaches only its three
+`/legal/v1/portal/...` routes: `invitations/resolve`, `receipts`, `acceptances`; never a generic reader route).
+Optional callers (an empty or unresolved entry is skipped, the routes only it may call answer 503, `/health` says
+`warning` with `optional_caller_unset:<name>`): `compliance_38` (ADR 0024) and `client_portal` (ADR 0028). Headers: `Authorization: Bearer <service token>` on every route
 but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for Andre.
 
 | Setting | Default | Notes |
@@ -176,8 +178,8 @@ recorded by the page never counts as evidence. Andre's steps: `docs/runbooks/cli
   fill time.
 - **AEGIS r1 fixes (aegis-client-acceptance.md).**
   - M-1: an empty or unresolved `client_portal` entry in `LEGAL_CALLER_TOKENS` is skipped with a start-up warning
-    (the first deploy sets that token after Legal restarts); the portal routes answer 503 until it is set. Every other
-    caller entry, and a set but short `client_portal` value, still refuses the start.
+    (the first deploy sets that token after Legal restarts); the portal routes answer 503 until it is set. Since the rebase on ADR 0024, `compliance_38` is optional
+    the same way; every other caller entry, and a set but short optional value, still refuses the start.
   - M-2: `POST /legal/v1/portal/receipts` `{"token", "request_id"}` answers the receipt (documents, display,
     acceptances) only to the submission that used the link; the portal shows it on a retry or a refresh.
   - M-5: Legal renders the page itself (`src/clickwrap_page.py`: clickwrap text v1 Parts B/C as blocks;

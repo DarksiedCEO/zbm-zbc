@@ -1773,8 +1773,8 @@ class LegalService:
     def _invitation_reasons(self, principal: str, v: Optional[dict], body: dict) -> list[dict]:
         """Money red team RTM-13, AEGIS r10 R10-L1/L2/L3:
 
-        * a ``client:*`` acceptance is recorded only on the onboarding path (ADR 0022: founder/onboarding); ``hub``
-          and ``clipper_network`` never record one, with or without an invitation;
+        * no caller records a ``client:*`` acceptance on this route, the onboarding token included (ADR 0028: only
+          the client acceptance page does, ``POST /legal/v1/portal/acceptances``);
         * an ``invitation_id``, from ANY caller, must name Andre's invitation for exactly this party, document and
           version, unused and unexpired (an unknown id is a 409 that writes nothing, never a 500 or a log line that
           updates a record that does not exist; no caller can use up another party's invitation);

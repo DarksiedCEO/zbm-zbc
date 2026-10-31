@@ -275,7 +275,9 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   .../acknowledgements`), and legal's `/health` is in the heartbeat check. AEGIS r12 R12-6 / r13 R13-7: a line whose
   apply fails is rolled back in memory from a snapshot taken before the line is written. AEGIS r13 R13-3: while an
   optional caller token (`compliance_38`) is unset, legal's `/health` answers `"status": "warning"` with
-  `warnings: ["optional_caller_unset:compliance_38"]`, so the heartbeat check stays red until runbook step D is done;
+  `warnings: ["optional_caller_unset:compliance_38"]`, so the heartbeat's configuration ping stays red until runbook
+  step D is done (since ADR 0028's rebase review RB-L1 the alive-and-holds ping treats a warning made only of
+  `optional_caller_unset:*` as alive, so an unset token never silences the hold alarm);
   a route another configured caller may use still answers 403 to a wrong token (503 only where no configured caller
   could call it).
 - **The route invariant (R11-7)** discovers routes from the live app and runs each money route's behavioural proof
