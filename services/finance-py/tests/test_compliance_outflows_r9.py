@@ -75,3 +75,67 @@ def test_a_refund_is_refused_while_any_payment_of_the_client_is_held():
                                                                                 "sanctions": False}}
     r = hr.post("/fin/v1/refunds/camp-1", {"request_id": rid()}, caller="scheduler")
     assert r.status_code == 409 and "held" in r.text, r.text
+
+
+# --- R9-2: nothing a non-Andre caller sees is unique to a sanctions upgrade -------------------------------------------
+
+def _visible(hr):
+    """What a non-Andre reader can see after the scenario: event-id prefixes (and how many), id shapes, break legs,
+    the key shape of every record put (by collection), and the job summary keys."""
+    import json
+    import re
+    from collections import Counter
+    texts, shapes_rec, jobs = [], set(), set()
+    cur = 0
+    while cur is not None:
+        page = hr.get("/fin/v1/audit/export", caller="onboarding").json() if cur == 0 else \
+            hr.get("/fin/v1/audit/export", caller="onboarding", cursor=cur).json()
+        texts.append(json.dumps(page))
+        for e in next(v for v in page.values() if isinstance(v, list)):
+            for r in e.get("records", []):
+                rec = r["record"].get("rec") if isinstance(r["record"], dict) else None
+                if isinstance(rec, dict):
+                    shapes_rec.add((r["record"].get("coll"), tuple(sorted(rec))))
+                    if isinstance(rec.get("summary"), dict):
+                        jobs.add(tuple(sorted(rec["summary"])))
+        cur = page["next_cursor"]
+    texts.append(hr.get("/fin/v1/audit/evidence", caller="onboarding").text)
+    texts.append(hr.get("/fin/v1/breaks", caller="onboarding").text)
+    for b in hr.get("/fin/v1/breaks", caller="onboarding").json().get("breaks", []):
+        shapes_rec.add(("breaks-view", tuple(sorted(b))))
+    t = "\n".join(texts)
+    ids = re.findall(r'"fin-([a-z0-9]+)-([0-9a-zA-Z]+)"', t)
+    prefixes = {p for p, _ in ids}
+    id_shapes = {(p, len(x)) for p, x in ids}
+    legs = set(re.findall(r'"leg": ?"([a-z_]+)"', t))
+    return prefixes, id_shapes, legs, shapes_rec, jobs, Counter(p for p, _ in ids if p == "hold")
+
+
+def _scenario(tmp_path, upgrade: bool, refund: bool):
+    from test_compliance_gate_adr0024 import _stripe_hr
+    from test_compliance_hold_r4 import _job
+    from test_compliance_hold_r5 import _pay_then
+    from test_compliance_hold_r6 import _refuse_plain
+    from test_compliance_hold_r8 import _ground
+    from test_stripe_incoming import sent
+    from test_sweep_followup import _charge
+    hr = _stripe_hr(tmp_path)
+    inv, pi, out = _pay_then(hr, lambda: _refuse_plain(hr))
+    if upgrade:
+        _ground(hr, "match")
+    _job(hr)
+    if refund:
+        hr.sim.refund(pi)
+        sent(hr, "charge.refunded", _charge(hr, pi))
+    return _visible(hr)
+
+
+def test_r9_2_the_same_prefixes_shapes_and_legs_with_and_without_a_sanctions_upgrade(tmp_path):
+    names = ("event-id prefixes", "event-id shapes", "break legs", "record shapes", "job summary keys")
+    for refund in (False, True):
+        (tmp_path / f"a{refund}").mkdir()
+        (tmp_path / f"b{refund}").mkdir()
+        plain = _scenario(tmp_path / f"a{refund}", upgrade=False, refund=refund)
+        sanct = _scenario(tmp_path / f"b{refund}", upgrade=True, refund=refund)
+        for n, x, y in zip(names, plain, sanct):
+            assert x == y, (n, "differ", refund, sorted(set(x) - set(y)), sorted(set(y) - set(x)))

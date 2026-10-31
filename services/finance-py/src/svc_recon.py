@@ -234,6 +234,7 @@ class ReconMixin:
                 if not full and b.get("leg") in self.PRIVATE_LEGS:
                     row.update(leg="compliance_hold", note="payment held by Compliance (details: Andre's token)",
                                resolution=None)
+                    row.pop("severity", None)                # AEGIS r9 R9-2: no severity tell either
                 out.append(row)
             return {"breaks": out}
 

@@ -392,7 +392,7 @@ class StripeMixin:
         (unknown) closes nothing and is counted ``activation_unknown`` (the checkout itself refuses meanwhile)."""
         if not self.cfg.stripe_incoming:
             return {"closed": 0, "failed": 0, "checked": 0, "refused_clients": 0, "activation_unknown": 0,
-                    "activation_checked": 0, "holds_released": 0, "holds_converted": 0, "holds_upgraded": 0}
+                    "activation_checked": 0, "holds_released": 0, "holds_changed": 0}
         # AEGIS r2 N-4: Compliance is read OUTSIDE the Stripe turn, for at most MAX_JOB_ACTIVATION_CHECKS clients per
         # run, rotating through the clients with an open page (a cursor after the last one checked)
         with self.lock:
@@ -500,7 +500,7 @@ class StripeMixin:
                 self._commit(op)
             return {"closed": closed, "failed": failed, "checked": len(todo), "refused_clients": refused_clients,
                     "activation_unknown": unknown, "activation_checked": len(clients), "holds_released": released,
-                    "holds_converted": converted, "holds_upgraded": upgraded}
+                    "holds_changed": converted + upgraded}
 
     # ================================================================== webhook events
 
@@ -758,9 +758,10 @@ class StripeMixin:
         b = op.get("breaks", hold["break_id"])
         if b is not None:
             op.put("breaks", b["break_id"], {**b, "note": self.HOLD_NOTE["sanctions"][1][:200]})
-        # AEGIS r8: a neutral event id prefix (the id is visible to every audit reader; the type is not)
-        op.record(derived_id("holdevt", invoice_id, hold["receipt_id"], new_ground), "compliance_hold_sanctions", actor,
-                  invoice_id, {"invoice_id": invoice_id, "receipt_id": hold["receipt_id"], "break_id": hold["break_id"],
+        # AEGIS r9 R9-2: every hold event shares one prefix and shape (the id is visible to every audit reader; the
+        # type is not), so no id tells a sanctions upgrade apart from any other hold event
+        op.record(derived_id("hold", "upgrade", invoice_id, hold["receipt_id"], new_ground), "compliance_hold_sanctions",
+                  actor, invoice_id, {"invoice_id": invoice_id, "receipt_id": hold["receipt_id"], "break_id": hold["break_id"],
                                "ground": new_ground},
                   f"Held payment is now sanctions-grounded: {why}"[:200])
 
@@ -787,7 +788,7 @@ class StripeMixin:
                 and M.D((rc.get("stripe") or {}).get("refunded") or "0.00") == 0:
             # AEGIS r5 R5-1: a receipt only for money that is still the client's payment (none after any refund)
             self._client_receipt(op, hold["receipt_id"], new, hold["amount"], hold["value_date"], hold["method_label"])
-        op.record(derived_id("holdrel", invoice_id, hold["receipt_id"], hold["kind"]), "compliance_hold_released",
+        op.record(derived_id("hold", "release", invoice_id, hold["receipt_id"], hold["kind"]), "compliance_hold_released",
                   actor, invoice_id, {"invoice_id": invoice_id, "kind": hold["kind"], "basis": basis, **detail},
                   f"Payment hold released ({basis})")
 
@@ -1109,12 +1110,13 @@ class StripeMixin:
             # the client receipt states the full amount paid: no longer true after any refund (never sent; one
             # already sent is marked withdrawn_after_send)
             self._withdraw_client_receipt(op, rct)
-        sanctions_hold = bool(inv is not None and (inv.get("held_compliance") or {}).get("sanctions"))
-        if sanctions_hold:
-            # RTM-05: blocked property just left the Stripe balance (a Dashboard refund Finance cannot stop): the hold
-            # stays, the invoice stays held (never routinely re-opened), and Andre gets a high-severity OFAC break
-            self._sanctions_refund_break(op, inv, rct, delta, total)
-        elif matched and inv["status"] == "paid":
+        held = (inv or {}).get("held_compliance") if inv is not None else None
+        if held:
+            # RTM-05 / AEGIS r9 R9-2: a refund of a HELD payment marks the hold's own break for Andre (loud and OFAC-
+            # relevant on a sanctions ground: blocked property just left the Stripe balance). The hold stays either
+            # way, and the booking below is the same for every hold, so nothing a non-Andre reader sees differs
+            self._held_refund_mark(op, inv, held, rct, delta, total)
+        if matched and inv["status"] == "paid":
             if full or net_reversed:
                 op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
                                                        "refunded": M.fmt(total)})
@@ -1142,23 +1144,25 @@ class StripeMixin:
                   {"receipt_id": rct, "amount": M.fmt(delta), "refunded_total": M.fmt(total), "entry_id": e["entry_id"],
                    "invoice_id": inv["invoice_id"] if inv else None},
                   f"Stripe refund booked: {M.fmt(delta)} (total refunded {M.fmt(total)})")
-        return "refund_booked_held" if sanctions_hold else "refund_booked"   # neutral: every caller reads event statuses
+        return "refund_booked_held" if held else "refund_booked"   # neutral: the same for every kind of hold
 
-    def _sanctions_refund_break(self, op: Op, inv: dict, rct: str, delta: Decimal, total: Decimal) -> None:
-        bid = rid("brk", "stripe_refund_sanctions", rct, M.fmt(total))
-        if op.get("breaks", bid) is not None:
-            return
-        op.put("breaks", bid, {"break_id": bid, "leg": "stripe_refund_sanctions", "severity": "high",
-                               "subject": f"zbm:invoice:{inv['invoice_id']}", "difference": M.fmt(delta),
-                               "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
-                               "owner": "andre", "explanation_code": "unknown", "status": "open", "receipt_id": rct,
-                               "resolution": None,
-                               "note": ("OFAC-RELEVANT: a payment held on SANCTIONS grounds was refunded at Stripe "
-                                        "(blocked property left the account): report it to OFAC and contact Stripe "
-                                        "support now (runbook step G)")})
-        op.record(derived_id("holdevt", "refund", inv["invoice_id"], rct, M.fmt(total)),
-                  "compliance_hold_sanctions_refunded", ACTOR, inv["invoice_id"],
-                  {"invoice_id": inv["invoice_id"], "receipt_id": rct, "amount": M.fmt(delta), "break_id": bid},
+    HELD_REFUND_NOTE = {
+        False: "the held payment was refunded at Stripe: release the hold with basis refund and the refund's entry",
+        "place": "OFAC-RELEVANT: a payment held on SANCTIONS grounds was refunded at Stripe (blocked property left "
+                 "the account): report it to OFAC and contact Stripe support now (runbook step G)",
+        "match": "OFAC-RELEVANT: a payment held on SANCTIONS grounds was refunded at Stripe (blocked property left "
+                 "the account): report it to OFAC and contact Stripe support now (runbook step G)"}
+
+    def _held_refund_mark(self, op: Op, inv: dict, held: dict, rct: str, delta: Decimal, total: Decimal) -> None:
+        ground = hold_ground(held)
+        b = op.get("breaks", held.get("break_id") or "")
+        if b is not None:
+            op.put("breaks", b["break_id"], {**b, "severity": "high" if ground else "normal",
+                                             "note": self.HELD_REFUND_NOTE[ground or False][:200]})
+        op.record(derived_id("hold", "refund", inv["invoice_id"], rct, M.fmt(total)),
+                  "compliance_hold_sanctions_refunded" if ground else "compliance_hold_refunded", ACTOR,
+                  inv["invoice_id"], {"invoice_id": inv["invoice_id"], "kind": held.get("kind"), "receipt_id": rct,
+                                      "amount": M.fmt(delta), "break_id": held.get("break_id")},
                   "A held payment was refunded at Stripe")
 
     def _stripe_refund_reversed(self, op: Op, rct: str, rc: dict, p: StripePayment, total: Decimal,

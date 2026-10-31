@@ -39,7 +39,7 @@ def _upgraded(hr):
     """A refused hold that the hourly job upgraded to sanctions (so a compliance_hold_sanctions event exists)."""
     inv, pi, out = _pay_then(hr, lambda: _refuse_plain(hr))
     _sanctioned(hr)
-    assert _job(hr)["holds_upgraded"] == 1
+    assert _job(hr)["holds_changed"] == 1
     return inv, pi
 
 
@@ -89,7 +89,7 @@ def test_converting_an_unverified_hold_keeps_its_sanctions_marker(tmp_path):
     first, second = _second_hold(hr, inv, kind="unverified", sanctions=False)
     assert second["kind"] == "unverified" and second["sanctions"] is True
     _refuse_plain(hr)                                       # Compliance now says a plain (non-sanctions) REFUSE
-    assert _job(hr)["holds_converted"] == 1
+    assert _job(hr)["holds_changed"] == 1
     h = _hold(hr, inv)
     assert h["kind"] == "refused" and h["sanctions"] is True
     hr.sim.refund(pi)

@@ -311,7 +311,7 @@ def redact(kind: str, record: dict) -> dict:
 # OFAC release details. Every other reader sees that a payment is held, and a generic event type.
 _HOLD_PRIVATE = ("sanctions", "sanctions_since", "sanctions_ground", "ofac_authorization_sha256", "ofac_document_kind",
                  "ofac_guidance_sha256", "documents", "returned_to_sender")
-_COMPLIANCE_LEGS = ("compliance_hold", "compliance_unverified", "stripe_refund_sanctions")
+_COMPLIANCE_LEGS = ("compliance_hold", "compliance_unverified")
 _OFAC_BASES = ("ofac_authorization", "ofac_rejected_return")
 GENERIC_HOLD_EVENT = "compliance_hold_event"
 
@@ -335,7 +335,8 @@ def hide_hold_details(obj):
         out[k] = hide_hold_details(v)
     if out.get("leg") in _COMPLIANCE_LEGS:
         out["leg"] = "compliance_hold"
-        out.pop("note", None)
+        for k in ("note", "note_sha256", "severity"):      # AEGIS r9 R9-2: a note's hash or a severity is a tell too
+            out.pop(k, None)
         out["resolution"] = None
     if isinstance(out.get("event_type"), str) and out["event_type"].startswith("compliance_hold_"):
         out["event_type"] = GENERIC_HOLD_EVENT

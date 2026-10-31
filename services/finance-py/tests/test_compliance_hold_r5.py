@@ -79,7 +79,7 @@ def test_an_unverified_hold_the_job_finds_sanctioned_becomes_a_sanctions_hold(tm
     hr = _stripe_hr(tmp_path)
     inv, pi, out = _paid(hr, then="down")
     _sanctioned(hr)
-    assert _job(hr)["holds_converted"] == 1
+    assert _job(hr)["holds_changed"] == 1
     h = _hold(hr, inv)
     assert h["kind"] == "refused" and h["sanctions"] is True
 

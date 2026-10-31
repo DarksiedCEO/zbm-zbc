@@ -79,7 +79,7 @@ def test_a_non_sanctions_hold_upgraded_by_the_job_takes_the_ground(tmp_path):
     hr = _stripe_hr(tmp_path)
     inv, pi, out = _pay_then(hr, lambda: _refuse_plain(hr))
     _ground(hr, "place")
-    assert _job(hr)["holds_upgraded"] == 1
+    assert _job(hr)["holds_changed"] == 1
     assert _hold(hr, inv)["sanctions_ground"] == "place"
 
 
@@ -186,7 +186,7 @@ def test_no_non_andre_response_names_sanctions_ofac_or_a_match(tmp_path):
     hr.f["compliance"].activations = {}
     inv3 = rr_invoice(hr, "200.00")                       # issued while the client was still allowed
     _ground(hr, "match")
-    assert _job(hr)["holds_upgraded"] == 1
+    assert _job(hr)["holds_changed"] == 1
     # what onboarding (and every general caller) can read now
     reads = [hr.get("/fin/v1/audit/export", caller="onboarding"),
              hr.get("/fin/v1/audit/evidence", caller="onboarding"),

@@ -115,13 +115,22 @@ def test_rtm05_a_refund_of_a_sanctions_held_payment_is_loud_and_keeps_the_hold(t
     hr.sim.refund(pi)
     r = sent(hr, "charge.refunded", charge_obj(hr, pi))
     assert r["status"] == "refund_booked_held"
-    brk = [b for b in hr.svc.db["breaks"].values() if b["leg"] == "stripe_refund_sanctions"]
-    assert len(brk) == 1 and brk[0]["severity"] == "high" and "OFAC" in brk[0]["note"]
     i = hr.svc.db["invoices"][inv["invoice_id"]]
-    assert i["held_compliance"]["sanctions"] is True and i["status"] == "paid"      # not routine 'issued'
+    hold = i["held_compliance"]
+    brk = hr.svc.db["breaks"][hold["break_id"]]                       # the hold's own break, marked for Andre
+    assert brk["severity"] == "high" and "OFAC" in brk["note"] and brk["status"] == "open"
+    assert hold["sanctions"] is True and hold["sanctions_ground"] == "match"          # the hold stays
+    assert i["refunded"] == "1200.00"                                  # the books say what happened at Stripe
     assert hr.ledger.of_type("compliance_hold_sanctions_refunded")
+    r2 = _release_refund(hr, inv)
+    assert r2.status_code == 409, r2.text                               # never released as a routine refund
     other = hr.get("/fin/v1/breaks", caller="onboarding").text
     assert "OFAC" not in other and "sanction" not in other.lower()
+
+
+def _release_refund(hr, inv):
+    from test_compliance_hold_r4 import _release
+    return _release(hr, inv, basis="refund")
 
 
 # --- RTM-08 -------------------------------------------------------------------------------------------------------------
