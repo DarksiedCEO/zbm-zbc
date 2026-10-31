@@ -495,7 +495,7 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.put_billing_profile(req.request_id, _id(client_id), dump(req))
 
     @app.get("/fin/v1/clients/{client_id}/billing-readiness", dependencies=auth)
-    def billing_readiness(client_id: str, who: str = Depends(caller("onboarding"))) -> dict:
+    def billing_readiness(client_id: str, who: str = Depends(andre_or_caller("billing-readiness", "onboarding"))) -> dict:
         return svc.billing_readiness(who, _id(client_id))
 
     @app.get("/fin/v1/readiness/sales-tax-nexus", dependencies=auth)

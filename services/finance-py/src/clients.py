@@ -277,6 +277,25 @@ class HttpCompliance(_Base):
         except (KeyError, TypeError):
             return ClientActivation(False, reason="Compliance's activation answer was not understood")
 
+    def rule_expiry(self) -> Optional[dict]:
+        """RTM-06: the rules a client's activation relies on that expire within 30 / 14 / 7 days (Compliance
+        readiness). None when Compliance cannot answer or the answer is not understood."""
+        d = self._get("/compliance/v1/readiness")
+        try:
+            ca = d["expiry_warnings"]["client_activation_rules"]
+            out = {"available": True}
+            for k in ("within_30_days", "within_14_days", "within_7_days"):
+                v = ca[k]
+                if not isinstance(v, list) or not all(isinstance(x, str) and _OID.fullmatch(x) for x in v):
+                    return None
+                out[k] = list(v)[:50]
+            nxt = d["expiry_warnings"].get("next_client_activation_rule")
+            out["next"] = ({"id": str(nxt["id"])[:40], "expires_at": str(nxt["expires_at"])[:10]}
+                           if isinstance(nxt, dict) else None)
+            return out
+        except (KeyError, TypeError):
+            return None
+
     def row_parameters(self, obligation_id: str) -> RegisterParameters:
         if not _OID.fullmatch(obligation_id or ""):
             return RegisterParameters(False, str(obligation_id)[:40])
