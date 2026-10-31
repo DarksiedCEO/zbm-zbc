@@ -335,19 +335,29 @@ class LegalService:
         # AEGIS r10 R10-L1: one bad record never stops the start. A record that cannot be applied (an update of a
         # record that does not exist, written by the code before the fix) is quarantined: skipped, kept in
         # ``replay_quarantine``, printed as a WARNING and flagged on /health for Andre; the rest of its line applies.
+        # AEGIS r11 R11-6: replay never applies a line whose caller was answered with a failure. A line the runtime
+        # marked ``apply_failed`` (durably, right after the failure), or one that would fail now (an update of a
+        # record that does not exist: the check the commit makes before writing), is quarantined WHOLE: none of its
+        # records is applied. Andre reviews the quarantine (GET /legal/v1/replay-quarantine) and acknowledges it
+        # (POST .../acknowledgements, durable); /health is degraded only while something is unacknowledged.
         self.replay_quarantine: list[dict] = []
+        self.quarantine_acks: set[int] = set()
+        self.apply_fault = False
+        failed = {r["seq"] for rec in self.log.iter_records() for k, r in rec["data"].get("ops", [])
+                  if k == "apply_failed"}
         for rec in self.log.iter_records():
-            for kind, r in rec["data"].get("ops", []):
+            ops = rec["data"].get("ops", [])
+            problem = self._line_problem(ops) or ("the runtime answered this line with a failure"
+                                                  if rec["seq"] in failed else None)
+            if problem:
+                self._quarantine(rec, ops, problem)
+                continue
+            for i, (kind, r) in enumerate(ops):
                 try:
                     self._apply(kind, r)
                 except (KeyError, TypeError, AttributeError) as exc:
-                    q = {"seq": rec["seq"], "kind": kind, "error": type(exc).__name__,
-                         "detail": (f"{r.get('coll')}:{r.get('key')}" if kind == "update" and isinstance(r, dict)
-                                    else str(exc))[:200]}
-                    self.replay_quarantine.append(q)
-                    print(f"WARNING legal-py: log line {rec['seq']}: a {kind} record could not be applied "
-                          f"({q['error']} {q['detail']}); quarantined, the rest of the line applied (Andre: see "
-                          "/health replay_quarantined)", file=sys.stderr, flush=True)
+                    self._quarantine(rec, ops[i:], f"{type(exc).__name__}")
+                    break
             ide = rec["data"].get("idem")
             if ide:
                 self._idem_load(ide)
@@ -406,6 +416,55 @@ class LegalService:
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing took effect",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
 
+    def _line_problem(self, ops: list) -> Optional[str]:
+        """R11-6: why a log line cannot be applied as a whole (the commit's pre-write check, replayed), or None."""
+        added: set[tuple[str, str]] = set()
+        for kind, r in ops:
+            if kind in PUT_KINDS:
+                attr, key = PUT_KINDS[kind]
+                added.add((attr, str(r.get(key))))
+            elif kind == "update":
+                coll = self.blob_meta if r.get("coll") == "blobs" else getattr(self, str(r.get("coll")), None)
+                if not isinstance(coll, dict) or (r.get("key") not in coll and (r.get("coll"), r.get("key")) not in added):
+                    return f"an update names a missing {r.get('coll')} record {str(r.get('key'))[:80]}"
+        return None
+
+    def _quarantine(self, rec: dict, ops: list, why: str) -> None:
+        kinds = [k for k, _ in ops]
+        q = {"seq": rec["seq"], "kind": kinds[0] if kinds else "", "kinds": kinds, "records": len(ops),
+             "detail": why[:200]}
+        self.replay_quarantine.append(q)
+        print(f"WARNING legal-py: log line {rec['seq']} not applied ({why[:160]}); {len(ops)} record(s) quarantined "
+              "(Andre: GET /legal/v1/replay-quarantine)", file=sys.stderr, flush=True)
+
+    def unacknowledged_quarantine(self) -> list[dict]:
+        return [q for q in self.replay_quarantine if q["seq"] not in self.quarantine_acks]
+
+    def quarantine_view(self) -> dict:
+        with self.lock:
+            return {"quarantined": [dict(q, acknowledged=q["seq"] in self.quarantine_acks)
+                                    for q in self.replay_quarantine],
+                    "unacknowledged": len(self.unacknowledged_quarantine()), "apply_fault": self.apply_fault}
+
+    def acknowledge_quarantine(self, request_id: str, seqs: list[int]) -> dict:
+        """R11-6 (Andre): acknowledge quarantined log lines after reviewing them. Durable (a log line); the records
+        stay unapplied; /health returns to ok once nothing is unacknowledged."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, "replay-quarantine/ack", sorted(seqs))
+            if ent:
+                return ent["response"]
+            known = {q["seq"] for q in self.replay_quarantine}
+            bad = sorted(set(seqs) - known)
+            if bad:
+                raise Conflict(f"log line(s) {bad[:10]} are not quarantined")
+            op = Op(self, f"qack|{request_id}", "andre", "replay-quarantine")
+            op.ev("qack", "replay_quarantine_acknowledged", "replay-quarantine", {"seqs": sorted(seqs)},
+                  f"Andre acknowledged {len(seqs)} quarantined log line(s)", actor="andre")
+            op.add("quarantine_ack", {"seqs": sorted(seqs), "at": iso(self._now()), "by": "andre"})
+            return self._answer(op, key, h, {"acknowledged": sorted(seqs),
+                                             "unacknowledged": len(self.unacknowledged_quarantine()) -
+                                             len(set(seqs) & {q["seq"] for q in self.unacknowledged_quarantine()})})
+
     def _check_updates(self, op: Op) -> None:
         """AEGIS r10 R10-L1: an ``update`` names a record that exists (now, or put earlier in the same operation);
         otherwise nothing is written (a line that updates a missing record would stop every later replay)."""
@@ -452,8 +511,24 @@ class LegalService:
                 except OSError:
                     pass
             raise Unavailable(f"local store write failed ({exc}); nothing took effect") from None
-        for kind, r in op.ops:
-            self._apply(kind, r)
+        try:
+            for kind, r in op.ops:
+                self._apply(kind, r)
+        except Exception:
+            # AEGIS r11 R11-6: the line is written but its caller gets a failure: mark it durably so a replay never
+            # applies it (the in-memory state may hold part of it until a restart: /health says apply_fault)
+            self.apply_fault = True
+            if not getattr(self, "_marking_failure", False):
+                self._marking_failure = True
+                try:
+                    mark = Op(self, f"apply-failed|{rec['seq']}", EVIDENCE, i10.LOG_SUBJECT)
+                    mark.add("apply_failed", {"seq": rec["seq"], "at": iso(self._now())})
+                    self._commit(mark)
+                except Exception:  # noqa: BLE001 - best effort; the replay's own check still refuses such a line
+                    pass
+                finally:
+                    self._marking_failure = False
+            raise
         if op.idem:
             self._idem_load(op.idem)
         for fn in op.after:
@@ -479,6 +554,8 @@ class LegalService:
                                                 v["rows_sha256"], v["prev_version_sha256"], tuple(v["rows"])))
         elif kind == "job_run":
             self.job_runs[f"{r['job']}|{r['day']}"] = r
+        elif kind == "quarantine_ack":
+            self.quarantine_acks.update(int(x) for x in r.get("seqs") or [])
         # lease, reconcile, founder_refused, refusal, injection, advice_block: evidence only
 
     # --- idempotency (request_id + route + body; 15 minutes; survives a restart through the log)
@@ -2959,11 +3036,11 @@ class LegalService:
                 "evidence": out[offset:offset + limit], "log_length": n_lines}
 
     def health(self) -> dict:
-        status = "closed" if self._closed else ("degraded" if self.log.fault or self.replay_quarantine
-                                                else "ok")   # bug sweep E; R10-L1: a quarantined record degrades
+        status = "closed" if self._closed else ("degraded" if self.log.fault or self.unacknowledged_quarantine()
+                                                or self.apply_fault else "ok")   # bug sweep E; R10-L1 / R11-6
         return {"status": status, "service": "legal-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned,
                 "log_write_fault": bool(self.log.fault),
                 "counsel_channel_wired": not type(self.ports.counsel).__name__.startswith("NotWired"),
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
-                "replay_quarantined": len(self.replay_quarantine)}
+                "replay_quarantined": len(self.unacknowledged_quarantine())}

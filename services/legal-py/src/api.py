@@ -404,6 +404,16 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                    req: m.AcceptanceCreate = Depends(body(m.AcceptanceCreate))) -> dict:
         return _echo(req.request_id, svc.record_acceptance(who, req.request_id, req.model_dump()))
 
+    @app.get("/legal/v1/replay-quarantine", dependencies=auth)
+    def replay_quarantine(_: str = Depends(andre("replay-quarantine"))) -> dict:
+        """AEGIS r11 R11-6 (Andre): log lines the replay did not apply (a failure the caller was told about)."""
+        return svc.quarantine_view()
+
+    @app.post("/legal/v1/replay-quarantine/acknowledgements", dependencies=auth)
+    def replay_quarantine_ack(_: str = Depends(andre("replay-quarantine/ack")),
+                              req: m.QuarantineAck = Depends(body(m.QuarantineAck))) -> dict:
+        return _echo(req.request_id, svc.acknowledge_quarantine(req.request_id, list(req.seqs)))
+
     @app.post("/legal/v1/acceptance-invitations", dependencies=auth, status_code=201)
     def acceptance_invitation(_: str = Depends(andre("acceptance-invitations")),
                               req: m.InvitationCreate = Depends(body(m.InvitationCreate))) -> dict:

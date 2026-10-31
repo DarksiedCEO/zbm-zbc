@@ -144,3 +144,81 @@ def test_the_commit_refuses_an_update_of_a_missing_record_before_anything_is_wri
     with x.svc.lock, pytest.raises(Conflict):
         x.svc._commit(op)
     assert len(x.svc.log) == n
+
+
+# --- AEGIS r11 R11-6: replay never resurrects a write the caller saw fail; Andre reviews and clears the quarantine -----
+
+def _poison_line(svc, ops):
+    """Append a line the pre-fix code could write (anchored, the runtime apply then failing)."""
+    from service import Op
+    op = Op(svc, f"acc|poison|{len(svc.log)}", "intel_03_clickwrap", "client:acme")
+    for kind, rec in ops:
+        if kind == "update":
+            op.update(*rec)
+        else:
+            op.add(kind, rec)
+    svc._check_updates = lambda _op: None                        # the pre-fix commit path: no guard
+    with svc.lock:
+        try:
+            svc._commit(op)
+        except KeyError:
+            pass
+
+
+_BAD = ("update", ("invitations", "inv-doesnotexist00000000", {"used_by": "acc-poison"}))
+_ACC = ("acceptance", {"acceptance_id": "acc-poison", "party_ref": "client:acme", "doc_id": "client_msa",
+                       "version": "1.0"})
+
+
+@pytest.mark.parametrize("order", ["update_first", "acceptance_first"])
+def test_r11_6_lp1_a_failed_line_is_never_applied_on_replay(tmp_path, order):
+    x, v = _setup(tmp_path)
+    _poison_line(x.svc, [_BAD, _ACC] if order == "update_first" else [_ACC, _BAD])
+    y = _restart(x, tmp_path)
+    assert "acc-poison" not in y.svc.acceptances                 # the caller was told it failed
+    h = y.ok(y.client.get("/health"))
+    assert h["status"] == "degraded" and h["replay_quarantined"] == 1, h
+    assert any("update" in q["kinds"] and "acceptance" in q["kinds"] for q in y.svc.replay_quarantine)
+
+
+def test_r11_6_andre_reviews_and_clears_the_quarantine_and_health_returns_to_ok(tmp_path):
+    from helpers import ANDRE_TOKEN
+    x, v = _setup(tmp_path)
+    _poison_line(x.svc, [_BAD, _ACC])
+    y = _restart(x, tmp_path)
+    assert y.client.get("/legal/v1/replay-quarantine", headers=y.headers(caller="hub")).status_code in (401, 403)
+    lst = y.ok(y.client.get("/legal/v1/replay-quarantine", headers=y.headers(andre=ANDRE_TOKEN)))
+    seqs = sorted({q["seq"] for q in lst["quarantined"]})
+    assert seqs and lst["unacknowledged"] == len(lst["quarantined"])
+    r = y.post("/legal/v1/replay-quarantine/acknowledgements", {"request_id": rid("qa"), "seqs": seqs}, caller="hub")
+    assert r.status_code in (401, 403)
+    y.ok(y.post("/legal/v1/replay-quarantine/acknowledgements", {"request_id": rid("qa"), "seqs": seqs},
+                andre=ANDRE_TOKEN))
+    assert y.ok(y.client.get("/health"))["status"] == "ok"
+    z = _restart(y, tmp_path)                                    # the acknowledgement is durable
+    h = z.ok(z.client.get("/health"))
+    assert h["status"] == "ok" and h["replay_quarantined"] == 0, h
+    assert "acc-poison" not in z.svc.acceptances
+
+
+def test_r11_6_a_runtime_apply_failure_is_marked_durably_and_skipped_on_replay(tmp_path):
+    x, v = _setup(tmp_path)
+    svc = x.svc
+    real = svc._apply
+    calls = {"n": 0}
+
+    def flaky(kind, r):                                          # an apply that fails after the line is appended
+        if kind == "acceptance" and r.get("acceptance_id") == "acc-flaky":
+            raise TypeError("boom")
+        return real(kind, r)
+    svc._apply = flaky
+    from service import Op
+    op = Op(svc, "acc|flaky", "intel_03_clickwrap", "client:acme")
+    op.add("acceptance", {"acceptance_id": "acc-flaky", "party_ref": "client:acme", "doc_id": "client_msa",
+                          "version": "1.0"})
+    with svc.lock, pytest.raises(TypeError):
+        svc._commit(op)
+    svc._apply = real
+    assert any(rec["kind"] == "apply_failed" for rec in svc.log.iter_records())
+    y = _restart(x, tmp_path)
+    assert "acc-flaky" not in y.svc.acceptances
