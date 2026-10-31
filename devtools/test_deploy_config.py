@@ -423,6 +423,32 @@ class ComplianceGate(unittest.TestCase):
         self.blocks = iac_services()
         self.text = IAC.read_text()
 
+    # The callers of Legal's deployed map before this branch (golive-next 783c96a8): they stay strict.
+    LEGAL_CALLERS_BEFORE = ("finance_31", "onboarding")
+
+    def test_every_caller_this_branch_adds_to_legals_map_is_optional_in_legal(self):
+        """A caller added to LEGAL_CALLER_TOKENS on this branch references a token that does not exist until the same
+        apply creates it (compliance_38 -> COMPLIANCE_LEGAL_CALLER_TOKEN): Legal must skip that entry (OPTIONAL_CALLERS
+        in its config.py: the routes only that caller may call answer 503) instead of refusing to start. Callers that
+        were already deployed stay strict. The runbook orders apply -> set the token -> redeploy legal -> redeploy
+        compliance."""
+        tree = ast.parse((REPO / "services/legal-py/src/config.py").read_text())
+        optional = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                        and any(getattr(t, "id", None) == "OPTIONAL_CALLERS" for t in n.targets))
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        callers = json.loads(m.group(1))
+        for caller in callers:
+            with self.subTest(caller=caller):
+                if caller in self.LEGAL_CALLERS_BEFORE:
+                    self.assertNotIn(caller, optional, f"{caller} was deployed before: it stays strict")
+                else:
+                    self.assertIn(caller, optional, f"{caller} is new in Legal's map: an empty value would stop Legal")
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = runbook.split("**D. Deploy order.**", 1)[1].split("**E.", 1)[0]
+        order = [step.index(x) for x in ("railway config apply", "COMPLIANCE_LEGAL_CALLER_TOKEN", "redeploy legal",
+                                         "redeploy compliance")]
+        self.assertEqual(order, sorted(order), "runbook order: apply, set the token, redeploy legal, then compliance")
+
     def test_compliance_is_private_with_its_volume_ledger_and_scheduler(self):
         b = self.blocks["compliance"]
         for forbidden in ("serviceDomains", "customDomains", "tcpProxies", "networking", "domain"):

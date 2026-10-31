@@ -858,8 +858,17 @@ destroy, delete or a change to an existing volume: **stop** and bring the plan b
 railway config apply
 ```
 
-**D. Deploy order.** ledger (with the new `LEDGER_CALLERS`), then legal, then compliance, then detection, then seo,
-then finance. seo must run this version **before or together with** finance: this finance adds `held` to the invoice
+**D. Deploy order.** The order that matters for Legal: after `railway config apply` (step C) Legal's
+`LEGAL_CALLER_TOKENS` names `compliance_38`, whose `COMPLIANCE_LEGAL_CALLER_TOKEN` exists only once the apply created
+the `compliance` service. Legal starts anyway (the entry is optional: its log warns that compliance_38 is not set
+yet, and the route only Compliance calls answers 503), so:
+
+1. `railway config apply` (step C);
+2. set `COMPLIANCE_LEGAL_CALLER_TOKEN` (and the other compliance tokens of step A) on compliance;
+3. redeploy legal (it now resolves the reference; the warning is gone);
+4. redeploy compliance.
+
+Then: ledger (with the new `LEDGER_CALLERS`, before compliance's first start), detection, seo, then finance. seo must run this version **before or together with** finance: this finance adds `held` to the invoice
 status seo reads, and an older seo refuses any field it does not know (`FINANCE_RESPONSE_INVALID` on every paid run:
 safe, but an outage until seo is updated). compliance's log prints its readiness at start (`compliance readiness ...`, `register not in force` until step
 E) and `compliance scheduler: controls every 21600 s; Change Watcher every 24 h`.
@@ -1143,10 +1152,12 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
      `ofac_authorization` with a license, unblocking report, Compliance Release or delisting for a sanctions hold;
      `ofac_rejected_return` only for a place ground with OFAC's written guidance). The hourly job releases an
      unverified one on ALLOW and upgrades a refused one's ground.
-   - **A founder alert** (AEGIS r11): a client whose deposit funds a campaign and whom Compliance no longer allows opens
-     an open, high-severity `compliance_hold` break (kind `founder_alert`, subject `client:<id>`); it counts in
+   - **A founder alert** (AEGIS r11, r12): a client whose money ZBC holds (an unspent deposit, a refund owed or open,
+     held unapplied money or a held payment) and whom Compliance no longer allows opens an open, high-severity
+     `compliance_hold` break (kind `founder_alert`, subject `client:<id>`, your token only); it counts in
      `compliance_holds_open`, the founder-alert email of ADR 0027 reads it, and it closes by itself once the client is
-     allowed again or funds no campaign. No accrual, payout, funding or refund moves that client's money meanwhile.
+     allowed again or ZBC holds none of its money. No accrual, payout, funding or refund moves that client's money
+     meanwhile.
    - **A refund stuck as `approved`** (Compliance refused the client between your approval and the payment, so the
      payment was `refused_at_execution` and nothing moved): cancel it, with a reason,
      `POST /fin/v1/refunds/{refund_id}/cancel` `{"request_id": "...", "reason": "..."}` (your token). The deposit goes

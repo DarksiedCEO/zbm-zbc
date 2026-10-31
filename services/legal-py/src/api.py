@@ -286,6 +286,10 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
             if andre_ok and request.headers.get(FOUNDER_HEADER) is not None:
                 return _andre(route or request.url.path[:64], request.headers.get(FOUNDER_HEADER))
             name = callers.identify(request.headers.get(CALLER_HEADER))
+            if name is None and allowed and set(allowed) <= set(settings.callers_not_configured):
+                # an optional caller not configured yet (first deploy): its routes answer 503 until its token is set
+                raise Unavailable(f"the {', '.join(allowed)} caller token is not set in LEGAL_CALLER_TOKENS: this route "
+                                  "is closed until it is")
             if name is None:
                 raise Forbidden("caller token missing or not recognised")
             if allowed and name not in allowed:
@@ -299,6 +303,10 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         return dep
 
     reader = caller(andre_ok=True, route="read")
+
+    if settings.callers_not_configured:
+        log.warning("LEGAL_CALLER_TOKENS: %s not set; the routes only it may call answer 503 until it is "
+                    "(docs/deploy/railway.md, ADR 0024 step D)", ", ".join(settings.callers_not_configured))
 
     def body(model: type[BaseModel]) -> Callable:
         def parse(payload: Any = Body(default=None)) -> Any:

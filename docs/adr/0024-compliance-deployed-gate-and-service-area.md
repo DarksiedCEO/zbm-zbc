@@ -246,16 +246,25 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   is `NotBuiltPush` in production). Every condition Andre must act on is an open, persisted break recorded with the
   state change that caused it, carrying ids and categories only: a held payment or held unapplied money (its
   `compliance_hold` / `compliance_unverified` break; a refund or bank return of held money marks it high severity),
-  and a funded client Compliance no longer allows (an open, high-severity `compliance_hold` break, `kind:
-  founder_alert`, `category: compliance_hold`, `subject: client:<id>`, closed by the hourly job once the client is
-  allowed again or funds no campaign). The founder-alert dispatcher of ADR 0027 (fix wave C,
+  and a client whose money ZBC holds and whom Compliance no longer allows (AEGIS r12 R12-2: derived from balances
+  and holds, never campaign status: an unspent deposit in 2010, a refund owed in 2050, an open refund, held unapplied
+  money or a held payment; an open, high-severity `compliance_hold` break, `kind: founder_alert`, `category:
+  compliance_hold`, `subject: client:<id>`, a random id; closed by the hourly job on a current ALLOW or once ZBC holds
+  none of the client's money; an unanswered Compliance changes nothing). AEGIS r12 R12-1: while open it is re-written on
+  every hourly run whatever its ground, so a sanctions upgrade writes the same log lines as a plain refusal;
+  non-Andre break reads show it as a generic compliance break with no client, note or severity, and
+  `GET /fin/v1/integrity` gives non-Andre callers the verdict only (`status`, `checked_at`), no counters. The founder-alert dispatcher of ADR 0027 (fix wave C,
   `feat/ops-alerts-offboarding-2026-10-31`) reads open breaks of the Compliance legs as its `compliance_hold`
   category and high-severity breaks as `finance_high_break`; delivery is recorded only by that dispatcher, never by
   the break. `compliance_holds_open` (held invoices, held unapplied money, open founder alerts) keeps the heartbeat
   check red meanwhile.
-- **Holds re-read under the lock (R11-5).** Finance's own holds of the brand (invoices and unapplied money) are read
-  again under the lock at the accrual, the payout run, Andre's approval and the release, so a hold booked while the
-  release gathers its inputs excludes the item. A Compliance flip inside that window is caught at the next step.
+- **Holds re-read under the lock (R11-5, R12-3).** Finance's own holds of the client (invoices and unapplied money)
+  are read again under the lock at the accrual, the payout run, Andre's approval, the release, every rail funding
+  execution, every refund payment attempt and every vendor payment, so a hold Finance booked while a step gathered its
+  inputs stops it. **Accepted residual (low):** a change of Compliance's own answer after a step read it and before
+  that step moves money is not seen by that step; for the release and for a refund payment there is no later step.
+  Compliance's answers change through Andre's own HR-14 attestation or the re-screen job, not through adversary timing,
+  and the window is the step's own gather (seconds).
 - **Legal replay (R11-6).** A log line whose caller was answered with a failure is never applied on replay (quarantined
   whole); Andre reviews and acknowledges the quarantine (`GET /legal/v1/replay-quarantine`, `POST
   .../acknowledgements`), and legal's `/health` is in the heartbeat check.
