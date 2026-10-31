@@ -157,6 +157,10 @@ export interface LegacyFinding {
 
 // GET /revenue-recovery/findings — read-only; viewing never writes.
 export interface RecordedFindingsResult {
+  // ADR 0021: "all_tenants" for this dashboard's request (scope=all);
+  // absent from an orchestrator older than the per-tenant change.
+  scope?: "client" | "all_tenants";
+  scope_client_id?: string | null;
   findings: RecordedFinding[];
   overlapping_claims: Record<string, RecordedFinding[]>;
   scans: ScanSummary[];
