@@ -52,6 +52,9 @@ SERVICES = {
     "seo": ("services/seo-py/Dockerfile", "SEO_PORT", 8500, "seo-py", True),
     "compliance": ("services/compliance-py/Dockerfile", "COMPLIANCE_PORT", 8380, "compliance-py", True),   # ADR 0024
 }
+# ADR 0026: Railway CRON services (no port, no healthcheck, no volume, no domain): name -> Dockerfile
+CRON_SERVICES = {"fin-cron": "deploy/scheduler/Dockerfile"}
+CRON_SCRIPT = REPO / "deploy" / "scheduler" / "fin_cron.py"
 PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
                "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",)}
 # ADR 0024: compliance-py's requirements.txt is clipper-network-py's (that suite checks the two are identical) and has
@@ -239,7 +242,7 @@ class RailwayIac(unittest.TestCase):
         self.text = IAC.read_text()
 
     def test_exactly_the_dockerfiles(self):
-        self.assertEqual(set(self.blocks), set(SERVICES))
+        self.assertEqual(set(self.blocks), set(SERVICES) | set(CRON_SERVICES))
         for svc, (df, _pv, port, _smoke, has_volume) in SERVICES.items():
             b = self.blocks[svc]
             with self.subTest(service=svc):
@@ -467,6 +470,149 @@ class ComplianceGate(unittest.TestCase):
         self.assertIn("complianceData", names)
 
 
+class FinCron(unittest.TestCase):
+    """ADR 0026 / red team OPS-H1: the cron service that runs Finance's housekeeping. PRIVATE (no domain), no volume,
+    one run per hourly tick, its own caller token (``ops_cron``), never the ``scheduler`` token."""
+
+    def setUp(self):
+        self.blocks = iac_services()
+        self.text = IAC.read_text()
+        self.b = self.blocks["fin-cron"]
+        self.code = re.sub(r"//[^\n]*", "", self.b)
+
+    def test_private_without_a_volume_and_a_cron_schedule(self):
+        for forbidden in ("domains", "serviceDomains", "customDomains", "tcpProxies", "networking", "volumeMounts",
+                          "healthcheck", "requiredMountPath"):
+            self.assertNotIn(forbidden, self.code)
+        self.assertIn('build: dockerfile("deploy/scheduler/Dockerfile", ["deploy/scheduler/**"]),', self.b)
+        self.assertIn('deploy: { numReplicas: 1, restartPolicyType: "NEVER" as const, cronSchedule: "17 * * * *" },',
+                      self.b)
+        self.assertIn("finCron]", self.text)
+
+    def test_its_own_caller_token_and_finance_knows_it_as_ops_cron_only(self):
+        self.assertRegex(self.b, r"(?m)^\s+FIN_CRON_CALLER_TOKEN:\s*preserve\(\)")
+        self.assertIn("FIN_CRON_SERVICE_TOKEN: finance.env.FIN_SERVICE_TOKEN,", self.b)
+        self.assertIn('FIN_CRON_FINANCE_URL: PRIVATE("finance", 8410),', self.b)
+        m = re.search(r"FIN_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["finance"])
+        callers = json.loads(m.group(1))
+        self.assertEqual(callers.get("ops_cron"), "${{fin-cron.FIN_CRON_CALLER_TOKEN}}")
+        self.assertNotIn("scheduler", callers)
+        accepted = (REPO / "services" / "finance-py" / "src" / "config.py").read_text()
+        self.assertIn('"ops_cron")', accepted)
+
+    def test_the_image_is_pinned_non_root_and_installs_nothing(self):
+        ins = instructions(REPO / CRON_SERVICES["fin-cron"])
+        froms = [i for i in ins if i.upper().startswith("FROM ")]
+        self.assertEqual(len(froms), 1)
+        self.assertRegex(froms[0], DIGEST_FROM)
+        self.assertIn("USER 10001:10001", ins)
+        self.assertFalse([i for i in ins if "pip" in i or "apt-get" in i])
+        self.assertEqual(entrypoint_args(REPO / CRON_SERVICES["fin-cron"]),
+                         ["/usr/local/bin/python", "-I", "/app/fin_cron.py"])
+        imports = set(re.findall(r"^(?:from|import) ([a-z_.]+)", CRON_SCRIPT.read_text(), re.M))
+        self.assertLessEqual({i.split(".")[0] for i in imports},
+                             {"__future__", "json", "os", "re", "sys", "time", "urllib", "datetime", "typing",
+                              "zoneinfo"})
+
+    def _mod(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fin_cron_under_test", CRON_SCRIPT)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    ENV = {"FIN_CRON_FINANCE_URL": "http://finance.railway.internal:8410",
+           "FIN_CRON_SERVICE_TOKEN": "s" * 64, "FIN_CRON_CALLER_TOKEN": "c" * 64}
+
+    def test_hourly_calls_daily_reconciliation_retries_and_exit_codes(self):
+        import io
+        from datetime import datetime, timezone
+        mod = self._mod()
+        calls, waits = [], []
+
+        def post(url, headers, body):
+            calls.append((url, headers, json.loads(body)))
+            return 200, {"summary": {"sent": 1, "secret": "never-printed"}}
+        out = io.StringIO()
+        # 15:17 UTC = 08:17 PDT: hourly only (the reconciliation hour is 7 local)
+        self.assertEqual(mod.run(self.ENV, datetime(2026, 10, 31, 15, 17, tzinfo=timezone.utc), post, waits.append,
+                                 out), 0)
+        self.assertEqual([c[0] for c in calls], ["http://finance.railway.internal:8410/fin/v1/jobs/stripe-sessions/run",
+                                                 "http://finance.railway.internal:8410/fin/v1/jobs/client-mail/run"])
+        h = calls[0][1]
+        self.assertEqual((h["Authorization"], h["X-FIN-Caller-Token"]), ("Bearer " + "s" * 64, "c" * 64))
+        self.assertRegex(calls[0][2]["request_id"], r"^[A-Za-z0-9._:-]{1,128}$")
+        self.assertNotIn("s" * 64, out.getvalue())
+        self.assertNotIn("c" * 64, out.getvalue())
+        self.assertNotIn("never-printed", out.getvalue())
+        calls.clear()
+        # 14:17 UTC = 07:17 PDT: plus the daily reconciliation
+        mod.run(self.ENV, datetime(2026, 10, 31, 14, 17, tzinfo=timezone.utc), post, waits.append, io.StringIO())
+        self.assertEqual(calls[-1][0], "http://finance.railway.internal:8410/fin/v1/reconciliations/run")
+        # a quiesced Finance (503) is retried; a refusal fails the run with an ALERT line
+        answers = [(503, None), (200, {}), (403, {"detail": "x"}), ]
+
+        def flaky(url, headers, body):
+            return answers.pop(0)
+        out = io.StringIO()
+        waits.clear()
+        self.assertEqual(mod.run(self.ENV, datetime(2026, 10, 31, 15, 17, tzinfo=timezone.utc), flaky, waits.append,
+                                 out), 1)
+        self.assertEqual(waits, [10])
+        self.assertIn("ALERT fin-cron:", out.getvalue())
+
+    def test_the_http_call_reads_json_and_never_follows_a_redirect(self):
+        import http.server
+        import threading
+        mod = self._mod()
+        seen = []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen.append((self.path, self.headers.get("X-FIN-Caller-Token"),
+                             self.rfile.read(int(self.headers["Content-Length"]))))
+                if self.path == "/redirect":
+                    self.send_response(307)
+                    self.send_header("Location", "http://127.0.0.1:1/steal")
+                    self.end_headers()
+                    return
+                body = b'{"summary": {"sent": 2}}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            base = f"http://127.0.0.1:{srv.server_port}"
+            status, doc = mod.http_post(base + "/ok", {"X-FIN-Caller-Token": "c" * 64,
+                                                       "Content-Type": "application/json"}, b'{"request_id": "x"}')
+            self.assertEqual((status, doc), (200, {"summary": {"sent": 2}}))
+            status, _ = mod.http_post(base + "/redirect", {"X-FIN-Caller-Token": "c" * 64}, b"{}")
+            self.assertEqual(status, 307)
+            self.assertEqual([p for p, _c, _b in seen], ["/ok", "/redirect"])        # nothing reached /steal
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_it_refuses_a_public_or_unresolved_configuration(self):
+        mod = self._mod()
+        bad = [{"FIN_CRON_FINANCE_URL": "http://evil.example:8410"},
+               {"FIN_CRON_FINANCE_URL": "http://finance.railway.internal:8410@evil.example"},
+               {"FIN_CRON_CALLER_TOKEN": "${{fin-cron.FIN_CRON_CALLER_TOKEN}}"},
+               {"FIN_CRON_CALLER_TOKEN": "short"}, {"FIN_CRON_CALLER_TOKEN": "s" * 64},
+               {"FIN_CRON_RECON_HOUR": "24"}, {"FIN_CRON_TZ": "Mars/Olympus"}]
+        for over in bad:
+            with self.subTest(over=over):
+                with self.assertRaises(SystemExit):
+                    mod.settings({**self.ENV, **over})
+
+
 class CiAndSmoke(unittest.TestCase):
     def test_ci_builds_every_dockerfile_and_the_smoke_covers_it(self):
         ci = CI.read_text()
@@ -475,6 +621,8 @@ class CiAndSmoke(unittest.TestCase):
             with self.subTest(service=svc):
                 self.assertIn(f"docker build -f {df} -t zbm-ci/{name}:ci .", ci)
                 self.assertRegex(smoke, rf'"{re.escape(name)}": \({port}, ')
+        for svc, df in CRON_SERVICES.items():                 # built in CI; no HTTP smoke (it serves nothing)
+            self.assertIn(f"docker build -f {df} -t zbm-ci/{svc}:ci .", ci)
         self.assertIn("      - railway-images\n", ci.split("  required:", 1)[1])
 
 
@@ -494,8 +642,9 @@ class VariableScan(unittest.TestCase):
     def test_no_python_service_reads_a_variable_outside_its_prefixes_unseen(self):
         """Every upper-case name a Python service reads in an environment-read position is either under the
         service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
-        outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set(),
-                            "compliance-py": set()}
+        # finance-py: the client-mail settings named in ADR 0026 (RESEND_API_KEY becomes RESEND_API_KEY_FILE)
+        outside_prefixes = {"detection-py": set(), "finance-py": {"RESEND_API_KEY_FILE", "MAIL_FROM"}, "legal-py": set(),
+                            "seo-py": set(), "compliance-py": set()}
         for svc, prefixes in PY_SERVICES.items():
             found = set()
             for p in (REPO / "services" / svc / "src").rglob("*.py"):

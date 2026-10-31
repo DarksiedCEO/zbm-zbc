@@ -198,8 +198,9 @@ export default defineRailway(() => {
       FIN_ANDRE_APPROVAL_TOKEN: preserve(),
       // `onboarding`: Andre's operator-held token until an onboarding service exists (drafts invoices,
       // POST /fin/v1/invoices); `${{VARIABLE}}` is Railway's same-service reference
+      // `ops_cron`: the fin-cron service below (ADR 0026): it reaches only the housekeeping jobs and the reconciliation
       FIN_CALLER_TOKENS:
-        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}"}',
+        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}", "ops_cron": "${{fin-cron.FIN_CRON_CALLER_TOKEN}}"}',
       FIN_ONBOARDING_CALLER_TOKEN: preserve(),
       FIN_LEGAL_URL: PRIVATE("legal", 8420),
       FIN_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
@@ -215,8 +216,32 @@ export default defineRailway(() => {
       FIN_STRIPE_WEBHOOK_SECRET: preserve(), // written to FIN_STRIPE_WEBHOOK_SECRET_FILE by the entrypoint
       FIN_STRIPE_SUCCESS_URL: preserve(),
       FIN_STRIPE_CANCEL_URL: preserve(),
+      // founder Oct 30 2026: card is accepted (no surcharge) on Revenue Recovery and SEO audit invoices up to $5,000
+      FIN_CARD_PREPAYMENTS: "1",
+      // CH-10: invoice due dates count from this zone's date
+      FIN_BUSINESS_TZ: "America/Los_Angeles",
+      // ADR 0026 client email: OFF until RESEND_API_KEY is set too (written to RESEND_API_KEY_FILE by the entrypoint)
+      MAIL_FROM: "Z Best Media <billing@zbestmedia.com>",
+      RESEND_API_KEY: preserve(),
     },
   }));
+
+  // ------------------------------------------------------------------------------------------------ fin-cron
+  // ADR 0026: a Railway CRON service (no volume, PRIVATE: no domain). Each hourly tick runs once and exits: the Stripe
+  // page sweep and Compliance hold re-check, client mail, and (at FIN_CRON_RECON_HOUR local time) the daily
+  // reconciliation, with its OWN caller token (ops_cron at finance), never the `scheduler` caller.
+  const finCron = service("fin-cron", {
+    source: source(),
+    build: dockerfile("deploy/scheduler/Dockerfile", ["deploy/scheduler/**"]),
+    deploy: { numReplicas: 1, restartPolicyType: "NEVER" as const, cronSchedule: "17 * * * *" },
+    env: {
+      FIN_CRON_FINANCE_URL: PRIVATE("finance", 8410),
+      FIN_CRON_SERVICE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
+      FIN_CRON_CALLER_TOKEN: preserve(), // its own token; finance's FIN_CALLER_TOKENS references it as `ops_cron`
+      FIN_CRON_RECON_HOUR: "7",
+      FIN_CRON_TZ: "America/Los_Angeles",
+    },
+  });
 
   // ------------------------------------------------------------------------------------------------ orchestrator
   // Public: the dashboard (Vercel) calls GET /revenue-recovery/findings over its Railway domain.
@@ -301,6 +326,6 @@ export default defineRailway(() => {
 
   return project("zbm-zbc", {
     resources: [ledgerData, legalData, financeData, seoData, complianceData, ledger, detection, legal, compliance, finance,
-      orchestrator, stripeGateway, seo],
+      orchestrator, stripeGateway, seo, finCron],
   });
 });

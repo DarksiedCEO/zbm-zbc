@@ -646,6 +646,7 @@ jobs:
             docker build -f services/compliance-py/Dockerfile -t zbm-ci/compliance-py:ci .
             docker build -f services/orchestrator-go/Dockerfile.orchestrator -t zbm-ci/orchestrator:ci .
             docker build -f services/orchestrator-go/Dockerfile.stripe-gateway -t zbm-ci/stripe-gateway:ci .
+            docker build -f deploy/scheduler/Dockerfile -t zbm-ci/fin-cron:ci .
           } 2>&1 | tee "$RUNNER_TEMP/railway-build.log"
           code=${PIPESTATUS[0]}
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/railway-build.log" --code "$code" \
