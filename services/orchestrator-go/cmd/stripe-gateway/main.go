@@ -50,8 +50,11 @@ const (
 	minTokenLen     = 32
 	defaultPort     = "8470"
 	maxInFlight     = 32
-	// Finance's route limit for /fin/v1/stripe/events is 300 KiB; a little is kept back
-	maxForwardBytes = 300<<10 - 1024
+	// Money red team RTM-10: the body is forwarded without HTML-escaping, and only valid JSON is accepted, so JSON
+	// escaping at most doubles it (a quote or backslash becomes two bytes; U+2028/U+2029 three bytes become six);
+	// with the envelope, a 256 KiB body always fits 2 x 256 KiB + 2 KiB. Finance's route limit for
+	// /fin/v1/stripe/events is 600 KiB, above that.
+	maxForwardBytes = 2*maxBodyBytes + 2<<10
 )
 
 type config struct {
@@ -237,16 +240,20 @@ func (g *gateway) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	// The body travels to Finance as a JSON string; invalid UTF-8 would be rewritten on the way and could never
 	// verify, so it is refused here.
-	if len(body) == 0 || !utf8.Valid(body) {
+	if len(body) == 0 || !utf8.Valid(body) || !json.Valid(body) {
 		answer(w, http.StatusBadRequest, "body is not UTF-8 JSON")
 		return
 	}
 	sum := sha256.Sum256(body)
-	fwd, _ := json.Marshal(map[string]string{
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // RTM-10: `&`, `<`, `>` stay one byte (json.Marshal made each six)
+	_ = enc.Encode(map[string]string{
 		"request_id": "stripe-" + hex.EncodeToString(sum[:])[:48],
 		"payload":    string(body),
 		"signature":  sig,
 	})
+	fwd := bytes.TrimRight(buf.Bytes(), "\n")
 	// JSON escaping can grow the body; past Finance's route limit Finance would answer 413 for ever (AEGIS L7)
 	if len(fwd) > maxForwardBytes {
 		log.Printf("correlation_id=%s delivery too large once escaped (%d bytes)", correlationID(), len(fwd))
