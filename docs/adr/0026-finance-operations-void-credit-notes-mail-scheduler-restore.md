@@ -116,6 +116,27 @@ The contracts promise things Finance could not do:
     acknowledgement sent outside Finance); refund totals on a rebuild come only from verified `stripe_refund_booked`
     events; credit note numbers go on from the highest number seen (also on the ledger), never the count.
 
+16. **AEGIS round 3 (Oct 31 2026): the restore lockdown, simplified and fail closed.** A restore is a rare disaster
+    with Andre present, so global strictness replaces per-invoice scoping (R3-5 moot). (R3-1/R3-2) A restore's
+    reconcile writes `restore_lockdown.json` (atomic, fsync) BEFORE it changes anything, then commits the reconcile
+    and the restore break in one log line (or answers 503). While the lockdown is on, every credit note, void, Stripe
+    page, payout, refund and vendor payment is refused for every client (money in is booked), `/health` is
+    `degraded`, and an ALERT repeats every 5 minutes from a watch thread. A failed ledger read at the scan leaves the
+    break `build_incomplete`; every re-import reads it again first and plans nothing until it can. Nothing closes the
+    break automatically: Andre lifts the lockdown (`POST /fin/v1/restore/lockdown/lift`), refused until the list is
+    complete, the coverage is full and every item is rebuilt or disposed of. At start the lockdown is read from disk;
+    without it, finance log anchors on the ledger that the local log lacks (after the last acknowledged position)
+    turn it on (`detected`). (R3-3) Only `needs_review` items can be disposed of; `reissued_as` names an invoice or
+    credit note of the same client first seen on the ledger after the item; `reissue_after_lift` opens a
+    `restore_reissue_due` break at the lift. (R3-4) Owed commit marks are derived from the local log (each line names
+    its evidence), written at start and hourly; `/health` counts them; an unmarked intent whose line anchor exists is
+    shown as "possibly committed" (never booked). (R3-9/R3-10) Marks carry a key id; `FIN_CONTACT_HASH_KEY` may list
+    up to two old keys (`<new>_<old>`) that only verify; without a key `/health` says `restore_rebuild_unavailable`
+    and start-up warns; tests cover no key, an unknown key id, a bad MAC, another department and a mark whose summary
+    does not hash to its payload. (Lows) The numbering floor counts only authentic numbers, per year (R3-6); the
+    pause ends on the wall or the monotonic clock (R3-7); the deadline close keeps the reason text in Finance's store
+    and refuses a `done_on` before the deadline began (R3-8).
+
 ## Consequences
 
 - New ledger event types: `invoice_voided`, `credit_note_issued`, `credit_note_refund_linked`, `client_contact_recorded`,
@@ -134,5 +155,5 @@ The contracts promise things Finance could not do:
 Finance tests: test_credit_notes.py, test_client_mail.py, test_seo_audit_card_and_webhooks.py,
 test_restore_reimport.py (the red team's restore scenario, end to end with the simulated Stripe),
 test_ops_cron_caller.py, test_business_tz.py, test_aegis_waveB_fixes.py, test_aegis_waveB_r2.py (AEGIS's round-2
-attacks kept as regressions), test_finance_ops_r2.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
+attacks kept as regressions), test_finance_ops_r2.py, test_finance_ops_r3.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
 against the real Stripe or Resend APIs.

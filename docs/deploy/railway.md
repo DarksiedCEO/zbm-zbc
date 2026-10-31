@@ -596,7 +596,7 @@ Set by IaC or by you:
 | `MAIL_FROM` | yes | no | `Z Best Media <billing@zbestmedia.com>` (IaC) | the only sender allowed (any other address refuses start); alone it does not switch mail on |
 | `RESEND_API_KEY` | to send client email | yes | (you; Resend) | becomes `RESEND_API_KEY_FILE`. With `MAIL_FROM`, client email is ON (receipts, credit notes, refund confirmations, acknowledgements); unset = OFF, nothing is sent and nothing alerts |
 | `RESEND_API_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself; set without `MAIL_FROM` refuses start |
-| `FIN_CONTACT_HASH_KEY` | before contacts or mail | yes | (you; Secrets) | becomes `FIN_CONTACT_HASH_KEY_FILE` (64 hex characters); the billing contact's ledger hash is an HMAC with it (AEGIS F8) |
+| `FIN_CONTACT_HASH_KEY` | before contacts or mail | yes | (you; Secrets) | becomes `FIN_CONTACT_HASH_KEY_FILE` (64 hex characters); the billing contact's ledger hash is an HMAC with it (AEGIS F8), and it signs the restore commit marks. To rotate: `<new>_<old>` (each 64 hex, joined by `_`, at most two old keys; the old ones only verify; runbook restore-and-reimport, "Commit marks and the key") |
 | `FIN_CONTACT_HASH_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself |
 
 Everything else finance-py reads — leave at the default (services/finance-py/README.md has the meaning of each):
@@ -1275,7 +1275,8 @@ from it, and the client's email shows the same date. If that date has already pa
 `POST $F/fin/v1/invoices/<id>/sow-ended` with `{"request_id", "sow_ended_on": "2026-11-01"}`. A
 `cancel_or_credit_due` break opens, due 10 business days later; the void, or a credit note that leaves nothing owed,
 closes it. Credited down only to the work done (something is still owed)? Close it yourself with the reason:
-`POST $F/fin/v1/deadlines/<break id>/close` with `{"request_id", "basis": "closed_by_andre", "reason": "..."}`.
+`POST $F/fin/v1/deadlines/<break id>/close` with `{"request_id", "basis": "closed_by_andre", "reason": "...",
+"done_on": "<optional; not before the SOW ended>"}` (the reason is kept with the break; no personal data in it).
 `sow_ended_on` must be on or after the invoice's issue day and not in the future.
 
 **Acknowledge a client request within 2 business days** (MSA 4.12(f)): `POST $F/fin/v1/clients/<client id>/acknowledgements`
