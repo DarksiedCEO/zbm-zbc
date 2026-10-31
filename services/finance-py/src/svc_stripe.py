@@ -282,6 +282,7 @@ class StripeMixin:
                     raise NotFound("no such invoice")
                 if inv["status"] != "issued":
                     raise Conflict(f"only an issued invoice can be paid; this one is {inv['status']}")
+                self._restore_refusal("Stripe page")       # AEGIS F2: a lost void must never become payable
                 methods, reasons = self._stripe_methods(inv)
                 if reasons:
                     raise Refused("no Stripe checkout for this invoice", reasons)

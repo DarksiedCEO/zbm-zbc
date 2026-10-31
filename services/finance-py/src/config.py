@@ -164,6 +164,8 @@ class Settings:
     # client email (ADR 0026): off unless BOTH the Resend key file and MAIL_FROM are set
     mail_from: Optional[str] = None
     resend_api_key: Optional[Secret] = field(default=None, repr=False)
+    # AEGIS F8: the per-deployment key of the HMAC that stands for a billing contact's address on the ledger
+    contact_hash_key: Optional[bytes] = field(default=None, repr=False)
 
 
 _HELD: dict = {}
@@ -413,7 +415,7 @@ def load(env: Optional[dict] = None) -> Settings:
         media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 2, 2, 10),
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
         business_tz=_tz(env, "FIN_BUSINESS_TZ", "America/Los_Angeles"),
-        **stripe, **_mail(env),
+        **stripe, **_mail(env), contact_hash_key=_contact_key(env),
     )
     # the flock last: every other refusal above leaves the directory untouched
     s.data_dir_lock = hold_data_dir(data_dir) if data_dir else None
@@ -436,6 +438,20 @@ def _tz(env, name: str, default: str) -> str:
 # The only address client mail is ever sent from (ADR 0026; founder Oct 30: billing@zbestmedia.com)
 MAIL_SENDER = "billing@zbestmedia.com"
 _MAIL_FROM = re.compile(r"(?:[A-Za-z0-9 .,'&-]{1,60} <billing@zbestmedia\.com>|billing@zbestmedia\.com)")
+
+
+def _contact_key(env) -> Optional[bytes]:
+    """AEGIS F8: FIN_CONTACT_HASH_KEY (64 hex characters, `openssl rand -hex 32`), written to FIN_CONTACT_HASH_KEY_FILE
+    by the entrypoint. Without it no billing contact is recorded, and client email cannot be switched on."""
+    if not (env.get("FIN_CONTACT_HASH_KEY_FILE") or "").strip():
+        if (env.get("RESEND_API_KEY_FILE") or "").strip():
+            raise RuntimeError("client email is on (RESEND_API_KEY) but FIN_CONTACT_HASH_KEY is not set: the billing "
+                               "contact's ledger hash needs it; refusing to start")
+        return None
+    v = _secret_file(env, "FIN_CONTACT_HASH_KEY_FILE", tuple("0123456789abcdef")).reveal()
+    if not re.fullmatch(r"[0-9a-f]{64}", v):
+        raise RuntimeError("FIN_CONTACT_HASH_KEY_FILE must hold 64 lowercase hex characters (openssl rand -hex 32)")
+    return bytes.fromhex(v)
 
 
 def _mail(env) -> dict:

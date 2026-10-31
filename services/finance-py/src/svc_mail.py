@@ -17,6 +17,8 @@ Client email: billing contacts, the outbox and the ``client-mail`` job (ADR 0026
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 from datetime import timedelta
 from typing import Optional
@@ -28,7 +30,7 @@ from errors import Conflict, NotFound
 from intelligences import i02_receivables as I2
 from ledger import derived_id
 from ports import MailOutcome
-from service import Gather, Op, rid, sha_text
+from service import Gather, Op, rid
 from svc_credits import add_business_days
 
 alert_log = logging.getLogger("finance.alert")
@@ -53,18 +55,24 @@ class MailMixin:
             if ent:
                 return ent["response"]
             email = body["email"]
-            rec = {"client_id": client_id, "email": email, "name": body.get("name"), "email_sha256": sha_text(email),
+            key_ = getattr(self.cfg, "contact_hash_key", None)
+            if not key_:
+                raise Conflict("FIN_CONTACT_HASH_KEY is not set: no billing contact is recorded without it (the "
+                               "ledger keeps only a keyed hash of the address; runbook, Secrets)")
+            # AEGIS F8: a keyed hash (HMAC-SHA-256, per-deployment key), never a bare SHA-256 a dictionary reverses
+            mac = hmac.new(key_, email.encode("utf-8"), hashlib.sha256).hexdigest()
+            rec = {"client_id": client_id, "email": email, "name": body.get("name"), "email_hmac_sha256": mac,
                    "set_at": iso(self._now()), "set_by": "andre"}
             op = Op(self, f"contact|{request_id}", "andre", client_id)
-            op.record(derived_id("contact", client_id, rec["email_sha256"]), "client_contact_recorded", "andre",
-                      client_id, {"client_id": client_id, "email_sha256": rec["email_sha256"]},
+            op.record(derived_id("contact", client_id, mac), "client_contact_recorded", "andre",
+                      client_id, {"client_id": client_id, "email_hmac_sha256": mac},
                       "Andre recorded a client's billing contact")
             op.put("client_contacts", client_id, rec)
             b = self.db["breaks"].get(rid("brk", "client_mail_no_contact", client_id))
             if b is not None and b["status"] != "resolved":
                 op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
                                                  "resolution": {"basis": "contact_recorded"}})
-            resp = self._idem_add(op, key, h, {"client_id": client_id, "email_sha256": rec["email_sha256"],
+            resp = self._idem_add(op, key, h, {"client_id": client_id, "email_hmac_sha256": mac,
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
             return resp
@@ -106,8 +114,22 @@ class MailMixin:
             op = Op(self, f"ack|{request_id}", "andre", client_id)
             mid = self._enqueue_client_mail(op, "acknowledgement", client_id, f"{client_id}|{request_id}", data)
             due = add_business_days(received, 2)
-            resp = self._idem_add(op, key, h, {"mail_id": mid, "acknowledge_by": due.isoformat(),
-                                               "late": self._business_today() > due,
+            # AEGIS F9: the 2-business-day promise is a deadline: a break until the acknowledgement is SENT
+            bid = rid("brk", "acknowledgement_due", mid)
+            late = self._business_today() > due
+            op.put("breaks", bid, {"break_id": bid, "leg": "acknowledgement_due", "subject": f"mail:{mid}"[:160],
+                                   "difference": "0.00", "opened_at": iso(self._now()),
+                                   "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                   "explanation_code": "timing", "status": "open", "receipt_id": None,
+                                   "mail_id": mid, "due_by": due.isoformat(), "deadline": "MSA 4.12(f)", "late": late,
+                                   "severity": "high" if late else "normal", "resolution": None,
+                                   "note": f"acknowledge the client's {body['topic'].replace('_', ' ')} by "
+                                           f"{due.isoformat()} (MSA 4.12(f)): closed when the email is sent"})
+            op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                      {"break_id": bid, "leg": "acknowledgement_due", "difference": "0.00"},
+                      f"Acknowledgement due by {due.isoformat()}")
+            resp = self._idem_add(op, key, h, {"mail_id": mid, "acknowledge_by": due.isoformat(), "break_id": bid,
+                                               "late": late,
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
             return resp
@@ -263,6 +285,11 @@ class MailMixin:
                       {"mail_id": mail_id, "outcome": out.outcome, "attempt": new["attempts"]},
                       f"Client email {out.outcome} ({rec['kind']})")
             op.put("mail_outbox", mail_id, new)
+            if new["status"] == "sent":
+                b = self.db["breaks"].get(rid("brk", "acknowledgement_due", mail_id))
+                if b is not None and b["status"] != "resolved":
+                    op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
+                                                     "resolution": {"basis": "acknowledgement_sent"}})
             self._commit(op)
             return out.outcome
 
@@ -271,12 +298,14 @@ class MailMixin:
         off (the stand-in): nothing is touched. A real adapter and no billing contact: the message waits untouched
         (the break from its first attempt already asks Andre for the contact)."""
         from ports import NotBuiltClientMail
+        overdue = self._deadline_sweep(prefix)
         port = self.ports.client_mail
         if isinstance(port, NotBuiltClientMail):
             with self.lock:
                 waiting = sum(1 for r in self.db["client_receipts"].values() if r["status"] == "pending_send") + \
                     sum(1 for r in self.db["mail_outbox"].values() if r["status"] == "pending")
-            return {"sent": 0, "waiting": waiting, "failed_for_good": 0, "skipped": 0, "due": 0, "mail_off": True}
+            return {"sent": 0, "waiting": waiting, "failed_for_good": 0, "skipped": 0, "due": 0, "mail_off": True,
+                    "deadlines_overdue": overdue}
         needs_contact = bool(getattr(port, "requires_contact", False))
         with self.lock:
             receipts = sorted((r["created_at"], k) for k, r in self.db["client_receipts"].items()
@@ -290,7 +319,8 @@ class MailMixin:
                 receipts = [x for x in receipts if known(x[1], "client_receipts")]
                 outbox = [x for x in outbox if known(x[1], "mail_outbox")]
         todo = ([("receipt", k) for _, k in receipts] + [("outbox", k) for _, k in outbox])[:MAIL_BATCH]
-        summary = {"sent": 0, "waiting": 0, "failed_for_good": 0, "skipped": 0, "due": len(receipts) + len(outbox)}
+        summary = {"sent": 0, "waiting": 0, "failed_for_good": 0, "skipped": 0, "due": len(receipts) + len(outbox),
+                   "deadlines_overdue": overdue}
         for i, (what, k) in enumerate(todo):
             req = rid("mailjob", prefix, what, k)
             if what == "receipt":
@@ -306,3 +336,27 @@ class MailMixin:
                 key = "failed_for_good"
             summary[key] += 1
         return summary
+
+    DEADLINE_LEGS = ("acknowledgement_due", "cancel_or_credit_due", "credit_note_refund_due")
+
+    def _deadline_sweep(self, prefix: str) -> int:
+        """AEGIS F9: every contract deadline still open after its due day turns high severity, once, with an ALERT
+        line (MSA 4.10 refunds, 4.12(f) acknowledgements, 4.12(g) cancel-or-credit). Run by the hourly job."""
+        today = self._business_today().isoformat()
+        with self.lock:
+            late = [dict(b) for b in self.db["breaks"].values()
+                    if b.get("leg") in self.DEADLINE_LEGS and b["status"] != "resolved" and b.get("due_by")
+                    and b["due_by"] < today and not b.get("overdue")]
+            if not late:
+                return 0
+            op = Op(self, f"{prefix}|deadlines", I2.ACTOR, "deadlines")
+            for b in late:
+                op.put("breaks", b["break_id"], {**b, "overdue": True, "severity": "high", "overdue_since": today})
+                op.record(derived_id("late", b["break_id"]), "deadline_overdue", I2.ACTOR, b["break_id"],
+                          {"break_id": b["break_id"], "leg": b["leg"], "due_by": b["due_by"]},
+                          f"Deadline passed: {b['leg']} due {b['due_by']}")
+            self._commit(op)
+        for b in late:
+            alert_log.error("ALERT finance: deadline_overdue leg=%s due_by=%s break=%s", b["leg"], b["due_by"],
+                            b["break_id"])
+        return len(late)

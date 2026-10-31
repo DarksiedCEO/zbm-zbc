@@ -255,7 +255,7 @@ CRON_JOBS = ("stripe-sessions", "client-mail")
 CRON_ROUTES = (re.compile(r"/fin/v1/jobs/(%s)/run" % "|".join(re.escape(j) for j in CRON_JOBS)),
                re.compile(r"/fin/v1/reconciliations/run"))
 # CH-3: while Finance is quiesced for a backup only reads and the resume are answered
-QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume")
+QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume|/fin/v1/reconcile")     # reconcile: restoring a paused backup
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -566,6 +566,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def credit_note(invoice_id: str, _: str = Depends(andre("invoices/credit-notes")),
                     req: m.CreditNoteIn = Depends(body(m.CreditNoteIn))) -> dict:
         return svc.issue_credit_note(req.request_id, _id(invoice_id), dump(req))
+
+    @app.post("/fin/v1/invoices/{invoice_id}/sow-ended", dependencies=auth, status_code=201)
+    def sow_ended(invoice_id: str, _: str = Depends(andre("invoices/sow-ended")),
+                  req: m.SowEnded = Depends(body(m.SowEnded))) -> dict:
+        return svc.sow_ended(req.request_id, _id(invoice_id), dump(req))
 
     @app.get("/fin/v1/invoices/{invoice_id}/credit-notes", dependencies=auth)
     def credit_notes(invoice_id: str, _: str = Depends(andre("invoices/credit-notes/list"))) -> dict:

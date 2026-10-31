@@ -1,9 +1,9 @@
 """
 The ONE list of Stripe webhook events Finance's endpoint subscribes to (red team OPS-C4; ADR 0026).
 
-docs/deploy/railway.md (step 9), services/finance-py/README.md and devtools/stripe_webhook_events.py all show this
-list; tests/test_stripe_webhook_events.py fails if any of them differs from it, or if an event here is one Finance
-would ignore (``svc_stripe.event_kind`` returns None).
+docs/deploy/railway.md (step 7), services/finance-py/README.md and devtools/stripe_webhook_events.py all show this
+list; tests/test_seo_audit_card_and_webhooks.py fails if any of them differs from it, or if an event here is one
+Finance would ignore (``svc_stripe.event_kind`` returns None).
 
 Why each group:
 - ``checkout.session.*``: a page was paid, its ACH payment settled or failed later, or the page expired.

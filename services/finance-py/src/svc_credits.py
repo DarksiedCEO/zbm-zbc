@@ -30,6 +30,7 @@ creates a refund asks Compliance first: a client refused on SANCTIONS grounds is
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -37,7 +38,7 @@ from typing import Optional
 import money as M
 import reasons as R
 from clock import iso
-from errors import Conflict, NotFound
+from errors import Conflict, Invalid, NotFound
 from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from ledger import derived_id
@@ -57,6 +58,35 @@ def add_business_days(day: date, n: int) -> date:
         if d.weekday() < 5:
             n -= 1
     return d
+
+
+def credit_note_entry_id(cnid: str) -> str:
+    return rid("je", "zbm", f"F11c|{cnid}")
+
+
+def credit_note_payload(cnid, number, iid, amount, to_refund, reason, due_from) -> dict:
+    return {"credit_note_id": cnid, "number": number, "invoice_id": iid, "amount": amount,
+            "to_ar": M.fmt(M.D(amount) - M.D(to_refund)), "to_refund": to_refund,
+            "entry_id": credit_note_entry_id(cnid), "reason_code": reason, "refund_due_from": due_from}
+
+
+CN_SUMMARY = re.compile(r"Credit note (CN-\d{4}-\d{4,}) (fin-cn-[0-9A-Z]{26}) on (fin-inv-[0-9A-Z]{26}): "
+                        r"(\d+\.\d{2}), refund (\d+\.\d{2}) due from (\d{4}-\d{2}-\d{2}|-), ([a-z_]+), line (\d+)")
+VOID_SUMMARY = re.compile(r"Invoice (fin-inv-[0-9A-Z]{26}) voided: (\d+\.\d{2}) no longer owed, ([a-z_]+), line (\d+)")
+
+
+def credit_note_summary(cnid, number, iid, amount, to_refund, reason, due_from, seq) -> str:
+    return (f"Credit note {number} {cnid} on {iid}: {amount}, refund {to_refund} due from {due_from or '-'}, "
+            f"{reason}, line {seq}")
+
+
+def void_payload(iid, amount, reason) -> dict:
+    return {"invoice_id": iid, "amount": amount, "entry_id": rid("je", "zbm", f"F11v|{iid}")
+            if M.D(amount) > 0 else None, "reason_code": reason}
+
+
+def void_summary(iid, amount, reason, seq) -> str:
+    return f"Invoice {iid} voided: {amount} no longer owed, {reason}, line {seq}"
 
 
 class CreditsMixin:
@@ -206,12 +236,14 @@ class CreditsMixin:
                    "void_reason": body["reason_code"], "decided_at": inv.get("decided_at") or now,
                    "credited": M.fmt(M.D(inv.get("credited") or "0.00") + due),
                    "credited_ar": M.fmt(M.D(inv.get("credited_ar") or "0.00") + due)}
+            if body.get("note"):
+                new["void_note_sha256"] = sha_text(body["note"])
+            # AEGIS F2: the ledger event carries everything a restore needs to rebuild the void (svc_restore)
             op.record(derived_id("invv", invoice_id), "invoice_voided", "andre", invoice_id,
-                      {"invoice_id": invoice_id, "amount": M.fmt(due), "entry_id": entry_id,
-                       "reason_code": body["reason_code"],
-                       "note_sha256": sha_text(body["note"]) if body.get("note") else None},
-                      f"Andre voided an issued invoice ({M.fmt(due)} no longer owed)")
+                      void_payload(invoice_id, M.fmt(due), body["reason_code"]),
+                      void_summary(invoice_id, M.fmt(due), body["reason_code"], len(self.log) + 1))
             op.put("invoices", invoice_id, new)
+            self._resolve_deadlines(op, "cancel_or_credit_due", invoice_id, "voided")
             self._enqueue_client_mail(op, "invoice_cancelled", inv["client_id"], invoice_id,
                                       {"invoice_id": invoice_id, "amount_cancelled": M.fmt(due),
                                        "cancelled_on": self._business_today().isoformat()})
@@ -222,6 +254,7 @@ class CreditsMixin:
 
     def _void_checks(self, inv: dict, body: dict) -> None:
         self._credit_refusals(inv, "void")
+        self._restore_refusal("void")
         if inv["status"] == "paid":
             raise Conflict("this invoice is paid: it is not voided; issue a credit note instead (it records the refund "
                            "ZBM owes)")
@@ -277,6 +310,7 @@ class CreditsMixin:
 
     def _credit_checks(self, inv: dict, body: dict, amount: Decimal) -> dict:
         self._credit_refusals(inv, "credit note")
+        self._restore_refusal("credit note")
         if inv["status"] not in ("issued", "paid", "credited"):
             raise Conflict(f"a credit note is issued against an issued or paid invoice; this one is {inv['status']}")
         if body["content_sha256"] != inv["content_sha256"]:
@@ -290,12 +324,34 @@ class CreditsMixin:
         if to_refund > st["refundable"]:
             raise Conflict(f"the credit would owe a refund of {M.fmt(to_refund)}, more than the client's money ZBM "
                            f"still holds on this invoice ({M.fmt(st['refundable'])})")
-        return {"to_ar": M.q(to_ar), "to_refund": to_refund, "state": st}
+        due_from = body.get("refund_due_from")
+        if to_refund > 0:
+            # AEGIS F4: MSA 4.10 counts the 10 business days from the day the refund BECAME due (the SOW's end, the
+            # agreement on an invoice dispute, ...), which Andre states; never from the day he issues the credit note
+            if due_from is None:
+                raise Conflict("this credit note owes a refund: say the day the refund became due under MSA 4.10 "
+                               "(refund_due_from); the 10 business days count from it")
+            if due_from > self._business_today():
+                raise Invalid("refund_due_from is in the future")
+        return {"to_ar": M.q(to_ar), "to_refund": to_refund, "state": st,
+                "refund_due_from": due_from if to_refund > 0 else None}
 
-    def _book_credit_note(self, op: Op, inv: dict, amount: Decimal, split: dict, body: dict, request_id: str) -> dict:
+    def _next_credit_note_number(self) -> str:
+        """Strictly increasing: one more than the highest number this Finance holds (after a restore, the re-import
+        rebuilds every credit note from the ledger before a new one can be issued: AEGIS F2)."""
+        year = self._business_today().year
+        top = 0
+        for c in self.db["credit_notes"].values():
+            m = re.fullmatch(r"CN-(\d{4})-(\d{4,})", c.get("number") or "")
+            if m and int(m.group(1)) == year:
+                top = max(top, int(m.group(2)))
+        return f"CN-{year}-{top + 1:04d}"
+
+    def _book_credit_note(self, op: Op, inv: dict, amount: Decimal, split: dict, body: dict, request_id: str, *,
+                          cnid: Optional[str] = None, number: Optional[str] = None, rebuilt: bool = False) -> dict:
         iid, cid = inv["invoice_id"], inv["client_id"]
-        cnid = rid("cn", iid, request_id)
-        number = f"CN-{self._business_today().year}-{len(self.db['credit_notes']) + 1:04d}"
+        cnid = cnid or rid("cn", iid, request_id)
+        number = number or self._next_credit_note_number()
         acct, sub = self._credit_account(inv)
         to_ar, to_refund = split["to_ar"], split["to_refund"]
         lines = [J.dr(acct, amount, sub)]
@@ -309,6 +365,10 @@ class CreditsMixin:
         except PostingRefused as exc:
             raise InvalidReasons("credit note posting refused", exc.reasons) from None
         today = self._business_today()
+        due_from = split.get("refund_due_from")
+        due_by = add_business_days(date.fromisoformat(str(due_from)), REFUND_DUE_BUSINESS_DAYS) \
+            if to_refund > 0 and due_from else None
+        late = due_by is not None and due_by < today
         # a credit note issued after a Stripe refund absorbs that refund (the A/R it raised): linked, oldest first
         refund_log = [dict(x) for x in inv.get("refund_log") or []]
         absorbed, links = to_ar, []
@@ -321,13 +381,23 @@ class CreditsMixin:
             x["credit_note_ids"] = list(x.get("credit_note_ids") or []) + [cnid]
             links.append({"entry_id": x["entry_id"], "amount": M.fmt(take), "booked": "before_credit_note"})
             absorbed = M.q(absorbed - take)
+        if links and all(M.D(x.get("ar_unlinked") or "0.00") == 0 for x in refund_log):
+            # AEGIS M2b: every Stripe refund on this invoice is now accounted for by a credit note: the "refunded at
+            # Stripe with no credit note" breaks are answered
+            rcts = {k for k, r in self.db["receipts"].items() if r.get("invoice_id") == iid}
+            for b in list(self.db["breaks"].values()):
+                if b.get("leg") == "stripe_refund" and b.get("receipt_id") in rcts and b["status"] != "resolved":
+                    op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
+                                                     "resolution": {"basis": "credit_note", "credit_note_id": cnid}})
         cn = {"credit_note_id": cnid, "number": number, "invoice_id": iid, "client_id": cid, "entity": "zbm",
               "amount": M.fmt(amount), "to_ar": M.fmt(to_ar), "to_refund": M.fmt(to_refund),
               "refund_remaining": M.fmt(to_refund), "refunds": links, "reason_code": body["reason_code"],
               "note_sha256": sha_text(body["note"]) if body.get("note") else None, "entry_id": e["entry_id"],
               "issued_at": iso(self._now()), "issued_on": today.isoformat(), "issued_by": "andre",
-              "refund_due_by": add_business_days(today, REFUND_DUE_BUSINESS_DAYS).isoformat() if to_refund > 0
-              else None, "status": "refund_pending" if to_refund > 0 else "applied", "break_id": None}
+              "refund_due_from": str(due_from) if due_by else None,
+              "refund_due_by": due_by.isoformat() if due_by else None,
+              "status": "refund_pending" if to_refund > 0 else "applied", "break_id": None,
+              **({"rebuilt_from_ledger": True} if rebuilt else {})}
         new = {**inv, "credited": M.fmt(split["state"]["credited"] + amount),
                "credited_ar": M.fmt(M.D(inv.get("credited_ar") or "0.00") + to_ar),
                "refund_due": M.fmt(split["state"]["refund_due"] + to_refund),
@@ -340,6 +410,7 @@ class CreditsMixin:
                                    "opened_on": self._today_la().isoformat(), "owner": "andre",
                                    "explanation_code": "timing", "status": "open", "receipt_id": None,
                                    "credit_note_id": cnid, "due_by": cn["refund_due_by"], "resolution": None,
+                                   "deadline": "MSA 4.10", "late": late, "severity": "high" if late else "normal",
                                    "note": f"refund {M.fmt(to_refund)} to the original payment method by "
                                            f"{cn['refund_due_by']} (MSA 4.10): refund it in Stripe; Finance links it"})
             op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
@@ -352,12 +423,22 @@ class CreditsMixin:
             new["paid_at"] = None if new["status"] != "paid" else new.get("paid_at")
             if new["status"] == "void":
                 new.update(voided_at=iso(self._now()), voided_by="andre", void_reason=body["reason_code"])
-        op.record(derived_id("cn", cnid), "credit_note_issued", "andre", cnid,
-                  {"credit_note_id": cnid, "invoice_id": iid, "amount": M.fmt(amount), "to_ar": M.fmt(to_ar),
-                   "to_refund": M.fmt(to_refund), "entry_id": e["entry_id"], "reason_code": body["reason_code"]},
-                  f"Credit note {number}: {M.fmt(amount)} against an invoice")
+        # AEGIS F2: the ledger event carries everything a restore needs to rebuild the credit note (svc_restore)
+        due_s = str(due_from) if due_by else None
+        if rebuilt:
+            op.record(derived_id("cnrb", cnid), "credit_note_rebuilt", "andre", cnid,
+                      {"credit_note_id": cnid, "number": number, "entry_id": e["entry_id"]},
+                      f"Credit note {number} rebuilt from the ledger after a restore")
+        else:
+            op.record(derived_id("cn", cnid), "credit_note_issued", "andre", cnid,
+                      credit_note_payload(cnid, number, iid, M.fmt(amount), M.fmt(to_refund), body["reason_code"], due_s),
+                      credit_note_summary(cnid, number, iid, M.fmt(amount), M.fmt(to_refund), body["reason_code"], due_s,
+                                          len(self.log) + 1))
         op.put("credit_notes", cnid, cn)
         op.put("invoices", iid, new)
+        self._resolve_deadlines(op, "cancel_or_credit_due", iid, "credit_note")
+        if rebuilt:
+            return {"credit_note": cn, "invoice": new, "entry_id": e["entry_id"]}
         self._enqueue_client_mail(op, "credit_note", cid, cnid,
                                   {"credit_note_number": number, "invoice_id": iid, "amount": M.fmt(amount),
                                    "issued_on": cn["issued_on"], "refund_amount": M.fmt(to_refund),
@@ -365,6 +446,49 @@ class CreditsMixin:
                                    "amount_still_due": M.fmt(max(I2.amount_due(new), M.ZERO))
                                    if new["status"] == "issued" else "0.00"})
         return {"credit_note": cn, "invoice": new, "entry_id": e["entry_id"]}
+
+    def _resolve_deadlines(self, op: Op, leg: str, invoice_id: str, basis: str) -> None:
+        """AEGIS F9: a contract deadline (cancel-or-credit) is met by the void or credit note that answers it."""
+        for b in list(self.db["breaks"].values()):
+            if b.get("leg") == leg and b.get("invoice_id") == invoice_id and b["status"] != "resolved":
+                op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
+                                                 "resolution": {"basis": basis}})
+
+    def sow_ended(self, request_id: str, invoice_id: str, body: dict) -> dict:
+        """AEGIS F9 / MSA 4.12(g): an SOW ended while this invoice is unpaid: within 10 business days ZBM cancels it
+        or credits it down. The deadline is a break until a void or a credit note on the invoice closes it."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"invoices/{invoice_id}/sow-ended", body)
+            if ent:
+                return ent["response"]
+            inv = self.db["invoices"].get(invoice_id)
+            if inv is None:
+                raise NotFound("no such invoice")
+            if inv["status"] != "issued":
+                raise Conflict(f"only an unpaid (issued) invoice is cancelled or credited; this one is {inv['status']}")
+            ended = body["sow_ended_on"]
+            if ended > self._business_today():
+                raise Invalid("sow_ended_on is in the future")
+            due = add_business_days(ended, REFUND_DUE_BUSINESS_DAYS)
+            bid = rid("brk", "cancel_or_credit_due", invoice_id)
+            if bid in self.db["breaks"] and self.db["breaks"][bid]["status"] != "resolved":
+                raise Conflict("this invoice already has an open cancel-or-credit deadline")
+            op = Op(self, f"sowend|{request_id}", "andre", invoice_id)
+            op.put("breaks", bid, {"break_id": bid, "leg": "cancel_or_credit_due", "subject": f"zbm:invoice:{invoice_id}",
+                                   "difference": inv["total"], "opened_at": iso(self._now()),
+                                   "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                   "explanation_code": "timing", "status": "open", "receipt_id": None,
+                                   "invoice_id": invoice_id, "due_by": due.isoformat(), "deadline": "MSA 4.12(g)",
+                                   "late": due < self._business_today(), "resolution": None,
+                                   "note": f"the SOW ended {ended.isoformat()}: void this invoice or credit it down to "
+                                           f"the work done by {due.isoformat()} (MSA 4.12(g))"})
+            op.record(derived_id("brk", bid, ended.isoformat()), "break_opened", "intel_07_reconciliation", bid,
+                      {"break_id": bid, "leg": "cancel_or_credit_due", "difference": inv["total"]},
+                      f"Cancel or credit by {due.isoformat()} (SOW ended {ended.isoformat()})")
+            resp = self._idem_add(op, key, h, {"break_id": bid, "due_by": due.isoformat(), "ledger_event_ids": op.events,
+                                               "request_id": request_id})
+            self._commit(op)
+            return resp
 
     # ================================================================== the refund side (called from svc_stripe)
 

@@ -751,7 +751,9 @@ class FinanceService:
                     "voidable": {"lines": sorted(a.void_lines), "event_ids": sorted(a.void_event_ids)},
                     "reconcile_mode": self.reconcile_mode,
                     # CH-3 (svc_restore): voidable evidence that is MONEY is never a cleanup; it needs the re-import
-                    "money_at_risk": self.money_at_risk(a.void_event_ids)}
+                    "money_at_risk": self.money_at_risk(a.void_event_ids),
+                    # AEGIS F1: the point the restored state reflects, read before any reconcile line is appended
+                    "restore_point": self.restore_point()}
 
     def reconcile(self, request_id: str, head_sha256: str, void_lines: list[int], void_event_ids: list[str],
                   money_events_acknowledged: bool = False) -> dict:

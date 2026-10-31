@@ -38,4 +38,4 @@ COPY services/finance-py/seed /app/services/finance-py/seed
 WORKDIR /app/services/finance-py/src
 ENV FIN_DATA_DIR=/data/finance
 USER 10001:10001
-ENTRYPOINT ["/usr/local/bin/zbm-entrypoint", "--port-var", "FIN_PORT", "--state-dir-var", "FIN_DATA_DIR", "--secret-file", "FIN_STRIPE_SECRET_KEY_FILE", "--secret-file", "FIN_STRIPE_WEBHOOK_SECRET_FILE", "--secret-file", "RESEND_API_KEY_FILE", "--", "/opt/venv/bin/python", "-m", "api"]
+ENTRYPOINT ["/usr/local/bin/zbm-entrypoint", "--port-var", "FIN_PORT", "--state-dir-var", "FIN_DATA_DIR", "--secret-file", "FIN_STRIPE_SECRET_KEY_FILE", "--secret-file", "FIN_STRIPE_WEBHOOK_SECRET_FILE", "--secret-file", "RESEND_API_KEY_FILE", "--secret-file", "FIN_CONTACT_HASH_KEY_FILE", "--", "/opt/venv/bin/python", "-m", "api"]

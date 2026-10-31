@@ -151,13 +151,22 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   `MAIL_FROM` (billing@zbestmedia.com only) are both set; otherwise the stand-in sends nothing. Backoff 15 min doubling
   to 8 h, 7 attempts, then `send_failed` + a high break + an `ALERT finance:` log line; `POST
   /fin/v1/client-mail/{id}/requeue` (Andre).
+- AEGIS wave B fixes: a refund-owing credit note needs `refund_due_from` (MSA 4.10; the deadline counts from it);
+  `POST /fin/v1/invoices/{id}/sow-ended` (Andre) opens the 4.12(g) cancel-or-credit deadline; acknowledgements carry
+  a 4.12(f) deadline closed when the email is sent; overdue deadlines turn high with an `ALERT finance:
+  deadline_overdue` line (client-mail job). The billing contact's ledger hash is an HMAC keyed by
+  `FIN_CONTACT_HASH_KEY_FILE` (64 hex; required before a contact is recorded and whenever mail is on).
 - Caller `ops_cron` (the fin-cron service): only `POST /fin/v1/jobs/{stripe-sessions,client-mail}/run` and
   `POST /fin/v1/reconciliations/run`.
 - Backups (CH-3): `POST /fin/v1/backup/quiesce` / `resume` (Andre) pause writes (503) around a backup set and record a
   marker; `GET /fin/v1/reconcile` lists `money_at_risk` and `POST /fin/v1/reconcile` needs
   `money_events_acknowledged: true` to void money evidence (then a `restore_reimport_required` break stays open);
   `POST /fin/v1/stripe/reimport` (Andre; dry run first, then the real run naming its `plan_sha256`) books what Stripe
-  holds for a period. docs/runbooks/restore-and-reimport.md.
+  holds for a period, and rebuilds the credit notes and voids made after the backup from their ledger events
+  (verified against the ledger's payload SHA-256), in ledger order with the payments and refunds. While the restore
+  break is open no credit note, void or Stripe page is made; it closes only when verified-clean runs cover every day
+  from the backup's day to the day it opened. A Finance restarted (or restored) inside a backup window stays paused
+  until the marker is resumed. docs/runbooks/restore-and-reimport.md.
 - CH-4: a paid Checkout page Finance does not know is answered 2xx with a `stripe_unknown_session` break and an
   `ALERT finance:` log line. CH-10: due dates count from the `FIN_BUSINESS_TZ` date (default America/Los_Angeles).
 

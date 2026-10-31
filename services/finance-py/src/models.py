@@ -639,6 +639,15 @@ class CreditNoteIn(Strict):
     amount: PositiveMoney
     reason_code: Literal[CREDIT_REASONS]
     note: Optional[Note] = None
+    # AEGIS F4: the day the refund became due under MSA 4.10 (required when the credit note owes a refund)
+    refund_due_from: Optional[date] = None
+
+
+class SowEnded(Strict):
+    """AEGIS F9 / MSA 4.12(g): the SOW behind an unpaid invoice ended on this day: cancel or credit within 10
+    business days."""
+    request_id: Id
+    sow_ended_on: date
 
 
 def _email_check(v: str) -> str:

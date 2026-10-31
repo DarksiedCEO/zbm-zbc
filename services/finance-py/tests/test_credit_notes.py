@@ -34,8 +34,10 @@ def void(hr, inv, **over):
     return hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/void", body, andre=ANDRE_TOKEN)
 
 
-def credit(hr, inv, amount, reason="sow_ended_unpaid", **kw):
+def credit(hr, inv, amount, reason="sow_ended_unpaid", refund_due_from="2026-10-02", **kw):
     body = {"request_id": rid(), "content_sha256": inv["content_sha256"], "amount": amount, "reason_code": reason}
+    if refund_due_from:
+        body["refund_due_from"] = refund_due_from          # AEGIS F4: when the refund became due (MSA 4.10)
     return hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/credit-notes", body, andre=ANDRE_TOKEN, **kw)
 
 

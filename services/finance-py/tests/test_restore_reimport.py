@@ -119,6 +119,11 @@ def test_ch3_restore_never_silently_voids_paid_invoices_and_the_reimport_rebuild
     brk = z.svc.db["breaks"][out["reimport_break_id"]]
     assert brk["status"] == "open" and brk["leg"] == "restore_reimport_required" and brk["since"] == TODAY
     assert z.bal("1060", None, "zbm") != sim_balance(z)                            # the books are behind Stripe
+    # the backup was taken inside its pause window: the restored Finance stays paused until the marker is resumed
+    # (AEGIS F6, fail closed); resuming it says the window is not a live one any more
+    assert z.post("/fin/v1/invoices", {"request_id": rid()}, caller="onboarding").status_code == 503
+    assert z.ok(z.post("/fin/v1/backup/resume", {"request_id": rid(), "marker_id": q["marker"]["marker_id"]},
+                       andre=ANDRE_TOKEN))["consistent"] is False
     # --- CH-4: Stripe redelivers C's completed page; Finance lost that page: 2xx, but a break and an ALERT
     with caplog.at_level(logging.ERROR, logger="finance.alert"):
         r = sent(z, "checkout.session.completed", {"id": cs_c["session_id"], "object": "checkout.session"})

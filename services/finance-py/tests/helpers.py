@@ -31,9 +31,27 @@ def rid(prefix: str = "r") -> str:
     return f"{prefix}-{next(_ids)}"
 
 
+def _contact_key_file() -> str:
+    """AEGIS F8: the per-deployment HMAC key for billing contacts (test value), in a private file removed at exit."""
+    import atexit
+    import os
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp(prefix="fin-contact-key-")
+    p = os.path.join(d, "key")
+    with open(p, "w") as fh:
+        fh.write("ab" * 32 + "\n")
+    os.chmod(p, 0o600)
+    atexit.register(shutil.rmtree, d, True)
+    return p
+
+
+CONTACT_KEY_FILE = _contact_key_file()
+
+
 def base_env(**over) -> dict:
     env = {"FIN_SERVICE_TOKEN": SERVICE_TOKEN, "FIN_ANDRE_APPROVAL_TOKEN": ANDRE_TOKEN,
-           "FIN_CALLER_TOKENS": json.dumps(CALLERS)}
+           "FIN_CALLER_TOKENS": json.dumps(CALLERS), "FIN_CONTACT_HASH_KEY_FILE": CONTACT_KEY_FILE}
     env.update({k: v for k, v in over.items() if v is not None})
     return {k: v for k, v in env.items() if v != "__unset__"}
 
