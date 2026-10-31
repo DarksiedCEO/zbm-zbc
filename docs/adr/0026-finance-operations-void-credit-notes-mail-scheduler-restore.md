@@ -137,6 +137,22 @@ The contracts promise things Finance could not do:
     pause ends on the wall or the monotonic clock (R3-7); the deadline close keeps the reason text in Finance's store
     and refuses a `done_on` before the deadline began (R3-8).
 
+17. **AEGIS round 4 (Oct 31 2026): the lockdown is an allowlist.** Locked = the lockdown on OR any restore break
+    open. A route dependency after the bearer check refuses every state-changing route and job outside
+    `LOCKDOWN_ALLOWED` (money in, the restore routes, the contract-deadline routes, the backup pause, the client-mail
+    job); a test walks every route and job of the running app. Service choke points (`_execute_transfer`, rail
+    submit, release, repay, the rail-sync re-drives) refuse too. Money-out ledger events after the backup
+    (`treasury_posting_committed`, `item_submitted`, `batch_release_started`, `refund_paid`,
+    `media_vendor_payment_recorded`) and in-flight transfers / payout items of the restored books are items Andre
+    records as `moved` / `not_moved`; their subjects are fenced permanently unless `not_moved` (a lost release is never
+    released again). The lockdown is never cleared while a restore break is open; a corrupt file stays locked with a
+    reason; an unreadable backup point refuses the reconcile, and a break without its position re-locates it from the
+    restored head's deterministic anchor id. `reissued` binds to the item (same invoice, at least the amount and
+    refund). MSA 4.12(g): Andre may void or credit (no refund) an unpaid untouched invoice during a lockdown, flagged
+    and listed at the lift; a lockdown past 2 business days escalates daily. The lift writes the file before its
+    commit, and a replay reports the real state. Anchors an honoured reconcile voided never count as lost (no lock on
+    a healthy, once-reconciled data directory).
+
 ## Consequences
 
 - New ledger event types: `invoice_voided`, `credit_note_issued`, `credit_note_refund_linked`, `client_contact_recorded`,
@@ -155,5 +171,5 @@ The contracts promise things Finance could not do:
 Finance tests: test_credit_notes.py, test_client_mail.py, test_seo_audit_card_and_webhooks.py,
 test_restore_reimport.py (the red team's restore scenario, end to end with the simulated Stripe),
 test_ops_cron_caller.py, test_business_tz.py, test_aegis_waveB_fixes.py, test_aegis_waveB_r2.py (AEGIS's round-2
-attacks kept as regressions), test_finance_ops_r2.py, test_finance_ops_r3.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
+attacks kept as regressions), test_finance_ops_r2.py, test_finance_ops_r3.py, test_finance_ops_r4.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
 against the real Stripe or Resend APIs.

@@ -110,12 +110,21 @@ department. Expect more to re-import (section 5).
    records the backup's point in time (`restore_point`: the restored log's last line, its time and its ledger
    position) and its day as `since`.
 
-   **The lockdown.** From now until you lift it, Finance refuses **every** credit note, void, new Stripe page, payout
-   run, payout release, refund and vendor payment, for every client (409 `RESTORE_LOCKDOWN`). Money coming in is
-   still booked (Stripe webhooks, bank lines). `/health` answers `"status": "degraded"` with `restore_lockdown.on:
-   true`, and finance logs `ALERT finance: restore_lockdown on` every 5 minutes. Only you lift it, by hand, once
-   section 5 is complete (section 5, step 5). If the lockdown file is ever lost, a Finance that finds ledger anchors
-   its log does not hold turns the lockdown on by itself at start (`restore_lockdown.detected: true`).
+   **The lockdown.** From now until you lift it, **all money out is paused**: Finance refuses every state-changing
+   route and every scheduler job (409 `RESTORE_LOCKDOWN`) except an allowlist: Stripe webhooks and bank lines (money
+   in is still booked), the restore routes (reconcile, re-import, dispositions, lift), the contract-deadline routes
+   (`sow-ended`, `acknowledgements`, `deadlines/<id>/close`), the backup pause and resume, and the client-mail job
+   (the founder alerts). Every bank transfer, rail submit, payout release and refund repayment is also refused inside
+   Finance itself. `/health` answers `"status": "degraded"` with `restore_lockdown.on: true` (and `why`), and finance
+   logs `ALERT finance: restore_lockdown on` every 5 minutes. The lockdown stays on while any restore break is open,
+   whatever the file says; a lockdown file that cannot be read keeps Finance locked. Only you lift it (step 5).
+
+   **Contract deadlines during a lockdown.** MSA 4.12(f) acknowledgements are recorded as usual. For MSA 4.12(g) you
+   may still void an **unpaid** invoice, or credit it down without any refund, when the restore's item list is
+   complete and nothing the restore lost touches that invoice (no money moves; the lift lists these). Refunds that
+   fall due (MSA 4.10) go through the **Stripe Dashboard**, which Finance books. If the lockdown lasts more than **2
+   business days**, finance logs `ALERT finance: restore_lockdown_long` with the contract deadlines due within 10
+   business days, and again every day: finish section 5 before those deadlines.
 4. Unset `FIN_RECONCILE_MODE`, redeploy finance. If the backup was taken inside a pause window (section 2), the
    restored Finance stays paused until the window's end (every write answers 503 `QUIESCED`): resume that marker
    now (`POST $F/fin/v1/backup/resume`; it answers `"consistent": false`, reason `restarted_or_restored`, which is
@@ -164,8 +173,8 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    client Compliance does not currently allow is booked and HELD, as always). Running it twice books nothing twice.
 3. Check: `results` has no `failed` items and `"clean": true`; on the run that completes the coverage (with every
    item settled), `ready_to_lift` names the restore break, the paid invoices show `paid`
-   again, and the next reconciliation (fin-cron at 07:xx, or `POST /fin/v1/reconciliations/run`) shows Stripe
-   balance leg L3 in balance. A `failed` item: fix its cause (usually Stripe unreachable) and run steps 1-2 again. A
+   again, and the first reconciliation after the lift (fin-cron at 07:xx, or `POST /fin/v1/reconciliations/run`; the
+   lockdown refuses it before) shows Stripe balance leg L3 in balance. A `failed` item: fix its cause (usually Stripe unreachable) and run steps 1-2 again. A
    `rebuild_*` action that fails ("the invoice is not in the restored books", "the ledger's evidence does not verify")
    becomes a `needs_review` item and does not stop the run from counting. Only `needs_review` items can be disposed
    of: an item the re-import rebuilds (`pending`, verified evidence with an authentic mark) is refused (409). For
@@ -176,11 +185,16 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    curl -sS -X POST $H $F/fin/v1/restore/items/<event_id>/disposition \
      -d '{"request_id":"disp-1","disposition":"reissue_after_lift","reason":"..."}'
    ```
+   - **Money that went out** (`kind` `money_out`: a transfer, payout item, payout release, refund payment or vendor
+     payment the ledger saw after the backup; `in_flight`: a transfer or payout item the restored books hold as
+     approved / executing / submitting): check the bank or the rail, then record `moved` (the reference in the
+     reason) or `not_moved`. Its subject stays **fenced** (never transferred, submitted, released or repaid again,
+     also after the lift) unless you record `not_moved`; book what moved by hand (journal correction).
    - `reissue_after_lift`: a credit note or void you must issue again; the lockdown refuses it now, so the lift opens
      a high-severity `restore_reissue_due` break with the item's number, amounts and refund date; issue it right after
      the lift, then resolve that break.
-   - `reissued` with `reissued_as`: an invoice or credit note **of the same client, made after the lost item** (never a
-     break or an email), e.g. a deadline you re-recorded on a new invoice.
+   - `reissued` with `reissued_as`: only for a lost credit note (a credit note on the **same invoice** for at least the
+     same amount and refund, issued after the item) or a lost void (the **same invoice**, voided after the item).
    - `lost` with the reason: it never happened or no longer applies (an invoice issued and voided after the backup), or
      you handled it outside Finance (a deadline re-recorded with `sow-ended` / `acknowledgements`, an email re-sent).
    `POST /fin/v1/breaks/<id>/resolution` refuses the restore break (and every deadline break).
@@ -191,7 +205,10 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    curl -sS -X POST $H $F/fin/v1/restore/lockdown/lift -d '{"request_id":"lift-1","reason":"re-import 11-07..11-09 clean; 2 items disposed"}'
    ```
    Refused (409, listing what is missing) while the item list is incomplete, a day is not covered, or an item is not
-   rebuilt or disposed of. Then `/health` is `ok` again and money can go out. Issue any `restore_reissue_due` items now.
+   rebuilt or disposed of. The answer lists `lockdown_effects` (voids and credits made during the lockdown) and the
+   `fenced` subjects. The lockdown file is written first: if that fails the answer is 503 and nothing changed; a retry
+   with the same `request_id` always says the state as it is now. Then `/health` is `ok` again and money can go out.
+   Issue any `restore_reissue_due` items now.
 
 ## Commit marks and the key (FIN_CONTACT_HASH_KEY)
 
