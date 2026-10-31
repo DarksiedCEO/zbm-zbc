@@ -1057,8 +1057,11 @@ class ComplianceService(OwnersMixin, OffboardingMixin):
                 ans = ScreenAnswer("unavailable")
             input_sha = _sha({"legal_name": body["legal_name"], "aliases": body.get("aliases") or [],
                               "country": body["country"], "region": body.get("region")})
+            # ADR 0027: the name and aliases went to the provider only; the record keeps their normalized SHA-256
+            # (what was screened, for the 10-year record of 31 CFR 501.601), never the text
             rec = {"screen_id": sid, "subject_id": subject, "role": body["role"], "owner_of": body.get("owner_of"),
-                   "legal_name": body["legal_name"], "aliases": list(body.get("aliases") or []),
+                   "name_sha256": i08_sanctions.name_sha256(body["legal_name"]),
+                   "aliases_sha256": [i08_sanctions.name_sha256(a) for a in body.get("aliases") or []],
                    "country": body["country"], "region": body.get("region"), "result": ans.result,
                    "list_version": ans.list_version, "screened_at": ans.screened_at or iso(now),
                    "provider_ref": ans.provider_ref, "input_sha256": input_sha, "recorded_at": iso(now),

@@ -145,6 +145,11 @@ backups. It is business data, not personal information, but it is Client Data un
   `aggregate_block_bp` (5000). `devtools/make_seed_v3.py` rebuilds it from v2 byte for byte; the pin moves to
   `02b8d0ae...7b2b`. Andre approves the seed as before. Fail-closed rules and the Andre-only release are unchanged.
 
+- **Payee and owner screens (provider path) store no names.** `POST /compliance/v1/sanctions/screen` sends the name,
+  aliases and date of birth to the screening provider only; its record (kept 10 years, 31 CFR 501.601) holds the
+  SHA-256 of the NFKC, case-folded, whitespace-collapsed name and of each alias, the country and region, the list
+  version, the provider's reference and the result: enough to prove what was screened, nothing to leak.
+
 Runbook: docs/runbooks/ofac-owner-screening.md (from the draft on `docs/ops-runbooks-2026-10-30`, now matching the
 routes); railway.md step G points to it.
 

@@ -55,6 +55,18 @@ def freshness_problem(screen: Optional[dict], now: datetime, freshness_days: int
     return None
 
 
+def normalize_name(name: str) -> str:
+    """The form a screened name is hashed in (ADR 0027): Unicode NFKC, case-folded, whitespace collapsed. The name
+    itself is never stored; its SHA-256 in this form proves what was screened (31 CFR 501.601: 10 years)."""
+    import unicodedata
+    return " ".join(unicodedata.normalize("NFKC", str(name)).casefold().split())
+
+
+def name_sha256(name: str) -> str:
+    import hashlib
+    return hashlib.sha256(normalize_name(name).encode("utf-8")).hexdigest()
+
+
 ATTESTATION_LISTS = ("SDN", "Consolidated")
 ATTESTATION_RESULTS = ("no_match", "potential_match", "match")
 

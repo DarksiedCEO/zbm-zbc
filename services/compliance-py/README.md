@@ -140,7 +140,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `POST /compliance/v1/review` | creative_production | payout (`zbc_clip`) / publish (`zbm_work`) (creative protocol) |
 | `POST /compliance/v1/gates/{activation,payout,publish}` | same | native form, same bodies |
 | `GET /compliance/v1/rulings/{id}` | any caller | one ruling |
-| `POST /compliance/v1/sanctions/screen` | onboarding, finance_31 | screen a payee or owner (DOB goes to the provider, never stored) |
+| `POST /compliance/v1/sanctions/screen` | onboarding, finance_31 | screen a payee or owner (the name, aliases and DOB go to the provider, never stored; ADR 0027: the record keeps the SHA-256 of the normalized name and aliases, country, list version and result, 10 years) |
 | `POST /compliance/v1/sanctions/attestations` | Andre only | ADR 0024: record his OFAC search for a client (HR-14); a hit opens a permanent hold. ADR 0027: with `owner_id`, the search of one of the client's disclosed owners (a hit holds the client) |
 | `PUT /compliance/v1/clients/{id}/ownership` | Andre only | ADR 0027: who owns the client (owners, shares in basis points, chains, the client's attestation; name hashes only) |
 | `GET /compliance/v1/clients/{id}/ownership` | Andre only | ADR 0027: the record, effective shares, each owner's latest search, the blocked share (50 Percent Rule), what is missing |
