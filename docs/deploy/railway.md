@@ -517,7 +517,12 @@ otherwise. Examples are never real values.
 | `PORT` | yes | no | `8080` (IaC) | copied to `ORCHESTRATOR_PORT` |
 | `ORCHESTRATOR_PORT` | — | no | (from `PORT`) | |
 | `ORCHESTRATOR_BIND_ADDR` | yes | no | `[::]` (IaC) | default `127.0.0.1` |
-| `ORCHESTRATOR_SERVICE_TOKEN` | yes | yes | (you) | callers (the dashboard) present it; refuses to start without it |
+| `ORCHESTRATOR_SERVICE_TOKEN` | yes | yes | (you) | callers (the dashboard) present it; refuses to start without it, and accepts **only a generated token**: exactly 64 lowercase hex characters (`openssl rand -hex 32`, the one to use) or 43+ base64url characters `[A-Za-z0-9_-]` without padding. On top: fewer than 10 different characters, a repeated 10-character block, a 10-character run like `0123456789`, a placeholder word, an unresolved `${{…}}` reference, or equal to `DETECTION_SERVICE_TOKEN` / `LEDGER_SERVICE_TOKEN` refuses the start (ADR 0023). **The token's strength is the only thing that stops guessing**: the failed-auth lockout does not slow it (below) |
+| `ORCHESTRATOR_CLIENT_IP_SOURCE` | yes on Railway | no | `x-real-ip` (IaC; also the default) | where the client address comes from (ADR 0023): `x-real-ip` = the header Railway's edge sets; `remote-addr` = the TCP peer (local runs only; on Railway it is the edge itself). A request without a usable `X-Real-IP` is refused 403 (except `GET /health`). Any other value stops the start-up |
+| `ORCHESTRATOR_RATE_PER_MIN` | no | no | unset = `30` | per client address (IPv6: per /64): requests a minute after the burst; over it → 429 + `Retry-After`. 1..6000 |
+| `ORCHESTRATOR_RATE_BURST` | no | no | unset = `30` | requests a client may make at once. 1..6000 |
+| `ORCHESTRATOR_AUTH_FAIL_MAX` | no | no | unset = `10` | answers of 401 (missing or wrong token) a client may get inside the window; then its requests WITHOUT the valid token are 429 + `Retry-After` until the window ends. A request with the valid token is never refused by the lockout and is counted in its own rate-limit table, which unauthenticated traffic cannot fill or drain (AEGIS edge review H-1/M-1). **It does not slow token guessing**: every request is compared against the token before any limit, so a wrong guess just gets 429 instead of 401 (AEGIS r2 NEW-1); the generated token is the control. 1..1000 |
+| `ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS` | no | no | unset = `600` | that window, from the client's first failure. 1..86400 |
 | `DETECTION_SERVICE_URL` | yes | no | `http://detection.railway.internal:8000` (IaC) | → detection |
 | `DETECTION_SERVICE_TOKEN` | yes | yes | ref `detection.ZBM_SERVICE_TOKEN` (IaC) | |
 | `LEDGER_SERVICE_URL` | yes | no | `http://ledger.railway.internal:8090` (IaC) | → ledger |
@@ -536,7 +541,12 @@ otherwise. Examples are never real values.
 | `STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP` | yes on Railway | no | `1` (IaC) | without it plain http is accepted only to a loopback Finance (AEGIS L8); `1` also accepts exactly `http://<STRIPE_GATEWAY_FINANCE_PRIVATE_NAME>.railway.internal[:port]` (no path, query or user) and no other private-network host (AEGIS L1). Added for this deploy; **needs AEGIS review** |
 | `STRIPE_GATEWAY_FINANCE_PRIVATE_NAME` | no | no | `finance` (IaC; the default when unset) | the one Railway service name the opt-in reaches: a single lowercase DNS label, never `localhost`. `ledger.railway.internal`, `localhost.railway.internal` or any other name is refused |
 | `STRIPE_GATEWAY_FINANCE_TOKEN` | yes | yes | ref `finance.FIN_SERVICE_TOKEN` (IaC) | ≥ 32 characters |
-| `STRIPE_GATEWAY_CALLER_TOKEN` | yes | yes | (you) | finance's `rail_gateway` caller token; must differ from the Finance token |
+| `STRIPE_GATEWAY_CALLER_TOKEN` | yes | yes | (you) | finance's `rail_gateway` caller token; must differ from the Finance token. Since ADR 0023 Finance lets it reach exactly `POST /fin/v1/stripe/events` (and the token-free `/health`), nothing else |
+| `STRIPE_GATEWAY_CLIENT_IP_SOURCE` | yes on Railway | no | `x-real-ip` (IaC; also the default) | as `ORCHESTRATOR_CLIENT_IP_SOURCE`. A delivery without a usable `X-Real-IP` is refused 403 before its body is read |
+| `STRIPE_GATEWAY_ALLOWED_IPS` | no | no | unset = Stripe's published webhook IPs compiled in (`cmd/stripe-gateway/stripe_ips.go`, docs.stripe.com/ips, retrieved 2026-10-30) | comma list of IPs / CIDRs that **replaces** the compiled-in list (no network wider than IPv4 /16 or IPv6 /48; Stripe sends from no IPv6 address). For a Stripe IP change before a code update: see [Stripe source-IP allowlist](#stripe-source-ip-allowlist-adr-0023) |
+| `STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED` | no | no | unset (check **ON**) | kill switch: `1` turns the source-IP check off (the log says so at start); unset/`0` = on; anything else, or `1` together with `STRIPE_GATEWAY_ALLOWED_IPS`, stops the start-up. Finance still verifies every signature with the check off |
+| `STRIPE_GATEWAY_RATE_PER_MIN` | no | no | unset = `60` | per Stripe source address: deliveries a minute after the burst; over it → 429 + `Retry-After`, which Stripe retries. 1..6000 |
+| `STRIPE_GATEWAY_RATE_BURST` | no | no | unset = `60` | deliveries at once per address. 1..6000 |
 
 ### finance (finance-py)
 
@@ -986,7 +996,31 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
       answer means `ORCHESTRATOR_ALLOW_FIXTURE_SCANS` is set: remove it and redeploy). Never run a scan with a
       `client_id` against production as a test: the ledger is append-only.
 - [ ] `curl -sS https://$GW/health` → 200.
-- [ ] `curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$GW/webhooks/stripe -d '{}'` → `400` (no signature).
+- [ ] Both public services' start-up logs carry one `event=edge_config` line with `client_ip_source=x-real-ip`
+      (any other value on Railway: fix the variable and redeploy before going on).
+- [ ] `curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://$GW/webhooks/stripe -d '{}'` → `403` (your machine is
+      not a Stripe webhook address; ADR 0023). stripe-gateway's log shows
+      `event=stripe_delivery_refused level=ALERT reason=not_allowlisted client=<your IP>`. A `400` means the allowlist is
+      off (`STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED`).
+- [ ] **Spoof probe (after EVERY deploy of either public service; AEGIS edge review M-2).** Railway's overwrite of
+      `X-Real-IP` is a forum statement, "not a versioned contractual guarantee", so check it each time:
+      1. `curl -sS -o /dev/null -w '%{http_code}\n' -H 'X-Real-IP: 3.18.12.63' -X POST https://$GW/webhooks/stripe -d '{}'`
+         → `403`, and the log line says `reason=not_allowlisted client=<your real IP>` (find yours at a "what is my IP"
+         site). `3.18.12.63` is a Stripe address: if the answer is `400` or the log names `3.18.12.63`, Railway passed
+         your header through. **Stop.** While that holds, anyone can pass the allowlist and every rate limit by
+         sending a Stripe address. Raise it with Railway and treat the code limits as absent until it is fixed
+         (Finance still verifies every signature, so no forged event is booked). Turning the allowlist off does not help.
+      2. The same with the header twice: `-H 'X-Real-IP: 3.18.12.63' -H 'X-Real-IP: 3.18.12.63'` → `403`, log
+         `client=<your real IP>` (the edge replaced both) or `reason=no_client_address detail="X-Real-IP repeated"`
+         (it kept them; also fail closed, but report it).
+      3. On the orchestrator: `curl -sS -o /dev/null -w '%{http_code}\n' -H 'X-Real-IP: not-an-ip' https://$ORCH/revenue-recovery/findings`
+         → `401` (the edge replaced the header with your real address). `403` means the edge passed `not-an-ip`
+         through and the service could not parse it (`reason=no_client_address` in its log): same stop as step 1.
+      The same three probes, scriptable: `python3 devtools/railway_smoke.py --live-spoof-probe --gateway-url
+      https://$GW --orchestrator-url https://$ORCH` (off by default; exit 0 only if all three pass). Railway can change
+      its edge without a deploy of ours, so also schedule it (daily is enough).
+- [ ] Six `curl` calls with a wrong token to `https://$ORCH/revenue-recovery/findings` all answer `401`. A lockout
+      (10 failures in 10 minutes) refuses only requests without the valid token, so it cannot lock the dashboard out.
 - [ ] Stripe webhook, **no money**: resend one existing **`checkout.session.*`** event, and only that type, to this
       endpoint: `stripe events resend evt_… --webhook-endpoint we_…` (the `we_…` id is on the endpoint's page; the
       flag syntax is unverified, so the fallback is the **Resend** button on that event under the endpoint's Event
@@ -1011,6 +1045,77 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 - [ ] Redeploy `ledger`: it comes back Active, its log says it loaded the existing entries with the chain verified, and
       the dashboard still loads.
 - [ ] Volume backups: each of the four volumes → Backups shows the Daily schedule from the IaC.
+
+## Public edge hardening (ADR 0023)
+
+Railway's edge is a reverse proxy, not a WAF. The two public services (orchestrator, stripe-gateway) therefore enforce
+their own perimeter, in code, before any route, body read, token check or upstream call. Cloudflare in front of them is
+the next layer: `docs/adr/0023-public-edge-hardening.md`, "Cloudflare".
+
+**Client address.** Both read the single `X-Real-IP` header Railway's HTTP edge sets. A Railway employee states the
+edge "overwrites caller-supplied X-Real-IP and X-Forwarded-For on every request it handles"
+(station.railway.com/questions/need-authoritative-client-ip-proxy-tru-090eac86, retrieved 2026-10-30); Railway also
+says this "can change at any time" and publishes no proxy ranges. `X-Forwarded-For` is never read (its leftmost entry is
+whatever the client sent). A missing, repeated or malformed `X-Real-IP` → 403 with the reason in the log (fail closed);
+Railway's health check reaches `/health` without it, so `GET /health` is the one exception. Requests between services
+over `*.railway.internal` do not pass the edge; neither public service is called that way.
+
+**Defaults and switches.**
+
+| Control | Service | Default | Change it with |
+|---|---|---|---|
+| Stripe source-IP allowlist | stripe-gateway | ON, Stripe's 15 published webhook IPs | `STRIPE_GATEWAY_ALLOWED_IPS` (replace the list), `STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED=1` (kill switch) |
+| Rate limit per client | stripe-gateway | 60/min, burst 60 per Stripe address | `STRIPE_GATEWAY_RATE_PER_MIN`, `STRIPE_GATEWAY_RATE_BURST` |
+| Rate limit per client | orchestrator | 30/min, burst 30 | `ORCHESTRATOR_RATE_PER_MIN`, `ORCHESTRATOR_RATE_BURST` |
+| Failed-auth lockout | orchestrator | 10 × 401 in 600 s → requests **without** the valid token get 429 until the window ends; the valid token always passes (own rate-limit table) | `ORCHESTRATOR_AUTH_FAIL_MAX`, `ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS` |
+| Token hygiene | orchestrator | only 64 lowercase hex or ≥ 43 base64url; plus ≥ 10 distinct, no repeated 10-char block or 10-char run, no placeholder / `${{`, ≠ outbound tokens | (none: any other token refuses the start) |
+| Cloudflare-address warning | both | a derived client address in Cloudflare's published ranges logs `reason=client_in_cloudflare_range` (once a minute) | (code: `internal/edge/cloudflare.go`) |
+| Body / header / time limits | both | unchanged: 64 KiB (orch) / 256 KiB (gateway) body, 16 KiB headers, 5 s header, 15 s request | (code constants, ADR 0001) |
+| Finance route allowlist for `rail_gateway` | finance | only `POST /fin/v1/stripe/events` + `/health` | (code: `api.NAMED_ROUTES`) |
+
+Every limiter is in memory (one replica), keyed by IPv4 address or IPv6 /64, bounded to 16 384 clients; a full table
+evicts its least recently used entry and never refuses a new client for being full (AEGIS edge review H-1: refusing
+let anyone lock every new client out by filling the table). A restart forgets every bucket and lockout. The dashboard calls the orchestrator
+from Vercel's servers, so its requests count against Vercel's address, not the viewer's; at one or two requests per
+page view it stays far under 30 a minute. Every setting is declared `preserve()` in the IaC, so a value you set by hand
+survives `railway config apply`; changing one needs a redeploy of that service.
+
+**Logs and alerts.** Every refusal is one line, `<service> edge event=<event> level=<WARN|ALERT> reason=<code>
+client=<ip> method=<m> source=<src>`, at most one a second per reason (the next line carries
+`not_logged_since_last=N`). Reasons: `no_client_address`, `not_allowlisted`, `auth_lockout`, `rate_limited`,
+`client_in_cloudflare_range`. A refused Stripe delivery is `event=stripe_delivery_refused level=ALERT`: set a Railway
+log alert (stripe-gateway → Observability / log alerts, if your plan has them; UNVERIFIED feature name) on
+`event=stripe_delivery_refused`, and check Stripe → Webhooks → Event deliveries weekly either way.
+`reason=client_in_cloudflare_range` means `X-Real-IP` holds Cloudflare's address, not the client's (Cloudflare in front
+and Railway not passing the client through, e.g. over IPv6): every client then shares one identity; take the domain
+out of Cloudflare's proxy (grey cloud) until it is fixed.
+
+### Stripe source-IP allowlist (ADR 0023)
+
+The list is compiled in from <https://docs.stripe.com/ips> ("Webhook notifications"), with its source and retrieval
+date in `services/orchestrator-go/cmd/stripe-gateway/stripe_ips.go`; the start-up log prints which list is in force.
+Stripe announces changes on its api-announce mailing list (groups.google.com/a/lists.stripe.com/g/api-announce)
+seven days ahead. Subscribe the operations mailbox to it.
+
+When Stripe announces a change:
+
+1. Fastest (no code): stripe-gateway → Variables → `STRIPE_GATEWAY_ALLOWED_IPS` = the **full new list** from the docs
+   page, comma-separated (it replaces the compiled-in list, it does not add to it) → Deploy.
+2. Then update `stripe_ips.go` (list + retrieval date) in a commit, and once that is deployed, delete the variable.
+
+If deliveries start failing with 403 (Stripe Dashboard → Webhooks → the endpoint → Event deliveries; stripe-gateway's
+log names the refused address): check the address against the docs page, then step 1. Emergency only:
+`STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED=1` → Deploy; Finance still verifies every signature; set it back to `0` (or delete
+it) as soon as the list is fixed. Stripe retries a refused delivery "for up to three days" in live mode but only "three times over the course
+of a few hours" in a sandbox (docs.stripe.com/webhooks), so in test mode a refusal that lasts longer loses the event.
+
+Stripe's test-mode deliveries, Dashboard **Resend**, `stripe events resend` and the events created by `stripe trigger`
+are all sent by Stripe to the endpoint, so they come from these addresses (Stripe docs: "make sure these events
+originate from a Stripe webhook IP address"; not separately confirmed for each tool, UNVERIFIED). `stripe listen
+--forward-to <url>` is different: the CLI on your machine re-posts the event, from your address, signed with the CLI's
+own `whsec_`, so pointed at the Railway domain it is refused 403 by the allowlist and would fail Finance's signature
+check anyway. Use it only against a local gateway started with `STRIPE_GATEWAY_CLIENT_IP_SOURCE=remote-addr
+STRIPE_GATEWAY_ALLOWED_IPS=127.0.0.1` (as `services/finance-py/devtools/live_run.py` does).
 
 ## Open items and risks
 

@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/edge"
 	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/orchestrator"
 )
 
@@ -145,6 +146,96 @@ func limitRequests(next http.Handler) http.Handler {
 		defer cancel()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// Perimeter settings (ADR 0023 "Public edge hardening"). The orchestrator's Railway domain is public; Railway's edge
+// is a reverse proxy, not a WAF, so the limits are enforced here, per client address (Railway's X-Real-IP).
+const (
+	clientIPSourceEnv   = "ORCHESTRATOR_CLIENT_IP_SOURCE"
+	ratePerMinEnv       = "ORCHESTRATOR_RATE_PER_MIN"
+	rateBurstEnv        = "ORCHESTRATOR_RATE_BURST"
+	authFailMaxEnv      = "ORCHESTRATOR_AUTH_FAIL_MAX"
+	authFailWindowEnv   = "ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS"
+	defaultRatePerMin   = 30
+	defaultRateBurst    = 30
+	defaultAuthFailMax  = 10
+	defaultAuthFailSecs = 600
+)
+
+// isHealth: the one request that passes without a client address (Railway's health check reaches the container
+// directly, without the edge's X-Real-IP); it answers a constant.
+func isHealth(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/health"
+}
+
+// loadGuard reads the perimeter settings: per client, a token bucket (ORCHESTRATOR_RATE_PER_MIN requests a minute,
+// bursts of ORCHESTRATOR_RATE_BURST) and a failed-authentication limit (ORCHESTRATOR_AUTH_FAIL_MAX answers of 401
+// inside ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS, then 429 until the window ends). A request whose client address
+// cannot be determined is refused 403 (except GET /health). Any malformed value refuses the start.
+//
+// AEGIS edge review H-1/M-1: a request carrying the valid bearer token (constant-time compare, bearerIs) is never
+// refused by the lockout or by anything an unauthenticated client did; it is counted in its own bucket table
+// (same per-client rate), which unauthenticated traffic can neither fill nor drain. The lockout is kept because it
+// is cheap and cuts the requests that reach the handler without the token to 10 per window per client. It does NOT
+// slow guessing: every request is compared against the token before any limit (so a valid one always passes), and a
+// wrong guess merely gets 429 instead of 401 (AEGIS r2 NEW-1). Token strength is the control: start-up accepts only
+// generator-shaped tokens (checkInboundToken).
+func loadGuard(getenv func(string) string, token string) (*edge.Guard, error) {
+	src, err := edge.ParseIPSource(clientIPSourceEnv, getenv(clientIPSourceEnv))
+	if err != nil {
+		return nil, err
+	}
+	perMin, err := edge.IntEnv(getenv, ratePerMinEnv, defaultRatePerMin, 1, 6000)
+	if err != nil {
+		return nil, err
+	}
+	burst, err := edge.IntEnv(getenv, rateBurstEnv, defaultRateBurst, 1, 6000)
+	if err != nil {
+		return nil, err
+	}
+	failMax, err := edge.IntEnv(getenv, authFailMaxEnv, defaultAuthFailMax, 1, 1000)
+	if err != nil {
+		return nil, err
+	}
+	failSecs, err := edge.IntEnv(getenv, authFailWindowEnv, defaultAuthFailSecs, 1, 86400)
+	if err != nil {
+		return nil, err
+	}
+	cf, _ := edge.CloudflareRanges()
+	return &edge.Guard{Name: "orchestrator-go", Source: src, Open: isHealth, WarnRanges: cf,
+		Limit:        edge.NewLimiter(perMin, burst, edge.DefaultMaxKeys),
+		AuthFail:     edge.NewFailureLimiter(failMax, time.Duration(failSecs)*time.Second, edge.DefaultMaxKeys),
+		Trusted:      bearerIs(token),
+		TrustedLimit: edge.NewLimiter(perMin, burst, edge.DefaultMaxKeys)}, nil
+}
+
+// bearerIs reports whether a request carries `Authorization: Bearer <token>`, compared in constant time (the same
+// comparison requireAuth makes). An empty token trusts nothing.
+func bearerIs(token string) func(*http.Request) bool {
+	want := []byte(token)
+	return func(r *http.Request) bool {
+		const prefix = "Bearer "
+		auth := r.Header.Get("Authorization")
+		if token == "" || !strings.HasPrefix(auth, prefix) {
+			return false
+		}
+		return subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, prefix)), want) == 1
+	}
+}
+
+// envOr: the setting as given, or its default (for the startup line only; loadGuard has validated it).
+func envOr(name string, def int) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return strconv.Itoa(def)
+}
+
+// guardServer puts the guard in front of everything the server runs, so a refused client is answered before its
+// body is read (limitRequests) and before any route or auth check.
+func guardServer(srv *http.Server, g *edge.Guard) *http.Server {
+	srv.Handler = g.Wrap(srv.Handler)
+	return srv
 }
 
 // newMux builds the orchestrator's routes.
@@ -288,6 +379,13 @@ func main() {
 				"dashboard) must present to reach /revenue-recovery/scan and /revenue-recovery/findings.",
 		)
 	}
+	// ADR 0023: the token guards a public domain, so it must be a real secret, not a placeholder.
+	if err := checkInboundToken(orchestratorToken, detectionToken, os.Getenv("LEDGER_SERVICE_TOKEN")); err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
+	if err := checkRef("DETECTION_SERVICE_TOKEN", detectionToken); err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
 	// Independent review, Sep 22 2026 (CONFIRMED): ledger-rust had zero
 	// authentication and has now been fixed to fail closed on its own
 	// LEDGER_SERVICE_TOKEN. This process must present that same token on
@@ -302,6 +400,9 @@ func main() {
 				"value, or every ledger write/read will fail with 401.",
 		)
 	}
+	if err := checkRef("LEDGER_SERVICE_TOKEN", ledgerToken); err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
 
 	allowFixtureScans, err := fixtureScansFromEnv(os.Getenv("ORCHESTRATOR_ALLOW_FIXTURE_SCANS"))
 	if err != nil {
@@ -311,9 +412,20 @@ func main() {
 		log.Printf("orchestrator-go: ORCHESTRATOR_ALLOW_FIXTURE_SCANS=1 — fixture scans write fixture findings to the ledger (dev/test only)")
 	}
 
+	guard, err := loadGuard(os.Getenv, orchestratorToken)
+	if err != nil {
+		log.Fatalf("orchestrator-go: REFUSING TO START — %v", err)
+	}
+	_, cfVersion := edge.CloudflareRanges()
+	// AEGIS edge review M-2: say at start where the client address comes from (and the limits), in one parseable line
+	log.Printf("orchestrator-go edge event=edge_config client_ip_source=%s rate_per_min=%s rate_burst=%s "+
+		"auth_fail_max=%s auth_fail_window_s=%s valid_token_bypasses_lockout=true cloudflare_ranges=%q",
+		guard.Source, envOr(ratePerMinEnv, defaultRatePerMin), envOr(rateBurstEnv, defaultRateBurst),
+		envOr(authFailMaxEnv, defaultAuthFailMax), envOr(authFailWindowEnv, defaultAuthFailSecs), cfVersion)
+
 	orch := orchestrator.New(detectionURL, detectionToken, ledgerURL, ledgerToken)
 
-	srv := newServer(bindAddr+":"+port, newMux(orch, orchestratorToken, allowFixtureScans))
+	srv := guardServer(newServer(bindAddr+":"+port, newMux(orch, orchestratorToken, allowFixtureScans)), guard)
 	// Bind first, then announce: ORCHESTRATOR_PORT=0 lets the kernel pick a free port, and ORCHESTRATOR_PORT_FILE
 	// (optional) receives the port actually bound, so a caller (the tests) never has to guess a free port and race
 	// another process for it (fix wave 25, scout C2-1 — the ledger-rust LEDGER_PORT_FILE pattern, ADR 0003 §11).
@@ -330,6 +442,162 @@ func main() {
 	}
 	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, bound, detectionURL, ledgerURL)
 	log.Fatal(srv.Serve(ln))
+}
+
+// Token hygiene (ADR 0023; AEGIS A2 M-2, edge review L-1 and r2 NEW-1). The orchestrator's bearer is the only thing
+// between its public domain and the Revenue Recovery routes, and the failed-auth lockout does NOT slow guessing of it
+// (a request is compared against the token before any limit, so a valid token always passes; ADR 0023 §4). Token
+// strength is therefore the control, and only generator-shaped tokens are accepted at start-up:
+//   - exactly 64 lowercase hex characters (`openssl rand -hex 32`, 256 bits), or
+//   - 43 or more base64url characters, [A-Za-z0-9_-], no padding (>= 256 bits; e.g.
+//     `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`).
+//
+// On top of the shape, a token that a generator would practically never produce is refused (each rule's false-refusal
+// rate on generated tokens is far below 1 in 10^8; TestGeneratedTokensAreNeverRefused): fewer than minDistinctChars
+// different characters, a repeatWindow-character block occurring twice, a runWindow-character run of consecutive
+// characters (0123456789...), a placeholder word, an unresolved Railway reference. It must also differ from the two
+// tokens this process SENDS upstream (a compromised upstream must not learn the inbound token). The value never
+// appears in a message.
+const (
+	hexTokenLen      = 64
+	minBase64URLLen  = 43
+	minDistinctChars = 10
+	repeatWindow     = 10
+	runWindow        = 10
+	tokenMakeAdvice  = "make it with `openssl rand -hex 32`"
+	inboundTokenName = "ORCHESTRATOR_SERVICE_TOKEN"
+)
+
+// unresolvedRefMarkers: a Railway variable reference that did not resolve reaches the process as its literal text,
+// e.g. "${{FIN_ONBOARDING_CALLER_TOKEN}}" (finance-py config._check_ref, AEGIS night review M-2).
+var unresolvedRefMarkers = []string{"${{", "{{", "}}"}
+
+// placeholderWords: text a human types instead of a generated secret, spelled in the base64url alphabet (the only
+// shape a word can appear in; hex holds none). Only words of 7 or more letters: a shorter word turns up by chance in
+// random base64url often enough to refuse a real token.
+var placeholderWords = []string{"changeme", "change-me", "change_me", "placeholder", "replaceme", "replace-me",
+	"replace_me", "your-token", "your_token", "yourtoken", "example", "password", "passw0rd", "orchestrator",
+	"qwertyuiop"}
+
+// generatorShaped: 64 lowercase hex, or >= 43 base64url characters.
+func generatorShaped(tok string) bool {
+	if len(tok) == hexTokenLen {
+		hex := true
+		for i := 0; i < len(tok); i++ {
+			c := tok[i]
+			hex = hex && (c >= '0' && c <= '9' || c >= 'a' && c <= 'f')
+		}
+		if hex {
+			return true
+		}
+	}
+	if len(tok) < minBase64URLLen {
+		return false
+	}
+	for i := 0; i < len(tok); i++ {
+		c := tok[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func distinctChars(tok string) int {
+	seen := map[byte]bool{}
+	for i := 0; i < len(tok); i++ {
+		seen[tok[i]] = true
+	}
+	return len(seen)
+}
+
+func hasRepeatedBlock(tok string) bool {
+	seen := map[string]bool{}
+	for i := 0; i+repeatWindow <= len(tok); i++ {
+		w := tok[i : i+repeatWindow]
+		if seen[w] {
+			return true
+		}
+		seen[w] = true
+	}
+	return false
+}
+
+func hasSequentialRun(tok string) bool {
+	up, down := 1, 1
+	for i := 1; i < len(tok); i++ {
+		d := int(tok[i]) - int(tok[i-1])
+		if d == 1 {
+			up++
+		} else {
+			up = 1
+		}
+		if d == -1 {
+			down++
+		} else {
+			down = 1
+		}
+		if up >= runWindow || down >= runWindow {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPlaceholderWord(tok string) bool {
+	low := strings.ToLower(tok)
+	for _, w := range placeholderWords {
+		if strings.Contains(low, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkRef refuses a value holding an unresolved Railway reference (names the setting only).
+func checkRef(name, v string) error {
+	for _, m := range unresolvedRefMarkers {
+		if strings.Contains(v, m) {
+			return fmt.Errorf("%s holds an unresolved Railway reference (a '${{...}}' placeholder), not a token: "+
+				"set the referenced variable in Railway, then redeploy", name)
+		}
+	}
+	return nil
+}
+
+// checkInboundToken applies every rule above to ORCHESTRATOR_SERVICE_TOKEN; each rule has its own message.
+func checkInboundToken(tok string, outbound ...string) error {
+	const name = inboundTokenName
+	if err := checkRef(name, tok); err != nil {
+		return err
+	}
+	if !generatorShaped(tok) {
+		return fmt.Errorf("%s must be exactly 64 lowercase hex characters (`openssl rand -hex 32`) or at least 43 "+
+			"base64url characters [A-Za-z0-9_-] without padding; a hand-made token is refused because the lockout "+
+			"does not slow guessing (ADR 0023 §4)", name)
+	}
+	if distinctChars(tok) < minDistinctChars {
+		return fmt.Errorf("%s has fewer than %d different characters: not a generated secret; %s", name,
+			minDistinctChars, tokenMakeAdvice)
+	}
+	if hasRepeatedBlock(tok) {
+		return fmt.Errorf("%s repeats a %d-character block: not a generated secret; %s", name, repeatWindow,
+			tokenMakeAdvice)
+	}
+	if hasSequentialRun(tok) {
+		return fmt.Errorf("%s holds a run of %d consecutive characters (like 0123456789): not a generated secret; %s",
+			name, runWindow, tokenMakeAdvice)
+	}
+	if hasPlaceholderWord(tok) {
+		return fmt.Errorf("%s looks like a placeholder, not a generated secret; %s", name, tokenMakeAdvice)
+	}
+	for _, o := range outbound {
+		if o != "" && subtle.ConstantTimeCompare([]byte(o), []byte(tok)) == 1 {
+			return fmt.Errorf("%s must differ from DETECTION_SERVICE_TOKEN and LEDGER_SERVICE_TOKEN (tokens this "+
+				"process sends upstream)", name)
+		}
+	}
+	return nil
 }
 
 // fixtureScansFromEnv reads ORCHESTRATOR_ALLOW_FIXTURE_SCANS: unset, empty or

@@ -704,7 +704,7 @@ class BooksMixin:
             if ent:
                 return ent["response"]
             self.require_rules()
-            if body["kind"] == "card_chargeback" or who == "rail_gateway":
+            if body["kind"] == "card_chargeback":
                 raise Refused("a card chargeback is never opened by hand: it arrives as a Stripe event and is posted "
                               "from there; nothing recorded as a dispute",
                               [R.item("CARD_DISABLED", "card chargebacks come only from the Stripe adapter")])

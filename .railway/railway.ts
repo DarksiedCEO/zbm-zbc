@@ -179,6 +179,13 @@ export default defineRailway(() => {
       DETECTION_SERVICE_TOKEN: detection.env.ZBM_SERVICE_TOKEN,
       LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
       LEDGER_SERVICE_TOKEN: preserve(), // the orchestrator's own ledger caller token
+      // Public edge (ADR 0023): the client address is the X-Real-IP Railway's edge sets; the limits below are operator
+      // settings set by hand when needed (unset = the documented defaults), declared so an apply cannot reset them.
+      ORCHESTRATOR_CLIENT_IP_SOURCE: "x-real-ip",
+      ORCHESTRATOR_RATE_PER_MIN: preserve(),
+      ORCHESTRATOR_RATE_BURST: preserve(),
+      ORCHESTRATOR_AUTH_FAIL_MAX: preserve(),
+      ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS: preserve(),
     },
   });
 
@@ -197,6 +204,14 @@ export default defineRailway(() => {
       STRIPE_GATEWAY_FINANCE_PRIVATE_NAME: "finance",
       STRIPE_GATEWAY_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       STRIPE_GATEWAY_CALLER_TOKEN: preserve(),
+      // Public edge (ADR 0023): Stripe source-IP allowlist ON by default (compiled-in list); the override, the kill
+      // switch and the rate limits are operator settings set by hand in an incident, declared so an apply cannot
+      // silently undo them (a kill switch released, an override dropped).
+      STRIPE_GATEWAY_CLIENT_IP_SOURCE: "x-real-ip",
+      STRIPE_GATEWAY_ALLOWED_IPS: preserve(),
+      STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED: preserve(),
+      STRIPE_GATEWAY_RATE_PER_MIN: preserve(),
+      STRIPE_GATEWAY_RATE_BURST: preserve(),
     },
   });
 

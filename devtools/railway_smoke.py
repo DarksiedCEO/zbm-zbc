@@ -24,11 +24,23 @@ root with RAILWAY_RUN_UID=0 — the entrypoint must hand /data/ledger to uid 100
 
     python3 devtools/railway_smoke.py [--only NAME ...]
 
+Live mode (optional, OFF by default; never run by CI): the X-Real-IP spoof probe of ADR 0023 against the DEPLOYED
+public services (AEGIS edge review M-2, r2 D-3). Railway's overwrite of X-Real-IP is a forum statement, not a
+contract, and Railway can change its edge without any deploy of ours, so schedule this (e.g. daily):
+
+    python3 devtools/railway_smoke.py --live-spoof-probe --gateway-url https://<gw domain> \
+        --orchestrator-url https://<orch domain>
+
+It sends no token and no signature, so nothing reaches Finance's books or the ledger. Exit 0 only when all three
+probes show the edge replaced the forged header.
+
 Exit 0 only when every check passed. Containers and volumes it creates are removed whatever happens.
 """
 from __future__ import annotations
 
 import argparse
+import http.client
+import urllib.parse
 import json
 import secrets
 import subprocess
@@ -265,10 +277,72 @@ def ledger_volume(tag: str) -> None:
         docker("volume", "rm", "-f", vol)
 
 
+# A Stripe webhook address (docs.stripe.com/ips): if the edge passed it through, the gateway's allowlist would admit
+# the probe and answer 400 (no valid Stripe-Signature) instead of 403.
+SPOOF_STRIPE_IP = "3.18.12.63"
+
+
+def _request(url: str, method: str, path: str, headers: list[tuple[str, str]], body: bytes | None,
+             timeout: float) -> int:
+    u = urllib.parse.urlsplit(url)
+    conn_cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(u.hostname, u.port, timeout=timeout)
+    try:
+        conn.putrequest(method, path)
+        for k, v in headers:          # putheader, so the same header can be sent twice
+            conn.putheader(k, v)
+        if body is not None:
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", str(len(body)))
+        conn.endheaders(body)
+        r = conn.getresponse()
+        r.read(4096)
+        return r.status
+    finally:
+        conn.close()
+
+
+def spoof_probe(gateway_url: str, orchestrator_url: str, timeout: float = 15) -> list[tuple[str, bool, str]]:
+    """The three spoof probes (docs/deploy/railway.md, Smoke-test checklist). Returns (name, passed, detail)."""
+    out = []
+    probes = [
+        ("gateway: forged X-Real-IP (a Stripe address) is replaced -> 403", gateway_url, "POST", "/webhooks/stripe",
+         [("X-Real-IP", SPOOF_STRIPE_IP)], b"{}", 403,
+         "400 means the forged Stripe address passed the allowlist: the edge kept the client's X-Real-IP"),
+        ("gateway: X-Real-IP sent twice is replaced or refused -> 403", gateway_url, "POST", "/webhooks/stripe",
+         [("X-Real-IP", SPOOF_STRIPE_IP), ("X-Real-IP", SPOOF_STRIPE_IP)], b"{}", 403,
+         "anything but 403 means a duplicated header changed the outcome"),
+        ("orchestrator: X-Real-IP 'not-an-ip' is replaced -> 401", orchestrator_url, "GET",
+         "/revenue-recovery/findings", [("X-Real-IP", "not-an-ip")], None, 401,
+         "403 means the edge passed the client's X-Real-IP through (the service could not parse it)"),
+    ]
+    for name, base, method, path, headers, body, want, hint in probes:
+        try:
+            got = _request(base, method, path, headers, body, timeout)
+        except OSError as e:
+            out.append((name, False, f"request failed: {e!r}"[:200]))
+            continue
+        out.append((name, got == want, f"HTTP {got}" + ("" if got == want else f" (want {want}; {hint})")))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--only", nargs="*", help="image names (default: all)")
+    ap.add_argument("--live-spoof-probe", action="store_true",
+                    help="probe the DEPLOYED public services for X-Real-IP pass-through instead of the image checks")
+    ap.add_argument("--gateway-url", help="https://<stripe-gateway domain> (live mode)")
+    ap.add_argument("--orchestrator-url", help="https://<orchestrator domain> (live mode)")
     a = ap.parse_args()
+    if a.live_spoof_probe:
+        if not (a.gateway_url and a.orchestrator_url):
+            print("--live-spoof-probe needs --gateway-url and --orchestrator-url")
+            return 2
+        for name, ok, detail in spoof_probe(a.gateway_url, a.orchestrator_url):
+            check(name, ok, detail)
+        failed = [r for r in RESULTS if not r[1]]
+        print(f"{len(RESULTS) - len(failed)}/{len(RESULTS)} spoof probes passed (railway_smoke --live-spoof-probe)")
+        return 1 if failed else 0
     table = images()
     names = a.only or list(table)
     unknown = [n for n in names if n not in table]

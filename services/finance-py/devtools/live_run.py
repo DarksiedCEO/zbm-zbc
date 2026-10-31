@@ -42,7 +42,8 @@ FIN_TOKEN = "live-fin-service-token-" + "s" * 16
 ANDRE = "live-fin-andre-approval-token-" + "a" * 12
 CALLERS = {n: f"live-fin-caller-{n}-" + "c" * 24 for n in ("compliance_38", "clipper_network", "verification_integrity",
                                                              "creative_production", "onboarding", "legal_37",
-                                                             "scheduler", "rail_gateway", "bank_feed")}
+                                                             "scheduler", "rail_gateway", "bank_feed",
+                                                             "payout_rail_gateway")}
 LOG: list[str] = []
 PROCS: list[subprocess.Popen] = []
 CHECKS: list[tuple[str, bool]] = []
@@ -328,7 +329,7 @@ def _main(work: Path) -> int:
         B.dev("/devtools/rail/paid", {"rail": "stripe", "idempotency_key": item["idempotency_key"]})
         ev = B.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [
             {"event_id": "evt-live-1", "type": "paid", "item_id": item["item_id"], "signature": "sig-ok-test-only"}]},
-            caller="rail_gateway").json()
+            caller="payout_rail_gateway").json()
         st = B.get(f"/fin/v1/payout-batches/{batch['batch_id']}")
         check("B: rail webhook paid -> F4e, batch settled", ev["results"][0]["status"] == "paid" and st["status"] == "settled")
         B.dev("/devtools/vi/clawback", {"submission_id": "sub-1", "views_delta": -2345})
@@ -378,7 +379,7 @@ def _main(work: Path) -> int:
         B.dev("/devtools/rail/paid", {"rail": "stripe", "idempotency_key": it2["idempotency_key"]})
         B.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [
             {"event_id": "evt-live-2", "type": "paid", "item_id": it2["item_id"], "signature": "sig-ok-test-only"}]},
-            caller="rail_gateway")
+            caller="payout_rail_gateway")
         payee = B.get("/fin/v1/payees/clip-a")
         check("B: receivable netted to 0.00 at release (F4b), week-2 batch settled",
               payee["clawback_open"] == "0.00" and B.get(f"/fin/v1/payout-batches/{b2['batch_id']}")["status"] == "settled")
@@ -460,7 +461,11 @@ def _main(work: Path) -> int:
             start([str(gw_bin)], {"STRIPE_GATEWAY_FINANCE_URL": f"http://127.0.0.1:{pfb}",
                                   "STRIPE_GATEWAY_FINANCE_TOKEN": FIN_TOKEN,
                                   "STRIPE_GATEWAY_CALLER_TOKEN": CALLERS["rail_gateway"],
-                                  "STRIPE_GATEWAY_PORT": str(gw_port)}, str(work), "stripe_gateway", work)
+                                  "STRIPE_GATEWAY_PORT": str(gw_port),
+                                  # ADR 0023: no proxy here, so the client address is the TCP peer, and the source
+                                  # allowlist (kept ON) holds the loopback address this run posts from
+                                  "STRIPE_GATEWAY_CLIENT_IP_SOURCE": "remote-addr",
+                                  "STRIPE_GATEWAY_ALLOWED_IPS": "127.0.0.1"}, str(work), "stripe_gateway", work)
             wait_up(f"http://127.0.0.1:{gw_port}/health")
             gurl = f"http://127.0.0.1:{gw_port}/webhooks/stripe"
             forged = httpx.post(gurl, content=ev["payload"].replace("checkout.session", "checkout.sessionX").encode(),

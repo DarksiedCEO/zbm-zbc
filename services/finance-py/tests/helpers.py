@@ -260,7 +260,7 @@ class Harness:
         if item_id:
             ev["item_id"] = item_id
         return self.ok(self.post(f"/fin/v1/rails/{rail}/events", {"request_id": rid(), "events": [ev]},
-                                 caller="rail_gateway"))
+                                 caller="payout_rail_gateway"))
 
     def pay_items(self, batch):
         for it in batch["items"]:

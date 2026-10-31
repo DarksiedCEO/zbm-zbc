@@ -160,6 +160,8 @@ def main() -> int:
                     "LEDGER_SERVICE_URL": lurl, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
                     "ORCHESTRATOR_SERVICE_TOKEN": ORCH_TOKEN, "ORCHESTRATOR_PORT": str(op),
                     "ORCHESTRATOR_BIND_ADDR": "127.0.0.1",
+                    # ADR 0023: no Railway edge here (no X-Real-IP), so the client address is the TCP peer
+                    "ORCHESTRATOR_CLIENT_IP_SOURCE": "remote-addr",
                     # L-2 (final go-live AEGIS): fixture scans are refused unless this dev/test flag is set; step 5
                     # runs one.
                     "ORCHESTRATOR_ALLOW_FIXTURE_SCANS": "1"}

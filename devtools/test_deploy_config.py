@@ -324,11 +324,24 @@ class RailwayIac(unittest.TestCase):
                     "SEO_KILL_GLOBAL", "SEO_KILLED_CAPABILITIES", "SEO_KILLED_PROVIDERS"),
             "finance": ("FIN_STRIPE_SUCCESS_URL", "FIN_STRIPE_CANCEL_URL"),
             "detection": ("RR_STORE_READS_DISABLED", "RR_STORE_KILL_SWITCH_FILE"),
+            # ADR 0023: public edge overrides, kill switch and limits
+            "stripe-gateway": ("STRIPE_GATEWAY_ALLOWED_IPS", "STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED",
+                               "STRIPE_GATEWAY_RATE_PER_MIN", "STRIPE_GATEWAY_RATE_BURST"),
+            "orchestrator": ("ORCHESTRATOR_RATE_PER_MIN", "ORCHESTRATOR_RATE_BURST", "ORCHESTRATOR_AUTH_FAIL_MAX",
+                             "ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS"),
         }
         for svc, names in hand_set.items():
             for name in names:
                 with self.subTest(service=svc, variable=name):
                     self.assertTrue(self._declared_preserved(svc, name), f"{name} is not preserve() on {svc}")
+
+    def test_public_services_take_the_client_address_from_railways_edge(self):
+        # ADR 0023: behind Railway's edge the TCP peer is the edge itself; remote-addr there would put every client in
+        # one bucket and refuse every Stripe delivery. The IaC pins the edge header on both public services.
+        for svc, name in (("orchestrator", "ORCHESTRATOR_CLIENT_IP_SOURCE"),
+                          ("stripe-gateway", "STRIPE_GATEWAY_CLIENT_IP_SOURCE")):
+            with self.subTest(service=svc):
+                self.assertRegex(self.blocks[svc], rf'(?m)^\s+{name}:\s*"x-real-ip",')
 
     def test_the_preserve_check_ignores_comments(self):
         saved = self.blocks
@@ -662,3 +675,67 @@ class SeoSearchConsoleKey(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveSpoofProbe(unittest.TestCase):
+    """ADR 0023 / AEGIS edge review M-2, r2 D-3: railway_smoke.py --live-spoof-probe tells an edge that replaces
+    X-Real-IP from one that passes it through. Run here against local stand-ins for both behaviours (port 0)."""
+
+    @staticmethod
+    def _server(passes_through: bool):
+        import http.server
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _answer(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                if n:
+                    self.rfile.read(n)
+                vals = self.headers.get_all("X-Real-IP") or []
+                if self.path == "/webhooks/stripe":
+                    if not passes_through or len(vals) > 1:
+                        code = 403          # replaced by the edge: the real (non-Stripe) address is refused
+                    else:
+                        code = 400 if vals == ["3.18.12.63"] else 403
+                else:
+                    code = 403 if passes_through and vals == ["not-an-ip"] else 401
+                self.send_response(code)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_GET = do_POST = _answer
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
+    def _probe(self, passes_through: bool):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("railway_smoke_mod", SMOKE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        srv = self._server(passes_through)
+        try:
+            url = f"http://127.0.0.1:{srv.server_address[1]}"
+            return mod.spoof_probe(url, url, timeout=5)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_an_edge_that_replaces_the_header_passes_all_three(self):
+        res = self._probe(False)
+        self.assertEqual(len(res), 3)
+        self.assertTrue(all(ok for _n, ok, _d in res), res)
+
+    def test_an_edge_that_passes_the_header_through_fails_the_single_header_probes(self):
+        res = {n.split(":")[0] + str(i): ok for i, (n, ok, _d) in enumerate(self._probe(True))}
+        self.assertEqual(list(res.values()), [False, True, False], res)
+
+    def test_live_mode_is_off_by_default(self):
+        text = SMOKE.read_text()
+        self.assertIn('ap.add_argument("--live-spoof-probe", action="store_true"', text)
+        ci = (REPO / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertNotIn("--live-spoof-probe", ci)
