@@ -68,9 +68,20 @@ def test_ids_are_never_reused_and_targets_must_match(hs):
     assert hs.propose({"kind": "retire", "target_id": "NOPE-1"}).status_code == 422
 
 
+def _add_to_service_area(hs, *codes):
+    """ADR 0024: the allowed set is HR-05 ``operate``; only an Andre-approved register amendment changes it."""
+    hr05 = _row(hs, "HR-05")
+    new = {**hr05, "verified_at": hs.clock.today().isoformat(),
+           "parameters": {**hr05["parameters"], "operate": [*hr05["parameters"]["operate"], *codes]}}
+    p = hs.propose({"kind": "amend", "target_id": "HR-05", "proposed_row": new})
+    assert p.status_code == 201, p.text
+    hs.approve(p.json()["proposal"], acknowledge_weakening=True)
+
+
 def test_house_rules_only_from_andre_and_jurisdiction_lists_change_through_approval(hs):
     hr05 = _row(hs, "HR-05")
-    new = {**hr05, "parameters": {**hr05["parameters"], "operate": ["US", "GB", "CA", "AU"]}}
+    new = {**hr05, "verified_at": NOW.date().isoformat(),
+           "parameters": {**hr05["parameters"], "operate": [*hr05["parameters"]["operate"], "AU"]}}
     assert hs.propose({"kind": "amend", "target_id": "HR-05", "proposed_row": new}, andre=None,
                       caller="legal_37").status_code == 422
     assert hs.rule("c-au", "client", client_facts(country="AU", region=None, targets=("AU",))).json()["allowed"] is False
@@ -232,14 +243,21 @@ def params():
 
 
 @pytest.mark.parametrize("j, cls", [
-    ({"declared_country": "GB", "declared_region": None, "attested": True, "attestation_ref": "a"}, "operate"),
+    # ADR 0024: the service area is the 50 states, US-DC, Puerto Rico and Guam; everything else refuses
+    ({"declared_country": "GB", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
     ({"declared_country": "US", "declared_region": "US-TX", "attested": True, "attestation_ref": "a"}, "operate"),
     ({"declared_country": "US", "declared_region": None, "attested": True, "attestation_ref": "a"}, "missing"),
-    ({"declared_country": "UA", "declared_region": None, "attested": True, "attestation_ref": "a"}, "missing"),
+    ({"declared_country": "UA", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
     ({"declared_country": "UA", "declared_region": "UA-30", "attested": True, "attestation_ref": "a"}, "refuse"),
     ({"declared_country": "CA", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
-    ({"declared_country": "CA", "declared_region": "CA-BC", "attested": True, "attestation_ref": "a"}, "operate"),
-    ({"declared_country": "DE", "declared_region": None, "attested": True, "attestation_ref": "a"}, "conditional"),
+    ({"declared_country": "CA", "declared_region": "CA-BC", "attested": True, "attestation_ref": "a"}, "refuse"),
+    ({"declared_country": "DE", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
+    ({"declared_country": "PR", "declared_region": None, "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "US", "declared_region": "US-GU", "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "US", "declared_region": "US-VI", "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "AS", "declared_region": None, "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "MP", "declared_region": None, "attested": True, "attestation_ref": "a"}, "operate"),
+    ({"declared_country": "US", "declared_region": "US-UM", "attested": True, "attestation_ref": "a"}, "refuse"),
     ({"declared_country": "US", "declared_region": "CA-ON", "attested": True, "attestation_ref": "a"}, "missing"),
     ({"declared_country": "US", "declared_region": "US-CA", "attested": False, "attestation_ref": "a"}, "missing"),
     ({"declared_country": "KP", "declared_region": None, "attested": True, "attestation_ref": "a"}, "refuse"),
@@ -253,8 +271,11 @@ def test_resolver_targets(params):
     assert resolve_target("CA", params).cls == "refuse"
     assert "HR-05" in resolve_target("CA", params).cites
     assert resolve_target("CA-QC", params).cls == "refuse" and "CA-QC-LAW25" in resolve_target("CA-QC", params).cites
-    assert resolve_target("IT", params).cls == "conditional"
+    assert resolve_target("IT", params).cls == "refuse"           # ADR 0024: no conditional (EU kit) list
     assert "US-OFAC-04" in resolve_target("CU", params).cites
+    assert resolve_target("US", params).cls == "operate" and resolve_target("US", params).cites == ("HR-05",)
+    assert resolve_target("PR", params).cls == "operate" and resolve_target("US-VI", params).cls == "operate"
+    assert resolve_target("US-UM", params).cls == "refuse" and resolve_target("MX", params).cls == "refuse"
 
 
 def test_resolve_route_records_and_notes_signal_mismatch(hs):
@@ -262,7 +283,7 @@ def test_resolve_route_records_and_notes_signal_mismatch(hs):
                                                          "person": {"declared_country": "US", "declared_region": "US-NY",
                                                                     "attested": True, "attestation_ref": "a"},
                                                          "network_country_signal": "CN"}, caller="onboarding").json()
-    assert [a["class"] for a in r["answers"]] == ["operate", "operate", "refuse"]
+    assert [a["class"] for a in r["answers"]] == ["operate", "refuse", "refuse"]     # GB refused (ADR 0024)
     assert r["note"] and hs.ledger.of_type("jurisdiction_resolved")
 
 
@@ -335,6 +356,10 @@ def test_payout_for_foreign_and_entity_payees(hs):
     hs.activate_brand()
     s = hs.screen("clipper-gb", country="GB", region=None)
     hs.ports.finance.form_kind = "w8ben"
+    refused = hs.rule("clipper-gb", "zbc_creator", creator_facts(s["screen_id"], country="GB", region=None,
+                                                                 tax_form_kind="w8ben", network_country_signal="GB"))
+    assert refused.json()["allowed"] is False      # ADR 0024: outside the service area until Andre adds it
+    _add_to_service_area(hs, "GB")
     r = hs.rule("clipper-gb", "zbc_creator", creator_facts(s["screen_id"], country="GB", region=None, tax_form_kind="w8ben",
                                                            network_country_signal="GB")).json()
     assert r["allowed"] is True, r["unmet_lines"]
@@ -360,7 +385,7 @@ def test_entity_payee_needs_screened_owners(hs):
 def test_audit_export_orders_records_redacts_names_and_pages(hs):
     s = hs.screen("clipper-1")
     hs.rule("c", "client", client_facts())
-    page = hs.get("/compliance/v1/audit/export").json()
+    page = hs.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN).json()
     recs = page["records"]
     assert [r["seq"] for r in recs] == sorted(r["seq"] for r in recs)
     kinds = {r["kind"] for r in recs}
@@ -371,6 +396,6 @@ def test_audit_export_orders_records_redacts_names_and_pages(hs):
     assert page["ledger_event_id"] and hs.ledger.of_type("audit_export_issued")
     assert "Name of clipper-1" not in str(page)
     assert s["screen_id"] in str(page)
-    later = hs.get("/compliance/v1/audit/export", cursor=recs[-1]["seq"]).json()
+    later = hs.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN, cursor=recs[-1]["seq"]).json()
     assert later["records"] == [] or later["records"][0]["seq"] > recs[-1]["seq"]
-    assert hs.get("/compliance/v1/audit/export", since="not-a-date").status_code == 422
+    assert hs.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN, since="not-a-date").status_code == 422

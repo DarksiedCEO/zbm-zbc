@@ -16,13 +16,13 @@ Rules:
     redirects followed;
   - retried only when a retry can help (connect error, timeout, 429, 500, 502, 503, 504); a 4xx is never retried;
   - minimal: Finance answers only the fields the verdict needs (id, status, entity, client id, kind, currency,
-    whether anything was refunded or charged back, paid_at); an answer with any other field (the full record) is
-    refused. Nothing of it reaches this service's log or ledger but the verdict and its SHA-256.
+    whether anything was refunded or charged back, paid_at, and, optionally, whether Compliance holds the payment:
+    ``held``, AEGIS r4); an answer with any other field (the full record) is refused. Nothing of it reaches this service's log or ledger but the verdict and its SHA-256.
 
 Reason codes (a closed set; ``reasons.py`` lists every one):
   UNVERIFIABLE  FINANCE_NOT_CONFIGURED, FINANCE_UNAVAILABLE, FINANCE_AUTH_REFUSED, FINANCE_RESPONSE_INVALID
   DEFINITIVE    INVOICE_NOT_FOUND, INVOICE_ENTITY_MISMATCH, INVOICE_TENANT_MISMATCH, INVOICE_CURRENCY_UNSUPPORTED,
-                INVOICE_NOT_PAID, INVOICE_REFUNDED
+                INVOICE_NOT_PAID, INVOICE_REFUNDED, INVOICE_HELD
   PAID          the one verdict that lets a paid run proceed
 
 This module is standalone (standard library and httpx only) so finance-py's contract test can load it by file path
@@ -54,12 +54,13 @@ MAX_RESPONSE_BYTES = 64 * 1024
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 STATUS_FIELDS = frozenset({"invoice_id", "entity", "client_id", "kind", "status", "currency", "paid_at", "refunded",
                            "charged_back"})                 # finance-py svc_books.invoice_status
+OPTIONAL_STATUS_FIELDS = frozenset({"held"})                # AEGIS r4 (ADR 0024): a payment held by Compliance
 _NOT_FOUND_DETAIL = "no such invoice"                       # finance-py svc_books.get_invoice
 
 UNVERIFIABLE = frozenset({"FINANCE_NOT_CONFIGURED", "FINANCE_UNAVAILABLE", "FINANCE_AUTH_REFUSED",
                           "FINANCE_RESPONSE_INVALID"})
 DEFINITIVE = frozenset({"INVOICE_NOT_FOUND", "INVOICE_ENTITY_MISMATCH", "INVOICE_TENANT_MISMATCH",
-                        "INVOICE_CURRENCY_UNSUPPORTED", "INVOICE_NOT_PAID", "INVOICE_REFUNDED"})
+                        "INVOICE_CURRENCY_UNSUPPORTED", "INVOICE_NOT_PAID", "INVOICE_REFUNDED", "INVOICE_HELD"})
 PAID = "PAID"
 
 
@@ -82,7 +83,8 @@ def parse_invoice(obj, invoice_id: str) -> dict:
     malformed, an extra field, or an answer about any other invoice is FINANCE_RESPONSE_INVALID (unverifiable,
     never "paid")."""
     try:
-        if not isinstance(obj, dict) or obj.get("invoice_id") != invoice_id or set(obj) != STATUS_FIELDS:
+        if not isinstance(obj, dict) or obj.get("invoice_id") != invoice_id \
+                or not STATUS_FIELDS <= set(obj) <= STATUS_FIELDS | OPTIONAL_STATUS_FIELDS:
             raise ValueError("not this invoice's status")
         status, entity, client, kind, cur = (obj.get(k) for k in ("status", "entity", "client_id", "kind", "currency"))
         if status not in STATUSES or entity not in ENTITIES or not isinstance(kind, str) or not 1 <= len(kind) <= 40:
@@ -93,13 +95,16 @@ def parse_invoice(obj, invoice_id: str) -> dict:
             raise ValueError("currency")
         if not isinstance(obj["refunded"], bool) or not isinstance(obj["charged_back"], bool):
             raise ValueError("refund flags")
+        if not isinstance(obj.get("held", False), bool):
+            raise ValueError("held")
         paid_at = obj.get("paid_at")
         if paid_at is not None and (not isinstance(paid_at, str) or not 10 <= len(paid_at) <= 40):
             raise ValueError("paid_at")
     except ValueError:
         raise FinanceLookupError("FINANCE_RESPONSE_INVALID") from None
     return {"invoice_id": invoice_id, "status": status, "entity": entity, "client_id": client, "kind": kind,
-            "currency": cur, "refunded": obj["refunded"], "charged_back": obj["charged_back"], "paid_at": paid_at}
+            "currency": cur, "refunded": obj["refunded"], "charged_back": obj["charged_back"], "paid_at": paid_at,
+            "held": obj.get("held", False)}
 
 
 def assess(facts: dict, expected_client_id: str, entity: str = SEO_ENTITY) -> str:
@@ -115,6 +120,8 @@ def assess(facts: dict, expected_client_id: str, entity: str = SEO_ENTITY) -> st
         return "INVOICE_NOT_PAID"
     if facts["refunded"] or facts["charged_back"]:
         return "INVOICE_REFUNDED"
+    if facts.get("held"):
+        return "INVOICE_HELD"           # paid, but held by Compliance (38): never releases a run (ADR 0024, AEGIS r4)
     return PAID
 
 

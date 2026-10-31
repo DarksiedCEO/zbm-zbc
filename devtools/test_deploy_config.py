@@ -50,9 +50,14 @@ SERVICES = {
     "stripe-gateway": ("services/orchestrator-go/Dockerfile.stripe-gateway", "STRIPE_GATEWAY_PORT", 8470,
                        "stripe-gateway", False),
     "seo": ("services/seo-py/Dockerfile", "SEO_PORT", 8500, "seo-py", True),
+    "compliance": ("services/compliance-py/Dockerfile", "COMPLIANCE_PORT", 8380, "compliance-py", True),   # ADR 0024
 }
 PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
-               "seo-py": ("SEO_",)}
+               "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",)}
+# ADR 0024: compliance-py's requirements.txt is clipper-network-py's (that suite checks the two are identical) and has
+# no use for cryptography; its pins must be a SUBSET of requirements.in, each locked at its pin. The image installs the
+# whole lock, like every Python image.
+LOCK_SUBSET = {"compliance-py"}
 # AEGIS final go-live M-2: the prefix scan alone missed detection-py's RR_STORE_* variables (both Revenue Recovery
 # kill switches among them). Besides the prefixes, any upper-case name in an environment-read position is collected
 # whatever its prefix: os.environ.get("X"), os.environ["X"], os.getenv("X"), env.get("X"), env["X"] (the services'
@@ -184,7 +189,11 @@ class Dockerfiles(unittest.TestCase):
         want = pins(REQ_IN.read_text())
         for svc in PY_SERVICES:
             with self.subTest(service=svc):
-                self.assertEqual(pins((REPO / "services" / svc / "requirements.txt").read_text()), want)
+                have = pins((REPO / "services" / svc / "requirements.txt").read_text())
+                if svc in LOCK_SUBSET:
+                    self.assertTrue(have and have <= want, f"{svc}: every pin must be one of requirements.in's")
+                else:
+                    self.assertEqual(have, want)
         lock = LOCK.read_text()
         entries = re.findall(r"^([a-z0-9._-]+)==(\S+) \\\n((?:\s+--hash=sha256:[0-9a-f]{64}(?: \\)?\n)+)", lock, re.M)
         names = {n for n, _v, _h in entries}
@@ -204,10 +213,15 @@ REF = re.compile(r"\$\{\{(?:[a-z][a-z0-9-]*\.)?[A-Z][A-Z0-9_]*\}\}")
 
 
 def secret_value_ok(value: str) -> bool:
-    """A secret in the IaC is preserve(), a reference (`finance.env.X`), or a JSON map literal whose EVERY value is
-    exactly one `${{service.VARIABLE}}` reference (AEGIS L5): a literal secret placed next to a reference is refused."""
+    """A secret in the IaC is preserve(), a reference (`finance.env.X`), exactly one Railway reference in a string
+    (`"${{compliance.X}}"`, ADR 0024: a service declared before the one holding the value), or a JSON map literal whose
+    EVERY value is exactly one `${{service.VARIABLE}}` reference (AEGIS L5): a literal secret next to a reference is
+    refused."""
     if re.fullmatch(r"preserve\(\)|[a-z][A-Za-z]*\.env\.[A-Z0-9_]+", value):
         return True
+    one = re.fullmatch(r'"(.*)"', value)
+    if one:
+        return REF.fullmatch(one.group(1)) is not None
     m = re.fullmatch(r"'(\{.*\})'", value)
     if not m:
         return False
@@ -241,19 +255,21 @@ class RailwayIac(unittest.TestCase):
 
     def test_every_secret_file_value_variable_is_preserved(self):
         # an image's --secret-file NAME_FILE is written from the Railway variable NAME; a plan that dropped NAME would
-        # delete the secret on the next apply (and with it the feature: a ledger caller, a Stripe key, a store)
+        # delete the secret on the next apply (and with it the feature: a ledger caller, a Stripe key, a store). ADR
+        # 0024: a reference to the service that holds the value (`compliance.env.X`) is declared too, and kept.
         for svc, (df, *_r) in SERVICES.items():
             for file_var in secret_files(REPO / df):
                 with self.subTest(service=svc, variable=file_var):
                     self.assertTrue(file_var.endswith("_FILE"))
-                    self.assertTrue(self._declared_preserved(svc, file_var[:-len("_FILE")]),
-                                    f"{file_var[:-5]} is not preserve() on {svc}")
+                    name = file_var[:-len("_FILE")]
+                    self.assertTrue(self._declared_preserved(svc, name) or self._declared_reference(svc, name),
+                                    f"{name} is neither preserve() nor a reference on {svc}")
 
     def test_detection_store_connector_is_wired_without_a_volume(self):
         # AEGIS A2 H-2: the store connector needs its ledger token, the connections JSON and the credential files; the
         # service keeps no state (snapshots in memory), so no volume and no secret on a backed-up disk
         want = ["DETECTION_LEDGER_TOKEN_FILE", "RR_STORE_CONNECTIONS_FILE", "RR_STORE_SECRET_1_FILE",
-                "RR_STORE_SECRET_2_FILE"]
+                "RR_STORE_SECRET_2_FILE", "DETECTION_COMPLIANCE_TOKEN_FILE", "DETECTION_COMPLIANCE_CALLER_TOKEN_FILE"]
         self.assertEqual(secret_files(REPO / SERVICES["detection"][0]), want)
         b = self.blocks["detection"]
         self.assertIn('DETECTION_LEDGER_URL: PRIVATE("ledger", 8090),', b)
@@ -292,6 +308,10 @@ class RailwayIac(unittest.TestCase):
                     with self.subTest(service=svc, variable=name):
                         self.assertTrue(secret_value_ok(value), f"{value}: a secret must be preserve(), a reference, "
                                         "or a JSON map whose every value is one ${{service.VARIABLE}}")
+
+    def _declared_reference(self, svc: str, name: str) -> bool:
+        code = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", self.blocks[svc], flags=re.S))
+        return re.search(rf"^\s+{name}:\s*[a-z][A-Za-z]*\.env\.[A-Z0-9_]+,", code, re.M) is not None
 
     def _declared_preserved(self, svc: str, name: str) -> bool:
         # comments stripped first, so a declaration inside /* ... */ or after // does not count
@@ -365,7 +385,8 @@ class RailwayIac(unittest.TestCase):
         # name outside the service's CALLER_NAMES makes it refuse to start (config._tokens). Each reference must name
         # a variable declared in the service it points at (the same service for `${{VARIABLE}}`).
         maps = {"finance": ("FIN_CALLER_TOKENS", "services/finance-py/src/config.py"),
-                "legal": ("LEGAL_CALLER_TOKENS", "services/legal-py/src/config.py")}
+                "legal": ("LEGAL_CALLER_TOKENS", "services/legal-py/src/config.py"),
+                "compliance": ("COMPLIANCE_CALLER_TOKENS", "services/compliance-py/src/config.py")}
         for svc, (name, config_py) in maps.items():
             tree = ast.parse((REPO / config_py).read_text())
             accepted = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
@@ -392,6 +413,84 @@ class RailwayIac(unittest.TestCase):
                 self.assertTrue(self._declared_preserved(svc, var), f"{var} is not preserve() on {svc}")
         self.assertNotIn("scheduler", self._caller_map("finance", "FIN_CALLER_TOKENS"),
                          "scheduler reaches payout runs, releases, refunds and sweeps: not for a hand-held token")
+
+
+class ComplianceGate(unittest.TestCase):
+    """ADR 0024: Compliance (38) is deployed PRIVATE, with its volume, ledger, Legal wiring and scheduler, and every
+    go-live caller is wired to it (Finance, SEO, detection; Legal delivers memo proposals)."""
+
+    def setUp(self):
+        self.blocks = iac_services()
+        self.text = IAC.read_text()
+
+    # The callers of Legal's deployed map before this branch (golive-next 783c96a8): they stay strict.
+    LEGAL_CALLERS_BEFORE = ("finance_31", "onboarding")
+
+    def test_every_caller_this_branch_adds_to_legals_map_is_optional_in_legal(self):
+        """A caller added to LEGAL_CALLER_TOKENS on this branch references a token that does not exist until the same
+        apply creates it (compliance_38 -> COMPLIANCE_LEGAL_CALLER_TOKEN): Legal must skip that entry (OPTIONAL_CALLERS
+        in its config.py: the routes only that caller may call answer 503) instead of refusing to start. Callers that
+        were already deployed stay strict. The runbook orders apply -> set the token -> redeploy legal -> redeploy
+        compliance."""
+        tree = ast.parse((REPO / "services/legal-py/src/config.py").read_text())
+        optional = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                        and any(getattr(t, "id", None) == "OPTIONAL_CALLERS" for t in n.targets))
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        callers = json.loads(m.group(1))
+        for caller in callers:
+            with self.subTest(caller=caller):
+                if caller in self.LEGAL_CALLERS_BEFORE:
+                    self.assertNotIn(caller, optional, f"{caller} was deployed before: it stays strict")
+                else:
+                    self.assertIn(caller, optional, f"{caller} is new in Legal's map: an empty value would stop Legal")
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = runbook.split("**D. Deploy order.**", 1)[1].split("**E.", 1)[0]
+        order = [step.index(x) for x in ("railway config apply", "COMPLIANCE_LEGAL_CALLER_TOKEN", "redeploy legal",
+                                         "redeploy compliance")]
+        self.assertEqual(order, sorted(order), "runbook order: apply, set the token, redeploy legal, then compliance")
+
+    def test_compliance_is_private_with_its_volume_ledger_and_scheduler(self):
+        b = self.blocks["compliance"]
+        for forbidden in ("serviceDomains", "customDomains", "tcpProxies", "networking", "domain"):
+            self.assertNotIn(forbidden, re.sub(r"//[^\n]*", "", b), "Compliance is private: no public domain")
+        self.assertIn('withDailyBackups(service("compliance", ', self.text)
+        self.assertIn('const complianceData = volume("compliance-data", VOLUME_AS_DEPLOYED);', self.text)
+        for line in ('COMPLIANCE_DATA_DIR: "/data/compliance",', 'LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),',
+                     'COMPLIANCE_LEGAL_URL: PRIVATE("legal", 8420),', "COMPLIANCE_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,",
+                     'COMPLIANCE_SCHEDULER_ENABLED: "1",', 'COMPLIANCE_WATCHER_ENABLED: "1",'):
+            self.assertIn(line, b)
+        for name in ("LEDGER_SERVICE_TOKEN", "COMPLIANCE_SERVICE_TOKEN", "COMPLIANCE_ANDRE_APPROVAL_TOKEN",
+                     "COMPLIANCE_ONBOARDING_CALLER_TOKEN", "COMPLIANCE_LEGAL_CALLER_TOKEN"):
+            self.assertRegex(b, rf"(?m)^\s+{name}:\s*preserve\(\)")
+        # nothing that must stay unset is set (config.py refuses to start on them)
+        for name in ("COMPLIANCE_SANCTIONS_PROVIDER", "COMPLIANCE_A11Y_PROVIDER", "COMPLIANCE_ALLOW_UNPINNED_SEED",
+                     "COMPLIANCE_SEED_PATH", "COMPLIANCE_SEED_SHA256", "COMPLIANCE_RECONCILE_MODE"):
+            self.assertNotIn(name, b)
+
+    def test_no_scheduler_token_exists(self):
+        m = re.search(r"COMPLIANCE_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["compliance"])
+        callers = json.loads(m.group(1))
+        self.assertEqual(sorted(callers), ["finance_31", "legal_37", "onboarding", "revenue_recovery", "seo_02"])
+
+    def test_every_go_live_caller_is_wired_to_compliance(self):
+        for svc, prefix in (("finance", "FIN_COMPLIANCE"), ("seo", "SEO_COMPLIANCE"),
+                            ("detection", "DETECTION_COMPLIANCE")):
+            b = self.blocks[svc]
+            with self.subTest(service=svc):
+                self.assertIn(f'{prefix}_URL: PRIVATE("compliance", 8380),', b)
+                self.assertIn(f"{prefix}_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,", b)
+                self.assertRegex(b, rf"(?m)^\s+{prefix}_CALLER_TOKEN:\s*preserve\(\)")
+        legal = self.blocks["legal"]
+        self.assertIn('LEGAL_COMPLIANCE_URL: PRIVATE("compliance", 8380),', legal)
+        self.assertIn('LEGAL_COMPLIANCE_TOKEN: "${{compliance.COMPLIANCE_SERVICE_TOKEN}}",', legal)
+        self.assertIn('"compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}"', legal)
+
+    def test_resources_list_every_service_and_volume_once(self):
+        res = re.search(r"resources:\s*\[([^\]]*)\]", self.text).group(1)
+        names = [x.strip() for x in res.split(",") if x.strip()]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("compliance", names)
+        self.assertIn("complianceData", names)
 
 
 class CiAndSmoke(unittest.TestCase):
@@ -421,7 +520,8 @@ class VariableScan(unittest.TestCase):
     def test_no_python_service_reads_a_variable_outside_its_prefixes_unseen(self):
         """Every upper-case name a Python service reads in an environment-read position is either under the
         service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
-        outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set()}
+        outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set(),
+                            "compliance-py": set()}
         for svc, prefixes in PY_SERVICES.items():
             found = set()
             for p in (REPO / "services" / svc / "src").rglob("*.py"):

@@ -70,7 +70,7 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/fin/v1/rate-cards/decisions$"), 64 * 1024),
     (re.compile(r"^/fin/v1/bank/events$"), 128 * 1024),
     (re.compile(r"^/fin/v1/rails/[a-z]+/events$"), 64 * 1024),
-    (re.compile(r"^/fin/v1/stripe/events$"), 300 * 1024),          # a raw Stripe event (<= 256 KiB) in JSON
+    (re.compile(r"^/fin/v1/stripe/events$"), 600 * 1024),          # a raw Stripe event (<= 256 KiB), JSON-escaped (RTM-10)
     (re.compile(r"^/fin/v1/invoices$"), 64 * 1024),
     (re.compile(r"^/fin/v1/payout-handoffs$"), 32 * 1024),
     (re.compile(r"^/fin/v1/journal/[a-z]+/corrections$"), 32 * 1024),
@@ -294,6 +294,26 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             return "andre"
         return dep
 
+    def andre_or_any_caller(route: str) -> Callable:
+        """AEGIS r6: a read every (general) caller may make, where Andre's token also shows the Compliance sanctions
+        details the others do not see."""
+        def dep(request: Request) -> str:
+            a = request.headers.get(FOUNDER_HEADER)
+            if a is not None:
+                try:
+                    founder.verify(a)
+                except FounderRefused as exc:
+                    svc.founder_refused(route, exc.reason)
+                    raise
+                return "andre"
+            name = callers.identify(request.headers.get(CALLER_HEADER))
+            if name is None:
+                raise Forbidden("caller token missing or not recognised")
+            if name in NAMED_ONLY:
+                raise Forbidden("this caller reaches only the routes that name it")
+            return name
+        return dep
+
     def andre_or_caller(route: str, *allowed: str) -> Callable:
         def dep(request: Request) -> str:
             a = request.headers.get(FOUNDER_HEADER)
@@ -388,8 +408,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return registry()
 
     @app.get("/fin/v1/integrity", dependencies=auth)
-    def integrity(_: str = Depends(caller())) -> dict:
-        return svc.integrity()
+    def integrity(who: str = Depends(andre_or_any_caller("integrity"))) -> dict:
+        """AEGIS r12 R12-1: Andre's token reads the whole answer; another caller reads the verdict only (no counter:
+        a log-line count moved by a hold's upgrade was a sanctions tell)."""
+        out = svc.integrity()
+        return out if who == "andre" else {"status": out["status"], "checked_at": out["checked_at"]}
 
     # --- protocol routes (§D.1) --------------------------------------------------------------------------------------
 
@@ -475,8 +498,14 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.put_billing_profile(req.request_id, _id(client_id), dump(req))
 
     @app.get("/fin/v1/clients/{client_id}/billing-readiness", dependencies=auth)
-    def billing_readiness(client_id: str, who: str = Depends(caller("onboarding"))) -> dict:
+    def billing_readiness(client_id: str, who: str = Depends(andre_or_caller("billing-readiness", "onboarding"))) -> dict:
         return svc.billing_readiness(who, _id(client_id))
+
+    @app.get("/fin/v1/readiness/sales-tax-nexus", dependencies=auth)
+    def sales_tax_nexus(_: str = Depends(andre_or_caller("readiness/sales-tax-nexus", "onboarding"))) -> dict:
+        """ADR 0024 (memo MEMO-FIN-CQ-11-2026-10-30): invoiced totals per client state/territory, trailing 12 months
+        and calendar year, flagged at 75% of each economic-nexus threshold (Compliance row US-SALESTAX-NEXUS)."""
+        return svc.sales_tax_nexus()
 
     # --- receivables ------------------------------------------------------------------------------------------------
 
@@ -492,8 +521,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.invoice_status(_id(invoice_id))
 
     @app.get("/fin/v1/invoices/{invoice_id}", dependencies=auth)
-    def invoice_get(invoice_id: str, _: str = Depends(caller())) -> dict:
-        return svc.get_invoice(_id(invoice_id))
+    def invoice_get(invoice_id: str, who: str = Depends(andre_or_any_caller("invoices/get"))) -> dict:
+        return svc.get_invoice(_id(invoice_id), full=who == "andre")
 
     @app.post("/fin/v1/invoices/{invoice_id}/decision", dependencies=auth)
     def invoice_decide(invoice_id: str, _: str = Depends(andre("invoices/decision")),
@@ -601,6 +630,12 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                      req: m.RefundRepay = Depends(body(m.RefundRepay))) -> dict:
         return svc.repay_refund(req.request_id, _id(refund_id), dump(req))
 
+    @app.post("/fin/v1/refunds/{refund_id}/cancel", dependencies=auth)
+    def refund_cancel(refund_id: str, _: str = Depends(andre("refunds/cancel")),
+                      req: m.RefundCancel = Depends(body(m.RefundCancel))) -> dict:
+        """AEGIS r11: an approved refund whose payment was refused at execution (no money moved) is cancelled."""
+        return svc.cancel_refund(req.request_id, _id(refund_id), dump(req))
+
     @app.post("/fin/v1/refunds/{refund_id}/decision", dependencies=auth)
     def refund_decide(refund_id: str, _: str = Depends(andre("refunds/decision")),
                       req: m.Decision = Depends(body(m.Decision))) -> dict:
@@ -635,8 +670,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                             "alongside Andre's token")
         return svc.decide_batch(req.request_id, _id(batch_id), dump(req))
 
-    @app.post("/fin/v1/payout-batches/{batch_id}/second-approval", dependencies=auth)
-    def batch_second(batch_id: str, request: Request, req: m.Decision = Depends(body(m.Decision))) -> dict:
+    def second_identity(request: Request) -> str:
+        """RTM-11: the second approver's identity, checked BEFORE the body is validated."""
         if request.headers.get(FOUNDER_HEADER) is not None or request.headers.get(CALLER_HEADER) is not None:
             svc.founder_refused("payout-batches/second-approval", "another identity's token on the second approval")
             raise Forbidden("the second approval carries the second approver's token only (one identity per request)")
@@ -645,6 +680,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         except FounderRefused as exc:
             svc.founder_refused("payout-batches/second-approval", exc.reason)
             raise
+        return "second"
+
+    @app.post("/fin/v1/payout-batches/{batch_id}/second-approval", dependencies=auth)
+    def batch_second(batch_id: str, _: str = Depends(second_identity),
+                     req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.second_approve_batch(req.request_id, _id(batch_id), dump(req))
 
     @app.post("/fin/v1/payout-batches/{batch_id}/release", dependencies=auth)
@@ -675,8 +715,23 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.run_recon(who, req.request_id)
 
     @app.get("/fin/v1/breaks", dependencies=auth)
-    def breaks(_: str = Depends(caller())) -> dict:
-        return svc.list_breaks()
+    def breaks(who: str = Depends(andre_or_any_caller("breaks/list"))) -> dict:
+        return svc.list_breaks(full=who == "andre")
+
+    @app.get("/fin/v1/invoices/{invoice_id}/compliance-hold", dependencies=auth)
+    def compliance_hold_status(invoice_id: str, _: str = Depends(andre("compliance-hold/status"))) -> dict:
+        return svc.compliance_hold_status(_id(invoice_id))
+
+    @app.post("/fin/v1/invoices/{invoice_id}/compliance-hold/release", dependencies=auth)
+    def compliance_hold_release(invoice_id: str, _: str = Depends(andre("compliance-hold/release")),
+                                req: m.ComplianceHoldRelease = Depends(body(m.ComplianceHoldRelease))) -> dict:
+        return svc.compliance_hold_release(req.request_id, _id(invoice_id), dump(req))
+
+    @app.post("/fin/v1/receipts/{receipt_id}/compliance-hold/release", dependencies=auth)
+    def receipt_hold_release(receipt_id: str, _: str = Depends(andre("receipts/compliance-hold/release")),
+                             req: m.ComplianceHoldRelease = Depends(body(m.ComplianceHoldRelease))) -> dict:
+        """AEGIS r11 R11-2: release the hold on held unapplied money (the invoice release's bases and kinds)."""
+        return svc.receipt_hold_release(req.request_id, _id(receipt_id), dump(req))
 
     @app.post("/fin/v1/breaks/{break_id}/resolution", dependencies=auth)
     def break_resolve(break_id: str, _: str = Depends(andre("breaks/resolution")),
@@ -781,20 +836,23 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.form_1099("andre", tax_year)
 
     @app.get("/fin/v1/audit/evidence", dependencies=auth)
-    def audit_evidence(who: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+    def audit_evidence(who: str = Depends(andre("audit/evidence")),
+                       limit: int = Query(default=200, ge=1, le=1000),
                        offset: int = Query(default=0, ge=0, le=10_000_000),
                        event_type: Optional[str] = Query(default=None, pattern=r"^[a-z_]{1,64}$")) -> dict:
         """Sweep B-F2 (bizdev R6 M1): every Finance evidence event on the ledger, ``committed`` (named by an anchored
         local log line whose seq and request key its payload carries) or ``attempted`` (recorded first, never
-        committed under that id); unanchored evidence = attempted, not done."""
-        return svc.audit_evidence(limit, offset, event_type)
+        committed under that id); unanchored evidence = attempted, not done. AEGIS r11 R11-3: Andre's token only (a
+        row's rk, event id and payload hash let a reader recompute a hold event's real type)."""
+        return svc.audit_evidence(limit, offset, event_type, full=who == "andre")
 
     @app.get("/fin/v1/audit/export", dependencies=auth)
-    def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),
+    def audit(who: str = Depends(andre("audit/export")),           # AEGIS r11 R11-3: Andre's token only
+              since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
               cursor: int = Query(default=0, ge=0, le=10**12)) -> dict:
         try:
-            return svc.audit_export(who, since, until, cursor)
+            return svc.audit_export(who, since, until, cursor, full=who == "andre")
         except ValueError:
             raise Invalid("since/until must be RFC 3339 timestamps with offset") from None
 

@@ -223,12 +223,31 @@ class ReconMixin:
             self._commit(op)
             return resp
 
-    def list_breaks(self) -> dict:
+    # The fields of a Compliance (or held-refund) break a non-Andre caller may see. AEGIS r13 R13-1/R13-5: no kind,
+    # category, severity or checked_at (a founder alert's alone), and nothing added later unless listed here.
+    SHARED_BREAK_FIELDS = ("break_id", "leg", "subject", "difference", "opened_at", "opened_on", "owner",
+                           "explanation_code", "status", "receipt_id", "aging")
+
+    def list_breaks(self, full: bool = True) -> dict:
+        """``full``: Andre's read. Other callers see a Compliance hold's break without its note or resolution (which
+        may say the hold rests on sanctions; AEGIS r6)."""
         with self.lock:
             out = []
             today = self._today_la()
             for b in sorted(self.db["breaks"].values(), key=lambda b: b["opened_at"]):
-                out.append({**b, "aging": I7.aging_bucket(date.fromisoformat(b["opened_on"]), today)})
+                row = {**b, "aging": I7.aging_bucket(date.fromisoformat(b["opened_on"]), today)}
+                if not full and b.get("leg") in self.PRIVATE_LEGS:
+                    # AEGIS r13 R13-1: built from an ALLOW-LIST, so a field added to a Compliance break later (a
+                    # ground, a severity, a kind, a checked_at) never reaches a non-Andre reader by default
+                    row = {k: row[k] for k in self.SHARED_BREAK_FIELDS if k in row}
+                    row.update(leg="compliance_hold", note="payment held by Compliance (details: Andre's token)",
+                               resolution=None)
+                    if b.get("kind") == "founder_alert":     # AEGIS r12 R12-1: no client named outside Andre's token
+                        row["subject"] = "compliance"
+                elif not full and b.get("leg") == "stripe_refund":
+                    # AEGIS r10 RTM-08c: a held refund's note and severity are Andre's (allow-list: AEGIS r13 R13-1)
+                    row = {k: row[k] for k in (*self.SHARED_BREAK_FIELDS, "resolution") if k in row}
+                out.append(row)
             return {"breaks": out}
 
     def resolve_break(self, request_id: str, break_id: str, body: dict) -> dict:
@@ -240,8 +259,16 @@ class ReconMixin:
             b = self.db["breaks"].get(break_id)
             if b is None:
                 raise NotFound("no such break")
+            if b.get("leg") in self.COMPLIANCE_LEGS:
+                # AEGIS r4 R4-2: a Compliance hold is released only on its own grounds (a refund, or a current ALLOW)
+                raise Conflict("a Compliance hold is released only through POST "
+                               "/fin/v1/invoices/{invoice_id}/compliance-hold/release")
             if b["status"] == "resolved":
                 raise Conflict("break already resolved")
+            if (self.db["receipts"].get(b.get("receipt_id") or "") or {}).get("held_compliance"):
+                # AEGIS r11 R11-1: held money's breaks close only with the hold's own release (its grounds)
+                raise Conflict("this money is held by Compliance: its breaks close only through POST "
+                               "/fin/v1/receipts/{receipt_id}/compliance-hold/release")
             now = self._now()
             status = None
             if body.get("entry_id"):
@@ -401,6 +428,12 @@ class ReconMixin:
                                                      f"{when} (other approved sweeps included)"))
         return reasons
 
+    def _local_hold_reasons_client(self, client_id) -> list[dict]:
+        if not self._local_holds(client_id):
+            return []
+        return [R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: none of its money "
+                                                   "is spent, moved or returned until the hold is released")]
+
     @staticmethod
     def treasury_op_sha(t: dict) -> str:
         """The content hash Andre approves a treasury operation by: SHA-256 over its identity (op id, kind, entity,
@@ -444,6 +477,9 @@ class ReconMixin:
             return resp
 
     def propose_funding(self, principal: str, request_id: str, batch_id: str) -> dict:
+        # AEGIS r10 R10-1: the rail is funded only for brands Compliance ALLOWs now (generic: the scheduler asks)
+        g_cmp = Gather(self, f"fund|{request_id}|compliance", "intel_08_treasury", batch_id)
+        client_reasons = self._campaigns_reasons(g_cmp, self._batch_campaigns(batch_id), full=False)
         with self.lock:
             key, h, ent = self._idem(principal, request_id, "funding", batch_id)
             if ent:
@@ -454,6 +490,8 @@ class ReconMixin:
                 raise NotFound("no such batch")
             if b["status"] != "approved":
                 raise Conflict("only an Andre-approved batch is funded")
+            if client_reasons:
+                raise Refused("funding refused", client_reasons, ledger_event_ids=g_cmp.events)
             need = M.q(M.D(b["totals"]["net"]) - max(M.ZERO, self.bal(C.RAIL_ACCOUNT[b["rail"]])))
             if need <= 0:
                 raise Conflict("the rail already holds the batch's net total")
@@ -519,6 +557,8 @@ class ReconMixin:
             with self.lock:
                 return self._treasury_replay(ent["response"], op_id, request_id) \
                     if op_id in self.db["treasury_ops"] else ent["response"]
+        client_reasons, g_cmp = (self._transfer_client_reasons(op_id, body, request_id, full=True) if kind == "funding"
+                                 else ([], None))
         with self.lock:
             self.require_rules()
             t = self.db["treasury_ops"].get(op_id)
@@ -546,8 +586,9 @@ class ReconMixin:
                     reasons.append(R.item("NOT_APPROVED", "funding only for an Andre-approved batch"))
                 elif M.D(t["amount"]) > M.D(b["totals"]["net"]):
                     reasons.append(R.item("TREASURY_BREACH", "funding above the approved batch total"))
+                reasons += client_reasons            # AEGIS r10 R10-1 (Andre reads the OFAC warning here)
             if reasons:
-                raise Refused(f"{kind} refused", R.dedupe(reasons))
+                raise Refused(f"{kind} refused", R.dedupe(reasons), ledger_event_ids=g_cmp.events if g_cmp else [])
             op.put("treasury_ops", op_id, {**t, "status": "approved", "approved_at": iso(self._now()),
                                            "approved_by": "andre"})
             op.record(derived_id("tra", op_id), "sweep_approved" if kind == "sweep" else "funding_approved", "andre",
@@ -560,6 +601,25 @@ class ReconMixin:
         resp = {"operation": self.db["treasury_ops"][op_id], "transfer": res, "request_id": request_id}
         with self.lock:
             return self._idem_mem(key, h, resp)
+
+    def _transfer_client_reasons(self, op_id: str, body: Optional[dict], request_id: str,
+                                 full: bool) -> tuple[list[dict], Optional[Gather]]:
+        """AEGIS r10 R10-1: a rail funding is approved and executed only while Compliance ALLOWs every brand whose
+        deposit the funded batch draws on; a refund payment is executed (every attempt, the retries too) only while it
+        ALLOWs the refunded client. Asked outside the lock; ``body`` None = a new execution attempt."""
+        if body is not None and body.get("decision") != "approve":
+            return [], None
+        with self.lock:
+            t = dict(self.db["treasury_ops"].get(op_id) or {})
+            refund = self.db["refunds"].get(t.get("ref_id") or "") if t.get("kind") == "refund_payment" else None
+        if not t.get("ref_id") or (body is None and t.get("status") != "approved"):
+            return [], None
+        g = Gather(self, f"trd|{request_id}|compliance", "intel_08_treasury", op_id)
+        if t["kind"] == "funding":
+            return self._campaigns_reasons(g, self._batch_campaigns(t["ref_id"]), full=full), g
+        if refund is not None and body is None:
+            return self._outflow_reasons(g, refund["client_id"], full=full), g
+        return [], None
 
     def _transfer_lines(self, t: dict):
         amt = M.D(t["amount"])
@@ -575,7 +635,7 @@ class ReconMixin:
             return "F6p", [J.dr("2050", amt, f"client:{r['client_id']}"), J.cr("1020", amt)], ("1020", t["to"])
         raise Invalid("unknown treasury operation")
 
-    def _execution_reasons(self, t: dict) -> list[dict]:
+    def _execution_reasons(self, t: dict, client_reasons: list[dict] = ()) -> list[dict]:
         """Re-checked at EXECUTION, not only at approval (AEGIS N17-2)."""
         if t["kind"] == "sweep":
             return self._sweep_reasons(t, "execution")
@@ -583,6 +643,12 @@ class ReconMixin:
             b = self.db["batches"].get(t["ref_id"])
             if not b or b["status"] not in ("approved", "releasing") or M.D(t["amount"]) > M.D(b["totals"]["net"]):
                 return [R.item("NOT_APPROVED", "funding only for an Andre-approved batch, up to its net total")]
+            local = [r for c in self._batch_campaigns(t["ref_id"]) for r in self._local_hold_reasons(c)]
+            return R.dedupe(list(client_reasons) + local)   # R10-1 / AEGIS r12 R12-3: own holds under the lock
+        if t["kind"] == "refund_payment":
+            r = self.db["refunds"].get(t["ref_id"]) or {}
+            local = self._local_hold_reasons_client(r.get("client_id"))
+            return R.dedupe(list(client_reasons) + local)   # R10-1: every attempt asks; R12-3: own holds re-read
         return []
 
     def _execute_transfer(self, tid: str) -> dict:
@@ -595,6 +661,9 @@ class ReconMixin:
         malformed) -> ``bank_unknown`` with a break for Andre, the posting kept, and the retry asks the bank again
         with the SAME key (never a second posting). A posting is never left dangling and the bank never moves money
         the journal has not recorded."""
+        # AEGIS r10 R10-1: a funding's brands (a refund payment's client) are re-asked right before a new attempt posts
+        # (outside the lock; generic: the reasons are stored on the operation every caller reads)
+        client_reasons, _g = self._transfer_client_reasons(tid, None, f"xfer|{tid}|{iso(self._now())}", full=False)
         with self.lock:
             t = self.db["treasury_ops"].get(tid)
             # sweep B-F2: ``executing`` too -- an operation whose bank answer could not be booked (a 503 after the bank
@@ -618,7 +687,7 @@ class ReconMixin:
                     return {"op_id": tid, "status": t["status"], "outcome_unknown": True}
                 n = t.get("attempts", 0) + 1
                 op = Op(self, f"xfer|{tid}|{n}", "intel_08_treasury", tid)
-                reasons = self._execution_reasons(t)
+                reasons = self._execution_reasons(t, client_reasons)
                 if reasons:
                     op.put("treasury_ops", tid, {**t, "status": "refused_at_execution", "reasons": R.dedupe(reasons),
                                                  "refused_at": iso(self._now())})

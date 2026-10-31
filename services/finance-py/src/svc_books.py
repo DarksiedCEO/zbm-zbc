@@ -8,6 +8,7 @@ refunds of unspent deposits (F6), Andre's journal corrections, the month-end clo
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Optional
 
 import chart as C
@@ -19,7 +20,7 @@ from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from intelligences import i07_reconciliation as I7
 from ledger import derived_id
-from ports import LegalAnswer
+from ports import ClientActivation, LegalAnswer, RegisterParameters
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha, sha_text
 from textguard import banned_words_in
 
@@ -30,6 +31,9 @@ CLOSE_TASKS = ("preclose_review", "subledgers_closed", "balance_sheet_recs", "re
 def legal_version(v) -> str:
     """Legal (37) numbers versions ``major.minor``; a whole number recorded before Legal was wired means ``n.0``."""
     return f"{v}.0" if isinstance(v, int) else str(v)
+
+
+_RATIO = Decimal("0.0001")
 
 
 class BooksMixin:
@@ -256,6 +260,28 @@ class BooksMixin:
                                                    "client"))
         return out
 
+    def _activation(self, g: Gather, client_id: str) -> ClientActivation:
+        """ADR 0024: Compliance's CURRENT activation decision for the client (fail closed: anything else is a NO)."""
+        cmp_ = self.ports.compliance
+        ans = g.call("compliance_38", "client_activation", (client_id,), lambda: cmp_.client_activation(client_id),
+                     ClientActivation(False))
+        return ans if isinstance(ans, ClientActivation) else ClientActivation(False)
+
+    @staticmethod
+    def _activation_reasons(act: ClientActivation, full: bool = False) -> list[dict]:
+        """``full``: Compliance's own reason text (Andre's routes and the hold record only Andre reads). Every other
+        caller gets a generic "compliance hold" (AEGIS r8: never whether it rests on sanctions)."""
+        if not act.available:
+            return [R.item("DEPENDENCY_UNAVAILABLE:compliance_38",
+                           "Compliance (38) cannot confirm the client's activation: refused")]
+        if not act.allowed:
+            if not full:
+                return [R.item("COMPLIANCE_NOT_ACTIVATED", "no current Compliance activation for this client "
+                                                           "(compliance hold)")]
+            first = act.reasons[0] if act.reasons else "no current ALLOW"
+            return [R.item("COMPLIANCE_NOT_ACTIVATED", f"no current Compliance activation for this client: {first}")]
+        return []
+
     def _fundable_reasons(self, g: Gather, campaign_id: str) -> list[dict]:
         prof = self.db["profiles"].get(campaign_id)
         if prof is None:
@@ -269,6 +295,7 @@ class BooksMixin:
     def billing_readiness(self, principal: str, client_id: str) -> dict:
         g = Gather(self, f"bready|{client_id}|{iso(self._now())}", "intel_02_receivables", client_id)
         unmet = list(self._rules_reasons())
+        unmet += self._activation_reasons(self._activation(g, client_id))     # ADR 0024: the Compliance hard gate
         prof = self.db["client_profiles"].get(client_id)
         if prof is None:
             unmet.append(R.item("LEGAL_NOT_CURRENT", "no Andre-approved client billing profile (entity, payment method, "
@@ -286,9 +313,127 @@ class BooksMixin:
         unmet += [R.item("TAX_TREATMENT_UNVERIFIED", x["message"], obligation_id="FIN-CQ-11")
                   for x in self._counsel_reasons("FIN-CQ-11")]
         unmet = R.dedupe(unmet)
-        return {"client_id": client_id, "allowed": not unmet, "unmet": R.lines(unmet), "reasons": unmet,
+        extra = {}
+        if principal == "andre":
+            # RTM-06: Andre sees which rules every client activation relies on expire soon (Compliance readiness)
+            cmp_ = self.ports.compliance
+            ans = g.call("compliance_38", "rule_expiry", (), lambda: cmp_.rule_expiry(), None) \
+                if hasattr(cmp_, "rule_expiry") else None
+            extra["compliance_rule_expiry"] = ans if isinstance(ans, dict) else {"available": False}
+        return {**extra, "client_id": client_id, "allowed": not unmet, "unmet": R.lines(unmet), "reasons": unmet,
                 "detail": "billing ready" if not unmet else f"{len(unmet)} requirement(s) unmet",
                 "rules_pinned": self.rules_pinned, "ledger_event_ids": g.events}
+
+    # ================================================================== ADR 0024: per-jurisdiction sales (nexus)
+
+    NEXUS_ROW = "US-SALESTAX-NEXUS"
+    NEXUS_MEMO = "MEMO-FIN-CQ-11-2026-10-30"
+
+    @staticmethod
+    def _nexus_thresholds(params: Optional[dict]) -> Optional[dict]:
+        """The Compliance row's parameters as {alert_ratio, default, overrides}; None when anything is malformed."""
+        try:
+            if not isinstance(params["alert_ratio"], str):
+                raise ValueError("ratio")
+            ratio = Decimal(params["alert_ratio"])
+
+            def one(t: dict) -> dict:
+                tx = t.get("transactions")
+                if tx is not None and (isinstance(tx, bool) or not isinstance(tx, int) or tx < 1):
+                    raise ValueError("transactions")
+                sales = M.D(t["sales_usd"])
+                if sales <= 0:
+                    raise ValueError("sales")
+                return {"sales_usd": sales, "transactions": tx, "source": t.get("source")}
+            default = one(params["default"])
+            default["source"] = params.get("default_source")
+            overrides = {k: one(v) for k, v in (params.get("overrides") or {}).items()}
+            if not (0 < ratio <= 1):
+                raise ValueError("ratio")
+            checks = params.get("check_before_first_client") or {}
+            if not isinstance(checks, dict) or not all(isinstance(k, str) and isinstance(v, str) and v
+                                                       for k, v in checks.items()):
+                raise ValueError("checks")
+            return {"alert_ratio": ratio, "default": default, "overrides": overrides, "checks": checks}
+        except (KeyError, TypeError, ValueError, AttributeError, ArithmeticError, M.MoneyError):
+            return None
+
+    def sales_tax_nexus(self) -> dict:
+        """Invoiced totals per client state/territory (as Compliance recorded it at invoice approval) for the trailing
+        12 months, the calendar year and the previous calendar year, each against its economic-nexus threshold from Compliance's register row
+        US-SALESTAX-NEXUS; a jurisdiction at or above ``alert_ratio`` (75%) of either limit is FLAGGED (memo
+        MEMO-FIN-CQ-11-2026-10-30: register before the threshold is crossed). Counted: invoices issued, paid or
+        returned (never drafts or voids), by ``issued_at``. Thresholds unreadable -> every jurisdiction with sales is
+        flagged; invoices with no recorded jurisdiction are their own flagged bucket ``unknown``."""
+        now = self._now()
+        today = now.date()
+        g = Gather(self, f"nexus|{iso(now)}", "intel_02_receivables", "sales-tax-nexus")
+        cmp_ = self.ports.compliance
+        ans = g.call("compliance_38", "row_parameters", (self.NEXUS_ROW,),
+                     lambda: cmp_.row_parameters(self.NEXUS_ROW), RegisterParameters(False, self.NEXUS_ROW))
+        th = self._nexus_thresholds(ans.parameters) if isinstance(ans, RegisterParameters) and ans.available else None
+        with self.lock:
+            invoices = [dict(v) for v in self.db["invoices"].values()
+                        if v["status"] in ("issued", "paid", "returned") and v.get("issued_at")]
+        # AEGIS F-11: the previous calendar year too (most states test the current OR the previous year)
+        windows = {"trailing_12_months": (today - timedelta(days=365), today),
+                   "calendar_year": (date(today.year, 1, 1), today),
+                   "previous_calendar_year": (date(today.year - 1, 1, 1), date(today.year - 1, 12, 31))}
+        starts = windows
+        buckets: dict[str, dict] = {}
+        with M.money_context():
+            for inv in invoices:
+                day = parse_iso(inv["issued_at"]).date()
+                code = inv.get("client_jurisdiction") or "unknown"
+                b = buckets.setdefault(code, {p: {"sales": M.D("0.00"), "transactions": 0} for p in starts})
+                for period, (start, end) in windows.items():
+                    if start <= day <= end:
+                        b[period]["sales"] += M.D(inv["total"])
+                        b[period]["transactions"] += 1
+            rows, flagged = [], []
+            for code in sorted(buckets):
+                b = buckets[code]
+                check = th["checks"].get(code) if th else None
+                # ADR 0024 (12:51 update): a territory with no verified threshold gets no number, only its check
+                t = None if check else ((th["overrides"].get(code) or th["default"]) if th else None)
+                item = {"jurisdiction": code, "threshold": None if t is None else
+                        {"sales_usd": M.fmt(t["sales_usd"]), "transactions": t["transactions"], "source": t["source"]},
+                        "flag_reasons": []}
+                for period in starts:
+                    v = b[period]
+                    rec = {"sales_usd": M.fmt(v["sales"]), "transactions": v["transactions"],
+                           "sales_ratio": None, "transactions_ratio": None}
+                    if t is not None:
+                        rec["sales_ratio"] = f"{(v['sales'] / t['sales_usd']).quantize(_RATIO):f}"
+                        if v["sales"] >= th["alert_ratio"] * t["sales_usd"]:
+                            item["flag_reasons"].append(f"{period}: sales at {rec['sales_ratio']} of the threshold")
+                        if t["transactions"]:
+                            ratio = Decimal(v["transactions"]) / Decimal(t["transactions"])
+                            rec["transactions_ratio"] = f"{ratio.quantize(_RATIO):f}"
+                            if ratio >= th["alert_ratio"]:
+                                item["flag_reasons"].append(f"{period}: {v['transactions']} transactions, at "
+                                                            f"{rec['transactions_ratio']} of the threshold")
+                    item[period] = rec
+                if check:
+                    item["flag_reasons"].append(check)
+                if code == "unknown":
+                    item["flag_reasons"].append("invoices with no recorded client jurisdiction (issued before ADR 0024"
+                                                " or without a Compliance activation): assign them by hand")
+                elif t is None and not check and any(b[p]["transactions"] for p in starts):
+                    item["flag_reasons"].append("thresholds unavailable from Compliance: review by hand")
+                item["flagged"] = bool(item["flag_reasons"])
+                if item["flagged"]:
+                    flagged.append(code)
+                rows.append(item)
+        return {"as_of": iso(now), "memo_ref": self.NEXUS_MEMO,
+                "thresholds": {"available": th is not None, "obligation_id": self.NEXUS_ROW,
+                               "row_status": ans.effective_status if isinstance(ans, RegisterParameters) else "unknown",
+                               "source_url": ans.source_url if isinstance(ans, RegisterParameters) else None,
+                               "alert_ratio": f"{th['alert_ratio']:f}" if th else None,
+                               # jurisdictions with no verified threshold: what to check before the first client there
+                               "check_before_first_client": dict(sorted(th["checks"].items())) if th else None},
+                "periods": {p: {"from": a.isoformat(), "to": b.isoformat()} for p, (a, b) in windows.items()},
+                "jurisdictions": rows, "flagged": flagged, "ledger_event_ids": g.events}
 
     def budget_view(self, campaign_id: str) -> dict:
         with self.lock:
@@ -335,6 +480,11 @@ class BooksMixin:
             if body["entity"] == "zbm" and body["kind"] == "campaign_deposit":
                 problems.append(R.item("ENTITY_MIX", "campaign deposits are ZBC's, never ZBM's"))
             problems += I2.recurring_problems({"kind": body["kind"], "recurring": body.get("recurring")})
+            if I2.lines_total(body["lines"]) > self.cfg.max_invoice_total:
+                # RTM-09: no invoice above the configured maximum (a wire would match it with no ceiling)
+                problems.append(R.item("AMOUNT_OUT_OF_RANGE", f"INVOICE_ABOVE_MAXIMUM: the total is above the maximum "
+                                                              f"of {M.fmt(self.cfg.max_invoice_total)} "
+                                                              "(FIN_MAX_INVOICE_TOTAL)"))
             if problems:
                 raise InvalidReasons("invoice draft refused", R.dedupe(problems))
             total = I2.lines_total(body["lines"])
@@ -373,7 +523,11 @@ class BooksMixin:
             raise NotFound("no such invoice")
         g = Gather(self, f"invdec|{request_id}", "intel_02_receivables", invoice_id)
         reasons = list(self._rules_reasons())
+        act = ClientActivation(False)
         if body["decision"] == "approve" and not reasons:
+            # ADR 0024: no invoice is approved or issued without Compliance's current ALLOW for the client
+            act = self._activation(g, inv["client_id"])
+            reasons += self._activation_reasons(act, full=True)      # Andre's decision route
             reasons += self._legal_reasons(g, inv["legal_ref"], "contract (MSA/order form/SOW)", inv["client_id"],
                                            inv["entity"])
             reasons += [R.item("TAX_TREATMENT_UNVERIFIED", "sales-tax treatment (FIN-CQ-11) is unverified",
@@ -403,7 +557,9 @@ class BooksMixin:
                     op.put("media_buys", buy["buy_id"], {**buy, "status": "cancelled", "cancelled_at": iso(now)})
             else:
                 due = (now.date() + timedelta(days=inv["due_days"])).isoformat()
-                new = {**inv, "status": "issued", "approved_by": "andre", "issued_at": iso(now), "due_at": due}
+                new = {**inv, "status": "issued", "approved_by": "andre", "issued_at": iso(now), "due_at": due,
+                       # ADR 0024: where the client is (Compliance's activation), for the per-jurisdiction totals
+                       "client_jurisdiction": act.jurisdiction, "compliance_ruling_id": act.ruling_id}
                 op.record(derived_id("inva", invoice_id), "invoice_approved", "andre", invoice_id,
                           {"invoice_id": invoice_id, "content_sha256": inv["content_sha256"]}, "Andre approved an invoice")
                 op.record(derived_id("invi", invoice_id), "invoice_issued", "intel_02_receivables", invoice_id,
@@ -432,12 +588,18 @@ class BooksMixin:
             self._commit(op)
             return resp
 
-    def get_invoice(self, invoice_id: str) -> dict:
+    def get_invoice(self, invoice_id: str, full: bool = True) -> dict:
+        """``full``: Andre's read. Every other caller sees only ``held`` for a Compliance hold, never its sanctions
+        marker, reason or history (AEGIS r6)."""
         with self.lock:
             inv = self.db["invoices"].get(invoice_id)
             if inv is None:
                 raise NotFound("no such invoice")
-            return dict(inv)
+            if full:
+                return dict(inv)
+            out = {k: v for k, v in inv.items() if k not in ("held_compliance", "held_compliance_history")}
+            out["held"] = bool(inv.get("held_compliance"))
+            return out
 
     def invoice_status(self, invoice_id: str) -> dict:
         """The narrow read for Search & Answer Intelligence (seo_02; AEGIS SEO Wave 3 M2): status, ownership and
@@ -450,11 +612,29 @@ class BooksMixin:
                     "kind": inv["kind"], "status": inv["status"], "currency": inv.get("currency", "USD"),
                     "paid_at": inv.get("paid_at"),
                     "refunded": bool(inv.get("refunded")) and M.D(inv["refunded"]) > 0,
-                    "charged_back": bool(inv.get("charged_back")) and M.D(inv["charged_back"]) > 0}
+                    "charged_back": bool(inv.get("charged_back")) and M.D(inv["charged_back"]) > 0,
+                    # AEGIS r4: a payment held by Compliance is not releasable for delivery (seo-py: INVOICE_HELD)
+                    "held": bool(inv.get("held_compliance"))}
 
     # ================================================================== bank statement lines (receipts)
 
     def bank_events(self, principal: str, request_id: str, lines: list[dict]) -> dict:
+        # RTM-01: the clients whose invoices these lines would match are asked about at Compliance first (outside the
+        # lock, as the Stripe path does); a line from a client that is not a current ALLOW is booked but HELD
+        with self.lock:
+            key, h, ent = self._idem(principal, request_id, "bank/events", lines)
+            if ent:
+                return ent["response"]
+            would = set()
+            for ln in lines:
+                inv0 = I2.match_receipt(ln["amount"], ln.get("reference_token"), self.db["invoices"], ln["entity"])
+                if inv0 is not None:
+                    would.add(inv0["client_id"])
+                att = self.db["invoices"].get(ln.get("reference_token") or "")
+                if att is not None:
+                    would.add(att["client_id"])      # AEGIS r10 R10-4: unapplied money that names a client too
+        g_cmp = Gather(self, f"bank|{request_id}|compliance", "intel_02_receivables", "bank_feed")
+        checks = {cid: self._client_check(g_cmp, cid) for cid in sorted(would)}
         with self.lock:
             key, h, ent = self._idem(principal, request_id, "bank/events", lines)
             if ent:
@@ -470,7 +650,7 @@ class BooksMixin:
                 raise InvalidReasons("statement lines refused", [R.item(
                     "PERIOD_LOCKED", f"period {period} of {', '.join(sorted(locked))} is locked: nothing in this "
                     "batch was posted")])
-            op = Op(self, f"bank|{request_id}", "intel_02_receivables", "bank_feed")
+            op = Op(self, f"bank|{request_id}", "intel_02_receivables", "bank_feed", g_cmp)
             results = []
             for ln in lines:
                 rct = rid("rct", ln["txn_ref_sha256"])
@@ -485,6 +665,11 @@ class BooksMixin:
                                        {k: op.get("invoices", k) for k in self.db["invoices"]}, entity)
                 ok_zbc = inv is not None and entity == "zbc" and acct == "1020" and inv["kind"] == "campaign_deposit"
                 ok_zbm = inv is not None and entity == "zbm" and acct == "1010"
+                if (ok_zbc or ok_zbm) and inv["client_id"] not in checks:
+                    # matched only after an earlier line in this batch changed the books: not asked yet, so held
+                    checks[inv["client_id"]] = ("unverified", "Compliance (38) was not asked about this client before "
+                                                "the line was booked", None)
+                check = checks.get(inv["client_id"]) if (ok_zbc or ok_zbm) else None
                 src = {"kind": "receipt", "id": rct}
                 try:
                     po = self._bank_stripe_payout(op, ln, amt, rct) if (inv is None and entity == "zbm"
@@ -507,7 +692,7 @@ class BooksMixin:
                                        "F1", src, f"F1|{rct}")
                         op.put("invoices", inv["invoice_id"], {**inv, "status": "paid", "paid_at": iso(self._now())})
                         prof = op.get("profiles", inv["campaign_id"])
-                        if prof and prof["status"] == "approved":
+                        if prof and prof["status"] == "approved" and not check:
                             op.put("profiles", inv["campaign_id"], {**prof, "status": "funded"})
                         status, etype = "matched", "receipt_matched"
                     elif ok_zbm:
@@ -543,16 +728,53 @@ class BooksMixin:
                                          else str(ln["value_date"]), "matched_at": iso(self._now()),
                                          "status": status, "entry_id": e["entry_id"],
                                          "reference_token": ln.get("reference_token")})
-                if status == "matched":
+                if status == "matched" and check:
+                    kind, why, ground = check
+                    self._open_compliance_hold(op, inv["invoice_id"], kind, why, rct, M.fmt(amt), e["entry_id"],
+                                               "ACH or wire", str(ln["value_date"]), sanctions=ground)
+                    status = f"matched_held_{'compliance' if kind == 'refused' else 'unverified'}"
+                elif status == "matched":
                     self._client_receipt(op, rct, inv, M.fmt(amt), str(ln["value_date"]))
+                elif status == "unapplied":
+                    # AEGIS r10 R10-4: the line names an invoice (wrong amount, already paid...): its client's money
+                    # is held like a matched payment while Compliance does not ALLOW the client
+                    att = op.get("invoices", ln.get("reference_token") or "")
+                    if att is not None:
+                        ucheck = checks.get(att["client_id"], ("unverified", "Compliance (38) was not asked about this "
+                                                               "client before the line was booked", None))
+                        if ucheck:
+                            status = self._hold_unapplied(op, rct, att, ucheck, M.fmt(amt), str(ln["value_date"]),
+                                                          "ACH or wire")
                 results.append({"receipt_id": rct, "status": status, "entry_id": e["entry_id"]})
             resp = self._idem_add(op, key, h, {"results": results, "ledger_event_ids": op.events,
                                                "request_id": request_id})
             self._commit(op)
             return resp
 
+    def _receipt_source_client(self, rc: dict) -> Optional[str]:
+        """AEGIS r11 R11-1: the client an unapplied receipt's money came from: its hold's client, else the client of
+        the invoice its reference token names (a bank line), else unknown."""
+        hold = rc.get("held_compliance") or {}
+        if hold.get("client_id"):
+            return hold["client_id"]
+        att = self.db["invoices"].get(rc.get("reference_token") or "")
+        return att["client_id"] if att is not None else None
+
     def apply_receipt(self, request_id: str, receipt_id: str, invoice_id: str) -> dict:
-        """Andre applies an unapplied receipt (in the deposits account) to an issued campaign deposit invoice."""
+        """Andre applies an unapplied receipt (in the deposits account) to an issued campaign deposit invoice. RTM-01:
+        for a brand Compliance does not currently ALLOW it is applied but HELD (no campaign funded, no receipt).
+        AEGIS r11 R11-1: money held by Compliance (the receipt's own hold) is never applied to any invoice until Andre
+        releases that hold on its grounds (``POST /fin/v1/receipts/{id}/compliance-hold/release``), and Compliance is
+        asked about the receipt's SOURCE client as well as the target invoice's: money from a client it does not
+        ALLOW now is refused (it is not moved onto another client's books)."""
+        with self.lock:
+            inv0 = self.db["invoices"].get(invoice_id)
+            rc0 = self.db["receipts"].get(receipt_id)
+            source = self._receipt_source_client(rc0) if rc0 is not None else None
+        g_cmp = Gather(self, f"apply|{request_id}|compliance", "andre", receipt_id)
+        check = self._client_check(g_cmp, inv0["client_id"]) if inv0 is not None else None
+        src_check = (self._client_check(g_cmp, source) if source and (inv0 is None or source != inv0["client_id"])
+                     else None)
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"receipt/{receipt_id}", invoice_id)
             if ent:
@@ -567,7 +789,15 @@ class BooksMixin:
             if not (rc["entity"] == "zbc" and rc["into_account"] == "1020" and inv["kind"] == "campaign_deposit"):
                 raise Conflict("only a receipt that landed in the deposits account can be applied to a deposit invoice "
                                "(a deposit in the operating account is moved by an Andre top-up first)")
-            op = Op(self, f"apply|{request_id}", "andre", receipt_id)
+            if rc.get("held_compliance"):
+                raise Conflict("this money is held by Compliance: it is applied to no invoice until its hold is "
+                               "released on its grounds (POST /fin/v1/receipts/{receipt_id}/compliance-hold/release)")
+            if src_check and self._receipt_source_client(rc) != inv["client_id"]:
+                kind, why, _g = src_check
+                raise Refused("application refused", [R.item(
+                    "COMPLIANCE_NOT_ACTIVATED", f"the money came from a client Compliance does not currently ALLOW "
+                                                f"({kind}: {why})"[:300])], ledger_event_ids=g_cmp.events)
+            op = Op(self, f"apply|{request_id}", "andre", receipt_id, g_cmp)
             amt = M.D(rc["amount"])
             try:
                 e = self._post(op, "zbc", [J.dr("2070", amt), J.cr("2010", amt, f"campaign:{inv['campaign_id']}")], "F1",
@@ -577,10 +807,11 @@ class BooksMixin:
             op.put("receipts", receipt_id, {**rc, "status": "matched", "invoice_id": invoice_id})
             op.put("invoices", invoice_id, {**inv, "status": "paid", "paid_at": iso(self._now())})
             prof = self.db["profiles"].get(inv["campaign_id"])
-            if prof and prof["status"] == "approved":
+            if prof and prof["status"] == "approved" and not check:
                 op.put("profiles", inv["campaign_id"], {**prof, "status": "funded"})
             for b in self.db["breaks"].values():
-                if b.get("receipt_id") == receipt_id and b["status"] == "open":
+                if b.get("receipt_id") == receipt_id and b["status"] == "open" \
+                        and b.get("leg") not in self.COMPLIANCE_LEGS:     # R11-1: never a Compliance break
                     op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolution": {
                         "entry_id": e["entry_id"], "approved_by": "andre", "at": iso(self._now())}})
                     op.record(derived_id("brkr", b["break_id"], e["entry_id"]), "break_resolved_by_andre", "andre",
@@ -589,7 +820,12 @@ class BooksMixin:
             op.record(derived_id("rcta", receipt_id), "receipt_matched", "andre", receipt_id,
                       {"receipt_id": receipt_id, "invoice_id": invoice_id, "amount": M.fmt(amt)},
                       "Andre applied an unapplied receipt")
-            self._client_receipt(op, receipt_id, inv, M.fmt(amt), rc["value_date"])
+            if check:
+                kind, why, ground = check
+                self._open_compliance_hold(op, invoice_id, kind, why, receipt_id, M.fmt(amt), e["entry_id"],
+                                           "ACH or wire", rc["value_date"], sanctions=ground)
+            else:
+                self._client_receipt(op, receipt_id, inv, M.fmt(amt), rc["value_date"])
             resp = self._idem_add(op, key, h, {"receipt_id": receipt_id, "entry_id": e["entry_id"],
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
@@ -654,6 +890,12 @@ class BooksMixin:
             op.put("receipts", receipt_id, {**rc, "status": "returned", "return": ret})
             op.put("invoices", inv["invoice_id"], {**inv, "status": "returned", "returned_at": iso(self._now())})
             self._withdraw_client_receipt(op, receipt_id)        # AEGIS M1: never "thank you" for bounced money
+            held = inv.get("held_compliance")
+            if held and held.get("receipt_id") == receipt_id:
+                # AEGIS r10 RTM-05 (bank path): a held deposit the bank returned is marked like a Stripe refund of a
+                # held payment (high severity and the OFAC note on a sanctions ground; Andre pushed); the hold stays
+                self._held_refund_mark(op, inv, held, receipt_id, amt, amt, notes=self.HELD_RETURN_NOTE,
+                                       how="returned by the bank")
             sf_id = None
             prof = self.db["profiles"].get(camp)
             if shortfall > 0:
@@ -764,7 +1006,73 @@ class BooksMixin:
 
     # ================================================================== refunds (F6)
 
+    def _outflow_reasons(self, g: Gather, client_id: str, full: bool) -> list[dict]:
+        """AEGIS r9 R9-1: before ANY money of a client goes out (a deposit refund, its approval, its re-payment),
+        Compliance is asked at that moment (outside the lock): anything but a current ALLOW refuses, and so does any
+        payment of the client held by Compliance. On a sanctions ground Andre's token (``full``) gets an OFAC
+        warning: blocked property is never returned without OFAC's written authorization (runbook step G)."""
+        act = self._activation(g, client_id)
+        out = list(self._activation_reasons(act, full=full))
+        with self.lock:
+            held = self._local_holds(client_id)
+        sanctions = bool(act.available and not act.allowed and act.sanctions) or \
+            any(i["held_compliance"].get("sanctions") for i in held)
+        if held:
+            out.append(R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: none of "
+                                                          "its money is spent, moved or returned until the hold is "
+                                                          "released"))
+        if sanctions and full:
+            out.append(R.item("COMPLIANCE_NOT_ACTIVATED", "OFAC: this client is refused on sanctions grounds; do NOT "
+                                                          "return or move its money; report to OFAC and follow "
+                                                          "runbook step G"))
+        return R.dedupe(out)
+
+    def _local_holds(self, client_id: Optional[str]) -> list[dict]:
+        """Finance's own Compliance holds of a client (under the lock): its held invoices and its held unapplied
+        money (AEGIS r11 R11-1/R11-5: read again under the lock right before money moves)."""
+        if not client_id:
+            return []
+        return [i for i in self.db["invoices"].values() if i.get("client_id") == client_id and i.get("held_compliance")] \
+            + [r for r in self.db["receipts"].values()
+               if (r.get("held_compliance") or {}).get("client_id") == client_id]
+
+    def _local_hold_reasons(self, campaign_id: str, ids=()) -> list[dict]:
+        """R11-5: under the lock, a hold booked after the Compliance read still stops the money (generic reason)."""
+        client = (self.db["profiles"].get(campaign_id) or {}).get("client_id")
+        if not self._local_holds(client):
+            return []
+        return [R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: none of its money "
+                                                   "is spent, moved or returned until the hold is released",
+                       list(ids))]
+
+    def _campaign_outflow(self, g: Gather, campaign_ids, full: bool) -> dict[str, list[dict]]:
+        """AEGIS r10 R10-1: per campaign, ``_outflow_reasons`` for the client whose deposit funds it. Every step that
+        spends or commits a deposit (a creator accrual, a payout run, Andre's approval, the second approval, rail
+        funding, the release) asks Compliance about that client at that moment (outside the lock), so a brand that
+        becomes an OFAC match after its campaign was funded pays no creator. Compliance asked once per client."""
+        with self.lock:
+            clients = {c: (self.db["profiles"].get(c) or {}).get("client_id") for c in sorted(set(campaign_ids))}
+        per_client: dict[str, list[dict]] = {}
+        out: dict[str, list[dict]] = {}
+        for c, client in clients.items():
+            if not client:
+                out[c] = [R.item("CAMPAIGN_NOT_FUNDED", "no Andre-approved commercial profile for this campaign")]
+                continue
+            if client not in per_client:
+                per_client[client] = self._outflow_reasons(g, client, full)
+            out[c] = per_client[client]
+        return out
+
+    def _campaigns_reasons(self, g: Gather, campaign_ids, full: bool) -> list[dict]:
+        """R10-1: the outflow reasons of every client whose deposit a batch (or its funding) draws on."""
+        per = self._campaign_outflow(g, campaign_ids, full)
+        return R.dedupe([r for c in sorted(per) for r in per[c]])
+
     def propose_refund(self, principal: str, request_id: str, campaign_id: str) -> dict:
+        with self.lock:
+            prof0 = self.db["profiles"].get(campaign_id)
+        g_cmp = Gather(self, f"rfd|{request_id}|compliance", "intel_02_receivables", campaign_id)
+        out_reasons = self._outflow_reasons(g_cmp, prof0["client_id"], full=False) if prof0 else []
         with self.lock:
             key, h, ent = self._idem(principal, request_id, f"refunds/{campaign_id}", campaign_id)
             if ent:
@@ -785,8 +1093,9 @@ class BooksMixin:
             amount = self.bal("2010", f"campaign:{campaign_id}")
             if amount <= 0:
                 reasons.append(R.item("CAMPAIGN_NOT_FUNDED", "no unspent deposit to refund"))
+            reasons += out_reasons
             if reasons:
-                raise Refused("refund refused", R.dedupe(reasons))
+                raise Refused("refund refused", R.dedupe(reasons), ledger_event_ids=g_cmp.events)
             fid = rid("rfd", campaign_id, request_id)
             r = {"refund_id": fid, "campaign_id": campaign_id, "client_id": prof["client_id"], "amount": M.fmt(amount),
                  "admin_fee": "0.00", "status": "proposed", "proposed_at": iso(self._now()), "proposed_by": principal}
@@ -805,6 +1114,11 @@ class BooksMixin:
         key, h, ent = self._idem("andre", request_id, f"refund/{refund_id}", body)
         if ent:
             return ent["response"]
+        with self.lock:
+            r0 = self.db["refunds"].get(refund_id)
+        g_cmp = Gather(self, f"rfdd|{request_id}|compliance", "andre", refund_id)
+        out_reasons = (self._outflow_reasons(g_cmp, r0["client_id"], full=True)
+                       if r0 is not None and body.get("decision") == "approve" else [])
         with self.lock:
             r = self.db["refunds"].get(refund_id)
             if r is None:
@@ -830,8 +1144,9 @@ class BooksMixin:
             reasons += self._control_block_reasons("refund")
             if self.bal("2010", f"campaign:{r['campaign_id']}") != M.D(r["amount"]):
                 reasons.append(R.item("CAMPAIGN_NOT_FUNDED", "the unspent deposit changed since the proposal"))
+            reasons += out_reasons
             if reasons:
-                raise Refused("refund refused", R.dedupe(reasons))
+                raise Refused("refund refused", R.dedupe(reasons), ledger_event_ids=g_cmp.events)
             amt = M.D(r["amount"])
             try:
                 e = self._post(op, "zbc", [J.dr("2010", amt, f"campaign:{r['campaign_id']}"),
@@ -860,12 +1175,64 @@ class BooksMixin:
         t["content_sha256"] = self.treasury_op_sha(t)        # AEGIS c0869c4 H-N1: same canonical form as other ops
         return t
 
+    CANCELLABLE_PAYMENT = ("refused_at_execution", "posting_refused", "not_moved")
+
+    def cancel_refund(self, request_id: str, refund_id: str, body: dict) -> dict:
+        """AEGIS r11 (the stuck approved refund): a refund Andre approved whose payment was refused at execution (the
+        client stopped being a current ALLOW, or the posting was refused) or settled not moved never paid anybody, but
+        it keeps the deposit in 2050 and reads ``approved``. Andre cancels it with a reason: F6 is reversed (Dr 2050,
+        Cr 2010: the unspent deposit is the campaign's again), the refund is ``cancelled`` and its payment operation
+        closed. Refused while a payment may have moved (executing, bank_unknown, done, or an unknown outcome). Once
+        the client is ALLOW again the scheduler proposes a new refund (which asks Compliance again)."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"refund-cancel/{refund_id}", body)
+            if ent:
+                return ent["response"]
+            self.require_rules()
+            r = self.db["refunds"].get(refund_id)
+            if r is None:
+                raise NotFound("no such refund")
+            if r["status"] not in ("approved", "payment_not_moved"):
+                raise Conflict(f"only an approved refund whose payment never moved is cancelled (it is {r['status']})")
+            tid = r.get("payment_op_id") or rid("trx", "refund", refund_id)
+            t = self.db["treasury_ops"].get(tid) or {}
+            if t.get("status") not in self.CANCELLABLE_PAYMENT or t.get("outcome_unknown"):
+                raise Conflict(f"the refund's payment is {t.get('status') or 'unknown'}: money may have moved; it is "
+                               "settled first (POST /fin/v1/treasury/operations/{op_id}/settlement)")
+            op = Op(self, f"rfdc|{request_id}", "andre", refund_id)
+            self._injection(op, {"reason": body.get("reason")})
+            amt = M.D(r["amount"])
+            try:
+                e = self._post(op, "zbc", [J.dr("2050", amt, f"client:{r['client_id']}"),
+                                           J.cr("2010", amt, f"campaign:{r['campaign_id']}")], "F6",
+                               {"kind": "refund_cancel", "id": refund_id}, f"F6c|{refund_id}", approval_ref=request_id,
+                               actor="andre")
+            except PostingRefused as exc:
+                raise Refused("refund cancellation refused", exc.reasons) from None
+            op.put("treasury_ops", tid, {**t, "status": "cancelled", "cancelled_at": iso(self._now())})
+            new = {**r, "status": "cancelled", "cancelled_at": iso(self._now()), "cancel_entry_id": e["entry_id"],
+                   "cancel_reason_sha256": sha(body["reason"])}
+            op.put("refunds", refund_id, new)
+            op.record(derived_id("rfdc", refund_id), "refund_cancelled", "andre", refund_id,
+                      {"refund_id": refund_id, "amount": r["amount"], "entry_id": e["entry_id"],
+                       "reason_sha256": sha(body["reason"])}, f"Andre cancelled an unpaid refund of {r['amount']}")
+            resp = self._idem_add(op, key, h, {"refund": new, "entry_id": e["entry_id"], "ledger_event_ids": op.events,
+                                               "request_id": request_id})
+            self._commit(op)
+            return resp
+
     def repay_refund(self, request_id: str, refund_id: str, body: dict) -> dict:
         """Andre pays a refund again after he settled its payment ``not_moved`` (AEGIS c0869c4 H-N1): a NEW refund
         payment operation (its own key, never the old one), bound to the refund's ``content_sha256``."""
         key, h, ent = self._idem("andre", request_id, f"refund-repay/{refund_id}", body)
         if ent:
             return ent["response"]
+        with self.lock:
+            r0 = self.db["refunds"].get(refund_id)
+        g_cmp = Gather(self, f"rfdr|{request_id}|compliance", "andre", refund_id)
+        out_reasons = self._outflow_reasons(g_cmp, r0["client_id"], full=True) if r0 is not None else []
+        if out_reasons:
+            raise Refused("refund payment refused", out_reasons, ledger_event_ids=g_cmp.events)
         with self.lock:
             self.require_rules()
             r = self.db["refunds"].get(refund_id)

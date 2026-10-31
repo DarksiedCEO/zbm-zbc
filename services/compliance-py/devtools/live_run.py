@@ -145,14 +145,20 @@ def _main(work: Path) -> int:
                                          "attestation_ref": "att-1"},
                         "flags": {k: False for k in ("political_content", "child_directed", "health_data_shared",
                                                      "biz_opp_client", "audience_data_sale", "marketplace", "pooled_client_funds")},
-                        "target_jurisdictions": ["US", "GB"], "platforms": ["youtube"], "client_category": "general",
+                        "target_jurisdictions": ["US"], "platforms": ["youtube"], "client_category": "general",
                         "claims": {"claims_present": False, "health_or_earnings_claim": False, "claim_file_id": None,
                                    "claim_file_approved": False},
                         "services_include_review_suppression": False, "outbound_cold_contact_countries": [],
                         "hbnr_clause_signed": False}
         r = c.post(A + "/compliance/v1/rule", headers=h("onboarding"),
                    json={"request_id": rid(), "subject_id": "client-live", "lane": "client", "facts": client_facts}).json()
-        say(f"GATE activation (client, US->US/GB): allowed={r['allowed']} ruling={r['ruling_id']} ledger_event={r['ledger_event_id']}")
+        say(f"GATE activation (client, US->US): allowed={r['allowed']} ruling={r['ruling_id']} ledger_event={r['ledger_event_id']}")
+        # ADR 0024: from Oct 30, 2026 a client also needs Andre's recorded OFAC search (HR-14) and Legal's current
+        # documents (HR-15, Legal not wired here): refused, and the status every caller reads says REFUSE
+        st = c.get(A + "/compliance/v1/clients/client-live/activation", headers=h("finance_31")).json()
+        say(f"client activation status (finance_31): decision={st['decision']} reasons={st['reasons'][:2]}")
+        rd = c.get(A + "/compliance/v1/readiness", headers=h("scheduler")).json()
+        say(f"readiness: expired={[e['id'] for e in rd['expired']]} gate_blockers={rd['gate_blockers']}")
         # thin clients against the live server
         sys.path[:0] = [str(SERVICES / "onboarding-py" / "src"), str(SERVICES / "creative-py" / "src")]
         from integrations.compliance38 import HttpComplianceDepartment
@@ -265,7 +271,7 @@ def _main(work: Path) -> int:
         st = c.get(B + "/compliance/v1/register/US-CPPA-2025", headers=h("scheduler")).json()["row"]["status"]
         say(f"US-CPPA-2025 status in B after approval: {st}")
         # audit export and ledger verification
-        ex = c.get(A + "/compliance/v1/audit/export", headers=h("scheduler")).json()
+        ex = c.get(A + "/compliance/v1/audit/export", headers=h(andre=ANDRE)).json()      # AEGIS r10: Andre only
         say(f"audit export page: {len(ex['records'])} records, ledger event {ex['ledger_event_id']}")
         ents = c.get(L + "/ledger/entries", headers={"Authorization": f"Bearer {LEDGER_TOKEN}"}).json()
         cmp = [e for e in ents if e.get("department") == "compliance"]
@@ -278,7 +284,7 @@ def _main(work: Path) -> int:
         ok = all(x.status_code == 200 and x.json().get("valid") is True for x in (v, vb))
         # bug sweep C (R6): every typed evidence event of A is committed under an anchored local line; and C-11 held
         # after the restart (the restart leg above)
-        ev = c.get(A + "/compliance/v1/audit/evidence", headers=h("scheduler"), params={"limit": 1000}).json()
+        ev = c.get(A + "/compliance/v1/audit/evidence", headers=h(andre=ANDRE), params={"limit": 1000}).json()
         # attempted = recorded, never named by an anchored line. In this fault-free run the only such events are
         # answers that change no state: a port crossing whose answer was "unavailable" (C-04 with the provider stand-in)
         # and the audit-export answer. Any other attempted event would be a state change that never committed.

@@ -19,6 +19,7 @@ from _store_fakes import (NOW, SECRETS, TOKEN, TOKEN_B, Clock, FakeShopify, Memo
                           write_connections, write_secret)
 from conftest import TEST_SERVICE_TOKEN
 from store_connector.service import StoreService
+from _store_fakes import AllowCompliance  # noqa: E402  (ADR 0024: the Compliance gate passes)
 
 AUTH = {"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}
 ORDER_AGENTS = {"affiliate-coupon-extension-v1": "/agents/affiliate-coupon-extension/detect",
@@ -44,7 +45,7 @@ def store(tmp_path, monkeypatch):
     clock = Clock()
     ledger = MemoryLedger()
     svc = StoreService(connections_file=write_connections(tmp_path, conns), ledger=ledger, transport=fake.transport,
-                       monotonic=clock.monotonic, sleep=clock.sleep, now=lambda: NOW)
+                       monotonic=clock.monotonic, sleep=clock.sleep, now=lambda: NOW, compliance=AllowCompliance())
     monkeypatch.setattr(api, "STORE", svc)
     svc.fake, svc.ledger_fake = fake, ledger
     return svc

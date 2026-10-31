@@ -37,7 +37,7 @@ def _ops(h):
                                    caller="scheduler")),
         ("proposal", lambda: h.propose({"kind": "amend", "target_id": "US-FTC-437-01",
                                         "proposed_row": {**row, "status": "unverified", "verified_at": None}})),
-        ("audit", lambda: h.get("/compliance/v1/audit/export")),
+        ("audit", lambda: h.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN)),
     ]
 
 

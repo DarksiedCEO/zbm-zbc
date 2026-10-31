@@ -286,6 +286,10 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
             if andre_ok and request.headers.get(FOUNDER_HEADER) is not None:
                 return _andre(route or request.url.path[:64], request.headers.get(FOUNDER_HEADER))
             name = callers.identify(request.headers.get(CALLER_HEADER))
+            if name is None and allowed and set(allowed) <= set(settings.callers_not_configured):
+                # an optional caller not configured yet (first deploy): its routes answer 503 until its token is set
+                raise Unavailable(f"the {', '.join(allowed)} caller token is not set in LEGAL_CALLER_TOKENS: this route "
+                                  "is closed until it is")
             if name is None:
                 raise Forbidden("caller token missing or not recognised")
             if allowed and name not in allowed:
@@ -299,6 +303,10 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         return dep
 
     reader = caller(andre_ok=True, route="read")
+
+    if settings.callers_not_configured:
+        log.warning("LEGAL_CALLER_TOKENS: %s not set; the routes only it may call answer 503 until it is "
+                    "(docs/deploy/railway.md, ADR 0024 step D)", ", ".join(settings.callers_not_configured))
 
     def body(model: type[BaseModel]) -> Callable:
         def parse(payload: Any = Body(default=None)) -> Any:
@@ -346,7 +354,13 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return svc.health()
+        out = svc.health()
+        if settings.callers_not_configured:
+            # AEGIS r13 R13-3: an optional caller left unset is a half-finished deploy step (railway.md step D): not
+            # "ok", so the heartbeat keeps flagging it; a worse status (degraded, closed) is never softened
+            out = {**out, "status": "warning" if out["status"] == "ok" else out["status"],
+                   "warnings": [f"optional_caller_unset:{c}" for c in settings.callers_not_configured]}
+        return out
 
     @app.get("/legal/v1/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(reader)) -> list[dict]:
@@ -404,9 +418,25 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                    req: m.AcceptanceCreate = Depends(body(m.AcceptanceCreate))) -> dict:
         return _echo(req.request_id, svc.record_acceptance(who, req.request_id, req.model_dump()))
 
+    @app.get("/legal/v1/replay-quarantine", dependencies=auth)
+    def replay_quarantine(_: str = Depends(andre("replay-quarantine"))) -> dict:
+        """AEGIS r11 R11-6 (Andre): log lines the replay did not apply (a failure the caller was told about)."""
+        return svc.quarantine_view()
+
+    @app.post("/legal/v1/replay-quarantine/acknowledgements", dependencies=auth)
+    def replay_quarantine_ack(_: str = Depends(andre("replay-quarantine/ack")),
+                              req: m.QuarantineAck = Depends(body(m.QuarantineAck))) -> dict:
+        return _echo(req.request_id, svc.acknowledge_quarantine(req.request_id, list(req.seqs)))
+
+    @app.post("/legal/v1/acceptance-invitations", dependencies=auth, status_code=201)
+    def acceptance_invitation(_: str = Depends(andre("acceptance-invitations")),
+                              req: m.InvitationCreate = Depends(body(m.InvitationCreate))) -> dict:
+        return _echo(req.request_id, svc.create_invitation(req.request_id, req.model_dump()))
+
     @app.get("/legal/v1/acceptances/{acceptance_id}", dependencies=auth)
     def acceptance_get(acceptance_id: str, _: str = Depends(caller("clipper_network", "finance_31", "onboarding",
-                                                                   andre_ok=True))) -> dict:
+                                                                   "compliance_38", andre_ok=True))) -> dict:
+        # compliance_38 (ADR 0024, HR-15): a client's activation needs Legal to confirm the client's own acceptance
         return svc.get_acceptance(_id(acceptance_id, LG_ID))
 
     @app.post("/legal/v1/envelopes", dependencies=auth)

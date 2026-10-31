@@ -976,7 +976,8 @@ class FinanceService:
 
     # ================================================================== audit, health
 
-    def audit_export(self, principal: str, since: Optional[str], until: Optional[str], cursor: int) -> dict:
+    def audit_export(self, principal: str, since: Optional[str], until: Optional[str], cursor: int,
+                     full: bool = True) -> dict:
         with self.lock:
             s = parse_iso(since) if since else None
             u = parse_iso(until) if until else None
@@ -986,7 +987,7 @@ class FinanceService:
                 at = parse_iso(rec["at"])
                 if (s and at < s) or (u and at > u):
                     continue
-                out.append(i10.export_entry(rec))
+                out.append(i10.export_entry(rec, full=full))
                 if len(out) >= i10.PAGE:
                     break
             more = last < len(self.log)
@@ -997,7 +998,7 @@ class FinanceService:
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "rules_version": self.rules_version}
 
-    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None, full: bool = True) -> dict:
         """``GET /fin/v1/audit/evidence`` (sweep B-F2; bizdev-py ``audit_evidence``, AEGIS round 6 M1). Every Finance
         event on the ledger except the log anchors, each marked:
 
@@ -1041,13 +1042,15 @@ class FinanceService:
                 cited.setdefault(eid, r["seq"])
         rows, counts = [], {"committed": 0, "cited": 0, "attempted": 0}
         for e in mine:
-            et = e.get("event_type")
-            if et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
+            et = real_et = e.get("event_type")
+            if not full and isinstance(et, str) and et.startswith("compliance_hold_"):
+                et = i10.GENERIC_HOLD_EVENT     # AEGIS r7 V1: Andre's token alone sees which hold event it is
+            if real_et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
                 continue
             eid = e.get("event_id")
             n = named.get(eid)
             if n is not None and n[2] == e.get("payload_sha256") \
-                    and eid == i10.evidence_id(n[1] or "", et, e.get("payload_sha256") or ""):
+                    and eid == i10.evidence_id(n[1] or "", real_et, e.get("payload_sha256") or ""):
                 status, seq, rk = "committed", n[0], n[1]
             elif n is None and eid in cited:
                 status, seq, rk = "cited", cited[eid], None
@@ -1060,11 +1063,19 @@ class FinanceService:
                 "offset": offset, "log_lines": len(raw), "epoch": epoch}
 
     def health(self) -> dict:
+        with self.lock:
+            # AEGIS r11 R11-2/R11-4: held invoices, held unapplied money and open founder alerts (funded brands
+            # Compliance no longer allows) all stop the heartbeat
+            holds = sum(1 for i in self.db["invoices"].values() if i.get("held_compliance")) \
+                + sum(1 for r in self.db["receipts"].values() if r.get("held_compliance")) \
+                + sum(1 for b in self.db["breaks"].values() if b.get("kind") == "founder_alert" and b["status"] == "open")
         return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,
                 "reconcile_required": bool(self.reconcile_required), "log_write_fault": bool(self.log.fault),
-                "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode}}
+                "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode},
+                # AEGIS r5 C2: a count only (no ids): the private heartbeat check pings only while this is 0
+                "compliance_holds_open": holds}
 
 
 from svc_books import BooksMixin  # noqa: E402

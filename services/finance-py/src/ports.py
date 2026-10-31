@@ -110,6 +110,33 @@ class JurisdictionAnswer:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class ClientActivation:
+    """ADR 0024: Compliance's CURRENT activation decision for a client (GET /compliance/v1/clients/{id}/activation).
+    ``allowed`` only for a current ALLOW; ``jurisdiction`` is the client's recorded place (US-CA, US-DC, PR, GU)."""
+
+    available: bool
+    allowed: bool = False
+    ruling_id: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    reasons: tuple = ()
+    reason: str = ""
+    sanctions: bool = False      # AEGIS r5 C1: Compliance says the refusal rests on sanctions (never refunded)
+    ground: Optional[str] = None  # AEGIS r8: "match" (OFAC list match) or "place" (sanctioned place or target)
+
+
+@dataclass(frozen=True)
+class RegisterParameters:
+    """ADR 0024: one Compliance register row's parameters (the economic-nexus thresholds, US-SALESTAX-NEXUS)."""
+
+    available: bool
+    obligation_id: str = ""
+    effective_status: str = "unknown"
+    parameters: Optional[dict] = None
+    source_url: Optional[str] = None
+    reason: str = ""
+
+
 class CompliancePort(Protocol):
     def ruling(self, ruling_id: str) -> ComplianceRuling: ...
 
@@ -120,6 +147,10 @@ class CompliancePort(Protocol):
     def row(self, obligation_id: str) -> RegisterRow: ...
 
     def jurisdiction(self, country: str, region: Optional[str]) -> JurisdictionAnswer: ...
+
+    def client_activation(self, client_id: str) -> ClientActivation: ...
+
+    def row_parameters(self, obligation_id: str) -> RegisterParameters: ...
 
 
 class NotWiredCompliance:
@@ -139,6 +170,12 @@ class NotWiredCompliance:
 
     def jurisdiction(self, country, region):
         return JurisdictionAnswer(False, reason=self.REASON)
+
+    def client_activation(self, client_id):
+        return ClientActivation(False, reason=self.REASON)
+
+    def row_parameters(self, obligation_id):
+        return RegisterParameters(False, obligation_id, reason=self.REASON)
 
 
 # --- Clipper Network, Legal 37 ------------------------------------------------------------------------------------
