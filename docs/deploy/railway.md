@@ -911,12 +911,15 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    with a cron schedule `*/10 * * * *` and the start command
 
    ```sh
-   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
+   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 http://legal.railway.internal:8420/health | grep -Eq "\"status\": ?\"ok\"" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
    ```
 
    and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance and finance over the private network
    (`/health` needs no token) and pings the monitor only while compliance's `/health` answers 200 **and** finance has
-   no payment held by Compliance (`compliance_holds_open` is 0). A 503, a dead or unreachable service, an open hold, or
+   no payment held by Compliance (`compliance_holds_open` is 0: held invoices, held unapplied money and open founder
+   alerts), and legal's `/health` says `"status": "ok"` (it is `degraded` while a log line the replay did not apply is
+   unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
+   /legal/v1/replay-quarantine/acknowledgements`, your token). A 503, a dead or unreachable service, an open hold, or
    the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
    things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
 3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
@@ -1131,6 +1134,23 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
      acting. A current ALLOW releases the hold and the receipt goes out; a REFUSE turns it into a `refused` hold (with
      `sanctions` set as Compliance says). Nothing to do unless Compliance stays down.
    - `POST /fin/v1/breaks/{break_id}/resolution` refuses these breaks; only the release above clears a hold.
+   - **Held unapplied money** (AEGIS r11): a wire or Stripe payment that names a refused client but matches no invoice
+     (wrong amount, an invoice already paid) is booked as unapplied cash and held on the RECEIPT
+     (`unapplied_held_compliance` / `unapplied_held_unverified`; it counts in `compliance_holds_open`). It is applied to
+     no invoice (`receipts/{id}/apply` refuses it, and refuses unheld money whose source client Compliance does not
+     allow now) until you release it: `POST /fin/v1/receipts/{receipt_id}/compliance-hold/release` with the same bases
+     and OFAC document kinds as an invoice hold (`compliance_allow` or `refund` for a non-sanctions hold;
+     `ofac_authorization` with a license, unblocking report, Compliance Release or delisting for a sanctions hold;
+     `ofac_rejected_return` only for a place ground with OFAC's written guidance). The hourly job releases an
+     unverified one on ALLOW and upgrades a refused one's ground.
+   - **A founder alert** (AEGIS r11): a client whose deposit funds a campaign and whom Compliance no longer allows opens
+     an open, high-severity `compliance_hold` break (kind `founder_alert`, subject `client:<id>`); it counts in
+     `compliance_holds_open`, the founder-alert email of ADR 0027 reads it, and it closes by itself once the client is
+     allowed again or funds no campaign. No accrual, payout, funding or refund moves that client's money meanwhile.
+   - **A refund stuck as `approved`** (Compliance refused the client between your approval and the payment, so the
+     payment was `refused_at_execution` and nothing moved): cancel it, with a reason,
+     `POST /fin/v1/refunds/{refund_id}/cancel` `{"request_id": "...", "reason": "..."}` (your token). The deposit goes
+     back to the campaign (2050 to 2010); once Compliance allows the client again the scheduler proposes a new refund.
 5. Close the tunnel (Ctrl-C) when done; delete `~/.zbm-cmp/*.hdr` if you do not activate another client today.
 
 **H. Re-verify before rules expire (nothing is extended by itself).** The readiness answer lists every expired rule and

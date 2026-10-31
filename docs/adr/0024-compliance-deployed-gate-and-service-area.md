@@ -172,14 +172,15 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   only; others read "compliance hold"). `tests/test_money_out_invariant_r10.py` classifies every state-changing Finance
   route (money out, money in, not client money) and fails when one that moves, commits or applies a client's money
   does not reach the activation check, or when a new route is not classified. The hourly `stripe-sessions` job also
-  asks about every client with a funded campaign and pushes Andre (his channel only) when one is no longer allowed.
+  asks about every client with a funded campaign and opens a durable founder alert when one is no longer allowed
+  (AEGIS r11 R11-4, below).
 - **Unapplied money of a refused client (R10-4).** Money that names a client (a bank line's invoice token with the
   wrong amount or for a paid invoice; a Stripe payment whose metadata names an invoice) is booked as unapplied cash
   and, while Compliance does not ALLOW the client, held like a matched payment: the receipt carries the hold (its
   sanctions ground included) and a Compliance break; the answer is `unapplied_held_compliance` /
   `unapplied_held_unverified`, the same for any refusal. A Dashboard refund or a bank return of held money (matched or
   unapplied) is an OFAC-held refund for Andre: the hold's break and the refund's own break go high severity with a
-  note naming the rejected-transaction path, and Andre is pushed. A held invoice refunded at Stripe stays paid-held
+  note naming the rejected-transaction path (the open break is Andre's alert). A held invoice refunded at Stripe stays paid-held
   until Andre releases the hold on the refund (RTM-05); a failed refund rewrites the hold's note.
 - **Stripe edge cases.** A refund that later fails at Stripe (an ACH refund returned: `amount_refunded` goes down) is
   booked back (F7r reversed, once per cumulative total) with a `stripe_refund_reversed` break; `refund.*` events are read
@@ -228,6 +229,51 @@ client's site only on an own tenant would be Andre's own act (AEGIS F-10). Finan
   party, document and version, unused, unexpired), else 409 with nothing written; only the onboarding path records a
   `client:*` acceptance (`hub` and `clipper_network` are refused); the commit refuses an update of a record that does
   not exist, and a replay quarantines (and `/health` flags) a record it cannot apply instead of refusing to start.
+
+### 4b. AEGIS r11 (Oct 31 2026): held unapplied money, founder alerts, audit reads, deviations
+
+- **Held unapplied money (R11-1, R11-2).** Money held on a receipt is applied to no invoice: `receipts/{id}/apply`
+  refuses it, asks Compliance about the receipt's SOURCE client as well as the target invoice's (money from a client it
+  does not ALLOW now is not moved onto another client's books), and never resolves a Compliance break; the generic
+  break resolution refuses any break of held money. Receipt holds count in `/health` `compliance_holds_open`, the hourly
+  job re-reads them like invoice holds (release an unverified one on ALLOW, convert, upgrade the ground), and Andre
+  releases one with `POST /fin/v1/receipts/{id}/compliance-hold/release` on the invoice release's bases and OFAC
+  document kinds.
+- **Finance's audit reads are Andre's (R11-3).** `GET /fin/v1/audit/evidence` and `/fin/v1/audit/export` answer Andre's
+  token only, as Compliance's do: a row's `rk`, event id and payload hash let any reader recompute a hold event's real
+  type. No department calls them (finance's live_run reads with Andre's token); a test asks with every caller identity.
+- **Durable founder alerts (R11-4); integration point with ADR 0027.** No in-process push is relied on (`ports.push`
+  is `NotBuiltPush` in production). Every condition Andre must act on is an open, persisted break recorded with the
+  state change that caused it, carrying ids and categories only: a held payment or held unapplied money (its
+  `compliance_hold` / `compliance_unverified` break; a refund or bank return of held money marks it high severity),
+  and a funded client Compliance no longer allows (an open, high-severity `compliance_hold` break, `kind:
+  founder_alert`, `category: compliance_hold`, `subject: client:<id>`, closed by the hourly job once the client is
+  allowed again or funds no campaign). The founder-alert dispatcher of ADR 0027 (fix wave C,
+  `feat/ops-alerts-offboarding-2026-10-31`) reads open breaks of the Compliance legs as its `compliance_hold`
+  category and high-severity breaks as `finance_high_break`; delivery is recorded only by that dispatcher, never by
+  the break. `compliance_holds_open` (held invoices, held unapplied money, open founder alerts) keeps the heartbeat
+  check red meanwhile.
+- **Holds re-read under the lock (R11-5).** Finance's own holds of the brand (invoices and unapplied money) are read
+  again under the lock at the accrual, the payout run, Andre's approval and the release, so a hold booked while the
+  release gathers its inputs excludes the item. A Compliance flip inside that window is caught at the next step.
+- **Legal replay (R11-6).** A log line whose caller was answered with a failure is never applied on replay (quarantined
+  whole); Andre reviews and acknowledges the quarantine (`GET /legal/v1/replay-quarantine`, `POST
+  .../acknowledgements`), and legal's `/health` is in the heartbeat check.
+- **The route invariant (R11-7)** discovers routes from the live app and runs each money route's behavioural proof
+  (the refused client's money does not move; source and target client for an applied receipt).
+- **Deviations from the AEGIS r10 fix text (accepted by AEGIS r11 unless noted):**
+  1. *No campaign pause on a sanctions refusal.* Every step that spends or commits the deposit asks Compliance at that
+     moment and re-reads Finance's own holds under the lock; a pause would be a second, visible state needing its own
+     un-pause. The profile keeps reading `funded`; the founder alert says why nothing moves.
+  2. *No payee re-screen at Andre's approval or at funding.* The payee's OFAC screen is re-read at the payout run and
+     again at the release, before anything leaves; funding moves money only between ZBC's own accounts (restricted
+     cash to the rail).
+  3. *A refund stuck as `approved`.* When Compliance refuses the client between Andre's approval and the payment, the
+     payment is `refused_at_execution`: nothing posted, nothing sent, the deposit kept in 2050. Andre recovers it with
+     `POST /fin/v1/refunds/{id}/cancel` (a reason, hashed): F6 is reversed (2050 back to 2010) and the scheduler
+     proposes a new refund once the client is allowed again (runbook step G).
+  4. *Unapplied holds re-checked.* Shipped in r10 without re-checks; since r11 they are re-read hourly, counted in
+     `/health`, releasable by Andre and never applied while held (R11-1, R11-2).
 
 ### 5. Readiness: which rules are expired and what they block
 

@@ -362,3 +362,12 @@ def test_a_paid_refund_is_never_cancelled():
     r = hr.post(f"/fin/v1/refunds/{rf['refund_id']}/cancel", {"request_id": rid(), "reason": "too late"},
                 andre=ANDRE_TOKEN)
     assert r.status_code == 409, r.text
+
+
+def test_a_refund_whose_payment_outcome_is_unknown_is_never_cancelled(hr):
+    from test_aegis_c0869c4 import refund_unknown
+    rf, tid, _st = refund_unknown(hr)                       # approved; the bank's answer is unknown: money may have moved
+    assert hr.svc.db["refunds"][rf["refund_id"]]["status"] == "approved"
+    r = hr.post(f"/fin/v1/refunds/{rf['refund_id']}/cancel", {"request_id": rid(), "reason": "stuck"}, andre=ANDRE_TOKEN)
+    assert r.status_code == 409 and "settled first" in r.text, r.text
+    assert hr.svc.db["refunds"][rf["refund_id"]]["status"] == "approved"
