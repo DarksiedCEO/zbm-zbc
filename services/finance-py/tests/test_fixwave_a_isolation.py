@@ -18,6 +18,15 @@ import serve
 SERVICES = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture(autouse=True)
+def _plain_word_rule():
+    """These tests check the plain-word rule on paths of several services. A Finance app built by an earlier test
+    registered Finance's route words (AEGIS F-15b: one service per process in production), so clear them here."""
+    access_redact.register_routes(None)
+    yield
+    access_redact.register_routes(None)
+
+
 @pytest.mark.parametrize("target,want", [
     ("/compliance/v1/sanctions/status?subject_id=client-ACME-123", "/compliance/v1/sanctions/status?<redacted>"),
     ("/legal/v1/obligations?party_ref=party-9&status=open", "/legal/v1/obligations?<redacted>"),
