@@ -578,3 +578,51 @@ def test_every_post_route_checks_identity_before_the_body():
         assert r.status_code in (401, 403), (route.path, r.status_code, r.text[:160])
         checked += 1
     assert checked >= 14
+
+
+# --- AEGIS r9 R9-4: only Finance (the money gate) and Andre see why a client is refused ----------------------------------
+
+def _activation_as(h, caller=None, andre=None, client="client-web"):
+    return h.client.get(f"/compliance/v1/clients/{client}/activation", headers=h.headers(caller, andre=andre))
+
+
+def test_r9_4_the_reason_and_sanctions_ground_go_only_to_finance_and_andre():
+    h = harness()
+    activate(h, "client-web")
+    attest(h, "client-web", result="potential_match")             # an OFAC hit after activation: a sanctions match
+    full = status(h, caller="finance_31")
+    assert full["sanctions_grounded"] is True and full["sanctions_ground"] == "match"
+    assert any("sanctions_match" in x for x in full["reasons"])
+    mine = _activation_as(h, andre=ANDRE_TOKEN)
+    assert mine.status_code == 200 and mine.json() == full, mine.text
+    generic = None
+    for caller in ("seo_02", "revenue_recovery", "onboarding"):
+        d = status(h, caller=caller)
+        assert d["decision"] == "REFUSE" and d["current"] is False
+        assert d["sanctions_grounded"] is None and d["sanctions_ground"] is None, d
+        values = str({k: v for k, v in d.items() if k not in ("sanctions_grounded", "sanctions_ground")}).lower()
+        assert "sanction" not in values and "ofac" not in values and "match" not in values, d
+        assert d["reasons"] == ["the client is not activated (the reasons go to Andre)"], d
+        generic = generic or d
+        assert d == generic                                          # one answer for every such caller
+    # a refusal for another reason looks exactly the same to them
+    h2 = harness()
+    activate(h2, "client-web", country="CA", region="CA-ON")
+    other = status(h2, caller="onboarding")
+    assert sorted(other) == sorted(generic) and other["reasons"] == generic["reasons"]
+    assert other["sanctions_grounded"] is None and other["sanctions_ground"] is None
+
+
+def test_r9_4_an_allow_is_unchanged_for_every_reader():
+    h = harness()
+    activate(h, "client-web")
+    full = status(h, caller="finance_31")
+    for caller in ("seo_02", "revenue_recovery", "onboarding"):
+        d = status(h, caller=caller)
+        assert d["decision"] == "ALLOW" and d["ruling_id"] == full["ruling_id"] and d["reasons"] == []
+
+
+def test_r9_4_a_wrong_andre_token_is_refused():
+    h = harness()
+    activate(h, "client-web")
+    assert _activation_as(h, andre="x" * 40).status_code in (401, 403)
