@@ -519,3 +519,21 @@ def test_a_non_sanctions_hold_is_not_sanctions_grounded():
     s = status(h)
     assert s["decision"] == "REFUSE" and any("jurisdiction_signal_mismatch" in x for x in s["reasons"])
     assert s["sanctions_grounded"] is False
+
+
+# --- AEGIS r8: the sanctions ground: an OFAC list match, or a sanctioned place --------------------------------------------
+
+def test_the_sanctions_ground_is_match_or_place_and_match_wins():
+    h = harness()
+    activate(h, "client-web")
+    assert status(h)["sanctions_ground"] is None
+    attest(h, "client-web", result="match")
+    assert status(h)["sanctions_ground"] == "match"
+    h2 = harness()
+    h2.rule("client-cu", "client", web_client(h2, "client-cu", country="CU", region=None, targets=("CU",)))
+    assert status(h2, "client-cu")["sanctions_ground"] == "place"
+    attest(h2, "client-cu", result="potential_match")
+    assert status(h2, "client-cu")["sanctions_ground"] == "match"           # both apply: match wins
+    h3 = harness()
+    h3.rule("client-fr", "client", web_client(h3, "client-fr", country="FR", region=None, targets=("FR",)))
+    assert status(h3, "client-fr")["sanctions_ground"] is None              # outside the area, not sanctioned

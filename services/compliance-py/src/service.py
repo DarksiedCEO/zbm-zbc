@@ -1250,7 +1250,12 @@ class ComplianceService:
                    # AEGIS r5 C1: the refusal rests on sanctions (an open sanctions_match hold, or the client's
                    # recorded place on HR-07's sanctions list); Finance never refunds such a payment
                    "sanctions_grounded": any(hh["status"] == "open" and hh["subject_id"] == client_id
-                                             and hh["kind"] == "sanctions_match" for hh in self.holds.values())}
+                                             and hh["kind"] == "sanctions_match" for hh in self.holds.values()),
+                   "sanctions_ground": None}
+            # AEGIS r8: WHICH sanctions ground: "match" (an OFAC list match on the client) or "place" (the client's
+            # place or a campaign target is comprehensively sanctioned); match wins when both apply
+            if out["sanctions_grounded"]:
+                out["sanctions_ground"] = "match"
             reasons = out["reasons"]
             rows = self.rows_by_id()
             if rows is None:
@@ -1268,6 +1273,7 @@ class ComplianceService:
             # target still says so
             if self._on_sanctions_list(r.get("place") or prof, rows):
                 out["sanctions_grounded"] = True
+                out["sanctions_ground"] = out["sanctions_ground"] or "place"
             if not r["allowed"]:
                 reasons.append("the latest activation ruling refused this client: fix the unmet items and re-activate")
                 return out
@@ -1306,7 +1312,7 @@ class ComplianceService:
                 elif att is not None:
                     out["valid_until"] = iso(parse_iso(att["searched_at"]) + timedelta(days=params["rescreen_after_days"]))
             if not reasons:
-                out.update(decision="ALLOW", current=True, sanctions_grounded=False)
+                out.update(decision="ALLOW", current=True, sanctions_grounded=False, sanctions_ground=None)
             return out
 
     def readiness(self) -> dict:
