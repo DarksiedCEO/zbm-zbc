@@ -235,16 +235,17 @@ approves the client contracts himself and his CQ-19 determination makes such a c
   **Attacker cost after the change.** Holding one real link that is dead, an attacker gets Legal called at most once
   per 15 minutes; holding one that is open, at most 40 times an hour (the link's own limit, which also locks out
   that link's own client until the hour ends: the remedy is to revoke it and send a new link). Spending the global
-  ceiling now needs about 8 open links (300 a minute against 40 an hour each), or hundreds of dead ones, all
-  minted by Legal for real clients. AEGIS's probe4 flood (one used link from 10 addresses, 300 requests): Legal
+  ceiling now needs about 8 open links (300 a minute against 40 an hour each) or about 300 used, expired or revoked
+  ones (one Legal call each per 15 minutes), all minted by Legal for real clients, for an outage of up to one minute
+  each time (corrected in r4: before N4-L1 each token had 16 spellings, so 6 open or about 19 dead links sufficed). AEGIS's probe4 flood (one used link from 10 addresses, 300 requests): Legal
   saw 1 call (was one per request), a real client's link answered 200. The remaining remedies are: revoke the link
   the log names, or, if many links leaked, change the key and resend (runbook step 9).
   **Which link.** A per-link 429 and a dead link log the link's log fingerprint (8 hex characters of the token's
   SHA-256: not reversible, never the token), once a minute per link. Andre finds it with
   `GET /legal/v1/client-acceptance-invitations/by-fingerprint/{fp}` (Andre's token only); every link view carries
   `log_fingerprint`.
-  **Residual.** A transient 404 at Legal (a document blob briefly unreadable) keeps a live link refused for up to
-  15 minutes; a portal restart clears it. A key mismatch between the two services is not cached (the tag check fails
+  **Residual (closed in r4, N4-L2).** A transient 404 at Legal (a document blob briefly unreadable) kept a live link
+  refused for up to 15 minutes. A key mismatch between the two services is not cached (the tag check fails
   first, nothing is stored).
 - **N3-L1.** Legal and the portal refuse to start if the link tag key equals any other secret they hold (Legal: its
   service, Andre, ledger, Compliance and caller tokens; the portal: its service and caller tokens and evidence key).
@@ -265,6 +266,26 @@ approves the client contracts himself and his CQ-19 determination makes such a c
 - **N3-L5.** Runbook check A2 uses two links (one per device) and tells the per-link limit from a shared address by
   the log line; step 8 opens with the rule that no link is sent before check B.
 - **N3-L6.** Finance's test-client rule ignores letter case (`ZZ-TEST-andre` is a test client).
+
+## AEGIS r4 fixes (2026-10-31, report at 05832146)
+
+- **N4-L1, one spelling per token.** A 66-character base64url token carries 4 unused bits in its last character, so
+  16 strings decoded to the same bytes, and each got its own per-link counter, dead-link entry and log fingerprint
+  (one the fingerprint lookup cannot find). Both copies of `link_tag.py` now accept a token only if it re-encodes to
+  exactly itself; the other 15 spellings are the plain 404 at the tag check, before anything is counted. The
+  attacker-cost figures in the r3 section above are corrected accordingly.
+- **N4-L2, only final 404s are remembered.** On the portal's private resolve and accept calls, Legal's 404 carries
+  `"final": true` only when the link is unknown (or its tag fails), used, expired or revoked. A link whose documents
+  cannot be served now (rules not loaded, a document retired or superseded, a blob missing) is a 404 without it, and
+  the portal asks again next time (within the per-link limit). A blob that exists but cannot be read (EIO, EMFILE)
+  is now a 503 (`StoreReadError`), never a 404; a missing blob file is still "not there". The client's page is the
+  same 404 in every case.
+- **N4-L3, nothing about the key on the public /health.** The portal's `/health` is `{"status":"ok"}` again. It logs
+  `link tags: format version 1, key id <8 hex>` at startup, for Andre to compare with Legal's private `/health`
+  `link_tags.key_id`. A token in another format version is a log line on the portal (anyone can send one) and a
+  counter, `link_tags.foreign_versions_seen`, on Legal's private `/health` (counted when such a token reaches Legal).
+  Runbook step 9 updated.
+- **N4-L5.** A test pins that a Legal 503 (or timeout) is never remembered as dead, on GET and on POST.
 
 ## For Andre's sign-off (the approved clickwrap text is the contract record; its wording is unchanged)
 

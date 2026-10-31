@@ -48,7 +48,7 @@ from intelligences.i03_acceptance import forbidden_keys
 from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
 from ports import Ports
 from service import JOBS, LegalService, Seeds
-from store import BlobStore, RecordLog
+from store import BlobStore, RecordLog, StoreReadError
 from textguard import ip_fields, ip_in
 
 log = logging.getLogger("legal.api")
@@ -362,6 +362,13 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
             content["issued"] = False
             return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content=content)
         return JSONResponse(status_code=exc.status_code, content=content)
+
+    @app.exception_handler(StoreReadError)
+    def _store_read(_: Request, exc: StoreReadError):
+        # AEGIS r4 N4-L2: a blob that exists but cannot be read now is a 503 (try again), never a 404
+        log.error("store read error: %s", exc)
+        return JSONResponse(status_code=503, headers={"Retry-After": "1"},
+                            content={"detail": "the local store could not be read; try again", "issued": False})
 
     @app.middleware("http")
     async def _unhandled(request: Request, call_next):

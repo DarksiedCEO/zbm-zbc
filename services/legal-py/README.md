@@ -196,6 +196,11 @@ recorded by the page never counts as evidence. Andre's steps: `docs/runbooks/cli
   refused in typed names (N-L3); the receipt also needs `form_sha256`, the hash of the form signature the accepted
   submission carried (recorded at acceptance; N-L4); views carry `time_zone` and `time_zone_label` (N-L5); a SOW
   whose stored fill values cannot be read fails the MSA-version rule closed (N-L8).
+- **AEGIS r4 fixes.** A token is valid only in the one spelling that re-encodes to itself (N4-L1); on
+  `POST /legal/v1/portal/invitations/resolve` and `/portal/acceptances`, a 404 carries `"final": true` when the link
+  is unknown, used, expired or revoked (never for documents that cannot be served now), and a blob that exists but
+  cannot be read is a 503 (`StoreReadError`), never a 404 (N4-L2); `/health` `link_tags.foreign_versions_seen` counts
+  tokens of another format version that reached Legal (N4-L3).
 - **AEGIS r3 fixes.** Link tokens carry a format version byte and `/health` reports `link_tags` (N3-L4); a malformed
   or unset key turns links off (503) without stopping Legal; a key equal to another secret refuses start (N3-L1);
   every link view carries `log_fingerprint`, and `GET /legal/v1/client-acceptance-invitations/by-fingerprint/{fp}`

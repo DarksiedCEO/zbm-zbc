@@ -2,9 +2,9 @@
 The client acceptance page (ADR 0028): a minimal public ASGI app, no framework.
 
 Routes (anything else: the uniform 404 page; any other method: 405):
-  GET  /health                               -> {"status": "ok", "link_tags": {...}} (Railway's health check; the
-                                                link format version and the tag key's 8-hex id, so Andre can match
-                                                them with Legal's /health; never the key)
+  GET  /health                               -> {"status": "ok"} (Railway's health check; says nothing else. The link
+                                                format version and the tag key's 8-hex id are logged at startup, to
+                                                match with Legal's private /health: AEGIS r4 N4-L3)
   GET  /robots.txt                           -> disallow everything
   GET  /accept/not-now                       -> "Nothing was recorded"
   GET  /accept/{token}                       -> the acceptance page for this link (Legal resolves the token)
@@ -19,8 +19,10 @@ Defenses:
 - rate limits before any Legal call: per client IP (keyed by an HMAC, never the IP), per link (keyed by an HMAC of
   the token; only tag-valid tokens are counted, so the table holds only links Legal minted) and global ceilings on
   Legal calls and not-found answers;
-- a link Legal answered 404 for (used, expired, revoked) is remembered for 15 minutes (AEGIS r3 N3-M1): a flood on a
-  dead link costs at most one Legal call per window;
+- a link Legal answered a FINAL 404 for (unknown, used, expired, revoked: ``"final": true``) is remembered for 15
+  minutes (AEGIS r3 N3-M1, r4 N4-L2): a flood on a dead link costs at most one Legal call per window; any other 404
+  and every 503 are never remembered;
+- a token is accepted only in the one spelling Legal minted (AEGIS r4 N4-L1);
 - request limits: target 2 KiB, head 8 KiB, form body 8 KiB (urlencoded only), body read deadline;
 - CSRF: the POST must carry the page's own signed form (HMAC over the token's hash, the page text's hash and the
   issue time, at most PORTAL_FORM_MAX_AGE_SECONDS old) and an ``Origin`` equal to PORTAL_PUBLIC_ORIGIN; a
@@ -51,7 +53,7 @@ from urllib.parse import parse_qs
 import link_tag as LT
 import render as V
 from config import Settings
-from legal_client import AcceptOutcome, LegalClient, LegalUnavailable, PortalView
+from legal_client import AcceptOutcome, Gone, LegalClient, LegalUnavailable, PortalView
 from mail import Attachment, ConfirmationMailer, ConfirmationMessage, NotWiredMailer
 from ratelimit import DeadLinks, Limiter, Once
 
@@ -118,7 +120,8 @@ class PortalApp:
         self.by_token = Limiter(settings.token_per_hour, 3600, max_keys=5_000, clock=monotonic)
         self.dead = DeadLinks(DEAD_LINK_TTL_S, clock=monotonic)          # AEGIS r3 N3-M1
         self.log_once = Once(60, clock=monotonic)
-        self.foreign_versions: dict = {}                                  # AEGIS r3 N3-L4: version byte -> count
+        # AEGIS r4 N4-L3: what the public /health no longer says, for Andre to match with Legal's private /health
+        log.info("link tags: format version %d, key id %s", LT.VERSION, LT.key_id(settings.link_tag_key))
         self.not_found = Limiter(settings.not_found_per_minute, 60, clock=monotonic)
         # AEGIS M-3: one ceiling on EVERY call to Legal (resolve, accept, receipt), charged before the call
         self.legal_calls = Limiter(settings.legal_per_minute, 60, clock=monotonic)
@@ -196,7 +199,7 @@ class PortalApp:
         if path == "/health":
             if method not in ("GET", "HEAD"):
                 return ("health", 405, [(b"allow", b"GET, HEAD")], b"")
-            return ("health", 200, [(b"content-type", b"application/json")], self._health())
+            return ("health", 200, [(b"content-type", b"application/json")], b'{"status":"ok"}')
         if path == "/robots.txt" and method in ("GET", "HEAD"):
             return ("robots", 200, [(b"content-type", b"text/plain; charset=utf-8")], b"User-agent: *\nDisallow: /\n")
         if path == "/accept/not-now" and method in ("GET", "HEAD"):
@@ -296,23 +299,16 @@ class PortalApp:
                      fp, DEAD_LINK_TTL_S // 60)
 
     def _foreign(self, token: str) -> None:
-        """AEGIS r3 N3-L4: a right-shaped token in another format version means Legal and the portal run different
-        link_tag.py (a deploy skew): every real link then fails here. Counted for /health, logged once a minute."""
+        """AEGIS r3 N3-L4 / r4 N4-L3: a right-shaped token in another format version means Legal and the portal may
+        run different link_tag.py (a deploy skew): every real link then fails here. Logged once a minute (anyone can
+        send such a token, so it is a log line, not a /health state)."""
         v = LT.version_of(token)
         if v is None or v == LT.VERSION:
             return
-        self.foreign_versions[v] = self.foreign_versions.get(v, 0) + 1
         if self.log_once(f"version {v}"):
             log.warning("a link in format version %d reached a portal that reads version %d: redeploy legal and "
                         "client-portal from the same commit (runbook: key and format changes)", v, LT.VERSION)
 
-    def _health(self) -> bytes:
-        tags = {"version": LT.VERSION, "key_id": LT.key_id(self.s.link_tag_key)}
-        if self.foreign_versions:
-            tags["foreign_versions_seen"] = {str(k): n for k, n in sorted(self.foreign_versions.items())}
-            tags["reason"] = ("links in another format version have arrived: legal and client-portal may run "
-                              "different builds")
-        return json.dumps({"status": "ok", "link_tags": tags}, separators=(",", ":")).encode()
 
     async def _resolve(self, token: str):
         """The link's view, or the answer to send (uniform 404, 429, 503). Pages the portal does not serve (an
@@ -329,8 +325,9 @@ class PortalApp:
             view = await asyncio.to_thread(self.legal.resolve, token)
         except LegalUnavailable:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
-        if view is None:
-            self._dead(token)
+        if isinstance(view, Gone):
+            if view.final:                           # AEGIS r4 N4-L2: only what Legal calls final is remembered
+                self._dead(token)
             return self._not_found()
         if not self._servable(view):
             return self._not_found()
@@ -478,7 +475,8 @@ class PortalApp:
         except LegalUnavailable:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         if out.kind == "not_found":
-            self._dead(token)
+            if out.final:
+                self._dead(token)
             return await self._receipt_or(token, rid, form_sha, state, self._not_found())
         if out.kind != "accepted":
             return self._page(409, V.changed_page(token))

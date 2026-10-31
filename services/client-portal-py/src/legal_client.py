@@ -3,7 +3,8 @@ The typed adapter to Legal (37)'s two portal routes (ADR 0028). Nothing else in 
 nothing here trusts Legal's answer's shape: every field is checked, and each document's text is hashed here and must
 equal the hash Legal names (a mismatch is treated as Legal being unavailable: nothing is shown, nothing is recorded).
 
-- ``resolve(token)`` -> ``PortalView`` | ``None`` (Legal's uniform 404) ; raises ``LegalUnavailable``.
+- ``resolve(token)`` -> ``PortalView`` | ``Gone`` (Legal's 404; ``final`` when Legal says the link is unknown, used,
+  expired or revoked, AEGIS r4 N4-L2) ; raises ``LegalUnavailable``.
 - ``accept(body)``   -> ``AcceptOutcome`` (accepted / not_found / refused) ; raises ``LegalUnavailable``.
 - ``receipt(token, request_id)`` -> ``Receipt`` | ``None`` : the receipt of the submission that used the link (AEGIS
   M-2: a retry after a lost response or a refresh) ; raises ``LegalUnavailable``.
@@ -20,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import httpx
 
@@ -108,10 +109,18 @@ class Receipt:
 
 
 @dataclass(frozen=True)
+class Gone:
+    """Legal's 404 for a link. ``final`` only when Legal said so (``"final": true``): the link is unknown, used,
+    expired or revoked and will not come back, so the portal may stop asking (AEGIS r4 N4-L2)."""
+    final: bool = False
+
+
+@dataclass(frozen=True)
 class AcceptOutcome:
     kind: str                                   # "accepted" | "not_found" | "refused"
     acceptances: tuple[Accepted, ...] = ()
     codes: tuple[str, ...] = ()
+    final: bool = False                         # for "not_found": Legal said the link is final (AEGIS r4 N4-L2)
 
 
 def _s(obj: Any, key: str, maximum: int, optional: bool = False) -> Optional[str]:
@@ -154,10 +163,18 @@ class LegalClient:
         except ValueError:
             raise LegalUnavailable("Legal's answer is not JSON") from None
 
-    def resolve(self, token: str) -> Optional[PortalView]:
+    @staticmethod
+    def _final(r: httpx.Response) -> bool:
+        try:
+            data = r.json()
+        except ValueError:
+            return False
+        return isinstance(data, dict) and data.get("final") is True
+
+    def resolve(self, token: str) -> Union[PortalView, Gone]:
         r = self._post("/legal/v1/portal/invitations/resolve", {"token": token})
         if r.status_code == 404:
-            return None
+            return Gone(final=self._final(r))
         if r.status_code != 200:
             raise LegalUnavailable(f"Legal answered {r.status_code}")
         return parse_view(self._json(r))
@@ -174,7 +191,7 @@ class LegalClient:
     def accept(self, body: dict) -> AcceptOutcome:
         r = self._post("/legal/v1/portal/acceptances", body)
         if r.status_code == 404:
-            return AcceptOutcome("not_found")
+            return AcceptOutcome("not_found", final=self._final(r))
         if r.status_code in (409, 422):
             data = self._json(r)
             codes = tuple(sorted({x.get("code") for x in data.get("reasons", []) if isinstance(x, dict)

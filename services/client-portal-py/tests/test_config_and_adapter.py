@@ -9,7 +9,7 @@ import pytest
 
 import config as config_mod
 from helpers import ENV, MSA_TEXT, SOW_TEXT, sha
-from legal_client import LegalClient, LegalUnavailable, parse_accepted, parse_view
+from legal_client import Gone, LegalClient, LegalUnavailable, parse_accepted, parse_view
 
 
 @pytest.mark.parametrize("over", [
@@ -84,7 +84,7 @@ def _client(status, payload, seen=None):
 
 def test_the_adapter_sends_the_token_in_the_body_with_the_portal_caller_token():
     seen = []
-    assert _client(404, {"detail": "not found"}, seen).resolve("T" * 43) is None
+    assert _client(404, {"detail": "not found"}, seen).resolve("T" * 43) == Gone(final=False)
     req = seen[0]
     assert req.url.path == "/legal/v1/portal/invitations/resolve" and "T" * 43 not in str(req.url)
     assert json.loads(req.content) == {"token": "T" * 43}

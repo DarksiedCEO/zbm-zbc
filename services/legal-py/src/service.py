@@ -25,6 +25,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import sys
@@ -129,6 +130,8 @@ def b64decode(value: str, what: str) -> bytes:
         raise Invalid(f"{what}: 1 byte .. 5 MiB decoded")
     return data
 
+
+log = logging.getLogger("legal.service")
 
 class Refused(Conflict):
     """409 carrying reason items (every refusal cites a rule id, §0.1.6)."""
@@ -2053,12 +2056,29 @@ class LegalService:
         accept; otherwise the ONE answer every case gets (404 "not found"): no enumeration oracle."""
         self._require_link_tags()
         if not LT.valid(token, self.cfg.link_tag_key or b""):       # AEGIS r2 N-M1: before any record is read
-            raise NotFound("not found")
+            self._count_foreign_version(token)
+            raise NotFound("not found", final=True)
         inv = self._client_invitation_by_token(token)
-        if (inv is None or self.current is None or self._client_invitation_status(inv) != "open"
-                or self._client_invitation_reasons(inv)):
+        # AEGIS r4 N4-L2: on this private call a 404 says whether it is final (unknown, used, expired, revoked: the
+        # portal may stop asking) or not (the documents cannot be served now: rules not loaded, a document retired
+        # or superseded, a blob missing). The client's page is the same 404 either way.
+        if inv is None or self._client_invitation_status(inv) != "open":
+            raise NotFound("not found", final=True)
+        if self.current is None or self._client_invitation_reasons(inv):
             raise NotFound("not found")
         return inv
+
+    def _count_foreign_version(self, token: str) -> None:
+        """AEGIS r4 N4-L3: a right-shaped token in another format version (the portal and Legal run different
+        link_tag.py): counted on this private /health and logged once per version."""
+        v = LT.version_of(token)
+        if v is None or v == LT.VERSION:
+            return
+        seen = self.__dict__.setdefault("_foreign_versions", {})
+        if v not in seen:
+            log.warning("a link in format version %d reached Legal, which reads version %d: redeploy legal and "
+                        "client-portal from the same commit (runbook step 9)", v, LT.VERSION)
+        seen[v] = seen.get(v, 0) + 1
 
     def _link_documents(self, inv: dict) -> tuple[dict, list[dict]]:
         """The link's display block and its documents (the MSA first) with their exact registered text and label."""
@@ -2094,7 +2114,11 @@ class LegalService:
     def link_tag_health(self) -> dict:
         if not self.cfg.link_tag_key:
             return {"status": self.cfg.link_tag_problem or "off: LEGAL_LINK_TAG_KEY is not set", "version": LT.VERSION}
-        return {"status": "ok", "version": LT.VERSION, "key_id": LT.key_id(self.cfg.link_tag_key)}
+        out = {"status": "ok", "version": LT.VERSION, "key_id": LT.key_id(self.cfg.link_tag_key)}
+        seen = self.__dict__.get("_foreign_versions")
+        if seen:
+            out["foreign_versions_seen"] = {str(k): n for k, n in sorted(seen.items())}
+        return out
 
     def client_invitations_by_fingerprint(self, fp: str) -> dict:
         """AEGIS r3 N3-M1 (Andre only): the links whose log fingerprint (the portal's 429 log line) is ``fp``."""

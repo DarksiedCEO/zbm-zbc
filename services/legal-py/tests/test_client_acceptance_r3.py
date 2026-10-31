@@ -61,7 +61,7 @@ def test_legal_refuses_a_bad_tag_before_looking_at_its_records(pair, monkeypatch
     for path, body in (("/legal/v1/portal/invitations/resolve", {"token": forged}),
                        ("/legal/v1/portal/receipts", {"token": forged, "request_id": "pa-1", "form_sha256": "0" * 64})):
         r = x.post(path, body, caller="client_portal")
-        assert r.status_code == 404 and r.json() == {"detail": "not found"}
+        assert r.status_code == 404 and r.json()["detail"] == "not found"     # r4 N4-L2: resolve adds "final"
     assert looked == []
 
 

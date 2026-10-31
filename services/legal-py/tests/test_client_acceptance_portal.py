@@ -230,8 +230,9 @@ def test_only_the_portal_caller_resolves_or_records(pair, who):
 
 
 def _not_found(r):
+    # the same detail for every unusable token; AEGIS r4 N4-L2 adds, on this private call only, whether it is final
     assert r.status_code == 404, r.text
-    assert r.json() == {"detail": "not found"}
+    assert r.json() in ({"detail": "not found"}, {"detail": "not found", "final": True})
 
 
 def test_every_unusable_token_is_the_same_404(pair):

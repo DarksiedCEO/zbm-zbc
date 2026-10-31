@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 
 import config as config_mod
 from app import PortalApp
-from legal_client import AcceptOutcome, Accepted, Display, Document, LegalUnavailable, PortalView, Receipt
+from legal_client import AcceptOutcome, Accepted, Display, Document, Gone, LegalUnavailable, PortalView, Receipt
 
 # Legal's own page renderer (standard library only), loaded by path: the fake Legal below answers with the blocks the
 # real Legal renders, so the page's words in these tests are the founder-approved clickwrap text (AEGIS M-5)
@@ -88,14 +88,18 @@ class FakeLegal:
     receipts: list = field(default_factory=list)
     used: set = field(default_factory=set)
     used_by: dict = field(default_factory=dict)        # token -> (request_id, AcceptOutcome)
+    transient: set = field(default_factory=set)        # tokens Legal answers a NOT final 404 for (AEGIS r4 N4-L2)
+    accept_final: bool = True
 
     def resolve(self, token: str) -> Optional[PortalView]:
         self.resolves.append(token)
         if self.unavailable:
             raise LegalUnavailable("down")
+        if token in self.transient:
+            return Gone(final=False)
         if token in self.used:
-            return None
-        return self.views.get(token)
+            return Gone(final=True)
+        return self.views.get(token) or Gone(final=True)
 
     def receipt(self, token: str, request_id: str, form_sha256: str = ""):
         """Legal's receipt: only for the submission (request id AND form) that used this link."""
@@ -113,13 +117,15 @@ class FakeLegal:
         self.accepts.append(body)
         if self.unavailable:
             raise LegalUnavailable("down")
+        if self.accept_kind == "not_found":
+            return AcceptOutcome("not_found", final=self.accept_final)
         if self.accept_kind != "accepted":
             return AcceptOutcome(self.accept_kind, codes=("ACCEPTANCE_HASH_MISMATCH",))
         if body["token"] in self.used:
             # Legal answers an identical retry from its idempotency record; any other use of a used link is 404
             prior = [b for b in self.accepts[:-1] if b["token"] == body["token"]]
             if not prior or prior[0]["request_id"] != body["request_id"]:
-                return AcceptOutcome("not_found")
+                return AcceptOutcome("not_found", final=True)
         self.used.add(body["token"])
         out = AcceptOutcome("accepted", tuple(
             Accepted("lg-acc-" + str(i) * 26, d["doc_id"], d["version"], d["doc_sha256"], "2026-10-01T17:05:00Z")

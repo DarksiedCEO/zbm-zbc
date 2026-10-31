@@ -134,25 +134,26 @@ def _v(version: int, seed: str = "v") -> str:
     return base64.urlsafe_b64encode(ver + rnd + tag).decode().rstrip("=")
 
 
-def test_a_link_in_another_format_version_is_refused_and_shows_on_health(caplog):
+def test_a_link_in_another_format_version_is_refused_and_logged(caplog):
+    # AEGIS r4 N4-L3: a log line only (anyone can send such a token); the public /health stays {"status": "ok"}
     app, legal, *_ = make()
     caplog.set_level(logging.WARNING)
     for i in range(3):
         assert call(app, "GET", f"/accept/{_v(2, str(i))}").status == 404
     assert legal.resolves == []
-    h = json.loads(call(app, "GET", "/health").body)
-    assert h["status"] == "ok" and h["link_tags"]["version"] == 1
-    assert h["link_tags"]["foreign_versions_seen"] == {"2": 3} and "different builds" in h["link_tags"]["reason"]
+    assert json.loads(call(app, "GET", "/health").body) == {"status": "ok"}
     warned = [r.getMessage() for r in caplog.records if "format version 2" in r.getMessage()]
     assert len(warned) == 1
 
 
-def test_health_names_the_key_by_its_id_only():
+def test_the_key_id_is_logged_at_startup_never_the_key(caplog):
+    # AEGIS r4 N4-L3: the public /health no longer carries it
+    caplog.set_level(logging.INFO)
     app, *_ = make()
-    body = call(app, "GET", "/health").body
-    tags = json.loads(body)["link_tags"]
-    assert tags == {"version": 1, "key_id": hashlib.sha256(LINK_TAG_KEY.encode()).hexdigest()[:8]}
-    assert LINK_TAG_KEY.encode() not in body and "foreign_versions_seen" not in tags
+    key_id = hashlib.sha256(LINK_TAG_KEY.encode()).hexdigest()[:8]
+    assert any(key_id in r.getMessage() for r in caplog.records)
+    assert all(LINK_TAG_KEY not in r.getMessage() for r in caplog.records)
+    assert call(app, "GET", "/health").body == b'{"status":"ok"}'
 
 
 # --- N3-L2: the distinct-secrets check and IPv4-mapped addresses ---------------------------------------------------

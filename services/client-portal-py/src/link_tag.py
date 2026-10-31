@@ -3,7 +3,7 @@ client-portal service holds this same file (byte-identical, a test checks it) an
 (PORTAL_LINK_TAG_KEY = LEGAL_LINK_TAG_KEY), so it can refuse a forged or mistyped token without asking Legal.
 
 token = base64url(VERSION[1] || random[32] || HMAC-SHA256(key, "zbm-link" 0x1F VERSION 0x1F random)[:16]), no
-padding: 66 characters. The 32 random bytes are the secret; the tag proves the token was minted with the key; the
+padding: 66 characters, canonical only (the one spelling that re-encodes to itself). The 32 random bytes are the secret; the tag proves the token was minted with the key; the
 version byte lets a service that reads another format say so (deploy skew) instead of refusing every link silently.
 
 Any change to this file ships in BOTH services in the same deploy (legal-py and client-portal-py); bump VERSION.
@@ -41,7 +41,11 @@ def _raw(token: str):
         raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
     except (binascii.Error, ValueError):
         return None
-    return raw if len(raw) == 1 + RANDOM_BYTES + TAG_BYTES else None
+    if len(raw) != 1 + RANDOM_BYTES + TAG_BYTES:
+        return None
+    # AEGIS r4 N4-L1: one spelling per token. The last character carries 4 unused bits, so 16 strings decode to the
+    # same bytes; only the one that re-encodes to itself (the one Legal minted) is a token.
+    return raw if base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=") == token else None
 
 
 def version_of(token: str):

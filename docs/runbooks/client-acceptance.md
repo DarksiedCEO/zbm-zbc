@@ -137,7 +137,9 @@ link's log fingerprint (the first 8 hex characters of the SHA-256 of its token; 
 Find it: `curl -sS $A $L/legal/v1/client-acceptance-invitations/by-fingerprint/<8 hex>` -> `links` (each with its
 `invitation_id`, `party_ref` and `status`). If it is open and is not the client's own normal use, revoke it as above
 and send the client a new one. A used, expired or revoked link costs Legal at most one call every 15 minutes however
-often it is replayed, so it needs no action.
+often it is replayed (the page accepts only the one spelling of a link Legal issued), so it needs no action. A link
+Legal cannot serve for another reason (a document retired or superseded, the store briefly unreadable) is asked
+about again on each visit, within the link's own 40-an-hour limit.
 
 ## 8. After the first deploy, before the first real link: check the client address the page records (mandatory)
 
@@ -191,16 +193,19 @@ Keep the results (the three HMACs and the settings) with your records.
 ## 9. Change the link key (or the link format)
 
 `LEGAL_LINK_TAG_KEY` (on `legal`) tags every link; `client-portal` reads the same value through its reference
-`PORTAL_LINK_TAG_KEY`. Both `/health` answers show `link_tags` with the format `version` and the key's `key_id` (8
-hex characters of the key's SHA-256, never the key): they must match. Change the key only if it may have leaked, and
+`PORTAL_LINK_TAG_KEY`. Legal's `/health` (private: through the tunnel) shows `link_tags` with the format `version`
+and the key's `key_id` (8 hex characters of the key's SHA-256, never the key); `client-portal` writes the same two
+values to its log when it starts (`link tags: format version 1, key id <8 hex>`; its public `/health` says only
+`{"status":"ok"}`). They must match. Change the key only if it may have leaked, and
 when no client is in the middle of accepting. In this order:
 
 1. On `legal`, set `LEGAL_LINK_TAG_KEY` to a new value (`openssl rand -hex 32`; it must differ from every other
    secret, or Legal refuses to start).
 2. Redeploy `legal`. Check its `/health`: `link_tags.status` is `ok` with the new `key_id`. (Between this step and the
    next, every link answers "This link cannot be used".)
-3. Redeploy `client-portal` (it reads the new value through the reference only when it restarts). Check its
-   `/health`: `link_tags.key_id` equals Legal's. The restart also clears the page's memory of dead links.
+3. Redeploy `client-portal` (it reads the new value through the reference only when it restarts). In its deploy log,
+   the line `link tags: format version 1, key id <8 hex>` shows the same key id as Legal's `/health`. The restart
+   also clears the page's memory of dead links.
 4. Every link created before step 1 is dead. For each one you sent and the client has not used (your step 4 records:
    `curl -sS $A $L/legal/v1/client-acceptance-invitations/<invitation_id>` shows its `status`), revoke it (step 7,
    so it stays dead even if the old key ever came back) and create and send a new one (steps 4 and 5).
@@ -209,8 +214,11 @@ If Legal's `/health` shows `link_tags.status` starting `off:`, the key is unset 
 gates keep running, but no link can be created or used (503) until the key is fixed and Legal redeployed.
 
 A change to `src/link_tag.py` (the link format) ships in **both** services from the same commit, `legal` first, then
-`client-portal`. If the page's `/health` shows `link_tags.foreign_versions_seen`, links in a format the page does not
-read have arrived: the two services run different builds; redeploy both from one commit.
+`client-portal`. If the client-portal log says `a link in format version N reached a portal that reads version M`, or
+Legal's `/health` shows `link_tags.foreign_versions_seen`, the two services may run different builds: compare the
+format version in Legal's `/health` with the portal's startup log line, and redeploy both from one commit. (Anyone
+can send a token that claims another version, so one such line alone proves nothing; real links failing as well
+does.)
 
 ## What the page does and does not do
 
