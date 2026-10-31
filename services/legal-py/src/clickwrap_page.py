@@ -111,9 +111,23 @@ DEFAULT_IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x11
                      (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF), (0x2800, 0x2800))
 
 
+# AEGIS r3 N3-L3: symbols that draw nothing (a blank or "null" glyph) though their category is So/Lo
+# AEGIS r3 N3-L3: glyphs that print as nothing, by their Unicode name (U+1D159 MUSICAL SYMBOL NULL NOTEHEAD, the
+# Hangul fillers, BRAILLE PATTERN BLANK, ...), so a new one is caught by its name rather than a hand list
+BLANK_NAME_WORDS = ("FILLER", "BLANK", "NULL NOTEHEAD")
+
+
 def _ignorable(ch: str) -> bool:
     cp = ord(ch)
-    return any(lo <= cp <= hi for lo, hi in DEFAULT_IGNORABLE)
+    if any(lo <= cp <= hi for lo, hi in DEFAULT_IGNORABLE):
+        return True
+    name = unicodedata.name(ch, "")
+    return any(w in name for w in BLANK_NAME_WORDS)
+
+
+def has_visible(s: str) -> bool:
+    """AEGIS r3 N3-L3: a name holds at least one letter or digit (not only marks, punctuation or spaces)."""
+    return any(unicodedata.category(ch)[0] in "LN" for ch in unicodedata.normalize("NFKC", s))
 
 
 def has_invisible(s: str) -> bool:

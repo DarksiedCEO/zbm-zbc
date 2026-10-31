@@ -131,7 +131,19 @@ $L/legal/v1/client-acceptance-invitations/<invitation_id>/revoke` -> `"status": 
 stands. To end a contract, follow the contract's own terms; to stop a template being accepted again, retire it
 (`decision: retire`), which also stops every open link that names one of its fills.
 
+**A link the page's log names.** When one link is hit too often, the client-portal log says `link rate-limited: link
+<8 hex>`; a link Legal no longer serves logs `link not usable at Legal ... link <8 hex>`. The 8 hex characters are the
+link's log fingerprint (the first 8 hex characters of the SHA-256 of its token; the token itself is never logged).
+Find it: `curl -sS $A $L/legal/v1/client-acceptance-invitations/by-fingerprint/<8 hex>` -> `links` (each with its
+`invitation_id`, `party_ref` and `status`). If it is open and is not the client's own normal use, revoke it as above
+and send the client a new one. A used, expired or revoked link costs Legal at most one call every 15 minutes however
+often it is replayed, so it needs no action.
+
 ## 8. After the first deploy, before the first real link: check the client address the page records (mandatory)
+
+**Do not send any client a link until check B below is done and its result is written down.** Until then nobody
+knows which address an acceptance records: possibly Railway's edge, for every client, which would make the IP
+evidence in every acceptance worthless and could put every client in one rate-limit bucket.
 
 The page records the client's address (as an HMAC) and keys its per-address limit on it. It reads `X-Real-IP` first
 (`PORTAL_CLIENT_IP_HEADER`), else the `X-Forwarded-For` entry `PORTAL_TRUSTED_PROXY_HOPS` from the end. What Railway's
@@ -167,11 +179,38 @@ then accept it in a browser with the same headers if you can (a header-editing e
 rely on B. If an acceptance's `ip_hmac_sha256` equals the HMAC of `192.0.2.1`, the edge passes client values
 through: switch to the first setting from B's table that does not, and tell the next build session.
 
-**A2 (independent buckets).** From the computer and from the phone at the same time, each open a test link 20 times
-in a minute: neither should see 429 (each has its own 30-a-minute bucket). If both get 429 together, they share an
-address: B's table applies.
+**A2 (independent buckets).** Create **two** test links (one per device: a single link has its own limit, 40 opens
+an hour, shared by everyone who holds it). From the computer and from the phone at the same time, each open its own
+link 20 times within one minute: neither should see 429 (each address has its own 30-a-minute bucket). If either sees
+429, read the client-portal log for that minute: a line `link rate-limited: link <8 hex>` means that link hit its
+own hourly limit (opened more than 40 times this hour: wait an hour or make new links and repeat); no such line means
+the per-address limit, so the two devices share an address and B's table applies.
 
 Keep the results (the three HMACs and the settings) with your records.
+
+## 9. Change the link key (or the link format)
+
+`LEGAL_LINK_TAG_KEY` (on `legal`) tags every link; `client-portal` reads the same value through its reference
+`PORTAL_LINK_TAG_KEY`. Both `/health` answers show `link_tags` with the format `version` and the key's `key_id` (8
+hex characters of the key's SHA-256, never the key): they must match. Change the key only if it may have leaked, and
+when no client is in the middle of accepting. In this order:
+
+1. On `legal`, set `LEGAL_LINK_TAG_KEY` to a new value (`openssl rand -hex 32`; it must differ from every other
+   secret, or Legal refuses to start).
+2. Redeploy `legal`. Check its `/health`: `link_tags.status` is `ok` with the new `key_id`. (Between this step and the
+   next, every link answers "This link cannot be used".)
+3. Redeploy `client-portal` (it reads the new value through the reference only when it restarts). Check its
+   `/health`: `link_tags.key_id` equals Legal's. The restart also clears the page's memory of dead links.
+4. Every link created before step 1 is dead. For each one you sent and the client has not used (your step 4 records:
+   `curl -sS $A $L/legal/v1/client-acceptance-invitations/<invitation_id>` shows its `status`), revoke it (step 7,
+   so it stays dead even if the old key ever came back) and create and send a new one (steps 4 and 5).
+
+If Legal's `/health` shows `link_tags.status` starting `off:`, the key is unset or malformed: Legal and its finance
+gates keep running, but no link can be created or used (503) until the key is fixed and Legal redeployed.
+
+A change to `src/link_tag.py` (the link format) ships in **both** services from the same commit, `legal` first, then
+`client-portal`. If the page's `/health` shows `link_tags.foreign_versions_seen`, links in a format the page does not
+read have arrived: the two services run different builds; redeploy both from one commit.
 
 ## What the page does and does not do
 

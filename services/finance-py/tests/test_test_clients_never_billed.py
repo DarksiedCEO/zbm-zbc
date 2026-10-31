@@ -3,6 +3,8 @@ step 8) is never billed: Finance refuses its billing profile, an invoice draft a
 
 from __future__ import annotations
 
+import pytest
+
 from helpers import ANDRE_TOKEN, Harness, rid
 from test_compliance_gate_adr0024 import draft
 from test_legal_client import ACC, SHA
@@ -35,4 +37,14 @@ def test_a_test_client_draft_written_earlier_is_never_approved():
     r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/decision",
                 {"request_id": rid(), "content_sha256": inv["content_sha256"], "decision": "approve"},
                 andre=ANDRE_TOKEN)
+    assert r.status_code == 409 and "test client" in r.text
+
+
+@pytest.mark.parametrize("client", ["ZZ-TEST-andre", "Zz-Test-andre", "zz-TEST-x"])
+def test_the_test_client_rule_ignores_case(client):
+    """AEGIS r3 N3-L6: a test client id in any letter case is still a test client."""
+    hr = Harness().ready()
+    r = hr.put(f"/fin/v1/clients/{client}/billing-profile",
+               {"request_id": rid(), "entity": "zbm", "payment_method": "ach",
+                "msa": {"doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA, "acceptance_id": ACC}})
     assert r.status_code == 409 and "test client" in r.text

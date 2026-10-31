@@ -1949,6 +1949,7 @@ class LegalService:
         reasons = self._client_invitation_reasons(inv) if status == "open" else []
         return {"invitation_id": inv["invitation_id"], "party_ref": inv["party_ref"], "documents": inv["documents"],
                 "page": inv["page"], "created_at": inv["created_at"], "expires_at": inv["expires_at"],
+                "log_fingerprint": inv["token_sha256"][:8],
                 "status": status, "usable": status == "open" and not reasons, "reasons": reasons,
                 "reason_lines": R.lines(reasons), "acceptance_ids": list(inv.get("acceptance_ids") or []),
                 "used_at": inv.get("used_at"), "revoked_at": inv.get("revoked_at")}
@@ -1971,9 +1972,7 @@ class LegalService:
             reasons = reasons or self._msa_version_reasons(party, docs)
             if reasons:
                 self._refuse("client_acceptance_link_refused", party, reasons, op_id=request_id)
-            if not self.cfg.link_tag_key:
-                raise Unavailable("LEGAL_LINK_TAG_KEY is not set: no client acceptance link can be issued (it must be "
-                                  "the client-portal service's PORTAL_LINK_TAG_KEY)")
+            self._require_link_tags()
             now = self._now()
             token = LT.mint(self.cfg.link_tag_key)              # AEGIS r2 N-M1: self-authenticating
             iid = rid("cin", "andre", request_id)
@@ -2052,6 +2051,7 @@ class LegalService:
     def _usable_client_invitation(self, token: str) -> dict:
         """The open, unexpired, unrevoked, unused invitation this token names whose documents are all still valid to
         accept; otherwise the ONE answer every case gets (404 "not found"): no enumeration oracle."""
+        self._require_link_tags()
         if not LT.valid(token, self.cfg.link_tag_key or b""):       # AEGIS r2 N-M1: before any record is read
             raise NotFound("not found")
         inv = self._client_invitation_by_token(token)
@@ -2085,6 +2085,23 @@ class LegalService:
             bl = CP.blocks(inv["page"], display, docs, msa_acc, self.cfg.business_tz)
         return display, docs, msa_acc, bl
 
+    def _require_link_tags(self) -> None:
+        """AEGIS r3 N3-L4: no link is issued or used while the tag key is unset or malformed (503, with the reason)."""
+        if not self.cfg.link_tag_key:
+            raise Unavailable((self.cfg.link_tag_problem or "off: LEGAL_LINK_TAG_KEY is not set")
+                              + " (client acceptance links are off; it must equal client-portal's PORTAL_LINK_TAG_KEY)")
+
+    def link_tag_health(self) -> dict:
+        if not self.cfg.link_tag_key:
+            return {"status": self.cfg.link_tag_problem or "off: LEGAL_LINK_TAG_KEY is not set", "version": LT.VERSION}
+        return {"status": "ok", "version": LT.VERSION, "key_id": LT.key_id(self.cfg.link_tag_key)}
+
+    def client_invitations_by_fingerprint(self, fp: str) -> dict:
+        """AEGIS r3 N3-M1 (Andre only): the links whose log fingerprint (the portal's 429 log line) is ``fp``."""
+        with self.lock:
+            hits = [inv for inv in self.client_invitations.values() if inv["token_sha256"].startswith(fp)]
+            return {"fingerprint": fp, "links": [self._client_invitation_view(inv) for inv in hits]}
+
     def _zone(self) -> dict:
         """AEGIS r2 N-L5: the zone Legal dates the page in, and its label, for the portal's confirmation."""
         return {"time_zone": self.cfg.business_tz, "time_zone_label": CP.zone_label(self.cfg.business_tz)}
@@ -2105,6 +2122,7 @@ class LegalService:
         lost response or a refresh. Only for the same token AND the same request id (the portal derives it from the
         submission); anything else is the one 404."""
         with self.lock:
+            self._require_link_tags()
             if not LT.valid(token, self.cfg.link_tag_key or b""):
                 raise NotFound("not found")
             inv = self._client_invitation_by_token(token)
@@ -3797,4 +3815,5 @@ class LegalService:
                 "log_write_fault": bool(self.log.fault),
                 "counsel_channel_wired": not type(self.ports.counsel).__name__.startswith("NotWired"),
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
-                "replay_quarantined": len(self.unacknowledged_quarantine())}
+                "replay_quarantined": len(self.unacknowledged_quarantine()),
+                "link_tags": self.link_tag_health()}

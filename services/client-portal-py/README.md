@@ -34,7 +34,7 @@ cd src && python3 -m api                                # PORTAL_BIND_ADDR (127.
 | `PORTAL_TRUSTED_PROXY_HOPS` | 1 | 0..3: fallback when that header is missing: the `X-Forwarded-For` entry this many from the END (never the left-most); 0 = the socket peer |
 | `PORTAL_RATE_LEGAL_PER_MINUTE` | 300 | every call to Legal, all clients together, charged before the call (AEGIS M-3) |
 | `PORTAL_RATE_IP_PER_MINUTE` | 30 | requests per client address per minute on `/accept/...` |
-| `PORTAL_RATE_TOKEN_PER_HOUR` | 40 | requests per link per hour (counted only for links Legal confirmed) |
+| `PORTAL_RATE_TOKEN_PER_HOUR` | 40 | requests per link per hour, charged before any Legal call (only tag-valid links are counted; at the limit the log names the link by its 8-hex log fingerprint, AEGIS r3 N3-M1). A link Legal answered 404 for is not asked about again for 15 minutes |
 | `PORTAL_RATE_NOT_FOUND_PER_MINUTE` | 120 | not-found answers per minute, all clients together |
 | `PORTAL_FORM_MAX_AGE_SECONDS` | 14400 | how long a served form can be submitted (300..86400) |
 | `PORTAL_LEGAL_TIMEOUT_SECONDS` | 5 | 1..30 |
@@ -45,7 +45,7 @@ cd src && python3 -m api                                # PORTAL_BIND_ADDR (127.
 
 | Route | Answer |
 |---|---|
-| `GET /health` | `{"status":"ok"}` |
+| `GET /health` | `{"status":"ok","link_tags":{"version":1,"key_id":"<8 hex>"}}`: the link format version and the tag key's id (8 hex characters of its SHA-256, never the key), to match against Legal's `/health`; `foreign_versions_seen` and `reason` appear if links of another format version have arrived (AEGIS r3 N3-L4) |
 | `GET /accept/{token}` | the page for this link (Part B: MSA + SOW; Part C: a new SOW for a client with a counted MSA acceptance) |
 | `POST /accept/{token}` | records the acceptance at Legal; the confirmation page |
 | `GET /accept/{token}/document/{1,2}` and `/download` | the document's exact registered text (its SHA-256 is the fingerprint on the page) |

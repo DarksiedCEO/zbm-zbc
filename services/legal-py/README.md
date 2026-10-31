@@ -40,7 +40,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `LEGAL_FILING_ALERT_DAYS` | 60 | |
 | `LEGAL_ESIGN_CONSENT_REQUIRED` | 1 | clipper agreements need the ESIGN §7001(c) block |
 | `LEGAL_BUSINESS_TZ` | `America/Los_Angeles` | the calendar dates Legal counts in |
-| `LEGAL_LINK_TAG_KEY` | unset | ADR 0028, AEGIS r2 N-M1: >= 32 printable characters, the same value as the client-portal service's `PORTAL_LINK_TAG_KEY`. A link token is 32 random bytes + the first 16 bytes of HMAC-SHA256(key, `zbm-link-v1` 0x1F random), base64url (64 characters; `src/link_tag.py`, byte-identical in client-portal-py). Unset: no link is issued (503); a token whose tag does not verify is the 404 before any record is read |
+| `LEGAL_LINK_TAG_KEY` | unset | ADR 0028, AEGIS r2 N-M1 / r3 N3-L4: >= 32 printable characters, the same value as the client-portal service's `PORTAL_LINK_TAG_KEY`, different from every other secret Legal holds (equal: refuses start). A link token is base64url(version 1 byte + 32 random bytes + the first 16 bytes of HMAC-SHA256(key, `zbm-link` 0x1F version 0x1F random)), 66 characters (`src/link_tag.py`, byte-identical in client-portal-py). Unset or malformed: Legal starts, link creation and the portal routes answer 503 with the reason, `/health` `link_tags.status` starts `off:`; set: `link_tags` = `{"status": "ok", "version": 1, "key_id": <8 hex of the key's SHA-256>}`. A token whose tag does not verify is the 404 before any record is read |
 | `LEGAL_ZBM_FACTS` | unset | ADR 0028: JSON object of ZBM's own entity facts (`{"zbm_legal_entity_name": "...", "zbm_street_address": "..."}`), names `zbm_[a-z0-9_]{1,36}`, values 1-500 printable characters without `{{ }}`. A template fill takes every `{{zbm_*}}` variable from here (a request supplying one is a 422; a fact missing here refuses the fill with `ZBM_FACT_MISSING`). A malformed value refuses start |
 | `LEGAL_RECONCILE_MODE` | 0 | see "Reconciling" |
 | `LEGAL_COUNSEL_CHANNEL`, `LEGAL_ESIGN_PROVIDER` | unset | not built: setting either refuses start |
@@ -196,6 +196,11 @@ recorded by the page never counts as evidence. Andre's steps: `docs/runbooks/cli
   refused in typed names (N-L3); the receipt also needs `form_sha256`, the hash of the form signature the accepted
   submission carried (recorded at acceptance; N-L4); views carry `time_zone` and `time_zone_label` (N-L5); a SOW
   whose stored fill values cannot be read fails the MSA-version rule closed (N-L8).
+- **AEGIS r3 fixes.** Link tokens carry a format version byte and `/health` reports `link_tags` (N3-L4); a malformed
+  or unset key turns links off (503) without stopping Legal; a key equal to another secret refuses start (N3-L1);
+  every link view carries `log_fingerprint`, and `GET /legal/v1/client-acceptance-invitations/by-fingerprint/{fp}`
+  (Andre only, 8 lower-case hex) finds the link a client-portal log line names (N3-M1); typed names holding a blank
+  glyph (Unicode name `FILLER`, `BLANK`, `NULL NOTEHEAD`) or no letter or digit are refused (N3-L3).
 
 ## Data directory and the local log (bug sweep E)
 

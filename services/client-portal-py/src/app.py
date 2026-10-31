@@ -2,7 +2,9 @@
 The client acceptance page (ADR 0028): a minimal public ASGI app, no framework.
 
 Routes (anything else: the uniform 404 page; any other method: 405):
-  GET  /health                               -> {"status": "ok"} (Railway's health check; says nothing else)
+  GET  /health                               -> {"status": "ok", "link_tags": {...}} (Railway's health check; the
+                                                link format version and the tag key's 8-hex id, so Andre can match
+                                                them with Legal's /health; never the key)
   GET  /robots.txt                           -> disallow everything
   GET  /accept/not-now                       -> "Nothing was recorded"
   GET  /accept/{token}                       -> the acceptance page for this link (Legal resolves the token)
@@ -14,8 +16,11 @@ Defenses:
 - every unusable token gets the SAME 404 page (malformed, unknown, expired, revoked, used, documents changed): the
   format check, the Legal lookup and the page are identical in every case; Legal compares token hashes in constant
   time;
-- rate limits before any Legal call: per client IP (keyed by an HMAC, never the IP), per token (keyed by an HMAC of
-  the token) and a global ceiling on not-found answers;
+- rate limits before any Legal call: per client IP (keyed by an HMAC, never the IP), per link (keyed by an HMAC of
+  the token; only tag-valid tokens are counted, so the table holds only links Legal minted) and global ceilings on
+  Legal calls and not-found answers;
+- a link Legal answered 404 for (used, expired, revoked) is remembered for 15 minutes (AEGIS r3 N3-M1): a flood on a
+  dead link costs at most one Legal call per window;
 - request limits: target 2 KiB, head 8 KiB, form body 8 KiB (urlencoded only), body read deadline;
 - CSRF: the POST must carry the page's own signed form (HMAC over the token's hash, the page text's hash and the
   issue time, at most PORTAL_FORM_MAX_AGE_SECONDS old) and an ``Origin`` equal to PORTAL_PUBLIC_ORIGIN; a
@@ -24,7 +29,8 @@ Defenses:
   ``form-action 'self'``, ``frame-ancestors 'none'``; no-store; ``Referrer-Policy: same-origin`` (the token in the
   path never leaves in a Referer, and the browser still sends ``Origin`` on the POST); nosniff; HSTS; noindex;
 - nothing logs a token, a name, an email, an IP address or a user agent: the log line is the route name, the status
-  and the time taken.
+  and the time taken. A per-link 429 or a dead link also logs the link's 8-hex log fingerprint (the first 8 hex
+  characters of SHA-256 of the token: not reversible); Andre looks it up at Legal to revoke that link.
 """
 
 from __future__ import annotations
@@ -47,7 +53,7 @@ import render as V
 from config import Settings
 from legal_client import AcceptOutcome, LegalClient, LegalUnavailable, PortalView
 from mail import Attachment, ConfirmationMailer, ConfirmationMessage, NotWiredMailer
-from ratelimit import Limiter
+from ratelimit import DeadLinks, Limiter, Once
 
 log = logging.getLogger("client_portal")
 
@@ -109,7 +115,10 @@ class PortalApp:
         self.mail_postal_line, self.mail_next_step = mail_postal_line, mail_next_step
         self.clock = clock
         self.by_ip = Limiter(settings.ip_per_minute, 60, clock=monotonic)
-        self.by_token = Limiter(settings.token_per_hour, 3600, clock=monotonic)
+        self.by_token = Limiter(settings.token_per_hour, 3600, max_keys=5_000, clock=monotonic)
+        self.dead = DeadLinks(DEAD_LINK_TTL_S, clock=monotonic)          # AEGIS r3 N3-M1
+        self.log_once = Once(60, clock=monotonic)
+        self.foreign_versions: dict = {}                                  # AEGIS r3 N3-L4: version byte -> count
         self.not_found = Limiter(settings.not_found_per_minute, 60, clock=monotonic)
         # AEGIS M-3: one ceiling on EVERY call to Legal (resolve, accept, receipt), charged before the call
         self.legal_calls = Limiter(settings.legal_per_minute, 60, clock=monotonic)
@@ -187,7 +196,7 @@ class PortalApp:
         if path == "/health":
             if method not in ("GET", "HEAD"):
                 return ("health", 405, [(b"allow", b"GET, HEAD")], b"")
-            return ("health", 200, [(b"content-type", b"application/json")], b'{"status":"ok"}')
+            return ("health", 200, [(b"content-type", b"application/json")], self._health())
         if path == "/robots.txt" and method in ("GET", "HEAD"):
             return ("robots", 200, [(b"content-type", b"text/plain; charset=utf-8")], b"User-agent: *\nDisallow: /\n")
         if path == "/accept/not-now" and method in ("GET", "HEAD"):
@@ -203,18 +212,19 @@ class PortalApp:
         if not LT.valid(token, self.s.link_tag_key):
             # AEGIS r2 N-M1: a token Legal did not mint (junk, forged, mistyped) is refused here, before any budget is
             # charged or Legal is asked: the same 404 page, at the cost of one HMAC
+            self._foreign(token)
             return (name, *self._page(404, V.NOT_FOUND))
         ok_ip, retry_ip = self.by_ip.hit(_mac(self.s.evidence_key, "rl-ip", rate_key(self._client_ip(scope))))
         if not ok_ip:
             return (name, *self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry_ip).encode())]))
+        limited = self._link_limited(token)          # AEGIS r3 N3-M1: per link BEFORE any Legal call
+        if limited:
+            return (name, *limited)
         if method == "POST":
             return (name, *await self._post(scope, receive, token))
         view = await self._resolve(token)
         if not isinstance(view, PortalView):
             return (name, *view)
-        limited = self._link_limited(token)
-        if limited:
-            return (name, *limited)
         if m_doc:
             n = int(m_doc.group(2))
             docs = self._shown(view)
@@ -250,9 +260,6 @@ class PortalApp:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         if rec is None:
             return otherwise
-        limited = self._link_limited(token)
-        if limited:
-            return limited
         pg = V.confirmation_page(rec, rec.acceptances, state.full_name, state.title, self.s.display_tz, False)
         return self._page(200, pg)
 
@@ -268,10 +275,44 @@ class PortalApp:
         return None if ok else self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry).encode())])
 
     def _link_limited(self, token: str):
-        """Per-link limit, charged only for a link Legal confirmed (a view or a receipt): a junk token never enters
-        the table, so junk cannot evict a real link's counter (AEGIS M-3)."""
+        """Per-link limit (AEGIS r3 N3-M1: charged BEFORE the Legal call). Only tag-valid tokens get here, so junk
+        cannot fill or evict the table (r2 N-M1). At the limit, the log names the link by its fingerprint (once a
+        minute) so Andre can find it at Legal and revoke it."""
         ok, retry = self.by_token.hit(_mac(self.s.evidence_key, "rl-token", token))
-        return None if ok else self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry).encode())])
+        if ok:
+            return None
+        fp = LT.log_fingerprint(token)
+        if self.log_once("429 " + fp):
+            log.warning("link rate-limited: link %s (look it up at Legal: client-acceptance-invitations/"
+                        "by-fingerprint/%s)", fp, fp)
+        return self._page(429, V.RATE_LIMITED, [(b"retry-after", str(retry).encode())])
+
+    def _dead(self, token: str) -> None:
+        """AEGIS r3 N3-M1: Legal answered 404 for this tag-valid link; do not ask again for DEAD_LINK_TTL_S."""
+        self.dead.add(_mac(self.s.evidence_key, "dead", token))
+        fp = LT.log_fingerprint(token)
+        if self.log_once("dead " + fp):
+            log.info("link not usable at Legal (used, expired or revoked): link %s, not asked again for %d min",
+                     fp, DEAD_LINK_TTL_S // 60)
+
+    def _foreign(self, token: str) -> None:
+        """AEGIS r3 N3-L4: a right-shaped token in another format version means Legal and the portal run different
+        link_tag.py (a deploy skew): every real link then fails here. Counted for /health, logged once a minute."""
+        v = LT.version_of(token)
+        if v is None or v == LT.VERSION:
+            return
+        self.foreign_versions[v] = self.foreign_versions.get(v, 0) + 1
+        if self.log_once(f"version {v}"):
+            log.warning("a link in format version %d reached a portal that reads version %d: redeploy legal and "
+                        "client-portal from the same commit (runbook: key and format changes)", v, LT.VERSION)
+
+    def _health(self) -> bytes:
+        tags = {"version": LT.VERSION, "key_id": LT.key_id(self.s.link_tag_key)}
+        if self.foreign_versions:
+            tags["foreign_versions_seen"] = {str(k): n for k, n in sorted(self.foreign_versions.items())}
+            tags["reason"] = ("links in another format version have arrived: legal and client-portal may run "
+                              "different builds")
+        return json.dumps({"status": "ok", "link_tags": tags}, separators=(",", ":")).encode()
 
     async def _resolve(self, token: str):
         """The link's view, or the answer to send (uniform 404, 429, 503). Pages the portal does not serve (an
@@ -279,6 +320,8 @@ class PortalApp:
         same 404."""
         if not LT.valid(token, self.s.link_tag_key):
             return self._page(404, V.NOT_FOUND)
+        if _mac(self.s.evidence_key, "dead", token) in self.dead:
+            return self._not_found()                 # AEGIS r3 N3-M1: no Legal call for a link Legal called dead
         limited = self._legal_limited()
         if limited:
             return limited
@@ -286,7 +329,10 @@ class PortalApp:
             view = await asyncio.to_thread(self.legal.resolve, token)
         except LegalUnavailable:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
-        if view is None or not self._servable(view):
+        if view is None:
+            self._dead(token)
+            return self._not_found()
+        if not self._servable(view):
             return self._not_found()
         return view
 
@@ -389,9 +435,6 @@ class PortalApp:
                 # receipt answers and the client sees the confirmation again; anything else stays the 404
                 return await self._receipt_or(token, rid, form_sha, state, view)
             return view
-        limited = self._link_limited(token)
-        if limited:
-            return limited
         shown = self._shown(view)
         try:
             fresh = self._page_sha(view, token)
@@ -408,7 +451,7 @@ class PortalApp:
             v = getattr(state, k)
             if not v:
                 errors[k] = f"Enter {label}"
-            elif len(v) > FIELD_MAX[k] or _CONTROL.search(v) or _invisible(v):
+            elif len(v) > FIELD_MAX[k] or _CONTROL.search(v) or _invisible(v) or not _has_visible(v):
                 errors[k] = f"Enter {label} in at most {FIELD_MAX[k]} characters, without special characters"
         if "company" not in errors and _norm_company(state.company) != _norm_company(view.display.client_legal_name):
             errors["company"] = f"Enter the company name as it appears in the documents: {view.display.client_legal_name}"
@@ -435,6 +478,7 @@ class PortalApp:
         except LegalUnavailable:
             return self._page(503, V.UNAVAILABLE, [(b"retry-after", b"60")])
         if out.kind == "not_found":
+            self._dead(token)
             return await self._receipt_or(token, rid, form_sha, state, self._not_found())
         if out.kind != "accepted":
             return self._page(409, V.changed_page(token))
@@ -443,6 +487,7 @@ class PortalApp:
         return self._page(200, pg)
 
 
+DEAD_LINK_TTL_S = 900          # AEGIS r3 N3-M1: how long a link Legal answered 404 for is not asked about again
 _INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp", "Co", "Cn"})
 
 
@@ -456,12 +501,27 @@ _IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1
               (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
               (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
               (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF), (0x2800, 0x2800))
+# AEGIS r3 N3-L3: legal-py's BLANK_NAME_WORDS (glyphs that print as nothing, by Unicode name)
+_BLANK_NAME_WORDS = ("FILLER", "BLANK", "NULL NOTEHEAD")
+
+
+def _blank(ch: str) -> bool:
+    cp = ord(ch)
+    if any(lo <= cp <= hi for lo, hi in _IGNORABLE):
+        return True
+    name = unicodedata.name(ch, "")
+    return any(w in name for w in _BLANK_NAME_WORDS)
 
 
 def _invisible(v: str) -> bool:
-    """AEGIS L-1 / r2 N-L3: bidi controls, zero-width, default-ignorable, blank fillers, other invisible characters."""
-    return any(unicodedata.category(ch) in _INVISIBLE or any(lo <= ord(ch) <= hi for lo, hi in _IGNORABLE)
-               for ch in v)
+    """AEGIS L-1 / r2 N-L3 / r3 N3-L3: bidi controls, zero-width, default-ignorable, blank fillers and blank glyphs,
+    other invisible characters."""
+    return any(unicodedata.category(ch) in _INVISIBLE or _blank(ch) for ch in v)
+
+
+def _has_visible(v: str) -> bool:
+    """AEGIS r3 N3-L3: legal-py's ``has_visible``: at least one letter or digit (not only marks or punctuation)."""
+    return any(unicodedata.category(ch)[0] in "LN" for ch in unicodedata.normalize("NFKC", v))
 
 
 def _attachments(view: PortalView, accepted) -> tuple:

@@ -27,7 +27,7 @@ from legal_client import LegalUnavailable, parse_view
 
 
 def _junk(i: int) -> str:
-    raw = hashlib.sha256(str(i).encode()).digest() + bytes(16)       # a right-shaped token with a wrong tag
+    raw = b"\x01" + hashlib.sha256(str(i).encode()).digest() + bytes(16)   # right-shaped, a wrong tag
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 

@@ -474,6 +474,14 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         """Andre invites one client to accept these document versions; the answer shows the acceptance token ONCE."""
         return _echo(req.request_id, svc.create_client_invitation(req.request_id, req.model_dump()))
 
+    @app.get("/legal/v1/client-acceptance-invitations/by-fingerprint/{fp}", dependencies=auth)
+    def client_invitation_by_fingerprint(fp: str,
+                                         _: str = Depends(andre("client-acceptance-invitations/fingerprint"))) -> dict:
+        """AEGIS r3 N3-M1: which link the portal's log line names (8 hex characters)."""
+        if not re.fullmatch(r"[0-9a-f]{8}", fp):
+            raise Invalid("a log fingerprint is 8 lower-case hex characters")
+        return svc.client_invitations_by_fingerprint(fp)
+
     @app.get("/legal/v1/client-acceptance-invitations/{invitation_id}", dependencies=auth)
     def client_invitation_get(invitation_id: str,
                               _: str = Depends(andre("client-acceptance-invitations/read"))) -> dict:

@@ -77,6 +77,7 @@ class Settings:
     business_tz: str = "America/Los_Angeles"
     zbm_facts: dict = field(default_factory=dict)                 # ADR 0028: {{zbm_*}} values (LEGAL_ZBM_FACTS)
     link_tag_key: Optional[bytes] = field(default=None, repr=False)   # AEGIS r2 N-M1 (LEGAL_LINK_TAG_KEY)
+    link_tag_problem: Optional[str] = None                        # AEGIS r3 N3-L4: why links are off
     data_dir_lock: Optional[object] = field(default=None, repr=False, compare=False)   # bug sweep E: the flock
 
 
@@ -203,14 +204,23 @@ def _zbm_facts(env: dict) -> dict:
     return dict(data)
 
 
-def _link_tag_key(env: dict) -> Optional[bytes]:
+def _link_tag_key(env: dict, others: list) -> tuple:
     """AEGIS r2 N-M1: the key that tags client acceptance link tokens, the same value as the client-portal service's
-    PORTAL_LINK_TAG_KEY. Unset = no link can be issued (503); a value is >= 32 printable characters."""
+    PORTAL_LINK_TAG_KEY. AEGIS r3 N3-L4: unset or malformed (an unresolved reference, under 32 printable characters,
+    a space) never stops Legal: link issuance and the portal routes answer 503 with the reason, /health says it.
+    AEGIS r3 N3-L1: a key equal to any other secret Legal holds refuses the start (a founder-grade secret must never
+    reach the public-facing service's environment). Returns (key or None, the reason links are off or None)."""
     raw = env.get("LEGAL_LINK_TAG_KEY")
     if raw is None or raw == "":
-        return None
-    _check_token(raw, "LEGAL_LINK_TAG_KEY")
-    return raw.encode("ascii")
+        return None, "off: LEGAL_LINK_TAG_KEY is not set"
+    if any(raw == o for o in others if o):
+        raise RuntimeError("LEGAL_LINK_TAG_KEY equals another secret this service holds (a service, Andre, caller, "
+                           "ledger or Compliance token): set its own value (openssl rand -hex 32); refusing to start")
+    try:
+        _check_token(raw, "LEGAL_LINK_TAG_KEY")
+    except RuntimeError as exc:
+        return None, f"off: {exc}".replace("; refusing to start", "")
+    return raw.encode("ascii"), None
 
 
 def load(env: Optional[dict] = None) -> Settings:
@@ -275,8 +285,10 @@ def load(env: Optional[dict] = None) -> Settings:
         esign_consent_required=_flag(env, "LEGAL_ESIGN_CONSENT_REQUIRED", True),
         business_tz=tz,
         zbm_facts=_zbm_facts(env),
-        link_tag_key=_link_tag_key(env),
     )
+    s.link_tag_key, s.link_tag_problem = _link_tag_key(
+        env, [token, andre, env.get("LEDGER_SERVICE_TOKEN"), comp[1], comp[2], *callers.values(),
+              *(v for v in (json.loads(env.get("LEGAL_CALLER_TOKENS") or "{}") or {}).values() if isinstance(v, str))])
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it
     return s
 

@@ -231,7 +231,7 @@ class BooksMixin:
     def _refuse_test_client(client_id: str) -> None:
         """ADR 0028, AEGIS r2 N-L7: a ``zz-test-`` client (the client acceptance runbook's test client) is never
         billed."""
-        if str(client_id).startswith(TEST_CLIENT_PREFIX):
+        if str(client_id).casefold().startswith(TEST_CLIENT_PREFIX):     # AEGIS r3 N3-L6: any letter case
             raise Conflict(f"{TEST_CLIENT_PREFIX}* is a test client: it is never billed (no billing profile, no "
                            "invoice)")
 

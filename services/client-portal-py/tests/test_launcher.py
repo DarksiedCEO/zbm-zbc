@@ -3,6 +3,7 @@ runs, uvicorn sends no Server header and logs no request path (the path holds th
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -54,7 +55,7 @@ def test_the_launcher_serves_health_without_a_server_header_or_an_access_log():
         while time.time() < deadline:
             try:
                 with OPEN(f"http://127.0.0.1:{port}/health", timeout=2) as r:
-                    assert r.status == 200 and r.read() == b'{"status":"ok"}'
+                    assert r.status == 200 and json.loads(r.read())["status"] == "ok"
                     headers = {k.lower(): v for k, v in r.headers.items()}
                     break
             except (urllib.error.URLError, OSError):

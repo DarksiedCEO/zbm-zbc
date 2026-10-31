@@ -35,12 +35,14 @@ ENV = {"PORTAL_LEGAL_URL": "http://legal.railway.internal:8420",
        "PORTAL_EVIDENCE_KEY": "test-portal-evidence-key-do-not-use-0123456789",
        "PORTAL_PUBLIC_ORIGIN": ORIGIN, "PORTAL_LINK_TAG_KEY": LINK_TAG_KEY}
 def tok(seed: str, key: str = LINK_TAG_KEY) -> str:
-    """A link token as Legal mints it (32 random bytes + the 16-byte tag), from a seed so tests can name links."""
+    """A link token as Legal mints it (version byte + 32 random bytes + the 16-byte tag), from a seed so tests can
+    name links."""
     import base64
     import hmac
     rnd = hashlib.sha256(seed.encode()).digest()
-    tag = hmac.new(key.encode(), b"zbm-link-v1\x1f" + rnd, hashlib.sha256).digest()[:16]
-    return base64.urlsafe_b64encode(rnd + tag).decode().rstrip("=")
+    ver = bytes([LEGAL_LT.VERSION])
+    tag = hmac.new(key.encode(), b"zbm-link\x1f" + ver + b"\x1f" + rnd, hashlib.sha256).digest()[:16]
+    return base64.urlsafe_b64encode(ver + rnd + tag).decode().rstrip("=")
 
 
 TOKEN = tok("the link")

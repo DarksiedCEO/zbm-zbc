@@ -44,18 +44,18 @@ def test_a_link_token_carries_a_tag_under_the_shared_key(pair):
     x, m, s, docs = pair
     tok = invite(x, docs)["token"]
     raw = base64.urlsafe_b64decode(tok + "=" * (-len(tok) % 4))
-    assert len(tok) == 64 and len(raw) == 48
-    want = hmac.new(LINK_TAG_KEY.encode(), b"zbm-link-v1\x1f" + raw[:32], hashlib.sha256).digest()[:16]
-    assert raw[32:] == want and LT.valid(tok, LINK_TAG_KEY.encode())
-    forged = base64.urlsafe_b64encode(raw[:32] + bytes(16)).decode().rstrip("=")
+    assert len(tok) == 66 and len(raw) == 49 and raw[0] == LT.VERSION       # r3 N3-L4: a version byte leads
+    want = hmac.new(LINK_TAG_KEY.encode(), b"zbm-link\x1f" + raw[:1] + b"\x1f" + raw[1:33], hashlib.sha256).digest()[:16]
+    assert raw[33:] == want and LT.valid(tok, LINK_TAG_KEY.encode())
+    forged = base64.urlsafe_b64encode(raw[:33] + bytes(16)).decode().rstrip("=")
     assert not LT.valid(forged, LINK_TAG_KEY.encode()) and not LT.valid("A" * 43, LINK_TAG_KEY.encode())
 
 
 def test_legal_refuses_a_bad_tag_before_looking_at_its_records(pair, monkeypatch):
     x, m, s, docs = pair
     tok = invite(x, docs)["token"]
-    raw = base64.urlsafe_b64decode(tok + "=")
-    forged = base64.urlsafe_b64encode(raw[:32] + bytes(16)).decode().rstrip("=")
+    raw = base64.urlsafe_b64decode(tok + "=" * (-len(tok) % 4))
+    forged = base64.urlsafe_b64encode(raw[:33] + bytes(16)).decode().rstrip("=")
     looked = []
     monkeypatch.setattr(x.svc, "_client_invitation_by_token", lambda t: looked.append(t))
     for path, body in (("/legal/v1/portal/invitations/resolve", {"token": forged}),
@@ -76,9 +76,10 @@ def test_no_link_is_issued_without_the_tag_key():
 
 
 @pytest.mark.parametrize("bad", ["short", "${{client-portal.PORTAL_LINK_TAG_KEY}}" + "x" * 20])
-def test_a_bad_tag_key_refuses_to_start(bad):
-    with pytest.raises(RuntimeError):
-        config_mod.load({"LEGAL_SERVICE_TOKEN": "s" * 40, "LEGAL_LINK_TAG_KEY": bad})
+def test_a_bad_tag_key_turns_links_off_without_stopping_legal(bad):
+    # AEGIS r3 N3-L4 supersedes r2: a malformed key must not take the finance gates down with it
+    cfg = config_mod.load({"LEGAL_SERVICE_TOKEN": "s" * 40, "LEGAL_LINK_TAG_KEY": bad})
+    assert cfg.link_tag_key is None and cfg.link_tag_problem.startswith("off")
 
 
 # --- N-L1 ----------------------------------------------------------------------------------------------------------

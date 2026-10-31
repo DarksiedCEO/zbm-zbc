@@ -132,7 +132,7 @@ def test_andre_invites_one_client_and_gets_a_single_use_token_shown_once(pair):
     hr, m, s, docs = pair
     out = invite(hr, docs)
     tok = out["token"]
-    assert re.fullmatch(r"[A-Za-z0-9_-]{64}", tok)               # 32 random bytes + a 16-byte tag (AEGIS r2 N-M1)
+    assert re.fullmatch(r"[A-Za-z0-9_-]{66}", tok)       # version byte + 32 random bytes + a 16-byte tag (AEGIS r2 N-M1, r3 N3-L4)
     assert out["accept_path"] == f"/accept/{tok}" and out["page"] == "first_engagement"
     assert out["party_ref"] == CLIENT and out["documents"] == docs and out["token_shown_once"] is True
     assert out["expires_at"] == iso(hr.clock.now() + timedelta(days=14))

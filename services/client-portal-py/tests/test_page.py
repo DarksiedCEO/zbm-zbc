@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
 import pytest
 
 import render as V
-from helpers import (DISPLAY, MSA_TEXT, SOW_TEXT, TOKEN, FakeLegal, call, hidden, make, sha, view)
+from helpers import (DISPLAY, LINK_TAG_KEY, MSA_TEXT, SOW_TEXT, TOKEN, FakeLegal, call, hidden, make, sha, view)
 from helpers import tok as mint_tok
 from legal_client import Display, Document
 
@@ -171,7 +172,8 @@ def test_rate_limits_per_client_address_per_link_and_for_not_found():
     assert call(app, "GET", f"/accept/{TOKEN}", client=("198.51.100.2", 1)).status == 200
     assert call(app, "GET", f"/accept/{TOKEN}", client=("198.51.100.3", 1)).status == 200
     assert call(app, "GET", f"/accept/{TOKEN}", client=("198.51.100.4", 1)).status == 429      # 8th for this link
-    assert len(legal.resolves) == n + 3 and len(app.by_token._hits) == 1
+    # AEGIS r3 N3-M1: the per-link limit is charged BEFORE Legal: the 8th request never reaches Legal
+    assert len(legal.resolves) == n + 2 and len(app.by_token._hits) == 1
     mono.t += 61
     # not-found answers have a global ceiling (distributed guessing): 3 per minute, then 429
     codes = [call(app, "GET", f"/accept/{mint_tok(c)}", client=(f"192.0.2.{i}", 1)).status
@@ -240,7 +242,9 @@ def test_request_target_and_head_limits():
 def test_health_robots_and_not_now_say_nothing_else():
     app, *_ = make()
     h = call(app, "GET", "/health")
-    assert h.status == 200 and h.body == b'{"status":"ok"}'
+    assert h.status == 200 and json.loads(h.body) == {          # r3 N3-L4: format version and key id, never the key
+        "status": "ok", "link_tags": {"version": 1, "key_id": hashlib.sha256(LINK_TAG_KEY.encode()).hexdigest()[:8]}}
+    assert LINK_TAG_KEY.encode() not in h.body
     assert call(app, "GET", "/robots.txt").body == b"User-agent: *\nDisallow: /\n"
     n = call(app, "GET", "/accept/not-now")
     assert n.status == 200 and "Nothing was recorded" in n.text and "Your link stays valid until it expires." in n.text

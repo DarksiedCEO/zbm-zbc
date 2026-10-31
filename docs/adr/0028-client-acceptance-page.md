@@ -223,6 +223,49 @@ approves the client contracts himself and his CQ-19 determination makes such a c
 - **N-L7.** Finance refuses a billing profile, an invoice draft and an invoice approval for any `zz-test-` client.
 - **N-L8.** A SOW whose stored fill values are missing or unreadable fails the MSA-version rule closed.
 
+## AEGIS r3 fixes (2026-10-31, report at 5f34539c)
+
+- **N3-M1, a replayed dead link no longer spends the shared Legal ceiling.** The r2 text above overstated the remedy:
+  revoking a used link changes nothing (it is already dead at Legal), and its holder could still spend the global
+  Legal-call ceiling (300 a minute) and lock every client out. Now, in the portal, in this order: the tag check; the
+  per-address limit; the **per-link limit (40 an hour), charged before any Legal call** (only tag-valid tokens reach
+  it, so the table holds only links Legal minted; bounded at 5,000 entries); a **dead-link memory**: a link Legal
+  answered 404 for (used, expired, revoked, documents changed) is not asked about again for 15 minutes (bounded at
+  20,000, keyed by an HMAC of the token, cleared by a restart). Then the Legal-call ceiling and the call.
+  **Attacker cost after the change.** Holding one real link that is dead, an attacker gets Legal called at most once
+  per 15 minutes; holding one that is open, at most 40 times an hour (the link's own limit, which also locks out
+  that link's own client until the hour ends: the remedy is to revoke it and send a new link). Spending the global
+  ceiling now needs about 8 open links (300 a minute against 40 an hour each), or hundreds of dead ones, all
+  minted by Legal for real clients. AEGIS's probe4 flood (one used link from 10 addresses, 300 requests): Legal
+  saw 1 call (was one per request), a real client's link answered 200. The remaining remedies are: revoke the link
+  the log names, or, if many links leaked, change the key and resend (runbook step 9).
+  **Which link.** A per-link 429 and a dead link log the link's log fingerprint (8 hex characters of the token's
+  SHA-256: not reversible, never the token), once a minute per link. Andre finds it with
+  `GET /legal/v1/client-acceptance-invitations/by-fingerprint/{fp}` (Andre's token only); every link view carries
+  `log_fingerprint`.
+  **Residual.** A transient 404 at Legal (a document blob briefly unreadable) keeps a live link refused for up to
+  15 minutes; a portal restart clears it. A key mismatch between the two services is not cached (the tag check fails
+  first, nothing is stored).
+- **N3-L1.** Legal and the portal refuse to start if the link tag key equals any other secret they hold (Legal: its
+  service, Andre, ledger, Compliance and caller tokens; the portal: its service and caller tokens and evidence key).
+- **N3-L2.** Tests cover the IPv4-mapped IPv6 branch (counted as the IPv4 address) and the portal's distinct-secrets
+  check.
+- **N3-L3.** Typed names are refused if they hold a character whose Unicode name says it prints as nothing
+  (`FILLER`, `BLANK`, `NULL NOTEHEAD`: U+1D159 and the Hangul fillers among them) or the musical-symbol format
+  characters U+1D173-U+1D17A (Default_Ignorable), and a name must hold at least one letter or digit (one made only of
+  combining marks, format characters or punctuation is refused). Both services apply the same rule; a test compares
+  them over U+0000-U+31FF and U+1D100-U+1D1FF.
+- **N3-L4.** The token now starts with a format version byte: base64url(version (1) || 32 random bytes || the first 16
+  bytes of HMAC-SHA256(key, `zbm-link` 0x1F version 0x1F random)), 66 characters. Both `/health` answers carry
+  `link_tags` (`version`, `key_id` = 8 hex characters of the key's SHA-256); the portal's adds
+  `foreign_versions_seen` and a reason when tokens of another version arrive (two different builds). A malformed or
+  unset `LEGAL_LINK_TAG_KEY` no longer stops Legal: it starts, `/health` says `link_tags.status: "off: ..."`, link
+  creation and the portal routes answer 503 with the reason, and the finance gates stay up. Key rotation order:
+  runbook step 9.
+- **N3-L5.** Runbook check A2 uses two links (one per device) and tells the per-link limit from a shared address by
+  the log line; step 8 opens with the rule that no link is sent before check B.
+- **N3-L6.** Finance's test-client rule ignores letter case (`ZZ-TEST-andre` is a test client).
+
 ## For Andre's sign-off (the approved clickwrap text is the contract record; its wording is unchanged)
 
 1. **The "Company you are signing for" field.** Not in clickwrap text v1; the build brief asked for it. It must equal

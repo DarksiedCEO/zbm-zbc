@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal, Optional, Union
 
-from clickwrap_page import has_invisible
+from clickwrap_page import has_invisible, has_visible
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 ID_PATTERN = r"^[A-Za-z0-9._:-]{1,128}$"
@@ -204,6 +204,8 @@ def _visible(v: str) -> str:
     NFKC): a typed name must read as it is stored."""
     if has_invisible(v):
         raise ValueError("invisible or control characters are not allowed")
+    if not has_visible(v):
+        raise ValueError("must hold at least one letter or digit")       # AEGIS r3 N3-L3
     return v
 
 
