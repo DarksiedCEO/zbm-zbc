@@ -31,10 +31,13 @@ def _plan(y):
     return r.json()
 
 
-def _reconcile(y, plan=None):
+def _reconcile(y, plan=None, ack=None):
     plan = plan or _plan(y)
+    # CH-3 (svc_restore): voiding MONEY evidence needs Andre's explicit acknowledgement (and then the re-import)
+    ack = bool(plan.get("money_at_risk")) if ack is None else ack
     return y.post(RECONCILE, {"request_id": rid("rec"), "head_sha256": plan["head_sha256"],
-                              "void_lines": plan["voidable"]["lines"], "void_event_ids": plan["voidable"]["event_ids"]},
+                              "void_lines": plan["voidable"]["lines"], "void_event_ids": plan["voidable"]["event_ids"],
+                              **({"money_events_acknowledged": True} if ack else {})},
                   andre=ANDRE_TOKEN)
 
 
@@ -118,6 +121,9 @@ def test_rules_rollback_is_voidable_only_by_andre(tmp_path):
     y = _restart(x, tmp_path, FIN_RECONCILE_MODE="1")
     plan = _plan(y)
     assert any(e.startswith("fin-ver-") for e in plan["voidable"]["event_ids"]) and not plan["fatal"]
+    assert plan["money_at_risk"]                       # the truncated tail held journal entries (CH-3 restore guard)
+    r = _reconcile(y, plan, ack=False)
+    assert r.status_code == 409 and "RESTORE_GUARD" in r.text
     assert _reconcile(y, plan).status_code == 200
     z = _restart(x, tmp_path)
     assert z.svc.rules_version == v - 1

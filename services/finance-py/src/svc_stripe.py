@@ -32,6 +32,7 @@ earlier than Stripe's: a late webhook only makes the hold longer.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from contextlib import contextmanager
@@ -50,6 +51,8 @@ from ports import StripeCheckout, StripeDispute, StripePayment, StripePayout, St
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid
 
 ACTOR = I2.ACTOR
+# CH-4: an ALERT line (level ERROR, prefix "ALERT finance:") is what a log-based alert keys on; ids only, never a body
+alert_log = logging.getLogger("finance.alert")
 STRIPE_DEP = "DEPENDENCY_UNAVAILABLE:stripe"
 CHECKOUT_TTL = timedelta(hours=23)                # Stripe allows 30 min .. 24 h; an hour of margin for clock skew
 MIN_CHARGE = Decimal("0.50")                      # Stripe's USD minimum
@@ -136,10 +139,10 @@ class StripeMixin:
             return (), [R.item("ENTITY_MIX", "ZBC client deposits never go through Stripe until counsel answers the "
                                              "custody question FIN-CQ-02 (ZBC also needs its own Stripe account)",
                                obligation_id="FIN-CQ-02")]
-        total = M.D(inv["total"])
+        total = I2.amount_due(inv)          # ADR 0026: what is owed now (the total less any credit note)
         if total < MIN_CHARGE or total > MAX_CHARGE:
             return (), [R.item("STRIPE_NOT_ALLOWED", f"Stripe takes 0.50 to 999999.99 per payment; this invoice is "
-                                                     f"{inv['total']}")]
+                                                     f"{M.fmt(total)}")]
         methods = []
         if "ach" in inv["payment_methods"]:
             methods.append("us_bank_account")
@@ -287,12 +290,12 @@ class StripeMixin:
                                                                              "Stripe account is connected")])
                 mine = [dict(s) for s in self.db["stripe_sessions"].values() if s["invoice_id"] == invoice_id]
                 for s in mine:                       # one live page per invoice: hand back the open one
-                    if s["status"] == "open" and s["methods"] == list(methods) and s["total"] == inv["total"] \
+                    if s["status"] == "open" and s["methods"] == list(methods) and s["total"] == M.fmt(I2.amount_due(inv)) \
                             and s["expires_at"] > iso(now + timedelta(minutes=30)):
                         return {"checkout": s, "reused": True, "ledger_event_ids": [], "request_id": request_id}
                 stale = [s for s in mine if s["status"] == "open"]
                 attempt = len(mine)
-                total = inv["total"]
+                total = M.fmt(I2.amount_due(inv))       # ADR 0026: a credit note lowers what the page asks for
             g = Gather(self, f"chk|{principal}|{request_id}", ACTOR, invoice_id)
             port = self.ports.stripe_in
             # AEGIS M2: a page whose methods or amount are no longer right is closed at Stripe BEFORE a new one is
@@ -354,7 +357,7 @@ class StripeMixin:
                 for sid in dead:
                     op.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "payment_failed"})
                 inv = self.db["invoices"][invoice_id]
-                if ans.outcome != "created" or inv["status"] != "issued" or inv["total"] != total:
+                if ans.outcome != "created" or inv["status"] != "issued" or M.fmt(I2.amount_due(inv)) != total:
                     if closed or dead:
                         self._commit(op)
                     if ans.outcome != "created":
@@ -479,7 +482,7 @@ class StripeMixin:
                         continue
                     inv = self.db["invoices"].get(s["invoice_id"]) or {}
                     methods = self._stripe_methods(inv)[0] if inv.get("status") == "issued" else ()
-                    if inv.get("status") != "issued" or inv.get("total") != s["total"] \
+                    if inv.get("status") != "issued" or M.fmt(I2.amount_due(inv)) != s["total"] \
                             or any(m not in methods for m in s["methods"]) or s["session_id"] in refused_ids:
                         todo.append(dict(s))
                 todo = sorted(todo, key=lambda s: s["created_at"])[:MAX_JOB_CLOSES]
@@ -657,6 +660,14 @@ class StripeMixin:
     def _stripe_session(self, op: Op, s: StripeSession, p: Optional[StripePayment]) -> str:
         rec = op.get("stripe_sessions", s.session_id) if s.found else None
         if rec is None:
+            if s.found and p is not None and p.found and p.status in ("succeeded", "processing"):
+                # CH-4: money moved (or is moving) on a page Finance has no record of -- after a restore, a page made
+                # by another environment, a lost commit. Still answered 2xx (the payment is Stripe's record, and a
+                # 5xx loop would not bring Finance's page back), but never silently: a break per page for Andre and
+                # an ALERT log line. The money is booked by the Stripe re-import (it re-links Finance's page from
+                # Stripe) or by the payment's own payment_intent.* event (unapplied cash + a break).
+                self._unknown_session_break(op, s, p)
+                return "unknown_session_break"
             return "unknown_session"
         if rec["status"] != s.status and s.status in ("complete", "expired"):
             op.put("stripe_sessions", rec["session_id"], {**rec, "status": s.status, "payment_intent": s.payment_intent})
@@ -664,10 +675,30 @@ class StripeMixin:
             return self._stripe_payment(op, p)
         return f"session_{s.status}"
 
+    def _unknown_session_break(self, op: Op, s: StripeSession, p: StripePayment) -> None:
+        bid = rid("brk", "stripe_unknown_session", s.session_id)
+        if op.get("breaks", bid) is not None:
+            return
+        amount = p.amount_received if p.status == "succeeded" and p.amount_received else "0.00"
+        note = (f"Stripe {'took' if p.status == 'succeeded' else 'is taking'} a payment ({p.payment_intent}) on Checkout "
+                f"page {s.session_id}, which Finance has no record of: run the Stripe re-import for its date "
+                "(docs/runbooks/restore-and-reimport.md) or book it by hand")
+        op.put("breaks", bid, {"break_id": bid, "leg": "stripe_unknown_session", "subject": "zbm:1060",
+                               "difference": amount, "opened_at": iso(self._now()),
+                               "opened_on": self._today_la().isoformat(), "owner": "andre", "severity": "high",
+                               "explanation_code": "unknown", "status": "open", "receipt_id": None,
+                               "session_id": s.session_id, "payment_intent": p.payment_intent,
+                               "resolution": None, "note": note[:200]})
+        op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                  {"break_id": bid, "leg": "stripe_unknown_session", "difference": amount},
+                  f"Break opened: a Stripe payment on a page Finance does not know ({amount})")
+        alert_log.error("ALERT finance: stripe_unknown_session session=%s payment_intent=%s amount=%s break=%s",
+                        s.session_id, p.payment_intent, amount, bid)
+
     # --- payments --------------------------------------------------------------------------------------------------
 
     def _stripe_invoice_ok(self, op: Op, inv: Optional[dict], p: StripePayment, gross: Decimal) -> bool:
-        if inv is None or inv["entity"] != "zbm" or inv["status"] != "issued" or M.D(inv["total"]) != gross:
+        if inv is None or inv["entity"] != "zbm" or inv["status"] != "issued" or I2.amount_due(inv) != gross:
             return False
         if not any(s["invoice_id"] == inv["invoice_id"] for s in self.db["stripe_sessions"].values()):
             return False                                 # Finance never made a checkout for it: not Finance's payment
@@ -1127,13 +1158,17 @@ class StripeMixin:
         prior = rc["status"]
         reversed_before = prior == "charged_back"
         matched = prior in ("matched", "partially_refunded", "refunded") and inv is not None
+        # ADR 0026: the part of the refund a pending credit note promised is paid out of 2050 (refunds payable), never
+        # raised again on A/R; only the rest makes the client "owe it again" (and opens the break below)
+        linked = self._credit_refund_share(inv, delta) if matched else M.ZERO
         if matched or (reversed_before and inv is not None):
-            debit = J.dr("1100", delta, f"client:{inv['client_id']}")
+            debits = ([J.dr("2050", linked, f"client:{inv['client_id']}")] if linked > 0 else []) + \
+                ([J.dr("1100", delta - linked, f"client:{inv['client_id']}")] if delta > linked else [])
         elif reversed_before:
-            debit = J.dr("5030", delta)
+            debits = [J.dr("5030", delta)]
         else:
-            debit = J.dr("2070", delta)
-        e = self._post(op, "zbm", [debit, J.cr("1060", delta)], "F7r", {"kind": "stripe_refund", "id": rct},
+            debits = [J.dr("2070", delta)]
+        e = self._post(op, "zbm", [*debits, J.cr("1060", delta)], "F7r", {"kind": "stripe_refund", "id": rct},
                        f"F7r|{p.payment_intent}|{M.fmt(total)}", actor=ACTOR, fact=True)
         st = dict(rc.get("stripe") or {})
         st.update(refunded=M.fmt(total), refund_entry_ids=list(st.get("refund_entry_ids") or []) + [e["entry_id"]])
@@ -1160,7 +1195,16 @@ class StripeMixin:
             # relevant on a sanctions ground: blocked property just left the Stripe balance). The hold stays either
             # way, and the booking below is the same for every hold, so nothing a non-Andre reader sees differs
             self._held_refund_mark(op, inv, held, rct, delta, total)
-        if matched and inv["status"] == "paid":
+        if matched:
+            # ADR 0026: credit notes record which refund paid them; refunds before a credit note wait to be linked
+            inv = self._credit_refund_link(op, inv, e["entry_id"], delta, linked)
+        if matched and inv.get("credit_note_ids") and inv["status"] in ("paid", "credited", "issued"):
+            new_status = self._credited_status(inv, total, M.D(rc["amount"]))
+            upd = {**inv, "refunded": M.fmt(total)}
+            if new_status != inv["status"]:
+                upd.update(status=new_status, **({"paid_at": None} if new_status != "paid" else {}))
+            op.put("invoices", inv["invoice_id"], upd)
+        elif matched and inv["status"] == "paid":
             if full or net_reversed:
                 op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
                                                        "refunded": M.fmt(total)})
@@ -1175,18 +1219,18 @@ class StripeMixin:
             if buy is not None:
                 op.put("media_buys", buy["buy_id"], {**buy, "payment_refunded": True})
         bid = rid("brk", "stripe_refund", rct, M.fmt(total))
-        if op.get("breaks", bid) is None:
+        if delta > linked and op.get("breaks", bid) is None:
             op.put("breaks", bid, {"break_id": bid, "leg": "stripe_refund", "subject": f"zbm:1060:{rct}"[:160],
-                                   "difference": M.fmt(delta), "opened_at": iso(self._now()),
+                                   "difference": M.fmt(delta - linked), "opened_at": iso(self._now()),
                                    "opened_on": self._today_la().isoformat(), "owner": "andre",
                                    "explanation_code": "unknown", "status": "open", "receipt_id": rct,
                                    "resolution": None})
             op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
-                      {"break_id": bid, "leg": "stripe_refund", "difference": M.fmt(delta)},
-                      f"Break opened: {M.fmt(delta)} refunded at Stripe outside Finance")
+                      {"break_id": bid, "leg": "stripe_refund", "difference": M.fmt(delta - linked)},
+                      f"Break opened: {M.fmt(delta - linked)} refunded at Stripe with no credit note")
         op.record(derived_id("rfds", rct, M.fmt(total)), "stripe_refund_booked", ACTOR, rct,
                   {"receipt_id": rct, "amount": M.fmt(delta), "refunded_total": M.fmt(total), "entry_id": e["entry_id"],
-                   "invoice_id": inv["invoice_id"] if inv else None},
+                   "invoice_id": inv["invoice_id"] if inv else None, "against_credit_notes": M.fmt(linked)},
                   f"Stripe refund booked: {M.fmt(delta)} (total refunded {M.fmt(total)})")
         return "refund_booked_held" if held else "refund_booked"   # neutral: the same for every kind of hold
 
@@ -1221,7 +1265,8 @@ class StripeMixin:
         bid = rid("brk", "stripe_refund_reversed", rct, M.fmt(total))
         note = f"a refund of {M.fmt(delta)} failed at Stripe: the money is back in the Stripe balance"
         simple = prior in ("refunded", "partially_refunded", "unapplied") and total >= 0 \
-            and not (inv is not None and inv["kind"] == I2.MEDIA_KIND)
+            and not (inv is not None and inv["kind"] == I2.MEDIA_KIND) \
+            and not (inv is not None and inv.get("credit_note_ids"))      # ADR 0026: Andre books it (break)
         if simple:
             credit = J.cr("1100", delta, f"client:{inv['client_id']}") if inv is not None else J.cr("2070", delta)
             e = self._post(op, "zbm", [J.dr("1060", delta), credit], "F7r",

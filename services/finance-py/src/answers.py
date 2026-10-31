@@ -28,7 +28,7 @@ from clock import parse_iso
 from ports import (BankBalance, BankTransfer, Certification, ClawbackPage, ClientActivation, ComplianceRuling, GLAnswer,
                    HoldsAnswer, JurisdictionAnswer, LegalAnswer, RegisterParameters, RailAccount, RailBalance, RailLookup, RailSubmit, RegisterRow,
                    SanctionsAnswer, StripeCheckout, StripeDispute, StripePayment, StripePayout, StripeSession,
-                   TaxAgentAnswer, TierAnswer)
+                   TaxAgentAnswer, TierAnswer, MailOutcome, StripeList)
 
 DEFAULT_MAX_VIEWS = 10 ** 12
 
@@ -324,6 +324,21 @@ class StripePayoutM(_S):
         return self
 
 
+class MailOutcomeM(_S):
+    """ADR 0026: a mail adapter's answer (never carries a recipient or a body)."""
+    outcome: Literal["sent", "retry", "permanent", "no_recipient", "disabled"]
+    code: Optional[Annotated[str, Field(max_length=80)]] = None
+    provider_id: Optional[Annotated[str, Field(max_length=120)]] = None
+
+
+class StripeListM(_S):
+    """CH-3 re-import: a Stripe listing (ids and the few fields the plan reads; the adapter checks each id)."""
+    available: Literal[True]
+    items: tuple[dict, ...] = Field(default=(), max_length=1000)
+    complete: bool = True
+    reason: Reason = ""
+
+
 MODELS: dict[type, type[BaseModel]] = {
     Certification: CertificationM, ClawbackPage: ClawbackPageM, ComplianceRuling: ComplianceRulingM,
     HoldsAnswer: HoldsAnswerM, SanctionsAnswer: SanctionsAnswerM, RegisterRow: RegisterRowM,
@@ -332,10 +347,10 @@ MODELS: dict[type, type[BaseModel]] = {
     RailAccount: RailAccountM, RailSubmit: RailSubmitM, RailLookup: RailLookupM, RailBalance: BalanceM,
     BankBalance: BalanceM, BankTransfer: BankTransferM, TaxAgentAnswer: TaxAgentAnswerM, GLAnswer: GLAnswerM,
     StripeCheckout: StripeCheckoutM, StripeSession: StripeSessionM, StripePayment: StripePaymentM,
-    StripeDispute: StripeDisputeM, StripePayout: StripePayoutM,
+    StripeDispute: StripeDisputeM, StripePayout: StripePayoutM, MailOutcome: MailOutcomeM, StripeList: StripeListM,
 }
 # answers without an ``available`` switch: every field is always checked
-_ALWAYS = (RailSubmit, BankTransfer, StripeCheckout)
+_ALWAYS = (RailSubmit, BankTransfer, StripeCheckout, MailOutcome)
 
 
 class Malformed(Exception):

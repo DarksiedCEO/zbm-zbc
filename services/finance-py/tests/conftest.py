@@ -19,7 +19,8 @@ for p in (SRC, TESTS):
 # unset (the module-level app gets the unconfigured ledger).
 os.environ.setdefault("FIN_SERVICE_TOKEN", "test-fin-service-token-do-not-use-0123456")
 for k in list(os.environ):
-    if k.startswith("FIN_") and k != "FIN_SERVICE_TOKEN" or k in ("LEDGER_SERVICE_URL", "LEDGER_SERVICE_TOKEN"):
+    if k.startswith("FIN_") and k != "FIN_SERVICE_TOKEN" or k in ("LEDGER_SERVICE_URL", "LEDGER_SERVICE_TOKEN",
+                                                                   "RESEND_API_KEY_FILE", "MAIL_FROM"):
         os.environ.pop(k, None)
 
 import helpers  # noqa: E402

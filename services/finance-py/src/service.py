@@ -55,7 +55,9 @@ COLLECTIONS = ("rc_proposals", "rate_cards", "profiles", "client_profiles", "pay
                "payables", "batches", "items", "exceptions", "recon_runs", "breaks", "invoices", "receipts", "disputes",
                "refunds", "treasury_ops", "controls", "close", "locks", "tax_readiness", "job_runs", "rail_events",
                "integrity_checks", "clawbacks", "offboarding", "shortfalls", "media_buys", "client_receipts",
-               "stripe_sessions", "stripe_events", "stripe_disputes", "stripe_payouts")
+               "stripe_sessions", "stripe_events", "stripe_disputes", "stripe_payouts",
+               # ADR 0026: credit notes, client billing contacts, the client-mail outbox, backup markers, Stripe imports
+               "credit_notes", "client_contacts", "mail_outbox", "backup_markers", "stripe_imports")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -747,12 +749,16 @@ class FinanceService:
             return {"epoch": self.log.epoch, "head_seq": len(shas), "head_sha256": shas[-1] if shas else None,
                     "rules_version": self.rules_version, "fatal": a.fatal, "problems": a.voidable,
                     "voidable": {"lines": sorted(a.void_lines), "event_ids": sorted(a.void_event_ids)},
-                    "reconcile_mode": self.reconcile_mode}
+                    "reconcile_mode": self.reconcile_mode,
+                    # CH-3 (svc_restore): voidable evidence that is MONEY is never a cleanup; it needs the re-import
+                    "money_at_risk": self.money_at_risk(a.void_event_ids)}
 
-    def reconcile(self, request_id: str, head_sha256: str, void_lines: list[int], void_event_ids: list[str]) -> dict:
+    def reconcile(self, request_id: str, head_sha256: str, void_lines: list[int], void_event_ids: list[str],
+                  money_events_acknowledged: bool = False) -> dict:
         with self.lock:
             key, h, ent = self._idem("andre", request_id, "reconcile",
-                                     {"head": head_sha256, "lines": void_lines, "ids": void_event_ids})
+                                     {"head": head_sha256, "lines": void_lines, "ids": void_event_ids,
+                                      **({"money_ack": True} if money_events_acknowledged else {})})
             if ent:
                 return ent["response"]
             plan = self.reconcile_plan()
@@ -766,10 +772,12 @@ class FinanceService:
                     sorted(set(void_event_ids)) != plan["voidable"]["event_ids"]:
                 raise Conflict("the void list is not exactly what the ledger shows now; nothing was voided",
                                expected=plan["voidable"])
+            self.restore_guard(plan, money_events_acknowledged)          # CH-3
             payload = i10.reconcile_payload(plan["epoch"], self.rules_version, plan["head_seq"], plan["head_sha256"],
                                             void_lines, void_event_ids)
             eid = i10.reconcile_id(plan["epoch"], plan["head_seq"], payload)
             self._reconciling = True
+            reimport_break = None
             try:
                 op = Op(self, f"reconcile|{eid}", "andre", i10.LOG_SUBJECT)
                 op.record(eid, i10.RECONCILE_TYPE, "andre", i10.LOG_SUBJECT, payload,
@@ -777,12 +785,17 @@ class FinanceService:
                           f"{len(payload['void_event_ids'])} ledger event(s) declared void", raw=True)
                 op.add("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": request_id})
                 self._commit(op)
+                try:
+                    reimport_break = self._restore_reimport_break(plan)  # CH-3: open until a re-import ran
+                except Unavailable:
+                    reimport_break = None       # the reconcile stands; the response still says a re-import is due
             finally:
                 self._reconciling = False
             left = self.assess_log()
             self.reconcile_required = list(left.voidable)
             resp = {"reconcile_event_id": eid, "voided": payload["void_event_ids"], "void_lines": payload["void_lines"],
                     "remaining_problems": left.problems, "restart_required": self.reconcile_mode,
+                    "stripe_reimport_required": bool(plan["money_at_risk"]), "reimport_break_id": reimport_break,
                     "ledger_event_ids": [eid], "request_id": request_id}
             return self._idem_mem(key, h, resp)
 
@@ -1081,8 +1094,11 @@ from svc_payees import PayeesMixin  # noqa: E402
 from svc_payouts import PayoutsMixin  # noqa: E402
 from svc_recon import ReconMixin  # noqa: E402
 from svc_stripe import StripeMixin  # noqa: E402
+from svc_credits import CreditsMixin  # noqa: E402
+from svc_mail import MailMixin  # noqa: E402
+from svc_restore import RestoreMixin  # noqa: E402
 
 
-class Service(BooksMixin, MediaMixin, StripeMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin,
-              FinanceService):
+class Service(BooksMixin, MediaMixin, StripeMixin, CreditsMixin, MailMixin, RestoreMixin, PayablesMixin, PayeesMixin,
+              PayoutsMixin, ReconMixin, FinanceService):
     """The assembled Finance service."""

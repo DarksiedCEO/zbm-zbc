@@ -246,8 +246,16 @@ def _sanitize(errors: list[dict]) -> dict:
 
 ID_RE = m.ID_RE
 # Callers that reach only routes naming them explicitly (``caller()`` with no names does not admit them).
-NAMED_ONLY = frozenset({"seo_02"})
+NAMED_ONLY = frozenset({"seo_02", "ops_cron"})
 SEO_STATUS_ROUTE = re.compile(r"/fin/v1/invoices/[A-Za-z0-9._:-]{1,128}/status")
+# ADR 0026: the Railway cron service (caller ops_cron) reaches exactly these: the repeatable housekeeping jobs (the
+# hourly Stripe page sweep and hold re-check, client mail) and the daily reconciliation. Never payouts, releases,
+# refunds, sweeps, receipts or anything else ``scheduler`` reaches.
+CRON_JOBS = ("stripe-sessions", "client-mail")
+CRON_ROUTES = (re.compile(r"/fin/v1/jobs/(%s)/run" % "|".join(re.escape(j) for j in CRON_JOBS)),
+               re.compile(r"/fin/v1/reconciliations/run"))
+# CH-3: while Finance is quiesced for a backup only reads and the resume are answered
+QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume")
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -382,11 +390,27 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         # callers (``caller()`` admits any caller) and no Andre-only route can answer it anything but 403.
         # /health is open to anyone without any token (no bearer, no caller), so refusing it to seo_02 would protect
         # nothing; it answers seo_02 exactly what it answers an anonymous caller (AEGIS SEO Wave 3 round 2)
-        if callers.identify(request.headers.get(CALLER_HEADER)) in NAMED_ONLY and not (
+        who = callers.identify(request.headers.get(CALLER_HEADER))
+        if who == "seo_02" and not (
                 request.method == "GET" and (SEO_STATUS_ROUTE.fullmatch(request.url.path)
                                              or request.url.path == "/health")):
             return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
                                                                    "name it"})
+        if who == "ops_cron" and not ((request.method == "POST" and any(r.fullmatch(request.url.path)
+                                                                         for r in CRON_ROUTES))
+                                      or (request.method == "GET" and request.url.path == "/health")):
+            return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
+                                                                   "name it"})
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def _quiesce(request: Request, call_next):
+        # CH-3: a backup window. Every write waits (503: Stripe and the cron service retry); reads still answer
+        if request.method not in ("GET", "HEAD") and not QUIESCE_EXEMPT.fullmatch(request.url.path) \
+                and svc.quiesced() is not None:
+            return JSONResponse(status_code=503, headers={"Retry-After": "300"},
+                                content={"detail": "QUIESCED: Finance is paused for a backup; nothing was done, "
+                                                   "retry later", "took_effect": False})
         return await call_next(request)
 
     @app.middleware("http")
@@ -526,6 +550,67 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                        req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.decide_invoice(req.request_id, _id(invoice_id), dump(req))
 
+    # --- void, credit notes, client mail (ADR 0026) --------------------------------------------------------------------
+
+    def _client(value: str) -> str:
+        if not m.CLIENT_ID_RE.fullmatch(value or "") or m.sensitive_value(value or ""):
+            raise Invalid("client id format")
+        return value
+
+    @app.post("/fin/v1/invoices/{invoice_id}/void", dependencies=auth)
+    def invoice_void(invoice_id: str, _: str = Depends(andre("invoices/void")),
+                     req: m.InvoiceVoid = Depends(body(m.InvoiceVoid))) -> dict:
+        return svc.void_invoice(req.request_id, _id(invoice_id), dump(req))
+
+    @app.post("/fin/v1/invoices/{invoice_id}/credit-notes", dependencies=auth, status_code=201)
+    def credit_note(invoice_id: str, _: str = Depends(andre("invoices/credit-notes")),
+                    req: m.CreditNoteIn = Depends(body(m.CreditNoteIn))) -> dict:
+        return svc.issue_credit_note(req.request_id, _id(invoice_id), dump(req))
+
+    @app.get("/fin/v1/invoices/{invoice_id}/credit-notes", dependencies=auth)
+    def credit_notes(invoice_id: str, _: str = Depends(andre("invoices/credit-notes/list"))) -> dict:
+        return svc.invoice_credit_notes(_id(invoice_id))
+
+    @app.get("/fin/v1/credit-notes/{credit_note_id}", dependencies=auth)
+    def credit_note_get(credit_note_id: str, _: str = Depends(andre("credit-notes/get"))) -> dict:
+        return svc.get_credit_note(_id(credit_note_id))
+
+    @app.put("/fin/v1/clients/{client_id}/billing-contact", dependencies=auth)
+    def billing_contact(client_id: str, _: str = Depends(andre("billing-contact")),
+                        req: m.BillingContact = Depends(body(m.BillingContact))) -> dict:
+        return svc.put_billing_contact(req.request_id, _client(client_id), dump(req))
+
+    @app.post("/fin/v1/clients/{client_id}/acknowledgements", dependencies=auth, status_code=201)
+    def acknowledgement(client_id: str, _: str = Depends(andre("acknowledgements")),
+                        req: m.Acknowledgement = Depends(body(m.Acknowledgement))) -> dict:
+        return svc.acknowledge(req.request_id, _client(client_id), dump(req))
+
+    @app.get("/fin/v1/client-mail/{mail_id}", dependencies=auth)
+    def client_mail_get(mail_id: str, _: str = Depends(andre("client-mail/get"))) -> dict:
+        return svc.mail_status(_id(mail_id))
+
+    @app.post("/fin/v1/client-mail/{mail_id}/requeue", dependencies=auth)
+    def client_mail_requeue(mail_id: str, _: str = Depends(andre("client-mail/requeue")),
+                            req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        return svc.requeue_mail(req.request_id, _id(mail_id))
+
+    # --- backups and the Stripe re-import (CH-3) -----------------------------------------------------------------------
+
+    @app.post("/fin/v1/backup/quiesce", dependencies=auth)
+    def backup_quiesce(_: str = Depends(andre("backup/quiesce")),
+                       req: m.QuiesceRequest = Depends(body(m.QuiesceRequest))) -> dict:
+        return svc.backup_quiesce(req.request_id, req.minutes)
+
+    @app.post("/fin/v1/backup/resume", dependencies=auth)
+    def backup_resume(_: str = Depends(andre("backup/resume")),
+                      req: m.ResumeRequest = Depends(body(m.ResumeRequest))) -> dict:
+        return svc.backup_resume(req.request_id, req.marker_id)
+
+    @app.post("/fin/v1/stripe/reimport", dependencies=auth)
+    def stripe_reimport(_: str = Depends(andre("stripe/reimport")),
+                        req: m.StripeReimport = Depends(body(m.StripeReimport))) -> dict:
+        return svc.stripe_reimport(req.request_id, dump(req))
+
     # --- media buys and client receipts (ADR 0009 amendment, Oct 5 2026) ---------------------------------------------
 
     @app.post("/fin/v1/media-buys", dependencies=auth, status_code=201)
@@ -635,7 +720,10 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     # --- jobs, payouts ----------------------------------------------------------------------------------------------
 
     @app.post("/fin/v1/jobs/{job}/run", dependencies=auth)
-    def job(job: str, who: str = Depends(caller("scheduler")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+    def job(job: str, who: str = Depends(caller("scheduler", "ops_cron")),
+            req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        if who == "ops_cron" and job not in CRON_JOBS:
+            raise Forbidden("the cron service runs only the housekeeping jobs")
         return svc.run_job(who, req.request_id, job)
 
     @app.post("/fin/v1/payout-runs", dependencies=auth, status_code=201)
@@ -702,7 +790,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     # --- reconciliation, treasury, clawbacks, close, journal ---------------------------------------------------------
 
     @app.post("/fin/v1/reconciliations/run", dependencies=auth)
-    def recon(who: str = Depends(caller("scheduler")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+    def recon(who: str = Depends(caller("scheduler", "ops_cron")),
+              req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
         return svc.run_recon(who, req.request_id)
 
     @app.get("/fin/v1/breaks", dependencies=auth)
@@ -846,7 +935,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
 
     @app.post("/fin/v1/reconcile", dependencies=auth)
     def reconcile(_: str = Depends(andre("reconcile")), req: m.ReconcileRequest = Depends(body(m.ReconcileRequest))) -> dict:
-        return svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines), list(req.void_event_ids))
+        return svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines), list(req.void_event_ids),
+                             req.money_events_acknowledged)
 
     return app
 
@@ -866,6 +956,10 @@ def build_ports(settings: config_mod.Settings) -> Ports:
     if settings.legal_url:
         from clients import HttpLegal
         ports.legal = HttpLegal(settings.legal_url, settings.legal_token, settings.legal_caller_token)
+    if settings.resend_api_key is not None and settings.mail_from:
+        # ADR 0026: client email is on only with BOTH set (config._mail); otherwise the stand-in sends nothing
+        from mail import ResendClientMail
+        ports.client_mail = ResendClientMail(settings.resend_api_key.reveal(), settings.mail_from)
     if settings.stripe_incoming:
         from stripe_incoming import StripeIncoming
         ports.stripe_in = StripeIncoming(settings.stripe_secret_key.reveal(), settings.stripe_webhook_secret.reveal(),

@@ -31,8 +31,8 @@ from ledger import derived_id
 from ports import BankBalance, BankTransfer, RailBalance, RailLookup
 from service import RUNNABLE, Gather, IntegrityRefused, Op, PostingRefused, Refused, rid, sha
 
-JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync", "stripe-sessions")
-REPEATABLE_JOBS = ("stripe-sessions",)        # safe to run many times a day (AEGIS N2): each run is recorded
+JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync", "stripe-sessions", "client-mail")
+REPEATABLE_JOBS = ("stripe-sessions", "client-mail")        # safe to run many times a day (AEGIS N2): each run is recorded
 PENDING_SWEEP = ("proposed", "approved", "executing", "bank_unknown")      # reserved when a sweep is proposed
 LIVE_SWEEP = ("approved", "executing", "bank_unknown")                     # reserved at approval and execution
 OPEN_OPS = ("proposed", "approved", "executing", "bank_unknown")
@@ -891,7 +891,8 @@ class ReconMixin:
         self.require_rules()
         prefix = f"job|{job}|{day}" if job not in REPEATABLE_JOBS else f"job|{jk}"
         fn = {"accrual": self.job_accrual, "clawback-sync": self.job_clawback_sync, "tax-sync": self.job_tax_sync,
-              "rail-sync": self.job_rail_sync, "stripe-sessions": self.job_stripe_sessions}[job]
+              "rail-sync": self.job_rail_sync, "stripe-sessions": self.job_stripe_sessions,
+              "client-mail": self.job_client_mail}[job]
         summary = fn(prefix)
         with self.lock:
             op = Op(self, f"{prefix}|done", "intel_10_evidence_audit", job)

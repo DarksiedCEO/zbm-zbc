@@ -375,6 +375,7 @@ class FakePeople:
 class FakeClientMail:
     def __init__(self):
         self.sent: list = []
+        self.notices: list = []
         self.accept = True
 
     def send_receipt(self, client_id, receipt):
@@ -382,6 +383,17 @@ class FakeClientMail:
             return False
         self.sent.append((client_id, receipt))
         return True
+
+    def deliver(self, msg):
+        """ADR 0026 port shape. Receipts still go through ``send_receipt`` (tests patch it); other kinds are kept in
+        ``notices``. Like the old fake it ignores the recipient (the real adapters enforce it: test_client_mail)."""
+        from ports import MailOutcome
+        if msg["kind"] == "receipt":
+            return MailOutcome("sent" if self.send_receipt(msg["client_id"], msg["data"]) is True else "retry")
+        if not self.accept:
+            return MailOutcome("retry")
+        self.notices.append(msg)
+        return MailOutcome("sent")
 
 
 class FakePush:

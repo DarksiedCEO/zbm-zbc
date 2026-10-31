@@ -35,6 +35,7 @@ class SimStripe:
         self.txns: dict = {}
         self.disputes: dict = {}
         self.payouts: dict = {}
+        self.refunds: dict = {}
         self.idem: dict = {}
         self.requests: list = []
         self.fail_next: list = []          # status codes to answer the next requests with
@@ -80,6 +81,8 @@ class SimStripe:
             parts = p.strip("/").split("/")
             if p == "/v1/balance":
                 return self._json(200, self.balance_doc())
+            if p in ("/v1/payment_intents", "/v1/refunds", "/v1/disputes", "/v1/checkout/sessions"):
+                return self._list(p, dict(query))
             if len(parts) == 4 and parts[1] == "checkout" and parts[2] == "sessions":
                 s = self.sessions.get(parts[3])
                 return self._json(200, {k: v for k, v in s.items() if not k.startswith("_")}) if s \
@@ -95,6 +98,26 @@ class SimStripe:
                 po = self.payouts.get(parts[2])
                 return self._json(200, po) if po else self._json(404, {"error": {"code": "resource_missing"}})
         return self._json(404, {"error": {"code": "resource_missing"}})
+
+    def _list(self, path: str, q: dict) -> httpx.Response:
+        """Stripe list endpoints, newest first, ``created[gte|lt]`` / ``payment_intent`` filters, ``limit`` and
+        ``starting_after`` paging (the shapes the re-import reads)."""
+        if path == "/v1/checkout/sessions":
+            rows = [{k: v for k, v in s.items() if not k.startswith("_")} for s in self.sessions.values()
+                    if s.get("payment_intent") == q.get("payment_intent")]
+        else:
+            src = {"/v1/payment_intents": self.pis, "/v1/refunds": self.refunds,
+                   "/v1/disputes": self.disputes}[path]
+            rows = [{k: v for k, v in o.items() if not k.startswith("_")} for o in src.values()]
+            gte, lt = int(q.get("created[gte]", 0)), int(q.get("created[lt]", 2 ** 40))
+            rows = [r for r in rows if gte <= r.get("created", 0) < lt]
+        rows.sort(key=lambda r: (-r.get("created", 0), r["id"]))
+        if q.get("starting_after"):
+            ids = [r["id"] for r in rows]
+            rows = rows[ids.index(q["starting_after"]) + 1:] if q["starting_after"] in ids else []
+        limit = int(q.get("limit", 10))
+        return self._json(200, {"object": "list", "data": rows[:limit], "has_more": len(rows) > limit,
+                                "url": path})
 
     def _create_session(self, request: httpx.Request, form: dict) -> httpx.Response:
         key = request.headers.get("idempotency-key")
@@ -168,6 +191,7 @@ class SimStripe:
         pi_id = f"pi_{self.next_n():04d}sim"
         amt = s["amount_total"] if amount is None else amount
         self.pis[pi_id] = {"id": pi_id, "object": "payment_intent", "amount": amt, "amount_received": 0,
+                           "created": int(self.clock.now().timestamp()),
                            "currency": "usd", "status": "processing", "livemode": self.livemode,
                            "metadata": dict(s["_pi_metadata"] if metadata is None else metadata),
                            "latest_charge": None, "payment_method_types": [method]}
@@ -205,7 +229,7 @@ class SimStripe:
                                                                           "payment_failure_refund"))
         pi.update(status="requires_payment_method")
 
-    def refund(self, pi_id: str, amount: Optional[int] = None) -> None:
+    def refund(self, pi_id: str, amount: Optional[int] = None) -> str:
         """A refund made at Stripe (the Dashboard, not Finance): the charge's ``amount_refunded`` grows and the money
         leaves the balance (Stripe keeps its processing fee)."""
         pi = self.pis[pi_id]
@@ -214,12 +238,17 @@ class SimStripe:
         ch["amount_refunded"] += amt
         ch["refunded"] = ch["amount_refunded"] == ch["amount"]
         self._txn(-amt, 0, ch["id"], "refund")
+        re_id = f"re_{self.next_n():04d}sim"
+        self.refunds[re_id] = {"id": re_id, "object": "refund", "amount": amt, "currency": "usd", "status": "succeeded",
+                               "payment_intent": pi_id, "charge": ch["id"], "created": int(self.clock.now().timestamp())}
+        return re_id
 
     def dispute(self, pi_id: str, fee: int = 1500, amount: Optional[int] = None) -> str:
         pi = self.pis[pi_id]
         amt = pi["amount"] if amount is None else amount
         du = f"du_{self.next_n():04d}sim"
         self.disputes[du] = {"id": du, "object": "dispute", "amount": amt, "currency": "usd", "status": "needs_response",
+                             "created": int(self.clock.now().timestamp()),
                              "payment_intent": pi_id, "charge": pi["latest_charge"], "livemode": self.livemode,
                              "_txns": [self._txn(-amt, fee, du, "adjustment")]}
         return du

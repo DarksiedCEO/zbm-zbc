@@ -373,8 +373,10 @@ class BooksMixin:
                      lambda: cmp_.row_parameters(self.NEXUS_ROW), RegisterParameters(False, self.NEXUS_ROW))
         th = self._nexus_thresholds(ans.parameters) if isinstance(ans, RegisterParameters) and ans.available else None
         with self.lock:
+            # ADR 0026: a credited invoice counts for what is left after its credit notes (fully credited: nothing)
             invoices = [dict(v) for v in self.db["invoices"].values()
-                        if v["status"] in ("issued", "paid", "returned") and v.get("issued_at")]
+                        if v["status"] in ("issued", "paid", "returned", "credited") and v.get("issued_at")
+                        and M.D(v["total"]) > M.D(v.get("credited") or "0.00")]
         # AEGIS F-11: the previous calendar year too (most states test the current OR the previous year)
         windows = {"trailing_12_months": (today - timedelta(days=365), today),
                    "calendar_year": (date(today.year, 1, 1), today),
@@ -388,7 +390,7 @@ class BooksMixin:
                 b = buckets.setdefault(code, {p: {"sales": M.D("0.00"), "transactions": 0} for p in starts})
                 for period, (start, end) in windows.items():
                     if start <= day <= end:
-                        b[period]["sales"] += M.D(inv["total"])
+                        b[period]["sales"] += M.D(inv["total"]) - M.D(inv.get("credited") or "0.00")
                         b[period]["transactions"] += 1
             rows, flagged = [], []
             for code in sorted(buckets):
@@ -455,6 +457,11 @@ class BooksMixin:
                     "rules_pinned": self.rules_pinned}
 
     # ================================================================== invoices (§B.9, §C.2)
+
+    def _business_today(self) -> date:
+        """CH-10: today's date where ZBM does business (FIN_BUSINESS_TZ, default America/Los_Angeles)."""
+        from zoneinfo import ZoneInfo
+        return self._now().astimezone(ZoneInfo(getattr(self.cfg, "business_tz", None) or "America/Los_Angeles")).date()
 
     def draft_invoice(self, principal: str, request_id: str, body: dict) -> dict:
         with self.lock:
@@ -556,7 +563,8 @@ class BooksMixin:
                     buy = self.db["media_buys"][inv["media_buy_id"]]
                     op.put("media_buys", buy["buy_id"], {**buy, "status": "cancelled", "cancelled_at": iso(now)})
             else:
-                due = (now.date() + timedelta(days=inv["due_days"])).isoformat()
+                # CH-10: the due date counts from the business day (FIN_BUSINESS_TZ), never the UTC date
+                due = (self._business_today() + timedelta(days=inv["due_days"])).isoformat()
                 new = {**inv, "status": "issued", "approved_by": "andre", "issued_at": iso(now), "due_at": due,
                        # ADR 0024: where the client is (Compliance's activation), for the per-jurisdiction totals
                        "client_jurisdiction": act.jurisdiction, "compliance_ruling_id": act.ruling_id}
@@ -754,7 +762,7 @@ class BooksMixin:
             inv = self.db["invoices"].get(invoice_id)
             if rc is None or inv is None:
                 raise NotFound("no such receipt or invoice")
-            if rc["status"] != "unapplied" or inv["status"] != "issued" or M.D(inv["total"]) != M.D(rc["amount"]):
+            if rc["status"] != "unapplied" or inv["status"] != "issued" or I2.amount_due(inv) != M.D(rc["amount"]):
                 raise Conflict("only an unapplied receipt of exactly an issued invoice's total can be applied")
             if not (rc["entity"] == "zbc" and rc["into_account"] == "1020" and inv["kind"] == "campaign_deposit"):
                 raise Conflict("only a receipt that landed in the deposits account can be applied to a deposit invoice "

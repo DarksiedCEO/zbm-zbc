@@ -98,7 +98,7 @@ CALLER_ROUTES = [
     ("POST", "/fin/v1/jobs/accrual/run", {"scheduler"}),
     ("POST", "/fin/v1/payout-runs", {"scheduler"}),
     ("POST", "/fin/v1/payout-batches/fin-bat-X/release", {"scheduler"}),
-    ("POST", "/fin/v1/reconciliations/run", {"scheduler"}),
+    ("POST", "/fin/v1/reconciliations/run", {"scheduler", "ops_cron"}),       # ADR 0026: fin-cron
     ("POST", "/fin/v1/treasury/sweeps", {"scheduler"}),
     ("POST", "/fin/v1/treasury/funding", {"scheduler"}),
     ("POST", "/fin/v1/close/zbc/2026-09/tasks/preclose_review", {"scheduler"}),

@@ -355,7 +355,7 @@ class BNotice(Strict):
 class InvoiceLine(Strict):
     # media_spend / media_fee are not here: Finance writes them itself from a media buy (POST /fin/v1/media-buys).
     line_code: Literal["campaign_deposit", "creative_services", "strategy_services", "production_services",
-                       "retainer_fee", "subscription_fee", "revenue_recovery_services"]
+                       "retainer_fee", "subscription_fee", "revenue_recovery_services", "seo_audit_services"]
     quantity: int = Field(ge=1, le=1_000_000)
     unit_price: PositiveMoney
     description: Optional[Short] = None
@@ -608,7 +608,79 @@ class ReconcileRequest(Strict):
     head_sha256: Sha
     void_lines: list[int] = Field(default_factory=list, max_length=10000)
     void_event_ids: list[Annotated[str, Field(max_length=128)]] = Field(default_factory=list, max_length=10000)
+    # CH-3: required (true) when the plan lists money_at_risk: Andre confirms he will run the Stripe re-import
+    money_events_acknowledged: bool = False
 
 
 def texts(obj: Any) -> list[str]:
     return list(iter_strings(obj))
+
+
+# --- invoice void, credit notes, client contacts, acknowledgements (ADR 0026) ----------------------------------------
+
+CREDIT_REASONS = ("sow_ended_unpaid", "sow_ended_prepaid", "cancelled_before_work", "nonconforming",
+                  "billing_dispute", "infringement_refund", "audit_not_run", "other")
+EMAIL_RE = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                      r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+")
+
+
+class InvoiceVoid(Strict):
+    """Andre cancels an ISSUED, UNPAID invoice in full (refund policy §5.3: "we cancel the invoice in full")."""
+    request_id: Id
+    content_sha256: Sha
+    reason_code: Literal[CREDIT_REASONS]
+    note: Optional[Note] = None
+
+
+class CreditNoteIn(Strict):
+    """Andre issues a credit note against an issued or paid invoice (MSA 4.12(g); refund policy §5.3, §8.4)."""
+    request_id: Id
+    content_sha256: Sha
+    amount: PositiveMoney
+    reason_code: Literal[CREDIT_REASONS]
+    note: Optional[Note] = None
+
+
+def _email_check(v: str) -> str:
+    if not isinstance(v, str) or len(v) > 254 or not EMAIL_RE.fullmatch(v):
+        raise ValueError("not an email address")
+    return v.lower()
+
+
+Email = Annotated[str, AfterValidator(_email_check)]
+
+
+class BillingContact(Strict):
+    """The ONE address client mail goes to for this client (Andre sets it from the signed SOW's billing contact)."""
+    request_id: Id
+    email: Email
+    name: Optional[_text(100)] = None
+
+
+class Acknowledgement(Strict):
+    """Andre has a client's written request and Finance emails the acknowledgement (MSA 4.12(f): within 2 business
+    days)."""
+    request_id: Id
+    topic: Literal["refund_request", "cancellation", "billing_dispute", "payment_question"]
+    received_on: date
+    invoice_id: Optional[Id] = None
+
+
+class QuiesceRequest(Strict):
+    request_id: Id
+    minutes: int = Field(default=30, ge=5, le=120)
+
+
+class ResumeRequest(Strict):
+    request_id: Id
+    marker_id: Id
+
+
+class StripeReimport(Strict):
+    """Andre re-imports Stripe's own record of payments, refunds and disputes for a period (CH-3). A dry run first,
+    always: the real run names the dry run's plan_sha256."""
+    request_id: Id
+    since: date
+    until: date
+    dry_run: bool = True
+    plan_sha256: Optional[Sha] = None

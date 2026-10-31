@@ -22,7 +22,10 @@ from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 # seo_02: Search & Answer Intelligence (2) reads one invoice (GET /fin/v1/invoices/{id}) to verify a paid audit's
 # invoice before the run (ADR 0017 W3-2); like every caller it can reach only the routes open to any caller.
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
-                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02")
+                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02", "ops_cron")
+# ops_cron: the Railway cron service (deploy/scheduler, ADR 0026). It reaches ONLY the repeatable housekeeping jobs and
+# the daily reconciliation (api.CRON_ROUTES); never payout runs, releases, refunds, sweeps or anything else
+# ``scheduler`` reaches.
 TOKEN_MIN = 32
 # AEGIS night review M-2: a Railway variable reference that was not resolved reaches the service as its literal text.
 # "${{FIN_ONBOARDING_CALLER_TOKEN}}" is exactly 32 printable characters and is public in the repo (.railway/railway.ts),
@@ -156,6 +159,11 @@ class Settings:
     stripe_success_url: Optional[str] = None
     stripe_cancel_url: Optional[str] = None
     card_max_invoice: Decimal = Decimal("5000.00")
+    # CH-10: the business day (invoice due dates) is the date in this zone, never the UTC date (FIN_BUSINESS_TZ)
+    business_tz: str = "America/Los_Angeles"
+    # client email (ADR 0026): off unless BOTH the Resend key file and MAIL_FROM are set
+    mail_from: Optional[str] = None
+    resend_api_key: Optional[Secret] = field(default=None, repr=False)
 
 
 _HELD: dict = {}
@@ -404,11 +412,50 @@ def load(env: Optional[dict] = None) -> Settings:
         media_default_markup_pct=media_default, media_max_markup_pct=media_max,
         media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 2, 2, 10),
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
-        **stripe,
+        business_tz=_tz(env, "FIN_BUSINESS_TZ", "America/Los_Angeles"),
+        **stripe, **_mail(env),
     )
     # the flock last: every other refusal above leaves the directory untouched
     s.data_dir_lock = hold_data_dir(data_dir) if data_dir else None
     return s
+
+
+def _tz(env, name: str, default: str) -> str:
+    """An IANA zone name the runtime knows (CH-10). A typo refuses start rather than falling back to UTC."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    raw = (env.get(name) or "").strip() or default
+    if not re.fullmatch(r"[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}", raw):
+        raise RuntimeError(f"{name} must be an IANA time zone name such as America/Los_Angeles")
+    try:
+        ZoneInfo(raw)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise RuntimeError(f"{name}={raw!r} is not a time zone this runtime knows; refusing to start") from None
+    return raw
+
+
+# The only address client mail is ever sent from (ADR 0026; founder Oct 30: billing@zbestmedia.com)
+MAIL_SENDER = "billing@zbestmedia.com"
+_MAIL_FROM = re.compile(r"(?:[A-Za-z0-9 .,'&-]{1,60} <billing@zbestmedia\.com>|billing@zbestmedia\.com)")
+
+
+def _mail(env) -> dict:
+    """Client email (ADR 0026): disabled by default. On only when the Resend key (written to RESEND_API_KEY_FILE by
+    the entrypoint from the Railway variable RESEND_API_KEY) AND MAIL_FROM are both set; one without the other is a
+    half-configured state and refuses start. MAIL_FROM must be billing@zbestmedia.com (a display name is allowed)."""
+    key_file = (env.get("RESEND_API_KEY_FILE") or "").strip()
+    sender = (env.get("MAIL_FROM") or "").strip()
+    if not key_file and not sender:
+        return {}
+    if sender and not key_file:
+        # MAIL_FROM is set in the IaC; with no key the mail stays off (the documented default), not a refusal
+        if not _MAIL_FROM.fullmatch(sender):
+            raise RuntimeError(f"MAIL_FROM must be {MAIL_SENDER} (optionally 'Z Best Media <{MAIL_SENDER}>')")
+        return {"mail_from": sender}
+    if key_file and not sender:
+        raise RuntimeError("RESEND_API_KEY is set but MAIL_FROM is not; set both (client email) or neither")
+    if not _MAIL_FROM.fullmatch(sender):
+        raise RuntimeError(f"MAIL_FROM must be {MAIL_SENDER} (optionally 'Z Best Media <{MAIL_SENDER}>')")
+    return {"mail_from": sender, "resend_api_key": _secret_file(env, "RESEND_API_KEY_FILE", ("re_",))}
 
 
 STRIPE_SETTINGS = ("FIN_STRIPE_SECRET_KEY_FILE", "FIN_STRIPE_WEBHOOK_SECRET_FILE", "FIN_STRIPE_SUCCESS_URL",

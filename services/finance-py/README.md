@@ -101,8 +101,9 @@ Every matched payment makes a client receipt; the scheduler sends it with
 `POST /fin/v1/client-receipts/{id}/send` (client-mail stand-in: nothing is sent, it stays `pending_send`).
 Settings: `FIN_MEDIA_DEFAULT_MARKUP_PCT` (`"15.00"`), `FIN_MEDIA_MAX_MARKUP_PCT` (`"100.00"`, at most `"500.00"`),
 `FIN_MEDIA_RELEASE_HOLD_BD` (2 business days, 2..10; founder M11, the business-account ACH dispute window).
-Card (founder M10): only on a Revenue Recovery-only invoice of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also
-the maximum), never with a surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (default off).
+Card (founder M10; Oct 30 2026 for the SEO audit): only on an invoice whose every line is `revenue_recovery_services`
+or `seo_audit_services`, of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also the maximum), never with a
+surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (default off; the Railway IaC sets it). USD only, Adaptive Pricing off.
 
 ## Stripe: ZBM client payments (ADR 0009 amendment, Oct 5 2026)
 
@@ -111,8 +112,9 @@ Off unless `FIN_STRIPE_INCOMING=1`. ZBM only; ZBC deposits never go through Stri
 invoice: ACH always when the invoice allows ACH, a card only when the card rule passes at that moment. It hands back the
 open page if one exists; an open page that is no longer right (amount or methods changed) is closed at Stripe first,
 and if it cannot be closed no new page is made. `GET` on the same path lists the pages made for an invoice. The
-scheduler runs `POST /fin/v1/jobs/stripe-sessions/run` daily: it closes every page whose invoice is no longer issued or
-that offers a method the invoice may no longer be paid with.
+scheduler (in production the fin-cron service, caller `ops_cron`) runs `POST /fin/v1/jobs/stripe-sessions/run` hourly: it
+closes every page whose invoice is no longer issued, whose amount due changed, or that offers a method the invoice may
+no longer be paid with, and re-asks Compliance about payments held `unverified`.
 `POST /fin/v1/stripe/events` (caller `rail_gateway`; in production the `stripe-gateway` binary in `services/orchestrator-go`, which is what Stripe calls) takes `{request_id, payload, signature}`: the webhook's RAW body and
 its `Stripe-Signature` header, untouched. Finance verifies the signature, then reads the payment, dispute or payout back
 from Stripe and books that (F13/F13f payment and fee into 1060 Stripe balance, F13x a payment that failed afterwards,
@@ -125,11 +127,39 @@ Settings (all required when on; refuses to start otherwise):
 - `FIN_STRIPE_WEBHOOK_SECRET_FILE`: the endpoint's `whsec_` secret, same file rules.
 - `FIN_STRIPE_SUCCESS_URL`, `FIN_STRIPE_CANCEL_URL`: https pages Stripe sends the client back to.
 - `FIN_STRIPE_LIVE`: `1` only for live keys.
-Webhook events to subscribe: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-`checkout.session.async_payment_failed`, `checkout.session.expired`, `payment_intent.succeeded`,
-`payment_intent.payment_failed`, `charge.failed`, `charge.dispute.created`, `charge.dispute.updated`,
-`charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
-`payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
+Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools/stripe_webhook_events.py` prints it):
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
+`checkout.session.expired`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.failed`,
+`charge.refunded`, `charge.refund.updated`, `refund.created`, `refund.updated`, `refund.failed`,
+`charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+`charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`, `payout.updated`, `payout.paid`,
+`payout.failed`, `payout.canceled`.
+
+## Void, credit notes, client email, backups (ADR 0026)
+
+- `POST /fin/v1/invoices/{id}/void` (Andre): cancels an issued, unpaid ZBM invoice in full (F11v, Dr 4110 or 2110 /
+  Cr 1100). Its open Stripe pages are closed at Stripe first.
+- `POST /fin/v1/invoices/{id}/credit-notes` (Andre): a partial or full credit against an issued or paid ZBM invoice
+  (F11c: Dr 4110/2110; Cr 1100 for what is still owed, Cr 2050 refunds payable for money already paid, with a
+  `credit_note_refund_due` break due in 10 business days). A Stripe refund (`charge.refunded`, the re-import) is paid
+  out of 2050 for what pending credit notes promised (F7r Dr 2050 / Cr 1060) and linked to them; a refund made
+  before a credit note is absorbed by it. A payment is matched to an invoice for its **amount due** (total less
+  credit notes). `GET /fin/v1/invoices/{id}/credit-notes`, `GET /fin/v1/credit-notes/{id}`.
+- Client email: `PUT /fin/v1/clients/{id}/billing-contact` (Andre) is the one recipient; receipts, credit notes,
+  cancellations, refund confirmations and `POST /fin/v1/clients/{id}/acknowledgements` (Andre) are queued with the
+  booking and sent by `POST /fin/v1/jobs/client-mail/run` (repeatable) through Resend when `RESEND_API_KEY_FILE` and
+  `MAIL_FROM` (billing@zbestmedia.com only) are both set; otherwise the stand-in sends nothing. Backoff 15 min doubling
+  to 8 h, 7 attempts, then `send_failed` + a high break + an `ALERT finance:` log line; `POST
+  /fin/v1/client-mail/{id}/requeue` (Andre).
+- Caller `ops_cron` (the fin-cron service): only `POST /fin/v1/jobs/{stripe-sessions,client-mail}/run` and
+  `POST /fin/v1/reconciliations/run`.
+- Backups (CH-3): `POST /fin/v1/backup/quiesce` / `resume` (Andre) pause writes (503) around a backup set and record a
+  marker; `GET /fin/v1/reconcile` lists `money_at_risk` and `POST /fin/v1/reconcile` needs
+  `money_events_acknowledged: true` to void money evidence (then a `restore_reimport_required` break stays open);
+  `POST /fin/v1/stripe/reimport` (Andre; dry run first, then the real run naming its `plan_sha256`) books what Stripe
+  holds for a period. docs/runbooks/restore-and-reimport.md.
+- CH-4: a paid Checkout page Finance does not know is answered 2xx with a `stripe_unknown_session` break and an
+  `ALERT finance:` log line. CH-10: due dates count from the `FIN_BUSINESS_TZ` date (default America/Los_Angeles).
 
 ## Reconciling the local log with the ledger
 

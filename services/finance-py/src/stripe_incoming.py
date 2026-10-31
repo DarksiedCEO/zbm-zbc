@@ -38,7 +38,7 @@ from urllib.parse import urlencode
 import httpx
 
 from clients import MAX_RESPONSE_BYTES, _run_bounded
-from ports import RailBalance, StripeCheckout, StripeDispute, StripePayment, StripePayout, StripeSession
+from ports import RailBalance, StripeCheckout, StripeDispute, StripeList, StripePayment, StripePayout, StripeSession
 
 API_BASE = "https://api.stripe.com"
 API_VERSION = "2026-09-30.endive"
@@ -340,6 +340,62 @@ class StripeIncoming:
                                 amount=from_cents(doc["amount"]), livemode=doc.get("livemode") is True)
         except (KeyError, TypeError, ValueError):
             return StripePayout(False, reason="stripe answer not understood")
+
+    LISTS = {"payment_intents": "/v1/payment_intents", "refunds": "/v1/refunds", "disputes": "/v1/disputes"}
+    LIST_PAGES = 10                     # 10 x 100 objects per kind and period; more -> complete=False (narrow it)
+
+    def list_objects(self, kind: str, gte: int, lt: int) -> StripeList:
+        """Ids (and the payment each refund or dispute belongs to) of the objects Stripe created in [gte, lt). Read
+        only. Paged with ``starting_after``; an answer that is not a list of that object is 'unavailable'."""
+        path = self.LISTS.get(kind)
+        if path is None or type(gte) is not int or type(lt) is not int or gte >= lt:
+            return StripeList(False, reason="bad listing request")
+        want = {"payment_intents": "payment_intent", "refunds": "refund", "disputes": "dispute"}[kind]
+        items: list = []
+        after = None
+        for _ in range(self.LIST_PAGES):
+            q = [("created[gte]", str(gte)), ("created[lt]", str(lt)), ("limit", "100")]
+            if after:
+                q.append(("starting_after", after))
+            kind_, status, doc = self._call("GET", path, query=q)
+            if kind_ != "ok" or not isinstance(doc, dict) or doc.get("object") != "list" \
+                    or not isinstance(doc.get("data"), list):
+                return StripeList(False, reason="stripe unavailable")
+            for o in doc["data"]:
+                if not isinstance(o, dict) or o.get("object") != want or not _SID.fullmatch(str(o.get("id") or "")):
+                    return StripeList(False, reason="stripe answer not understood")
+                pi = o.get("payment_intent")
+                pi = pi.get("id") if isinstance(pi, dict) else pi
+                items.append({"id": o["id"], "payment_intent": pi if isinstance(pi, str) and _SID.fullmatch(pi)
+                              else (o["id"] if want == "payment_intent" else None)})
+            if not doc.get("has_more") or not doc["data"]:
+                return StripeList(True, items=tuple(items), complete=True)
+            after = doc["data"][-1]["id"]
+        return StripeList(True, items=tuple(items), complete=False)
+
+    def sessions_for_payment(self, payment_intent: str) -> StripeList:
+        """The Checkout pages Stripe holds for one payment (``GET /v1/checkout/sessions?payment_intent=``): each with
+        its id, status, client_reference_id and amount, so the re-import can re-link a page Finance lost."""
+        if not _SID.fullmatch(payment_intent or ""):
+            return StripeList(True, items=())
+        kind_, status, doc = self._call("GET", "/v1/checkout/sessions",
+                                        query=[("payment_intent", payment_intent), ("limit", "10")])
+        if kind_ != "ok" or not isinstance(doc, dict) or doc.get("object") != "list" \
+                or not isinstance(doc.get("data"), list):
+            return StripeList(False, reason="stripe unavailable")
+        out = []
+        for o in doc["data"]:
+            if not isinstance(o, dict) or o.get("object") != "checkout.session" or not _SID.fullmatch(str(o.get("id"))):
+                return StripeList(False, reason="stripe answer not understood")
+            pi = o.get("payment_intent")
+            pi = pi.get("id") if isinstance(pi, dict) else pi
+            if pi != payment_intent:
+                continue
+            out.append({"id": o["id"], "status": o.get("status"), "client_reference_id": o.get("client_reference_id"),
+                        "amount_total": o.get("amount_total"), "currency": o.get("currency"),
+                        "livemode": o.get("livemode") is True, "expires_at": o.get("expires_at"),
+                        "allowed_payment_method_types": list(o.get("allowed_payment_method_types") or [])})
+        return StripeList(True, items=tuple(out))
 
     def balance(self) -> RailBalance:
         kind, status, doc = self._call("GET", "/v1/balance")

@@ -39,6 +39,7 @@ from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from intelligences import i06_tax as I6
 from ledger import derived_id
+from svc_mail import backoff_minutes
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha
 
 MEDIA_LABELS = {"broadcast_tv": "Broadcast TV", "cable_tv": "Cable TV", "streaming_tv": "Streaming TV",
@@ -47,7 +48,8 @@ MEDIA_LABELS = {"broadcast_tv": "Broadcast TV", "cable_tv": "Cable TV", "streami
 LINE_LABELS = {"campaign_deposit": "Campaign deposit", "creative_services": "Creative services",
                "strategy_services": "Strategy services", "production_services": "Production services",
                "retainer_fee": "Retainer", "subscription_fee": "Subscription",
-               "revenue_recovery_services": "Revenue Recovery services", "media_spend": "Media",
+               "revenue_recovery_services": "Revenue Recovery services", "seo_audit_services": "SEO Technical Audit",
+               "media_spend": "Media",
                "media_fee": "Media placement and management"}
 OPEN_FOR_VENDOR = ("prepaid", "vendor_partially_paid")
 
@@ -444,9 +446,13 @@ class MediaMixin:
                 (now - parse_iso(rec["claimed_at"])).total_seconds() < self.SEND_CLAIM_STALE_MIN * 60:
             return "a send is already in progress"
         last = rec.get("last_attempt_at")
+        if rec["status"] == "send_failed":
+            return "sending failed for good: Andre requeues it once the cause is fixed"
+        attempts = rec.get("attempts") or 0
+        wait = backoff_minutes(attempts) if attempts else self.SEND_BACKOFF_MIN
         if rec["status"] == "pending_send" and last and \
-                (now - parse_iso(last)).total_seconds() < self.SEND_BACKOFF_MIN * 60:
-            return f"backoff: the last attempt failed less than {self.SEND_BACKOFF_MIN} minutes ago"
+                (now - parse_iso(last)).total_seconds() < wait * 60:
+            return f"backoff: the last attempt failed less than {wait} minutes ago"
         return None
 
     def send_client_receipt(self, principal: str, request_id: str, crid: str) -> dict:
@@ -473,36 +479,28 @@ class MediaMixin:
             claim.put("client_receipts", crid, {**rec, "status": "sending", "claimed_at": iso(self._now()),
                                                 "claimed_by": request_id})
             self._commit(claim)
-        mail = self.ports.client_mail
         g = Gather(self, f"crcs|{principal}|{request_id}", I2.ACTOR, crid)
-        sent = g.call("client_mail", "send_receipt", (rec["client_id"], crid),
-                      lambda: mail.send_receipt(rec["client_id"], view), False)
+        # ADR 0026: the message goes to the client's billing contact on file only (mail.py), outside every lock
+        out = self._deliver(g, "receipt", rec["client_id"], crid, view)
+        sent = out.outcome == "sent"
         with self.lock:
             rec = self.db["client_receipts"][crid]
-            now = iso(self._now())
-            withdrawn = rec["status"] in ("withdrawn", "withdrawn_after_send")
             mine = rec["status"] == "sending" and rec.get("claimed_by") == request_id
-            if sent is True:
-                status = "withdrawn_after_send" if withdrawn else "sent"
-            elif mine:
-                status = "pending_send"
-            else:
-                # AEGIS N1: a late failure never undoes another request's outcome (a stale claim taken over and
-                # sent, or a withdrawal) -- it is recorded as an attempt only
-                status = rec["status"]
-            keep_claim = not mine and rec["status"] == "sending" and sent is not True
-            new = {**rec, "attempts": rec["attempts"] + 1, "last_attempt_at": now, "status": status,
-                   **({} if keep_claim else {"claimed_at": None, "claimed_by": None}),
-                   **({"sent_at": now} if sent is True else {})}
             op = Op(self, f"crcs|{principal}|{request_id}", I2.ACTOR, crid, g)
-            op.record(derived_id("crcs", crid, request_id), "client_receipt_sent" if sent is True
+            new = self._mail_after(op, "client_receipts", crid, rec, out, "pending_send", mine)
+            op.record(derived_id("crcs", crid, request_id), "client_receipt_sent" if sent
                       else "client_receipt_send_failed", I2.ACTOR, crid,
-                      {"client_receipt_id": crid, "sent": sent is True, "attempt": new["attempts"]},
-                      "Client receipt sent" if sent is True else "Client receipt not sent (mail unavailable)")
+                      {"client_receipt_id": crid, "sent": sent, "attempt": new["attempts"], "outcome": out.outcome},
+                      "Client receipt sent" if sent else f"Client receipt not sent ({out.outcome})")
             op.put("client_receipts", crid, new)
-            resp = self._idem_add(op, key, h, {"client_receipt": new, "sent": sent is True,
-                                               "detail": "sent" if sent is True else
-                                               "not sent: the client-mail adapter is not built or refused it",
+            detail = "sent" if sent else {
+                "disabled": "not sent: client mail is not configured (RESEND_API_KEY / MAIL_FROM)",
+                "no_recipient": "not sent: no billing contact is on file for this client",
+                "permanent": "not sent: the mail provider refused it for good (break opened)"}.get(
+                out.outcome, "not sent: the client-mail adapter is not built or refused it")
+            if new["status"] == "send_failed" and out.outcome != "permanent":
+                detail = "not sent: every retry failed (break opened)"
+            resp = self._idem_add(op, key, h, {"client_receipt": new, "sent": sent, "detail": detail,
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
             return resp

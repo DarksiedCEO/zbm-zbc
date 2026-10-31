@@ -415,6 +415,16 @@ class NotBuiltPush:
         return False
 
 
+@dataclass(frozen=True)
+class MailOutcome:
+    """What a mail adapter's ``deliver`` answers (ADR 0026): ``sent`` (the provider accepted it), ``retry`` (busy,
+    unreachable, rate limited: try again later), ``permanent`` (refused for good: Andre is alerted), ``no_recipient``
+    (Finance has no billing contact for the client) or ``disabled`` (no mail provider is configured)."""
+    outcome: str
+    code: Optional[str] = None
+    provider_id: Optional[str] = None
+
+
 class ClientMailPort(Protocol):
     """Sends a client their payment receipt (founder, Oct 5 2026: "that receipt goes out to them with the explanation
     of what they bought via email"). True only when the mail provider accepted the message for delivery.
@@ -425,11 +435,19 @@ class ClientMailPort(Protocol):
     inside 15 minutes, so a retry never reaches the client as a second email."""
     def send_receipt(self, client_id: str, receipt: dict) -> bool: ...
 
+    # ADR 0026: the message Finance built (mail.message): kind, client_id, to (the ONE billing contact on file, or None),
+    # subject, text, html, idempotency_key, data. An adapter sends to ``to`` only, and answers no_recipient without one.
+    def deliver(self, msg: dict) -> MailOutcome: ...
+
 
 class NotBuiltClientMail:
-    """No mail provider is chosen or wired: nothing is sent; the receipt stays ``pending_send``."""
+    """Mail is OFF (the default until RESEND_API_KEY and MAIL_FROM are set): nothing is sent; receipts and notices stay
+    pending and go out once mail is configured."""
     def send_receipt(self, client_id, receipt):
         return False
+
+    def deliver(self, msg):
+        return MailOutcome("disabled")
 
 
 # --- Stripe incoming: ZBM client payments (founder M6/M9/M10, ADR 0009 amendment Oct 5 2026) -------------------------
@@ -504,6 +522,16 @@ class StripePayout:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class StripeList:
+    """One kind of Stripe object created in a period (the re-import, CH-3): ``items`` are dicts with at least ``id``
+    (refunds and disputes also carry ``payment_intent``). ``complete`` is False when the listing was cut at the cap."""
+    available: bool
+    items: tuple = ()
+    complete: bool = True
+    reason: str = ""
+
+
 class StripeIncomingPort(Protocol):
     """ZBM's Stripe account, incoming side only. No refund, transfer or payout-creating method exists here."""
 
@@ -523,6 +551,11 @@ class StripeIncomingPort(Protocol):
     def payout(self, payout_id: str) -> StripePayout: ...
 
     def balance(self) -> RailBalance: ...
+
+    # CH-3 re-import (read-only): what Stripe created in [gte, lt) epoch seconds, and the Checkout pages of a payment
+    def list_objects(self, kind: str, gte: int, lt: int) -> StripeList: ...
+
+    def sessions_for_payment(self, payment_intent: str) -> StripeList: ...
 
 
 class NotWiredStripeIncoming:
@@ -551,6 +584,12 @@ class NotWiredStripeIncoming:
 
     def balance(self):
         return RailBalance(False, reason=self.REASON)
+
+    def list_objects(self, kind, gte, lt):
+        return StripeList(False, reason=self.REASON)
+
+    def sessions_for_payment(self, payment_intent):
+        return StripeList(False, reason=self.REASON)
 
 
 @dataclass
