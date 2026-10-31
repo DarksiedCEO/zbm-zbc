@@ -511,12 +511,15 @@ class LegalService:
                 except OSError:
                     pass
             raise Unavailable(f"local store write failed ({exc}); nothing took effect") from None
+        snap = self._snapshot(op.ops)
         try:
             for kind, r in op.ops:
                 self._apply(kind, r)
         except Exception:
             # AEGIS r11 R11-6: the line is written but its caller gets a failure: mark it durably so a replay never
-            # applies it (the in-memory state may hold part of it until a restart: /health says apply_fault)
+            # applies it. AEGIS r12 R12-6: and roll back what of it was applied in memory, so no later write builds on
+            # a record the replay will not have (/health says apply_fault until a restart)
+            self._rollback(snap)
             self.apply_fault = True
             if not getattr(self, "_marking_failure", False):
                 self._marking_failure = True
@@ -533,6 +536,48 @@ class LegalService:
             self._idem_load(op.idem)
         for fn in op.after:
             fn()
+
+    _MISSING = object()
+
+    def _snapshot(self, ops: list) -> list:
+        """R12-6: what applying ``ops`` would change in memory, to restore it if the apply fails part way."""
+        snap: list = []
+
+        def keep(coll, k):
+            snap.append((coll, k, json.loads(json.dumps(coll[k])) if k in coll else self._MISSING))
+        for kind, r in ops:
+            try:
+                if kind in PUT_KINDS:
+                    attr, key = PUT_KINDS[kind]
+                    keep(self.blob_meta if attr == "blobs" else getattr(self, attr), r[key])
+                elif kind == "update":
+                    keep(self.blob_meta if r["coll"] == "blobs" else getattr(self, r["coll"]), r["key"])
+                elif kind == "proposal":
+                    keep(self.proposals, r["proposal_id"])
+                elif kind == "decision":
+                    for d in r["decisions"]:
+                        keep(self.proposals, d["proposal_id"])
+                    snap.append(("versions", len(self.versions)))
+                elif kind == "job_run":
+                    keep(self.job_runs, f"{r['job']}|{r['day']}")
+                elif kind == "quarantine_ack":
+                    snap.append(("acks", set(self.quarantine_acks)))
+            except (KeyError, TypeError, AttributeError):
+                continue
+        return snap
+
+    def _rollback(self, snap: list) -> None:
+        for item in reversed(snap):
+            if item[0] == "versions":
+                del self.versions[item[1]:]
+            elif item[0] == "acks":
+                self.quarantine_acks = item[1]
+            else:
+                coll, k, v = item
+                if v is self._MISSING:
+                    coll.pop(k, None)
+                else:
+                    coll[k] = v
 
     def _apply(self, kind: str, r: dict) -> None:
         if kind in PUT_KINDS:

@@ -11,6 +11,8 @@ another client's invitation, and only the onboarding path records a client's acc
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from helpers import Harness, rid
@@ -222,3 +224,72 @@ def test_r11_6_a_runtime_apply_failure_is_marked_durably_and_skipped_on_replay(t
     assert any(rec["kind"] == "apply_failed" for rec in svc.log.iter_records())
     y = _restart(x, tmp_path)
     assert "acc-flaky" not in y.svc.acceptances
+
+
+# --- AEGIS r12 R12-6 and the surviving guards l5, l7, l8 -----------------------------------------------------------------
+
+def _flaky_line(x, fail_id, ids):
+    from service import Op
+    svc = x.svc
+    real = svc._apply
+
+    def flaky(kind, r):
+        if kind == "acceptance" and r.get("acceptance_id") == fail_id:
+            raise TypeError("boom")
+        return real(kind, r)
+    svc._apply = flaky
+    op = Op(svc, f"acc|{'-'.join(ids)}", "intel_03_clickwrap", "client:acme")
+    for i in ids:
+        op.add("acceptance", {"acceptance_id": i, "party_ref": "client:acme", "doc_id": "client_msa", "version": "1.0"})
+    with svc.lock, pytest.raises(TypeError):
+        svc._commit(op)
+    svc._apply = real
+
+
+def test_r12_6_lp3_a_failed_line_leaves_nothing_in_memory_and_later_writes_survive_a_restart(tmp_path):
+    from errors import Conflict
+    from service import Op
+    x, v = _setup(tmp_path)
+    _flaky_line(x, "acc-B", ["acc-A", "acc-B"])
+    assert "acc-A" not in x.svc.acceptances                         # rolled back: the caller was told it failed
+    h = x.ok(x.client.get("/health"))
+    assert h["status"] == "degraded", h                             # l7: apply_fault degrades until a restart
+    op2 = Op(x.svc, "acc|A-upd", "intel_03_clickwrap", "client:acme")
+    op2.update("acceptances", "acc-A", {"note": "later"})
+    with x.svc.lock, pytest.raises(Conflict):                       # nothing can build on the failed write
+        x.svc._commit(op2)
+    op3 = Op(x.svc, "acc|C", "intel_03_clickwrap", "client:acme")   # an unrelated later write succeeds ...
+    op3.add("acceptance", {"acceptance_id": "acc-C", "party_ref": "client:acme", "doc_id": "client_msa",
+                           "version": "1.0"})
+    with x.svc.lock:
+        x.svc._commit(op3)
+    y = _restart(x, tmp_path)                                       # ... and survives the restart
+    assert "acc-C" in y.svc.acceptances and "acc-A" not in y.svc.acceptances
+    assert not [q for q in y.svc.replay_quarantine if "acc-C" in json.dumps(q)]
+
+
+def test_l5_acknowledging_a_line_that_is_not_quarantined_is_refused(tmp_path):
+    from helpers import ANDRE_TOKEN
+    x, v = _setup(tmp_path)
+    r = x.post("/legal/v1/replay-quarantine/acknowledgements", {"request_id": rid("qa"), "seqs": [999]},
+               andre=ANDRE_TOKEN)
+    assert r.status_code == 409, r.text
+
+
+def test_l8_the_replay_fallback_stops_a_line_at_its_first_failing_record(tmp_path):
+    from service import Op
+    x, v = _setup(tmp_path)
+    svc = x.svc
+    real = svc._apply
+    svc._apply = lambda kind, r: None if kind == "job_run" else real(kind, r)   # runtime skips the odd record
+    op = Op(svc, "acc|odd", "intel_03_clickwrap", "client:acme")
+    op.add("acceptance", {"acceptance_id": "acc-1", "party_ref": "client:acme", "doc_id": "client_msa", "version": "1.0"})
+    op.add("job_run", {"malformed": True})                           # replay's _apply raises KeyError on it
+    op.add("acceptance", {"acceptance_id": "acc-2", "party_ref": "client:acme", "doc_id": "client_msa", "version": "1.0"})
+    with svc.lock:
+        svc._commit(op)
+    svc._apply = real
+    y = _restart(x, tmp_path)
+    assert "acc-1" in y.svc.acceptances and "acc-2" not in y.svc.acceptances
+    q = [q for q in y.svc.replay_quarantine if q["kinds"][:1] == ["job_run"]]
+    assert q and q[0]["kinds"] == ["job_run", "acceptance"]
