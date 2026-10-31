@@ -56,18 +56,22 @@ state); Resend idempotency as the dedupe (24 hours only, and a changed digest is
 Residual risk: if Finance itself is down, no email can come (the cron runs fail red in Railway). A second,
 independent path (for example the heartbeat monitor in railway.md, or a Railway notification) covers that.
 
-### 2. Business days skip US federal bank holidays (Federal Reserve schedule)
+### 2. Business days skip the federal legal public holidays as observed under 5 U.S.C. 6103
 
-`finance-py/src/bizdays.py` computes the 11 holidays of 5 U.S.C. 6103(a) for any year from 1986 (Juneteenth from
-2022) with the Federal Reserve's observance: Sunday -> the Monday after; Saturday -> not moved (the Reserve Banks are
-open the Friday before). Every contract deadline Finance computes uses it: refunds (10 business days), client
-acknowledgements (2), billing disputes (15). Tests pin 2026-2028.
+The MSA (section 1, changelog 45) defines a business day as "a weekday that is not a United States federal legal public
+holiday, as observed under 5 U.S.C. 6103 (a holiday falling on a Saturday is observed on the Friday before, and one
+falling on a Sunday on the Monday after)". `finance-py/src/bizdays.py` computes exactly that for any year from 1986:
+the 11 holidays of 6103(a) (Juneteenth from 2022), a Saturday holiday observed the Friday before (New Year's Day 2028
+is observed Friday December 31, 2027), a Sunday holiday the Monday after. Every contract deadline Finance computes
+uses it: refunds (10 business days), client acknowledgements (2), billing disputes (15).
 
-Note for Andre: Legal (legal-py `seed/us_federal_holidays.json`) uses the federal-employee rule instead (a Saturday
-holiday moves to the Friday, so for example July 3, 2026 is a holiday there and a business day here). The MSA says
-"a weekday that is not a United States federal holiday"; which rule reads that sentence is his call. On the Federal
-Reserve rule ZBM is never later than the other reading by more than that one Friday; the Friday-observed reading
-gives the client one more day. This ADR follows the instruction (Federal Reserve schedule); Legal is unchanged.
+(The first version of this decision followed the Federal Reserve schedule, which does not move a Saturday holiday; the
+MSA now settles the rule, and Finance matches it.)
+
+Legal keeps its own seeded list (`legal-py/seed/us_federal_holidays.json`, pinned by hash, 2026-2030, the same rule);
+a Finance test checks that both give identical dates for every year Legal's list covers. Legal's list ends with 2030
+and Legal fails closed past it (`HolidaysUnknown`): it must be extended (or computed like Finance's) before late 2030,
+when a 10-14 business-day window starts reaching 2031. Open item.
 
 ### 3. Client offboarding: a dry run, then a certified run; personal information never in the append-only stores
 

@@ -1,20 +1,21 @@
 """
-US business days on the Federal Reserve's holiday schedule (founder ask, Oct 31 2026; MSA: "a business day is a weekday
-that is not a United States federal holiday"; refund policy: refunds within 10 business days, acknowledgements within
-2, billing disputes within 15).
+US business days (MSA 1, changelog 45: "a weekday that is not a United States federal legal public holiday, as observed
+under 5 U.S.C. 6103 (a holiday falling on a Saturday is observed on the Friday before, and one falling on a Sunday on
+the Monday after)"; refund policy: refunds within 10 business days, acknowledgements within 2, billing disputes
+within 15).
 
-Computed in code for any year from 1986 on (no seeded list that can run out):
+Computed in code for any year from 1986 (no seeded list that can run out):
 
 - the 11 legal public holidays of 5 U.S.C. 6103(a): New Year's Day, Birthday of Martin Luther King, Jr. (3rd Monday of
   January), Washington's Birthday (3rd Monday of February), Memorial Day (last Monday of May), Juneteenth National
-  Independence Day (June 19, from 2022 on the Federal Reserve's schedule), Independence Day, Labor Day (1st Monday of
-  September), Columbus Day (2nd Monday of October), Veterans Day (November 11), Thanksgiving Day (4th Thursday of
-  November), Christmas Day;
-- observance as the Federal Reserve Banks close: a holiday that falls on a SUNDAY is observed the Monday after; a holiday
-  that falls on a SATURDAY is not moved (the Reserve Banks are open the Friday before; the federal-employee rule of
-  5 U.S.C. 6103(b), which moves it to the Friday, is NOT used here).
+  Independence Day (June 19, from 2022), Independence Day, Labor Day (1st Monday of September), Columbus Day (2nd
+  Monday of October), Veterans Day (November 11), Thanksgiving Day (4th Thursday of November), Christmas Day;
+- observance under 5 U.S.C. 6103(b) and Executive Order 11582: a holiday on a SATURDAY is observed the Friday before
+  (so New Year's Day 2028, a Saturday, is observed Friday December 31, 2027, a day of 2027), a holiday on a SUNDAY the
+  Monday after.
 
-Inauguration Day (a federal-employee holiday in the Washington area only) is not a bank holiday and is not counted.
+Inauguration Day (Washington-area federal employees only) is not counted. Legal (legal-py seed/us_federal_holidays.json)
+uses the same rule for 2026-2030; tests/test_bizdays.py checks both give the same dates.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from datetime import date, timedelta
 from functools import lru_cache
 
 FIRST_YEAR = 1986          # the first year all of today's Monday holidays, MLK Day included, were observed
-JUNETEENTH_FROM = 2022     # first year on the Federal Reserve's schedule (the law was signed June 17, 2021)
+JUNETEENTH_FROM = 2022     # first full year (the law was signed June 17, 2021)
 
 
 def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
@@ -63,31 +64,35 @@ def federal_holidays(year: int) -> dict:
     return dict(_federal(year))
 
 
+def _observe(d: date) -> date:
+    if d.weekday() == 5:                         # Saturday: the Friday before
+        return d - timedelta(days=1)
+    if d.weekday() == 6:                         # Sunday: the Monday after
+        return d + timedelta(days=1)
+    return d
+
+
 @lru_cache(maxsize=256)
-def _bank(year: int) -> tuple:
-    out = []
-    for d, name in _federal(year):
-        if d.weekday() == 6:                     # Sunday: observed the Monday after
-            out.append((d + timedelta(days=1), name))
-        elif d.weekday() == 5:                   # Saturday: not moved (Reserve Banks open the Friday before)
-            continue
-        else:
-            out.append((d, name))
-    return tuple(sorted(out))
+def _observed(year: int) -> tuple:
+    out = [(_observe(d), name) for d, name in _federal(year)]
+    if year + 1 <= 9998:                         # next New Year's Day on a Saturday is observed on December 31
+        nxt = date(year + 1, 1, 1)
+        out.append((_observe(nxt), "new_years_day"))
+    return tuple(sorted((d, n) for d, n in out if d.year == year))
 
 
-def bank_holidays(year: int) -> dict:
-    """The weekdays of ``year`` on which the Federal Reserve Banks are closed for a holiday."""
-    return dict(_bank(year))
+def observed_holidays(year: int) -> dict:
+    """The weekdays of ``year`` that are legal public holidays as observed under 5 U.S.C. 6103 (date -> name)."""
+    return dict(_observed(year))
 
 
 def is_business_day(d: date) -> bool:
-    return d.weekday() < 5 and d not in bank_holidays(d.year)
+    return d.weekday() < 5 and d not in observed_holidays(d.year)
 
 
 def add_business_days(day: date, n: int) -> date:
-    """The ``n``-th business day after ``day`` (``day`` itself never counts; 0 is ``day``). Weekends and Federal
-    Reserve bank holidays are skipped."""
+    """The ``n``-th business day after ``day`` (``day`` itself never counts; 0 is ``day``). Weekends and observed
+    federal legal public holidays are skipped."""
     if not isinstance(n, int) or isinstance(n, bool) or n < 0:
         raise ValueError("n must be a whole number of business days, 0 or more")
     d = day

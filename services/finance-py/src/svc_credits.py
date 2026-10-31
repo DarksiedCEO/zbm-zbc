@@ -50,8 +50,8 @@ PAID_RECEIPT = ("matched", "partially_refunded", "refunded")
 
 
 def add_business_days(day: date, n: int) -> date:
-    """``n`` business days after ``day``: Monday to Friday, skipping US federal bank holidays on the Federal
-    Reserve's schedule (``bizdays``; MSA "a business day is a weekday that is not a United States federal holiday").
+    """``n`` business days after ``day``: Monday to Friday, skipping the federal legal public holidays as observed
+    under 5 U.S.C. 6103 (``bizdays``; MSA 1, changelog 45).
     Used for every contract deadline Finance computes: refunds (10), acknowledgements (2), billing disputes (15)."""
     return _bizdays.add_business_days(day, n)
 

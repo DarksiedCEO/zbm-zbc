@@ -174,8 +174,9 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   `founder_alerts.json` in the data directory, never in the log or the ledger. **Off until** `FOUNDER_ALERT_EMAIL`,
   `FOUNDER_ALERT_FROM` (alerts@ or billing@zbestmedia.com) and the Resend key are all set; a wrong value leaves it
   off and the job's answer says why (never a refusal to start). Runbook: docs/runbooks/founder-alerts.md.
-- **Business days** (refunds 10, acknowledgements 2, billing disputes 15) skip weekends and US federal bank holidays
-  on the Federal Reserve's schedule, computed for any year (`bizdays.py`).
+- **Business days** (refunds 10, acknowledgements 2, billing disputes 15) skip weekends and the federal legal public
+  holidays as observed under 5 U.S.C. 6103 (Saturday -> the Friday before, Sunday -> the Monday after; MSA 1),
+  computed for any year (`bizdays.py`), the same dates as Legal's calendar.
 - **Client offboarding** (MSA 15.5): `POST /fin/v1/clients/{id}/offboarding` (Andre). `{"dry_run": true}` lists what
   Finance holds and what happens to each kind; the real run names the dry run's `plan_sha256` (409 if anything changed;
   blocked by an open Compliance hold or Stripe dispute), deletes the billing contact, withdraws unsent client email,
