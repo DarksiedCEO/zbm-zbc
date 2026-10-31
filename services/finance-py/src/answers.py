@@ -139,6 +139,7 @@ class ClientActivationM(_S):
     reasons: tuple[Annotated[str, StringConstraints(max_length=200)], ...] = Field(default=(), max_length=21)
     reason: Reason = ""
     sanctions: bool = False
+    ground: Optional[Literal["match", "place"]] = None
 
 
 class RegisterParametersM(_S):

@@ -122,6 +122,7 @@ class ClientActivation:
     reasons: tuple = ()
     reason: str = ""
     sanctions: bool = False      # AEGIS r5 C1: Compliance says the refusal rests on sanctions (never refunded)
+    ground: Optional[str] = None  # AEGIS r8: "match" (OFAC list match) or "place" (sanctioned place or target)
 
 
 @dataclass(frozen=True)
