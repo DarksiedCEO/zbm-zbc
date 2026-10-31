@@ -217,7 +217,7 @@ def test_nexus_totals_per_jurisdiction_flag_at_75_percent():
     tx = next(j for j in r["jurisdictions"] if j["jurisdiction"] == "US-TX")
     assert tx["trailing_12_months"]["sales_usd"] == "74999.99" and tx["flagged"] is False
     issue(hr, draft(hr, "tx-1", "0.01"))
-    issue(hr, draft(hr, "ca-1", "300000.00"))
+    issue(hr, draft(hr, "ca-1", "240000.00"))          # under FIN_MAX_INVOICE_TOTAL (RTM-09)
     r = nexus(hr)
     tx = next(j for j in r["jurisdictions"] if j["jurisdiction"] == "US-TX")
     ca = next(j for j in r["jurisdictions"] if j["jurisdiction"] == "US-CA")

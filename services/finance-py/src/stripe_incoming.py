@@ -211,6 +211,8 @@ class StripeIncoming:
             "line_items": [{"quantity": 1, "price_data": {"currency": "usd", "unit_amount": cents,
                                                            "product_data": {"name": label[:120]}}}],
             "metadata": meta, "payment_intent_data": {"metadata": meta},
+            # RTM-03: never present or charge in another currency (Adaptive Pricing; API 2024-11-20.acacia+)
+            "adaptive_pricing": {"enabled": False},
         })
         kind, status, doc = self._call("POST", "/v1/checkout/sessions", form=form, idem=idempotency_key)
         if kind == "error" or (kind == "http" and (status == 429 or status >= 500)):
@@ -222,7 +224,8 @@ class StripeIncoming:
         sid, url, exp = doc.get("id"), doc.get("url"), doc.get("expires_at")
         if not (isinstance(sid, str) and _SID.fullmatch(sid) and isinstance(url, str) and type(exp) is int
                 and doc.get("livemode") is self.livemode and doc.get("amount_total") == cents
-                and doc.get("client_reference_id") == invoice_id and doc.get("currency") == "usd"):
+                and doc.get("client_reference_id") == invoice_id and doc.get("currency") == "usd"
+                and (doc.get("adaptive_pricing") or {}).get("enabled") is not True):
             return StripeCheckout("rejected", reason="stripe's session does not match what was asked")
         return StripeCheckout("created", session_id=sid, url=url, expires_at=_iso(exp))
 

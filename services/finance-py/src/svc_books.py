@@ -473,6 +473,11 @@ class BooksMixin:
             if body["entity"] == "zbm" and body["kind"] == "campaign_deposit":
                 problems.append(R.item("ENTITY_MIX", "campaign deposits are ZBC's, never ZBM's"))
             problems += I2.recurring_problems({"kind": body["kind"], "recurring": body.get("recurring")})
+            if I2.lines_total(body["lines"]) > self.cfg.max_invoice_total:
+                # RTM-09: no invoice above the configured maximum (a wire would match it with no ceiling)
+                problems.append(R.item("AMOUNT_OUT_OF_RANGE", f"INVOICE_ABOVE_MAXIMUM: the total is above the maximum "
+                                                              f"of {M.fmt(self.cfg.max_invoice_total)} "
+                                                              "(FIN_MAX_INVOICE_TOTAL)"))
             if problems:
                 raise InvalidReasons("invoice draft refused", R.dedupe(problems))
             total = I2.lines_total(body["lines"])

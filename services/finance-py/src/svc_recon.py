@@ -231,7 +231,7 @@ class ReconMixin:
             today = self._today_la()
             for b in sorted(self.db["breaks"].values(), key=lambda b: b["opened_at"]):
                 row = {**b, "aging": I7.aging_bucket(date.fromisoformat(b["opened_on"]), today)}
-                if not full and b.get("leg") in self.COMPLIANCE_LEGS:
+                if not full and b.get("leg") in self.PRIVATE_LEGS:
                     row.update(leg="compliance_hold", note="payment held by Compliance (details: Andre's token)",
                                resolution=None)
                 out.append(row)

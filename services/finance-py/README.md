@@ -85,6 +85,8 @@ W3-2 / W3-5).
 - Treasury liabilities are absolute per sub-ledger; reconciliation L4 compares every sub-ledger, not only totals.
 - New settings: `FIN_MAX_RATE_PER_1000` (`"1000.00"`), `FIN_MAX_CERTIFIED_VIEWS` (10^12), `FIN_WITHHOLDING_BASIS`
   (`gross`; `gross_minus_netting` only with CPA row FIN-CQ-16 verified).
+- `FIN_MAX_INVOICE_TOTAL` (`"250000.00"`, money red team RTM-09): an invoice draft above it is refused with
+  `INVOICE_ABOVE_MAXIMUM`.
 
 ## Media buys and client receipts (ADR 0009 amendment, Oct 5 2026)
 

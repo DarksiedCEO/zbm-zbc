@@ -119,6 +119,8 @@ def event_kind(typ: str) -> Optional[str]:
         return "dispute"
     if typ.startswith("charge."):
         return "charge"
+    if typ.startswith("refund."):
+        return "charge"             # RTM-02: refund.created / .updated / .failed: read the charge back by its payment
     if typ.startswith("payout."):
         return "payout"
     return None
@@ -942,7 +944,12 @@ class StripeMixin:
         if rc is not None:
             # sweep X-6: a refund made at Stripe (``charge.refunded``) is booked from the charge's amount_refunded
             return self._stripe_refund(op, rct, p) or "payment_already_booked"
-        if p.currency != "usd" or p.balance_txn is None or p.gross is None or p.fee is None:
+        if p.currency is not None and p.currency != "usd":
+            # RTM-03: presented in another currency (Adaptive Pricing is pinned off, so this should not happen): never
+            # applied to the invoice and never a retry loop: booked as unapplied cash when Stripe's balance
+            # transaction is readable, a break for Andre either way
+            return self._stripe_currency_mismatch(op, rct, p)
+        if p.balance_txn is None or p.gross is None or p.fee is None:
             # succeeded but Stripe has not exposed its balance transaction yet: let Stripe send the event again
             raise Unavailable("the payment's Stripe balance transaction is not readable yet; retried later")
         gross, fee = M.D(p.gross), M.D(p.fee)
@@ -1008,6 +1015,39 @@ class StripeMixin:
                 self._client_receipt(op, rct, inv, M.fmt(gross), value_date, METHOD_LABEL.get(p.method, "Stripe"))
         return self._stripe_refund(op, rct, p) or status
 
+    def _stripe_currency_mismatch(self, op: Op, rct: str, p: StripePayment) -> str:
+        bid = rid("brk", "stripe_currency_mismatch", p.payment_intent)
+        note = f"Stripe payment {p.payment_intent} is in {str(p.currency)[:8]}, not USD: not applied to any invoice"
+        status = "currency_mismatch_break"
+        if p.balance_txn is not None and p.gross is not None and p.fee is not None and M.D(p.gross) > 0:
+            gross, fee = M.D(p.gross), M.D(p.fee)
+            src = {"kind": "receipt", "id": rct}
+            e = self._post(op, "zbm", [J.dr("1060", gross), J.cr("2070", gross)], "F13", src,
+                           f"F13u|{p.payment_intent}", actor=ACTOR)
+            if fee > 0:
+                self._post(op, "zbm", [J.dr("5020", fee), J.cr("1060", fee)], "F13f", src, f"F13f|{p.payment_intent}",
+                           actor=ACTOR)
+            op.put("receipts", rct, {"receipt_id": rct, "invoice_id": None, "entity": "zbm", "amount": M.fmt(gross),
+                                     "method": "stripe_other", "bank_txn_ref_sha256": None, "into_account": "1060",
+                                     "value_date": self._today_la().isoformat(), "matched_at": iso(self._now()),
+                                     "status": "unapplied", "entry_id": e["entry_id"],
+                                     "stripe": {"payment_intent": p.payment_intent, "charge": p.charge,
+                                                "balance_txn": p.balance_txn, "fee": M.sfmt(fee),
+                                                "currency": p.currency}})
+            note += f"; booked as unapplied cash ({M.fmt(gross)} USD settled)"
+            status = "unapplied_currency_mismatch"
+        else:
+            note += "; its USD settlement is not readable: nothing booked, book it by hand"
+        if op.get("breaks", bid) is None:
+            op.put("breaks", bid, {"break_id": bid, "leg": "stripe_currency_mismatch", "subject": "zbm:1060",
+                                   "difference": p.amount_received or "0.00", "opened_at": iso(self._now()),
+                                   "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                   "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                                   "resolution": None, "note": note[:200]})
+            op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                      {"break_id": bid, "leg": "stripe_currency_mismatch"}, f"Break opened: {note}"[:200])
+        return status
+
     def _stripe_refund(self, op: Op, rct: str, p: StripePayment) -> Optional[str]:
         """Sweep X-6: money refunded at Stripe (the Dashboard, or any refund Finance did not make) left the Stripe
         balance. The increase of the charge's ``amount_refunded`` over what Finance booked is posted once (F7r, keyed
@@ -1023,7 +1063,7 @@ class StripeMixin:
         if total == done:
             return None
         if total < done:
-            raise Invalid("Stripe reported less refunded on a payment than Finance already booked")
+            return self._stripe_refund_reversed(op, rct, rc, p, total, done)
         if total > M.D(rc["amount"]):
             raise Invalid("Stripe reported a refund above the payment")
         if rc["status"] not in ("matched", "partially_refunded", "unapplied", "refunded", "charged_back"):
@@ -1069,7 +1109,12 @@ class StripeMixin:
             # the client receipt states the full amount paid: no longer true after any refund (never sent; one
             # already sent is marked withdrawn_after_send)
             self._withdraw_client_receipt(op, rct)
-        if matched and inv["status"] == "paid":
+        sanctions_hold = bool(inv is not None and (inv.get("held_compliance") or {}).get("sanctions"))
+        if sanctions_hold:
+            # RTM-05: blocked property just left the Stripe balance (a Dashboard refund Finance cannot stop): the hold
+            # stays, the invoice stays held (never routinely re-opened), and Andre gets a high-severity OFAC break
+            self._sanctions_refund_break(op, inv, rct, delta, total)
+        elif matched and inv["status"] == "paid":
             if full or net_reversed:
                 op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
                                                        "refunded": M.fmt(total)})
@@ -1097,7 +1142,71 @@ class StripeMixin:
                   {"receipt_id": rct, "amount": M.fmt(delta), "refunded_total": M.fmt(total), "entry_id": e["entry_id"],
                    "invoice_id": inv["invoice_id"] if inv else None},
                   f"Stripe refund booked: {M.fmt(delta)} (total refunded {M.fmt(total)})")
-        return "refund_booked"
+        return "refund_booked_held" if sanctions_hold else "refund_booked"   # neutral: every caller reads event statuses
+
+    def _sanctions_refund_break(self, op: Op, inv: dict, rct: str, delta: Decimal, total: Decimal) -> None:
+        bid = rid("brk", "stripe_refund_sanctions", rct, M.fmt(total))
+        if op.get("breaks", bid) is not None:
+            return
+        op.put("breaks", bid, {"break_id": bid, "leg": "stripe_refund_sanctions", "severity": "high",
+                               "subject": f"zbm:invoice:{inv['invoice_id']}", "difference": M.fmt(delta),
+                               "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
+                               "owner": "andre", "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                               "resolution": None,
+                               "note": ("OFAC-RELEVANT: a payment held on SANCTIONS grounds was refunded at Stripe "
+                                        "(blocked property left the account): report it to OFAC and contact Stripe "
+                                        "support now (runbook step G)")})
+        op.record(derived_id("holdevt", "refund", inv["invoice_id"], rct, M.fmt(total)),
+                  "compliance_hold_sanctions_refunded", ACTOR, inv["invoice_id"],
+                  {"invoice_id": inv["invoice_id"], "receipt_id": rct, "amount": M.fmt(delta), "break_id": bid},
+                  "A held payment was refunded at Stripe")
+
+    def _stripe_refund_reversed(self, op: Op, rct: str, rc: dict, p: StripePayment, total: Decimal,
+                                done: Decimal) -> str:
+        """RTM-02: Stripe now reports LESS refunded than Finance booked: a refund failed (an ACH refund returned) and the
+        money is back in the Stripe balance. It is booked back once per new cumulative total (F7r, Dr 1060 against
+        the account the refund debited), the receipt and invoice return to their state for that total, and a break
+        tells Andre. An unexpected state opens a break and is answered (never a 422 loop)."""
+        delta = M.q(done - total)
+        inv = op.get("invoices", rc["invoice_id"]) if rc.get("invoice_id") else None
+        prior = rc["status"]
+        bid = rid("brk", "stripe_refund_reversed", rct, M.fmt(total))
+        note = f"a refund of {M.fmt(delta)} failed at Stripe: the money is back in the Stripe balance"
+        simple = prior in ("refunded", "partially_refunded", "unapplied") and total >= 0 \
+            and not (inv is not None and inv["kind"] == I2.MEDIA_KIND)
+        if simple:
+            credit = J.cr("1100", delta, f"client:{inv['client_id']}") if inv is not None else J.cr("2070", delta)
+            e = self._post(op, "zbm", [J.dr("1060", delta), credit], "F7r",
+                           {"kind": "stripe_refund_reversal", "id": rct}, f"F7rr|{p.payment_intent}|{M.fmt(total)}",
+                           actor=ACTOR, fact=True)
+            st = dict(rc.get("stripe") or {})
+            st.update(refunded=M.fmt(total),
+                      refund_reversal_entry_ids=list(st.get("refund_reversal_entry_ids") or []) + [e["entry_id"]])
+            if inv is None:
+                status = "unapplied"
+            else:
+                status = "matched" if total == 0 else "partially_refunded"
+            op.put("receipts", rct, {**rc, "stripe": st, "status": status})
+            if inv is not None:
+                held = bool(inv.get("held_compliance"))
+                new = {**inv, "refunded": M.fmt(total)}
+                if inv["status"] == "issued" and not held:
+                    new.update(status="paid", paid_at=iso(self._now()))
+                op.put("invoices", inv["invoice_id"], new)
+            outcome = "refund_reversed"
+        else:
+            note = f"{note}; Finance could not book it back by itself (receipt {prior}): book it by hand"
+            outcome = "refund_reversal_break"
+        if op.get("breaks", bid) is None:
+            op.put("breaks", bid, {"break_id": bid, "leg": "stripe_refund_reversed", "subject": f"zbm:1060:{rct}"[:160],
+                                   "difference": M.fmt(delta), "opened_at": iso(self._now()),
+                                   "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                   "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                                   "resolution": None, "note": note[:200]})
+            op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                      {"break_id": bid, "leg": "stripe_refund_reversed", "difference": M.fmt(delta)},
+                      f"Break opened: {note}"[:200])
+        return outcome
 
     @staticmethod
     def _charged_back_total(rc: dict, inv: Optional[dict]) -> Decimal:
@@ -1177,6 +1286,26 @@ class StripeMixin:
         held = M.D(rec["held"])
         posted = list(rec["posted_txns"])
         new = [t for t in d.txns if t["txn_id"] not in posted]
+        withdrawn = held + M.total(-M.D(t["amount"]) for t in new if M.D(t["amount"]) < 0)
+        if rc is not None and (M.D(d.amount or "0.00") > M.D(rc["amount"]) or withdrawn > M.D(rc["amount"])):
+            # RTM-08: a dispute larger than the payment it disputes: never booked silently; a break for Andre
+            bid = rid("brk", "stripe_dispute_anomaly", did)
+            if op.get("breaks", bid) is None:
+                op.put("breaks", bid, {"break_id": bid, "leg": "stripe_dispute_anomaly", "subject": f"zbm:1300:{did}",
+                                       "difference": d.amount or "0.00", "opened_at": iso(self._now()),
+                                       "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                       "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                                       "resolution": None,
+                                       "note": (f"dispute {did} of {d.amount} is larger than the payment "
+                                                f"({rc['amount']}): not booked; check it in the Dashboard")[:200]})
+                op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                          {"break_id": bid, "leg": "stripe_dispute_anomaly", "difference": d.amount or "0.00"},
+                          "Break opened: a dispute larger than its payment")
+            if inv is not None and inv["kind"] == I2.MEDIA_KIND:
+                buy = op.get("media_buys", inv["media_buy_id"])
+                if buy is not None and not buy.get("payment_disputed"):
+                    op.put("media_buys", buy["buy_id"], {**buy, "payment_disputed": True})
+            return "dispute_anomaly_break"
         if held - M.total(M.D(t["amount"]) for t in new) < 0:
             raise Invalid("Stripe reinstated more for this dispute than it withdrew")
         for t in new:
