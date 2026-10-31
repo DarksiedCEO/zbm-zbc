@@ -535,3 +535,16 @@ def test_a_held_media_prepayment_never_pays_the_vendor(tmp_path):
     hr.clock.advance(days=4)
     r = pay_vendor(hr, m["media_buy"]["buy_id"], "10000.00", paid_on="2026-10-06")
     assert r.status_code == 409 and "Compliance" in r.text, r.text
+
+
+def test_the_client_reads_whether_a_refusal_is_sanctions_grounded():
+    """AEGIS r5 C1: only an explicit true on a refusal marks it sanctions-grounded (never on an ALLOW)."""
+    path = "/compliance/v1/clients/zbm-client-1/activation"
+    refuse = {"decision": "REFUSE", "current": False, "reasons": ["hold open: sanctions_match (h)"]}
+    a = cmp_client({path: (200, activation_doc(**refuse, sanctions_grounded=True))}).client_activation("zbm-client-1")
+    assert a.allowed is False and a.sanctions is True
+    for v in (False, "true", 1, None):
+        a = cmp_client({path: (200, activation_doc(**refuse, sanctions_grounded=v))}).client_activation("zbm-client-1")
+        assert a.sanctions is False, v
+    a = cmp_client({path: (200, activation_doc(sanctions_grounded=True))}).client_activation("zbm-client-1")
+    assert a.allowed is True and a.sanctions is False

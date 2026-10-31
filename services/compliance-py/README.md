@@ -74,7 +74,9 @@ round 14"):
   client's; fact `legal_documents`; `src/legal_client.py`, `COMPLIANCE_LEGAL_*`).
 - **`GET /compliance/v1/clients/{client_id}/activation`** (`finance_31`, `seo_02`, `revenue_recovery`, `onboarding`):
   the client's CURRENT decision, ALLOW or REFUSE with reasons and the recorded jurisdiction, re-evaluated on every call
-  (rule fingerprints, the service area in force now, holds, C-11, the OFAC search's age and lane). Finance (invoices,
+  (rule fingerprints, the service area in force now, holds, C-11, the OFAC search's age and lane).
+  `sanctions_grounded` is true when a refusal rests on sanctions (an open sanctions_match hold, or the client's place
+  on HR-07's sanctions list): Finance never refunds or releases such a payment without an OFAC authorization. Finance (invoices,
   billing readiness, Stripe pages), seo (client runs and reports) and detection (store reads) refuse anything but a
   current ALLOW.
 - **`GET /compliance/v1/readiness`** (any caller) and the lines printed at start: expired rules and the gates they
