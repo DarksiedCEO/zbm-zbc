@@ -69,7 +69,8 @@ def images() -> dict[str, tuple[int, dict[str, str], str, str]]:
         # still answers (it never calls Legal)
         "client-portal-py": (8480, {"PORTAL_BIND_ADDR": "::", "PORTAL_LEGAL_URL": "http://legal.railway.internal:8420",
                                     "PORTAL_LEGAL_SERVICE_TOKEN": tok(), "PORTAL_LEGAL_CALLER_TOKEN": tok(),
-                                    "PORTAL_EVIDENCE_KEY": tok(), "PORTAL_PUBLIC_ORIGIN": "https://accept.example.com"},
+                                    "PORTAL_EVIDENCE_KEY": tok(), "PORTAL_LINK_TAG_KEY": tok(),
+                                    "PORTAL_PUBLIC_ORIGIN": "https://accept.example.com"},
                              "PORTAL_LEGAL_SERVICE_TOKEN", "RuntimeError: PORTAL_LEGAL_SERVICE_TOKEN is not set"),
         "orchestrator": (8080, {"ORCHESTRATOR_BIND_ADDR": "[::]", "ORCHESTRATOR_SERVICE_TOKEN": tok(),
                                 "DETECTION_SERVICE_TOKEN": tok(), "DETECTION_SERVICE_URL": "http://detection.invalid:8000",
