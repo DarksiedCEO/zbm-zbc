@@ -211,7 +211,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use ledger_rust::{
-    genesis_hash, is_log_binding, is_reset_binding, ledger_log, verify_entry, verify_log_file, AppendOutcome,
+    anchor_string, check_anchor, genesis_hash, hmac_sha256, is_log_binding, is_reset_binding, ledger_log, verify_entry, verify_log_file, AppendOutcome,
     EntryFilter, EventAppendOutcome, EventInput, LedgerEntry, LedgerError, LedgerOpenOptions, LedgerRecordInput,
     PersistError, PersistentLedger, FINDINGS_DEPARTMENT,
 };
@@ -263,6 +263,8 @@ const DRAINS_MAX: usize = 512;
 
 /// Sweep F-12: the shared token's minimum length in bytes.
 const MIN_TOKEN_BYTES: usize = 32;
+/// CH-6: default floor of free bytes on the log's filesystem below which /health is 503.
+const DEFAULT_MIN_FREE_BYTES: u64 = 64 * 1024 * 1024;
 /// Sweep F-2: reads (entries, verify) running at once: one per CPU, at most
 /// MAX_READ_SLOTS. A full read is CPU-bound (copy + serialize), so more reads
 /// than CPUs only slow every read down (measured: 6 concurrent 500k-entry
@@ -464,6 +466,90 @@ struct App {
     reads: Semaphore,
     verified: Mutex<Verified>,
     auth: Auth,
+    /// CH-6: what GET /health reports beyond liveness.
+    health: HealthState,
+    /// RTM-07: LEDGER_HEAD_SIGNING_KEY, when set (signs GET /ledger/anchor).
+    head_key: Option<Vec<u8>>,
+}
+
+/// CH-6 (red team c04 L1): with the log's disk full every append answered 500 while GET /health stayed 200, so
+/// no monitor could tell the ledger could not write. /health now answers 503 `{"status":"degraded","reasons":[…]}`
+/// while the last append failed to persist (cleared by the next one that persists) or while the log's
+/// filesystem has less than LEDGER_MIN_FREE_BYTES available. The reasons are fixed codes (no path, no error
+/// text: /health needs no token); the detail is in the operator log.
+struct HealthState {
+    log_dir: PathBuf,
+    min_free_bytes: u64,
+    last_append_failed: std::sync::atomic::AtomicBool,
+}
+
+impl HealthState {
+    fn note_write(&self, status: u16) {
+        if status == 500 {
+            if !self.last_append_failed.swap(true, Ordering::SeqCst) {
+                ledger_log!("ledger-rust: ALERT ledger_write_failing — an append could not be persisted; /health is 503 until one persists");
+            }
+        } else if (200..300).contains(&status) && self.last_append_failed.swap(false, Ordering::SeqCst) {
+            ledger_log!("ledger-rust: ledger_write_recovered — appends persist again");
+        }
+    }
+
+    fn reasons(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.last_append_failed.load(Ordering::SeqCst) {
+            out.push("last_append_failed".to_string());
+        }
+        if let Some(free) = free_bytes(&self.log_dir) {
+            if free < self.min_free_bytes {
+                out.push(format!("disk_low: {free} bytes free, floor {}", self.min_free_bytes));
+            }
+        }
+        out
+    }
+}
+
+/// Bytes available to this (unprivileged) process on the filesystem holding `dir`; None when unknown.
+fn free_bytes(dir: &Path) -> Option<u64> {
+    let c = CString::new(dir.as_os_str().as_encoded_bytes()).ok()?;
+    // SAFETY: statvfs writes into a zeroed struct we own; `c` is a valid NUL-terminated path.
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(c.as_ptr(), &mut st) };
+    if rc != 0 {
+        return None;
+    }
+    Some((st.f_bavail as u64).saturating_mul(st.f_frsize as u64))
+}
+
+fn health(app: &App) -> (u16, String) {
+    let reasons = app.health.reasons();
+    if reasons.is_empty() {
+        (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string())
+    } else {
+        (503, serde_json::json!({"status": "degraded", "service": "ledger-rust", "reasons": reasons}).to_string())
+    }
+}
+
+/// RTM-07: GET /ledger/anchor — the head to store OUTSIDE this system (Andre's heartbeat monitor keeps one per
+/// day, append-only). `anchor` is exactly the value for LEDGER_ANCHORED_HEAD; `signature` is
+/// HMAC-SHA256(LEDGER_HEAD_SIGNING_KEY, "zbm-ledger-anchor-v1|<entries>|<head_hash>|<at>") when the key is set.
+fn anchor(app: &App) -> (u16, String) {
+    let head = app.gate.read(&app.ledger, |l| l.head());
+    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let signature = app.head_key.as_ref().map(|k| {
+        hex::encode(hmac_sha256(k, format!("zbm-ledger-anchor-v1|{}|{}|{at}", head.entries, head.head_hash).as_bytes()))
+    });
+    (
+        200,
+        serde_json::json!({
+            "anchor": anchor_string(head.entries, &head.head_hash),
+            "entries": head.entries,
+            "head_hash": head.head_hash,
+            "at": at,
+            "signature_alg": signature.as_ref().map(|_| "HMAC-SHA256"),
+            "signature": signature,
+        })
+        .to_string(),
+    )
 }
 
 /// Locks the ledger. A poisoned lock means a panic happened mid-operation;
@@ -944,7 +1030,9 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
     }
 
     match (method, path, query) {
-        (Method::GET, "/health", None) => (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string()),
+        (Method::GET, "/health", None) => health(&app),
+
+        (Method::GET, "/ledger/anchor", None) => on_blocking(&app, anchor).await,
 
         (Method::GET, "/ledger/entries", q) => {
             let scope = principal.as_ref().expect("authenticated above").read_scope();
@@ -1001,7 +1089,11 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
                     principal.name(),
                     input.department
                 )),
-                Ok(input) => on_ledger_write(&app, move |l| handle_event(l, input)).await,
+                Ok(input) => {
+                    let r = on_ledger_write(&app, move |l| handle_event(l, input)).await;
+                    app.health.note_write(r.0);
+                    r
+                }
             }
         }
 
@@ -1019,7 +1111,11 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
                 )),
                 Ok(record) => match idempotency_requested(&key, &record) {
                     Err(resp) => resp,
-                    Ok(idempotent) => on_ledger_write(&app, move |l| handle_append(l, record, idempotent)).await,
+                    Ok(idempotent) => {
+                        let r = on_ledger_write(&app, move |l| handle_append(l, record, idempotent)).await;
+                        app.health.note_write(r.0);
+                        r
+                    }
                 },
             }
         }
@@ -1681,6 +1777,28 @@ fn load_auth() -> Auth {
     }
 }
 
+/// CH-6: LEDGER_MIN_FREE_BYTES (default 64 MiB): below it /health is 503 `disk_low`.
+fn load_min_free_bytes() -> u64 {
+    match std::env::var("LEDGER_MIN_FREE_BYTES") {
+        Err(_) => DEFAULT_MIN_FREE_BYTES,
+        Ok(v) if v.is_empty() => DEFAULT_MIN_FREE_BYTES,
+        Ok(v) => v.parse().unwrap_or_else(|_| refuse(format!("LEDGER_MIN_FREE_BYTES={v:?} is not a whole number of bytes"))),
+    }
+}
+
+/// RTM-07: LEDGER_HEAD_SIGNING_KEY (optional, at least MIN_TOKEN_BYTES bytes).
+fn load_head_key() -> Option<Vec<u8>> {
+    match std::env::var("LEDGER_HEAD_SIGNING_KEY") {
+        Err(_) => None,
+        Ok(v) if v.is_empty() => None,
+        Ok(v) if v.len() < MIN_TOKEN_BYTES => refuse(format!(
+            "LEDGER_HEAD_SIGNING_KEY is {} bytes; at least {MIN_TOKEN_BYTES} (openssl rand -hex 32)",
+            v.len()
+        )),
+        Ok(v) => Some(v.into_bytes()),
+    }
+}
+
 fn load_max_connections() -> usize {
     match std::env::var("LEDGER_MAX_CONNECTIONS") {
         Err(_) => DEFAULT_MAX_CONNECTIONS,
@@ -1717,6 +1835,9 @@ fn load_binding(name: &str, valid: fn(&str) -> bool, shape: &str) -> Option<Stri
 
 fn main() {
     let auth = load_auth();
+    let min_free_bytes = load_min_free_bytes();
+    let head_key = load_head_key();
+    let anchored_head = std::env::var("LEDGER_ANCHORED_HEAD").ok().filter(|v| !v.is_empty());
     let max_connections = load_max_connections();
     let reset = load_binding(
         "LEDGER_ALLOW_RESET",
@@ -1800,6 +1921,18 @@ fn main() {
         }
     };
 
+    // RTM-07: the ledger's own chain cannot show a consistent rewrite or a rollback with a matching `.head`; the
+    // last head Andre stored off-system can. Refuse to serve a ledger that is behind it or differs from it.
+    if let Some(a) = &anchored_head {
+        match check_anchor(ledger.entries(), a) {
+            Ok(()) => ledger_log!("ledger-rust: external anchor {a} verified (LEDGER_ANCHORED_HEAD)"),
+            Err(e) => refuse(format!(
+                "REFUSING TO START — LEDGER_ANCHORED_HEAD: {e}. Restore the ledger from a backup taken at or \
+                 after the anchor (services/ledger-rust/README.md, 'External anchor')"
+            )),
+        }
+    }
+
     match listener.local_addr() {
         Ok(a) => ledger_log!("ledger-rust listening on {a} (log: {log_path})"),
         Err(_) => ledger_log!("ledger-rust listening on {addr} (log: {log_path})"),
@@ -1829,6 +1962,16 @@ fn main() {
         reads: Semaphore::new(read_slots()),
         verified: Mutex::new(verified),
         auth,
+        health: HealthState {
+            log_dir: Path::new(&log_path)
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from(".")),
+            min_free_bytes,
+            last_append_failed: std::sync::atomic::AtomicBool::new(false),
+        },
+        head_key,
     });
     runtime.block_on(serve(listener, app, max_connections));
 }

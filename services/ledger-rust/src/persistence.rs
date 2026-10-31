@@ -25,9 +25,19 @@
 //! that is out of scope for this pass and is not pretended otherwise.
 //!
 //! Events (Sep 24 2026): `kind: "event"` entries share the same log file and
-//! the same hash chain as findings. An in-memory `event_id -> position` index
-//! is rebuilt on every open; a log containing the same event_id twice is
-//! treated as corrupt (fail closed), since the append path never writes one.
+//! the same hash chain as findings. An in-memory `(department, event_id) ->
+//! position` index is rebuilt on every open; a log containing the same
+//! event_id twice FOR ONE DEPARTMENT is treated as corrupt (fail closed),
+//! since the append path never writes one.
+//!
+//! RTA-1 (red team, Oct 31 2026): event ids are namespaced per department.
+//! Before, the index was global, so any write caller could pre-claim another
+//! department's deterministic id (seo writing `fin-inva-…` made Finance's own
+//! write of that id a permanent 409). Now the same id in two departments is
+//! two independent events; idempotency and the 409 rule apply within one
+//! department. Every existing log loads unchanged (its ids were globally
+//! unique, so they are unique per department too): the migration is a no-op,
+//! and the hash chain's canonical form does not involve the index.
 //!
 //! Crash safety (fix wave 1, AEGIS F5, docs/adr/0003 section 5):
 //!
@@ -556,7 +566,8 @@ pub fn verify_log_file(path: &Path, log_bytes: u64, entries: usize, head_hash: &
 #[derive(Debug)]
 pub struct PersistentLedger {
     ledger: Ledger,
-    event_index: HashMap<String, usize>,
+    /// RTA-1: keyed by (department, event_id).
+    event_index: HashMap<(String, String), usize>,
     /// finding_id -> every position holding it (sweep F-7; duplicates are
     /// legal in a log, see module docs).
     finding_index: HashMap<String, Vec<usize>>,
@@ -970,7 +981,7 @@ impl PersistentLedger {
         let complete_len = bytes.iter().rposition(|&b| b == b'\n').map(|p| p + 1).unwrap_or(0);
 
         let mut entries: Vec<LedgerEntry> = Vec::new();
-        let mut event_index: HashMap<String, usize> = HashMap::new();
+        let mut event_index: HashMap<(String, String), usize> = HashMap::new();
         let mut finding_index: HashMap<String, Vec<usize>> = HashMap::new();
         let mut read_index = ReadIndex::default();
         let mut line_no = 0;
@@ -995,10 +1006,13 @@ impl PersistentLedger {
             })?;
             match &entry {
                 LedgerEntry::Event(ev) => {
-                    if event_index.insert(ev.event_id.clone(), entries.len()).is_some() {
+                    if event_index.insert((ev.department.clone(), ev.event_id.clone()), entries.len()).is_some() {
                         return Err(PersistError::Corrupt {
                             line: i + 1,
-                            reason: format!("duplicate event_id {:?} in ledger log", ev.event_id),
+                            reason: format!(
+                                "duplicate event_id {:?} for department {:?} in ledger log",
+                                ev.event_id, ev.department
+                            ),
                         });
                     }
                 }
@@ -1307,7 +1321,8 @@ impl PersistentLedger {
     /// `append`.
     pub fn append_event(&mut self, input: EventInput) -> Result<EventAppendOutcome<'_>, PersistError> {
         input.validate().map_err(|e| PersistError::Invalid(e.to_string()))?;
-        if let Some(&pos) = self.event_index.get(&input.event_id) {
+        let key = (input.department.clone(), input.event_id.clone());
+        if let Some(&pos) = self.event_index.get(&key) {
             let existing = &self.ledger.entries()[pos];
             let same = existing
                 .as_event()
@@ -1320,11 +1335,10 @@ impl PersistentLedger {
             });
         }
 
-        let event_id = input.event_id.clone();
         let pos = self.ledger.len();
         let entry = self.ledger.build_event_entry(input);
         self.persist_then_push(entry)?;
-        self.event_index.insert(event_id, pos);
+        self.event_index.insert(key, pos);
         Ok(EventAppendOutcome::Created(&self.ledger.entries()[pos]))
     }
 }
@@ -1821,6 +1835,36 @@ mod tests {
             payload_sha256: "c".repeat(64),
             summary: summary.to_string(),
         }
+    }
+
+    /// RTA-1 (red team, lateral_probe.out section C): a write caller of another department pre-claimed
+    /// Finance's deterministic id (`seo` wrote `fin-inva-…` first, Finance then got a permanent 409). Ids are
+    /// now namespaced per department: the squat is an event of `seo` only and Finance's own write succeeds;
+    /// within one department the idempotency / 409 rule is unchanged, and both survive a reopen.
+    #[test]
+    fn rta1_event_ids_are_namespaced_per_department() {
+        let path = scratch_path("rta1_ns");
+        let _cleanup = ScratchFile(path.clone());
+        let mut squat = sample_event("fin-inva-b3d3ee3b", "squatted");
+        squat.department = "seo".into();
+        let mut real = sample_event("fin-inva-b3d3ee3b", "invoice approved");
+        real.department = "finance".into();
+        {
+            let mut pl = PersistentLedger::open(&path).expect("open");
+            assert!(matches!(pl.append_event(squat.clone()), Ok(EventAppendOutcome::Created(_))));
+            assert!(
+                matches!(pl.append_event(real.clone()), Ok(EventAppendOutcome::Created(_))),
+                "another department's earlier write of the same id must not block this department"
+            );
+            assert!(matches!(pl.append_event(real.clone()), Ok(EventAppendOutcome::Existing(_))));
+            let mut other = real.clone();
+            other.summary = "different".into();
+            assert!(matches!(pl.append_event(other), Ok(EventAppendOutcome::Conflict(_))));
+        }
+        let mut pl = PersistentLedger::open(&path).expect("reopen with the same id in two departments");
+        assert_eq!(pl.len(), 2);
+        assert!(matches!(pl.append_event(squat), Ok(EventAppendOutcome::Existing(_))));
+        assert!(matches!(pl.append_event(real), Ok(EventAppendOutcome::Existing(_))));
     }
 
     #[test]

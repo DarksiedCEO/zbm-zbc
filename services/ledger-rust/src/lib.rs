@@ -361,6 +361,14 @@ impl LedgerEntry {
         }
     }
 
+    /// When the ledger recorded this entry (CH-12: never before the previous entry's).
+    pub fn recorded_at(&self) -> DateTime<Utc> {
+        match self {
+            LedgerEntry::Finding(f) => f.recorded_at,
+            LedgerEntry::Event(e) => e.recorded_at,
+        }
+    }
+
     pub fn as_finding(&self) -> Option<&FindingEntry> {
         match self {
             LedgerEntry::Finding(f) => Some(f),
@@ -498,6 +506,64 @@ pub fn event_canonical(e: &EventEntry) -> String {
     )
 }
 
+/// HMAC-SHA256 (RFC 2104) over `sha2` (no hmac crate in this offline build). RTM-07: the signature on
+/// `GET /ledger/anchor`, so the head Andre's monitor stores off-system can be shown to come from this ledger.
+pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    const BLOCK: usize = 64;
+    let mut k = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(k.iter().map(|b| b ^ 0x36).collect::<Vec<u8>>());
+    inner.update(msg);
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(k.iter().map(|b| b ^ 0x5c).collect::<Vec<u8>>());
+    outer.update(inner);
+    outer.finalize().into()
+}
+
+/// RTM-07: the anchor string Andre's monitor stores (and feeds back as `LEDGER_ANCHORED_HEAD`).
+pub fn anchor_string(entries: u64, head_hash: &str) -> String {
+    format!("{entries}:{head_hash}")
+}
+
+/// RTM-07: checks a ledger against the last externally anchored head `<entries>:<64 hex>`. The ledger must hold at
+/// least `entries` entries and its entry `entries - 1` must have exactly that hash (an anchor of 0 entries is the
+/// genesis hash). `Err` names the problem: a rollback (fewer entries) or a rewrite (another hash at that position).
+pub fn check_anchor(entries: &[LedgerEntry], anchor: &str) -> Result<(), String> {
+    let (n, hash) = anchor
+        .split_once(':')
+        .ok_or_else(|| "LEDGER_ANCHORED_HEAD must be <entries>:<64 lowercase hex> (from GET /ledger/anchor)".to_string())?;
+    let n: u64 = n.parse().map_err(|_| "LEDGER_ANCHORED_HEAD: <entries> is not a number".to_string())?;
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err("LEDGER_ANCHORED_HEAD: the hash is not 64 lowercase hex characters".to_string());
+    }
+    if n == 0 {
+        return if hash == genesis_hash() { Ok(()) } else { Err("LEDGER_ANCHORED_HEAD: 0 entries must carry the genesis hash".to_string()) };
+    }
+    if (entries.len() as u64) < n {
+        return Err(format!(
+            "the ledger holds {} entries but its last external anchor is at {n}: the log was rolled back or \
+             truncated after it was anchored",
+            entries.len()
+        ));
+    }
+    let got = entries[(n - 1) as usize].hash();
+    if got != hash {
+        return Err(format!(
+            "entry {} has hash {got} but the external anchor says {hash}: the history before the anchor was \
+             rewritten",
+            n - 1
+        ));
+    }
+    Ok(())
+}
+
 pub fn genesis_hash() -> String {
     sha256_hex(GENESIS_HASH_SEED)
 }
@@ -519,6 +585,35 @@ impl Ledger {
         &self.entries
     }
 
+    /// CH-12 (red team c04 L4): `recorded_at` is monotonic. A wall clock that stepped back (NTP correction, a
+    /// VM restored from a snapshot) used to stamp the new entry BEFORE the previous one (3 days back was
+    /// accepted). Now the new entry takes `max(previous recorded_at, now)`, and the step is logged with the
+    /// wall-clock reading so the skew is visible in the operator log. The chain order (`seq`) was always the
+    /// authority; this keeps the human-readable time consistent with it. A clock that jumps FORWARD cannot be
+    /// told from real time passing: entries after it carry the later time until the wall clock catches up
+    /// (logged here too, as a backward step, once the clock is corrected).
+    pub fn next_recorded_at(&self) -> DateTime<Utc> {
+        Self::monotonic(self.entries.last().map(LedgerEntry::recorded_at), Utc::now())
+    }
+
+    /// `max(prev, now)`, logging a backward wall-clock step.
+    pub fn monotonic(prev: Option<DateTime<Utc>>, now: DateTime<Utc>) -> DateTime<Utc> {
+        match prev {
+            Some(prev) if prev > now => {
+                ledger_log!(
+                    "ledger-rust: WARNING — clock_skew: the wall clock ({}) is {} ms behind the last entry's \
+                     recorded_at ({}); the new entry is stamped with the last entry's time (recorded_at stays \
+                     monotonic)",
+                    now.to_rfc3339(),
+                    (prev - now).num_milliseconds(),
+                    prev.to_rfc3339()
+                );
+                prev
+            }
+            _ => now,
+        }
+    }
+
     fn last_hash(&self) -> String {
         match self.entries.last() {
             Some(e) => e.hash().to_string(),
@@ -535,7 +630,7 @@ impl Ledger {
     pub fn build_entry(&self, record: LedgerRecordInput) -> LedgerEntry {
         let seq = self.entries.len() as u64;
         let prev_hash = self.last_hash();
-        let recorded_at = Utc::now();
+        let recorded_at = self.next_recorded_at();
 
         let hash = compute_finding_hash(
             seq,
@@ -578,7 +673,7 @@ impl Ledger {
             subject_id: input.subject_id,
             payload_sha256: input.payload_sha256,
             summary: input.summary,
-            recorded_at: Utc::now(),
+            recorded_at: self.next_recorded_at(),
             prev_hash: self.last_hash(),
             hash: String::new(),
         };
@@ -725,6 +820,64 @@ mod tests {
             payload_sha256: "a".repeat(64),
             summary: "Activation blocked: 2 requirements unmet".to_string(),
         }
+    }
+
+    /// CH-12 (red team c04 L4): a wall clock 3 days behind the last entry used to stamp the new entry 3 days
+    /// earlier. The next entry is never stamped before the previous one, and the chain still verifies.
+    #[test]
+    fn ch12_recorded_at_never_goes_backwards() {
+        let mut l = Ledger::new();
+        l.append_event(sample_event("e-0"));
+        // the previous entry was recorded "in the future" (the clock has since stepped back 3 days)
+        let future = Utc::now() + chrono::Duration::days(3);
+        if let LedgerEntry::Event(e) = &mut l.entries[0] {
+            e.recorded_at = future;
+            e.hash = sha256_hex(&event_canonical(e));
+        }
+        assert_eq!(l.verify_chain(), Ok(()));
+        l.append_event(sample_event("e-1"));
+        l.append(sample_record("f-2", "s", "1.00"));
+        assert!(l.entries[1].recorded_at() >= future, "event stamped before the previous entry");
+        assert!(l.entries[2].recorded_at() >= l.entries[1].recorded_at(), "finding stamped before the previous entry");
+        assert_eq!(l.verify_chain(), Ok(()));
+        // a clock that moves on normally is used as is
+        let now = Utc::now();
+        assert_eq!(Ledger::monotonic(Some(now - chrono::Duration::seconds(5)), now), now);
+        assert_eq!(Ledger::monotonic(None, now), now);
+    }
+
+    #[test]
+    fn rtm07_hmac_matches_rfc4231() {
+        let h = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
+        assert_eq!(hex::encode(h), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        let long_key = [0xaau8; 131];
+        let h = hmac_sha256(&long_key, b"Test Using Larger Than Block-Size Key - Hash Key First");
+        assert_eq!(hex::encode(h), "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
+    }
+
+    /// RTM-07 (ledger_tamper.py): dropping the tail and rewriting `.head`, or rewriting entries with recomputed
+    /// hashes, was accepted as "chain verified". Against an external anchor both are refused.
+    #[test]
+    fn rtm07_check_anchor_refuses_rollback_and_rewrite() {
+        let mut l = Ledger::new();
+        for i in 0..5 {
+            l.append_event(sample_event(&format!("e-{i}")));
+        }
+        let anchor = anchor_string(4, l.entries()[3].hash());
+        assert_eq!(check_anchor(l.entries(), &anchor), Ok(()));
+        assert_eq!(check_anchor(l.entries(), &anchor_string(0, &genesis_hash())), Ok(()));
+        // rollback: only 3 entries left
+        let rolled = Ledger::from_entries(l.entries()[..3].to_vec());
+        assert!(check_anchor(rolled.entries(), &anchor).unwrap_err().contains("rolled back"));
+        // rewrite: entries recomputed from position 2 on (valid chain, other hashes)
+        let mut rewritten = Ledger::from_entries(l.entries()[..2].to_vec());
+        for i in 2..5 {
+            rewritten.append_event(sample_event(&format!("x-{i}")));
+        }
+        assert_eq!(rewritten.verify_chain(), Ok(()));
+        assert!(check_anchor(rewritten.entries(), &anchor).unwrap_err().contains("rewritten"));
+        assert!(check_anchor(l.entries(), "nonsense").is_err());
+        assert!(check_anchor(l.entries(), "4:ABC").is_err());
     }
 
     fn finding_mut(l: &mut Ledger, i: usize) -> &mut FindingEntry {

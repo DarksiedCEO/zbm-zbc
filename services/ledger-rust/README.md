@@ -24,6 +24,9 @@ cargo run --release --bin server
 | `LEDGER_PORT` / `LEDGER_BIND_ADDR` | `8090` / `127.0.0.1` | Listen address. `LEDGER_PORT=0` picks a free port. |
 | `LEDGER_PORT_FILE` | unset | Receives the bound port (a hint: check `GET /health`; ADR 0003 sections 9-11). |
 | `LEDGER_MAX_CONNECTIONS` | `512` | Concurrent connections; beyond it an immediate 503. |
+| `LEDGER_MIN_FREE_BYTES` | `67108864` (64 MiB) | Fix wave A (CH-6): below this many bytes free on the log's filesystem, `GET /health` is 503 `disk_low`. |
+| `LEDGER_ANCHORED_HEAD` | unset | Fix wave A (RTM-07): the last externally stored anchor, `<entries>:<head hash>` exactly as `GET /ledger/anchor` gave it. Start refuses (exit 1) when the log holds fewer entries (rolled back) or another hash at that position (rewritten). See "External anchor". |
+| `LEDGER_HEAD_SIGNING_KEY` | unset | Fix wave A (RTM-07): at least 32 bytes (`openssl rand -hex 32`); signs `GET /ledger/anchor` (HMAC-SHA256). |
 
 `LEDGER_ALLOW_SHARED_TOKEN` accepts only `1` (on) or `0`/empty/unset (off); `LEDGER_ALLOW_RESET` and
 `LEDGER_MIGRATE_LEGACY` accept only `0`/empty/unset or a value of their printed shape; any other value refuses to
@@ -35,18 +38,34 @@ Every route except `GET /health` needs `Authorization: Bearer <token>` (401 othe
 
 | Route | Answers |
 |---|---|
-| `GET /health` | 200 `{"status":"ok","service":"ledger-rust"}` |
+| `GET /health` | 200 `{"status":"ok","service":"ledger-rust"}`; fix wave A (CH-6): 503 `{"status":"degraded","service":"ledger-rust","reasons":[…]}` while the last append failed to persist (`last_append_failed`, cleared by the next append that persists; an `ALERT ledger_write_failing` line is logged once) or the disk is below `LEDGER_MIN_FREE_BYTES` (`disk_low: …`). |
 | `POST /ledger/append` | A finding. 201 entry; 400 invalid; 413 body over 64 KiB; 500 not recorded. With `Idempotency-Key: <finding_id>` (must equal the body's `finding_id`, else 400): 201 new, 200 identical retry (existing entry), 409 same `finding_id` with different content. Without the header every post is appended (unchanged). |
-| `POST /ledger/events` | A department event, idempotent on `event_id`: 201 new, 200 identical retry, 409 conflicting content, 400 invalid. |
+| `POST /ledger/events` | A department event, idempotent on `(department, event_id)`: 201 new, 200 identical retry, 409 conflicting content, 400 invalid. Fix wave A (RTA-1): event ids are namespaced per department, so one department's write can never pre-claim (and 409-block) another department's deterministic id; existing logs load unchanged (no migration step). |
 | `GET /ledger/entries` | No query: every entry the caller may read, as a JSON array (the whole ledger for the shared token and `read_all` callers, byte-identical to before). `?after_seq=&limit=&department=&event_type=`: entries with `seq > after_seq`, at most `limit` (default 1000, max 10000), filters match events only; the next page is `after_seq=<last seq>`, and fewer than `limit` entries means the end. Served from a per-department / per-event-type index (a page costs O(page + log n), not a scan). Unknown/repeated/malformed parameters: 400; a `department` outside the caller's read scope: 403. |
 | `GET /ledger/verify` | 200 `{"valid":true,"entries":N}` / 409 `{"valid":false,"error":…}`. Incremental (verifies only what is new since the last verified head; the whole chain is verified at every start); `?full=1` re-verifies the whole in-memory chain AND re-reads and re-hashes the log from disk, which must end at the in-memory head. |
 | `GET /ledger/head` | `{"entries":N,"head_seq":N-1,"head_hash":"…"}` — the durable head checkpoint (plus `migrated_from` / `reset_from` when an operator override was ever applied). |
+| `GET /ledger/anchor` | Fix wave A (RTM-07): `{"anchor":"<entries>:<head_hash>","entries":N,"head_hash":"…","at":"…","signature_alg":"HMAC-SHA256"|null,"signature":"<hex>"|null}`. `signature` = HMAC-SHA256(`LEDGER_HEAD_SIGNING_KEY`, `zbm-ledger-anchor-v1|<entries>|<head_hash>|<at>`) when the key is set. |
 
 With `LEDGER_CALLERS_FILE` set: 403 when a caller writes an event for a department it is not scoped to, writes a
 finding without the `revenue_recovery` department, (read-only caller) calls any POST, or filters
 `GET /ledger/entries` by a department it may not read. Reads are scoped: a caller's `GET /ledger/entries` returns
 only events of the departments it may read, and findings only if those include `revenue_recovery`.
 `/ledger/verify` and `/ledger/head` carry no department data and stay open to every authenticated caller.
+
+## External anchor (fix wave A, RTM-07)
+
+The chain is unkeyed: someone who can write the ledger volume AND a department's volume can rewrite history
+consistently (recomputed hashes, a matching `.head`), and the ledger alone cannot notice. The control is a copy of
+the head kept OUTSIDE the system, where no service can write:
+
+1. Once a day Andre's heartbeat monitor calls `GET /ledger/anchor` (any read token) and stores the answer in its own
+   append-only record (the monitor's log, or an email to billing@ it sends itself). No service holds write access to
+   that record. Nothing in this repository pushes it anywhere.
+2. When the ledger is (re)deployed, set `LEDGER_ANCHORED_HEAD` to the latest stored `anchor` value. The ledger then
+   refuses to start if its log is behind that anchor (a rollback or a restored older volume) or holds a different
+   hash at that position (a rewrite).
+3. With `LEDGER_HEAD_SIGNING_KEY` set, the stored record also proves the head came from this ledger (verify the
+   HMAC with the same key, kept by Andre).
 
 ## Per-caller tokens (`LEDGER_CALLERS_FILE`)
 
