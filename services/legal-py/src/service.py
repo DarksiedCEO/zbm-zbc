@@ -26,6 +26,7 @@ import hashlib
 import json
 import re
 import secrets
+import sys
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -331,9 +332,22 @@ class LegalService:
         self.reconcile_required: list[str] = []
         self._reconciling = False
         self._replaying = True
+        # AEGIS r10 R10-L1: one bad record never stops the start. A record that cannot be applied (an update of a
+        # record that does not exist, written by the code before the fix) is quarantined: skipped, kept in
+        # ``replay_quarantine``, printed as a WARNING and flagged on /health for Andre; the rest of its line applies.
+        self.replay_quarantine: list[dict] = []
         for rec in self.log.iter_records():
             for kind, r in rec["data"].get("ops", []):
-                self._apply(kind, r)
+                try:
+                    self._apply(kind, r)
+                except (KeyError, TypeError, AttributeError) as exc:
+                    q = {"seq": rec["seq"], "kind": kind, "error": type(exc).__name__,
+                         "detail": (f"{r.get('coll')}:{r.get('key')}" if kind == "update" and isinstance(r, dict)
+                                    else str(exc))[:200]}
+                    self.replay_quarantine.append(q)
+                    print(f"WARNING legal-py: log line {rec['seq']}: a {kind} record could not be applied "
+                          f"({q['error']} {q['detail']}); quarantined, the rest of the line applied (Andre: see "
+                          "/health replay_quarantined)", file=sys.stderr, flush=True)
             ide = rec["data"].get("idem")
             if ide:
                 self._idem_load(ide)
@@ -392,9 +406,23 @@ class LegalService:
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing took effect",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
 
+    def _check_updates(self, op: Op) -> None:
+        """AEGIS r10 R10-L1: an ``update`` names a record that exists (now, or put earlier in the same operation);
+        otherwise nothing is written (a line that updates a missing record would stop every later replay)."""
+        added: set[tuple[str, str]] = set()
+        for kind, r in op.ops:
+            if kind in PUT_KINDS:
+                attr, key = PUT_KINDS[kind]
+                added.add((attr, str(r.get(key))))
+            elif kind == "update":
+                coll = self.blob_meta if r["coll"] == "blobs" else getattr(self, r["coll"], None)
+                if coll is None or (r["key"] not in coll and (r["coll"], r["key"]) not in added):
+                    raise Conflict(f"an update names a {r['coll']} record that does not exist; nothing took effect")
+
     def _commit(self, op: Op, after_anchor: Optional[Callable] = None) -> None:
         if not op.ops:
             return
+        self._check_updates(op)
         data = {"ops": [[k, r] for k, r in op.ops], "ledger_event_ids": list(op.events),
                 "rules_version": self.rules_version, "anchored": True}
         if op.idem:
@@ -1262,7 +1290,7 @@ class LegalService:
                     reasons.append(R.item("VERSION_NOT_IN_FORCE", f"{body['doc_id']} {body['version']} is not "
                                           "approved and in force at accepted_at"))
                 reasons += self._instance_reasons(v, body["party_ref"])
-                reasons += self._invitation_reasons(principal, v, body)
+            reasons += self._invitation_reasons(principal, v, body)
             if body["presented_sha256"] != body["doc_sha256"]:
                 reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the text shown is not the document exactly"))
             if body["affirmative_act"] is not True:
@@ -1296,7 +1324,7 @@ class LegalService:
                    "method": rec["method"], "evidence_sufficient": rec["evidence_sufficient"],
                    "signer_identity_ref_sha256": sha(rec["signer_identity_ref"])},
                   f"Acceptance of {rec['doc_id']} {rec['version']} recorded")
-            if body.get("invitation_id"):
+            if body.get("invitation_id") and body["invitation_id"] in self.invitations:     # validated above (R10-L1)
                 rec["invitation_id"] = body["invitation_id"]
                 op.update("invitations", body["invitation_id"], {"used_by": aid, "used_at": iso(now)})
             op.add("acceptance", rec)
@@ -1307,21 +1335,34 @@ class LegalService:
             return self._answer(op, key, h, {**self.acceptance_view(rec), "obligation_ids": obligations,
                                              "reasons": reasons, "reason_lines": R.lines(reasons)})
 
-    def _invitation_reasons(self, principal: str, v: dict, body: dict) -> list[dict]:
-        """Money red team RTM-13: the onboarding token records a STANDARD form's acceptance (a version bound to no
-        party) only with Andre's invitation for that party, document and version: unused and unexpired. A version
-        bound to a party keeps its own binding (``_instance_reasons``); other callers are unchanged."""
+    def _invitation_reasons(self, principal: str, v: Optional[dict], body: dict) -> list[dict]:
+        """Money red team RTM-13, AEGIS r10 R10-L1/L2/L3:
+
+        * a ``client:*`` acceptance is recorded only on the onboarding path (ADR 0022: founder/onboarding); ``hub``
+          and ``clipper_network`` never record one, with or without an invitation;
+        * an ``invitation_id``, from ANY caller, must name Andre's invitation for exactly this party, document and
+          version, unused and unexpired (an unknown id is a 409 that writes nothing, never a 500 or a log line that
+          updates a record that does not exist; no caller can use up another party's invitation);
+        * the onboarding token records a STANDARD form's acceptance (a version bound to no party) only with such an
+          invitation. A version bound to a party keeps its own binding (``_instance_reasons``)."""
         inv_id = body.get("invitation_id")
-        if principal != "onboarding" or v.get("party_ref"):
-            return []
-        inv = self.invitations.get(inv_id or "")
-        ok = (inv is not None and inv["party_ref"] == body["party_ref"] and inv["doc_id"] == body["doc_id"]
-              and inv["version"] == body["version"] and not inv.get("used_by")
-              and parse_iso(inv["expires_at"]) > self._now())
-        if ok:
-            return []
-        return [R.item("ACCEPTANCE_NOT_INVITED", "a standard form is accepted for a client only with Andre's unused, "
-                       "unexpired invitation for that client, document and version")]
+        out = []
+        if str(body.get("party_ref") or "").startswith("client:") and principal != "onboarding":
+            out.append(R.item("ACCEPTANCE_NOT_INVITED", "a client's acceptance is recorded only on the onboarding "
+                                                        "path, with Andre's invitation for that client"))
+        if inv_id is not None:
+            inv = self.invitations.get(inv_id)
+            ok = (inv is not None and inv["party_ref"] == body["party_ref"] and inv["doc_id"] == body["doc_id"]
+                  and inv["version"] == body["version"] and not inv.get("used_by")
+                  and parse_iso(inv["expires_at"]) > self._now())
+            if not ok:
+                out.append(R.item("ACCEPTANCE_NOT_INVITED", "the invitation is not Andre's unused, unexpired "
+                                                            "invitation for this party, document and version"))
+        elif principal == "onboarding" and v is not None and not v.get("party_ref"):
+            out.append(R.item("ACCEPTANCE_NOT_INVITED", "a standard form is accepted for a client only with Andre's "
+                                                        "unused, unexpired invitation for that client, document and "
+                                                        "version"))
+        return out
 
     def create_invitation(self, request_id: str, body: dict) -> dict:
         """RTM-13: Andre invites ONE client to accept ONE document version (the acceptance page carries its id)."""
@@ -2918,9 +2959,11 @@ class LegalService:
                 "evidence": out[offset:offset + limit], "log_length": n_lines}
 
     def health(self) -> dict:
-        status = "closed" if self._closed else ("degraded" if self.log.fault else "ok")   # bug sweep E
+        status = "closed" if self._closed else ("degraded" if self.log.fault or self.replay_quarantine
+                                                else "ok")   # bug sweep E; R10-L1: a quarantined record degrades
         return {"status": status, "service": "legal-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned,
                 "log_write_fault": bool(self.log.fault),
                 "counsel_channel_wired": not type(self.ports.counsel).__name__.startswith("NotWired"),
-                "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required)}
+                "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
+                "replay_quarantined": len(self.replay_quarantine)}
