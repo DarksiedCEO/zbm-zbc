@@ -759,6 +759,28 @@ class StripeMixin:
                   f"Payment held ({kind}): {amount}")
         return hold
 
+    def _hold_unapplied(self, op: Op, rct: str, inv: dict, check: tuple, amount: str, value_date: str,
+                        method_label: str) -> str:
+        """AEGIS r10 R10-4: unapplied money that names a client (Stripe metadata, a bank reference token) whose
+        Compliance answer is not a current ALLOW is HELD like a matched payment: the receipt carries the hold (its
+        sanctions ground included), a Compliance break says what to do (OFAC note on a sanctions ground, Andre-only),
+        and a refund or return of it is an OFAC-held refund for Andre, never a routine one. The unapplied-cash break
+        stays for reconciliation; only Andre applies it (``apply_receipt`` asks Compliance again)."""
+        kind, why, ground = check
+        ground = merge_ground(ground)
+        leg, note = self.HOLD_NOTE["sanctions" if ground else kind]
+        bid = self._compliance_break(op, leg, inv, rct, amount, note)
+        rc = op.get("receipts", rct)
+        hold = {"kind": kind, "sanctions": bool(ground), "sanctions_ground": ground, "reason": why[:200],
+                "break_id": bid, "since": iso(self._now()), "receipt_id": rct, "amount": amount,
+                "client_id": inv["client_id"], "attributed_invoice_id": inv["invoice_id"],
+                "method_label": method_label, "value_date": value_date}
+        op.put("receipts", rct, {**rc, "held_compliance": hold})
+        op.record(derived_id("hold", "unapplied", rct, kind), "compliance_hold_opened", ACTOR, inv["invoice_id"],
+                  {"invoice_id": inv["invoice_id"], "kind": kind, "receipt_id": rct, "amount": amount, "break_id": bid},
+                  f"Unapplied payment held ({kind}): {amount}")
+        return f"unapplied_held_{'compliance' if kind == 'refused' else 'unverified'}"
+
     def _funded_client_alert(self, client_id: str, act) -> None:
         """AEGIS r10 R10-1: a client whose deposit funds a campaign is no longer allowed: accruals, payout runs,
         approvals, funding and releases for it are refused at each step; Andre is pushed once per state (his channel
@@ -831,6 +853,10 @@ class StripeMixin:
         hist = list(cur.get("held_compliance_history") or []) + [{**hold, "released_at": iso(self._now()),
                                                                   "basis": basis, **detail}]
         new = {k: v for k, v in cur.items() if k != "held_compliance"}
+        if basis == "refund" and new.get("status") == "paid" and \
+                M.D(new.get("refunded") or "0.00") >= M.D(new.get("total") or "0.00") > 0:
+            # AEGIS r10 RTM-05: a held invoice refunded at Stripe stayed paid-held; Andre's release re-opens it
+            new.update(status="issued", paid_at=None)
         op.put("invoices", invoice_id, {**new, "held_compliance_history": hist})
         rc = op.get("receipts", hold["receipt_id"]) or {}
         if basis == "compliance_allow" and rc.get("status") == "matched" \
@@ -1091,6 +1117,10 @@ class StripeMixin:
                   {"receipt_id": rct, "entity": "zbm", "account": "1060", "amount": M.fmt(gross),
                    "invoice_id": inv["invoice_id"] if ok else None, "fee": M.sfmt(fee)},
                   f"Stripe payment {status}: {M.fmt(gross)} (fee {M.sfmt(fee)})")
+        if not ok and inv is not None and getattr(op, "compliance_check", None):
+            # AEGIS r10 R10-4: unapplied money that names a client Compliance does not ALLOW is held, never plain cash
+            status = self._hold_unapplied(op, rct, inv, op.compliance_check, M.fmt(gross), value_date,
+                                          METHOD_LABEL.get(p.method, "Stripe"))
         if ok:
             for s in self.db["stripe_sessions"].values():
                 if s["invoice_id"] == inv["invoice_id"] and s["status"] == "open":
@@ -1130,6 +1160,10 @@ class StripeMixin:
                                                 "currency": p.currency}})
             note += f"; booked as unapplied cash ({M.fmt(gross)} USD settled)"
             status = "unapplied_currency_mismatch"
+            inv = op.get("invoices", p.invoice_id) if p.invoice_id else None
+            if inv is not None and getattr(op, "compliance_check", None):         # AEGIS r10 R10-4
+                status = self._hold_unapplied(op, rct, inv, op.compliance_check, M.fmt(gross),
+                                              self._today_la().isoformat(), "Stripe")
         else:
             note += "; its USD settlement is not readable: nothing booked, book it by hand"
         if op.get("breaks", bid) is None:
@@ -1203,14 +1237,21 @@ class StripeMixin:
             # the client receipt states the full amount paid: no longer true after any refund (never sent; one
             # already sent is marked withdrawn_after_send)
             self._withdraw_client_receipt(op, rct)
-        held = (inv or {}).get("held_compliance") if inv is not None else None
+        held = ((inv or {}).get("held_compliance") if inv is not None else None) or rc.get("held_compliance")
         if held:
             # RTM-05 / AEGIS r9 R9-2: a refund of a HELD payment marks the hold's own break for Andre (loud and OFAC-
             # relevant on a sanctions ground: blocked property just left the Stripe balance). The hold stays either
             # way, and the booking below is the same for every hold, so nothing a non-Andre reader sees differs
-            self._held_refund_mark(op, inv, held, rct, delta, total)
+            self._held_refund_mark(op, inv or {"invoice_id": held.get("attributed_invoice_id")}, held, rct, delta,
+                                   total)
         if matched and inv["status"] == "paid":
-            if full or net_reversed:
+            if (full or net_reversed) and inv.get("held_compliance"):
+                # AEGIS r10 RTM-05: a held invoice is never silently re-opened by a refund: it stays paid-held (the
+                # hold's break and Andre's push say what happened); Andre's release on the refund re-opens it
+                op.put("invoices", inv["invoice_id"], {**inv, "refunded": M.fmt(total)})
+                if inv["kind"] == I2.MEDIA_KIND:
+                    self._media_unpaid(op, inv, rct, "the client was refunded at Stripe", break_key=f"refund:{rct}")
+            elif full or net_reversed:
                 op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
                                                        "refunded": M.fmt(total)})
                 if inv["kind"] == I2.MEDIA_KIND:
@@ -1225,11 +1266,17 @@ class StripeMixin:
                 op.put("media_buys", buy["buy_id"], {**buy, "payment_refunded": True})
         bid = rid("brk", "stripe_refund", rct, M.fmt(total))
         if op.get("breaks", bid) is None:
+            extra = {}
+            if held:
+                # AEGIS r10 RTM-08c: the refund's own break says it too (Andre's token only: non-Andre views drop a
+                # stripe_refund break's note and severity)
+                g = hold_ground(held)
+                extra = {"note": self.HELD_REFUND_NOTE[g or False][:200], "severity": "high" if g else "normal"}
             op.put("breaks", bid, {"break_id": bid, "leg": "stripe_refund", "subject": f"zbm:1060:{rct}"[:160],
                                    "difference": M.fmt(delta), "opened_at": iso(self._now()),
                                    "opened_on": self._today_la().isoformat(), "owner": "andre",
                                    "explanation_code": "unknown", "status": "open", "receipt_id": rct,
-                                   "resolution": None})
+                                   "resolution": None, **extra})
             op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
                       {"break_id": bid, "leg": "stripe_refund", "difference": M.fmt(delta)},
                       f"Break opened: {M.fmt(delta)} refunded at Stripe outside Finance")
@@ -1241,17 +1288,42 @@ class StripeMixin:
 
     HELD_REFUND_NOTE = {
         False: "the held payment was refunded at Stripe: release the hold with basis refund and the refund's entry",
-        "place": "OFAC-RELEVANT: a payment held on SANCTIONS grounds was refunded at Stripe (blocked property left "
-                 "the account): report it to OFAC and contact Stripe support now (runbook step G)",
-        "match": "OFAC-RELEVANT: a payment held on SANCTIONS grounds was refunded at Stripe (blocked property left "
-                 "the account): report it to OFAC and contact Stripe support now (runbook step G)"}
+        "place": "OFAC-HELD REFUND: a payment held on SANCTIONS grounds was refunded at Stripe (blocked property left "
+                 "the account): Andre reports it to OFAC (rejected-transaction path, runbook step G), tells Stripe",
+        "match": "OFAC-HELD REFUND: a payment held on SANCTIONS grounds was refunded at Stripe (blocked property left "
+                 "the account): Andre reports it to OFAC (rejected-transaction path, runbook step G), tells Stripe"}
+    # AEGIS r10 RTM-05: the bank path (an ACH return of a held deposit) and a refund that later failed at Stripe
+    HELD_RETURN_NOTE = {
+        False: "the held payment was returned by the bank: the hold stays until Andre releases it",
+        "place": "OFAC-HELD RETURN: a payment held on SANCTIONS grounds was returned by the bank (blocked property "
+                 "left the account): Andre reports it to OFAC (rejected-transaction path, runbook step G)",
+        "match": "OFAC-HELD RETURN: a payment held on SANCTIONS grounds was returned by the bank (blocked property "
+                 "left the account): Andre reports it to OFAC (rejected-transaction path, runbook step G)"}
+    HELD_REVERSED_NOTE = {
+        False: "the refund of the held payment failed at Stripe: the money is back in the Stripe balance; the hold "
+               "stays",
+        "place": "OFAC-RELEVANT: the refund of a payment held on SANCTIONS grounds failed at Stripe: the money is back "
+                 "in the Stripe balance and blocked again; say so in the OFAC report (runbook step G)",
+        "match": "OFAC-RELEVANT: the refund of a payment held on SANCTIONS grounds failed at Stripe: the money is back "
+                 "in the Stripe balance and blocked again; say so in the OFAC report (runbook step G)"}
 
-    def _held_refund_mark(self, op: Op, inv: dict, held: dict, rct: str, delta: Decimal, total: Decimal) -> None:
+    def _held_refund_mark(self, op: Op, inv: dict, held: dict, rct: str, delta: Decimal, total: Decimal,
+                          notes: Optional[dict] = None, how: str = "refunded at Stripe") -> None:
         ground = hold_ground(held)
+        notes = notes or self.HELD_REFUND_NOTE
         b = op.get("breaks", held.get("break_id") or "")
         if b is not None:
             op.put("breaks", b["break_id"], {**b, "severity": "high" if ground else "normal",
-                                             "note": self.HELD_REFUND_NOTE[ground or False][:200]})
+                                             "note": notes[ground or False][:200]})
+        # AEGIS r10 RTM-05: Andre is pushed (his channel only; nothing in the log differs by ground)
+        msg = f"a payment held by Compliance was {how} ({M.fmt(delta)})" + (
+            "; OFAC: it was held on sanctions grounds: report it to OFAC (rejected-transaction path, runbook step G)"
+            if ground else "")
+        try:
+            self.ports.push.push("compliance_held_refund", {"invoice_id": inv.get("invoice_id"), "receipt_id": rct,
+                                                            "message": msg})
+        except Exception:  # noqa: BLE001 - a push is best effort (stand-in); the break is the durable signal
+            pass
         op.record(derived_id("hold", "refund", inv["invoice_id"], rct, M.fmt(total)),
                   "compliance_hold_sanctions_refunded" if ground else "compliance_hold_refunded", ACTOR,
                   inv["invoice_id"], {"invoice_id": inv["invoice_id"], "kind": held.get("kind"), "receipt_id": rct,
@@ -1290,6 +1362,11 @@ class StripeMixin:
                 if inv["status"] == "issued" and not held:
                     new.update(status="paid", paid_at=iso(self._now()))
                 op.put("invoices", inv["invoice_id"], new)
+            hold = ((inv or {}).get("held_compliance") if inv is not None else None) or rc.get("held_compliance")
+            hb = op.get("breaks", (hold or {}).get("break_id") or "")
+            if hb is not None:
+                # AEGIS r10 RTM-05: the money is back, so the hold's note no longer says it left the account
+                op.put("breaks", hb["break_id"], {**hb, "note": self.HELD_REVERSED_NOTE[hold_ground(hold) or False]})
             outcome = "refund_reversed"
         else:
             note = f"{note}; Finance could not book it back by itself (receipt {prior}): book it by hand"

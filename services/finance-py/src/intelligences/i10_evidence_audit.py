@@ -338,6 +338,9 @@ def hide_hold_details(obj):
         for k in ("note", "note_sha256", "severity"):      # AEGIS r9 R9-2: a note's hash or a severity is a tell too
             out.pop(k, None)
         out["resolution"] = None
+    elif out.get("leg") == "stripe_refund":                 # AEGIS r10 RTM-08c: a held refund's note is Andre's
+        for k in ("note", "note_sha256", "severity"):
+            out.pop(k, None)
     if isinstance(out.get("event_type"), str) and out["event_type"].startswith("compliance_hold_"):
         out["event_type"] = GENERIC_HOLD_EVENT
     return out

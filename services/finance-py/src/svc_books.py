@@ -630,6 +630,9 @@ class BooksMixin:
                 inv0 = I2.match_receipt(ln["amount"], ln.get("reference_token"), self.db["invoices"], ln["entity"])
                 if inv0 is not None:
                     would.add(inv0["client_id"])
+                att = self.db["invoices"].get(ln.get("reference_token") or "")
+                if att is not None:
+                    would.add(att["client_id"])      # AEGIS r10 R10-4: unapplied money that names a client too
         g_cmp = Gather(self, f"bank|{request_id}|compliance", "intel_02_receivables", "bank_feed")
         checks = {cid: self._client_check(g_cmp, cid) for cid in sorted(would)}
         with self.lock:
@@ -732,6 +735,16 @@ class BooksMixin:
                     status = f"matched_held_{'compliance' if kind == 'refused' else 'unverified'}"
                 elif status == "matched":
                     self._client_receipt(op, rct, inv, M.fmt(amt), str(ln["value_date"]))
+                elif status == "unapplied":
+                    # AEGIS r10 R10-4: the line names an invoice (wrong amount, already paid...): its client's money
+                    # is held like a matched payment while Compliance does not ALLOW the client
+                    att = op.get("invoices", ln.get("reference_token") or "")
+                    if att is not None:
+                        ucheck = checks.get(att["client_id"], ("unverified", "Compliance (38) was not asked about this "
+                                                               "client before the line was booked", None))
+                        if ucheck:
+                            status = self._hold_unapplied(op, rct, att, ucheck, M.fmt(amt), str(ln["value_date"]),
+                                                          "ACH or wire")
                 results.append({"receipt_id": rct, "status": status, "entry_id": e["entry_id"]})
             resp = self._idem_add(op, key, h, {"results": results, "ledger_event_ids": op.events,
                                                "request_id": request_id})
@@ -851,6 +864,12 @@ class BooksMixin:
             op.put("receipts", receipt_id, {**rc, "status": "returned", "return": ret})
             op.put("invoices", inv["invoice_id"], {**inv, "status": "returned", "returned_at": iso(self._now())})
             self._withdraw_client_receipt(op, receipt_id)        # AEGIS M1: never "thank you" for bounced money
+            held = inv.get("held_compliance")
+            if held and held.get("receipt_id") == receipt_id:
+                # AEGIS r10 RTM-05 (bank path): a held deposit the bank returned is marked like a Stripe refund of a
+                # held payment (high severity and the OFAC note on a sanctions ground; Andre pushed); the hold stays
+                self._held_refund_mark(op, inv, held, receipt_id, amt, amt, notes=self.HELD_RETURN_NOTE,
+                                       how="returned by the bank")
             sf_id = None
             prof = self.db["profiles"].get(camp)
             if shortfall > 0:

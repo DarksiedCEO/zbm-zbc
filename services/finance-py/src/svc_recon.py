@@ -235,6 +235,9 @@ class ReconMixin:
                     row.update(leg="compliance_hold", note="payment held by Compliance (details: Andre's token)",
                                resolution=None)
                     row.pop("severity", None)                # AEGIS r9 R9-2: no severity tell either
+                elif not full and b.get("leg") == "stripe_refund":
+                    row.pop("note", None)                    # AEGIS r10 RTM-08c: a held refund's note is Andre's
+                    row.pop("severity", None)
                 out.append(row)
             return {"breaks": out}
 

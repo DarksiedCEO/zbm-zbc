@@ -104,9 +104,10 @@ def test_a_later_hold_inherits_the_sanctions_marker_with_an_open_ofac_break(tmp_
 def test_no_checkout_on_an_invoice_that_carries_a_hold(tmp_path):
     hr = _stripe_hr(tmp_path)
     inv, pi, out = _pay_then(hr, lambda: _sanctioned(hr))
-    hr.sim.refund(pi)                                            # refunded anyway at Stripe: the invoice is issued again
+    hr.sim.refund(pi)                                            # refunded anyway at Stripe
     sent(hr, "charge.refunded", _charge(hr, pi))
-    assert hr.svc.db["invoices"][inv["invoice_id"]]["status"] == "issued"
+    # AEGIS r10 RTM-05: a held invoice is never silently re-opened by a refund: it stays paid-held
+    assert hr.svc.db["invoices"][inv["invoice_id"]]["status"] == "paid"
     _allow(hr)
     r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/stripe-checkout", {"request_id": rid()}, caller="onboarding")
     assert r.status_code == 409 and "held by Compliance" in r.text, r.text
