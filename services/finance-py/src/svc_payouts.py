@@ -146,9 +146,12 @@ class PayoutsMixin:
     def _open_breaks(self) -> list[dict]:
         out = []
         today = self._today_la()
+        pending = self._pending_restore_subjects() if self.db["breaks"] else {}
         for b in self.db["breaks"].values():
             if b.get("leg") in self.COMPLIANCE_LEGS:
                 continue
+            if self._explained_by_pending(b.get("subject"), b.get("difference"), pending):
+                continue           # AEGIS r7 R7-2c: owed to an unbooked restore item; its counterparty stays fenced
             if b["status"] == "open":
                 out.append(b)
             elif b["status"] == "explained" and (b.get("clears_by") or "") < today.isoformat():
@@ -169,8 +172,10 @@ class PayoutsMixin:
             if not self._fresh(last["run_at"], I7.FC01_MAX_AGE_H):
                 out.append(R.item("RECON_BREAK", f"latest reconciliation run is stale ({last['run_at']}; max "
                                                  f"{I7.FC01_MAX_AGE_H} h)", [last["recon_id"]]))
-            if not I7.all_matched(last["legs"]):
-                bad = [f"{l['leg']}:{l['subject']}" for l in last["legs"] if l["status"] not in ("matched", "not_in_use")]
+            pend = self._pending_restore_subjects() if self.db["breaks"] else {}
+            bad = [f"{l['leg']}:{l['subject']}" for l in last["legs"] if l["status"] not in ("matched", "not_in_use")
+                   and not self._explained_by_pending(l.get("subject"), l.get("difference"), pend)]
+            if bad:                # AEGIS r7 R7-2c: a leg off by exactly the unbooked restore items fences only them
                 out.append(R.item("RECON_BREAK", f"latest reconciliation has unmatched legs: {', '.join(bad)[:120]}",
                                   [last["recon_id"]]))
         brks = self._open_breaks()
@@ -414,6 +419,7 @@ class PayoutsMixin:
                          and not e.get("consumed_by")}
             batch_net = M.ZERO
             live_now = self._live_payables()
+            fenced = self._subject_fences()
             for pid in sorted(cands):
                 payee = op.get("payees", pid)
                 # re-read under the lock: a payable changed since the gather (a clawback, another run) is never used stale
@@ -430,6 +436,9 @@ class PayoutsMixin:
                 if not good:
                     continue
                 preasons, withhold_unmatched = self._payee_reasons(payee, inputs)
+                if pid in fenced:      # AEGIS r7 R7-2c: held alone; the rest of the run goes ahead
+                    preasons.append(R.item("PAYEE_HOLD", "RESTORE_FENCED: money to this payee was recorded as moved "
+                                                         "after a restore and is not booked yet"))
                 amts = self._amounts(payee, good, withhold_unmatched, op)
                 minimum = self.cfg.final_payout_min if payee["status"] == "offboarding" else self.cfg.min_payout
                 if amts["net"] < minimum and not (amts["net"] == 0 and amts["netted"] > 0):
@@ -883,7 +892,8 @@ class PayoutsMixin:
             # AEGIS r6 R6-1/R6-4: payee, rail, batch and key, verifiable from the summary (a restore derives from it)
             op.record(derived_id("isub", iid), "item_submitted", I4.ACTOR, iid,
                       RE.item_payload(iid, it["net"], it["idempotency_key"], it["payee_id"], it["rail"], it["batch_id"]),
-                      RE.item_summary(it["net"], it["idempotency_key"], it["payee_id"], it["rail"], it["batch_id"],
+                      RE.item_summary(it["net"], self.db["batches"][it["batch_id"]]["period"], it["payee_id"], it["rail"],
+                                      it["batch_id"],
                                       len(self.log) + 1))
             # AEGIS r5 R5-3: an item a restore named may have been sent already: the rail is looked up first
             touched = iid in self._restore_touched() or it.get("batch_id") in self._restore_touched()

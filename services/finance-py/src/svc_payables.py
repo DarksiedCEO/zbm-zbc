@@ -138,6 +138,32 @@ class PayablesMixin:
                    "rate_card_sha256": p["rate_card"]["sha256"]},
                   f"Payable accrued: {p['amount']} for {p['paid_views']} verified views")
         op.put("payables", p["payable_id"], new)
+        return self._restore_settle_resent(op, new)
+
+    def _restore_settle_resent(self, op: Op, p: dict) -> dict:
+        """AEGIS r7 R7-8: a handoff re-sent after a restore for a submission Andre's manual restore booking named as
+        already paid is settled by that booking at once (never paid again), up to the booked amount. Beyond it the
+        payable is fenced by a high-severity break until Andre resolves it."""
+        hit = self._restore_paid_submission(p["submission_id"], p["payee_id"]) if p["status"] == "accrued" else None
+        if hit is None:
+            return p
+        event_id, booked, _entry = hit
+        done = M.total(M.D(q["current_amount"]) for q in self.db["payables"].values()
+                       if q.get("settled_by_restore_correction") == event_id and q["payable_id"] != p["payable_id"])
+        if done + M.D(p["current_amount"]) > booked:
+            bid = rid("brk", "restore_resent_over", p["payable_id"])
+            op.put("breaks", bid, {"break_id": bid, "leg": "restore_resent_over_booking", "status": "open",
+                                   "subject": f"zbc:payable:{p['payable_id']}", "difference": p["current_amount"],
+                                   "opened_at": iso(self._now()), "owner": "andre", "severity": "high",
+                                   "explanation_code": "unknown", "receipt_id": None, "resolution": None,
+                                   "restore_item": event_id})
+            return p
+        new = {**p, "status": "settled", "settled_by_restore_correction": event_id}
+        op.put("payables", p["payable_id"], new)
+        op.record(derived_id("prs", p["payable_id"], event_id), "payable_settled_by_restore_booking",
+                  "intel_03_payables", p["payable_id"],
+                  {"payable_id": p["payable_id"], "restore_item": event_id, "amount": p["current_amount"]},
+                  "Re-sent handoff: payable settled by the manual restore booking that paid it")
         return new
 
     def _identity_conflict(self, op: Op, sid: str, cert: Certification,

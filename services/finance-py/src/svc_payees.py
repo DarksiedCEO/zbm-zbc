@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 from datetime import timedelta
 from typing import Optional
@@ -29,6 +30,7 @@ from ports import RailAccount, TaxAgentAnswer
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, facts_sha256, rid, sha, sha_text, unbatched
 
 HELD = "held_submitting"
+alert_log = logging.getLogger("finance.alert")
 
 # Wave 25 (scout B Low): the payout-country list is a pinned seed like fin_rules_seed.json — a changed file refuses
 # the import (and so the start) instead of silently changing who can be paid; read through a closed handle.
@@ -587,6 +589,46 @@ class PayeesMixin:
             return "hold_opened"
         return "recorded"
 
+    def rail_event_disposition(self, request_id: str, rail_name: str, event_id: str, body: dict) -> dict:
+        """AEGIS r7 R7-6: Andre's way out for a rail event parked during a restore that never became applicable:
+        ``apply`` (try it now; refused if it still does not apply) or ``discard`` (with the reason, audited)."""
+        k = f"{rail_name}|{event_id}"
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"rail-events/{k}", body)
+            if ent:
+                return ent["response"]
+            r = self.db["rail_events"].get(k)
+            if r is None or not r.get("restore_parked") or not r.get("held"):
+                raise NotFound("no parked rail event waiting with that id")
+            op = Op(self, f"redisp|{request_id}", "andre", event_id)
+            if body["action"] == "apply":
+                status = self._rail_event(op, rail_name, {"event_id": event_id, "type": r["type"],
+                                                          "item_id": r.get("item_id")})
+                if str(status).startswith("ignored_") or status == HELD:
+                    raise Conflict(f"the event still does not apply ({status}): discard it with the reason instead")
+                new = {**r, "status": status, "held": False, "applied_by_andre": iso(self._now())}
+            else:
+                new = {**r, "status": "discarded_by_andre", "held": False, "discard_reason": body["reason"],
+                       "discarded_at": iso(self._now())}
+            op.put("rail_events", k, new)
+            op.record(derived_id("redisp", k, request_id), "rail_event_disposed", "andre", event_id,
+                      {"rail": rail_name, "event_id": event_id, "action": body["action"],
+                       "reason_sha256": sha_text(body["reason"])}, f"Andre {body['action']} a parked rail event")
+            resp = self._idem_add(op, key, h, {"event": new, "ledger_event_ids": op.events, "request_id": request_id})
+            self._commit(op)
+            return resp
+
+    def _parked_alert(self) -> None:
+        """AEGIS r7 R7-6: a rail event parked during a restore and still waiting after 72 h is reported to Andre."""
+        now = self._now()
+        stale = [k for k, r in self.db["rail_events"].items() if r.get("restore_parked") and r.get("held")
+                 and r.get("waiting_since") and (now - parse_iso(r["waiting_since"])).total_seconds() > 72 * 3600]
+        last = getattr(self, "_parked_alert_on", None)
+        if stale and last != now.date():
+            self._parked_alert_on = now.date()
+            alert_log.error("ALERT finance: rail_event_parked_72h %s: apply or discard it "
+                            "(POST /fin/v1/rail-events/{rail}/{event_id}/disposition)", ",".join(sorted(stale)[:10]))
+
     def _next_parked_seq(self, op: Op) -> int:
         """A monotonic arrival number for events parked during a restore lockdown (gaps are harmless)."""
         top = max([int(r.get("parked_seq") or 0) for r in self.db["rail_events"].values()] or [0])
@@ -615,7 +657,8 @@ class PayeesMixin:
                     continue
                 if r.get("restore_parked") and str(status).startswith("ignored_"):
                     # AEGIS r6 R6-5: not applicable YET (e.g. returned before paid): it stays held, never deduplicated
-                    op.put("rail_events", k, {**r, "status": HELD, "held": True, "waiting_since": iso(self._now()),
+                    op.put("rail_events", k, {**r, "status": HELD, "held": True,
+                                              "waiting_since": r.get("waiting_since") or iso(self._now()),
                                               "last_try": status})
                     self._commit(op)
                     continue

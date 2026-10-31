@@ -464,6 +464,9 @@ class MediaMixin:
         if ent:
             return ent["response"]
         self.require_rules()
+        if self.restore_locked():
+            raise Conflict("RESTORE_LOCKDOWN: no client email while a restore is open")
+        self._restore_mail_dedupe(f"crcs|{request_id}", ids=[crid])   # AEGIS r7 R7-7: every send path, ledger-checked
         with self.lock:
             rec = self.db["client_receipts"].get(crid)
             if rec is None:

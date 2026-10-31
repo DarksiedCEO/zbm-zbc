@@ -43,6 +43,14 @@ def _correct(z, it, ref, **kw):
                   andre=ANDRE_TOKEN)
 
 
+def _feed(hr, entity, account, amount, token):
+    """Feed one bank statement line to Finance (the money is already at the bank)."""
+    import hashlib
+    line = {"txn_ref_sha256": hashlib.sha256(rid("txn").encode()).hexdigest(), "entity": entity, "account": account,
+            "direction": "credit", "amount": amount, "value_date": "2026-10-02", "reference_token": token}
+    return hr.ok(hr.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [line]}, caller="bank_feed"))
+
+
 def _two_payee_payout(keys, tmp_path, paid=True):  # noqa: F811
     """AEGIS G4c: payables of clip-a and clip-b; run, funding and release AFTER the backup; the rail pays."""
     x = durable(keys, tmp_path)
@@ -141,9 +149,10 @@ def test_r6_3_the_refeed_is_checked_against_booked_bank_lines_and_the_exception_
     assert z.post("/fin/v1/restore/bank-refeed", {"request_id": rid(), "since": "2026-10-02", "until": "2026-10-02",
                                                   "statement_ref": "s", "statement_days": [
                                                       {"day": "2026-10-02", "entity": "zbc", "account": "1020",
-                                                       "credit_lines": 0, "credit_total": "0.00"}]},
+                                                       "credit_lines": 0, "credit_total": "0.00",
+                                                       "closing_balance": "0.00"}]},
                   andre=ANDRE_TOKEN).status_code == 409                       # every account of every business day
-    z.receive("zbm", "1010", "700.00", a["invoice_id"])                      # Andre feeds the line
+    _feed(z, "zbm", "1010", "700.00", a["invoice_id"])                       # Andre feeds the line (bank unchanged)
     refeed(z)
     r = _void(z, z.svc.db["invoices"][a["invoice_id"]])
     assert r.status_code == 409                                               # paid: never voided

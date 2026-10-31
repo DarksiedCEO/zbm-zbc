@@ -78,7 +78,7 @@ def reimport(hr, dry=True, plan=None, since=TODAY, until=TODAY):
 
 
 def statement_days(hr, since, until, extra=()):
-    """The bank statement's per-day credit figures for every business day and bank account. In these tests the
+    """The bank statement's per-day credit figures for every calendar day and bank account. In these tests the
     statement is what the fake bank feed delivered, i.e. the lines Finance booked, plus ``extra`` lines the bank has
     that Finance has not been fed: (day, entity, account, amount)."""
     from datetime import date, timedelta
@@ -86,9 +86,8 @@ def statement_days(hr, since, until, extra=()):
     out = {}
     d, end = date.fromisoformat(str(since)), date.fromisoformat(str(until))
     while d <= end:
-        if d.weekday() < 5:
-            for ent, acct in (("zbc", "1020"), ("zbc", "1010"), ("zbm", "1010")):
-                out[(d.isoformat(), ent, acct)] = [0, Decimal("0.00")]
+        for ent, acct in (("zbc", "1020"), ("zbc", "1010"), ("zbm", "1010")):    # every calendar day (AEGIS r7)
+            out[(d.isoformat(), ent, acct)] = [0, Decimal("0.00")]
         d += timedelta(days=1)
     for r in hr.svc.db["receipts"].values():
         k = (str(r.get("value_date") or "")[:10], r.get("entity"), r.get("into_account"))
@@ -98,8 +97,10 @@ def statement_days(hr, since, until, extra=()):
     for day, ent, acct, amt in extra:
         out[(day, ent, acct)][0] += 1
         out[(day, ent, acct)][1] += Decimal(amt)
-    return [{"day": k[0], "entity": k[1], "account": k[2], "credit_lines": v[0], "credit_total": f"{v[1]:.2f}"}
-            for k, v in sorted(out.items())]
+    closing = {(e, a): hr.svc.ports.bank.balance(e, a).balance for e, a in (("zbc", "1020"), ("zbc", "1010"),
+                                                                              ("zbm", "1010"))}
+    return [{"day": k[0], "entity": k[1], "account": k[2], "credit_lines": v[0], "credit_total": f"{v[1]:.2f}",
+             "closing_balance": closing[(k[1], k[2])]} for k, v in sorted(out.items())]
 
 
 def refeed(hr, extra=(), status=200):

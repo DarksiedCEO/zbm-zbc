@@ -698,6 +698,33 @@ class RestoreDisposition(Strict):
     statement_date: Optional[date] = None
 
 
+class ManualRestoreBooking(Strict):
+    """AEGIS r7 R7-2b: Andre books a moved restore item that cannot be derived; the accounts are fixed by its type."""
+    request_id: Id
+    provider_ref: Id
+    amount: PositiveMoney
+    counterparty: Id
+    reason: Note
+    evidence_sha256: Sha
+    rail: Optional[Literal["stripe", "trolley"]] = None
+    transfer_kind: Optional[Literal["funding"]] = None
+    payable_ids: list[Id] = Field(default_factory=list, max_length=200)
+    submission_ids: list[Id] = Field(default_factory=list, max_length=200)   # R7-8: payables accrued after the backup
+
+
+class RestoreBookingReversal(Strict):
+    """AEGIS r7 R7-1: Andre reverses a restore booking (FRC) with the reason."""
+    request_id: Id
+    reason: Note
+
+
+class RailEventDisposition(Strict):
+    """AEGIS r7 R7-6: Andre's decision on a rail event parked during a restore that never became applicable."""
+    request_id: Id
+    action: Literal["apply", "discard"]
+    reason: Note
+
+
 class StatementDay(Strict):
     """AEGIS r6 R6-3: one business day of the bank statement: how many credit lines and their total (0 and 0.00 for
     a day without activity), per account."""
@@ -706,6 +733,7 @@ class StatementDay(Strict):
     account: Literal["1010", "1020"]
     credit_lines: int = Field(ge=0, le=10000)
     credit_total: Money
+    closing_balance: Money                       # AEGIS r7 R7-3: the statement's balance at the end of the day
 
 
 class BankRefeed(Strict):

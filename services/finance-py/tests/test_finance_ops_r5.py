@@ -88,11 +88,16 @@ def test_r5_2_a_lost_payout_is_booked_by_corrections_and_payouts_work_again_noth
     assert d["derived"] is True and d["counterparties"] == [payee] and d["moved_amount"] == amt
     lift(z)
     assert z.svc.lockdown_status()["post_restore_reconcile_required"] is True
-    rec = z.recon()
-    assert rec["post_restore_clean"] is False                               # the books are behind the bank and rail
     # money out stays refused until a clean reconciliation after the lift
     with pytest.raises(Conflict, match="POST_RESTORE_RECONCILE_REQUIRED"):
         z.svc._money_out_refusal("bank transfer", "x")
+    # AEGIS r7 R7-2c: the breaks are exactly the moved money not booked yet: the phase ends for everyone else, the
+    # payee stays fenced (any amount) until its payout is booked
+    rec = z.recon()
+    assert rec["post_restore_clean"] is True and z.svc.restore_post_phase() is None
+    assert payee in z.svc._subject_fences()
+    with pytest.raises(Conflict, match="RESTORE_FENCED"):
+        z.svc._money_out_refusal("rail submit", "fin-itm-x", counterparties=(payee,), amount="1.00")
     # the corrections: the funding transfer, then the payout (its payables settled)
     bad = _correct(z, its["item_submitted"], "rail-ref-WRONG", payable_ids=[pay_["payable_id"]])
     assert bad.status_code == 409                                            # not the recorded reference
@@ -112,8 +117,8 @@ def test_r5_2_a_lost_payout_is_booked_by_corrections_and_payouts_work_again_noth
     assert payee not in z.svc._subject_fences()
     assert z.svc.db["payables"][pay_["payable_id"]]["status"] == "settled"
     rec = z.recon()
-    assert rec["post_restore_clean"] is True, ([l for l in rec["recon"]["legs"] if l["status"] != "matched"], [b for b in z.svc.db["breaks"].values() if b["status"] != "resolved"])
-    assert not z.svc.lockdown_status()["post_restore_reconcile_required"]
+    assert rec["fc01"] is True and not [b for b in z.svc.db["breaks"].values()
+                                         if b.get("leg") in ("L1", "L3", "L4") and b["status"] != "resolved"]
     # the lost batch is never released again; a NEW payout works
     r = z.post(f"/fin/v1/payout-batches/{b['batch_id']}/release", {"request_id": rid()}, caller="scheduler")
     assert r.status_code in (404, 409)
@@ -148,16 +153,20 @@ def test_r5_1_a_lost_refund_is_fenced_by_subject_and_booked_by_a_correction(keys
     _full_reimport(z, brk["since"], brk["opened_on"])
     its = {i["event_type"]: i for i in _items(z, out).values() if i["kind"] in ("money_out", "in_flight")}
     assert "refund_paid" in its                                              # R5-7: refund_paid is money out
+    assert its["treasury_posting_committed"]["status"] == "follows_movement"   # R7-1: one refund, one item
     for it in its.values():
-        _moved(z, it, "bank-ref-9")
+        if it["status"] != "follows_movement":
+            _moved(z, it, "bank-ref-9")
     lift(z)
     r = z.post("/fin/v1/refunds/camp-1", {"request_id": rid()}, caller="scheduler")
     assert r.status_code in (409, 422) and "RESTORE_FENCED" in r.text       # a new id, the same refund: refused
     r = _correct(z, its["treasury_posting_committed"], "bank-ref-9")
-    assert r.status_code == 409 and "refund_paid" in r.text                  # the same money: booked once, there
+    assert r.status_code == 409                                              # the same money: booked once, there
     assert _correct(z, its["refund_paid"], "bank-ref-9").status_code == 409  # R6-1: the campaign is mandatory
     c = z.ok(_correct(z, its["refund_paid"], "bank-ref-9", refund_campaign_id="camp-1"), 201)
     assert {"camp-1", "client-1"}.isdisjoint(z.svc._subject_fences())
+    xfer = _items(z, out)[its["treasury_posting_committed"]["event_id"]]    # AEGIS r7 survivor: its transfer, covered
+    assert xfer["covered_by"] == its["refund_paid"]["event_id"] and xfer["corrected_by"] == c["entry"]["entry_id"]
     rec = z.recon()
     assert rec["post_restore_clean"] is True, (c, rec["recon"]["legs"])
     assert len(z.bank.transfers) == n1                                       # paid once, ever
