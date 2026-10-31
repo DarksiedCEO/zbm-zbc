@@ -307,3 +307,21 @@ def test_f12_the_holding_app_never_answers_200_on_health():
     assert asyncio.run(call("/health"))[0] == 503
     assert asyncio.run(call("/legal/v1/anything"))[0] == 503
     assert asyncio.run(call("/livez"))[0] == 200
+
+
+def test_f15b_a_lowercase_word_in_an_id_position_never_reaches_the_access_log(tmp_path):
+    """AEGIS rounds 2-3 F-15b: `/legal/v1/acceptances/aegisprobelowercasesecretword` was logged verbatim (a plain
+    lowercase word passed as a route word). Once the app's routes are registered, only the words of a route template
+    are kept; any other segment is `:id`."""
+    import access_redact
+    x = _durable(tmp_path)
+    access_redact.register_routes(x.client.app)
+    try:
+        got = access_redact.redact_target("/legal/v1/acceptances/aegisprobelowercasesecretword?x=1")
+        assert got == "/legal/v1/acceptances/:id?<redacted>", got
+        assert access_redact.redact_target("/legal/v1/rules") == "/legal/v1/rules"
+        assert access_redact.redact_target("/health") == "/health"
+        assert access_redact.redact_target("/legal/v1/documents/engagement_letter/versions/3/decision") == \
+            "/legal/v1/documents/:id/versions/:id/decision"
+    finally:
+        access_redact.register_routes(None)                    # back to the plain-word rule for other tests

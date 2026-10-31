@@ -24,10 +24,14 @@ run, which closes nothing by itself but turns Compliance's /health red (the hear
 Fail loud (AEGIS round 2 N-2, N-6). The job may not fail silently:
 
 * a torn last line (a crash or ENOSPC mid-append) is cut back to the last complete record before the run (an ALERT
-  line says how many bytes went); a garbage *complete* line is not repaired: the run fails;
+  line says how many bytes went); a last record that is complete and MAC-valid and only lacks its newline is kept
+  (the newline is added; AEGIS round 3 N3-7); a garbage *complete* line is not repaired: the run fails;
+* a store that is missing, empty or shorter than the state file says it was is ``anchor_store_missing`` (503), and no
+  new chain is started over it (round 3 N3-7);
 * any failure of a run other than a ledger read is ``anchor_check_failing`` on /health (503) until a run succeeds;
 * with no anchor stored or confirmed for more than ``STALE_AFTER`` (26 h; the ledger unreadable, the job not running)
-  /health is 503 ``ledger_anchor_stale``;
+  /health is 503 ``ledger_anchor_stale``, counted from the last good run kept in the state file, so a restart does
+  not reset it (round 3 N3-6);
 * a mismatch is kept in ``ledger_anchor_state.json`` beside the store, so a restart does not hide it;
 * a store without ``COMPLIANCE_LEDGER_ANCHOR_KEY`` is a /health warning (``ledger_anchor_unkeyed``).
 
@@ -48,6 +52,10 @@ STATE_FILE = "ledger_anchor_state.json"
 STALE_AFTER = timedelta(hours=26)
 
 
+class StoreMissing(Exception):
+    """The anchor store is missing, empty or shorter than the state file says it was (AEGIS round 3 N3-7)."""
+
+
 def _canon(rec: dict) -> bytes:
     return json.dumps({k: v for k, v in rec.items() if k != "mac"}, sort_keys=True, separators=(",", ":")).encode()
 
@@ -61,7 +69,8 @@ class AnchorStore:
         self.mismatch: Optional[str] = st.get("mismatch")      # sticky until Andre resolves it (survives restarts)
         self.failing: Optional[str] = st.get("failing")        # a run failed (not a ledger read); clears on success
         self.last_ok: Optional[str] = st.get("last_ok")        # ISO time of the last run that stored or confirmed
-        self.opened_at: Optional[datetime] = None
+        self.first_seen: Optional[str] = st.get("first_seen")  # ISO time this store was first used (no good run yet)
+        self.size: int = int(st.get("size") or 0)              # the store's size after the last append
 
     @property
     def keyed(self) -> bool:
@@ -81,8 +90,8 @@ class AnchorStore:
 
     def save_state(self) -> None:
         tmp = self.state_path + ".tmp"
-        data = json.dumps({"mismatch": self.mismatch, "failing": self.failing, "last_ok": self.last_ok},
-                          sort_keys=True).encode()
+        data = json.dumps({"mismatch": self.mismatch, "failing": self.failing, "last_ok": self.last_ok,
+                           "first_seen": self.first_seen, "size": self.size}, sort_keys=True).encode()
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         try:
             os.write(fd, data)
@@ -91,21 +100,34 @@ class AnchorStore:
             os.close(fd)
         os.replace(tmp, self.state_path)
 
+    def missing(self) -> bool:
+        """The state file says records were stored, but the store is gone, empty or shorter than it was."""
+        if self.size <= 0:
+            return False
+        try:
+            return os.stat(self.path).st_size < self.size
+        except FileNotFoundError:
+            return True
+
     def reasons(self, now: datetime) -> list[str]:
         """/health codes (empty: nothing wrong)."""
-        if self.opened_at is None:
-            self.opened_at = now
+        if self.first_seen is None and self.last_ok is None:
+            self.first_seen = now.isoformat()
+            try:
+                self.save_state()
+            except OSError:
+                pass                                         # the next run saves it; staleness still counts in memory
         out = []
         if self.mismatch:
             out.append("ledger_anchor_mismatch")
         if self.failing:
             out.append("anchor_check_failing")
-        since = self.opened_at
-        if self.last_ok:
-            try:
-                since = max(since, datetime.fromisoformat(self.last_ok.replace("Z", "+00:00")))
-            except ValueError:
-                pass
+        if self.missing():
+            out.append("anchor_store_missing")
+        try:
+            since = datetime.fromisoformat((self.last_ok or self.first_seen).replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            since = now
         if now - since > STALE_AFTER:
             out.append("ledger_anchor_stale")
         return out
@@ -113,7 +135,8 @@ class AnchorStore:
     # --- the store ------------------------------------------------------------------------------------------------
 
     def repair(self) -> int:
-        """Cuts a torn last line (no trailing newline) back to the last complete record; returns the bytes removed."""
+        """A tail without its newline: kept (newline added) when it is a complete record whose MAC and ``prev`` link
+        verify (round 3 N3-7); otherwise cut back to the last complete record. Returns the bytes removed."""
         try:
             fd = os.open(self.path, os.O_RDWR | os.O_NOFOLLOW)
         except FileNotFoundError:
@@ -132,11 +155,26 @@ class AnchorStore:
             if data.endswith(b"\n"):
                 return 0
             keep = data.rfind(b"\n") + 1
+            if self._valid_tail(data[:keep], data[keep:]):
+                os.lseek(fd, 0, os.SEEK_END)
+                os.write(fd, b"\n")
+                os.fsync(fd)
+                return 0
             os.ftruncate(fd, keep)
             os.fsync(fd)
             return size - keep
         finally:
             os.close(fd)
+
+    def _valid_tail(self, head: bytes, tail: bytes) -> bool:
+        try:
+            rec = json.loads(tail)
+            lines = [ln for ln in head.split(b"\n") if ln.strip()]
+            prev = json.loads(lines[-1])["mac"] if lines else None
+        except (ValueError, KeyError, TypeError):
+            return False
+        return (isinstance(rec, dict) and rec.get("prev") == prev
+                and hmac.compare_digest(str(rec.get("mac")), self._mac(rec)))
 
     def _mac(self, rec: dict) -> str:
         if not self.key:
@@ -163,6 +201,8 @@ class AnchorStore:
         return None
 
     def append(self, anchor: dict, at: str) -> dict:
+        if self.missing():
+            raise StoreMissing("the anchor store is missing, empty or shorter than the state file says")
         self.repair()
         recs = self.records()
         rec = {"anchor": anchor["anchor"], "entries": int(anchor["entries"]), "head_hash": anchor["head_hash"],
@@ -173,6 +213,7 @@ class AnchorStore:
         try:
             os.write(fd, json.dumps(rec, sort_keys=True, separators=(",", ":")).encode() + b"\n")
             os.fsync(fd)
+            self.size = os.fstat(fd).st_size
         finally:
             os.close(fd)
         return rec
@@ -181,6 +222,8 @@ class AnchorStore:
 def check(store: AnchorStore, client, now_iso: str) -> tuple[Optional[str], Optional[dict]]:
     """One run: ``(problem, appended record)``. ``client`` has ``anchor(at=None) -> dict`` (raises when the ledger
     cannot be read: the caller retries later, that is not a mismatch)."""
+    if store.missing():
+        raise StoreMissing("the anchor store is missing, empty or shorter than the state file says")
     broken = store.verify()
     if broken:
         return broken, None

@@ -151,8 +151,8 @@ def test_f11_a_rotation_window_has_an_explicit_end():
     t = [1000.0]
     s = TR.Secret(["current-token-0000000000000000000000"], next_plaintexts=[nxt], next_until=2000.0, clock=lambda: t[0])
     assert s.matches(nxt) and s.matches("current-token-0000000000000000000000")
-    t[0] = 2000.0
-    assert not s.matches(nxt) and s.matches("current-token-0000000000000000000000")
+    t[0] = 2000.0                    # AEGIS round 3 N3-9: after the end only the new value works (fail closed)
+    assert s.matches(nxt) and not s.matches("current-token-0000000000000000000000")
     # a plaintext Andre token and a hash of ANOTHER token: refused at start (the old plaintext would keep working)
     with pytest.raises(RuntimeError, match="different"):
         config_mod.load({**h.env, "FIN_ANDRE_APPROVAL_TOKEN_SHA256": _sha("another-andre-token-0000000000000000")})
@@ -162,30 +162,41 @@ def test_f11_a_rotation_window_has_an_explicit_end():
     assert _json
 
 
-def test_n4_an_expired_rotation_window_never_stops_a_start(caplog):
-    """AEGIS round 2 N-4/N-8: after <P>_ROTATION_ENDS_AT any restart (an OOM, a host move, a redeploy for another
-    variable) refused to start: a crash loop of the money path. Now the service starts, the *_NEXT values are ignored
-    (the current tokens keep working), every start logs a warning, /health shows `rotation_expired` (a warning the
-    heartbeat alerts on), and `rotation_in_progress` is false once the window has ended."""
+def test_n4_an_expired_rotation_window_never_stops_a_start_and_fails_closed(caplog):
+    """AEGIS round 2 N-4/N-8: after <P>_ROTATION_ENDS_AT any restart refused to start (a crash loop of the money
+    path). It now starts. AEGIS round 3 N3-9: after the window only the NEW (NEXT) values are accepted and the old ones
+    are refused (fail closed: a rotation is often a compromise of the old value), every start logs a warning, and
+    /health is 503 `rotation_expired_unpromoted` until NEXT is promoted to current; /livez stays 200."""
+    import json as _json
     import time as _time
 
     import token_rotation as TR
     import config as config_mod
     from helpers import CALLERS, SERVICE_TOKEN, Harness
     nxt = "next-fin-service-token-openssl-rand-hex-32-aa"
+    nxt_sched = "next-fin-caller-scheduler-token-rand-hex-32-bb"
     with caplog.at_level(logging.WARNING):
-        h = Harness(env={"FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": _ends(-1)})
+        h = Harness(env={"FIN_SERVICE_TOKEN_NEXT": nxt, "FIN_ROTATION_ENDS_AT": _ends(-1),
+                         "FIN_CALLER_TOKENS_NEXT": _json.dumps({"scheduler": nxt_sched})})
     assert any("ROTATION_ENDS_AT" in r.getMessage() and "expired" in r.getMessage() for r in caplog.records), \
         [r.getMessage() for r in caplog.records]
     assert nxt not in caplog.text
     hb = h.client.get("/health")
-    assert hb.status_code == 200, hb.text
+    assert hb.status_code == 503, hb.text
     body = hb.json()
-    assert body.get("rotation_expired") is True and "rotation_expired" in body.get("warnings", []), body
+    assert "rotation_expired_unpromoted" in body["degraded_reasons"] and body.get("rotation_expired") is True, body
     assert not body.get("rotation_in_progress"), body
-    hdr = {"X-FIN-Caller-Token": CALLERS["scheduler"]}
-    assert h.client.get("/fin/v1/integrity", headers={"Authorization": f"Bearer {nxt}", **hdr}).status_code == 401
-    assert h.client.get("/fin/v1/integrity", headers={"Authorization": f"Bearer {SERVICE_TOKEN}", **hdr}).status_code == 200
+    assert h.client.get("/livez").status_code == 200
+
+    def call(bearer, caller):
+        return h.client.get("/fin/v1/integrity", headers={"Authorization": f"Bearer {bearer}",
+                                                          "X-FIN-Caller-Token": caller}).status_code
+    assert call(nxt, nxt_sched) == 200                                   # the new values work
+    assert call(SERVICE_TOKEN, nxt_sched) == 401                         # the old bearer is refused
+    assert call(nxt, CALLERS["scheduler"]) == 403                        # the old token of a rotated caller too
+    assert call(nxt, CALLERS["onboarding"]) == 200                       # a caller not being rotated is unaffected
+    s = TR.Secret(["current-token-0000000000000000000000"], next_plaintexts=[nxt], next_until=_time.time() - 1)
+    assert s.matches(nxt) and not s.matches("current-token-0000000000000000000000")
     # a window that ends while the service runs: in progress before, expired (not in progress) after (N-8)
     r = TR.Rotation(service_next=nxt, ends_at=_time.time() + 3600)
     assert r.in_progress and not r.expired

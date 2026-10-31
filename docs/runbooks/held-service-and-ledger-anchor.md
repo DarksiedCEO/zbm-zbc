@@ -9,6 +9,7 @@ Andre token). Every check below is `GET /health` on the private network or throu
 | `status` (HTTP) | Meaning | Section |
 |---|---|---|
 | `ok` (200) | Writes work. A `warnings` list (still 200) needs you but stops nothing. | 5 |
+| ledger `degraded` (503) with `ledger_clock_behind_log` | The ledger's newest entry is more than 5 minutes ahead of the host clock. Appends still work. | 5 |
 | `degraded` (503) | The instance cannot write now: `degraded_reasons` names why (ledger unreachable, a write not yet reconciled, a log fault, `ledger_anchor_*`). It usually clears by itself once the ledger is back. | 4 |
 | `starting` (503) | The start-up hold is waiting for the ledger (`ledger_unavailable_at_start`). Clears by itself. | |
 | `refused` (503) | The start-up hold refuses this log: `interrupted_write_anchored`, `volume_generation_mismatch` or `log_divergence`. Needs you. | 1, 2 |
@@ -75,21 +76,35 @@ restart does not hide it.
   read, a full disk). The log line `anchor_check_failing` names the error type. Fix the cause; the flag clears on the
   next successful run (daily, and at every start). A garbage record in the middle of the store is not repaired by
   itself: move the store aside as in step 2 above after checking it.
-- **`ledger_anchor_stale`**: no anchor stored or confirmed for more than 26 hours. Usually Compliance cannot read
+- **`anchor_store_missing`**: the state file says anchors were stored, but `ledger_anchors.jsonl` is gone, empty or
+  shorter than it was. No new chain is started over it. Find out why (a volume restore, a deletion); restore the file
+  from a volume backup, or, after Andre's review, move `ledger_anchor_state.json` aside as in step 2 above so a new
+  chain starts.
+- **`ledger_anchor_stale`**: no anchor stored or confirmed for more than 26 hours, counted from the last good run
+  kept in the state file (a restart does not reset it). Usually Compliance cannot read
   `GET /ledger/anchor` (its ledger token changed, or the ledger is down). Check Compliance's log for
   `compliance scheduler: ledger anchor run failed`. It clears at the next good run.
 - **A torn last line** (a crash mid-append) is cut back to the last whole record by itself, with the ALERT line
-  `ledger_anchor_store_repaired`. Nothing to do.
+  `ledger_anchor_store_repaired`; a complete, valid last record that only lost its newline is kept. Nothing to do.
 - **Warning `ledger_anchor_unkeyed`**: `COMPLIANCE_LEDGER_ANCHOR_KEY` is not set, so the store is only a hash chain
   (anyone who can write Compliance's volume can rewrite it consistently). Set the key (`openssl rand -hex 32`, Sealed)
   **before the first anchor is stored**. If the store already has unkeyed records, setting the key makes them fail
   verification (`ledger_anchor_mismatch`, "does not verify at record 1"): move both files aside as in step 2 when you
   set the key.
 
-## 5. Warnings (200, `warnings` list)
+## 5. Rotation and the ledger clock (503)
+
+- **`rotation_expired_unpromoted`** (finance, legal, compliance): a rotation window ended with `_NEXT` variables still
+  set. Only the new values work now; the old ones are refused. Promote each `_NEXT` value to current, delete the
+  `_NEXT` variables and `<P>_ROTATION_ENDS_AT`, deploy (docs/runbooks/token-rotation.md).
+- **`ledger_clock_behind_log`** (ledger): the newest entry is more than 5 minutes ahead of the host clock. New entries
+  are stamped 1 µs after it (never backwards) until real time catches up. Fix the host clock. If an entry was written
+  under a clock far in the future (for example at boot), the stamps stay pinned and the alarm stays on until real
+  time passes that entry: note the `seq` of the first wrong entry; `seq` is the order of record and the chain stays
+  verifiable (services/ledger-rust/README.md, "Time").
+
+## 6. Warnings (200, `warnings` list)
 
 | Warning | Where | What to do |
 |---|---|---|
-| `rotation_expired` | finance, legal, compliance | A rotation window ended with `_NEXT` variables still set; they are ignored. Remove them and `<P>_ROTATION_ENDS_AT` (token-rotation runbook). |
 | `ledger_anchor_unkeyed` | compliance | Section 4. |
-| `clock_skew` | ledger | The host clock jumped. `recorded_at` never goes backwards; while the warning lasts, timestamps follow the monotonic clock. A warning that stays (the last entry is ahead of the wall clock) means an entry was stamped under a wrong clock at boot: fix the host clock and note the time of the first wrong entry; the entries stay verifiable and `seq` is the order of record (services/ledger-rust/README.md, "Time"). |

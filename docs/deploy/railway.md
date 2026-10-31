@@ -925,13 +925,16 @@ monitor cannot reach it directly. Set up a **private check with a heartbeat** (o
    diverged log, and **503** `"status":"maintenance"` in reconcile mode (AEGIS round 2 N-3: a forgotten
    `<P>_RECONCILE_MODE=1` refuses every write and used to pass this check). The ledger's `/health` is 503 when its
    last append failed or its disk is below `LEDGER_MIN_FREE_BYTES`. `curl -f` fails on every 503, so each of these
-   stops the pings. A `warnings` list (`rotation_expired`, `ledger_anchor_unkeyed`, the ledger's `clock_skew`) stays
-   200 and does not stop the pings; the ops-alerts job reads it (below). What to do for each code:
+   stops the pings, as do `rotation_expired_unpromoted` (finance, legal, compliance) and the ledger's
+   `ledger_clock_behind_log` (AEGIS round 3). A `warnings` list (`ledger_anchor_unkeyed`) stays 200 and does not stop
+   the pings; the ops-alerts job reads it (below). What to do for each code:
    docs/runbooks/held-service-and-ledger-anchor.md.
 
    **ops-alerts health poll (AEGIS round 2 N-3).** `services/finance-py/src/health_poll.py` polls each service's
    `/health` and reports a service that is non-ok (no answer, not 200, a status other than `ok`, `write_ok` false, or
-   any warning) for 10 minutes without a break, as the founder-alert category `service_unhealthy` with a fixed code.
+   any warning) for 10 minutes without a break (`service_unhealthy`), or in more than half of the polls over 30
+   minutes (`service_flapping`), with a fixed code; an empty or incomplete `OPS_HEALTH_URLS` is its own alert
+   (`health_poll_unconfigured`). The call site is one line: `health_poll.run(state, os.environ, now)`.
    It is wired into the `ops-alerts` cron service of fix wave C (ADR 0027, `founder_alerts.FounderAlerts.run`) at
    integration, with `OPS_HEALTH_URLS=finance=http://finance.railway.internal:8410,legal=http://legal.railway.internal:8420,compliance=http://compliance.railway.internal:8380,ledger=http://ledger.railway.internal:8090`.
    Until then this curl heartbeat is the check. The services also log one

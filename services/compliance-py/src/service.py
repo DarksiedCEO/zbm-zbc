@@ -616,7 +616,7 @@ class ComplianceService:
         if store is None or not hasattr(self.recorder.client, "anchor"):
             return None
         now = self._now()
-        store.reasons(now)                                       # starts the staleness clock at the first run
+        store.reasons(now)                                       # records first_seen when the store is new
         try:
             cut = store.repair()
             if cut:
@@ -624,6 +624,9 @@ class ComplianceService:
             problem, rec = ledger_anchor.check(store, self.recorder.client, iso(now))
         except (LedgerQueryFailed, Unavailable):
             raise                                                # the ledger could not be read: retried, not a fault
+        except ledger_anchor.StoreMissing:
+            CR.alert("anchor_store_missing", "compliance-py")    # AEGIS round 3 N3-7: never a silent new chain
+            raise
         except Exception as exc:  # noqa: BLE001 - a fault of the job itself: loud on /health, never silent
             store.failing = type(exc).__name__
             CR.alert("anchor_check_failing", "compliance-py", error=type(exc).__name__)

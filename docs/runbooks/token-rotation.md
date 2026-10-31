@@ -12,11 +12,12 @@ Every service accepts, during a rotation window, the current value AND a next va
 | Andre's approval token | `<P>_ANDRE_APPROVAL_TOKEN_SHA256` | `<P>_ANDRE_APPROVAL_TOKEN_NEXT_SHA256` |
 
 Every `_NEXT` value needs `<P>_ROTATION_ENDS_AT`, when the window ends (ISO 8601 with a time zone, at most 14 days
-ahead, e.g. `2026-11-07T00:00:00Z`): the next values are refused after it. A window that has ended never stops a
-service from starting (AEGIS round 2 N-4: that would turn any restart into a crash loop): the `_NEXT` values are
-ignored, the current tokens stay in force, every start logs a warning, and `/health` shows `"rotation_expired": true`
-with the warning `rotation_expired` (the heartbeat alerts on it) until the `_NEXT` variables and
-`<P>_ROTATION_ENDS_AT` are removed. `/health` shows `"rotation_in_progress": true` only while a window is open (AEGIS
+ahead, e.g. `2026-11-07T00:00:00Z`). When the window ends, **only the `_NEXT` values are accepted and the old ones
+are refused** (fail closed, AEGIS round 3 N3-9: a rotation is often a compromise of the old value). Make sure every
+caller has the new value before that time. A window that has ended never stops a service from starting (round 2 N-4:
+that would turn any restart into a crash loop), but every start logs a warning and `/health` is **503
+`rotation_expired_unpromoted`** (`"rotation_expired": true`; the heartbeat alerts) until you promote: put each `_NEXT`
+value into the current variable, delete the `_NEXT` variables and `<P>_ROTATION_ENDS_AT`, and deploy. `/health` shows `"rotation_in_progress": true` only while a window is open (AEGIS
 wave A F-11, round 2 N-8). A `<P>_ROTATION_ENDS_AT` that is not ISO 8601 with a time zone refuses the deploy. A next value must differ from every current value. Every new token is made
 the same way:
 

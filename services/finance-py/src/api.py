@@ -38,6 +38,7 @@ from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 import config as config_mod
+import access_redact
 import token_rotation
 import models as m
 import money as M
@@ -236,8 +237,12 @@ class Callers:
             return None
         d = _digest(supplied)
         found = None
-        live = self._next if (self._until is not None and time.time() < self._until) else []
-        for name, dg in self._digests + live:  # no early exit
+        # AEGIS round 3 N3-9: after the window a rotated caller is recognised by its NEXT token only (fail closed)
+        expired = self._until is not None and time.time() >= self._until
+        rotated = {name for name, _ in self._next}
+        current = [(n, dg) for n, dg in self._digests if not (expired and n in rotated)]
+        live = self._next if self._until is not None else []
+        for name, dg in current + live:  # no early exit
             if hmac.compare_digest(d, dg):
                 found = name
         return found
@@ -420,8 +425,9 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         h = svc.health()
         if rot.in_progress:
             h = {**h, "rotation_in_progress": True}      # AEGIS wave A F-11: a *_NEXT window is open
-        if rot.expired:                                  # AEGIS round 2 N-4: NEXT values left after the window
-            h = {**h, "rotation_expired": True, "warnings": [*h.get("warnings", []), "rotation_expired"]}
+        if rot.expired:     # AEGIS round 2 N-4 / round 3 N3-9: only NEXT is accepted now; 503 until it is promoted
+            h = {**h, "rotation_expired": True, "status": "degraded" if h["status"] == "ok" else h["status"],
+                 "degraded_reasons": [*h.get("degraded_reasons", []), "rotation_expired_unpromoted"]}
         # fix wave A (CH-2/CH-6): 503 while this instance cannot write (ledger unreachable, a write failing or not
         # yet reconciled, a log fault); the body says why
         return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)
@@ -871,6 +877,7 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def reconcile(_: str = Depends(andre("reconcile")), req: m.ReconcileRequest = Depends(body(m.ReconcileRequest))) -> dict:
         return svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines), list(req.void_event_ids))
 
+    access_redact.register_routes(app)                   # AEGIS F-15b: the access log keeps route words only
     return app
 
 

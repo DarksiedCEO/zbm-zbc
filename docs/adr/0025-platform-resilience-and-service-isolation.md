@@ -173,35 +173,50 @@ Railway's deploy healthcheck and the old deployment keeps serving, which is the 
 Round 2 (`scratchpad/night/aegis-resilience-waveA-r2.md`, subject 34841fbd). Where this section and section 7
 disagree, this section holds.
 
-- **N-1/N-5, time never goes backwards (supersedes the F-6 restart rule).** Each stamp is
-  `max(candidate, previous + 1 µs)`. The candidate is the wall clock when it agrees (within 5 minutes) with the last
-  *trusted* wall reading plus elapsed monotonic time, and that plausible time otherwise. Only trusted readings move
-  the baseline (round 2 found one bad reading kept every later stamp 3 days behind until a restart). A backward step
-  keeps following real time and the wall clock is used again once corrected; a forward step of at most a day that
-  stays consistent for 2 minutes (a slow clock corrected, a paused VM) is adopted; a larger jump never is. After a
-  restart there is no baseline: an entry ahead of the wall clock is never undercut (new entries follow it), and
-  `/health` keeps the `clock_skew` warning for as long as the log is ahead. CH-12's 3-day test is restored, with the
-  2-minute, correction and forward cases.
+- **N-1/N-5, time (rewritten after AEGIS round 3; supersedes F-6 and the round-2 heuristics).** One rule:
+  `recorded_at = max(previous + 1 µs, wall clock)`; ordering is `seq`. There is no elapsed-time baseline and no
+  adoption of forward steps (round 3 found each heuristic produced a new edge case: N3-1..N3-4). `recorded_at` never
+  goes backwards; a forward jump is stamped as observed. When the newest entry is more than 5 minutes ahead of the
+  wall clock, the ledger's `/health` is **503 `ledger_clock_behind_log`** (appends still 201) so a human fixes the
+  host clock; a 1–3 s NTP step back stays under the threshold and never alarms. A host clock that was far ahead
+  while entries were written (e.g. 100 years at boot) pins every later stamp at previous + 1 µs until real time
+  catches up, across restarts, and the alarm stays on the whole time: an accepted, documented consequence of
+  "never backwards", never silent. The stamps of such a period do not tell real time; `seq` and the hash chain stay
+  the record. No service decides anything from the ledger's `recorded_at`.
 - **N-2/N-6, the anchor job fails loud.** A torn last line of `ledger_anchors.jsonl` is cut back to the last whole
   record (ALERT `ledger_anchor_store_repaired`). Any failure other than a ledger read is `anchor_check_failing`
   (503) until a run succeeds; no anchor stored or confirmed for 26 h is `ledger_anchor_stale` (503); a mismatch is
   kept in `ledger_anchor_state.json` across restarts; a store without `COMPLIANCE_LEDGER_ANCHOR_KEY` is the warning
   `ledger_anchor_unkeyed`. Resolution steps: docs/runbooks/held-service-and-ledger-anchor.md, section 4.
+  Round 3 (N3-6, N3-7): staleness is counted from the last good run (or, before any, the first time the store was
+  seen) kept in the state file, so a restart never resets it; a last record that is complete and MAC-valid and only
+  lacks its newline is kept (newline added); a store that is missing, empty or shorter than the state file recorded
+  is `anchor_store_missing` (503) and no new chain is started over it.
 - **N-3, `/health` is never "ok" in reconcile mode (supersedes F-1's "200 in reconcile mode").** Reconcile mode is
   503 `"status":"maintenance"`; Railway's deploy healthcheck is `/livez`, so the reconcile deploy still activates.
   The heartbeat: the curl check in docs/deploy/railway.md now fails on maintenance too, and
   `services/finance-py/src/health_poll.py` (with tests) is the poll the `ops-alerts` cron job of fix wave C (ADR
   0027, `founder_alerts.FounderAlerts.run`) calls at integration: a service non-ok for 10 minutes (no answer, not
   200, a status other than ok, `write_ok` false, or any warning) becomes the founder alert `service_unhealthy` with a
-  fixed code. The ops-alerts service itself is in wave C's IaC.
-- **N-4/N-8, an ended rotation window never stops a start (supersedes F-11's refusal).** After
-  `<P>_ROTATION_ENDS_AT` the `_NEXT` values are ignored, every start logs a warning, and `/health` shows
-  `rotation_expired` (a warning) until they are removed. `rotation_in_progress` is true only while the window is
-  open. A `<P>_ROTATION_ENDS_AT` that is not ISO 8601 with a zone refuses the deploy, with or without a `_NEXT`.
+  fixed code. The ops-alerts service itself is in wave C's IaC. Round 3 (N3-8): `health_poll.run(state, env, now)`
+  is the whole call site; it also reports `service_flapping` (non-ok in more than half of at least 4 polls over 30
+  minutes), every warning code, and `health_poll_unconfigured` (an empty, malformed or incomplete
+  `OPS_HEALTH_URLS`, also logged as a warning). Until that wiring, the curl heartbeat in docs/deploy/railway.md is
+  the only live detector; every alarm that matters is a 503, which it catches.
+- **N-4/N-8, N3-9, an ended rotation window never stops a start and fails closed (supersedes F-11's refusal).**
+  After `<P>_ROTATION_ENDS_AT` only the `_NEXT` values are accepted and the old ones are refused (a rotation is often
+  a compromise of the old value); every start logs a warning, and `/health` is 503 `rotation_expired_unpromoted`
+  until the operator promotes each `_NEXT` value to current and removes the variables (`/livez` stays 200, so there is
+  no crash loop). `rotation_in_progress` is true only while the window is open. A `<P>_ROTATION_ENDS_AT` that is not
+  ISO 8601 with a zone refuses the deploy, with or without a `_NEXT`.
 - **N-7, the FIN guard blocks only FIN-owned rows (supersedes F-8's alias rule).** Legal refuses Compliance's
   invalidation of a `FIN-*` target or a `FIN-*` canonical row. The shared Legal rows a FIN alias points to (CQ-01,
   CQ-04, CQ-07; CQ-01 is the AB 5 clipper-classification row) are Compliance's to tighten: tightening one also shows
-  on its FIN alias, which can only become stricter (unverified), never looser.
+  on its FIN alias, which can only become stricter (unverified), never looser. Exercised live end to end (the rules
+  gate passed first) by the chaos probe `probe_n7.py`.
+- **F-15b (round 3).** Finance, Legal and Compliance register their routes with `access_redact.register_routes(app)`:
+  the access log then keeps only the static words of route templates, so a lowercase word in an id position is
+  `:id`. The other services keep the plain-word rule (the shared module is byte-identical in all 17).
 - **N-9.** The pin check also reads `ONBUILD COPY --from` / `ONBUILD RUN --mount=from`, a `# escape=` directive with
   backtick continuations, and the `# syntax=` frontend image. No Dockerfile in the repository uses them today. The
   four builder digests are still to be pasted from CI (docs/ci.md); that job stays red until then.

@@ -6,6 +6,8 @@ request_id) recorded and returned that same id as the live ruling."""
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 import crash_recovery as CR
@@ -362,6 +364,97 @@ def test_n6_a_mismatch_survives_a_restart_and_a_missing_key_is_a_warning(tmp_pat
     z.svc.anchor_store = LA.AnchorStore(str(tmp_path / "unkeyed" / "d" / LA.FILE), None)
     h = z.client.get("/health")
     assert h.status_code == 200 and "ledger_anchor_unkeyed" in h.json().get("warnings", []), h.text
+
+
+def _store(x, tmp_path, key="k" * 40):
+    import ledger_anchor as LA
+    x.svc.anchor_store = LA.AnchorStore(str(tmp_path / "d" / LA.FILE), key)
+    return tmp_path / "d" / LA.FILE
+
+
+def test_n3_7_a_complete_last_record_missing_only_its_newline_is_kept(tmp_path):
+    """AEGIS round 3 N3-7 (R3A1): repair cut a complete, MAC-valid last record that only lacked its newline, and the
+    check then compared with the record before it, hiding a rollback below the newest anchor."""
+    x = _durable(tmp_path)
+    p = _store(x, tmp_path)
+    led = _AnchorLedger(["a1" * 32])
+    x.svc.recorder.client.anchor = led.anchor
+    x.svc.ledger_anchor_check()
+    led.hashes.append("a2" * 32)
+    x.svc.ledger_anchor_check()
+    p.write_bytes(p.read_bytes()[:-1])                         # only the final newline is lost
+    assert x.svc.anchor_store.repair() == 0 and p.read_bytes().endswith(b"\n")
+    assert len(x.svc.anchor_store.records()) == 2 and x.svc.anchor_store.verify() is None
+    p.write_bytes(p.read_bytes()[:-1])
+    led.hashes = led.hashes[:1]                                # and the ledger is rolled back below it
+    assert "rolled back" in x.svc.ledger_anchor_check()
+    h = x.client.get("/health")
+    assert h.status_code == 503 and "ledger_anchor_mismatch" in h.json()["degraded_reasons"], h.text
+    # a torn tail that is NOT a valid record is still cut back
+    y = _durable(tmp_path / "y")
+    q = _store(y, tmp_path / "y")
+    y.svc.recorder.client.anchor = _AnchorLedger(["b1" * 32]).anchor
+    y.svc.ledger_anchor_check()
+    good = q.read_bytes()
+    q.write_bytes(good + good[:-5])                            # a record whose end (and newline) was torn off
+    assert y.svc.anchor_store.repair() == len(good) - 5 and q.read_bytes() == good
+
+
+def test_n3_7_a_deleted_or_emptied_store_is_anchor_store_missing(tmp_path):
+    """AEGIS round 3 N3-7 (R3A2): with ledger_anchors.jsonl deleted, a new chain started silently from a rolled-back
+    head. The state file knows records existed: a missing or empty store is `anchor_store_missing` (503), and no new
+    chain is started over it."""
+    import ledger_anchor as LA
+    for how in ("delete", "empty"):
+        x = _durable(tmp_path / how)
+        p = _store(x, tmp_path / how)
+        led = _AnchorLedger(["b1" * 32, "b2" * 32, "b3" * 32])
+        x.svc.recorder.client.anchor = led.anchor
+        x.svc.ledger_anchor_check()
+        if how == "delete":
+            os.remove(p)
+        else:
+            p.write_bytes(b"")
+        led.hashes = led.hashes[:1]
+        with pytest.raises(Exception):
+            x.svc.ledger_anchor_check()
+        assert not p.exists() or p.read_bytes() == b"", "no new chain over a lost store"
+        h = x.client.get("/health")
+        assert h.status_code == 503 and "anchor_store_missing" in h.json()["degraded_reasons"], (how, h.text)
+        again = LA.AnchorStore(str(p), "k" * 40)                # what a restart builds
+        assert "anchor_store_missing" in again.reasons(x.clock.now())
+
+
+def test_n3_6_a_restart_does_not_reset_the_staleness_clock(tmp_path):
+    """AEGIS round 3 N3-6 (R3A3): a redeploy every 20 h restarted the 26 h clock, so a ledger unreadable for days
+    stayed /health 200. Staleness is computed from the last good run kept in the state file."""
+    import ledger as L
+    import ledger_anchor as LA
+    x = _durable(tmp_path)
+    _store(x, tmp_path)
+    x.svc.recorder.client.anchor = _AnchorLedger(["c1" * 32]).anchor
+    x.svc.ledger_anchor_check()
+
+    def down(at=None):
+        raise L.LedgerQueryFailed("ledger anchor could not be read: HTTP 403")
+    for _ in range(2):
+        x.clock.advance(hours=20)
+        x.svc.close()
+        y = _restart(x, tmp_path)
+        y.svc.anchor_store = LA.AnchorStore(str(tmp_path / "d" / LA.FILE), "k" * 40)
+        y.svc.recorder.client.anchor = down
+        with pytest.raises(L.LedgerQueryFailed):
+            y.svc.ledger_anchor_check()
+        x = y
+    h = x.client.get("/health")                                 # 40 h after the last good run, just restarted
+    assert h.status_code == 503 and "ledger_anchor_stale" in h.json()["degraded_reasons"], h.text
+    # a store that never had a good run: the first time it was seen is kept too
+    z = _durable(tmp_path / "z")
+    st = LA.AnchorStore(str(tmp_path / "z" / "d" / LA.FILE), "k" * 40)
+    assert st.reasons(z.clock.now()) == []
+    later = LA.AnchorStore(str(tmp_path / "z" / "d" / LA.FILE), "k" * 40)
+    from datetime import timedelta as _td
+    assert "ledger_anchor_stale" in later.reasons(z.clock.now() + _td(hours=27))
 
 
 def _ends(days=1):

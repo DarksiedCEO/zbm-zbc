@@ -3,24 +3,30 @@ Service health poll for the founder-alerts job (AEGIS round 2 N-3; ADR 0025 sect
 
 Why. Railway's deploy healthcheck is ``/livez`` (AEGIS wave A F-1), so Railway activates a deployment whose service
 is held, in reconcile mode or degraded: ``/livez`` answers 200 whenever the process serves. ``/health`` stays the
-truth (503 with a fixed code while a service cannot write; ``"maintenance"`` in reconcile mode; ``warnings`` such as
-``rotation_expired``, ``clock_skew`` or ``ledger_anchor_unkeyed``). Something must read it and tell Andre. That is
+truth (503 with a fixed code while a service cannot write, in reconcile mode (``"maintenance"``), after an unpromoted
+rotation (``rotation_expired_unpromoted``) or while the ledger's clock is behind its log (``ledger_clock_behind_log``);
+200 ``warnings`` such as ``ledger_anchor_unkeyed``). Something must read it and tell Andre. That is
 the ``ops-alerts`` cron job (fix wave C, ADR 0027, ``founder_alerts.FounderAlerts.run``), which runs every 5 minutes;
 this module is the self-contained piece it calls.
 
-Integration point (wired when wave C's branch is merged; nothing here sends anything)::
+Integration point (wired when wave C's branch is merged; nothing here sends anything). The whole call site, inside
+``FounderAlerts.run`` after ``conds`` is built::
 
-    import health_poll
-    targets = health_poll.targets_from_env(os.environ)          # OPS_HEALTH_URLS
-    for category, source, ref in health_poll.track(st, health_poll.poll(targets), now):
-        conds.append(Condition.make(category, source, ref))      # SEVERITY["service_unhealthy"] = "high"
+    conds += [Condition.make(*c) for c in health_poll.run(st, os.environ, now)]
 
-``st`` is the founder-alerts state dict (this module keeps its own ``"health"`` key in it). A condition exists once a
-service has been non-ok for ``DOWN_MIN`` (10) minutes without a break, and clears when one poll sees it ok.
+with ``SEVERITY`` / ``WHAT_TO_DO`` entries for ``service_unhealthy`` (high), ``service_flapping`` (high) and
+``health_poll_unconfigured`` (high). ``st`` is the founder-alerts state dict (this module keeps its own ``"health"``
+and ``"health_hist"`` keys in it). Conditions (AEGIS round 3 N3-8):
+
+* ``service_unhealthy``: non-ok for ``DOWN_MIN`` (10) minutes without a break;
+* ``service_flapping``: non-ok in more than half of at least ``FLAP_MIN_POLLS`` polls over ``FLAP_WINDOW_MIN`` (30)
+  minutes (a crash loop that is up at one poll in three);
+* ``health_poll_unconfigured``: ``OPS_HEALTH_URLS`` empty or malformed (``ops-alerts``), or one of ``REQUIRED``
+  missing from it (the service's name); also logged as a warning on every run.
 
 What counts as non-ok: no answer, an HTTP status other than 200, a ``status`` other than ``"ok"``, ``write_ok`` false,
 or any entry in ``warnings``. Only fixed codes leave this module (``unreachable``, ``http_503``, ``maintenance``,
-``degraded``, ``write_refused``, ``warning:rotation_expired`` ...): a value that is not a short lowercase code is
+``degraded``, ``write_refused``, ``warning:ledger_anchor_unkeyed`` ...): a value that is not a short lowercase code is
 replaced by ``bad_status``/``bad_warning``, so no id or free text from a body can reach an email.
 
 ``OPS_HEALTH_URLS``: ``name=url`` pairs separated by commas, e.g.
@@ -30,6 +36,7 @@ Each URL is the service root (``/health`` is appended); http or https, no creden
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -39,10 +46,16 @@ from urllib.parse import urlsplit
 import httpx
 
 DOWN_MIN = 10
+FLAP_WINDOW_MIN = 30
+FLAP_MIN_POLLS = 4
 CATEGORY = "service_unhealthy"
+FLAPPING = "service_flapping"
+UNCONFIGURED = "health_poll_unconfigured"
+REQUIRED = ("compliance", "finance", "ledger", "legal")
 TIMEOUT_S = 5
 ENV = "OPS_HEALTH_URLS"
 
+log = logging.getLogger("health_poll")
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,47}")
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 
@@ -100,8 +113,8 @@ def probe(name: str, base_url: str, transport: Optional[httpx.BaseTransport] = N
         return Reading(name, False, "write_refused")
     warnings = body.get("warnings")
     if warnings:
-        first = warnings[0] if isinstance(warnings, list) else None
-        return Reading(name, False, "warning:" + _code(first, "bad_warning"))
+        codes = [_code(w, "bad_warning") for w in (warnings if isinstance(warnings, list) else [None])][:8]
+        return Reading(name, False, "warning:" + ",".join(sorted(set(codes))))   # every code (round 3 N3-8)
     return Reading(name, True, "ok")
 
 
@@ -117,15 +130,25 @@ def _parse(s) -> Optional[datetime]:
 
 
 def track(state: dict, readings: Iterable[Reading], now: datetime, down_min: int = DOWN_MIN) -> list[tuple[str, str, str]]:
-    """Non-ok for ``down_min`` minutes without a break -> ``(CATEGORY, service name, code)``. Keeps the first non-ok
-    time per service in ``state["health"]``; an ok reading (or a service no longer polled) clears it."""
+    """Non-ok for ``down_min`` minutes without a break -> ``(CATEGORY, name, code)``; non-ok in more than half of the
+    polls of the last ``FLAP_WINDOW_MIN`` minutes (at least ``FLAP_MIN_POLLS``) -> ``(FLAPPING, name, code)``. Keeps
+    the first non-ok time per service in ``state["health"]`` and the recent polls in ``state["health_hist"]``; a
+    service no longer polled is forgotten."""
     st = state.get("health")
     if not isinstance(st, dict):
         st = state["health"] = {}
+    hist = state.get("health_hist")
+    if not isinstance(hist, dict):
+        hist = state["health_hist"] = {}
+    window = timedelta(minutes=FLAP_WINDOW_MIN)
     seen = set()
     out = []
     for r in readings:
         seen.add(r.name)
+        polls = [p for p in hist.get(r.name, []) if isinstance(p, list) and len(p) == 2
+                 and (t := _parse(p[0])) is not None and now - t < window]
+        polls.append([now.isoformat(), bool(r.ok)])
+        hist[r.name] = polls
         if r.ok:
             st.pop(r.name, None)
             continue
@@ -135,6 +158,27 @@ def track(state: dict, readings: Iterable[Reading], now: datetime, down_min: int
             since = now
         if now - since >= timedelta(minutes=down_min):
             out.append((CATEGORY, r.name, r.code))
-    for name in [n for n in st if n not in seen]:
-        st.pop(name, None)
+        elif len(polls) >= FLAP_MIN_POLLS and sum(1 for p in polls if not p[1]) * 2 > len(polls):
+            out.append((FLAPPING, r.name, r.code))
+    for d in (st, hist):
+        for name in [n for n in d if n not in seen]:
+            d.pop(name, None)
     return out
+
+
+def run(state: dict, env, now: datetime, transport: Optional[httpx.BaseTransport] = None) -> list[tuple[str, str, str]]:
+    """The whole call site for the ops-alerts job: read ``OPS_HEALTH_URLS``, poll, track. Never raises for a bad
+    configuration: an empty, malformed or incomplete list is a logged warning and a ``health_poll_unconfigured``
+    condition (round 3 N3-8)."""
+    try:
+        targets = targets_from_env(env)
+    except ValueError:
+        log.warning("health poll: %s is malformed; no service is polled", ENV)
+        return [(UNCONFIGURED, "ops-alerts", "malformed")]
+    if not targets:
+        log.warning("health poll: %s is empty; no service is polled", ENV)
+        return [(UNCONFIGURED, "ops-alerts", "no_targets")]
+    out = [(UNCONFIGURED, name, "missing") for name in REQUIRED if name not in targets]
+    if out:
+        log.warning("health poll: %s lacks %s", ENV, ", ".join(n for _, n, _ in out))
+    return out + track(state, poll(targets, transport), now)

@@ -36,8 +36,9 @@ def digest(token: str) -> bytes:
 
 
 class Secret:
-    """The values one credential may take now, held as SHA-256 digests: the current ones always, the ``next`` ones
-    only until ``next_until`` (epoch seconds; AEGIS wave A F-11: a rotation window has an explicit end)."""
+    """The values one credential may take now, held as SHA-256 digests. During a window (until ``next_until``, epoch
+    seconds; AEGIS wave A F-11) the current AND the next values; after it, when next values exist, ONLY the next ones
+    (AEGIS round 3 N3-9: fail closed; the old value is refused, as a rotation is often a compromise of it)."""
 
     def __init__(self, plaintexts: Iterable[Optional[str]] = (), sha256_hex: Iterable[Optional[str]] = (),
                  next_plaintexts: Iterable[Optional[str]] = (), next_sha256_hex: Iterable[Optional[str]] = (),
@@ -51,8 +52,11 @@ class Secret:
         return bool(self.digests or self.next_digests)
 
     def _accepted(self) -> list:
-        nxt = self.next_digests if (self.next_until is not None and self.clock() < self.next_until) else []
-        return self.digests + nxt
+        if not self.next_digests or self.next_until is None:
+            return self.digests
+        if self.clock() < self.next_until:
+            return self.digests + self.next_digests
+        return self.next_digests
 
     def matches(self, supplied: Optional[str]) -> bool:
         accepted = self._accepted()
@@ -94,8 +98,9 @@ class Rotation:
 
     @property
     def expired(self) -> bool:
-        """AEGIS round 2 N-4: *_NEXT values are still set but their window has ended. They are ignored (``Secret``
-        honours a next value only until ``ends_at``); /health shows ``rotation_expired`` until they are removed."""
+        """AEGIS round 2 N-4 / round 3 N3-9: *_NEXT values are still set but their window has ended. From then on only
+        the next values are accepted (``Secret``; the old ones are refused) and /health is 503
+        ``rotation_expired_unpromoted`` until the operator promotes NEXT to current and removes the variables."""
         return self.has_next and self.ends_at is not None and time.time() >= self.ends_at
 
 
@@ -171,10 +176,11 @@ def load(env: dict, prefix: str, caller_names: Iterable[str], check_token: Calla
         if ends_at > time.time() + MAX_WINDOW_S:
             raise RuntimeError(f"{prefix}_ROTATION_ENDS_AT must be at most 14 days ahead")
         if ends_at <= time.time():
-            # AEGIS round 2 N-4: an ended window must never stop a restart (a crash loop of the money path). The
-            # next values are ignored; this warning is logged at every start and /health shows rotation_expired.
+            # AEGIS round 2 N-4: an ended window must never stop a restart (a crash loop of the money path).
+            # Round 3 N3-9: only the next values are accepted from now on; this warning is logged at every start and
+            # /health is 503 rotation_expired_unpromoted.
             logging.getLogger("token_rotation").warning(
-                "%s_ROTATION_ENDS_AT has passed: the rotation window is expired and the *_NEXT values are ignored "
-                "(the current tokens stay in force). Finish or abandon the rotation and remove the *_NEXT variables "
-                "and %s_ROTATION_ENDS_AT (docs/runbooks/token-rotation.md)", prefix, prefix)
+                "%s_ROTATION_ENDS_AT has passed: the rotation window is expired; ONLY the *_NEXT values are accepted "
+                "now and the old values are refused (fail closed). Promote each *_NEXT value to current and remove "
+                "the *_NEXT variables and %s_ROTATION_ENDS_AT (docs/runbooks/token-rotation.md)", prefix, prefix)
     return Rotation(nxt, dict(callers), cur_hash, next_hash, ends_at)
