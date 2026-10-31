@@ -9,8 +9,9 @@ import json
 import re
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
+import token_rotation
 from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 CALLER_NAMES = ("onboarding", "creative_production", "finance_31", "verification_integrity", "legal_37",
@@ -31,6 +32,8 @@ class Settings:
     service_token: str
     caller_tokens: dict[str, str] = field(default_factory=dict)
     andre_token: Optional[str] = None
+    # fix wave A (RTA-5): *_NEXT tokens during a rotation window and Andre's token as a SHA-256 (token_rotation.py)
+    rotation: Any = field(default=None, repr=False)
     seed_path: str = DEFAULT_SEED_PATH
     seed_sha256: Optional[str] = None
     data_dir: Optional[str] = None
@@ -109,6 +112,14 @@ def hold_data_dir(data_dir: str) -> DataDirLock:
         _HELD[key] = lock
     return lock
 
+def _rotation_token_check(tok: str, what: str) -> None:
+    """Fix wave A (RTA-5): a *_NEXT token obeys the caller-token rules (no unresolved reference, length, ASCII)."""
+    if any(mark in tok for mark in UNRESOLVED_REF_MARKERS):
+        raise RuntimeError(f"{what} is an unresolved Railway reference; refusing to start")
+    if len(tok) < CALLER_TOKEN_MIN or not all(0x21 <= ord(c) <= 0x7e for c in tok):
+        raise RuntimeError(f"{what} must be >= {CALLER_TOKEN_MIN} printable ASCII characters")
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ) if env is None else env
     token = env.get("COMPLIANCE_SERVICE_TOKEN")
@@ -138,6 +149,8 @@ def load(env: Optional[dict] = None) -> Settings:
                 raise RuntimeError(f"COMPLIANCE_CALLER_TOKENS: the {name} token equals the service or Andre token")
         if len(set(callers.values())) != len(callers):
             raise RuntimeError("COMPLIANCE_CALLER_TOKENS: caller tokens must all be distinct")
+    rotation = token_rotation.load(env, "COMPLIANCE", CALLER_NAMES, _rotation_token_check, [token, *callers.values()],
+                                   andre)
     for name in ("COMPLIANCE_SANCTIONS_PROVIDER", "COMPLIANCE_A11Y_PROVIDER"):
         v = (env.get(name) or "").strip().lower()
         if v not in ("", "none"):
@@ -184,7 +197,7 @@ def load(env: Optional[dict] = None) -> Settings:
         raise RuntimeError("COMPLIANCE_LEGAL_URL must be https://host[:port], http://<service>.railway.internal[:port] "
                            "or a loopback http URL")
     s = Settings(
-        service_token=token, caller_tokens=callers, andre_token=andre,
+        service_token=token, caller_tokens=callers, andre_token=andre, rotation=rotation,
         seed_path=env.get("COMPLIANCE_SEED_PATH") or DEFAULT_SEED_PATH,
         seed_sha256=seed_sha,
         data_dir=env.get("COMPLIANCE_DATA_DIR") or None,

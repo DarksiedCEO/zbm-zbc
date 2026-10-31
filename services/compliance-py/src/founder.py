@@ -11,10 +11,10 @@ approval refused; missing or wrong -> refused; non-ASCII -> refused
 
 from __future__ import annotations
 
-import hmac
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+import token_rotation
 from errors import FounderRefused
 
 FOUNDER = "andre"
@@ -22,14 +22,17 @@ FOUNDER = "andre"
 
 @dataclass(frozen=True)
 class FounderGate:
-    token: Optional[str]
+    token: Optional[token_rotation.Secret]
 
     @classmethod
     def build(cls, founder_token: Optional[str], service_token: Optional[str],
-              caller_tokens: Iterable[str] = ()) -> "FounderGate":
-        if not founder_token or founder_token == service_token or founder_token in set(caller_tokens):
+              caller_tokens: Iterable[str] = (), founder_sha256: Iterable[str] = ()) -> "FounderGate":
+        # fix wave A (RTA-5): the accepted values as SHA-256 digests (token_rotation.Secret), never the plaintext;
+        # built from the plaintext token and/or *_ANDRE_APPROVAL_TOKEN_SHA256 / _NEXT_SHA256 (a rotation window)
+        secret = token_rotation.Secret([founder_token], founder_sha256)
+        if not secret or secret.overlaps([service_token, *caller_tokens]):
             return cls(None)
-        return cls(founder_token)
+        return cls(secret)
 
     @property
     def configured(self) -> bool:
@@ -41,9 +44,5 @@ class FounderGate:
                                  "a caller token); approvals are impossible until it is set (fail closed)")
         if not supplied:
             raise FounderRefused("Andre approval token missing")
-        try:
-            ok = hmac.compare_digest(supplied, self.token)
-        except TypeError:
-            ok = False
-        if not ok:
+        if not self.token.matches(supplied):
             raise FounderRefused("Andre approval token invalid")

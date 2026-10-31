@@ -14,9 +14,10 @@ import re
 import stat
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 import money
+import token_rotation
 from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 # seo_02: Search & Answer Intelligence (2) reads one invoice (GET /fin/v1/invoices/{id}) to verify a paid audit's
@@ -100,6 +101,8 @@ class Settings:
     caller_tokens: dict = field(default_factory=dict, repr=False)
     andre_token: Optional[str] = field(default=None, repr=False)
     second_approver_token: Optional[str] = field(default=None, repr=False)
+    # fix wave A (RTA-5): *_NEXT tokens during a rotation window and Andre's token as a SHA-256 (token_rotation.py)
+    rotation: Any = field(default=None, repr=False)
     dual_human_threshold: Decimal = Decimal("0.00")
     seed_path: str = DEFAULT_SEED_PATH
     seed_sha256: Optional[str] = None
@@ -288,6 +291,7 @@ def load(env: Optional[dict] = None) -> Settings:
     specials = [t for t in (token, andre, second) if t]
     if len(set(specials)) != len(specials) or any(t in every for t in specials):
         raise RuntimeError("the service, Andre, second-approver and caller tokens must all be distinct (spec §D)")
+    rotation = token_rotation.load(env, "FIN", CALLER_NAMES, _check_token, [token, *every, second], andre)
     # --- founder-locked model and custody (D1, FIN-CQ-01/02) ---
     _only(env, "FIN_REVENUE_MODEL", ("principal",), "principal", "spec D1: Model A, ZBC sells verified views as principal")
     _only(env, "FIN_CUSTODY_MODEL", ("own_deposit",), "own_deposit",
@@ -360,7 +364,7 @@ def load(env: Optional[dict] = None) -> Settings:
         raise RuntimeError("FIN_MEDIA_DEFAULT_MARKUP_PCT must not exceed FIN_MEDIA_MAX_MARKUP_PCT")
     data_dir = env.get("FIN_DATA_DIR") or None
     s = Settings(
-        service_token=token, caller_tokens=callers, andre_token=andre, second_approver_token=second,
+        service_token=token, caller_tokens=callers, andre_token=andre, second_approver_token=second, rotation=rotation,
         dual_human_threshold=second_threshold,
         seed_path=env.get("FIN_SEED_PATH") or DEFAULT_SEED_PATH, seed_sha256=seed_sha, allow_unpinned_seed=unpinned,
         data_dir=data_dir,

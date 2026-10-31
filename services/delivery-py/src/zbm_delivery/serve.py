@@ -52,6 +52,7 @@ import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
 from zbm_delivery import launch_guard
+from zbm_delivery import access_redact
 from zbm_delivery.graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 
@@ -134,6 +135,7 @@ def uvicorn_kwargs() -> dict:
         "h11_max_incomplete_event_size": MAX_HEADER_BYTES,
         "timeout_keep_alive": KEEP_ALIVE_TIMEOUT_S,
         "limit_concurrency": LIMIT_CONCURRENCY,
+        "log_config": access_redact.log_config(),   # fix wave A (RTA-4): no query string or id in access logs
     }
 
 

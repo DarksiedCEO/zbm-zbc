@@ -63,6 +63,7 @@ from agents import (
 from bounded_state import BoundedExpiringMap
 import http_limits
 import launch_guard
+import access_redact
 from contact_window import ContactWindow, parse_contact_window
 from fixtures_loader import load_appointments, load_call_events, load_dossiers
 from fulfillment_schema import (
@@ -2451,6 +2452,7 @@ def main() -> None:
             h11_max_incomplete_event_size=http_limits.MAX_HEADER_BYTES,
             timeout_keep_alive=http_limits.KEEP_ALIVE_TIMEOUT_S,
             limit_concurrency=http_limits.LIMIT_CONCURRENCY,
+            log_config=access_redact.log_config(),   # fix wave A (RTA-4): no query string or id in access logs
         )
 
 

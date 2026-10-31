@@ -38,6 +38,7 @@ from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 import config as config_mod
+import token_rotation
 import models as m
 import money as M
 import reasons as R
@@ -199,17 +200,17 @@ class InputLimits:
         await self.app(scope, replay, send)
 
 
-def make_require_auth(required_token: str) -> Callable:
+def make_require_auth(required_token: str, next_token: Optional[str] = None) -> Callable:
+    # fix wave A (RTA-5): the current token, and the next one during a rotation window, compared as SHA-256 digests
+    accepted = token_rotation.Secret([required_token, next_token])
+
     def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
         if authorization is None or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail="missing or malformed Authorization header (expected: Bearer <token>)",
                                 headers={"WWW-Authenticate": "Bearer"})
         supplied = authorization.removeprefix("Bearer ")
-        try:
-            valid = hmac.compare_digest(supplied, required_token)
-        except TypeError:
-            valid = False  # non-ASCII token: invalid (401), never a 500
+        valid = accepted.matches(supplied)   # non-ASCII token: invalid (401), never a 500
         if not valid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
                                 headers={"WWW-Authenticate": "Bearer"})
@@ -222,15 +223,17 @@ def _digest(token: str) -> bytes:
 
 
 class Callers:
-    def __init__(self, tokens: dict[str, str]):
-        self._digests = {name: _digest(tok) for name, tok in tokens.items()}
+    def __init__(self, tokens: dict[str, str], next_tokens: Optional[dict] = None):
+        # fix wave A (RTA-5): a caller being rotated is recognised by its current and its next token
+        self._digests = [(name, _digest(tok)) for name, tok in tokens.items()] + \
+            [(name, _digest(tok)) for name, tok in (next_tokens or {}).items()]
 
     def identify(self, supplied: Optional[str]) -> Optional[str]:
         if not supplied:
             return None
         d = _digest(supplied)
         found = None
-        for name, dg in self._digests.items():  # no early exit
+        for name, dg in self._digests:  # no early exit
             if hmac.compare_digest(d, dg):
                 found = name
         return found
@@ -262,10 +265,12 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                   description="NON-LIVE: rails, bank, tax agent, GL, vault, V&I, Compliance, Clipper Network, Legal, "
                               "People and push are fail-closed stand-ins unless wired.",
                   version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
-    auth = [Depends(make_require_auth(settings.service_token))]
-    callers = Callers(settings.caller_tokens)
+    rot = getattr(settings, "rotation", None) or token_rotation.Rotation()   # fix wave A (RTA-5)
+    auth = [Depends(make_require_auth(settings.service_token, rot.service_next))]
+    callers = Callers(settings.caller_tokens, rot.callers_next)
     others = list(settings.caller_tokens.values()) + [t for t in (settings.second_approver_token,) if t]
-    founder = FounderGate.build(settings.andre_token, settings.service_token, others)
+    founder = FounderGate.build(settings.andre_token, settings.service_token, others,
+                                 founder_sha256=rot.andre_sha256)
     second = FounderGate.build(settings.second_approver_token, settings.service_token,
                                list(settings.caller_tokens.values()) + [t for t in (settings.andre_token,) if t],
                                who="second approver")
@@ -400,8 +405,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     app.add_middleware(InputLimits)
 
     @app.get("/health")
-    async def health() -> dict:
-        return svc.health()
+    async def health():
+        h = svc.health()
+        # fix wave A (CH-2/CH-6): 503 while this instance cannot write (ledger unreachable, a write failing or not
+        # yet reconciled, a log fault); the body says why
+        return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)
 
     @app.get("/fin/v1/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(caller())) -> list[dict]:
@@ -895,17 +903,37 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
         raise
 
 
-def _app_from_env() -> FastAPI:
+def _app_from_env():
+    """Fix wave A (CH-5, ADR 0025): a ledger that cannot be reached at start, or a log that diverges from it, no
+    longer exits the process (Railway's restart budget ran out during a long ledger outage): ``startup_hold`` serves
+    /health 503 with the reason and retries the build with backoff. Any other start-up error still raises."""
+    import startup_hold
     settings = config_mod.load()
-    return create_app(build_service(settings), settings)
+    return startup_hold.supervise("finance-py", lambda: create_app(build_service(settings), settings),
+                                  on_ready=_start_watch)
 
 
+def _start_watch(application) -> None:
+    """Fix wave A (CH-2/CH-6): retries pending ledger writes with backoff and keeps /health's write state current.
+    Started only by ``main()`` (tests drive ``settle_pending`` / ``probe_ledger`` directly)."""
+    if not _WATCH:
+        return
+    import crash_recovery
+    svc = application.state.service
+    svc.watch = crash_recovery.LedgerWatch("finance-py", svc.settle_pending, svc.probe_ledger,
+                                           lambda: len(svc.intent)).start()
+
+
+_WATCH: list = []
 app = _app_from_env()
 
 
 def main() -> None:
     import serve
 
+    _WATCH.append(True)
+    if getattr(app, "state", None) is not None and getattr(app.state, "service", None) is not None:
+        _start_watch(app)
     host = os.environ.get("FIN_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("FIN_PORT", "8410"))
     serve.run(app, host=host, port=port)

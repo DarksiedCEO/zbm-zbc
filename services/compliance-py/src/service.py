@@ -46,6 +46,8 @@ import readiness as readiness_mod
 from register import Version, effective_status, rows_sha256, sha256_text
 from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
+import crash_recovery as CR
+from startup_hold import StartupHeld, StartupTransient
 
 SPEC_SEED_SHA256 = "bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5"   # seed v2 (ADR 0024)
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -58,6 +60,10 @@ GATE_EVENT = {"activation": "activation_ruling", "payout": "payout_ruling", "pub
 GATE_ACTOR = {"activation": i02_activation_gate.ACTOR, "payout": i03_payout_gate.ACTOR,
               "publish": i04_publish_gate.ACTOR}
 EVIDENCE_ACTOR = i11_evidence_audit.ACTOR
+# fix wave A (CH-1): the ledger writes announced in the intent journal before they are made
+JOURNALED = frozenset(i11_evidence_audit.RULING_TYPES) | {i11_evidence_audit.ANCHOR_TYPE,
+                                                           i11_evidence_audit.VERSION_TYPE,
+                                                           i11_evidence_audit.LEASE_TYPE}
 
 
 @dataclass
@@ -302,22 +308,40 @@ class ComplianceService:
         self.instance_id = secrets.token_hex(8)  # AEGIS N15-2: this process; its lease names it on the ledger
         self.reconcile_required: list[str] = []  # voidable problems pending Andre (at start; after a reconcile)
         self._reconciling = False
+        # fix wave A (CH-11): every ledger event id a recorded reconcile declared void; a ruling id is never reused
+        # once voided (the retry gets a new one)
+        self.voided_ids: set[str] = set()
+        # fix wave A (CH-1/CH-2/CH-6): see finance-py
+        self.intent = CR.IntentJournal(self.log.path)
+        self._absent_since: dict[str, float] = {}
+        self._ledger_write_error: Optional[str] = None
+        self._ledger_probe_ok: Optional[bool] = None
+        self.divergence: Optional[str] = None
+        self.watch: Optional[CR.LedgerWatch] = None
         for rec in self.log.iter_records():
             self._apply(rec["kind"], rec["data"]["record"])
         if not self.log.in_memory:
             # AEGIS N14-4 / N15-1 / N15-2: the local log must match what the ledger anchors (no truncated tail,
             # no rewritten line, no register version behind the ledger's, no stray ruling, no newer lease from
-            # another instance). Unverifiable = refuse (fail closed).
+            # another instance). Unverifiable = refuse (fail closed). Fix wave A (CH-1): crash residue of THIS log
+            # (every item announced by its intent journal) is rolled back automatically and re-verified.
             try:
                 a = self.assess_log()
+                if a.voidable and not a.fatal and not self.reconcile_mode and \
+                        CR.unexplained(a, self.intent.ids()) is None:
+                    self._auto_reconcile(a, "start")
+                    a = self.assess_log()
             except LedgerQueryFailed as exc:
-                raise RuntimeError(f"refusing to start: the local log cannot be verified against the evidence "
-                                   f"ledger ({exc})") from None
+                raise StartupTransient(f"refusing to start: the local log cannot be verified against the evidence "
+                                       f"ledger ({exc})") from None
+            except Unavailable as exc:
+                raise StartupTransient(f"refusing to start: the crash recovery could not be recorded on the "
+                                       f"evidence ledger ({exc.reason})") from None
             if a.fatal or (a.voidable and not self.reconcile_mode):
                 hint = ("" if a.fatal or not a.voidable else
                         " -- only Andre can void these: start with COMPLIANCE_RECONCILE_MODE=1 and POST "
                         "/compliance/v1/reconcile (README, 'Reconciling the local log with the ledger')")
-                raise RuntimeError("refusing to start: " + "; ".join(a.problems) + hint)
+                raise StartupHeld("refusing to start: " + "; ".join(a.problems) + hint)
             self.reconcile_required = list(a.voidable)
         if self.reconcile_mode:
             return  # nothing is written (no seed proposal, no lease) until Andre reconciles and the service restarts
@@ -329,7 +353,8 @@ class ComplianceService:
             try:
                 self._write_lease()
             except Unavailable as exc:
-                raise RuntimeError(f"refusing to start: the instance lease could not be recorded ({exc.reason})") from None
+                raise StartupTransient(f"refusing to start: the instance lease could not be recorded "
+                                       f"({exc.reason})") from None
 
     # ------------------------------------------------------------------ plumbing
 
@@ -362,12 +387,22 @@ class ComplianceService:
         if self.reconcile_mode and not self._reconciling:
             raise Unavailable("reconcile mode (COMPLIANCE_RECONCILE_MODE=1): only Andre's POST /compliance/v1/reconcile "
                               "is answered; restart without it once the log is reconciled", ledger_write="not_recorded")
+        if event_type in JOURNALED and not self.log.in_memory:
+            try:
+                self.intent.note(event_id, event_type)        # fix wave A (CH-1): announced BEFORE the ledger call
+            except CR.IntentWriteError as exc:
+                raise Unavailable(f"{exc}; nothing was recorded", ledger_write="not_recorded") from None
         try:
             eid = self.recorder.record(event_id, event_type, actor, subject, payload, summary)
         except LedgerRecordError as exc:
             self._ledger_conflict = isinstance(exc, LedgerConflict)
+            if CR.cannot_write(exc):
+                self._ledger_write_error = type(exc).__name__
+            if exc.took_effect is False:
+                self.intent.settle([event_id])               # certainly not on the ledger: nothing to reconcile
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing was issued",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
+        self._ledger_write_error = None
         if event_type in i11_evidence_audit.RULING_TYPES:
             self._pending_rulings[eid] = self._op_epoch
         if not raw:
@@ -401,10 +436,10 @@ class ComplianceService:
         rec, line = self.log.prepare(kind, iso(self._now()), data)
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
-        self._record(i11_evidence_audit.anchor_id(epoch, rec["seq"], line_sha), i11_evidence_audit.ANCHOR_TYPE,
-                     EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
-                     {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": kind},
-                     f"Local log line {rec['seq']} ({kind}) anchored", raw=True)
+        anchor = self._record(i11_evidence_audit.anchor_id(epoch, rec["seq"], line_sha), i11_evidence_audit.ANCHOR_TYPE,
+                              EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
+                              {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": kind},
+                              f"Local log line {rec['seq']} ({kind}) anchored", raw=True)
         if after_anchor is not None:
             after_anchor()
         try:
@@ -420,6 +455,8 @@ class ComplianceService:
         for e in list(event_ids) + list(data.get("attempted_event_ids") or []):
             self._named.pop(e, None)
             self._pending_rulings.pop(e, None)
+        # fix wave A: the committed line names these now
+        self.intent.settle(list(event_ids) + list(data.get("attempted_event_ids") or []) + [anchor])
         self._apply(kind, record)
         return record
 
@@ -516,10 +553,108 @@ class ComplianceService:
                 self._reconciling = False
             left = self.assess_log()
             self.reconcile_required = list(left.voidable)
+            self.intent.settle(payload["void_event_ids"])
             resp = {"reconcile_event_id": eid, "voided": payload["void_event_ids"], "void_lines": payload["void_lines"],
                     "remaining_problems": left.problems, "restart_required": self.reconcile_mode,
                     "ledger_event_ids": [eid]}
             return self._idem_store(key, h, resp)
+
+    # --- fix wave A: automatic crash recovery and the write-health signal (CH-1, CH-2, CH-6; ADR 0025) ---------------
+
+    def _auto_reconcile(self, a: "i11_evidence_audit.Assessment", when: str) -> str:
+        """Void crash residue (every item announced by this log's intent journal: never acknowledged to anyone).
+        The same recorded reconcile as Andre's, by the evidence intelligence, marked ``automatic``."""
+        with self.lock:
+            shas = self.log.line_shas()
+            head_seq, head_sha = len(shas), (shas[-1] if shas else None)
+            payload = i11_evidence_audit.reconcile_payload(self.log.epoch, self.version_number, head_seq, head_sha,
+                                                           sorted(a.void_lines), sorted(a.void_event_ids))
+            eid = i11_evidence_audit.reconcile_id(self.log.epoch, head_seq, payload)
+            self._reconciling = True
+            try:
+                self._record(eid, i11_evidence_audit.RECONCILE_TYPE, EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
+                             payload, f"Automatic crash recovery at line {head_seq}: "
+                             f"{len(payload['void_event_ids'])} interrupted write(s) declared void (never acknowledged)",
+                             raw=True)
+                self._commit("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": f"auto-{when}",
+                                           "automatic": True}, [eid])
+            finally:
+                self._reconciling = False
+            self.intent.settle(payload["void_event_ids"])
+            for e in payload["void_event_ids"]:
+                self._pending_rulings.pop(e, None)
+                self._named.pop(e, None)
+            CR.alert("crash_recovered", "compliance-py", when=when, voided=len(payload["void_event_ids"]),
+                     void_lines=payload["void_lines"], reconcile_event_id=eid)
+            return eid
+
+    def settle_pending(self) -> bool:
+        """CH-2: finish what the intent journal still holds (see finance-py ``settle_pending``)."""
+        with self.lock:
+            if self._closed or self.reconcile_mode or self.log.in_memory:
+                return not len(self.intent)
+            if not len(self.intent) and self.divergence is None:
+                return True
+            try:
+                entries = self.recorder.client.entries()
+                a = self._assess(entries)
+                journal = self.intent.ids()
+                why = CR.unexplained(a, journal) if a.voidable or a.fatal else None
+                self.divergence = why
+                if why is not None:
+                    CR.alert("log_divergence", "compliance-py", reason=why[:500], pending=len(journal))
+                    return False
+                if a.voidable:
+                    self._auto_reconcile(a, "running")
+                    entries = self.recorder.client.entries()
+                    a = self._assess(entries)
+                held = {e.get("event_id") for e in entries
+                        if isinstance(e, dict) and e.get("department") == LEDGER_DEPARTMENT}
+                # a ruling recorded by an earlier try that the NEXT committed line will name (bug sweep C R6) is not
+                # residue: it stays announced until that line names it
+                keep = set(self._pending_rulings)
+                done = CR.resolved({k: v for k, v in self.intent.ids().items() if k not in keep}, a, held,
+                                   self._absent_since, CR.now_monotonic())
+                self.intent.settle(done)
+                self.reconcile_required = list(a.voidable)
+            except (LedgerQueryFailed, Unavailable) as exc:
+                self._ledger_probe_ok = False
+                CR.alert("ledger_write_pending", "compliance-py", pending=len(self.intent), reason=type(exc).__name__)
+                return False
+            if len(self.intent):
+                CR.alert("ledger_write_pending", "compliance-py", pending=len(self.intent))
+            return not len(self.intent)
+
+    def probe_ledger(self) -> bool:
+        """CH-6: can the ledger be reached now (GET /ledger/head, or /ledger/verify for a client without it)?"""
+        client = self.recorder.client
+        try:
+            ok = client.head() if hasattr(client, "head") else client.verify() is True
+        except Exception:  # noqa: BLE001
+            ok = False
+        if self._ledger_probe_ok is not False and not ok:
+            CR.alert("ledger_unreachable", "compliance-py")
+        self._ledger_probe_ok = bool(ok)
+        return bool(ok)
+
+    def write_state(self) -> list[str]:
+        """Why this instance cannot write now (empty: it can)."""
+        out = []
+        if self._closed:
+            out.append("closed")
+        if self.reconcile_mode:
+            out.append("reconcile_mode")
+        if self.reconcile_required or self.divergence:
+            out.append("reconcile_required")
+        if self.log.fault:
+            out.append("log_write_fault")
+        if self._ledger_probe_ok is False:
+            out.append("ledger_unreachable")
+        if self._ledger_write_error:
+            out.append(f"ledger_write_failing:{self._ledger_write_error}")
+        if len(self.intent):
+            out.append(f"pending_unreconciled_writes:{len(self.intent)}")
+        return out
 
     def _apply(self, kind: str, r: dict) -> None:
         if kind in ("proposal", "proposal_redraft"):
@@ -576,6 +711,8 @@ class ComplianceService:
             self.sanctions_list = r
         elif kind == "obligation_expired":
             self.expired_announced.add((r["obligation_id"], r["expires_at"]))
+        elif kind == "reconcile":
+            self.voided_ids.update((r.get("payload") or {}).get("void_event_ids") or [])   # fix wave A (CH-11)
         # founder_refused, injection, jurisdiction_resolved, audit_export, fetch_attempt: evidence only
 
     def _idem_check(self, principal: str, request_id: str, route: str, body: Any) -> tuple[tuple, str, Optional[dict]]:
@@ -878,10 +1015,12 @@ class ComplianceService:
             if ent is not None and ent.get("outcome_sha256") == outcome_sha:
                 return ent["response"]                  # inputs still current: the stored answer
             ruling_id = base_id if ent is None else "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}")
+            ruling_id = self._unvoided(ruling_id, principal, request_id, outcome_sha)
             if ruling_id in self.rulings:
                 if self.rulings[ruling_id].get("outcome_sha256") == outcome_sha:
                     return self._idem_store_ruling(key, h, self.rulings[ruling_id], ent)
-                ruling_id = "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}")
+                ruling_id = self._unvoided("cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}"), principal,
+                                           request_id, outcome_sha)
                 if ruling_id in self.rulings:
                     return self._idem_store_ruling(key, h, self.rulings[ruling_id], ent)
             hold_events = []
@@ -910,7 +1049,8 @@ class ComplianceService:
                 # the ledger already holds a DIFFERENT ruling under the request's first id (an earlier attempt
                 # was recorded but never committed here, and the state has moved since): issue under the
                 # outcome-derived id instead of refusing forever (AEGIS N14-15b)
-                ruling_id = "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}")
+                ruling_id = self._unvoided("cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}"), principal,
+                                           request_id, outcome_sha)
                 events.append(self._record(ruling_id, GATE_EVENT[gate], actor, subject_id,
                                            {"ruling_id": ruling_id, **outcome}, summary, raw=True))
             for kind, rec, eids in deferred:
@@ -946,6 +1086,17 @@ class ComplianceService:
                 record["campaign_id"] = ctx.facts.get("campaign_id")
             self._commit("ruling", record, events)   # _apply also refreshes the idempotency entry
             return self.idem[key]["response"]
+
+    def _unvoided(self, ruling_id: str, principal: str, request_id: str, outcome_sha: str) -> str:
+        """Fix wave A (CH-11): a ruling id a recorded reconcile declared void is never issued again. The ledger holds
+        only payload hashes, so a retry that re-derived the same id (same request, same outcome) used to get the
+        ledger's 200 and become the LIVE ruling under an id the audit trail calls voided. After a void the id takes
+        an attempt counter instead (``|retry<n>``), the first one not voided."""
+        n = 0
+        while ruling_id in self.voided_ids:
+            n += 1
+            ruling_id = "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}|retry{n}")
+        return ruling_id
 
     def _idem_entry(self, principal: str, request_id: str, route: str, body: Any) -> tuple[tuple, str, Optional[dict]]:
         """Like ``_idem_check`` but returns the stored ENTRY (gates re-evaluate before answering from it)."""
@@ -1867,7 +2018,14 @@ class ComplianceService:
         sched = self.scheduler.liveness() if self.scheduler is not None else {"enabled": False}
         healthy = sched.get("healthy", True)
         rules_expiring = self._rules_expiring_summary()
-        return {"status": "ok" if healthy else "unhealthy", "service": "compliance-py", "rules_expiring": rules_expiring,
+        with self.lock:
+            reasons = self.write_state()
+        # fix wave A (CH-2/CH-6): "degraded" (503) while this instance cannot write now; reconcile mode is Andre's
+        # deliberate state and keeps its own flag
+        degraded = [r for r in reasons if r != "reconcile_mode"]
+        status = "unhealthy" if not healthy else ("degraded" if degraded else "ok")
+        return {"status": status, "write_ok": not reasons, "degraded_reasons": reasons,
+                "service": "compliance-py", "rules_expiring": rules_expiring,
                 "register_version_in_force": self.version_number,
                 "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),

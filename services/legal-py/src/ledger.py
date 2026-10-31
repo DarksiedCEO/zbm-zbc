@@ -152,6 +152,15 @@ class HttpLedgerClient:
         except (httpx.HTTPError, ValueError, AttributeError):
             return False
 
+    def head(self) -> bool:
+        """Fix wave A (CH-6): True when GET /ledger/head answers 200 (the ledger is reachable and serving)."""
+        try:
+            with httpx.Client(timeout=self._timeout, transport=self._transport) as client:
+                resp = client.get(f"{self._base_url}/ledger/head", headers={"Authorization": f"Bearer {self._token}"})
+            return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
+
     def entries(self) -> list[dict]:
         """GET /ledger/entries (ledger-rust has no filtered read), size-capped. Used to verify the local
         log against the ledger at start-up and by GET /legal/v1/integrity (AEGIS N14-4)."""
@@ -185,6 +194,9 @@ class UnconfiguredLedgerClient:
                                 "nothing can take effect without a ledger record")
 
     def verify(self) -> bool:
+        return False
+
+    def head(self) -> bool:
         return False
 
     def entries(self) -> list[dict]:

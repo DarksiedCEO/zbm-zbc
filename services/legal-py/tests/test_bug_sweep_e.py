@@ -91,7 +91,9 @@ def test_service_reports_local_log_write_fault(tmp_path, monkeypatch):
     assert r.status_code == 503
     integ = h.ok(h.get("/legal/v1/integrity"))
     assert integ["status"] == "red" and any(p.startswith("LOCAL_LOG_WRITE_FAULT") for p in integ["problems"])
-    health = h.ok(h.client.get("/health"))
+    r = h.client.get("/health")
+    assert r.status_code == 503                               # fix wave A (CH-6): not "ok" is a 503 with the body
+    health = r.json()
     assert health["status"] == "degraded" and health["log_write_fault"] is True
 
 
@@ -120,7 +122,8 @@ def test_one_service_instance_per_data_directory(tmp_path):
     assert x.post("/legal/v1/requests", {"request_id": rid(), "channel": "email", "requester_ref": "r",
                                          "kind": "question"}, caller="hub").status_code == 503
     assert x.ledger.calls == calls and len(x.svc.log) == n
-    assert x.ok(x.client.get("/health"))["status"] == "closed"
+    r = x.client.get("/health")                               # fix wave A (CH-6): not "ok" is a 503 with the body
+    assert r.status_code == 503 and r.json()["status"] == "closed"
     y = Harness(data_dir=d, ledger=x.ledger, clock=x.clock, ports=x.ports)   # after close: starts
     assert y.ok(y.get("/legal/v1/integrity"))["status"] == "green"
 

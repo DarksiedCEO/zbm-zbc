@@ -38,6 +38,7 @@ from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 import config as config_mod
+import token_rotation
 import models as m
 from clock import Clock, SystemClock
 from errors import ComplianceError, Forbidden, FounderRefused, Invalid, Unavailable
@@ -51,6 +52,14 @@ from store import RecordLog
 log = logging.getLogger("compliance.api")
 
 CALLER_HEADER = "X-Compliance-Caller-Token"
+# Fix wave A (red team RTA-2): the two callers that ingest untrusted data (seo_02 crawls the internet,
+# revenue_recovery = detection-py parses Shopify data) reach exactly ONE route besides /health: a client's activation
+# decision (what seo-py compliance_client.py and detection-py store_connector/compliance.py call). Checked BEFORE
+# routing, as finance-py does for seo_02: no route that forgot to name its callers (``caller()`` with no names admits
+# every caller: audit export/evidence, holds, inbox, register, controls, trust center, rulings, jurisdictions) can
+# answer them anything but 403.
+NAMED_ONLY = frozenset({"seo_02", "revenue_recovery"})
+ACTIVATION_ROUTE = re.compile(r"/compliance/v1/clients/[A-Za-z0-9._:-]{1,128}/activation")
 FOUNDER_HEADER = "X-Andre-Approval-Token"
 MAX_BODY_BYTES = 1024 * 1024
 MAX_TARGET_BYTES = 4096
@@ -193,17 +202,17 @@ class InputLimits:
         await self.app(scope, replay, send)
 
 
-def make_require_auth(required_token: str) -> Callable:
+def make_require_auth(required_token: str, next_token: Optional[str] = None) -> Callable:
+    # fix wave A (RTA-5): the current token, and the next one during a rotation window, compared as SHA-256 digests
+    accepted = token_rotation.Secret([required_token, next_token])
+
     def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
         if authorization is None or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail="missing or malformed Authorization header (expected: Bearer <token>)",
                                 headers={"WWW-Authenticate": "Bearer"})
         supplied = authorization.removeprefix("Bearer ")
-        try:
-            valid = hmac.compare_digest(supplied, required_token)
-        except TypeError:
-            valid = False  # non-ASCII token: invalid (401), never a 500
+        valid = accepted.matches(supplied)   # non-ASCII token: invalid (401), never a 500
         if not valid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
                                 headers={"WWW-Authenticate": "Bearer"})
@@ -216,15 +225,17 @@ def _digest(token: str) -> bytes:
 
 
 class Callers:
-    def __init__(self, tokens: dict[str, str]):
-        self._digests = {name: _digest(tok) for name, tok in tokens.items()}
+    def __init__(self, tokens: dict[str, str], next_tokens: Optional[dict] = None):
+        # fix wave A (RTA-5): a caller being rotated is recognised by its current and its next token
+        self._digests = [(name, _digest(tok)) for name, tok in tokens.items()] + \
+            [(name, _digest(tok)) for name, tok in (next_tokens or {}).items()]
 
     def identify(self, supplied: Optional[str]) -> Optional[str]:
         if not supplied:
             return None
         d = _digest(supplied)
         found = None
-        for name, dg in self._digests.items():  # no early exit
+        for name, dg in self._digests:  # no early exit
             if hmac.compare_digest(d, dg):
                 found = name
         return found
@@ -253,9 +264,11 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
     app = FastAPI(title="ZBM/ZBC Compliance (38)",
                   description="NON-LIVE: V&I, Finance, Legal, sanctions and accessibility providers are fail-closed stand-ins.",
                   version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
-    auth = [Depends(make_require_auth(settings.service_token))]
-    callers = Callers(settings.caller_tokens)
-    founder = FounderGate.build(settings.andre_token, settings.service_token, settings.caller_tokens.values())
+    rot = getattr(settings, "rotation", None) or token_rotation.Rotation()   # fix wave A (RTA-5)
+    auth = [Depends(make_require_auth(settings.service_token, rot.service_next))]
+    callers = Callers(settings.caller_tokens, rot.callers_next)
+    founder = FounderGate.build(settings.andre_token, settings.service_token, settings.caller_tokens.values(),
+                                 founder_sha256=rot.andre_sha256)
     app.state.service = service
     svc = service
 
@@ -264,6 +277,8 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
             name = callers.identify(x_compliance_caller_token)
             if name is None:
                 raise Forbidden("caller token missing or not recognised")
+            if name in NAMED_ONLY and name not in allowed:
+                raise Forbidden("this caller reaches only the routes that name it")
             if allowed and name not in allowed:
                 raise Forbidden("this caller is not authorized for this route")
             return name
@@ -302,6 +317,16 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
             content["issued"] = False
             return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content=content)
         return JSONResponse(status_code=exc.status_code, content=content)
+
+    @app.middleware("http")
+    async def _named_only(request: Request, call_next):
+        # fix wave A (RTA-2): see NAMED_ONLY
+        if callers.identify(request.headers.get(CALLER_HEADER)) in NAMED_ONLY and not (
+                request.method == "GET" and (ACTIVATION_ROUTE.fullmatch(request.url.path)
+                                             or request.url.path == "/health")):
+            return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
+                                                                   "name it"})
+        return await call_next(request)
 
     @app.middleware("http")
     async def _unhandled(request: Request, call_next):
@@ -606,11 +631,36 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
         raise
 
 
-def _app_from_env() -> FastAPI:
+def _app_from_env():
+    """Fix wave A (CH-5, ADR 0025): a ledger that cannot be reached at start, or a log that diverges from it, no
+    longer exits the process: ``startup_hold`` serves /health 503 with the reason and retries with backoff; the
+    readiness summary, the scheduler and the ledger watch start once the real app exists (``_on_ready``)."""
+    import startup_hold
     settings = config_mod.load()
-    application = create_app(build_service(settings), settings)
-    application.state.settings = settings
-    return application
+
+    def build():
+        application = create_app(build_service(settings), settings)
+        application.state.settings = settings
+        return application
+    return startup_hold.supervise("compliance-py", build, on_ready=_on_ready)
+
+
+_MAIN: list = []
+
+
+def _on_ready(application) -> None:
+    """Runs once the real app exists; does nothing until ``main()`` (imports in tests start no thread)."""
+    if not _MAIN:
+        return
+    import crash_recovery
+    import readiness as readiness_mod
+    svc: ComplianceService = application.state.service
+    # ADR 0024: the operator sees, at every start, exactly which rules are expired and which gates they affect
+    for line in readiness_mod.summary_lines(svc.readiness()):
+        print(line, flush=True)
+    start_scheduler(svc, application.state.settings)
+    svc.watch = crash_recovery.LedgerWatch("compliance-py", svc.settle_pending, svc.probe_ledger,
+                                           lambda: len(svc.intent)).start()
 
 
 app = _app_from_env()
@@ -630,15 +680,11 @@ def start_scheduler(svc: ComplianceService, settings) -> Optional["scheduler.Sch
 
 
 def main() -> None:
-    import readiness as readiness_mod
     import serve
 
-    svc: ComplianceService = app.state.service
-    settings: config_mod.Settings = app.state.settings
-    # ADR 0024: the operator sees, at every start, exactly which rules are expired and which gates they affect
-    for line in readiness_mod.summary_lines(svc.readiness()):
-        print(line, flush=True)
-    start_scheduler(svc, settings)
+    _MAIN.append(True)
+    if getattr(app, "state", None) is not None and getattr(app.state, "service", None) is not None:
+        _on_ready(app)                    # built at once; otherwise the start-up hold calls it when it is
     host = os.environ.get("COMPLIANCE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("COMPLIANCE_PORT", "8380"))
     serve.run(app, host=host, port=port)

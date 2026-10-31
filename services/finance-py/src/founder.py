@@ -13,10 +13,10 @@ by default (Andre only — compensating dual control, ADR 0009 note).
 
 from __future__ import annotations
 
-import hmac
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+import token_rotation
 from errors import FounderRefused
 
 FOUNDER = "andre"
@@ -24,16 +24,19 @@ FOUNDER = "andre"
 
 @dataclass(frozen=True)
 class FounderGate:
-    token: Optional[str]
+    # fix wave A (RTA-5): the accepted values as SHA-256 digests (token_rotation.Secret), never the plaintext; built
+    # from the plaintext token and/or FIN_ANDRE_APPROVAL_TOKEN_SHA256 / _NEXT_SHA256 (a rotation window)
+    token: Optional[token_rotation.Secret]
     who: str = FOUNDER
 
     @classmethod
     def build(cls, founder_token: Optional[str], service_token: Optional[str],
-              other_tokens: Iterable[str] = (), who: str = FOUNDER) -> "FounderGate":
-        others = {t for t in other_tokens if t}
-        if not founder_token or founder_token == service_token or founder_token in others:
+              other_tokens: Iterable[str] = (), who: str = FOUNDER,
+              founder_sha256: Iterable[str] = ()) -> "FounderGate":
+        secret = token_rotation.Secret([founder_token], founder_sha256)
+        if not secret or secret.overlaps([service_token, *other_tokens]):
             return cls(None, who)
-        return cls(founder_token, who)
+        return cls(secret, who)
 
     @property
     def configured(self) -> bool:
@@ -42,10 +45,7 @@ class FounderGate:
     def matches(self, supplied: Optional[str]) -> bool:
         if self.token is None or not supplied:
             return False
-        try:
-            return hmac.compare_digest(supplied, self.token)
-        except TypeError:
-            return False
+        return self.token.matches(supplied)
 
     def verify(self, supplied: Optional[str]) -> None:
         if self.token is None:

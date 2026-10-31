@@ -29,7 +29,8 @@ def _src_files():
 
 def test_g1_no_float_in_money_paths():
     # timeouts, switch intervals; never money (launch_guard.py: the launchers' shared switch-interval check, wave 26b)
-    allowed = {"serve.py", "clients.py", "clock.py", "api.py", "ledger.py", "launch_guard.py"}
+    allowed = {"serve.py", "clients.py", "clock.py", "api.py", "ledger.py", "launch_guard.py",
+               "crash_recovery.py", "startup_hold.py"}   # fix wave A: retry timings in seconds, never money
     for f in _src_files():
         tree = ast.parse(f.read_text())
         for node in ast.walk(tree):

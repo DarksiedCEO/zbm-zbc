@@ -16,7 +16,9 @@ import os
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
+
+import token_rotation
 
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
                 "finance_31", "hub", "esign_gateway", "scheduler")
@@ -46,6 +48,8 @@ class Settings:
     service_token: str
     caller_tokens: dict = field(default_factory=dict)
     andre_token: Optional[str] = None
+    # fix wave A (RTA-5): *_NEXT tokens during a rotation window and Andre's token as a SHA-256 (token_rotation.py)
+    rotation: Any = field(default=None, repr=False)
     seed_dir: str = SEED_DIR
     seed_sha256: Optional[str] = None
     allow_unpinned_seed: bool = False
@@ -169,6 +173,8 @@ def load(env: Optional[dict] = None) -> Settings:
         raise RuntimeError("LEGAL_CALLER_TOKENS: every token must be distinct")
     if token in every or (andre and andre in every):
         raise RuntimeError("a caller token equals the service or Andre token")
+    rotation = token_rotation.load(env, "LEGAL", CALLER_NAMES, _check_token,
+                                   [token, *every], andre)
     _off(env, "LEGAL_COUNSEL_CHANNEL", "a counsel channel (spec D1: engagement letter TBD)")
     _off(env, "LEGAL_ESIGN_PROVIDER", "an e-sign provider (spec D2, LR decision 7)")
     if _flag(env, "LEGAL_PORTAL_FAQ", False):
@@ -199,7 +205,7 @@ def load(env: Optional[dict] = None) -> Settings:
     except Exception:  # noqa: BLE001 - any failure: refuse (no silent UTC fallback)
         raise RuntimeError(f"LEGAL_BUSINESS_TZ={tz!r} is not a known IANA time zone on this host") from None
     s = Settings(
-        service_token=token, caller_tokens=callers, andre_token=andre,
+        service_token=token, caller_tokens=callers, andre_token=andre, rotation=rotation,
         seed_dir=env.get("LEGAL_SEED_DIR") or SEED_DIR, seed_sha256=seed_sha, allow_unpinned_seed=unpinned,
         data_dir=env.get("LEGAL_DATA_DIR") or None,
         ledger_url=env.get("LEDGER_SERVICE_URL") or None, ledger_token=env.get("LEDGER_SERVICE_TOKEN") or None,

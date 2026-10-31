@@ -23,6 +23,7 @@ from uvicorn.protocols.http.h11_impl import H11Protocol
 
 import dual_stack
 import launch_guard
+import access_redact
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 from api import MAX_HEADER_BYTES
@@ -175,6 +176,7 @@ def main() -> None:
             http=_HeadDeadlineH11Protocol,
             h11_max_incomplete_event_size=MAX_HEADER_BYTES,
             timeout_keep_alive=5,
+            log_config=access_redact.log_config(),   # fix wave A (RTA-4): no query string or id in access logs
         )
 
 

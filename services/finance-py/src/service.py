@@ -44,10 +44,14 @@ from models import ID_RE
 from ports import Ports
 from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
+import crash_recovery as CR
+from startup_hold import StartupHeld, StartupTransient
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
 EVIDENCE = i10.ACTOR
+# fix wave A (CH-1): the ledger writes announced in the intent journal before they are made
+JOURNALED = frozenset(i10.RULING_TYPES) | {i10.ANCHOR_TYPE, i10.VERSION_TYPE, i10.LEASE_TYPE}
 LA = ZoneInfo("America/Los_Angeles")
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _SUBJECT_BAD = __import__("re").compile(r"[^A-Za-z0-9._:-]")
@@ -323,6 +327,14 @@ class FinanceService:
         self.reconcile_mode = settings.reconcile_mode
         self.reconcile_required: list[str] = []
         self._reconciling = False
+        # fix wave A (CH-1/CH-2/CH-6): the intent journal of ledger writes started and not yet named by a committed
+        # line; what the ledger watch last saw; whether a write is failing now
+        self.intent = CR.IntentJournal(self.log.path)
+        self._absent_since: dict[str, float] = {}
+        self._ledger_write_error: Optional[str] = None
+        self._ledger_probe_ok: Optional[bool] = None
+        self.divergence: Optional[str] = None
+        self.watch: Optional[CR.LedgerWatch] = None
         self._replaying = True
         for rec in self.log.iter_records():
             for kind, r in rec["data"].get("ops", []):
@@ -334,14 +346,23 @@ class FinanceService:
         if not self.log.in_memory:
             try:
                 a = self.assess_log()
+                if a.voidable and not a.fatal and not self.reconcile_mode and \
+                        CR.unexplained(a, self.intent.ids()) is None:
+                    # CH-1: only crash residue of THIS log (every item announced by its intent journal): roll it
+                    # back, recorded, and verify again against the ledger
+                    self._auto_reconcile(a, "start")
+                    a = self.assess_log()
             except LedgerQueryFailed as exc:
-                raise RuntimeError(f"refusing to start: the local log cannot be verified against the evidence "
-                                   f"ledger ({exc})") from None
+                raise StartupTransient(f"refusing to start: the local log cannot be verified against the evidence "
+                                       f"ledger ({exc})") from None
+            except Unavailable as exc:
+                raise StartupTransient(f"refusing to start: the crash recovery could not be recorded on the "
+                                       f"evidence ledger ({exc.reason})") from None
             if a.fatal or (a.voidable and not self.reconcile_mode):
                 hint = ("" if a.fatal or not a.voidable else
                         " -- only Andre can void these: start with FIN_RECONCILE_MODE=1 and POST /fin/v1/reconcile "
                         "(README, 'Reconciling the local log with the ledger')")
-                raise RuntimeError("refusing to start: " + "; ".join(a.problems) + hint)
+                raise StartupHeld("refusing to start: " + "; ".join(a.problems) + hint)
             self.reconcile_required = list(a.voidable)
         if settings.unmatched_tin_policy == "withhold_24" and not self.counsel_verified("FIN-CQ-06"):
             raise RuntimeError("FIN_UNMATCHED_TIN_POLICY=withhold_24 needs counsel row FIN-CQ-06 verified (spec C.6); "
@@ -356,7 +377,8 @@ class FinanceService:
             try:
                 self._write_lease()
             except Unavailable as exc:
-                raise RuntimeError(f"refusing to start: the instance lease could not be recorded ({exc.reason})") from None
+                raise StartupTransient(f"refusing to start: the instance lease could not be recorded "
+                                       f"({exc.reason})") from None
 
     # ================================================================== plumbing
 
@@ -375,12 +397,23 @@ class FinanceService:
             raise Unavailable("reconcile mode (FIN_RECONCILE_MODE=1): only Andre's POST /fin/v1/reconcile is answered; "
                               "restart without it once the log is reconciled", ledger_write="not_recorded")
         subject = _SUBJECT_BAD.sub("-", str(subject))[:128] or "finance"
+        if event_type in JOURNALED and not self.log.in_memory:
+            try:
+                self.intent.note(event_id, event_type)        # fix wave A (CH-1): announced BEFORE the ledger call
+            except CR.IntentWriteError as exc:
+                raise Unavailable(f"{exc}; nothing was recorded", ledger_write="not_recorded") from None
         try:
-            return self.recorder.record(event_id, event_type, actor, subject, payload, summary)
+            eid = self.recorder.record(event_id, event_type, actor, subject, payload, summary)
         except LedgerRecordError as exc:
             self._ledger_conflict = isinstance(exc, LedgerConflict)
+            if CR.cannot_write(exc):
+                self._ledger_write_error = type(exc).__name__
+            if exc.took_effect is False:
+                self.intent.settle([event_id])               # certainly not on the ledger: nothing to reconcile
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing took effect",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
+        self._ledger_write_error = None
+        return eid
 
     def _evidence(self, rk: str, event_type: str, payload: dict) -> tuple[str, dict]:
         """The id and payload of one typed evidence event (``Op.record``): ``rk`` and ``seq`` inside the payload, the
@@ -415,9 +448,9 @@ class FinanceService:
             raise Unavailable("the local log moved under this operation; nothing took effect (retry)")
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
-        self._record(i10.anchor_id(epoch, rec["seq"], line_sha), i10.ANCHOR_TYPE, EVIDENCE, i10.LOG_SUBJECT,
-                     {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": rec["kind"]},
-                     f"Local log line {rec['seq']} ({rec['kind']}) anchored")
+        anchor = self._record(i10.anchor_id(epoch, rec["seq"], line_sha), i10.ANCHOR_TYPE, EVIDENCE, i10.LOG_SUBJECT,
+                              {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": rec["kind"]},
+                              f"Local log line {rec['seq']} ({rec['kind']}) anchored")
         if after_anchor is not None:
             after_anchor()
         try:
@@ -430,6 +463,7 @@ class FinanceService:
                 except OSError:
                     pass
             raise Unavailable(f"local store write failed ({exc}); nothing took effect") from None
+        self.intent.settle(list(op.events) + [anchor])       # fix wave A: the committed line names these now
         for kind, r in op.ops:
             self._apply(kind, r)
 
@@ -619,7 +653,9 @@ class FinanceService:
         client = self.recorder.client
         if not hasattr(client, "entries"):
             raise LedgerQueryFailed("this ledger client cannot read entries")
-        entries = client.entries()
+        return self._assess_entries(client.entries())
+
+    def _assess_entries(self, entries: list) -> i10.Assessment:
         shas = self.log.line_shas()
         lines, referenced, leases, reconciles, metas, named = [], set(), [], [], [], set()
         for rec, s in zip(self.log.iter_records(), shas):
@@ -784,7 +820,100 @@ class FinanceService:
             resp = {"reconcile_event_id": eid, "voided": payload["void_event_ids"], "void_lines": payload["void_lines"],
                     "remaining_problems": left.problems, "restart_required": self.reconcile_mode,
                     "ledger_event_ids": [eid], "request_id": request_id}
+            self.intent.settle(payload["void_event_ids"])
             return self._idem_mem(key, h, resp)
+
+    # --- fix wave A: automatic crash recovery and the write-health signal (CH-1, CH-2, CH-6; ADR 0025) ---------------
+
+    def _auto_reconcile(self, a: "i10.Assessment", when: str) -> str:
+        """Void crash residue (every item announced by this log's intent journal: never acknowledged to anyone).
+        The same recorded reconcile as Andre's, by the evidence intelligence, marked ``automatic``."""
+        with self.lock:
+            shas = self.log.line_shas()
+            head_seq, head_sha = len(shas), (shas[-1] if shas else None)
+            payload = i10.reconcile_payload(self.log.epoch, self.rules_version, head_seq, head_sha,
+                                            sorted(a.void_lines), sorted(a.void_event_ids))
+            eid = i10.reconcile_id(self.log.epoch, head_seq, payload)
+            self._reconciling = True
+            try:
+                op = Op(self, f"reconcile|{eid}", EVIDENCE, i10.LOG_SUBJECT)
+                op.record(eid, i10.RECONCILE_TYPE, EVIDENCE, i10.LOG_SUBJECT, payload,
+                          f"Automatic crash recovery at line {head_seq}: {len(payload['void_event_ids'])} interrupted "
+                          "write(s) declared void (never acknowledged)", raw=True)
+                op.add("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": f"auto-{when}",
+                                     "automatic": True})
+                self._commit(op)
+            finally:
+                self._reconciling = False
+            self.intent.settle(payload["void_event_ids"])
+            CR.alert("crash_recovered", "finance-py", when=when, voided=len(payload["void_event_ids"]),
+                     void_lines=payload["void_lines"], reconcile_event_id=eid)
+            return eid
+
+    def settle_pending(self) -> bool:
+        """CH-2: finish what the intent journal still holds (the ledger watch calls this with backoff). Crash
+        residue is rolled back as at start; what the ledger shows as committed or explained is forgotten; anything
+        the journal cannot explain is real divergence (``divergence``, on /health) and is left for Andre. True when
+        nothing is pending any more."""
+        with self.lock:
+            if self._closed or self.reconcile_mode or self.log.in_memory:
+                return not len(self.intent)
+            if not len(self.intent) and self.divergence is None:
+                return True
+            try:
+                entries = self.recorder.client.entries()
+                a = self._assess_entries(entries)
+                journal = self.intent.ids()
+                why = CR.unexplained(a, journal) if a.voidable or a.fatal else None
+                self.divergence = why
+                if why is not None:
+                    CR.alert("log_divergence", "finance-py", reason=why[:500], pending=len(journal))
+                    return False
+                if a.voidable:
+                    self._auto_reconcile(a, "running")
+                    entries = self.recorder.client.entries()
+                    a = self._assess_entries(entries)
+                held = {e.get("event_id") for e in entries if isinstance(e, dict) and e.get("department") == i10.DEPT}
+                self.intent.settle(CR.resolved(self.intent.ids(), a, held, self._absent_since, CR.now_monotonic()))
+                self.reconcile_required = list(a.voidable)
+            except (LedgerQueryFailed, Unavailable) as exc:
+                self._ledger_probe_ok = False
+                CR.alert("ledger_write_pending", "finance-py", pending=len(self.intent), reason=type(exc).__name__)
+                return False
+            if len(self.intent):
+                CR.alert("ledger_write_pending", "finance-py", pending=len(self.intent))
+            return not len(self.intent)
+
+    def probe_ledger(self) -> bool:
+        """CH-6: can the ledger be reached now (GET /ledger/head, or /ledger/verify for a client without it)?"""
+        client = self.recorder.client
+        try:
+            ok = client.head() if hasattr(client, "head") else client.verify() is True
+        except Exception:  # noqa: BLE001
+            ok = False
+        if self._ledger_probe_ok is not False and not ok:
+            CR.alert("ledger_unreachable", "finance-py")
+        self._ledger_probe_ok = bool(ok)
+        return bool(ok)
+
+    def write_state(self) -> list[str]:
+        """Why this instance cannot write now (empty: it can)."""
+        out = []
+        if self._closed:
+            out.append("closed")
+        if self.reconcile_mode:
+            out.append("reconcile_mode")
+        if self.reconcile_required or self.divergence:
+            out.append("reconcile_required")
+        if self.log.fault:
+            out.append("log_write_fault")
+        if self._ledger_probe_ok is False:
+            out.append("ledger_unreachable")
+        if self._ledger_write_error:
+            out.append(f"ledger_write_failing:{self._ledger_write_error}")
+        if len(self.intent):
+            out.append(f"pending_unreconciled_writes:{len(self.intent)}")
+        return out
 
     # ================================================================== rules (§B.12)
 
@@ -1065,7 +1194,12 @@ class FinanceService:
     def health(self) -> dict:
         with self.lock:
             holds = sum(1 for i in self.db["invoices"].values() if i.get("held_compliance"))
-        return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,
+            reasons = self.write_state()
+        # fix wave A (CH-2/CH-6): "degraded" (the API answers 503) while this instance cannot write now; reconcile
+        # mode is Andre's deliberate state and keeps its own flag
+        degraded = [r for r in reasons if r != "reconcile_mode"]
+        return {"status": "degraded" if degraded else "ok", "write_ok": not reasons, "degraded_reasons": reasons,
+                "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,
                 "reconcile_required": bool(self.reconcile_required), "log_write_fault": bool(self.log.fault),

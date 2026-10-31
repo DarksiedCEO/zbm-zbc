@@ -130,10 +130,13 @@ def test_failed_commit_after_anchor_only_andre_reconciles(tmp_path):
                caller="onboarding")
     assert r.status_code == 503
     assert x.ok(x.get("/fin/v1/integrity"))["status"] == "red"
+    # fix wave A (CH-1): an interrupted write this log announced is rolled back automatically at the next start
+    # (test_fixwave_a_resilience.py); without its intent journal it is still Andre's -- the path kept covered here
+    (tmp_path / "d" / "fin_log.jsonl.intent").unlink()
     with pytest.raises(RuntimeError, match="only Andre"):
         _restart(x, tmp_path)
     y = _restart(x, tmp_path, FIN_RECONCILE_MODE="1")
-    assert y.ok(y.get("/health"))["reconcile_required"] is True
+    assert y.get("/health").json()["reconcile_required"] is True
     r = y.post("/fin/v1/payees", {"request_id": rid(), "payee_id": "k8", "kind": "clipper", "declared_country": "US"},
                caller="onboarding")
     assert r.status_code == 503                                        # nothing else runs in reconcile mode

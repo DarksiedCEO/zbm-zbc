@@ -38,6 +38,7 @@ from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 import config as config_mod
+import token_rotation
 import models as m
 from clock import Clock, SystemClock
 from compliance_client import HttpCompliance
@@ -55,6 +56,40 @@ log = logging.getLogger("legal.api")
 
 CALLER_HEADER = "X-LEGAL-Caller-Token"
 FOUNDER_HEADER = "X-Andre-Approval-Token"
+
+# Fix wave A (red team RTA-3): per-caller route allowlists, checked BEFORE routing (finance-py's NAMED_ONLY pattern).
+# ``reader`` and ``POST /legal/v1/requests`` admitted every Legal caller, so a compromised Finance or Compliance read
+# the register, obligations, filings, memos, matters and takedowns, and could open matters (with litigation holds
+# only Andre releases). These two callers now reach exactly the routes their deployed clients call (finance-py
+# clients.py: document versions and acceptances; compliance-py legal_client.py: current documents and acceptances)
+# plus the routes that name them explicitly; anything else is 403 before any route, dependency or body is touched.
+_SEG = r"[A-Za-z0-9._:-]{1,128}"
+_R = lambda pattern: re.compile(pattern.replace("{x}", _SEG))  # noqa: E731
+NAMED_ROUTES: dict[str, tuple[tuple[str, re.Pattern], ...]] = {
+    "finance_31": (
+        ("GET", _R(r"/legal/v1/documents/{x}/versions/{x}")),
+        ("GET", _R(r"/legal/v1/documents/{x}/current")),
+        ("GET", _R(r"/legal/v1/acceptances/{x}")),
+        ("GET", _R(r"/legal/v1/register/{x}")),
+        ("POST", _R(r"/legal/v1/obligations/{x}/done")),
+    ),
+    "compliance_38": (
+        ("GET", _R(r"/legal/v1/documents/{x}/current")),
+        ("GET", _R(r"/legal/v1/acceptances/{x}")),
+        ("POST", _R(r"/legal/v1/register/{x}/invalidate")),   # tighten only; never a FIN-* row (service.invalidate)
+        ("POST", _R(r"/legal/v1/obligations/{x}/done")),
+        ("POST", _R(r"/legal/v1/music/rulings")),
+        ("GET", _R(r"/legal/v1/audit/evidence")),
+    ),
+}
+
+
+def named_route_allowed(name: Optional[str], method: str, path: str) -> bool:
+    """True unless ``name`` is a caller with an allowlist and (method, path) is not on it. /health is open."""
+    routes = NAMED_ROUTES.get(name or "")
+    if routes is None or path == "/health":
+        return True
+    return any(method == m and rx.fullmatch(path) for m, rx in routes)
 MAX_BODY_BYTES = 7 * 1024 * 1024
 MAX_TARGET_BYTES = 4096
 MAX_HEAD_BYTES = 16 * 1024
@@ -197,17 +232,17 @@ class InputLimits:
         await self.app(scope, replay, send)
 
 
-def make_require_auth(required_token: str) -> Callable:
+def make_require_auth(required_token: str, next_token: Optional[str] = None) -> Callable:
+    # fix wave A (RTA-5): the current token, and the next one during a rotation window, compared as SHA-256 digests
+    accepted = token_rotation.Secret([required_token, next_token])
+
     def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
         if authorization is None or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail="missing or malformed Authorization header (expected: Bearer <token>)",
                                 headers={"WWW-Authenticate": "Bearer"})
         supplied = authorization.removeprefix("Bearer ")
-        try:
-            valid = hmac.compare_digest(supplied, required_token)
-        except TypeError:
-            valid = False  # non-ASCII token: invalid (401), never a 500
+        valid = accepted.matches(supplied)   # non-ASCII token: invalid (401), never a 500
         if not valid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
                                 headers={"WWW-Authenticate": "Bearer"})
@@ -220,15 +255,17 @@ def _digest(token: str) -> bytes:
 
 
 class Callers:
-    def __init__(self, tokens: dict[str, str]):
-        self._digests = {name: _digest(tok) for name, tok in tokens.items()}
+    def __init__(self, tokens: dict[str, str], next_tokens: Optional[dict] = None):
+        # fix wave A (RTA-5): a caller being rotated is recognised by its current and its next token
+        self._digests = [(name, _digest(tok)) for name, tok in tokens.items()] + \
+            [(name, _digest(tok)) for name, tok in (next_tokens or {}).items()]
 
     def identify(self, supplied: Optional[str]) -> Optional[str]:
         if not supplied:
             return None
         d = _digest(supplied)
         found = None
-        for name, dg in self._digests.items():  # no early exit
+        for name, dg in self._digests:  # no early exit
             if hmac.compare_digest(d, dg):
                 found = name
         return found
@@ -266,9 +303,11 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                   description="NON-LIVE: counsel channel, e-sign provider, Cybersecurity 22, People 43 and every "
                               "department port are fail-closed stand-ins. Nothing here is legal advice.",
                   version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
-    auth = [Depends(make_require_auth(settings.service_token))]
-    callers = Callers(settings.caller_tokens)
-    founder = FounderGate.build(settings.andre_token, settings.service_token, list(settings.caller_tokens.values()))
+    rot = getattr(settings, "rotation", None) or token_rotation.Rotation()   # fix wave A (RTA-5)
+    auth = [Depends(make_require_auth(settings.service_token, rot.service_next))]
+    callers = Callers(settings.caller_tokens, rot.callers_next)
+    founder = FounderGate.build(settings.andre_token, settings.service_token, list(settings.caller_tokens.values()),
+                                 founder_sha256=rot.andre_sha256)
     app.state.service = service
     svc = service
 
@@ -335,6 +374,15 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         return JSONResponse(status_code=exc.status_code, content=content)
 
     @app.middleware("http")
+    async def _named_routes(request: Request, call_next):
+        # fix wave A (RTA-3): see NAMED_ROUTES
+        if not named_route_allowed(callers.identify(request.headers.get(CALLER_HEADER)), request.method,
+                                   request.url.path):
+            return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that name "
+                                                                   "it"})
+        return await call_next(request)
+
+    @app.middleware("http")
     async def _unhandled(request: Request, call_next):
         try:
             return await call_next(request)
@@ -345,8 +393,10 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     app.add_middleware(InputLimits)
 
     @app.get("/health")
-    async def health() -> dict:
-        return svc.health()
+    async def health():
+        h = svc.health()
+        # fix wave A (CH-2/CH-6): 503 while this instance cannot write; the body says why
+        return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)
 
     @app.get("/legal/v1/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(reader)) -> list[dict]:
@@ -699,16 +749,35 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
         raise
 
 
-def _app_from_env() -> FastAPI:
+def _app_from_env():
+    """Fix wave A (CH-5, ADR 0025): a ledger that cannot be reached at start, or a log that diverges from it, no
+    longer exits the process: ``startup_hold`` serves /health 503 with the reason and retries with backoff."""
+    import startup_hold
     settings = config_mod.load()
-    return create_app(build_service(settings), settings)
+    return startup_hold.supervise("legal-py", lambda: create_app(build_service(settings), settings),
+                                  on_ready=_start_watch)
 
 
+def _start_watch(application) -> None:
+    """Fix wave A (CH-2/CH-6): the ledger watch; started only by ``main()``."""
+    if not _WATCH:
+        return
+    import crash_recovery
+    svc = application.state.service
+    svc.watch = crash_recovery.LedgerWatch("legal-py", svc.settle_pending, svc.probe_ledger,
+                                           lambda: len(svc.intent)).start()
+
+
+_WATCH: list = []
 app = _app_from_env()
 
 
 def main() -> None:
     import serve
+
+    _WATCH.append(True)
+    if getattr(app, "state", None) is not None and getattr(app.state, "service", None) is not None:
+        _start_watch(app)
 
     host = os.environ.get("LEGAL_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("LEGAL_PORT", "8420"))

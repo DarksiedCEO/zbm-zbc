@@ -41,7 +41,8 @@ def test_h02_seed_approved_with_andre_token_is_version_1(h):
                     "reconcile_mode": False, "reconcile_required": False,   # AEGIS N15-1
                     "log_write_fault": False,                                 # bug sweep C
                     "scheduler": {"enabled": False},                         # AEGIS F-4
-                    "rules_expiring": ANY}                                   # money red team RTM-06
+                    "rules_expiring": ANY,                                   # money red team RTM-06
+                    "write_ok": True, "degraded_reasons": []}                 # fix wave A (CH-6)
     assert len(h.ledger.of_type("register_version_published")) == 1
     assert len(h.ledger.of_type("seed_loaded")) == 1
 

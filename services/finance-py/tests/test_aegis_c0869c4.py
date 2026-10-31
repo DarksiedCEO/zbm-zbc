@@ -288,7 +288,8 @@ def test_m1_a_truncate_that_fails_is_reported_not_silent(tmp_path, monkeypatch):
     assert r.status_code == 503
     monkeypatch.setattr(store_mod.os, "pwrite", real_w)
     monkeypatch.setattr(store_mod.os, "ftruncate", real_t)
-    assert h.ok(h.client.get("/health"))["log_write_fault"] is True
+    r = h.client.get("/health")                                       # fix wave A (CH-6): degraded is a 503
+    assert r.status_code == 503 and r.json()["log_write_fault"] is True
     integ = h.ok(h.get("/fin/v1/integrity"))
     assert integ["status"] == "red" and any("LOCAL_LOG_WRITE_FAULT" in p for p in integ["problems"])
     r = h.post("/fin/v1/payees", {"request_id": rid(), "payee_id": "clip-u", "kind": "clipper",

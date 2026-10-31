@@ -1094,6 +1094,11 @@ def lint_shared() -> list[str]:
         "launch_guard.py": sorted(svc.glob("*/src/launch_guard.py")) + sorted(svc.glob("*/src/*/launch_guard.py")),
         # war room fixes (ADR 0018): the shared lookalike fold (devtools/lookalikes/generate.py, test_lookalikes.py)
         "lookalikes.py": sorted(svc.glob("*/src/lookalikes.py")),
+        # fix wave A (red team Oct 31, ADR 0025): crash recovery, the start-up hold, access-log redaction
+        "crash_recovery.py": sorted(svc.glob("*/src/crash_recovery.py")),
+        "startup_hold.py": sorted(svc.glob("*/src/startup_hold.py")),
+        "token_rotation.py": sorted(svc.glob("*/src/token_rotation.py")),
+        "access_redact.py": sorted(svc.glob("*/src/access_redact.py")) + sorted(svc.glob("*/src/*/access_redact.py")),
     }
     for name, files in groups.items():
         norm = {f: SERVICE_CONSTANTS.sub(r'\1 = "<service>"', f.read_text()) for f in files}
