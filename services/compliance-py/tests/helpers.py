@@ -84,8 +84,8 @@ class Harness:
     def post(self, path, body, caller=None, andre=None, bearer=SERVICE_TOKEN):
         return self.client.post(path, json=body, headers=self.headers(caller, andre, bearer))
 
-    def get(self, path, caller="scheduler", **params):
-        return self.client.get(path, headers=self.headers(caller), params=params)
+    def get(self, path, caller="scheduler", andre=None, **params):
+        return self.client.get(path, headers=self.headers(caller, andre), params=params)
 
     # --- register ------------------------------------------------------------------
     def inbox(self):

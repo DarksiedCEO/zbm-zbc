@@ -271,7 +271,7 @@ def _main(work: Path) -> int:
         st = c.get(B + "/compliance/v1/register/US-CPPA-2025", headers=h("scheduler")).json()["row"]["status"]
         say(f"US-CPPA-2025 status in B after approval: {st}")
         # audit export and ledger verification
-        ex = c.get(A + "/compliance/v1/audit/export", headers=h("scheduler")).json()
+        ex = c.get(A + "/compliance/v1/audit/export", headers=h(andre=ANDRE)).json()      # AEGIS r10: Andre only
         say(f"audit export page: {len(ex['records'])} records, ledger event {ex['ledger_event_id']}")
         ents = c.get(L + "/ledger/entries", headers={"Authorization": f"Bearer {LEDGER_TOKEN}"}).json()
         cmp = [e for e in ents if e.get("department") == "compliance"]
@@ -284,7 +284,7 @@ def _main(work: Path) -> int:
         ok = all(x.status_code == 200 and x.json().get("valid") is True for x in (v, vb))
         # bug sweep C (R6): every typed evidence event of A is committed under an anchored local line; and C-11 held
         # after the restart (the restart leg above)
-        ev = c.get(A + "/compliance/v1/audit/evidence", headers=h("scheduler"), params={"limit": 1000}).json()
+        ev = c.get(A + "/compliance/v1/audit/evidence", headers=h(andre=ANDRE), params={"limit": 1000}).json()
         # attempted = recorded, never named by an anchored line. In this fault-free run the only such events are
         # answers that change no state: a port crossing whose answer was "unavailable" (C-04 with the provider stand-in)
         # and the audit-export answer. Any other attempted event would be a state change that never committed.

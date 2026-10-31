@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import helpers as H
 from helpers import ANDRE_TOKEN, rid
-from test_service_area_gate import activate, attest, harness, status, web_client
+from test_service_area_gate import activate, andre_view, attest, harness, status, web_client
 
 
 def _row(h, oid):
@@ -167,7 +167,8 @@ def test_an_ofac_record_for_another_lane_does_not_count():
     assert a.status_code == 200, a.text
     f = web_client(h, "client-lane", attest_first=False, sanctions_attestation_id=a.json()["attestation_id"])
     j = h.rule("client-lane", "client", f).json()
-    assert j["allowed"] is False and any("lane" in x for x in j["unmet_lines"]), j["unmet_lines"]
+    full = andre_view(h, j)                                       # R9-4: the HR-14 detail is Andre's record
+    assert j["allowed"] is False and any("lane" in x for x in full["unmet_lines"]), full["unmet_lines"]
 
 
 # --- F-9: who reads the activation status --------------------------------------------------------------------------------

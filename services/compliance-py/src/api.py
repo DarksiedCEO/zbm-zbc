@@ -235,10 +235,35 @@ GENERIC_REFUSAL = "the client is not activated (the reasons go to Andre)"
 
 def generic_activation(out: dict) -> dict:
     """AEGIS r9 R9-4: the activation answer for a department that only needs the decision: a refusal carries one
-    generic reason and no sanctions marker, so it reads the same whatever the reason."""
+    generic reason and no sanctions marker, so it reads the same whatever the reason. AEGIS r10 R10-3: and no field
+    that differs by reason either (a jurisdiction, a re-screen date, a ruling): every refusal is byte-identical."""
     if out.get("decision") == "ALLOW":
         return {**out, "sanctions_grounded": None, "sanctions_ground": None}
-    return {**out, "reasons": [GENERIC_REFUSAL], "sanctions_grounded": None, "sanctions_ground": None}
+    return {**out, "reasons": [GENERIC_REFUSAL], "sanctions_grounded": None, "sanctions_ground": None,
+            "ruling_id": None, "evaluated_at": None, "jurisdiction": None, "valid_until": None}
+
+
+# AEGIS r10 R9-4: what of an activation ruling only Andre reads: the client's sanctions screening (HR-14: missing,
+# stale or a hit) and any open hold (its kind and id). Other callers read one generic item in their place.
+GENERIC_RULING_ITEM = {"code": "andre_review", "obligation_id": None, "obligation_title": None, "source_url": None,
+                       "row_status": None, "message": "an item only Andre reviews (screening or hold)"}
+
+
+def generic_ruling(view: dict) -> dict:
+    if view.get("gate") != "activation" or view.get("allowed"):
+        return view
+    keep, hidden = [], False
+    for u in view.get("unmet") or []:
+        if u.get("obligation_id") == "HR-14" or str(u.get("code", "")).startswith("hold_open"):
+            hidden = True
+        else:
+            keep.append(u)
+    if not hidden:
+        return view
+    keep.append(dict(GENERIC_RULING_ITEM))
+    lines = [ln for ln in view.get("unmet_lines") or [] if "/HR-14/" not in ln and "/hold_open" not in ln]
+    lines.append(f"compliance_38/-/andre_review: {GENERIC_RULING_ITEM['message']} [no source url]")
+    return {**view, "unmet": keep, "unmet_lines": lines}
 
 
 def _sanitize(errors: list[dict]) -> dict:
@@ -328,7 +353,8 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
     @app.post("/compliance/v1/rule", dependencies=auth)
     def rule(who: str = Depends(caller("onboarding")),
              req: m.RuleRequest = Depends(body(m.RuleRequest))) -> dict:
-        return svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane, route="rule")
+        return generic_ruling(svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane,
+                                       route="rule"))
 
     @app.post("/compliance/v1/review", dependencies=auth)
     def review(who: str = Depends(caller("creative_production")),
@@ -340,8 +366,8 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
     @app.post("/compliance/v1/gates/activation", dependencies=auth)
     def gate_activation(who: str = Depends(caller("onboarding")),
                         req: m.RuleRequest = Depends(body(m.RuleRequest))) -> dict:
-        return svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane,
-                        route="gates/activation")
+        return generic_ruling(svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane,
+                                       route="gates/activation"))
 
     def _native(gate: str, kind: str):
         def handler(who: str = Depends(caller("creative_production")),
@@ -357,7 +383,7 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
 
     @app.get("/compliance/v1/rulings/{ruling_id}", dependencies=auth)
     def ruling(ruling_id: str, _: str = Depends(caller())) -> dict:
-        return svc.get_ruling(ruling_id[:64])
+        return generic_ruling(svc.get_ruling(ruling_id[:64]))        # R9-4: HR-14 and holds go to Andre only
 
     # --- sanctions, accessibility, jurisdictions --------------------------------------
 
@@ -514,9 +540,24 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
 
     # --- holds ------------------------------------------------------------------------------
 
+    finance_only = caller("finance_31")
+
+    def holds_reader(x_compliance_caller_token: Optional[str] = Header(default=None),
+                     x_andre_approval_token: Optional[str] = Header(default=None)) -> str:
+        """AEGIS r10 R10-3: Andre's token, or Finance (its payout gate needs which subject has an open hold)."""
+        if x_andre_approval_token is not None:
+            return andre("holds")(x_andre_approval_token)
+        return finance_only(x_compliance_caller_token)
+
     @app.get("/compliance/v1/holds", dependencies=auth)
-    def holds(_: str = Depends(caller())) -> list[dict]:
-        return svc.list_holds()
+    def holds(who: str = Depends(holds_reader)) -> list[dict]:
+        """AEGIS r10 R10-3: in full to Andre; to Finance each hold as a generic ``compliance_hold`` (id, subject,
+        status, dates), never its kind, obligation or detail (an OFAC search result); other callers 403."""
+        out = svc.list_holds()
+        if who == "andre":
+            return out
+        return [{**{k: hh.get(k) for k in ("hold_id", "subject_id", "status", "opened_at", "released_at")},
+                 "kind": "compliance_hold", "obligation_id": None} for hh in out]
 
     @app.post("/compliance/v1/holds/{hold_id}/release", dependencies=auth)
     def release(hold_id: str,
@@ -545,14 +586,15 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         return svc.watcher_run(req.request_id)
 
     @app.get("/compliance/v1/audit/evidence", dependencies=auth)
-    def audit_evidence(_: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+    def audit_evidence(_: str = Depends(andre("audit/evidence")), limit: int = Query(default=200, ge=1, le=1000),
                        offset: int = Query(default=0, ge=0, le=10_000_000),
                        event_type: Optional[str] = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
-        """Bug sweep C (R6): every Compliance evidence event on the ledger, committed / cited / attempted."""
+        """Bug sweep C (R6): every Compliance evidence event on the ledger, committed / cited / attempted. AEGIS r10
+        R10-3: Andre's token only (event types and subjects name sanctions holds)."""
         return svc.audit_evidence(limit, offset, event_type)
 
     @app.get("/compliance/v1/audit/export", dependencies=auth)
-    def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),
+    def audit(who: str = Depends(andre("audit/export")), since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
               cursor: int = Query(default=0, ge=0, le=10**12)) -> dict:
         try:

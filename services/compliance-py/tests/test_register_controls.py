@@ -385,7 +385,7 @@ def test_entity_payee_needs_screened_owners(hs):
 def test_audit_export_orders_records_redacts_names_and_pages(hs):
     s = hs.screen("clipper-1")
     hs.rule("c", "client", client_facts())
-    page = hs.get("/compliance/v1/audit/export").json()
+    page = hs.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN).json()
     recs = page["records"]
     assert [r["seq"] for r in recs] == sorted(r["seq"] for r in recs)
     kinds = {r["kind"] for r in recs}
@@ -396,6 +396,6 @@ def test_audit_export_orders_records_redacts_names_and_pages(hs):
     assert page["ledger_event_id"] and hs.ledger.of_type("audit_export_issued")
     assert "Name of clipper-1" not in str(page)
     assert s["screen_id"] in str(page)
-    later = hs.get("/compliance/v1/audit/export", cursor=recs[-1]["seq"]).json()
+    later = hs.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN, cursor=recs[-1]["seq"]).json()
     assert later["records"] == [] or later["records"][0]["seq"] > recs[-1]["seq"]
-    assert hs.get("/compliance/v1/audit/export", since="not-a-date").status_code == 422
+    assert hs.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN, since="not-a-date").status_code == 422

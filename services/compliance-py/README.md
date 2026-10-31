@@ -158,9 +158,9 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `POST /compliance/v1/controls/{id}/results` | the control's owner | push a result |
 | `POST /compliance/v1/controls/internal/run` | scheduler | compute Compliance-owned controls; draft re-verification proposals |
 | `GET /compliance/v1/trust-center` | any caller | `{control_id, title, status, last_passed_at}` only |
-| `GET /compliance/v1/holds`, `POST /holds/{id}/release` | any caller; Andre | holds |
+| `GET /compliance/v1/holds`, `POST /holds/{id}/release` | Andre (in full) and `finance_31` (each hold as a generic `compliance_hold`: no kind, obligation or detail); Andre | holds (AEGIS r10 R10-3) |
 | `POST /compliance/v1/watcher/run` | scheduler | one Change Watcher cycle (only when `COMPLIANCE_WATCHER_ENABLED=1`) |
-| `GET /compliance/v1/audit/export` | any caller | ordered records with ledger event ids and register versions (500/page; personal data only as hashes) |
+| `GET /compliance/v1/audit/export` | Andre only (AEGIS r10 R10-3) | ordered records with ledger event ids and register versions (500/page; personal data only as hashes) |
 | `GET /intelligences` | any caller | the 11 intelligences |
 
 Status codes: 401 bearer, 403 caller/Andre, 404, 409, 413, 414/431, 415, 422,
@@ -303,7 +303,7 @@ AI/synthetic disclosure, so those clips and assets stay blocked.
 
 ## Bug sweep C (Oct 7, 2026)
 
-`GET /compliance/v1/audit/evidence?event_type=&limit=&offset=` (any caller): every Compliance ledger event, `committed`
+`GET /compliance/v1/audit/evidence?event_type=&limit=&offset=` (Andre only, AEGIS r10 R10-3): every Compliance ledger event, `committed`
 (named by an anchored local line), `cited` or `attempted` (recorded first, never committed: unanchored evidence =
 attempted, not done). `/health` adds `log_write_fault`. The data directory is single-writer (`compliance.lock`). The
 Change Watcher's fetches and C-11's ledger reads run outside the service lock. Details: ADR 0006, "Bug sweep C fixes".

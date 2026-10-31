@@ -17,7 +17,7 @@ import facts as facts_mod
 import models
 import ports
 from fetcher import FetchFailed, NotWiredFetcher
-from helpers import SEED_PATH, Harness, base_env, client_facts, clip_facts, publish_facts, rid
+from helpers import ANDRE_TOKEN, SEED_PATH, Harness, base_env, client_facts, clip_facts, publish_facts, rid
 from register import SHELF_LIFE_DAYS, seed_checks
 from store import StoreCorrupt
 
@@ -72,7 +72,8 @@ def test_h26_no_money_key_in_any_response(hs):
     hs.activate_brand()
     responses = [hs.review("zbc_clip", rid(), clip_facts()).json(), hs.review("zbm_work", "w", publish_facts()).json(),
                  hs.rule("c", "client", client_facts()).json(), hs.get("/compliance/v1/controls").json(),
-                 hs.get("/compliance/v1/trust-center").json(), hs.get("/compliance/v1/audit/export").json()]
+                 hs.get("/compliance/v1/trust-center").json(),
+                 hs.get("/compliance/v1/audit/export", andre=ANDRE_TOKEN).json()]
 
     def keys(o):
         if isinstance(o, dict):

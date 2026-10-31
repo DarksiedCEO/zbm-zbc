@@ -170,6 +170,8 @@ def test_h22_network_signal_contradicting_declared_country_is_a_hold(hs):
     s = hs.screen("clipper-1")
     r = hs.rule("clipper-1", "zbc_creator", creator_facts(s["screen_id"], network_country_signal="RU")).json()
     assert r["allowed"] is False
+    assert "andre_review" in {u["code"] for u in r["unmet"]}       # AEGIS r10 R9-4: the caller reads a generic item
+    r = hs.svc.ruling_view(hs.svc.rulings[r["ruling_id"]])        # Andre's record names the hold
     holds = [u for u in r["unmet"] if u["code"].startswith("hold_open:")]
     assert holds and holds[0]["obligation_id"] == "HR-05"
     again = hs.rule("clipper-1", "zbc_creator", creator_facts(s["screen_id"], network_country_signal="RU")).json()

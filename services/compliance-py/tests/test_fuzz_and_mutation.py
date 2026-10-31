@@ -134,7 +134,8 @@ def _run_oct30(case):
     f = client_facts(platforms=("web",), sanctions_attestation_id=a["attestation_id"],
                      legal_documents=[{"doc_id": "client_msa", "version": "1.0", "doc_sha256": "e" * 64,
                                        "acceptance_id": "lg-acc-01J0000000000000000000000A"}])
-    return x.rule("c", "client", f).json()
+    j = x.rule("c", "client", f).json()
+    return x.svc.ruling_view(x.svc.rulings[j["ruling_id"]])     # AEGIS r10 R9-4: HR-14 detail is Andre's record
 
 
 def _run(case):

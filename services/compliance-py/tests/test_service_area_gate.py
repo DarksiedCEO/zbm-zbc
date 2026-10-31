@@ -65,6 +65,12 @@ def activate(h: Harness, subject: str = "client-web", **kw):
     return r.json()
 
 
+def andre_view(h: Harness, j: dict) -> dict:
+    """AEGIS r10 R9-4: an activation ruling's screening (HR-14) and hold items are Andre's record; onboarding reads one
+    generic item in their place."""
+    return h.svc.ruling_view(h.svc.rulings[j["ruling_id"]])
+
+
 def status(h: Harness, client: str = "client-web", caller: str = "finance_31"):
     r = h.get(f"/compliance/v1/clients/{client}/activation", caller=caller)
     assert r.status_code == 200, r.text
@@ -163,7 +169,7 @@ def test_resolve_route_answers_the_service_area_for_finance():
 def test_sanctions_screening_missing_is_refused():
     h = harness()
     j = h.rule("client-ns1", "client", web_client(h, "client-ns1", attest_first=False)).json()
-    assert j["allowed"] is False and ("HR-14", "fact_missing:sanctions_attestation_id") in unmet_codes(j)
+    assert j["allowed"] is False and ("HR-14", "fact_missing:sanctions_attestation_id") in unmet_codes(andre_view(h, j))
 
 
 def test_sanctions_attestation_of_another_subject_is_refused():
@@ -171,7 +177,7 @@ def test_sanctions_attestation_of_another_subject_is_refused():
     other = attest(h, "client-other").json()["attestation_id"]
     j = h.rule("client-ns2", "client", web_client(h, "client-ns2", attest_first=False,
                                                   sanctions_attestation_id=other)).json()
-    assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(j)
+    assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(andre_view(h, j))
 
 
 def test_a_potential_match_or_match_refuses_and_holds_the_subject_permanently():
@@ -182,7 +188,7 @@ def test_a_potential_match_or_match_refuses_and_holds_the_subject_permanently():
         assert a.status_code == 200 and a.json()["hold_id"], a.text
         f = web_client(h, subject, attest_first=False, sanctions_attestation_id=a.json()["attestation_id"])
         j = h.rule(subject, "client", f).json()
-        assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(j)
+        assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(andre_view(h, j))
         rel = h.post(f"/compliance/v1/holds/{a.json()['hold_id']}/release",
                      {"request_id": rid("rel"), "reason": "looked fine"}, andre=ANDRE_TOKEN)
         assert rel.status_code == 409          # never released through the API: refuse, do not investigate around it
@@ -193,7 +199,7 @@ def test_a_stale_screening_is_refused():
     a = attest(h, "client-old", searched_at=OCT30 - timedelta(days=31)).json()
     j = h.rule("client-old", "client", web_client(h, "client-old", attest_first=False,
                                                   sanctions_attestation_id=a["attestation_id"])).json()
-    assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(j)
+    assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(andre_view(h, j))
 
 
 def test_a_screening_missing_a_list_or_in_the_future_is_refused():
@@ -203,7 +209,7 @@ def test_a_screening_missing_a_list_or_in_the_future_is_refused():
     a = attest(h, "client-sdn", lists=("SDN",)).json()
     j = h.rule("client-sdn", "client", web_client(h, "client-sdn", attest_first=False,
                                                   sanctions_attestation_id=a["attestation_id"])).json()
-    assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(j)
+    assert j["allowed"] is False and ("HR-14", "client_sanctions_attested") in unmet_codes(andre_view(h, j))
 
 
 def test_only_andre_records_a_sanctions_attestation_and_it_is_on_the_ledger_first():
