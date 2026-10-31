@@ -500,7 +500,7 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     @app.post("/legal/v1/portal/receipts", dependencies=auth)
     def portal_receipt(_: str = Depends(portal()), req: m.PortalReceipt = Depends(body(m.PortalReceipt))) -> dict:
         """AEGIS M-2: the receipt of the submission that used a link (same token, same request id); else 404."""
-        return svc.portal_receipt(req.token, req.request_id)
+        return svc.portal_receipt(req.token, req.request_id, req.form_sha256)
 
     @app.post("/legal/v1/portal/acceptances", dependencies=auth, status_code=201)
     def portal_acceptance(_: str = Depends(portal()),

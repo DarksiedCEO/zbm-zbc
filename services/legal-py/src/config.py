@@ -76,6 +76,7 @@ class Settings:
     esign_consent_required: bool = True
     business_tz: str = "America/Los_Angeles"
     zbm_facts: dict = field(default_factory=dict)                 # ADR 0028: {{zbm_*}} values (LEGAL_ZBM_FACTS)
+    link_tag_key: Optional[bytes] = field(default=None, repr=False)   # AEGIS r2 N-M1 (LEGAL_LINK_TAG_KEY)
     data_dir_lock: Optional[object] = field(default=None, repr=False, compare=False)   # bug sweep E: the flock
 
 
@@ -202,6 +203,16 @@ def _zbm_facts(env: dict) -> dict:
     return dict(data)
 
 
+def _link_tag_key(env: dict) -> Optional[bytes]:
+    """AEGIS r2 N-M1: the key that tags client acceptance link tokens, the same value as the client-portal service's
+    PORTAL_LINK_TAG_KEY. Unset = no link can be issued (503); a value is >= 32 printable characters."""
+    raw = env.get("LEGAL_LINK_TAG_KEY")
+    if raw is None or raw == "":
+        return None
+    _check_token(raw, "LEGAL_LINK_TAG_KEY")
+    return raw.encode("ascii")
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ) if env is None else env
     token = env.get("LEGAL_SERVICE_TOKEN")
@@ -264,6 +275,7 @@ def load(env: Optional[dict] = None) -> Settings:
         esign_consent_required=_flag(env, "LEGAL_ESIGN_CONSENT_REQUIRED", True),
         business_tz=tz,
         zbm_facts=_zbm_facts(env),
+        link_tag_key=_link_tag_key(env),
     )
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it
     return s

@@ -52,7 +52,8 @@ def test_an_unset_portal_caller_never_stops_legal_and_its_routes_answer_503(valu
     x.approve_rules()
     assert x.ok(x.client.get("/health"))["status"] in ("ok", "degraded")
     for path, body in (("/legal/v1/portal/invitations/resolve", {"token": "A" * 43}),
-                       ("/legal/v1/portal/receipts", {"token": "A" * 43, "request_id": "pa-1"}),
+                       ("/legal/v1/portal/receipts", {"token": "A" * 43, "request_id": "pa-1",
+                                                      "form_sha256": "0" * 64}),
                        ("/legal/v1/portal/acceptances", {"request_id": "pa-1"})):
         r = x.post(path, body, caller=CALLERS["client_portal"])
         assert r.status_code == 503 and "client_portal" in r.text, (path, r.text)
@@ -73,8 +74,10 @@ def test_a_short_portal_token_is_still_refused():
 
 # --- M-2 -----------------------------------------------------------------------------------------------------------
 
-def receipt(h, token, request_id, caller="client_portal"):
-    return h.post("/legal/v1/portal/receipts", {"token": token, "request_id": request_id}, caller=caller)
+def receipt(h, token, request_id, caller="client_portal", form_sha256=None):
+    form = form_sha256 or hashlib.sha256(f"form {token}".encode()).hexdigest()
+    return h.post("/legal/v1/portal/receipts", {"token": token, "request_id": request_id, "form_sha256": form},
+                  caller=caller)
 
 
 def test_the_receipt_answers_only_the_submission_that_used_the_link(pair):
@@ -172,9 +175,8 @@ def _sow_citing(x, msa_version, party=CLIENT, doc_id="sow_revenue_recovery"):
 
 def test_a_sow_with_the_msa_of_the_same_link_must_cite_that_msa_version(pair):
     x, m, s, docs = pair
-    good, bad = _sow_citing(x, "1.0"), _sow_citing(x, "2.0")
-    invite(x, docs_of(m, good))
-    r = invite(x, docs_of(m, bad), code=409)
+    invite(x, docs_of(m, _sow_citing(x, "1.0")))
+    r = invite(x, docs_of(m, _sow_citing(x, "2.0")), code=409)       # (each the client's latest fill: AEGIS r2 N-L2)
     assert "MSA_VERSION_MISMATCH" in [i["code"] for i in r["reasons"]]
 
 

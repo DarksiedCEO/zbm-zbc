@@ -23,6 +23,7 @@ NOW = datetime(2026, 10, 1, 17, 0, tzinfo=timezone.utc)
 SERVICE_TOKEN = "test-legal-service-token-do-not-use-0123"
 ANDRE_TOKEN = "test-andre-approval-token-legal-do-not-use-01"
 CALLERS = {n: f"test-legal-caller-{n}-0123456789abcdefghij" for n in config_mod.CALLER_NAMES}
+LINK_TAG_KEY = "test-link-tag-key-shared-with-the-portal-do-not-use"   # ADR 0028, AEGIS r2 N-M1
 COUNSEL_REF = "eng-counsel-1"
 _ids = itertools.count(1)
 
@@ -43,7 +44,7 @@ def sha(data) -> str:
 
 def base_env(**over) -> dict:
     env = {"LEGAL_SERVICE_TOKEN": SERVICE_TOKEN, "LEGAL_ANDRE_APPROVAL_TOKEN": ANDRE_TOKEN,
-           "LEGAL_CALLER_TOKENS": json.dumps(CALLERS)}
+           "LEGAL_CALLER_TOKENS": json.dumps(CALLERS), "LEGAL_LINK_TAG_KEY": LINK_TAG_KEY}
     env.update({k: v for k, v in over.items() if v is not None})
     return {k: v for k, v in env.items() if v != "__unset__"}
 
@@ -253,6 +254,7 @@ class Harness:
                 "documents": [{**d, "presented_sha256": presented if d is target else d["doc_sha256"],
                                "affirmative_act": act if d is target else True} for d in docs],
                 "presentation": "inline", "page_sha256": sha(page), "page_text_b64": b64(page),
+                "form_sha256": sha("form " + inv.json()["token"]),
                 "signatory": {"full_name": "Sam Signer", "title": "Owner", "company": "Client LLC"},
                 "ip_hmac_sha256": "e" * 64, "user_agent_hmac_sha256": "f" * 64, "hmac_key_id": "0" * 16}
         r = self.ok(self.post("/legal/v1/portal/acceptances", body, caller="client_portal"), code)

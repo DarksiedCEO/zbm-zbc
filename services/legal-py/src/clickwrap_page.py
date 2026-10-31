@@ -103,8 +103,32 @@ def norm_company(s: str) -> str:
 
 
 INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp", "Co", "Cn"})
+# AEGIS r2 N-L3: Unicode's Default_Ignorable_Code_Point (DerivedCoreProperties.txt, Unicode 15.1) plus the blank-glyph
+# fillers that are letters (U+3164, U+115F, U+1160, U+FFA0 are in it) and the braille blank U+2800
+DEFAULT_IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+                     (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+                     (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+                     (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF), (0x2800, 0x2800))
+
+
+def _ignorable(ch: str) -> bool:
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in DEFAULT_IGNORABLE)
 
 
 def has_invisible(s: str) -> bool:
-    """AEGIS L-1: bidi controls, zero-width and other invisible or control characters (after NFKC)."""
-    return any(unicodedata.category(ch) in INVISIBLE for ch in unicodedata.normalize("NFKC", s))
+    """AEGIS L-1 / r2 N-L3: bidi controls, zero-width, default-ignorable, blank fillers and other invisible or control
+    characters (after NFKC)."""
+    return any(unicodedata.category(ch) in INVISIBLE or _ignorable(ch) for ch in unicodedata.normalize("NFKC", s))
+
+
+ZONE_LABELS = {"America/Los_Angeles": "Pacific Time", "America/Denver": "Mountain Time",
+               "America/Phoenix": "Mountain Time (Arizona)", "America/Chicago": "Central Time",
+               "America/New_York": "Eastern Time", "America/Anchorage": "Alaska Time",
+               "Pacific/Honolulu": "Hawaii Time", "America/Puerto_Rico": "Atlantic Time",
+               "Pacific/Guam": "Chamorro Time", "Pacific/Pago_Pago": "Samoa Time", "UTC": "UTC"}
+
+
+def zone_label(tz: str) -> str:
+    """AEGIS r2 N-L5: the words after a time ("(Pacific Time)"), from the configured zone."""
+    return ZONE_LABELS.get(tz, f"{tz} time")

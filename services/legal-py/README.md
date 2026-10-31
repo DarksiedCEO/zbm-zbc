@@ -40,6 +40,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `LEGAL_FILING_ALERT_DAYS` | 60 | |
 | `LEGAL_ESIGN_CONSENT_REQUIRED` | 1 | clipper agreements need the ESIGN §7001(c) block |
 | `LEGAL_BUSINESS_TZ` | `America/Los_Angeles` | the calendar dates Legal counts in |
+| `LEGAL_LINK_TAG_KEY` | unset | ADR 0028, AEGIS r2 N-M1: >= 32 printable characters, the same value as the client-portal service's `PORTAL_LINK_TAG_KEY`. A link token is 32 random bytes + the first 16 bytes of HMAC-SHA256(key, `zbm-link-v1` 0x1F random), base64url (64 characters; `src/link_tag.py`, byte-identical in client-portal-py). Unset: no link is issued (503); a token whose tag does not verify is the 404 before any record is read |
 | `LEGAL_ZBM_FACTS` | unset | ADR 0028: JSON object of ZBM's own entity facts (`{"zbm_legal_entity_name": "...", "zbm_street_address": "..."}`), names `zbm_[a-z0-9_]{1,36}`, values 1-500 printable characters without `{{ }}`. A template fill takes every `{{zbm_*}}` variable from here (a request supplying one is a 422; a fact missing here refuses the fill with `ZBM_FACT_MISSING`). A malformed value refuses start |
 | `LEGAL_RECONCILE_MODE` | 0 | see "Reconciling" |
 | `LEGAL_COUNSEL_CHANNEL`, `LEGAL_ESIGN_PROVIDER` | unset | not built: setting either refuses start |
@@ -189,6 +190,12 @@ recorded by the page never counts as evidence. Andre's steps: `docs/runbooks/cli
   - L-3: approving a newer fill of a client document revokes that client's open links to other versions of it
     (`reason: newer_fill_approved`).
   - L-4: `POST /legal/v1/acceptance-invitations` refuses a `client:*` party.
+- **AEGIS r2 fixes (aegis-client-acceptance-r2.md).** Self-authenticating link tokens (`LEGAL_LINK_TAG_KEY`, N-M1);
+  a client legal name must be its own NFKC form (N-L1); a link names only the client's latest approved fill of each
+  document (`VERSION_SUPERSEDED`, N-L2); Default_Ignorable_Code_Point characters, the Hangul fillers and U+2800 are
+  refused in typed names (N-L3); the receipt also needs `form_sha256`, the hash of the form signature the accepted
+  submission carried (recorded at acceptance; N-L4); views carry `time_zone` and `time_zone_label` (N-L5); a SOW
+  whose stored fill values cannot be read fails the MSA-version rule closed (N-L8).
 
 ## Data directory and the local log (bug sweep E)
 

@@ -220,10 +220,19 @@ class InvitationDocument(Strict):
     doc_sha256: Sha256
 
 
+def _round_trips(v: str) -> str:
+    """AEGIS r2 N-L1: the client's legal name is its own NFKC form, so what a client types (normalized the same way on
+    both sides) can match it; ™, full-width letters, superscripts, NBSP ... are refused here."""
+    import unicodedata
+    if unicodedata.normalize("NFKC", v) != v:
+        raise ValueError("the client legal name must be its own NFKC form (write TM, plain letters and digits)")
+    return v
+
+
 class InvitationDisplay(Strict):
     """What the acceptance page shows about the client (clickwrap text v1, Part B). Kept as a blob; only its hash
     is in Legal's records."""
-    client_legal_name: Short
+    client_legal_name: Annotated[Short, AfterValidator(_round_trips), AfterValidator(_visible)]
     notice_email: Email
     contact_first_name: Optional[Person] = None
     sow_number: Optional[Annotated[str, StringConstraints(min_length=1, max_length=60), AfterValidator(_printable)]] = None
@@ -276,9 +285,11 @@ class PortalSignatory(Strict):
 
 
 class PortalReceipt(Strict):
-    """AEGIS M-2: the receipt of the submission that used a link (a retry after a lost response or a refresh)."""
+    """AEGIS M-2: the receipt of the submission that used a link (a retry after a lost response or a refresh).
+    AEGIS r2 N-L4: also the hash of the form signature that submission carried."""
     token: Token
     request_id: Id
+    form_sha256: Sha256
 
 
 class PortalAcceptanceCreate(Strict):
@@ -295,6 +306,7 @@ class PortalAcceptanceCreate(Strict):
     ip_hmac_sha256: Sha256
     user_agent_hmac_sha256: Sha256
     hmac_key_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{16}$")]
+    form_sha256: Sha256                          # AEGIS r2 N-L4: SHA-256 of the form signature the page issued
 
 
 class EnvelopeCreate(Strict):

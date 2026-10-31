@@ -37,6 +37,7 @@ from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 import clickwrap_page as CP
+import link_tag as LT
 import reasons as R
 import rules as RU
 from advice import AdviceGuard
@@ -1856,6 +1857,13 @@ class LegalService:
             out.append(R.item("VERSION_NOT_IN_FORCE", f"{d['doc_id']} {d['version']} is not approved and in force"))
         out += self._instance_reasons(v, party)
         out += self._template_reasons(v)
+        if v.get("party_ref") and v.get("template_ref"):
+            # AEGIS r2 N-L2: only the latest approved fill of this document for this client
+            newer = [x for x in self._versions_of(d["doc_id"]) if x.get("party_ref") == party and x.get("template_ref")
+                     and x["status"] == "approved" and i01.vkey(x["version"]) > i01.vkey(v["version"])]
+            if newer:
+                out.append(R.item("VERSION_SUPERSEDED", f"{d['doc_id']} {d['version']} is not this client's latest "
+                                  f"approved fill ({max(newer, key=lambda x: i01.vkey(x['version']))['version']} is)"))
         if not v.get("party_ref") and not v.get("template_variables"):
             cur = self._current(d["doc_id"])
             if cur is not None and cur["version"] != v["version"]:
@@ -1873,14 +1881,21 @@ class LegalService:
             out += self._client_doc_reasons(inv["party_ref"], d)
         return out or self._msa_version_reasons(inv["party_ref"], inv["documents"])
 
+    UNREADABLE = "\x00unreadable"
+
     def _fill_variable(self, v: dict, name: str) -> Optional[str]:
+        """A fill's stored value. AEGIS r2 N-L8: a fill whose stored values are missing or unreadable answers
+        UNREADABLE (the rule then fails closed), never "no value"."""
         if not v.get("variables_sha256"):
             return None
         data = self.blobs.get(v["variables_sha256"])
         try:
-            val = json.loads(data).get(name) if data is not None else None
+            vals = json.loads(data) if data is not None else None
         except ValueError:
-            return None
+            vals = None
+        if not isinstance(vals, dict):
+            return self.UNREADABLE
+        val = vals.get(name)
         return val if isinstance(val, str) else None
 
     def _msa_version_reasons(self, party: str, docs: list[dict]) -> list[dict]:
@@ -1901,7 +1916,10 @@ class LegalService:
             else:
                 acc = self._msa_acceptance(party)
                 want = acc["version"] if acc else None
-            if cited != want:
+            if cited == self.UNREADABLE:
+                out.append(R.item("MSA_VERSION_MISMATCH", f"{d['doc_id']} {d['version']}: its stored fill values "
+                                  "cannot be read, so the MSA version it is made under cannot be checked"))
+            elif cited != want:
                 out.append(R.item("MSA_VERSION_MISMATCH", f"{d['doc_id']} {d['version']} is made under MSA version "
                                   f"{cited}, which is not {'the MSA of this link' if msa else 'the MSA the client accepted'}"))
         return out
@@ -1953,8 +1971,11 @@ class LegalService:
             reasons = reasons or self._msa_version_reasons(party, docs)
             if reasons:
                 self._refuse("client_acceptance_link_refused", party, reasons, op_id=request_id)
+            if not self.cfg.link_tag_key:
+                raise Unavailable("LEGAL_LINK_TAG_KEY is not set: no client acceptance link can be issued (it must be "
+                                  "the client-portal service's PORTAL_LINK_TAG_KEY)")
             now = self._now()
-            token = secrets.token_urlsafe(TOKEN_BYTES)
+            token = LT.mint(self.cfg.link_tag_key)              # AEGIS r2 N-M1: self-authenticating
             iid = rid("cin", "andre", request_id)
             op = Op(self, f"cin|{iid}", "andre", party)
             display_sha = op.blob(canonical(body["display"]).encode("utf-8"), "evidence",
@@ -2031,6 +2052,8 @@ class LegalService:
     def _usable_client_invitation(self, token: str) -> dict:
         """The open, unexpired, unrevoked, unused invitation this token names whose documents are all still valid to
         accept; otherwise the ONE answer every case gets (404 "not found"): no enumeration oracle."""
+        if not LT.valid(token, self.cfg.link_tag_key or b""):       # AEGIS r2 N-M1: before any record is read
+            raise NotFound("not found")
         inv = self._client_invitation_by_token(token)
         if (inv is None or self.current is None or self._client_invitation_status(inv) != "open"
                 or self._client_invitation_reasons(inv)):
@@ -2062,6 +2085,10 @@ class LegalService:
             bl = CP.blocks(inv["page"], display, docs, msa_acc, self.cfg.business_tz)
         return display, docs, msa_acc, bl
 
+    def _zone(self) -> dict:
+        """AEGIS r2 N-L5: the zone Legal dates the page in, and its label, for the portal's confirmation."""
+        return {"time_zone": self.cfg.business_tz, "time_zone_label": CP.zone_label(self.cfg.business_tz)}
+
     def portal_resolve(self, token: str) -> dict:
         """ADR 0028 (caller client_portal): the page Legal renders for the link (blocks and the hash of their text) and
         the documents' exact registered text. A page Legal does not render (an MSA-only link, a SOW alone for a client
@@ -2070,22 +2097,25 @@ class LegalService:
             inv = self._usable_client_invitation(token)
             display, docs, msa_acc, bl = self._page(inv)
             return {"invitation_id": inv["invitation_id"], "page": inv["page"], "expires_at": inv["expires_at"],
-                    "display": display, "documents": docs, "msa_acceptance": msa_acc, "blocks": bl,
+                    "display": display, "documents": docs, "msa_acceptance": msa_acc, "blocks": bl, **self._zone(),
                     "page_sha256": hashlib.sha256(CP.page_text(bl).encode("utf-8")).hexdigest() if bl else None}
 
-    def portal_receipt(self, token: str, request_id: str) -> dict:
+    def portal_receipt(self, token: str, request_id: str, form_sha256: str = "") -> dict:
         """AEGIS M-2 (caller client_portal): the receipt of the submission that used this link, for a retry after a
         lost response or a refresh. Only for the same token AND the same request id (the portal derives it from the
         submission); anything else is the one 404."""
         with self.lock:
+            if not LT.valid(token, self.cfg.link_tag_key or b""):
+                raise NotFound("not found")
             inv = self._client_invitation_by_token(token)
             if inv is None or not inv.get("used_at") or inv.get("used_request_sha256") is None \
-                    or not hmac.compare_digest(inv["used_request_sha256"], sha(request_id)):
+                    or not hmac.compare_digest(inv["used_request_sha256"], sha(request_id)) \
+                    or not hmac.compare_digest(inv.get("used_form_sha256") or "", form_sha256):
                 raise NotFound("not found")
             display, docs = self._link_documents(inv)
             accs = [self.acceptances[a] for a in inv["acceptance_ids"] if a in self.acceptances]
             return {"invitation_id": inv["invitation_id"], "page": inv["page"], "accepted_at": inv["used_at"],
-                    "display": display, "documents": docs,
+                    "display": display, "documents": docs, **self._zone(),
                     "acceptances": [self.acceptance_view(a) for a in accs]}
 
     def portal_accept(self, request_id: str, body: dict) -> dict:
@@ -2170,7 +2200,8 @@ class LegalService:
                   {"invitation_id": iid, "acceptance_ids": aids, "page_sha256": page_sha},
                   "Client acceptance link used (accepted on the acceptance page)")
             op.update("client_invitations", iid, {"used_at": iso(now), "acceptance_ids": aids,
-                                                  "used_request_sha256": sha(request_id)})
+                                                  "used_request_sha256": sha(request_id),
+                                                  "used_form_sha256": body["form_sha256"]})
             return self._answer(op, key, h, {"invitation_id": iid, "accepted_at": iso(now), "acceptances": views,
                                              "obligation_ids": obligations, "reasons": [], "reason_lines": []})
 

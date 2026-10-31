@@ -101,6 +101,7 @@ def accept_body(token, docs, h=None, **over):
     body = {"request_id": rid("pacc"), "token": token,
             "documents": [{**d, "presented_sha256": d["doc_sha256"], "affirmative_act": True} for d in docs],
             "presentation": "inline", "page_sha256": hashlib.sha256(page).hexdigest(), "page_text_b64": b64(page),
+            "form_sha256": hashlib.sha256(f"form {token}".encode()).hexdigest(),
             "signatory": dict(SIGNATORY), "ip_hmac_sha256": HMAC_IP, "user_agent_hmac_sha256": HMAC_UA,
             "hmac_key_id": KEY_ID}
     body.update(over)
@@ -131,7 +132,7 @@ def test_andre_invites_one_client_and_gets_a_single_use_token_shown_once(pair):
     hr, m, s, docs = pair
     out = invite(hr, docs)
     tok = out["token"]
-    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", tok)                       # 32 random bytes, base64url
+    assert re.fullmatch(r"[A-Za-z0-9_-]{64}", tok)               # 32 random bytes + a 16-byte tag (AEGIS r2 N-M1)
     assert out["accept_path"] == f"/accept/{tok}" and out["page"] == "first_engagement"
     assert out["party_ref"] == CLIENT and out["documents"] == docs and out["token_shown_once"] is True
     assert out["expires_at"] == iso(hr.clock.now() + timedelta(days=14))
