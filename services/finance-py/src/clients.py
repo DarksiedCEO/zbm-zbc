@@ -38,6 +38,7 @@ TIMEOUT_S = 10.0
 MAX_RESPONSE_BYTES = 1024 * 1024
 _ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 _OID = re.compile(r"[A-Z0-9][A-Z0-9-]{1,39}")
+_HOLD = re.compile(r"hold-[a-z2-7]{20}")                  # a Compliance hold id (compliance-py _b32)
 _LEGAL_DOC = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _LEGAL_VERSION = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}")
 _LEGAL_ACC = re.compile(r"lg-[a-z]{3}-[0-9A-Z]{26}")
@@ -202,6 +203,18 @@ class HttpCompliance(_Base):
         except (KeyError, TypeError):
             return HoldsAnswer(False)
         return HoldsAnswer(True, open_)
+
+    def all_open_holds(self) -> HoldsAnswer:
+        """ADR 0027: every open hold id at Compliance (the founder-alert feed): ids only, never kinds or details."""
+        d = self._get("/compliance/v1/holds")
+        if not isinstance(d, list):
+            return HoldsAnswer(False)
+        try:
+            ids = tuple(sorted(h["hold_id"] for h in d if isinstance(h, dict) and h.get("status") == "open"
+                               and isinstance(h.get("hold_id"), str) and _HOLD.fullmatch(h["hold_id"])))
+        except (KeyError, TypeError):
+            return HoldsAnswer(False)
+        return HoldsAnswer(True, ids[:500])
 
     def sanctions_status(self, subject_id: str, role: str) -> SanctionsAnswer:
         if not _ID.fullmatch(subject_id or "") or role not in ("payee", "owner"):

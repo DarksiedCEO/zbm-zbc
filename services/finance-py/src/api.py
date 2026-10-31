@@ -246,7 +246,7 @@ def _sanitize(errors: list[dict]) -> dict:
 
 ID_RE = m.ID_RE
 # Callers that reach only routes naming them explicitly (``caller()`` with no names does not admit them).
-NAMED_ONLY = frozenset({"seo_02", "ops_cron"})
+NAMED_ONLY = frozenset({"seo_02", "ops_cron", "ops_alerts"})
 SEO_STATUS_ROUTE = re.compile(r"/fin/v1/invoices/[A-Za-z0-9._:-]{1,128}/status")
 # ADR 0026: the Railway cron service (caller ops_cron) reaches exactly these: the repeatable housekeeping jobs (the
 # hourly Stripe page sweep and hold re-check, client mail) and the daily reconciliation. Never payouts, releases,
@@ -254,8 +254,12 @@ SEO_STATUS_ROUTE = re.compile(r"/fin/v1/invoices/[A-Za-z0-9._:-]{1,128}/status")
 CRON_JOBS = ("stripe-sessions", "client-mail")
 CRON_ROUTES = (re.compile(r"/fin/v1/jobs/(%s)/run" % "|".join(re.escape(j) for j in CRON_JOBS)),
                re.compile(r"/fin/v1/reconciliations/run"))
-# CH-3: while Finance is quiesced for a backup only reads and the resume are answered
-QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume")
+# ADR 0027: the ops-alerts cron service (caller ops_alerts) reaches exactly this one route, every 5 minutes
+ALERTS_JOB = "founder-alerts"
+ALERTS_ROUTE = re.compile(r"/fin/v1/jobs/founder-alerts/run")
+# CH-3: while Finance is quiesced for a backup only reads, the resume and the founder alerts (they write no book, no
+# log line and no ledger event) are answered
+QUIESCE_EXEMPT = re.compile(r"/fin/v1/backup/resume|/fin/v1/jobs/founder-alerts/run")
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -399,6 +403,10 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         if who == "ops_cron" and not ((request.method == "POST" and any(r.fullmatch(request.url.path)
                                                                          for r in CRON_ROUTES))
                                       or (request.method == "GET" and request.url.path == "/health")):
+            return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
+                                                                   "name it"})
+        if who == "ops_alerts" and not ((request.method == "POST" and ALERTS_ROUTE.fullmatch(request.url.path))
+                                        or (request.method == "GET" and request.url.path == "/health")):
             return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
                                                                    "name it"})
         return await call_next(request)
@@ -720,8 +728,16 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     # --- jobs, payouts ----------------------------------------------------------------------------------------------
 
     @app.post("/fin/v1/jobs/{job}/run", dependencies=auth)
-    def job(job: str, who: str = Depends(caller("scheduler", "ops_cron")),
+    def job(job: str, who: str = Depends(caller("scheduler", "ops_cron", "ops_alerts")),
             req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        if job == ALERTS_JOB:
+            # ADR 0027: not a booking job: no idempotency entry, no job_runs record, no ledger event (it must work
+            # while the ledger is down); the answer carries counts only
+            if who not in ("ops_alerts", "scheduler"):
+                raise Forbidden("the founder alerts are run by the ops-alerts cron service")
+            return {"job": job, "summary": svc.run_founder_alerts(), "request_id": req.request_id}
+        if who == "ops_alerts":
+            raise Forbidden("the ops-alerts cron service runs only the founder alerts")
         if who == "ops_cron" and job not in CRON_JOBS:
             raise Forbidden("the cron service runs only the housekeeping jobs")
         return svc.run_job(who, req.request_id, job)
@@ -960,6 +976,11 @@ def build_ports(settings: config_mod.Settings) -> Ports:
         # ADR 0026: client email is on only with BOTH set (config._mail); otherwise the stand-in sends nothing
         from mail import ResendClientMail
         ports.client_mail = ResendClientMail(settings.resend_api_key.reveal(), settings.mail_from)
+    fa = getattr(settings, "founder_alerts", None)
+    if fa is not None and fa.enabled and settings.resend_api_key is not None:
+        # ADR 0027: Andre's alert email; on only with FOUNDER_ALERT_EMAIL, FOUNDER_ALERT_FROM and the Resend key
+        from founder_alerts import ResendAlertMail
+        ports.founder_mail = ResendAlertMail(settings.resend_api_key.reveal(), fa.sender, fa.to)
     if settings.stripe_incoming:
         from stripe_incoming import StripeIncoming
         ports.stripe_in = StripeIncoming(settings.stripe_secret_key.reveal(), settings.stripe_webhook_secret.reveal(),

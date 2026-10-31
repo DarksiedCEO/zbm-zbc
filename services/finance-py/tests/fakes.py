@@ -185,6 +185,12 @@ class FakeCompliance:
 
     rule_expiry_answer = None
 
+    def all_open_holds(self):
+        """ADR 0027: every open hold id at Compliance (the founder-alert feed)."""
+        if not self.holds_available:
+            return HoldsAnswer(False)
+        return HoldsAnswer(True, tuple(sorted(h for ids in self.open_holds.values() for h in ids)))
+
     def rule_expiry(self):
         self.calls.append(("rule_expiry",))
         return self.rule_expiry_answer

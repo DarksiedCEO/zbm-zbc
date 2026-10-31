@@ -199,8 +199,9 @@ export default defineRailway(() => {
       // `onboarding`: Andre's operator-held token until an onboarding service exists (drafts invoices,
       // POST /fin/v1/invoices); `${{VARIABLE}}` is Railway's same-service reference
       // `ops_cron`: the fin-cron service below (ADR 0026): it reaches only the housekeeping jobs and the reconciliation
+      // `ops_alerts`: the ops-alerts service below (ADR 0027): it reaches only the founder-alerts job
       FIN_CALLER_TOKENS:
-        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}", "ops_cron": "${{fin-cron.FIN_CRON_CALLER_TOKEN}}"}',
+        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}", "ops_cron": "${{fin-cron.FIN_CRON_CALLER_TOKEN}}", "ops_alerts": "${{ops-alerts.FIN_CRON_CALLER_TOKEN}}"}',
       FIN_ONBOARDING_CALLER_TOKEN: preserve(),
       FIN_LEGAL_URL: PRIVATE("legal", 8420),
       FIN_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
@@ -223,6 +224,9 @@ export default defineRailway(() => {
       // ADR 0026 client email: OFF until RESEND_API_KEY is set too (written to RESEND_API_KEY_FILE by the entrypoint)
       MAIL_FROM: "Z Best Media <billing@zbestmedia.com>",
       RESEND_API_KEY: preserve(),
+      // ADR 0027 founder alerts: OFF until FOUNDER_ALERT_EMAIL (your address, set by hand) and RESEND_API_KEY are set
+      FOUNDER_ALERT_EMAIL: preserve(),
+      FOUNDER_ALERT_FROM: "Z Best Media Alerts <alerts@zbestmedia.com>",
     },
   }));
 
@@ -240,6 +244,22 @@ export default defineRailway(() => {
       FIN_CRON_CALLER_TOKEN: preserve(), // its own token; finance's FIN_CALLER_TOKENS references it as `ops_cron`
       FIN_CRON_RECON_HOUR: "7",
       FIN_CRON_TZ: "America/Los_Angeles",
+    },
+  });
+
+  // ------------------------------------------------------------------------------------------------ ops-alerts
+  // ADR 0027: the founder-alert cron (same image as fin-cron, FIN_CRON_JOBS=alerts). Every 5 minutes it asks Finance to
+  // email Andre what needs him (deduplicated, one digest per window, inside Finance). Its OWN caller token (ops_alerts
+  // at finance), which reaches only POST /fin/v1/jobs/founder-alerts/run. PRIVATE, no volume.
+  const opsAlerts = service("ops-alerts", {
+    source: source(),
+    build: dockerfile("deploy/scheduler/Dockerfile", ["deploy/scheduler/**"]),
+    deploy: { numReplicas: 1, restartPolicyType: "NEVER" as const, cronSchedule: "*/5 * * * *" },
+    env: {
+      FIN_CRON_JOBS: "alerts",
+      FIN_CRON_FINANCE_URL: PRIVATE("finance", 8410),
+      FIN_CRON_SERVICE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
+      FIN_CRON_CALLER_TOKEN: preserve(), // its own token; finance's FIN_CALLER_TOKENS references it as `ops_alerts`
     },
   });
 
@@ -326,6 +346,6 @@ export default defineRailway(() => {
 
   return project("zbm-zbc", {
     resources: [ledgerData, legalData, financeData, seoData, complianceData, ledger, detection, legal, compliance, finance,
-      orchestrator, stripeGateway, seo, finCron],
+      orchestrator, stripeGateway, seo, finCron, opsAlerts],
   });
 });

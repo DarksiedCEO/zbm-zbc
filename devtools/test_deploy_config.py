@@ -53,7 +53,7 @@ SERVICES = {
     "compliance": ("services/compliance-py/Dockerfile", "COMPLIANCE_PORT", 8380, "compliance-py", True),   # ADR 0024
 }
 # ADR 0026: Railway CRON services (no port, no healthcheck, no volume, no domain): name -> Dockerfile
-CRON_SERVICES = {"fin-cron": "deploy/scheduler/Dockerfile"}
+CRON_SERVICES = {"fin-cron": "deploy/scheduler/Dockerfile", "ops-alerts": "deploy/scheduler/Dockerfile"}
 CRON_SCRIPT = REPO / "deploy" / "scheduler" / "fin_cron.py"
 PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
                "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",)}
@@ -487,7 +487,7 @@ class FinCron(unittest.TestCase):
         self.assertIn('build: dockerfile("deploy/scheduler/Dockerfile", ["deploy/scheduler/**"]),', self.b)
         self.assertIn('deploy: { numReplicas: 1, restartPolicyType: "NEVER" as const, cronSchedule: "17 * * * *" },',
                       self.b)
-        self.assertIn("finCron]", self.text)
+        self.assertIn("finCron, opsAlerts]", self.text)
 
     def test_its_own_caller_token_and_finance_knows_it_as_ops_cron_only(self):
         self.assertRegex(self.b, r"(?m)^\s+FIN_CRON_CALLER_TOKEN:\s*preserve\(\)")
@@ -498,7 +498,7 @@ class FinCron(unittest.TestCase):
         self.assertEqual(callers.get("ops_cron"), "${{fin-cron.FIN_CRON_CALLER_TOKEN}}")
         self.assertNotIn("scheduler", callers)
         accepted = (REPO / "services" / "finance-py" / "src" / "config.py").read_text()
-        self.assertIn('"ops_cron")', accepted)
+        self.assertIn('"ops_cron", "ops_alerts")', accepted)
 
     def test_the_image_is_pinned_non_root_and_installs_nothing(self):
         ins = instructions(REPO / CRON_SERVICES["fin-cron"])
@@ -613,6 +613,72 @@ class FinCron(unittest.TestCase):
                     mod.settings({**self.ENV, **over})
 
 
+class OpsAlerts(unittest.TestCase):
+    """ADR 0027: the founder-alert cron. Same image as fin-cron, every 5 minutes, PRIVATE, no volume, its OWN caller
+    token that Finance knows as ``ops_alerts`` (it reaches only POST /fin/v1/jobs/founder-alerts/run)."""
+
+    def setUp(self):
+        self.blocks = iac_services()
+        self.text = IAC.read_text()
+        self.b = self.blocks["ops-alerts"]
+        self.code = re.sub(r"//[^\n]*", "", self.b)
+
+    def test_private_without_a_volume_every_five_minutes_on_the_fin_cron_image(self):
+        for forbidden in ("domains", "serviceDomains", "customDomains", "tcpProxies", "networking", "volumeMounts",
+                          "healthcheck", "requiredMountPath"):
+            self.assertNotIn(forbidden, self.code)
+        self.assertIn('build: dockerfile("deploy/scheduler/Dockerfile", ["deploy/scheduler/**"]),', self.b)
+        self.assertIn('deploy: { numReplicas: 1, restartPolicyType: "NEVER" as const, cronSchedule: "*/5 * * * *" },',
+                      self.b)
+        self.assertIn('FIN_CRON_JOBS: "alerts",', self.b)
+        self.assertIn("opsAlerts]", self.text)
+
+    def test_its_own_caller_token_and_finance_knows_it_as_ops_alerts(self):
+        self.assertRegex(self.b, r"(?m)^\s+FIN_CRON_CALLER_TOKEN:\s*preserve\(\)")
+        self.assertIn("FIN_CRON_SERVICE_TOKEN: finance.env.FIN_SERVICE_TOKEN,", self.b)
+        self.assertIn('FIN_CRON_FINANCE_URL: PRIVATE("finance", 8410),', self.b)
+        m = re.search(r"FIN_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["finance"])
+        callers = json.loads(m.group(1))
+        self.assertEqual(callers.get("ops_alerts"), "${{ops-alerts.FIN_CRON_CALLER_TOKEN}}")
+        self.assertNotEqual(callers.get("ops_alerts"), callers.get("ops_cron"))
+        accepted = (REPO / "services" / "finance-py" / "src" / "config.py").read_text()
+        self.assertIn('"ops_alerts")', accepted)
+
+    def test_finance_has_the_alert_settings_and_the_address_is_set_by_hand(self):
+        fin = self.blocks["finance"]
+        self.assertRegex(fin, r"(?m)^\s+FOUNDER_ALERT_EMAIL:\s*preserve\(\)")
+        self.assertRegex(fin, r'(?m)^\s+FOUNDER_ALERT_FROM:\s*"[^"]*<alerts@zbestmedia\.com>"')
+
+    def _mod(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fin_cron_alerts_under_test", CRON_SCRIPT)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_the_alerts_mode_calls_only_the_alerts_job_every_tick(self):
+        import io
+        from datetime import datetime, timezone
+        mod = self._mod()
+        env = {**FinCron.ENV, "FIN_CRON_JOBS": "alerts"}
+        calls = []
+
+        def post(url, headers, body):
+            calls.append(url)
+            return 200, {"summary": {"sent": 1, "open": 2, "why_off": "never-printed-text"}}
+        out = io.StringIO()
+        for hour in (14, 15):                     # 07:xx PDT is the reconciliation hour of the housekeeping mode
+            self.assertEqual(mod.run(env, datetime(2026, 10, 31, hour, 5, tzinfo=timezone.utc), post, lambda s: None,
+                                     out), 0)
+        self.assertEqual(calls, ["http://finance.railway.internal:8410/fin/v1/jobs/founder-alerts/run"] * 2)
+        self.assertNotIn("never-printed-text", out.getvalue())
+        with self.assertRaises(SystemExit):
+            mod.settings({**FinCron.ENV, "FIN_CRON_JOBS": "payouts"})
+        calls.clear()
+        mod.run(FinCron.ENV, datetime(2026, 10, 31, 15, 17, tzinfo=timezone.utc), post, lambda s: None, io.StringIO())
+        self.assertNotIn("http://finance.railway.internal:8410/fin/v1/jobs/founder-alerts/run", calls)
+
+
 class CiAndSmoke(unittest.TestCase):
     def test_ci_builds_every_dockerfile_and_the_smoke_covers_it(self):
         ci = CI.read_text()
@@ -642,8 +708,11 @@ class VariableScan(unittest.TestCase):
     def test_no_python_service_reads_a_variable_outside_its_prefixes_unseen(self):
         """Every upper-case name a Python service reads in an environment-read position is either under the
         service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
-        # finance-py: the client-mail settings named in ADR 0026 (RESEND_API_KEY becomes RESEND_API_KEY_FILE)
-        outside_prefixes = {"detection-py": set(), "finance-py": {"RESEND_API_KEY_FILE", "MAIL_FROM"}, "legal-py": set(),
+        # finance-py: the client-mail settings named in ADR 0026 (RESEND_API_KEY becomes RESEND_API_KEY_FILE) and the
+        # founder-alert settings of ADR 0027
+        outside_prefixes = {"detection-py": set(), "finance-py": {"RESEND_API_KEY_FILE", "MAIL_FROM",
+                                                                  "FOUNDER_ALERT_EMAIL", "FOUNDER_ALERT_FROM"},
+                            "legal-py": set(),
                             "seo-py": set(), "compliance-py": set()}
         for svc, prefixes in PY_SERVICES.items():
             found = set()

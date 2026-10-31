@@ -16,16 +16,18 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
+import founder_alerts as founder_alerts_mod
 import money
 from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 # seo_02: Search & Answer Intelligence (2) reads one invoice (GET /fin/v1/invoices/{id}) to verify a paid audit's
 # invoice before the run (ADR 0017 W3-2); like every caller it can reach only the routes open to any caller.
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
-                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02", "ops_cron")
+                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02", "ops_cron", "ops_alerts")
 # ops_cron: the Railway cron service (deploy/scheduler, ADR 0026). It reaches ONLY the repeatable housekeeping jobs and
 # the daily reconciliation (api.CRON_ROUTES); never payout runs, releases, refunds, sweeps or anything else
 # ``scheduler`` reaches.
+# ops_alerts: the ops-alerts Railway cron service (ADR 0027): it reaches ONLY POST /fin/v1/jobs/founder-alerts/run.
 TOKEN_MIN = 32
 # AEGIS night review M-2: a Railway variable reference that was not resolved reaches the service as its literal text.
 # "${{FIN_ONBOARDING_CALLER_TOKEN}}" is exactly 32 printable characters and is public in the repo (.railway/railway.ts),
@@ -164,6 +166,9 @@ class Settings:
     # client email (ADR 0026): off unless BOTH the Resend key file and MAIL_FROM are set
     mail_from: Optional[str] = None
     resend_api_key: Optional[Secret] = field(default=None, repr=False)
+    # founder alerts (ADR 0027): off unless FOUNDER_ALERT_EMAIL, FOUNDER_ALERT_FROM and the Resend key are all set;
+    # a wrong or half configuration leaves them off with the reason (never a refusal to start)
+    founder_alerts: object = None
 
 
 _HELD: dict = {}
@@ -363,6 +368,7 @@ def load(env: Optional[dict] = None) -> Settings:
     if media_max > Decimal("500.00"):
         raise RuntimeError("FIN_MEDIA_MAX_MARKUP_PCT must be at most 500.00 (a typo guard on the fee)")
     stripe = _stripe(env)
+    mail = _mail(env)
     media_default = _money(env, "FIN_MEDIA_DEFAULT_MARKUP_PCT", "15.00")
     if media_default > media_max:
         raise RuntimeError("FIN_MEDIA_DEFAULT_MARKUP_PCT must not exceed FIN_MEDIA_MAX_MARKUP_PCT")
@@ -413,7 +419,8 @@ def load(env: Optional[dict] = None) -> Settings:
         media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 2, 2, 10),
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
         business_tz=_tz(env, "FIN_BUSINESS_TZ", "America/Los_Angeles"),
-        **stripe, **_mail(env),
+        **stripe, **mail,
+        founder_alerts=founder_alerts_mod.settings_from_env(env, mail.get("resend_api_key") is not None),
     )
     # the flock last: every other refusal above leaves the directory untouched
     s.data_dir_lock = hold_data_dir(data_dir) if data_dir else None

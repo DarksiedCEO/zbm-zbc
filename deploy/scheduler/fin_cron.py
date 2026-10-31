@@ -13,6 +13,10 @@ Once a day, on the tick whose local hour (FIN_CRON_TZ) is FIN_CRON_RECON_HOUR:
 
 Compliance's own controls run inside Compliance (its in-process scheduler); nothing here calls Compliance.
 
+The same image runs a second cron service, ``ops-alerts`` (ADR 0027), with ``FIN_CRON_JOBS=alerts``: every 5 minutes it
+calls only ``POST /fin/v1/jobs/founder-alerts/run`` (Finance's caller ``ops_alerts``), which emails Andre what needs
+him, deduplicated and rate-limited inside Finance.
+
 A 503 (Finance quiesced for a backup, Stripe busy) is retried twice with a short wait; anything else that is not 2xx is
 a failed call. The process exits 1 if any call failed, so Railway marks the cron run failed.
 
@@ -23,6 +27,8 @@ Environment (all set in .railway/railway.ts):
   FIN_CRON_CALLER_TOKEN    this service's caller token (Finance knows it as ``ops_cron``)
   FIN_CRON_RECON_HOUR      0-23, default 7
   FIN_CRON_TZ              IANA zone, default America/Los_Angeles
+  FIN_CRON_JOBS            housekeeping (default: the hourly jobs and the daily reconciliation) or alerts (only the
+                           founder alerts; the ops-alerts service)
 """
 
 from __future__ import annotations
@@ -40,6 +46,8 @@ from zoneinfo import ZoneInfo
 
 HOURLY = ("/fin/v1/jobs/stripe-sessions/run", "/fin/v1/jobs/client-mail/run")
 DAILY = ("/fin/v1/reconciliations/run",)
+ALERTS = ("/fin/v1/jobs/founder-alerts/run",)
+MODES = ("housekeeping", "alerts")
 TIMEOUT_S = 120
 RETRY_WAIT_S = (10, 30)
 _URL = re.compile(r"(http://[a-z0-9-]{1,63}\.railway\.internal|https://[A-Za-z0-9.-]{1,253})(:[0-9]{1,5})?")
@@ -70,7 +78,10 @@ def settings(env) -> dict:
         ZoneInfo(tz)
     except Exception:  # noqa: BLE001
         raise SystemExit("fin-cron: FIN_CRON_TZ is not a time zone") from None
-    return {"url": url, "bearer": bearer, "caller": caller, "hour": int(raw_hour), "tz": tz}
+    mode = (env.get("FIN_CRON_JOBS") or "housekeeping").strip()
+    if mode not in MODES:
+        raise SystemExit("fin-cron: FIN_CRON_JOBS must be housekeeping or alerts")
+    return {"url": url, "bearer": bearer, "caller": caller, "hour": int(raw_hour), "tz": tz, "mode": mode}
 
 
 def http_post(url: str, headers: dict, body: bytes) -> tuple[int, Optional[dict]]:
@@ -96,7 +107,10 @@ def run(env, now: Optional[datetime] = None, post: Callable = http_post, sleep: 
     s = settings(env)
     now = now or datetime.now(timezone.utc)
     local = now.astimezone(ZoneInfo(s["tz"]))
-    paths = list(HOURLY) + (list(DAILY) if local.hour == s["hour"] else [])
+    if s["mode"] == "alerts":
+        paths = list(ALERTS)
+    else:
+        paths = list(HOURLY) + (list(DAILY) if local.hour == s["hour"] else [])
     stamp = now.strftime("%Y%m%dT%H%MZ")
     failed = 0
     for path in paths:

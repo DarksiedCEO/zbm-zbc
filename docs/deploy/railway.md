@@ -193,6 +193,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `SEO_FINANCE_CALLER_TOKEN` | `openssl rand -hex 32` | seo | finance `FIN_CALLER_TOKENS` (`seo_02`, interpolated) |
 | `FIN_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | finance | legal `LEGAL_CALLER_TOKENS` (`finance_31`, interpolated) |
 | `FIN_CRON_CALLER_TOKEN` | `openssl rand -hex 32` | fin-cron | finance `FIN_CALLER_TOKENS` (`ops_cron`, interpolated; ADR 0026) |
+| `FIN_CRON_CALLER_TOKEN` (on ops-alerts) | `openssl rand -hex 32` (a new value) | ops-alerts | finance `FIN_CALLER_TOKENS` (`ops_alerts`, interpolated; ADR 0027) |
 | `RESEND_API_KEY` | Resend → API Keys → Create (permission **Sending access**, domain `zbestmedia.com`) | finance | — (becomes `RESEND_API_KEY_FILE`; client email stays OFF until it is set, ADR 0026) |
 | `FIN_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` | finance | finance `FIN_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-FIN-Caller-Token` (keep it in your password manager) |
 | `LEGAL_SERVICE_TOKEN` | `openssl rand -hex 32` | legal | finance `FIN_LEGAL_TOKEN` (reference) |
@@ -574,7 +575,7 @@ Set by IaC or by you:
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | finance's own ledger caller token |
 | `FIN_SERVICE_TOKEN` | yes | yes | (you) | ≥ 32 printable characters |
 | `FIN_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | header `X-Andre-Approval-Token` |
-| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02`, `onboarding`, `ops_cron` | `onboarding` is your operator-held token (Secrets); `ops_cron` is fin-cron's (it reaches only the housekeeping jobs and the reconciliation); `scheduler` is never deployed |
+| `FIN_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `rail_gateway`, `seo_02`, `onboarding`, `ops_cron`, `ops_alerts` | `onboarding` is your operator-held token (Secrets); `ops_cron` is fin-cron's (it reaches only the housekeeping jobs and the reconciliation); `ops_alerts` is ops-alerts' (it reaches only the founder-alerts job, ADR 0027); `scheduler` is never deployed |
 | `FIN_ONBOARDING_CALLER_TOKEN` | yes to draft invoices | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
 | `FIN_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal. Without Legal no invoice can issue |
 | `FIN_LEGAL_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
@@ -594,6 +595,8 @@ Set by IaC or by you:
 | `MAIL_FROM` | yes | no | `Z Best Media <billing@zbestmedia.com>` (IaC) | the only sender allowed (any other address refuses start); alone it does not switch mail on |
 | `RESEND_API_KEY` | to send client email | yes | (you; Resend) | becomes `RESEND_API_KEY_FILE`. With `MAIL_FROM`, client email is ON (receipts, credit notes, refund confirmations, acknowledgements); unset = OFF, nothing is sent and nothing alerts |
 | `RESEND_API_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself; set without `MAIL_FROM` refuses start |
+| `FOUNDER_ALERT_EMAIL` | to get alert email | no (private) | (you: your own inbox) | ADR 0027: the ONE address founder alerts go to. With `FOUNDER_ALERT_FROM` and `RESEND_API_KEY`, alerts are ON; unset = OFF (the job's answer says why). A wrong value leaves alerts off, never stops Finance |
+| `FOUNDER_ALERT_FROM` | to get alert email | no | `Z Best Media Alerts <alerts@zbestmedia.com>` (IaC) | only alerts@ or billing@zbestmedia.com (the domain Resend has verified) |
 
 Everything else finance-py reads — leave at the default (services/finance-py/README.md has the meaning of each):
 
@@ -621,6 +624,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `FIN_SEED_PATH`, `FIN_SEED_SHA256`, `FIN_ALLOW_UNPINNED_SEED` | the image's pinned seed, unset, unset | an unpinned seed is non-production only |
 | `FIN_RECONCILE_MODE` | unset | `1` only while reconciling after a refused start (finance README) |
 | `FIN_REQUEST_HEAD_TIMEOUT_SECONDS`, `FIN_KEEP_ALIVE_TIMEOUT_SECONDS`, `FIN_LIMIT_CONCURRENCY`, `FIN_SWITCH_INTERVAL_SECONDS`, `FIN_DRAINS_MAX` | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
+| `FIN_ALERT_WINDOW_MIN`, `FIN_ALERT_REMIND_HOURS`, `FIN_ALERT_LEDGER_DOWN_MIN`, `FIN_ALERT_MAX_PER_DAY` | `60`, `24`, `15`, `30` | founder alerts (ADR 0027): one digest per window, a reminder for what is still open, ledger/Compliance silence before it alerts, a daily cap |
 
 ### fin-cron (deploy/scheduler; ADR 0026)
 
@@ -642,6 +646,24 @@ re-asks Compliance about every payment held `unverified`: the hourly hold re-che
 paused for a backup) is retried twice; anything else that is not 2xx prints an `ALERT fin-cron:` line and fails the
 run (Railway shows the cron run as failed). Compliance's controls are not called here: they run inside Compliance.
 Legal's daily jobs and seo's schedule tick are NOT run by fin-cron (they need their own `scheduler` callers; Open items).
+
+### ops-alerts (deploy/scheduler; ADR 0027)
+
+The same image as fin-cron, a second Railway **cron** service: every 5 minutes (`cronSchedule: "*/5 * * * *"`, the
+shortest Railway cron interval) it calls `POST /fin/v1/jobs/founder-alerts/run` and exits. Finance decides what to
+email (deduplicated, one digest per `FIN_ALERT_WINDOW_MIN`); this service only ticks. Its caller token reaches nothing
+else at Finance.
+
+| Variable | Required | Secret | Value / example | Notes |
+|---|---|---|---|---|
+| `FIN_CRON_JOBS` | yes | no | `alerts` (IaC) | `housekeeping` (fin-cron's default) or `alerts` |
+| `FIN_CRON_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | as fin-cron |
+| `FIN_CRON_SERVICE_TOKEN` | yes | yes | ref `finance.FIN_SERVICE_TOKEN` (IaC) | Finance's bearer |
+| `FIN_CRON_CALLER_TOKEN` | yes | yes | (you; Secrets: `openssl rand -hex 32`, a NEW value, not fin-cron's) | `ops_alerts` at Finance |
+
+If Finance itself is down, this service cannot email (Finance holds the alert state and the Resend key): each run
+prints `ALERT fin-cron:` and Railway marks it failed. Watch for that with the heartbeat (Compliance step F) until a
+second, independent alert path exists (ADR 0027, residual risk).
 
 ### legal (legal-py)
 

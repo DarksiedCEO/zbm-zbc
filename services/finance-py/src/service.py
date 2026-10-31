@@ -1097,8 +1097,9 @@ from svc_stripe import StripeMixin  # noqa: E402
 from svc_credits import CreditsMixin  # noqa: E402
 from svc_mail import MailMixin  # noqa: E402
 from svc_restore import RestoreMixin  # noqa: E402
+from svc_alerts import AlertsMixin  # noqa: E402
 
 
-class Service(BooksMixin, MediaMixin, StripeMixin, CreditsMixin, MailMixin, RestoreMixin, PayablesMixin, PayeesMixin,
-              PayoutsMixin, ReconMixin, FinanceService):
+class Service(BooksMixin, MediaMixin, StripeMixin, CreditsMixin, MailMixin, RestoreMixin, AlertsMixin, PayablesMixin,
+              PayeesMixin, PayoutsMixin, ReconMixin, FinanceService):
     """The assembled Finance service."""

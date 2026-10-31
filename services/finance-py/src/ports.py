@@ -607,6 +607,8 @@ class Ports:
     push: PushPort = field(default_factory=NotBuiltPush)
     client_mail: ClientMailPort = field(default_factory=NotBuiltClientMail)
     stripe_in: StripeIncomingPort = field(default_factory=NotWiredStripeIncoming)
+    # ADR 0027: the founder-alert sender (founder_alerts.ResendAlertMail); None = alerts send nothing
+    founder_mail: object = None
 
 
 STAND_INS = (NotWiredVerification, NotWiredCompliance, NotBuiltClipperNetwork, NotBuiltLegal37, NotWiredRail,

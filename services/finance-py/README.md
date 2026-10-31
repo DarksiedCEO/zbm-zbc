@@ -161,6 +161,22 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
 - CH-4: a paid Checkout page Finance does not know is answered 2xx with a `stripe_unknown_session` break and an
   `ALERT finance:` log line. CH-10: due dates count from the `FIN_BUSINESS_TZ` date (default America/Los_Angeles).
 
+## Founder alerts, business days, client offboarding (ADR 0027)
+
+- **Founder alerts.** `POST /fin/v1/jobs/founder-alerts/run` (caller `ops_alerts`, the `ops-alerts` cron service every
+  5 minutes; also `scheduler`) emails Andre ONE digest per window for: open high-severity breaks, payments held by
+  Compliance and open holds at Compliance, client email failed for good, reconciliation mismatches, disputes, a paid
+  Checkout page Finance does not know, the ledger's `/health` failing for `FIN_ALERT_LEDGER_DOWN_MIN` minutes
+  (default 15), Compliance not answering that long, and a client-activation rule expiring within 14 days. IDs and
+  categories only. Dedupe (a reminder after `FIN_ALERT_REMIND_HOURS`, default 24), at most one digest per
+  `FIN_ALERT_WINDOW_MIN` (default 60) and `FIN_ALERT_MAX_PER_DAY` (default 30); a failed digest is retried frozen
+  (5, 15, 30 ... 480 min), then dropped with an `ALERT finance: founder_alert_dropped` line. State in
+  `founder_alerts.json` in the data directory, never in the log or the ledger. **Off until** `FOUNDER_ALERT_EMAIL`,
+  `FOUNDER_ALERT_FROM` (alerts@ or billing@zbestmedia.com) and the Resend key are all set; a wrong value leaves it
+  off and the job's answer says why (never a refusal to start). Runbook: docs/runbooks/founder-alerts.md.
+- **Business days** (refunds 10, acknowledgements 2, billing disputes 15) skip weekends and US federal bank holidays
+  on the Federal Reserve's schedule, computed for any year (`bizdays.py`).
+
 ## Reconciling the local log with the ledger
 
 Identical to compliance-py / verification-py. If start-up refuses with a VOIDABLE problem (a commit that failed
