@@ -249,3 +249,52 @@ def test_every_money_route_is_paired_with_behavioural_tests_that_pass():
     r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *sorted(set(ids))],
                        cwd=str(here.parent), capture_output=True, text=True, timeout=900)
     assert r.returncode == 0, (r.stdout[-3000:], r.stderr[-1000:])
+
+
+# AEGIS r12 R12-4: GET handlers that write at all (never a money effect) -- any other GET that can write fails
+GET_WRITES = {
+    ("GET", "/fin/v1/integrity"): "the route passes record=False; FC-04's recorded check is the scheduler job's",
+    ("GET", "/fin/v1/rules"): "records the seed rules proposal once (rules, not money)",
+}
+MONEY_EFFECTS = ("_post", "_execute_transfer", "_submit_item", "_accrue", "_release_compliance_hold",
+                 "_release_receipt_hold")
+
+
+def _all_routes():
+    import inspect
+    import textwrap
+
+    from helpers import Harness
+    return list(Harness().app.routes), inspect, textwrap
+
+
+def test_every_entry_of_the_app_is_a_plain_api_route_no_mount():
+    """AEGIS r12 R12-4: a mounted sub-app (or any other route type) would escape route discovery: none is allowed."""
+    from fastapi.routing import APIRoute
+    routes, _i, _t = _all_routes()
+    other = [(type(r).__name__, getattr(r, "path", "?")) for r in routes if not isinstance(r, APIRoute)]
+    assert not other, ("routes that are not APIRoutes (mounts, sub-apps)", other)
+
+
+def test_no_get_route_changes_state_beyond_its_declared_reason():
+    """AEGIS r12 R12-4: a GET (or HEAD) handler that can reach a write is allowed only in GET_WRITES, and none of those
+    reaches a money effect."""
+    routes, inspect, textwrap = _all_routes()
+    g = _graph()
+    found = {}
+    for r in routes:
+        methods = set(getattr(r, "methods", None) or ()) & {"GET", "HEAD"}
+        if not methods:
+            continue
+        tree = ast.parse(textwrap.dedent(inspect.getsource(r.endpoint)))
+        calls = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and isinstance(n.func.value, ast.Name) and n.func.value.id == "svc"}
+        writes = sorted(c for c in calls if _reaches(g, c, "_commit") or _reaches(g, c, "_post"))
+        if writes:
+            found[("GET", r.path)] = writes
+    assert set(found) <= set(GET_WRITES), ("GET routes that write", {k: v for k, v in found.items()
+                                                                     if k not in GET_WRITES})
+    for key, methods in found.items():
+        for m in methods:
+            for eff in MONEY_EFFECTS:
+                assert not _reaches(g, m, eff), (key, m, eff)

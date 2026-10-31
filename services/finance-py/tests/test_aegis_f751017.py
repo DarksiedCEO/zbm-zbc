@@ -229,7 +229,7 @@ def test_mn1_a_settled_operation_survives_a_restart(tmp_path):
     h.ok(_settle(h, tid, "moved"))
     h2 = Harness(data_dir=d, ledger=h.ledger, clock=h.clock, fakes=h.f)
     assert h2.svc.db["treasury_ops"][tid]["status"] == "done"
-    assert h2.ok(h2.get("/fin/v1/integrity"))["status"] == "green"
+    assert h2.ok(h2.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
 
 
 # --------------------------------------------------------------------------------------------- M-N2

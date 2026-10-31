@@ -168,6 +168,10 @@ class MediaMixin:
                                                             f"({held['kind']}); the vendor is not paid until the hold "
                                                             "is released (AEGIS r3 N-9, r4 R4-1)"))
             reasons += act_reasons
+            if self._local_holds(buy.get("client_id") or client0) and not held:
+                # AEGIS r12 R12-3: any of the client's money held by Compliance, re-read under the lock
+                reasons.append(R.item("COLLECT_BEFORE_PAY", "a payment of this client is held by Compliance (38); "
+                                                            "the vendor is not paid until the hold is released"))
             if buy.get("payment_disputed"):
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "the client disputed the prepayment at Stripe; the vendor "
                                                             "is not paid while that dispute is open (founder M3)"))

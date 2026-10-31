@@ -235,6 +235,10 @@ class ReconMixin:
                     row.update(leg="compliance_hold", note="payment held by Compliance (details: Andre's token)",
                                resolution=None)
                     row.pop("severity", None)                # AEGIS r9 R9-2: no severity tell either
+                    if b.get("kind") == "founder_alert":     # AEGIS r12 R12-1: no client named outside Andre's token
+                        for k in ("kind", "category"):
+                            row.pop(k, None)
+                        row["subject"] = "compliance"
                 elif not full and b.get("leg") == "stripe_refund":
                     row.pop("note", None)                    # AEGIS r10 RTM-08c: a held refund's note is Andre's
                     row.pop("severity", None)
@@ -418,6 +422,12 @@ class ReconMixin:
             reasons.append(R.item("TREASURY_BREACH", f"sweep {t['amount']} exceeds the sweepable amount {M.fmt(sw)} at "
                                                      f"{when} (other approved sweeps included)"))
         return reasons
+
+    def _local_hold_reasons_client(self, client_id) -> list[dict]:
+        if not self._local_holds(client_id):
+            return []
+        return [R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: none of its money "
+                                                   "is spent, moved or returned until the hold is released")]
 
     @staticmethod
     def treasury_op_sha(t: dict) -> str:
@@ -628,9 +638,12 @@ class ReconMixin:
             b = self.db["batches"].get(t["ref_id"])
             if not b or b["status"] not in ("approved", "releasing") or M.D(t["amount"]) > M.D(b["totals"]["net"]):
                 return [R.item("NOT_APPROVED", "funding only for an Andre-approved batch, up to its net total")]
-            return list(client_reasons)          # AEGIS r10 R10-1: Compliance re-asked at execution
+            local = [r for c in self._batch_campaigns(t["ref_id"]) for r in self._local_hold_reasons(c)]
+            return R.dedupe(list(client_reasons) + local)   # R10-1 / AEGIS r12 R12-3: own holds under the lock
         if t["kind"] == "refund_payment":
-            return list(client_reasons)          # R10-1: a refund payment (its retries too) asks at every attempt
+            r = self.db["refunds"].get(t["ref_id"]) or {}
+            local = self._local_hold_reasons_client(r.get("client_id"))
+            return R.dedupe(list(client_reasons) + local)   # R10-1: every attempt asks; R12-3: own holds re-read
         return []
 
     def _execute_transfer(self, tid: str) -> dict:

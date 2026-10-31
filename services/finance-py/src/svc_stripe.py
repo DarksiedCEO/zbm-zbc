@@ -414,8 +414,8 @@ class StripeMixin:
                     unverified.setdefault(inv["client_id"], []).append(i)
                 elif hk == "refused":                  # AEGIS r10 R10-2: a match hold too (the same summary)
                     refused_holds.setdefault(inv["client_id"], []).append(i)
-            # AEGIS r10 R10-1: clients whose deposit funds a campaign (accruals and payouts ask anyway; Andre is told)
-            funded = {p["client_id"] for p in self.db["profiles"].values() if p.get("status") in ("funded", "paused")}
+            # AEGIS r12 R12-2: every client whose money ZBC holds (balances and holds, not campaign status)
+            funded = self._money_clients()
             # AEGIS r11 R11-4: clients with an open founder alert (closed once allowed again or no longer funded)
             alerted = {b["subject"].split(":", 1)[1] for b in self.db["breaks"].values()
                        if b.get("kind") == "founder_alert" and b["status"] == "open"}
@@ -793,44 +793,76 @@ class StripeMixin:
         return f"unapplied_held_{'compliance' if kind == 'refused' else 'unverified'}"
 
     FUNDED_ALERT_NOTE = {
-        False: "a funded campaign's brand is no longer allowed by Compliance: no creator is accrued or paid from its "
-               "deposit until it is",
-        True: "a funded campaign's brand is refused on SANCTIONS grounds: its deposit is blocked property; do NOT "
-              "return or move it; report to OFAC (runbook step G)"}
+        False: "ZBC holds money of a client Compliance no longer allows (a deposit, a refund or unapplied money): none "
+               "of it is accrued, paid or returned until the client is allowed again",
+        True: "ZBC holds money of a client refused on SANCTIONS grounds: it is blocked property; do NOT return or move "
+              "it; report to OFAC (runbook step G)"}
 
-    def _job_founder_alerts(self, prefix: str, funded: set, alerted: set, acts: dict) -> None:
-        """AEGIS r11 R11-4: a DURABLE founder alert, recorded with the job's state change: an open high-severity
-        ``compliance_hold`` break (kind ``founder_alert``, category ``compliance_hold``, subject ``client:<id>``: ids
-        only) for each client whose deposit funds a campaign and whom Compliance no longer allows. The founder-alert
-        dispatcher of ADR 0027 (fix wave C) reads open breaks of the Compliance legs and emails Andre; delivery is its
-        record, never this one. The break closes when the client is allowed again or funds no campaign any more; an
-        unanswered client changes nothing. Non-Andre readers see a generic compliance break (no note, no severity)."""
+    def _client_holds_money(self, client_id: str) -> bool:
+        """AEGIS r12 R12-2 (under the lock): ZBC holds money of this client: an unspent deposit (2010 on any of its
+        campaigns), a refund owed (2050), an open refund, held unapplied money or a held payment."""
+        camps = [c for c, p in self.db["profiles"].items() if p.get("client_id") == client_id]
+        if any(self.bal("2010", f"campaign:{c}") != 0 for c in camps) or self.bal("2050", f"client:{client_id}") != 0:
+            return True
+        if any(r.get("client_id") == client_id and r["status"] in ("proposed", "approved", "payment_not_moved")
+               for r in self.db["refunds"].values()):
+            return True
+        return bool(self._local_holds(client_id))
+
+    def _money_clients(self) -> set:
+        """R12-2: every client whose money ZBC holds now (derived from balances and holds, never campaign status)."""
+        cands = {p["client_id"] for p in self.db["profiles"].values() if p.get("client_id")}
+        cands |= {r["client_id"] for r in self.db["refunds"].values() if r.get("client_id")}
+        cands |= {(r.get("held_compliance") or {}).get("client_id") for r in self.db["receipts"].values()} - {None}
+        cands |= {i["client_id"] for i in self.db["invoices"].values() if i.get("held_compliance")}
+        return {c for c in cands if self._client_holds_money(c)}
+
+    def _open_alert(self, client_id: str, op: Optional[Op] = None) -> Optional[dict]:
+        get = (lambda k: op.get("breaks", k)) if op else (lambda k: self.db["breaks"].get(k))
+        for k, b in list(self.db["breaks"].items()):
+            if b.get("kind") == "founder_alert" and b.get("subject") == f"client:{client_id}":
+                cur = get(k)
+                if cur is not None and cur["status"] == "open":
+                    return cur
+        return None
+
+    def _job_founder_alerts(self, prefix: str, holding: set, alerted: set, acts: dict) -> None:
+        """AEGIS r11 R11-4, r12 R12-1/R12-2: a DURABLE founder alert, recorded with the job's state change: an open
+        high-severity ``compliance_hold`` break (kind ``founder_alert``, category ``compliance_hold``, subject
+        ``client:<id>``) for every client whose money ZBC holds (``_client_holds_money``) and whom Compliance does not
+        allow now. The founder-alert dispatcher of ADR 0027 reads open Compliance-leg breaks and emails Andre; delivery
+        is its record. While open, an alert is re-written on EVERY run whatever its ground (one log line each), so a
+        sanctions upgrade writes exactly what a plain refusal writes; its id is random (not derivable from the
+        client) and non-Andre readers see no client, no note, no severity. It closes on a current ALLOW or once ZBC
+        holds none of the client's money; an unanswered client changes nothing (its note is never overwritten)."""
+        import secrets
         with self.lock:
             op = Op(self, f"{prefix}|founder-alerts", ACTOR, "founder-alerts")
-            for cid in sorted(funded | alerted):
+            for cid in sorted(holding | alerted):
                 act = acts.get(cid)
                 if act is None or not act.available:
                     continue
-                bid = rid("brk", "founder_alert", "funded_client", cid)
-                b = op.get("breaks", bid)
-                if cid in funded and not act.allowed:
+                b = self._open_alert(cid, op)
+                needs = (not act.allowed) and self._client_holds_money(cid)
+                if needs:
                     note = self.FUNDED_ALERT_NOTE[bool(act.sanctions)]
-                    if b is None or b["status"] != "open":
+                    if b is None:
+                        bid = rid("brk", "founder_alert", secrets.token_hex(16))
                         op.put("breaks", bid, {"break_id": bid, "leg": "compliance_hold", "kind": "founder_alert",
                                                "category": "compliance_hold", "severity": "high",
                                                "subject": f"client:{cid}", "difference": "0.00",
                                                "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
                                                "owner": "andre", "explanation_code": "unknown", "status": "open",
-                                               "resolution": None, "note": note})
-                        op.record(derived_id("brk", bid, iso(self._now())), "break_opened", "intel_07_reconciliation",
-                                  bid, {"break_id": bid, "leg": "compliance_hold", "difference": "0.00"},
-                                  "Break opened: founder alert (a funded client Compliance does not allow)")
-                    elif b.get("note") != note:
-                        op.put("breaks", bid, {**b, "note": note})
-                elif b is not None and b["status"] == "open":
-                    op.put("breaks", bid, {**b, "status": "resolved", "resolved_at": iso(self._now()),
-                                           "resolution": {"basis": "compliance_allow" if act.allowed
-                                                          else "no_funded_campaign"}})
+                                               "resolution": None, "note": note, "checked_at": iso(self._now())})
+                        op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                                  {"break_id": bid, "leg": "compliance_hold", "difference": "0.00"},
+                                  "Break opened: founder alert (client money held for a client Compliance refuses)")
+                    else:
+                        op.put("breaks", b["break_id"], {**b, "note": note, "checked_at": iso(self._now())})
+                elif b is not None:
+                    op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolved_at": iso(self._now()),
+                                                     "resolution": {"basis": "compliance_allow" if act.allowed
+                                                                    else "no_client_money_held"}})
             if op.ops:
                 self._commit(op)
 

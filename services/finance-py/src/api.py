@@ -408,8 +408,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return registry()
 
     @app.get("/fin/v1/integrity", dependencies=auth)
-    def integrity(_: str = Depends(caller())) -> dict:
-        return svc.integrity()
+    def integrity(who: str = Depends(andre_or_any_caller("integrity"))) -> dict:
+        """AEGIS r12 R12-1: Andre's token reads the whole answer; another caller reads the verdict only (no counter:
+        a log-line count moved by a hold's upgrade was a sanctions tell)."""
+        out = svc.integrity()
+        return out if who == "andre" else {"status": out["status"], "checked_at": out["checked_at"]}
 
     # --- protocol routes (§D.1) --------------------------------------------------------------------------------------
 

@@ -48,7 +48,7 @@ def test_clean_restart_restores_books_and_integrity_is_green(tmp_path):
     y = _restart(x, tmp_path)
     assert y.ok(y.get("/fin/v1/journal/zbc/trial-balance")) == tb
     assert y.ok(y.get("/health"))["rules_version"] == x.svc.rules_version and y.ok(y.get("/health"))["in_memory"] is False
-    assert y.ok(y.get("/fin/v1/integrity"))["status"] == "green"
+    assert y.ok(y.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
     y.recon()
     b = y.run()["batch"]
     assert b["totals"]["net"] == "29.01"
@@ -129,7 +129,7 @@ def test_failed_commit_after_anchor_only_andre_reconciles(tmp_path):
     r = x.post("/fin/v1/payees", {"request_id": rid(), "payee_id": "k9", "kind": "clipper", "declared_country": "US"},
                caller="onboarding")
     assert r.status_code == 503
-    assert x.ok(x.get("/fin/v1/integrity"))["status"] == "red"
+    assert x.ok(x.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "red"
     with pytest.raises(RuntimeError, match="only Andre"):
         _restart(x, tmp_path)
     y = _restart(x, tmp_path, FIN_RECONCILE_MODE="1")
@@ -147,7 +147,7 @@ def test_failed_commit_after_anchor_only_andre_reconciles(tmp_path):
     assert _reconcile(y, plan).status_code == 200
     z = _restart(x, tmp_path)
     assert z.ok(z.get("/health"))["reconcile_required"] is False
-    assert z.ok(z.get("/fin/v1/integrity"))["status"] == "green"
+    assert z.ok(z.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
 
 
 def test_reconcile_is_honoured_only_while_the_ledger_event_matches(tmp_path):
@@ -176,9 +176,9 @@ def test_forged_anchor_beyond_head_is_a_dos_only_andre_lifts(tmp_path):
 
 def test_ghost_journal_entry_on_the_ledger_turns_integrity_red(tmp_path):
     x = _durable(tmp_path)
-    assert x.ok(x.get("/fin/v1/integrity"))["status"] == "green"
+    assert x.ok(x.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
     _forge(x.ledger, "fin-je-" + "a" * 40, "journal_entry_posted", subject="fin-je-GHOST", actor="intel_01_journal")
-    i = x.ok(x.get("/fin/v1/integrity"))
+    i = x.ok(x.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))
     assert i["status"] == "red" and "ruling" in " ".join(i["problems"])
     x.recon()                                                         # FC-04 recorded red -> runs blocked
     r = x.post("/fin/v1/payout-runs", {"request_id": rid(), "rail": "stripe"}, caller="scheduler")
@@ -192,7 +192,7 @@ def test_copied_data_dir_red_on_the_original_and_older_copies_refuse(tmp_path):
     c = Harness(data_dir=str(tmp_path / "c"), ledger=x.ledger, clock=x.clock, fakes=x.f)
     assert c.post("/fin/v1/payees", {"request_id": rid(), "payee_id": "kc", "kind": "clipper",
                                      "declared_country": "US"}, caller="onboarding").status_code == 200
-    assert x.ok(x.get("/fin/v1/integrity"))["status"] == "red"
+    assert x.ok(x.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "red"
     with pytest.raises(RuntimeError, match="refusing to start"):
         Harness(data_dir=str(tmp_path / "e"), ledger=x.ledger, clock=x.clock, fakes=x.f)
 
