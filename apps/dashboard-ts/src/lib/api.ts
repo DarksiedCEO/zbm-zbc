@@ -85,6 +85,14 @@ function looksLikeFindings(v: unknown): v is RecordedFindingsResult {
   );
 }
 
+// AEGIS A2 M-1 / ADR 0021: the orchestrator serves findings per tenant and
+// refuses a request that names none. This dashboard is the operator's view
+// (one password, Andre only) and shows every tenant, so it asks for that
+// explicitly; the orchestrator grants scope=all only to the operator token.
+// A client-facing view must never use this path: it asks for its own
+// client_id with a credential bound to that tenant.
+export const FINDINGS_PATH = "/revenue-recovery/findings?scope=all";
+
 export async function loadRecordedFindings(
   env: Record<string, string | undefined> = process.env,
   fetchImpl: typeof fetch = fetch
@@ -106,7 +114,7 @@ export async function loadRecordedFindings(
   const signal = AbortSignal.timeout(ms);
   let res: Response;
   try {
-    res = await fetchImpl(`${orchestratorUrl}/revenue-recovery/findings`, {
+    res = await fetchImpl(`${orchestratorUrl}${FINDINGS_PATH}`, {
       method: "GET",
       cache: "no-store",
       headers: { Authorization: `Bearer ${token}` },
