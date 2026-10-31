@@ -117,8 +117,9 @@ def test_every_other_document_keeps_its_existing_gate(hr, doc_id):
 
 def test_cq19_founder_determination_makes_a_client_clickwrap_sufficient(hr):
     v = client_msa(hr)
-    a1 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
-    assert a1["evidence_sufficient"] is False and a1["evidence_basis"] is None      # before
+    # before: no acceptance link is issued at all while a clickwrap acceptance would be insufficient (ADR 0028)
+    r1 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=409)
+    assert "EVIDENCE_INSUFFICIENT" in [x["code"] for x in r1["reasons"]]
     out = determine_cq19(hr)
     assert out["founder_determination"]["status"] == "active" and out["founder_determination"]["renew_by"]
     a2 = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
@@ -130,8 +131,6 @@ def test_cq19_founder_determination_makes_a_client_clickwrap_sufficient(hr):
                                                          "sow_seo_audit", "zbc_order_form"]
     read = hr.ok(hr.get(f"/legal/v1/acceptances/{a2['acceptance_id']}", caller="finance_31"))
     assert read["evidence_sufficient"] is True and read["evidence_basis"] == "founder_determination"
-    assert hr.ok(hr.get(f"/legal/v1/acceptances/{a1['acceptance_id']}", caller="finance_31"))[
-        "evidence_sufficient"] is False                                             # a record never changes
     ev = hr.ledger.of_type("register_row_founder_determined")
     assert len(ev) == 1 and ev[0]["actor"] == "andre" and ev[0]["payload"]["rule_id"] == "LG-20"
 
@@ -175,8 +174,8 @@ def test_compliance_invalidating_cq19_also_ends_the_founder_determination(hr):
     hr.ok(hr.post("/legal/v1/register/CQ-19/invalidate", {"request_id": rid(), "source_ref": "urn:x:1",
                                                           "detected_change_sha256": "c" * 64}, caller="compliance_38"))
     assert hr.ok(hr.get("/legal/v1/register/CQ-19"))["founder_determination"]["status"] == "invalidated"
-    a = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
-    assert a["evidence_sufficient"] is False
+    r = hr.clickwrap("client_msa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=409)
+    assert "EVIDENCE_INSUFFICIENT" in [x["code"] for x in r["reasons"]]             # ADR 0028: no link is issued
 
 
 def test_the_determination_expires_with_the_memo_review_period(hr):
@@ -562,8 +561,12 @@ def test_l3_the_determination_covers_only_the_documents_it_recorded(hr):
     hr.svc.documents["dpa"]["founder_approval_allowed"] = True                  # a future seed flags another document
     v = hr.upload("dpa", "DPA v1", "1.0", "zbm")
     founder_approve(hr, "dpa", "1.0", v["sha256"])
-    a = hr.clickwrap("dpa", "1.0", v["sha256"], party=CLIENT, caller="onboarding")
-    assert a["evidence_sufficient"] is False
+    # ADR 0028: the client acceptance page serves only the client contracts (no link for a DPA), and no other route
+    # records a client's acceptance
+    hr.clickwrap("dpa", "1.0", v["sha256"], party=CLIENT, caller="onboarding", code=422)
+    r = hr.clickwrap("dpa", "1.0", v["sha256"], party=CLIENT, caller="hub", code=409)
+    assert r["detail"] == "ACCEPTANCE_NOT_INVITED"
+    assert hr.svc._clickwrap_basis("dpa") is None                                  # and its evidence would not count
 
 
 

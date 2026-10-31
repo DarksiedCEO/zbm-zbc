@@ -43,7 +43,7 @@ def playbook(x, doc_type="client_msa", clauses=MSA_CLAUSES, version="1.0"):
     return p
 
 
-def executed_msa(x, client="acme", end_date="2027-09-30", with_ccpa=True, verify_cq19=True):
+def executed_msa(x, client="acme", end_date="2027-09-30", with_ccpa=True, verify_cq19=True, founder_cq19=False):
     """Playbook + MSA template v1.0 (counsel) + scheduler fill v1.1 (counsel sign-off on the filled hash) + an
     evidence-sufficient clickwrap acceptance by the client. Returns (filled version, acceptance)."""
     playbook(x)
@@ -59,7 +59,14 @@ def executed_msa(x, client="acme", end_date="2027-09-30", with_ccpa=True, verify
                  {"request_id": rid("ap"), "decision": "approve", "version_sha256": fill["sha256"]}))
     if verify_cq19:
         x.verify_cq("CQ-19")
-    acc = x.clickwrap("client_msa", "1.1", fill["sha256"], party=f"client:{client}", caller="onboarding")
+    if founder_cq19:                       # ADR 0022: Andre's founder determination on CQ-19 instead of a memo
+        x.ok(x.apost("/legal/v1/register/CQ-19/founder-determination",
+                     {"request_id": rid("fdt"), "founder_confirms": True,
+                      "rationale": "Founder determination (ADR 0022): B2B clients accept by an unticked box."}))
+    # ADR 0028: without CQ-19 no acceptance link is issued (the refusal is the answer); with it, the client accepts on
+    # the client acceptance page
+    acc = x.clickwrap("client_msa", "1.1", fill["sha256"], party=f"client:{client}", caller="onboarding",
+                      code=201 if (verify_cq19 or founder_cq19) else 409)
     return fill, acc
 
 

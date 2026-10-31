@@ -134,8 +134,11 @@ def test_s5_executed_msa_creates_bound_obligations_and_a_missed_one_alerts_andre
 
 
 def test_s5_no_obligation_from_an_insufficient_acceptance(he):
-    fill, acc = executed_msa(he, verify_cq19=False)
-    assert acc["evidence_sufficient"] is False and acc["obligation_ids"] == []
+    fill, refused = executed_msa(he, verify_cq19=False)
+    # ADR 0028: no acceptance link is issued while a clickwrap acceptance would be insufficient, so no acceptance and
+    # no obligation exist
+    assert "EVIDENCE_INSUFFICIENT" in [r["code"] for r in refused["reasons"]]
+    assert not he.svc.acceptances
     assert he.ok(he.get("/legal/v1/obligations"))["items"] == []
 
 

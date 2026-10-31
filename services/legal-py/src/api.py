@@ -54,6 +54,7 @@ from textguard import ip_fields, ip_in
 log = logging.getLogger("legal.api")
 
 CALLER_HEADER = "X-LEGAL-Caller-Token"
+NARROW_CALLERS = frozenset({"client_portal"})       # ADR 0028: only routes that name them
 FOUNDER_HEADER = "X-Andre-Approval-Token"
 MAX_BODY_BYTES = 7 * 1024 * 1024
 MAX_TARGET_BYTES = 4096
@@ -73,6 +74,8 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/legal/v1/playbooks/[^/]+/reviews$"), BLOB),
     (re.compile(r"^/legal/v1/playbooks/proposals$"), BLOB),
     (re.compile(r"^/legal/v1/reconcile$"), 1024 * 1024),
+    (re.compile(r"^/legal/v1/portal/acceptances$"), 4 * 1024 * 1024),     # ADR 0028: the page text as shown (base64)
+    (re.compile(r"^/legal/v1/portal/invitations/resolve$"), 1024),
 ]
 DEFAULT_ROUTE_LIMIT = 256 * 1024
 
@@ -294,6 +297,10 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                 raise Forbidden("caller token missing or not recognised")
             if allowed and name not in allowed:
                 raise Forbidden("this caller is not authorized for this route")
+            if not allowed and name in NARROW_CALLERS:
+                # ADR 0028: the client-portal token (held by the one public-facing service) reaches only the routes
+                # that name it, never the generic reader routes every other caller may use
+                raise Forbidden("this caller is not authorized for this route")
             return name
         return dep
 
@@ -444,6 +451,37 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     def acceptance_invitation(_: str = Depends(andre("acceptance-invitations")),
                               req: m.InvitationCreate = Depends(body(m.InvitationCreate))) -> dict:
         return _echo(req.request_id, svc.create_invitation(req.request_id, req.model_dump()))
+
+    # --- ADR 0028: the client acceptance page ----------------------------------------------------------------------
+
+    @app.post("/legal/v1/client-acceptance-invitations", dependencies=auth, status_code=201)
+    def client_invitation(_: str = Depends(andre("client-acceptance-invitations")),
+                          req: m.ClientInvitationCreate = Depends(body(m.ClientInvitationCreate))) -> dict:
+        """Andre invites one client to accept these document versions; the answer shows the acceptance token ONCE."""
+        return _echo(req.request_id, svc.create_client_invitation(req.request_id, req.model_dump()))
+
+    @app.get("/legal/v1/client-acceptance-invitations/{invitation_id}", dependencies=auth)
+    def client_invitation_get(invitation_id: str,
+                              _: str = Depends(andre("client-acceptance-invitations/read"))) -> dict:
+        return svc.client_invitation_get(_id(invitation_id, LG_ID))
+
+    @app.post("/legal/v1/client-acceptance-invitations/{invitation_id}/revoke", dependencies=auth)
+    def client_invitation_revoke(invitation_id: str, _: str = Depends(andre("client-acceptance-invitations/revoke")),
+                                 req: m.InvitationRevoke = Depends(body(m.InvitationRevoke))) -> dict:
+        return _echo(req.request_id, svc.revoke_client_invitation(req.request_id, _id(invitation_id, LG_ID),
+                                                                  req.model_dump()))
+
+    @app.post("/legal/v1/portal/invitations/resolve", dependencies=auth)
+    def portal_resolve(_: str = Depends(caller("client_portal")),
+                       req: m.PortalResolve = Depends(body(m.PortalResolve))) -> dict:
+        """The client-portal service's read of one acceptance link: every unusable token is the same 404."""
+        return svc.portal_resolve(req.token)
+
+    @app.post("/legal/v1/portal/acceptances", dependencies=auth, status_code=201)
+    def portal_acceptance(_: str = Depends(caller("client_portal")),
+                          req: m.PortalAcceptanceCreate = Depends(body(m.PortalAcceptanceCreate))) -> dict:
+        """The ONLY way a client's acceptance is recorded (ADR 0028)."""
+        return _echo(req.request_id, svc.portal_accept(req.request_id, req.model_dump()))
 
     @app.get("/legal/v1/acceptances/{acceptance_id}", dependencies=auth)
     def acceptance_get(acceptance_id: str, _: str = Depends(caller("clipper_network", "finance_31", "onboarding",

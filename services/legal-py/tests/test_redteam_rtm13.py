@@ -42,11 +42,11 @@ def test_an_invitation_binds_the_acceptance_to_one_client_once():
     x, v = _setup()
     inv = _invite(x, "client:acme")
     assert _accept(x, v, "client:globex", invitation_id=inv["invitation_id"]).status_code == 409   # another client
+    # ADR 0028: even the invited client's acceptance is not recorded on this route (onboarding token included): only
+    # the client acceptance page records it; the invitation is never used up here
     r = _accept(x, v, "client:acme", invitation_id=inv["invitation_id"])
-    assert r.status_code == 201, r.text
-    assert r.json()["invitation_id"] == inv["invitation_id"]
-    again = _accept(x, v, "client:acme", invitation_id=inv["invitation_id"])
-    assert again.status_code == 409 and again.json()["detail"] == "ACCEPTANCE_NOT_INVITED"           # single use
+    assert r.status_code == 409 and r.json()["detail"] == "ACCEPTANCE_NOT_INVITED", r.text
+    assert x.svc.invitations[inv["invitation_id"]]["used_by"] is None and not x.svc.acceptances
 
 
 def test_an_invitation_expires_and_names_its_document_version():

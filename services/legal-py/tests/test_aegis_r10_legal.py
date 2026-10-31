@@ -75,8 +75,11 @@ def test_no_caller_can_burn_another_clients_invitation():
                 invitation_id=inv["invitation_id"])
     assert r.status_code == 409 and r.json()["detail"] == "ACCEPTANCE_NOT_INVITED", r.text
     assert x.svc.invitations[inv["invitation_id"]]["used_by"] is None
-    ok = _accept(x, v["sha256"], "client:acme", invitation_id=inv["invitation_id"])     # acme's own acceptance
-    assert ok.status_code == 201, ok.text
+    # ADR 0028: acme's own acceptance is recorded only on the client acceptance page, never here, even with this
+    # invitation; it stays unused either way
+    no = _accept(x, v["sha256"], "client:acme", invitation_id=inv["invitation_id"])
+    assert no.status_code == 409 and no.json()["detail"] == "ACCEPTANCE_NOT_INVITED", no.text
+    assert x.svc.invitations[inv["invitation_id"]]["used_by"] is None
 
 
 def test_an_invitation_for_another_client_or_document_is_refused_and_stays_unused():
@@ -131,9 +134,11 @@ def test_a_poisoned_log_line_never_stops_the_start_it_is_quarantined_and_flagged
     h = y.ok(y.client.get("/health"))
     assert h["replay_quarantined"] == 1 and h["status"] == "degraded", h
     assert y.svc.replay_quarantine[0]["kind"] == "update" and "invitations" in y.svc.replay_quarantine[0]["detail"]
-    # the service works: a real acceptance is recorded after the restart
-    inv = _invite(y, "client:acme")
-    assert _accept(y, v["sha256"], "client:acme", invitation_id=inv["invitation_id"]).status_code == 201
+    # the service works: a real acceptance is recorded after the restart (a clipper's standard agreement; a client's
+    # acceptance is recorded only on the client acceptance page, ADR 0028)
+    cv = _clipper_doc(y)
+    assert _accept(y, cv["sha256"], "clipper:cn-clp-1", caller="clipper_network",
+                   doc_id="clipper_agreement").status_code == 201
 
 
 def test_the_commit_refuses_an_update_of_a_missing_record_before_anything_is_written():

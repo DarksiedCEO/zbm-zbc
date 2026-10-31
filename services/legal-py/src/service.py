@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -81,8 +82,14 @@ PUT_KINDS = {
     "ruling": ("rulings", "ruling_id"), "signoff": ("signoffs", "signoff_id"), "engagement": ("engagements", "counsel_ref"),
     "review": ("reviews", "review_id"), "package": ("packages", "package_id"), "outbound": ("outbound", "outbound_id"),
     "invitation": ("invitations", "invitation_id"),
+    "client_invitation": ("client_invitations", "invitation_id"),      # ADR 0028: the client acceptance page
 }
 INVITATION_DAYS = 14          # money red team RTM-13: an acceptance invitation is valid for 14 days, used once
+# ADR 0028: the client acceptance page. A client's acceptance is recorded only by this caller, on its own route.
+PORTAL_CALLER = "client_portal"
+SOW_DOCS = ("sow", "sow_seo_audit", "sow_revenue_recovery")
+CLIENT_PAGE_DOCS = ("client_msa",) + SOW_DOCS
+TOKEN_BYTES = 32              # 256-bit acceptance token, base64url (43 characters); only its SHA-256 is stored
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -300,6 +307,7 @@ class LegalService:
         self.blob_meta: dict[str, dict] = {}
         self.acceptances: dict[str, dict] = {}
         self.invitations: dict[str, dict] = {}
+        self.client_invitations: dict[str, dict] = {}       # ADR 0028
         self.envelopes: dict[str, dict] = {}
         self.pb_proposals: dict[str, dict] = {}
         self.playbooks: dict[str, dict] = {}
@@ -1084,6 +1092,10 @@ class LegalService:
                 and a.get("evidence_lineage") == (fd.get("lineage") or fd.get("determined_at")))
 
     def _acceptance_sufficient(self, a: dict) -> bool:
+        # ADR 0028: a client's acceptance counts only when the client acceptance page recorded it (an older record made
+        # on the onboarding path, with Andre's token, stays in the log and never counts)
+        if str(a.get("party_ref") or "").startswith("client:") and a.get("entry_by") != PORTAL_CALLER:
+            return False
         return bool(a.get("evidence_sufficient")) and self._acceptance_basis_ok(a)
 
     def founder_determine(self, request_id: str, cq_id: str, body: dict) -> dict:
@@ -1333,8 +1345,20 @@ class LegalService:
                 if not body.get("party_ref"):
                     raise Invalid("a fill names the party it is for (party_ref): only that party can accept it")
                 schema = tpl["template_variables"] or {}
+                supplied = dict(body["variables"]) if isinstance(body["variables"], dict) else body["variables"]
+                facts = sorted(n for n in schema if n.startswith("zbm_"))
+                if facts and isinstance(supplied, dict):
+                    # ADR 0028: ZBM's own entity facts come from LEGAL_ZBM_FACTS, never from the request
+                    if any(n.startswith("zbm_") for n in supplied):
+                        raise Invalid("zbm_* values are ZBM's entity facts, set in LEGAL_ZBM_FACTS, never in a request")
+                    missing = [n for n in facts if n not in self.cfg.zbm_facts]
+                    if missing:
+                        raise Refused("ZBM_FACT_MISSING", reasons=[R.item(
+                            "ZBM_FACT_MISSING", f"the template names {len(missing)} ZBM entity fact(s) that "
+                            f"LEGAL_ZBM_FACTS does not set: {', '.join(missing)[:120]}")], recorded=False)
+                    supplied = {**supplied, **{n: self.cfg.zbm_facts[n] for n in facts}}
                 try:
-                    values = i01.check_variables(schema, body["variables"])
+                    values = i01.check_variables(schema, supplied)
                 except ValueError as exc:
                     raise Invalid(str(exc)) from None
                 self._guard([v for n, v in values.items() if schema[n]["type"] == "string"], f"doc:{doc_id}",
@@ -1633,6 +1657,8 @@ class LegalService:
         out["basis_in_force"] = self._acceptance_basis_ok(a)
         if a.get("invitation_id"):
             out["invitation_id"] = a["invitation_id"]                  # RTM-13
+        if a.get("entry_by") == PORTAL_CALLER:
+            out["via"] = PORTAL_CALLER                                 # ADR 0028: the client acceptance page
         return out | {"rules_pinned": self.rules_pinned}
 
     def get_acceptance(self, acceptance_id: str) -> dict:
@@ -1726,9 +1752,11 @@ class LegalService:
           invitation. A version bound to a party keeps its own binding (``_instance_reasons``)."""
         inv_id = body.get("invitation_id")
         out = []
-        if str(body.get("party_ref") or "").startswith("client:") and principal != "onboarding":
-            out.append(R.item("ACCEPTANCE_NOT_INVITED", "a client's acceptance is recorded only on the onboarding "
-                                                        "path, with Andre's invitation for that client"))
+        if str(body.get("party_ref") or "").startswith("client:"):
+            # ADR 0028 (closes RTM-13's residual, AEGIS r11 L3): no caller records a client's acceptance here, the
+            # onboarding token included; only the client acceptance page does (POST /legal/v1/portal/acceptances)
+            out.append(R.item("ACCEPTANCE_NOT_INVITED", "a client's acceptance is recorded only through the client "
+                                                        "acceptance page, from Andre's acceptance link"))
         if inv_id is not None:
             inv = self.invitations.get(inv_id)
             ok = (inv is not None and inv["party_ref"] == body["party_ref"] and inv["doc_id"] == body["doc_id"]
@@ -1765,6 +1793,261 @@ class LegalService:
                   actor="andre")
             op.add("invitation", rec)
             return self._answer(op, key, h, dict(rec))
+
+    # ================================================================== ADR 0028: the client acceptance page
+
+    @staticmethod
+    def _token_sha(token: str) -> str:
+        return hashlib.sha256(token.encode("ascii", "replace")).hexdigest()
+
+    def _client_invitation_by_token(self, token: str) -> Optional[dict]:
+        """Every record is compared (constant time each, no early exit): the answer's timing does not depend on where,
+        or whether, the token's hash matches."""
+        want = self._token_sha(token)
+        found = None
+        for inv in self.client_invitations.values():
+            if hmac.compare_digest(inv["token_sha256"], want):
+                found = inv
+        return found
+
+    def _client_invitation_status(self, inv: dict) -> str:
+        if inv.get("revoked_at"):
+            return "revoked"
+        if inv.get("used_at"):
+            return "accepted"
+        if self._now() >= parse_iso(inv["expires_at"]):
+            return "expired"
+        return "open"
+
+    def _client_doc_reasons(self, party: str, d: dict) -> list[dict]:
+        """Whether ``party`` can validly accept this exact document version NOW: it exists with this hash, is approved
+        and in force, is bound to this party (or is the CURRENT standard form), its template is in force, and a
+        clickwrap acceptance of it would be evidence-sufficient (a memo or Andre's founder determination on CQ-19)."""
+        v = self.doc_versions.get(f"{d['doc_id']}@{d['version']}")
+        if v is None:
+            return [R.item("DOCUMENT_UNKNOWN", f"no {d['doc_id']} version {d['version']}")]
+        out = []
+        if v["sha256"] != d["doc_sha256"]:
+            out.append(R.item("ACCEPTANCE_HASH_MISMATCH", f"{d['doc_id']} {d['version']} has another content hash"))
+        if not self._in_force(v):
+            out.append(R.item("VERSION_NOT_IN_FORCE", f"{d['doc_id']} {d['version']} is not approved and in force"))
+        out += self._instance_reasons(v, party)
+        out += self._template_reasons(v)
+        if not v.get("party_ref") and not v.get("template_variables"):
+            cur = self._current(d["doc_id"])
+            if cur is not None and cur["version"] != v["version"]:
+                out.append(R.item("VERSION_SUPERSEDED", f"{d['doc_id']} {d['version']} is not the current standard "
+                                  f"form ({cur['version']} is)"))
+        if self._clickwrap_basis(d["doc_id"]) is None:
+            out.append(R.item("EVIDENCE_INSUFFICIENT", f"a clickwrap acceptance of {d['doc_id']} would not be "
+                              "evidence-sufficient (CQ-19 has no memo and no founder determination in force)",
+                              cq_id="CQ-19"))
+        return out
+
+    def _client_invitation_reasons(self, inv: dict) -> list[dict]:
+        out = []
+        for d in inv["documents"]:
+            out += self._client_doc_reasons(inv["party_ref"], d)
+        return out
+
+    def _msa_acceptance(self, party: str) -> Optional[dict]:
+        """The client's latest acceptance of a client_msa that counts now (for the new-SOW page, clickwrap text Part C)."""
+        accs = [a for a in self.acceptances.values() if a.get("party_ref") == party and a.get("doc_id") == "client_msa"
+                and self._acceptance_sufficient(a)]
+        a = max(accs, key=lambda x: x["accepted_at"], default=None)
+        return {"version": a["version"], "accepted_at": a["accepted_at"]} if a else None
+
+    def _client_page(self, party: str, docs: list[dict]) -> tuple[str, list[str]]:
+        ids = [d["doc_id"] for d in docs]
+        has_msa, has_sow = "client_msa" in ids, any(i in SOW_DOCS for i in ids)
+        if has_msa and has_sow:
+            return "first_engagement", []
+        if has_sow:
+            if self._msa_acceptance(party):
+                return "new_sow", []
+            return "new_sow", ["this client has no MSA acceptance on record yet: the acceptance page opens a SOW-only "
+                               "link only after the client has accepted the MSA"]
+        return "msa_only", ["the acceptance page serves the MSA together with a SOW, or a SOW alone after the MSA: "
+                            "this MSA-only link does not open there; invite the MSA with the client's first SOW"]
+
+    def _client_invitation_view(self, inv: dict) -> dict:
+        status = self._client_invitation_status(inv)
+        reasons = self._client_invitation_reasons(inv) if status == "open" else []
+        return {"invitation_id": inv["invitation_id"], "party_ref": inv["party_ref"], "documents": inv["documents"],
+                "page": inv["page"], "created_at": inv["created_at"], "expires_at": inv["expires_at"],
+                "status": status, "usable": status == "open" and not reasons, "reasons": reasons,
+                "reason_lines": R.lines(reasons), "acceptance_ids": list(inv.get("acceptance_ids") or []),
+                "used_at": inv.get("used_at"), "revoked_at": inv.get("revoked_at")}
+
+    def create_client_invitation(self, request_id: str, body: dict) -> dict:
+        """ADR 0028: Andre invites ONE client to accept these exact document versions. The answer carries a 256-bit
+        acceptance token ONCE: Legal keeps only its SHA-256 (the record, the ledger, the export and the idempotency
+        record never hold the token; a replay of this request answers without it)."""
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, "client-acceptance-invitations", body)
+            if ent:
+                return ent["response"]
+            party = body["party_ref"]
+            docs = [{"doc_id": d["doc_id"], "version": d["version"], "doc_sha256": d["doc_sha256"]}
+                    for d in body["documents"]]
+            reasons = []
+            for d in docs:
+                reasons += self._client_doc_reasons(party, d)
+            if reasons:
+                self._refuse("client_acceptance_link_refused", party, reasons, op_id=request_id)
+            now = self._now()
+            token = secrets.token_urlsafe(TOKEN_BYTES)
+            iid = rid("cin", "andre", request_id)
+            op = Op(self, f"cin|{iid}", "andre", party)
+            display_sha = op.blob(canonical(body["display"]).encode("utf-8"), "evidence",
+                                  [party, f"client_invitation:{iid}"])
+            page, warnings = self._client_page(party, docs)
+            rec = {"invitation_id": iid, "party_ref": party, "documents": docs, "page": page,
+                   "display_sha256": display_sha, "token_sha256": self._token_sha(token), "created_at": iso(now),
+                   "expires_at": iso(now + timedelta(days=body["expires_in_days"])), "used_at": None,
+                   "used_request_sha256": None, "acceptance_ids": [], "revoked_at": None}
+            op.ev("cin", "client_acceptance_link_issued", party,
+                  {"invitation_id": iid, "documents": docs, "page": page, "expires_at": rec["expires_at"]},
+                  f"Client acceptance link issued ({page}, {len(docs)} document(s))", actor="andre")
+            op.add("client_invitation", rec)
+            stored = {"invitation_id": iid, "party_ref": party, "documents": docs, "page": page, "warnings": warnings,
+                      "expires_at": rec["expires_at"], "token": None, "accept_path": None, "token_shown_once": True}
+            resp = self._answer(op, key, h, stored)
+            return {**resp, "token": token, "accept_path": f"/accept/{token}"}
+
+    def client_invitation_get(self, invitation_id: str) -> dict:
+        with self.lock:
+            inv = self.client_invitations.get(invitation_id)
+            if inv is None:
+                raise NotFound("no such client acceptance link")
+            return self._client_invitation_view(inv)
+
+    def revoke_client_invitation(self, request_id: str, invitation_id: str, body: dict) -> dict:
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, f"client-acceptance-invitations/{invitation_id}/revoke", body)
+            if ent:
+                return ent["response"]
+            inv = self.client_invitations.get(invitation_id)
+            if inv is None:
+                raise NotFound("no such client acceptance link")
+            status = self._client_invitation_status(inv)
+            if status == "accepted":
+                raise Conflict("this link was already used: the client's acceptance stands (a link is revoked only "
+                               "before it is used)")
+            if status == "revoked":
+                return self._client_invitation_view(inv)
+            now = self._now()
+            op = Op(self, f"cinr|{invitation_id}", "andre", inv["party_ref"])
+            op.ev("cin", "client_acceptance_link_revoked", inv["party_ref"], {"invitation_id": invitation_id},
+                  "Client acceptance link revoked", actor="andre")
+            op.update("client_invitations", invitation_id, {"revoked_at": iso(now)})
+            return self._answer(op, key, h, self._client_invitation_view({**inv, "revoked_at": iso(now)}))
+
+    def _usable_client_invitation(self, token: str) -> dict:
+        """The open, unexpired, unrevoked, unused invitation this token names whose documents are all still valid to
+        accept; otherwise the ONE answer every case gets (404 "not found"): no enumeration oracle."""
+        inv = self._client_invitation_by_token(token)
+        if (inv is None or self.current is None or self._client_invitation_status(inv) != "open"
+                or self._client_invitation_reasons(inv)):
+            raise NotFound("not found")
+        return inv
+
+    def portal_resolve(self, token: str) -> dict:
+        """ADR 0028 (caller client_portal): the documents' exact registered text for the acceptance page."""
+        with self.lock:
+            inv = self._usable_client_invitation(token)
+            docs = []
+            for d in inv["documents"]:
+                v = self.doc_versions[f"{d['doc_id']}@{d['version']}"]
+                data = self.blobs.get(v["sha256"])
+                if data is None or sha_bytes(data) != d["doc_sha256"]:
+                    raise NotFound("not found")
+                docs.append({**d, "title": self.documents[d["doc_id"]]["title"], "text": data.decode("utf-8")})
+            disp = self.blobs.get(inv["display_sha256"])
+            if disp is None:
+                raise NotFound("not found")
+            return {"invitation_id": inv["invitation_id"], "page": inv["page"], "expires_at": inv["expires_at"],
+                    "display": json.loads(disp), "documents": docs,
+                    "msa_acceptance": self._msa_acceptance(inv["party_ref"])}
+
+    def portal_accept(self, request_id: str, body: dict) -> dict:
+        """ADR 0028 (caller client_portal): the client accepted every document of the link on the acceptance page. One
+        operation records one acceptance per document and uses the link up: exactly once (the service lock), and a
+        retry of the same submission is answered from its idempotency record. The signatory block and the page text
+        are blobs; the records, the ledger and the export carry only their hashes."""
+        with self.lock:
+            key, h, ent = self._idem(PORTAL_CALLER, request_id, "portal/acceptances", body)
+            if ent:
+                return ent["response"]
+            inv = self._usable_client_invitation(body["token"])
+            iid, party = inv["invitation_id"], inv["party_ref"]
+            reasons = []
+            want = sorted((d["doc_id"], d["version"], d["doc_sha256"]) for d in inv["documents"])
+            got = sorted((d["doc_id"], d["version"], d["doc_sha256"]) for d in body["documents"])
+            if got != want:
+                reasons.append(R.item("ACCEPTANCE_HASH_MISMATCH", "the documents submitted are not exactly the "
+                                      "documents (versions and hashes) of this acceptance link"))
+            for d in body["documents"]:
+                if d["presented_sha256"] != d["doc_sha256"]:
+                    reasons.append(R.item("PRESENTED_TEXT_MISMATCH", f"the text shown for {d['doc_id']} is not the "
+                                          "document exactly"))
+                if d["affirmative_act"] is not True:
+                    reasons.append(R.item("AFFIRMATIVE_ACT_MISSING", f"{d['doc_id']} needs its own unticked box "
+                                          "ticked"))
+            page = b64decode(body["page_text_b64"], "page_text_b64")
+            if sha_bytes(page) != body["page_sha256"]:
+                reasons.append(R.item("ACCEPTANCE_HASH_MISMATCH", "page_text_b64 does not match page_sha256"))
+            if reasons:
+                self._refuse("acceptance_refused", party, reasons, op_id=request_id)
+            now = self._now()
+            sig = {k: body["signatory"][k] for k in ("full_name", "title", "company")}
+            op = Op(self, f"pac|{iid}", i03.ACTOR, party)
+            self._injection(op, {"signatory": sig})
+            refs = [party, f"client_invitation:{iid}"]
+            page_sha = op.blob(page, "evidence", refs)
+            sig_sha = op.blob(canonical(sig).encode("utf-8"), "evidence", refs)
+            pe = {"page_sha256": page_sha, "signatory_sha256": sig_sha, "ip_hmac_sha256": body["ip_hmac_sha256"],
+                  "user_agent_hmac_sha256": body["user_agent_hmac_sha256"], "hmac_key_id": body["hmac_key_id"]}
+            views, aids, obligations = [], [], []
+            for d in sorted(inv["documents"], key=lambda x: x["doc_id"] != "client_msa"):
+                v = self.doc_versions[f"{d['doc_id']}@{d['version']}"]
+                aid = rid("acc", PORTAL_CALLER, iid, d["doc_id"])
+                rec = {"acceptance_id": aid, "party_ref": party, "signer_identity_ref": f"sig:{sig_sha[:40]}",
+                       "doc_id": d["doc_id"], "version": d["version"], "doc_sha256": d["doc_sha256"],
+                       "presented_sha256": d["doc_sha256"], "accepted_at": iso(now), "method": "clickwrap_unticked_box",
+                       "presentation": "inline", "affirmative_act": True, "esign_consent": None,
+                       "evidence_ref": {"kind": "session_ref", "sha256": page_sha, "blob": page_sha},
+                       "entry_by": PORTAL_CALLER, "invitation_id": iid, "portal_evidence": dict(pe)}
+                basis = self._clickwrap_basis(d["doc_id"])
+                rec["evidence_sufficient"] = i03.clickwrap_sufficient(rec, basis is not None,
+                                                                      self.cfg.esign_consent_required,
+                                                                      not self._instance_reasons(v, party))
+                if not rec["evidence_sufficient"]:            # checked by _usable_client_invitation; never reached
+                    raise Conflict("the acceptance would not be evidence-sufficient; nothing was recorded")
+                rec["evidence_basis"] = basis
+                if basis == "founder_determination":
+                    fd = self.register["CQ-19"]["founder_determination"]
+                    rec["evidence_lineage"] = fd.get("lineage") or fd.get("determined_at")
+                op.ev("acc", "acceptance_recorded", party,
+                      {"acceptance_id": aid, "doc_id": rec["doc_id"], "version": rec["version"],
+                       "doc_sha256": rec["doc_sha256"], "method": rec["method"], "evidence_sufficient": True,
+                       "evidence_basis": basis, "evidence_lineage": rec.get("evidence_lineage"),
+                       "signer_identity_ref_sha256": sha(rec["signer_identity_ref"]), "via": PORTAL_CALLER,
+                       "invitation_id": iid, "page_sha256": page_sha, "signatory_sha256": sig_sha},
+                      f"Acceptance of {rec['doc_id']} {rec['version']} recorded (client acceptance page)")
+                op.add("acceptance", rec)
+                obligations += self._bind_obligations(op, rec, v)
+                views.append(self.acceptance_view(rec))
+                aids.append(aid)
+            op.ev("cin", "client_acceptance_link_used", party,
+                  {"invitation_id": iid, "acceptance_ids": aids, "page_sha256": page_sha},
+                  "Client acceptance link used (accepted on the acceptance page)")
+            op.update("client_invitations", iid, {"used_at": iso(now), "acceptance_ids": aids,
+                                                  "used_request_sha256": sha(request_id)})
+            return self._answer(op, key, h, {"invitation_id": iid, "accepted_at": iso(now), "acceptances": views,
+                                             "obligation_ids": obligations, "reasons": [], "reason_lines": []})
 
     def _template_reasons(self, v: dict) -> list[dict]:
         """ADR 0022 / AEGIS r2 N7: a fill counts only while the template it was made from is approved and in force.

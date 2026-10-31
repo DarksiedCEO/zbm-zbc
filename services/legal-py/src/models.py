@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 ID_PATTERN = r"^[A-Za-z0-9._:-]{1,128}$"
 ID_RE = re.compile(ID_PATTERN)
@@ -190,6 +190,94 @@ class InvitationCreate(Strict):
     doc_id: DocId
     version: Version
     party_ref: PartyRef
+
+
+# --- ADR 0028: the client acceptance page ------------------------------------------------------------------------
+
+CLIENT_DOC_IDS = ("client_msa", "sow", "sow_seo_audit", "sow_revenue_recovery")
+SOW_DOC_IDS = ("sow", "sow_seo_audit", "sow_revenue_recovery")
+Email = Annotated[str, StringConstraints(min_length=3, max_length=254,
+                                         pattern=r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})+$")]
+Person = Annotated[str, StringConstraints(min_length=1, max_length=120, strip_whitespace=True),
+                   AfterValidator(_printable)]
+Token = Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]{1,200}$")]
+
+
+class InvitationDocument(Strict):
+    doc_id: Literal["client_msa", "sow", "sow_seo_audit", "sow_revenue_recovery"]
+    version: Version
+    doc_sha256: Sha256
+
+
+class InvitationDisplay(Strict):
+    """What the acceptance page shows about the client (clickwrap text v1, Part B). Kept as a blob; only its hash
+    is in Legal's records."""
+    client_legal_name: Short
+    notice_email: Email
+    contact_first_name: Optional[Person] = None
+    sow_number: Optional[Annotated[str, StringConstraints(min_length=1, max_length=60), AfterValidator(_printable)]] = None
+    sow_title: Optional[Short] = None
+
+
+def _client_documents(v: list) -> list:
+    ids = [d.doc_id for d in v]
+    if len(set(ids)) != len(ids) or sum(i == "client_msa" for i in ids) > 1 or sum(i in SOW_DOC_IDS for i in ids) > 1:
+        raise ValueError("at most one client_msa and one SOW, each once")
+    return v
+
+
+class ClientInvitationCreate(Strict):
+    """ADR 0028: Andre invites ONE client to accept these document versions (the MSA, one SOW, or both)."""
+    request_id: Id
+    party_ref: Annotated[str, StringConstraints(pattern=r"^client:[A-Za-z0-9._-]{1,100}$")]
+    documents: Annotated[list[InvitationDocument], Field(min_length=1, max_length=2), AfterValidator(_client_documents)]
+    display: InvitationDisplay
+    expires_in_days: int = Field(default=14, ge=1, le=14)
+
+    @model_validator(mode="after")
+    def _sow_named(self):
+        if any(d.doc_id in SOW_DOC_IDS for d in self.documents) and not (self.display.sow_number
+                                                                          and self.display.sow_title):
+            raise ValueError("a SOW needs display.sow_number and display.sow_title (the acceptance page names it)")
+        return self
+
+
+class InvitationRevoke(Strict):
+    request_id: Id
+
+
+class PortalResolve(Strict):
+    token: Token
+
+
+class PortalDocument(Strict):
+    doc_id: Literal["client_msa", "sow", "sow_seo_audit", "sow_revenue_recovery"]
+    version: Version
+    doc_sha256: Sha256
+    presented_sha256: Sha256
+    affirmative_act: bool
+
+
+class PortalSignatory(Strict):
+    full_name: Person
+    title: Person
+    company: Short
+
+
+class PortalAcceptanceCreate(Strict):
+    """ADR 0028: what the client-portal service records for one submitted acceptance page. The IP address and user
+    agent never reach Legal: the portal sends HMAC-SHA256 values made with its own key (``hmac_key_id`` names the
+    key, the first 16 hex characters of the SHA-256 of the key)."""
+    request_id: Id
+    token: Token
+    documents: Annotated[list[PortalDocument], Field(min_length=1, max_length=3)]
+    presentation: Literal["inline"]
+    page_sha256: Sha256
+    page_text_b64: Annotated[str, StringConstraints(min_length=4, max_length=2_800_000, pattern=r"^[A-Za-z0-9+/=]+$")]
+    signatory: PortalSignatory
+    ip_hmac_sha256: Sha256
+    user_agent_hmac_sha256: Sha256
+    hmac_key_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{16}$")]
 
 
 class EnvelopeCreate(Strict):

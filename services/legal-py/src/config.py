@@ -25,7 +25,11 @@ from typing import Optional
 # deployed map on this branch (ADR 0024): on the first apply COMPLIANCE_LEGAL_CALLER_TOKEN does not exist yet.
 OPTIONAL_CALLERS = ("compliance_38",)
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
-                "finance_31", "hub", "esign_gateway", "scheduler")
+                "finance_31", "hub", "esign_gateway", "scheduler", "client_portal")
+# ADR 0028: ZBM's own entity facts a client template names as ``{{zbm_*}}`` variables (legal entity name, entity type and
+# state, street address, ...). Filled from LEGAL_ZBM_FACTS at fill time, never from a request, never hard-coded.
+ZBM_FACT_NAME = re.compile(r"^zbm_[a-z0-9_]{1,36}$")
+ZBM_FACT_MAX = 500
 TOKEN_MIN = 32
 # AEGIS night review M-2: a Railway variable reference that was not resolved reaches the service as its literal text.
 # "${{LEGAL_ONBOARDING_CALLER_TOKEN}}" is >= 32 printable characters and is public in the repo (.railway/railway.ts),
@@ -70,6 +74,7 @@ class Settings:
     filing_alert_days: int = 60
     esign_consent_required: bool = True
     business_tz: str = "America/Los_Angeles"
+    zbm_facts: dict = field(default_factory=dict)                 # ADR 0028: {{zbm_*}} values (LEGAL_ZBM_FACTS)
     data_dir_lock: Optional[object] = field(default=None, repr=False, compare=False)   # bug sweep E: the flock
 
 
@@ -175,6 +180,27 @@ def _off(env, name, what: str) -> None:
                            "stand-in answers 'not delivered' / 'unavailable')")
 
 
+def _zbm_facts(env: dict) -> dict:
+    """ADR 0028: LEGAL_ZBM_FACTS, a JSON object of ``zbm_*`` names to non-empty printable strings (no ``{{``/``}}``,
+    at most 500 characters). Unset = no facts (a fill of a template that names one is refused, never guessed)."""
+    raw = env.get("LEGAL_ZBM_FACTS")
+    if raw is None or raw.strip() == "":
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise RuntimeError("LEGAL_ZBM_FACTS must be a JSON object {\"zbm_legal_entity_name\": \"...\", ...}") from None
+    if not isinstance(data, dict):
+        raise RuntimeError("LEGAL_ZBM_FACTS must be a JSON object {\"zbm_legal_entity_name\": \"...\", ...}")
+    for k, v in data.items():
+        if not isinstance(k, str) or not ZBM_FACT_NAME.fullmatch(k):
+            raise RuntimeError("LEGAL_ZBM_FACTS: every name is zbm_[a-z0-9_]{1,36}")
+        if (not isinstance(v, str) or not v.strip() or len(v) > ZBM_FACT_MAX or "{{" in v or "}}" in v
+                or re.search(r"[\x00-\x1f\x7f-\x9f]", v)):
+            raise RuntimeError(f"LEGAL_ZBM_FACTS: {k} must be 1-{ZBM_FACT_MAX} printable characters with no {{{{ }}}}")
+    return dict(data)
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ) if env is None else env
     token = env.get("LEGAL_SERVICE_TOKEN")
@@ -236,6 +262,7 @@ def load(env: Optional[dict] = None) -> Settings:
         filing_alert_days=_int(env, "LEGAL_FILING_ALERT_DAYS", 60, 1, 365),
         esign_consent_required=_flag(env, "LEGAL_ESIGN_CONSENT_REQUIRED", True),
         business_tz=tz,
+        zbm_facts=_zbm_facts(env),
     )
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it
     return s

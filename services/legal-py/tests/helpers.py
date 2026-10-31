@@ -201,14 +201,36 @@ class Harness:
             body["esign_consent"] = {"disclosure_version": "1.0", "consented_at": "2026-10-01T16:59:00Z",
                                      "access_demonstrated": True}
         if caller == "onboarding" and party.startswith("client:") and "invitation_id" not in over:
-            # merge of ADR 0022 into the RTM-13 branch: a client's acceptance on the onboarding path names Andre's
-            # invitation for that client, document and version; the helper asks for one when it can be issued
-            inv = self.apost("/legal/v1/acceptance-invitations", {"request_id": rid("inv"), "doc_id": doc_id,
-                                                                  "version": version, "party_ref": party})
-            if inv.status_code == 201:
-                body["invitation_id"] = inv.json()["invitation_id"]
+            # ADR 0028: a client's acceptance is recorded only through the client acceptance page
+            return self.client_page_accept(doc_id, version, doc_sha, party, code, **over)
         body.update(over)
         return self.ok(self.post("/legal/v1/acceptances", body, caller=caller), code)
+
+    def client_page_accept(self, doc_id, version, doc_sha, party, code=201, **over):
+        """ADR 0028: Andre's acceptance link for this ONE document version and client, then the client-portal caller's
+        recording of the page (the only way a client's acceptance is recorded). A refused link answers its refusal."""
+        inv = self.apost("/legal/v1/client-acceptance-invitations", {
+            "request_id": rid("cinv"), "party_ref": party,
+            "documents": [{"doc_id": doc_id, "version": version, "doc_sha256": doc_sha}],
+            "display": {"client_legal_name": "Client LLC", "notice_email": "legal@client.example",
+                        "sow_number": "SOW-1", "sow_title": "Statement of Work"}})
+        if inv.status_code != 201:
+            return self.ok(inv, code)
+        page = f"acceptance page for {doc_id} {version}".encode("utf-8")
+        doc = {"doc_id": doc_id, "version": version, "doc_sha256": doc_sha,
+               "presented_sha256": over.pop("presented_sha256", doc_sha),
+               "affirmative_act": over.pop("affirmative_act", True)}
+        over.pop("signer_identity_ref", None)
+        assert not over, f"client_page_accept: no page field for {sorted(over)}"
+        body = {"request_id": rid("pacc"), "token": inv.json()["token"], "documents": [doc], "presentation": "inline",
+                "page_sha256": sha(page), "page_text_b64": b64(page),
+                "signatory": {"full_name": "Sam Signer", "title": "Owner", "company": "Client LLC"},
+                "ip_hmac_sha256": "e" * 64, "user_agent_hmac_sha256": "f" * 64, "hmac_key_id": "0" * 16}
+        r = self.ok(self.post("/legal/v1/portal/acceptances", body, caller="client_portal"), code)
+        if code != 201:
+            return r
+        return {**r["acceptances"][0], "obligation_ids": r["obligation_ids"], "reasons": [], "reason_lines": [],
+                "request_id": r["request_id"], "invitation_id": r["invitation_id"]}
 
     def job(self, name):
         return self.ok(self.post(f"/legal/v1/jobs/{name}/run", {"request_id": rid("job")}, caller="scheduler"))
