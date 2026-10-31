@@ -313,7 +313,14 @@ class BooksMixin:
         unmet += [R.item("TAX_TREATMENT_UNVERIFIED", x["message"], obligation_id="FIN-CQ-11")
                   for x in self._counsel_reasons("FIN-CQ-11")]
         unmet = R.dedupe(unmet)
-        return {"client_id": client_id, "allowed": not unmet, "unmet": R.lines(unmet), "reasons": unmet,
+        extra = {}
+        if principal == "andre":
+            # RTM-06: Andre sees which rules every client activation relies on expire soon (Compliance readiness)
+            cmp_ = self.ports.compliance
+            ans = g.call("compliance_38", "rule_expiry", (), lambda: cmp_.rule_expiry(), None) \
+                if hasattr(cmp_, "rule_expiry") else None
+            extra["compliance_rule_expiry"] = ans if isinstance(ans, dict) else {"available": False}
+        return {**extra, "client_id": client_id, "allowed": not unmet, "unmet": R.lines(unmet), "reasons": unmet,
                 "detail": "billing ready" if not unmet else f"{len(unmet)} requirement(s) unmet",
                 "rules_pinned": self.rules_pinned, "ledger_event_ids": g.events}
 

@@ -183,6 +183,12 @@ class FakeCompliance:
                                 tuple(a.get("reasons", ())), sanctions=bool(a.get("sanctions")),
                                 ground=a.get("ground"))
 
+    rule_expiry_answer = None
+
+    def rule_expiry(self):
+        self.calls.append(("rule_expiry",))
+        return self.rule_expiry_answer
+
     def row_parameters(self, oid):
         from ports import RegisterParameters
         if not self.rows_available or self.nexus_params is None:

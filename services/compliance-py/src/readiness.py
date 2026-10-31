@@ -41,13 +41,21 @@ def _applies_to_us_web_client(row: dict, today: date) -> bool:
     return True
 
 
+WARN_DAYS = (30, 14, 7)
+
+
 def compute(rows: Optional[list[dict]], version: Optional[int], seed_pinned: bool, now: datetime,
             control_blockers: list[str]) -> dict:
     """``control_blockers``: ``control_red:<id>: <reason>`` for each red control that blocks client activation."""
     today = now.astimezone(timezone.utc).date()
     out = {"as_of": iso(now), "register_version": version, "seed_pinned": seed_pinned,
            "gate_blockers": [], "expired": [], "expiring_within_60_days": [],
-           "us_web_client_activation": {"rows": [], "blocking_now": [], "expiring": []}}
+           "us_web_client_activation": {"rows": [], "blocking_now": [], "expiring": []},
+           # money red team RTM-06: early warning, 30 / 14 / 7 days before a verified rule expires (it then blocks
+           # every gate it feeds: fail closed, unchanged); client_activation_rules = the rows a US web client relies on
+           "expiry_warnings": {**{f"within_{d}_days": [] for d in WARN_DAYS},
+                               "client_activation_rules": {f"within_{d}_days": [] for d in WARN_DAYS},
+                               "next_client_activation_rule": None}}
     if rows is None:
         out["gate_blockers"] = ["register_not_in_force"]
         return out
@@ -65,6 +73,19 @@ def compute(rows: Optional[list[dict]], version: Optional[int], seed_pinned: boo
         elif st == "verified" and r.get("expires_at") and \
                 date.fromisoformat(r["expires_at"]) <= today + timedelta(days=EXPIRING_WINDOW_DAYS):
             out["expiring_within_60_days"].append(r["id"])
+    ew = out["expiry_warnings"]
+    for r in sorted(rows, key=lambda x: x["id"]):
+        if r["status"] == "superseded" or effective_status(r, today) != "verified" or not r.get("expires_at"):
+            continue
+        left = (date.fromisoformat(r["expires_at"]) - today).days
+        for d in WARN_DAYS:
+            if left <= d:
+                ew[f"within_{d}_days"].append(r["id"])
+                if r["id"] in web_ids:
+                    ew["client_activation_rules"][f"within_{d}_days"].append(r["id"])
+    nxt = sorted((r["expires_at"], r["id"]) for r in web
+                 if r.get("expires_at") and effective_status(r, today) == "verified")
+    ew["next_client_activation_rule"] = {"id": nxt[0][1], "expires_at": nxt[0][0]} if nxt else None
     w = out["us_web_client_activation"]
     w["rows"] = sorted(web_ids)
     w["blocking_now"] = sorted(r["id"] for r in web if effective_status(r, today) != "verified")
@@ -91,6 +112,13 @@ def summary_lines(r: dict) -> list[str]:
                                                  else "not blocked by any rule"))
     for e in w["expiring"]:
         lines.append(f"  - {e['id']} expires {e['expires_at']} (re-verify and have Andre approve before then)")
+    soon = r.get("expiry_warnings", {}).get("client_activation_rules", {}).get(f"within_{WARN_DAYS[0]}_days") or []
+    asof = date.fromisoformat(r["as_of"][:10])
+    for e in w["expiring"]:
+        if e["id"] in soon:
+            left = (date.fromisoformat(e["expires_at"]) - asof).days
+            lines.append(f"WARNING: {e['id']} expires {e['expires_at']} (in {left} days): every client activation "
+                         "relies on it; re-verify it now (runbook step H)")
     return lines
 
 

@@ -150,3 +150,34 @@ def test_rtm09_an_invoice_above_the_maximum_is_refused(tmp_path):
         assert (r.status_code == 201) is ok, (price, r.status_code, r.text[:200])
         if not ok:
             assert "INVOICE_ABOVE_MAXIMUM" in r.text or "maximum" in r.text
+
+
+# --- RTM-06: Andre sees the rule-expiry warning on billing readiness ----------------------------------------------------
+
+def test_rtm06_billing_readiness_shows_andre_the_rules_about_to_expire(tmp_path):
+    hr = _stripe_hr(tmp_path)
+    hr.cmp.rule_expiry_answer = {"available": True, "within_30_days": ["US-OFAC-04"], "within_14_days": [],
+                                 "within_7_days": [], "next": {"id": "US-OFAC-04", "expires_at": "2026-12-25"}}
+    mine = hr.client.get("/fin/v1/clients/zbm-client-7/billing-readiness",
+                         headers={**hr.headers(None), "X-Andre-Approval-Token": ANDRE_TOKEN})
+    assert mine.status_code == 200, mine.text
+    assert mine.json()["compliance_rule_expiry"]["within_30_days"] == ["US-OFAC-04"]
+    other = hr.ok(hr.get("/fin/v1/clients/zbm-client-7/billing-readiness", caller="onboarding"))
+    assert "compliance_rule_expiry" not in other
+    hr.cmp.rule_expiry_answer = None                                     # Compliance unreachable: says so
+    mine = hr.client.get("/fin/v1/clients/zbm-client-7/billing-readiness",
+                         headers={**hr.headers(None), "X-Andre-Approval-Token": ANDRE_TOKEN}).json()
+    assert mine["compliance_rule_expiry"] == {"available": False}
+
+
+def test_rtm06_the_client_reads_compliance_readiness(tmp_path):
+    from test_compliance_gate_adr0024 import cmp_client
+    doc = {"expiry_warnings": {"within_30_days": ["US-OFAC-04"], "within_14_days": [], "within_7_days": [],
+                               "client_activation_rules": {"within_30_days": ["US-OFAC-04"], "within_14_days": [],
+                                                           "within_7_days": []},
+                               "next_client_activation_rule": {"id": "US-OFAC-04", "expires_at": "2026-12-25"}}}
+    a = cmp_client({"/compliance/v1/readiness": (200, doc)}).rule_expiry()
+    assert a == {"available": True, "within_30_days": ["US-OFAC-04"], "within_14_days": [], "within_7_days": [],
+                 "next": {"id": "US-OFAC-04", "expires_at": "2026-12-25"}}
+    assert cmp_client({"/compliance/v1/readiness": (503, {})}).rule_expiry() is None
+    assert cmp_client({"/compliance/v1/readiness": (200, {"x": 1})}).rule_expiry() is None

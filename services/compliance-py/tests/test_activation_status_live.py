@@ -537,3 +537,26 @@ def test_the_sanctions_ground_is_match_or_place_and_match_wins():
     h3 = harness()
     h3.rule("client-fr", "client", web_client(h3, "client-fr", country="FR", region=None, targets=("FR",)))
     assert status(h3, "client-fr")["sanctions_ground"] is None              # outside the area, not sanctioned
+
+
+# --- money red team RTM-06: early warning before the rules client activation relies on expire ---------------------------
+
+def test_readiness_and_health_warn_30_14_and_7_days_before_a_rule_expires():
+    from datetime import datetime, timezone
+    h = harness(at=datetime(2026, 11, 30, 12, 0, tzinfo=timezone.utc))         # 25 days before US-OFAC-04 expires
+    r = h.get("/compliance/v1/readiness").json()
+    w = r["expiry_warnings"]
+    assert "US-OFAC-04" in w["within_30_days"] and "US-OFAC-04" not in w["within_14_days"]
+    assert w["client_activation_rules"]["within_30_days"] == ["US-OFAC-04"]
+    health = h.client.get("/health").json()["rules_expiring"]
+    assert health["within_30_days"] >= 1 and health["within_7_days"] == 0
+    assert health["next_client_activation_rule"] == {"id": "US-OFAC-04", "expires_at": "2026-12-25"}
+    h.clock.at = datetime(2026, 12, 20, 12, 0, tzinfo=timezone.utc)            # 5 days before
+    h.run_controls()
+    w = h.get("/compliance/v1/readiness").json()["expiry_warnings"]
+    assert "US-OFAC-04" in w["within_7_days"] and w["client_activation_rules"]["within_7_days"] == ["US-OFAC-04"]
+    assert h.client.get("/health").json()["rules_expiring"]["within_7_days"] >= 1
+    assert h.client.get("/health").status_code == 200                           # a warning, not an outage
+    import readiness
+    text = "\n".join(readiness.summary_lines(h.svc.readiness()))
+    assert "WARNING" in text and "US-OFAC-04 expires 2026-12-25 (in 5 days)" in text

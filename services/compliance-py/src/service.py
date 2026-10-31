@@ -1852,10 +1852,22 @@ class ComplianceService:
     # the in-process scheduler (api.main attaches it when COMPLIANCE_SCHEDULER_ENABLED=1); its liveness is in /health
     scheduler: Any = None
 
+    def _rules_expiring_summary(self) -> dict:
+        """RTM-06: counts only (no client data) for /health and the heartbeat check; never makes /health unhealthy."""
+        try:
+            r = self.readiness()
+        except Exception:  # noqa: BLE001 - a health answer never fails on the warning
+            return {"available": False}
+        ew = r["expiry_warnings"]
+        return {"available": True, **{k: len(v) for k, v in ew.items() if k.startswith("within_")},
+                "client_activation_rules_within_30_days": len(ew["client_activation_rules"]["within_30_days"]),
+                "next_client_activation_rule": ew["next_client_activation_rule"]}
+
     def health(self) -> dict:
         sched = self.scheduler.liveness() if self.scheduler is not None else {"enabled": False}
         healthy = sched.get("healthy", True)
-        return {"status": "ok" if healthy else "unhealthy", "service": "compliance-py",
+        rules_expiring = self._rules_expiring_summary()
+        return {"status": "ok" if healthy else "unhealthy", "service": "compliance-py", "rules_expiring": rules_expiring,
                 "register_version_in_force": self.version_number,
                 "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),

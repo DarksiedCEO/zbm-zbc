@@ -396,7 +396,25 @@ _PRIMITIVE = {
     "contact_ref_valid": lambda v: v is None or type(v) is bool,
     "verify_event": lambda v: type(v) is bool,
     "send_receipt": lambda v: type(v) is bool,
+    "rule_expiry": lambda v: v is None or _rule_expiry_ok(v),     # money red team RTM-06
 }
+
+
+_RULE_ID = re.compile(r"^[A-Z0-9][A-Z0-9-]{0,39}$")
+
+
+def _rule_expiry_ok(v: Any) -> bool:
+    if type(v) is not dict or v.get("available") is not True:
+        return False
+    if set(v) != {"available", "within_30_days", "within_14_days", "within_7_days", "next"}:
+        return False
+    for k in ("within_30_days", "within_14_days", "within_7_days"):
+        if type(v[k]) is not list or len(v[k]) > 50 or not all(type(x) is str and _RULE_ID.fullmatch(x) for x in v[k]):
+            return False
+    n = v["next"]
+    return n is None or (type(n) is dict and set(n) == {"id", "expires_at"} and type(n["id"]) is str
+                         and _RULE_ID.fullmatch(n["id"]) is not None and type(n["expires_at"]) is str
+                         and re.fullmatch(r"\d{4}-\d{2}-\d{2}", n["expires_at"]) is not None)
 
 
 def check_primitive(action: str, ans: Any) -> Any:

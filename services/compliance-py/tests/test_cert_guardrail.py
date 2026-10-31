@@ -1,5 +1,6 @@
 """Certification guardrails, spec §H items 26-31 (run on every change)."""
 
+from unittest.mock import ANY
 import ast
 import hashlib
 import inspect
@@ -217,7 +218,8 @@ def test_persistence_replays_versions_rulings_and_holds(tmp_path):
                                        "in_memory": False, "seed_pinned": True, "production": True,
                                        "reconcile_mode": False, "reconcile_required": False,   # AEGIS N15-1
                                        "log_write_fault": False,                                 # bug sweep C
-                                       "scheduler": {"enabled": False}}                         # AEGIS F-4
+                                       "scheduler": {"enabled": False},                         # AEGIS F-4
+                                       "rules_expiring": ANY}                                   # money red team RTM-06
     assert y.get(f"/compliance/v1/rulings/{a['ruling_id']}").json()["allowed"] is True
     assert y.svc.control_state["C-11"]["last_result"] == "pass"
 
