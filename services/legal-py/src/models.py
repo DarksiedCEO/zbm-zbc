@@ -152,6 +152,15 @@ class AcceptanceCreate(Strict):
     affirmative_act: bool
     esign_consent: Optional[EsignConsent] = None
     evidence_ref: Optional[EvidenceRef] = None
+    invitation_id: Optional[Id] = None          # money red team RTM-13
+
+
+class InvitationCreate(Strict):
+    """RTM-13: Andre invites one client (party_ref) to accept one document version."""
+    request_id: Id
+    doc_id: DocId
+    version: Version
+    party_ref: PartyRef
 
 
 class EnvelopeCreate(Strict):

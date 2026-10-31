@@ -404,6 +404,11 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                    req: m.AcceptanceCreate = Depends(body(m.AcceptanceCreate))) -> dict:
         return _echo(req.request_id, svc.record_acceptance(who, req.request_id, req.model_dump()))
 
+    @app.post("/legal/v1/acceptance-invitations", dependencies=auth, status_code=201)
+    def acceptance_invitation(_: str = Depends(andre("acceptance-invitations")),
+                              req: m.InvitationCreate = Depends(body(m.InvitationCreate))) -> dict:
+        return _echo(req.request_id, svc.create_invitation(req.request_id, req.model_dump()))
+
     @app.get("/legal/v1/acceptances/{acceptance_id}", dependencies=auth)
     def acceptance_get(acceptance_id: str, _: str = Depends(caller("clipper_network", "finance_31", "onboarding",
                                                                    "compliance_38", andre_ok=True))) -> dict:
