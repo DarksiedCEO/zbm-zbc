@@ -20,11 +20,11 @@ the check.
 | `node:dashboard-ts` | 53 | node --test | — |
 | `python:bizdev-py` | 358 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
-| `python:compliance-py` | 766 | pytest collection | — |
+| `python:compliance-py` | 770 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 736 | pytest collection | — |
 | `python:detection-py` | 845 | pytest collection | — |
-| `python:finance-py` | 807 | pytest collection | — |
+| `python:finance-py` | 812 | pytest collection | — |
 | `python:fulfillment-py` | 1120 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
 | `python:legal-py` | 365 | pytest collection | — |
@@ -35,4 +35,4 @@ the check.
 | `python:seo-py` | 1231 | pytest collection | — |
 | `python:service-py` | 815 | pytest collection | — |
 | `python:verification-py` | 350 | pytest collection | — |
-| `rust:ledger-rust` | 171 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |
+| `rust:ledger-rust` | 174 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |
