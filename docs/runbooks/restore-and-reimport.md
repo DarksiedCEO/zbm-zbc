@@ -125,8 +125,11 @@ department. Expect more to re-import (section 5).
    **Contract deadlines during a lockdown.** MSA 4.12(f) acknowledgements are recorded as usual. For MSA 4.12(g) you
    may still void an **unpaid** invoice, or credit it down without any refund, once the restore's item list is
    complete, the Stripe re-import has covered every day since the backup, you have confirmed the bank lines were fed
-   again (step 4 of section 5), no payment page or issue of that invoice was recorded after the backup, and nothing
-   the restore lost touches it (no money moves; the lift lists these). Refunds that
+   again (step 4 of section 5), the bank's own closing balance of every account equals the books (less money the
+   restore recorded as moved and not booked yet), no bank line since the backup is unattributed (an ACH or wire line
+   without an invoice reference blocks the exception for its client, or for every invoice when its client cannot be
+   told, until you apply or explain it), no payment page or issue of that invoice was recorded after the backup, and
+   nothing the restore lost touches it (no money moves; the lift lists these). Refunds that
    fall due (MSA 4.10) go through the **Stripe Dashboard**, which Finance books. If the lockdown lasts more than **2
    business days**, finance logs `ALERT finance: restore_lockdown_long` with the contract deadlines due within 10
    business days, and again every day: finish section 5 before those deadlines.
@@ -205,13 +208,55 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
          -d '{"request_id":"rc-1","provider_ref":"<the same reference>","payable_ids":["<the payables it paid>"]}'
        ```
        The entry is **derived** from the lost event (accounts, amounts, entity, counterparty); you never type lines.
+       **One money movement, one item, one booking.** A transfer's in-flight operation and its posting(s), or a
+       refund and its transfer, are the same money: one item carries it and the others say `follows_movement`
+       (`primary` names it); they cannot be disposed of or booked on their own. A posting attempt the ledger shows
+       reversed (the bank refused it) moved nothing and derives nothing. A second booking of the same movement, or of
+       the same bank / rail reference on another item, is refused (409).
        A payout must name its payables (mandatory: the payee's, adding up to the item's net, the item's own if the
        restored books hold it); they become settled. A refund must name `refund_campaign_id` (its campaign); it is
        recorded paid, and its own transfer item is booked by the same correction (a refund's transfer item is never
        corrected on its own). A funding transfer needs nothing more. A release or a vendor payment has nothing to
        book (the money is on its payout items / the vendor record). It may touch restricted cash (flow FRC, only
        here) and resolves the reconciliation breaks on the accounts it touches. The counterparty's fence ends when
-       its payables are settled / its refund is recorded paid, never earlier.
+       its payables are settled / its refund is recorded paid, never earlier. The booking is a fact (the money already
+       moved), so the restricted-pool gate does not refuse it.
+
+       **A booking made in error** is reversed by you, never edited:
+       ```
+       curl -sS -X POST $H $F/fin/v1/restore/items/<event_id>/correction/reversal \
+         -d '{"request_id":"rr-1","reason":"booked on the wrong reference"}'
+       ```
+       It posts the exact reversal (same accounts, opposite sides, linked to the booking, memo FRC), returns the
+       payables it settled, marks a refund it recorded `reversed_restore_booking`, re-fences the counterparty and
+       re-opens the item (and the items that followed it) for one new booking. The reversal is on the ledger with
+       your reason.
+
+       **An item that cannot be derived** (an older summary, an evidence row that does not verify) is booked by hand:
+       ```
+       curl -sS -X POST $H $F/fin/v1/restore/items/<event_id>/manual-booking \
+         -d '{"request_id":"rm-1","provider_ref":"<the reference>","amount":"29.01","counterparty":"<payee id>",
+              "rail":"stripe","reason":"rail statement shows the payout paid","evidence_sha256":"<sha of the statement>",
+              "payable_ids":["<the payables it paid>"]}'
+       ```
+       You give the amount, the counterparty, the reference, the reason and the evidence's SHA-256; you never choose
+       the accounts: a payout books Dr 2020 `payee:<id>` / Cr the rail account, a refund Dr 2010 `campaign:<id>` /
+       Cr 1020 (`counterparty` is the campaign), a funding transfer (`"transfer_kind":"funding"`) Dr the rail account
+       / Cr 1020, always ZBC. The amount and counterparty must agree with the disposition. A derivable item is refused
+       here (use the correction). It settles the item and its fence exactly like a correction.
+
+       **A payout whose payables were accrued after the backup** (the restored books hold none): the clipper network
+       re-sends the handoffs of the submissions the payout paid (`POST /fin/v1/payout-handoffs`, the same
+       submission ids; ask the clipper network team to re-post them for the days since `since`). Finance accrues them
+       under their original payable ids; then book the correction naming them. If the re-send is not possible, use
+       the manual booking with `"submission_ids":["<the submissions it paid>"]` instead of `payable_ids`: a handoff
+       re-sent later for one of them is accrued and settled by your booking at once, never paid again (beyond the
+       booked amount it opens a high-severity `restore_resent_over_booking` break for you).
+
+       **The rail lookup is not wired in production yet.** The Stripe Connect and Trolley adapters are not built
+       (`NotWiredRail`: every lookup answers unavailable), so `not_moved` for a payout answers 503 until they exist.
+       Until then a payout item is `moved` with the rail dashboard's reference and booked with the correction or the
+       manual booking; nothing in production is payable through a rail before then either.
      - `not_moved`: for ANY payout (held by the restored books or not) Finance asks the rail by the idempotency key
        the lost event carries: found -> refused (record it as moved); the rail unreachable -> 503, nothing recorded;
        not found -> the answer is `pending_not_moved` with `retry_after`: ask again after 24 h (a second lookup) with
@@ -229,17 +274,21 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    `POST /fin/v1/breaks/<id>/resolution` refuses the restore break (and every deadline break).
 4. Anything Stripe does not know (a wire, an ACH credit to the bank) is not re-imported: re-post those bank lines
    through the bank feed as usual (`POST /fin/v1/bank/events`), for every day from `since` to `opened_on`, then
-   confirm it with the statement's figures for EVERY business day and every bank account (zbc 1020, zbc 1010,
-   zbm 1010): the number of credit lines and their total, 0 and 0.00 for a day without activity:
+   confirm it with the statement's figures for EVERY calendar day (weekends and holidays included: ACH and wire
+   value dates fall on them) and every bank account (zbc 1020, zbc 1010, zbm 1010): the number of credit lines,
+   their total (0 and 0.00 for a day without activity) and the day's closing balance:
    ```
    curl -sS -X POST $H $F/fin/v1/restore/bank-refeed -d '{"request_id":"rf-1","since":"2026-11-07","until":"2026-11-09",
      "statement_ref":"<statement id>","statement_days":[{"day":"2026-11-07","entity":"zbc","account":"1020",
-     "credit_lines":2,"credit_total":"1500.00"}, ...]}'
+     "credit_lines":2,"credit_total":"1500.00","closing_balance":"8250.00"}, ...]}'
    ```
    Finance compares each day with the bank lines it has booked; any difference is refused (409
-   `RESTORE_REFEED_MISMATCH`, listing the days): feed the missing lines and confirm again. The lift and the MSA
-   4.12(g) exception need this confirmation, and the exception is refused for an invoice any bank line since the
-   backup refers to (matched or not).
+   `RESTORE_REFEED_MISMATCH`, listing the days; a day outside the window or a missing day is refused too): feed the
+   missing lines and confirm again. The last day's closing balance of each account is checked against the bank's
+   own balance. The lift and the MSA 4.12(g) exception need this confirmation AND the bank's balances to equal the
+   books (less money recorded as moved and not booked yet), checked again when you ask; the exception is refused for
+   an invoice any bank line since the backup refers to (matched or not) and while an unattributed bank line could be
+   that client's.
 5. **Lift the lockdown** (only you, explicitly):
    ```
    curl -sS -X POST $H $F/fin/v1/restore/lockdown/lift -d '{"request_id":"lift-1","reason":"re-import 11-07..11-09 clean; 2 items disposed"}'
@@ -256,8 +305,23 @@ the break by itself: when the coverage is complete and every item is rebuilt or 
    (a second restore during it stacks a new lockdown, then this phase again). Book every `moved` item with its
    restore correction first; the parked rail events are applied at the lift in the order they arrived (one that does
    not apply yet, e.g. a return before its payment, stays held until it does). Then money out resumes. Client email
-   resumes too; a message or client receipt the ledger shows was sent after the backup is marked sent, never sent
-   again.
+   resumes too; a message or client receipt the ledger shows was sent is marked sent and never sent again, on every
+   path (the mail job and the direct send route), also after a restore that lost no money.
+
+   **Only the affected counterparties wait.** A `moved` item not booked yet keeps its counterparty fenced (that
+   payee is held out of every run with `PAYEE_HOLD` / `RESTORE_FENCED`; that campaign gets no refund). A
+   reconciliation leg or break that is off by exactly the unbooked items' amounts is explained by them: it ends the
+   post-restore phase and does not block anyone else's run. Any other difference still blocks everything.
+
+   **A parked rail event still held** (one that never applies, e.g. a `returned` for an item that was lost) keeps
+   the reconciliation from ending the post-restore phase. After 72 h finance logs `ALERT finance:
+   rail_event_parked_72h` (once a day). Decide it:
+   ```
+   curl -sS -X POST $H $F/fin/v1/rail-events/stripe/<event id>/disposition \
+     -d '{"request_id":"re-1","action":"discard","reason":"the rail confirms no return"}'
+   ```
+   `apply` applies it now (refused while it still does not apply); `discard` drops it with your reason. Both are on
+   the ledger.
 
 ## Commit marks and the key (FIN_CONTACT_HASH_KEY)
 

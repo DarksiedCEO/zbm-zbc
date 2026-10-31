@@ -183,7 +183,12 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   AEGIS r6: the correction is derived from the lost event (`restore_evidence.py`: the money-out events carry their
   payload in a verifiable summary); payouts must name their payables, refunds their campaign; a moved counterparty
   gets no money in any amount until that debt is settled; the re-feed is checked day by day against the booked bank
-  lines; not_moved for any payout needs rail lookups 24 h apart; parked rail events replay in arrival order. `/health` is
+  lines; not_moved for any payout needs rail lookups 24 h apart; parked rail events replay in arrival order.
+  AEGIS r7 (no restore state is permanent): one money movement is one item and one booking; Andre reverses a booking
+  (`.../correction/reversal`) and books an underivable item by hand (`.../manual-booking`, accounts fixed by the
+  event type); an unbooked item fences only its counterparty; the re-feed and the 4.12(g) exception check the bank's
+  own balances over every calendar day; a parked rail event held 72 h alerts and gets Andre's disposition
+  (`POST /fin/v1/rail-events/{rail}/{event_id}/disposition`); a receipt the ledger shows sent is never re-sent. `/health` is
   `degraded` and an ALERT repeats every 5 minutes (a watch thread). A failed ledger read leaves the item list
   `build_incomplete` (every re-import reads it again first). Items the re-import cannot rebuild are disposed of with
   `POST /fin/v1/restore/items/{event_id}/disposition` (Andre: `lost`, `reissued` naming a later invoice or credit

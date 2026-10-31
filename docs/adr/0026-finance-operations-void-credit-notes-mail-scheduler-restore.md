@@ -184,6 +184,27 @@ The contracts promise things Finance could not do:
     Consequence: the summaries of those three events changed format (older ledgers' events of that kind do not
     verify, so they derive nothing: fail closed; no restore has run in production).
 
+20. **AEGIS round 7 (Oct 31 2026): fail closed, never fail permanent.** Every restore state has a bounded, audited,
+    Andre-only way out. (a) One money movement is one item: a transfer's in-flight operation and its postings, and a
+    refund and its transfer, share a movement key; the others `follows_movement`; a posting attempt the ledger shows
+    reversed derives nothing; a movement or a bank / rail reference is booked once. (b) Andre reverses a restore
+    booking (FRC, exact reversal, linked; payables back to `returned`, the item and its fence re-opened). (c) The
+    summaries fit the longest ids the types allow (payee and campaign ids 128, client ids 100): the payout summary
+    names the batch's ISO week instead of the 64-character idempotency key, which the restore recomputes
+    (i04: SHA-256 of batch, payee and period). (d) An item that cannot be derived is booked by hand with the
+    accounts fixed by its event type, the entity fixed (ZBC), the reason and the evidence SHA-256 recorded. A payout
+    whose payables were accrued after the backup is booked after the clipper network re-sends the handoffs, or by
+    the manual booking naming the submissions it paid (a later re-sent handoff is settled by it, never paid again).
+    (e) An unbooked moved item fences only its counterparty: a payee is held out of a run alone (`PAYEE_HOLD`), and a
+    reconciliation leg or break off by exactly the unbooked amounts neither blocks other payees nor keeps the post
+    phase on. (f) The re-feed covers calendar days and carries each day's closing balance; the lift and the 4.12(g)
+    exception need the bank's own balances to equal the books less money moved and unbooked; an unattributed bank
+    line since the backup blocks the exception. (g) A parked rail event held 72 h alerts daily, keeps the post phase
+    on and gets Andre's `apply` / `discard`. (h) A client receipt the ledger shows sent is never sent again, on the
+    job and the direct route. Design choice: a restore booking is posted as a fact (the money already moved), so the
+    restricted-pool gate does not refuse it; its reversal is not. Not built: the Stripe Connect / Trolley adapters
+    (`NotWiredRail`), so `not_moved` for a payout answers 503 in production and the manual path is the way until then.
+
 ## Consequences
 
 - New ledger event types: `invoice_voided`, `credit_note_issued`, `credit_note_refund_linked`, `client_contact_recorded`,
@@ -202,5 +223,5 @@ The contracts promise things Finance could not do:
 Finance tests: test_credit_notes.py, test_client_mail.py, test_seo_audit_card_and_webhooks.py,
 test_restore_reimport.py (the red team's restore scenario, end to end with the simulated Stripe),
 test_ops_cron_caller.py, test_business_tz.py, test_aegis_waveB_fixes.py, test_aegis_waveB_r2.py (AEGIS's round-2
-attacks kept as regressions), test_finance_ops_r2.py, test_finance_ops_r3.py, test_finance_ops_r4.py, test_finance_ops_r5.py, test_finance_ops_r6.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
+attacks kept as regressions), test_finance_ops_r2.py, test_finance_ops_r3.py, test_finance_ops_r4.py, test_finance_ops_r5.py, test_finance_ops_r6.py, test_finance_ops_r7.py; devtools/test_deploy_config.py (FinCron). Nothing has run on Railway or
 against the real Stripe or Resend APIs.
