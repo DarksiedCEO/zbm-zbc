@@ -1923,6 +1923,31 @@ class LegalService:
                 raise NotFound("no such client acceptance link")
             return self._client_invitation_view(inv)
 
+    def client_invitation_evidence(self, invitation_id: str) -> dict:
+        """Andre only: what the client accepted on the page -- the signatory as typed, the client's display block, the
+        page text as shown, the HMACs and the acceptance ids (for the confirmation email and any dispute)."""
+        with self.lock:
+            inv = self.client_invitations.get(invitation_id)
+            if inv is None:
+                raise NotFound("no such client acceptance link")
+            if not inv.get("used_at"):
+                raise Conflict("this link has not been used: there is no acceptance evidence yet")
+            accs = [self.acceptances[a] for a in inv["acceptance_ids"] if a in self.acceptances]
+            if not accs:
+                raise Unavailable("the link's acceptance records are not held")
+            pe = accs[0]["portal_evidence"]
+            sig, page, disp = (self.blobs.get(pe["signatory_sha256"]), self.blobs.get(pe["page_sha256"]),
+                               self.blobs.get(inv["display_sha256"]))
+            if sig is None or page is None or disp is None:
+                raise Unavailable("an evidence blob is not readable")
+            return {"invitation_id": invitation_id, "party_ref": inv["party_ref"], "accepted_at": inv["used_at"],
+                    "display": json.loads(disp), "signatory": json.loads(sig),
+                    "acceptances": [{k: a[k] for k in ("acceptance_id", "doc_id", "version", "doc_sha256")}
+                                    for a in accs],
+                    "page_sha256": pe["page_sha256"], "page_text_b64": base64.b64encode(page).decode("ascii"),
+                    "ip_hmac_sha256": pe["ip_hmac_sha256"], "user_agent_hmac_sha256": pe["user_agent_hmac_sha256"],
+                    "hmac_key_id": pe["hmac_key_id"]}
+
     def revoke_client_invitation(self, request_id: str, invitation_id: str, body: dict) -> dict:
         with self.lock:
             self._require_rules()

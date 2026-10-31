@@ -260,3 +260,21 @@ def test_aegis_m2_a_basis_legal_no_longer_holds_is_refused_at_invoice_issue(vers
     # AEGIS r2 N6: say plainly that Legal's basis is out of force, never a hash/document mismatch that is not there
     assert msgs and all("basis is not in force at Legal" in m for m in msgs), msgs
     assert not any("does not match" in m or "is not current at Legal" in m for m in msgs), msgs
+
+
+# --- ADR 0028: the client acceptance page ---------------------------------------------------------------------------
+
+def test_an_acceptance_recorded_by_the_client_acceptance_page_is_recognised():
+    """legal-py's acceptance_view for a page acceptance adds ``via`` and ``invitation_id`` (and ADR 0022's
+    ``evidence_basis`` / ``basis_in_force``); the contract check counts it."""
+    page_acc = acceptance_doc(via="client_portal", invitation_id="lg-cin-0123456789ABCDEFGHJKMNPQRS",
+                              evidence_basis="founder_determination", basis_in_force=True)
+    ans = ask(client(acceptance=page_acc))
+    assert ans.available and ans.current and ans.acceptance_matches and ans.acceptance_basis_in_force is True
+
+
+def test_a_client_acceptance_legal_does_not_count_is_refused():
+    """legal-py answers ``evidence_sufficient: false`` for a client acceptance the page did not record (ADR 0028)."""
+    ans = ask(client(acceptance=acceptance_doc(evidence_sufficient=False, evidence_basis="founder_determination",
+                                               basis_in_force=True)))
+    assert ans.available and not ans.acceptance_matches

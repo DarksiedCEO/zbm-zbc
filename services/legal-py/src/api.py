@@ -465,6 +465,12 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                               _: str = Depends(andre("client-acceptance-invitations/read"))) -> dict:
         return svc.client_invitation_get(_id(invitation_id, LG_ID))
 
+    @app.get("/legal/v1/client-acceptance-invitations/{invitation_id}/evidence", dependencies=auth)
+    def client_invitation_evidence(invitation_id: str,
+                                   _: str = Depends(andre("client-acceptance-invitations/evidence"))) -> dict:
+        """Andre only: the signatory, the page text as shown and the HMACs of a used link."""
+        return svc.client_invitation_evidence(_id(invitation_id, LG_ID))
+
     @app.post("/legal/v1/client-acceptance-invitations/{invitation_id}/revoke", dependencies=auth)
     def client_invitation_revoke(invitation_id: str, _: str = Depends(andre("client-acceptance-invitations/revoke")),
                                  req: m.InvitationRevoke = Depends(body(m.InvitationRevoke))) -> dict:

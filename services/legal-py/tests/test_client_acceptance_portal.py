@@ -529,3 +529,20 @@ def test_a_missing_zbm_fact_refuses_the_fill():
 def test_bad_zbm_facts_refuse_to_start(raw):
     with pytest.raises(RuntimeError):
         config_mod.load({"LEGAL_SERVICE_TOKEN": "s" * 40, "LEGAL_ZBM_FACTS": raw})
+
+
+# --- 7. Andre reads the evidence back (the confirmation email, a dispute) -----------------------------------------
+
+def test_andre_reads_the_signatory_and_the_evidence_of_a_used_link(pair):
+    hr, _, _, docs = pair
+    out = invite(hr, docs)
+    path = f"/legal/v1/client-acceptance-invitations/{out['invitation_id']}/evidence"
+    assert hr.client.get(path, headers=hr.headers(andre=ANDRE_TOKEN)).status_code == 409     # not used yet
+    r = hr.ok(accept(hr, out["token"], docs), 201)
+    ev = hr.ok(hr.client.get(path, headers=hr.headers(andre=ANDRE_TOKEN)))
+    assert ev["signatory"] == SIGNATORY and ev["display"] == DISPLAY and ev["accepted_at"] == r["accepted_at"]
+    assert [a["acceptance_id"] for a in ev["acceptances"]] == [a["acceptance_id"] for a in r["acceptances"]]
+    assert ev["page_sha256"] == hashlib.sha256(PAGE).hexdigest() and base64.b64decode(ev["page_text_b64"]) == PAGE
+    assert (ev["ip_hmac_sha256"], ev["user_agent_hmac_sha256"], ev["hmac_key_id"]) == (HMAC_IP, HMAC_UA, KEY_ID)
+    for who in ("onboarding", "client_portal", "finance_31", "compliance_38"):
+        assert hr.get(path, caller=who).status_code == 403
