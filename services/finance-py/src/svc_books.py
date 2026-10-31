@@ -607,6 +607,19 @@ class BooksMixin:
     # ================================================================== bank statement lines (receipts)
 
     def bank_events(self, principal: str, request_id: str, lines: list[dict]) -> dict:
+        # RTM-01: the clients whose invoices these lines would match are asked about at Compliance first (outside the
+        # lock, as the Stripe path does); a line from a client that is not a current ALLOW is booked but HELD
+        with self.lock:
+            key, h, ent = self._idem(principal, request_id, "bank/events", lines)
+            if ent:
+                return ent["response"]
+            would = set()
+            for ln in lines:
+                inv0 = I2.match_receipt(ln["amount"], ln.get("reference_token"), self.db["invoices"], ln["entity"])
+                if inv0 is not None:
+                    would.add(inv0["client_id"])
+        g_cmp = Gather(self, f"bank|{request_id}|compliance", "intel_02_receivables", "bank_feed")
+        checks = {cid: self._client_check(g_cmp, cid) for cid in sorted(would)}
         with self.lock:
             key, h, ent = self._idem(principal, request_id, "bank/events", lines)
             if ent:
@@ -622,7 +635,7 @@ class BooksMixin:
                 raise InvalidReasons("statement lines refused", [R.item(
                     "PERIOD_LOCKED", f"period {period} of {', '.join(sorted(locked))} is locked: nothing in this "
                     "batch was posted")])
-            op = Op(self, f"bank|{request_id}", "intel_02_receivables", "bank_feed")
+            op = Op(self, f"bank|{request_id}", "intel_02_receivables", "bank_feed", g_cmp)
             results = []
             for ln in lines:
                 rct = rid("rct", ln["txn_ref_sha256"])
@@ -637,6 +650,11 @@ class BooksMixin:
                                        {k: op.get("invoices", k) for k in self.db["invoices"]}, entity)
                 ok_zbc = inv is not None and entity == "zbc" and acct == "1020" and inv["kind"] == "campaign_deposit"
                 ok_zbm = inv is not None and entity == "zbm" and acct == "1010"
+                if (ok_zbc or ok_zbm) and inv["client_id"] not in checks:
+                    # matched only after an earlier line in this batch changed the books: not asked yet, so held
+                    checks[inv["client_id"]] = ("unverified", "Compliance (38) was not asked about this client before "
+                                                "the line was booked", None)
+                check = checks.get(inv["client_id"]) if (ok_zbc or ok_zbm) else None
                 src = {"kind": "receipt", "id": rct}
                 try:
                     po = self._bank_stripe_payout(op, ln, amt, rct) if (inv is None and entity == "zbm"
@@ -659,7 +677,7 @@ class BooksMixin:
                                        "F1", src, f"F1|{rct}")
                         op.put("invoices", inv["invoice_id"], {**inv, "status": "paid", "paid_at": iso(self._now())})
                         prof = op.get("profiles", inv["campaign_id"])
-                        if prof and prof["status"] == "approved":
+                        if prof and prof["status"] == "approved" and not check:
                             op.put("profiles", inv["campaign_id"], {**prof, "status": "funded"})
                         status, etype = "matched", "receipt_matched"
                     elif ok_zbm:
@@ -695,7 +713,12 @@ class BooksMixin:
                                          else str(ln["value_date"]), "matched_at": iso(self._now()),
                                          "status": status, "entry_id": e["entry_id"],
                                          "reference_token": ln.get("reference_token")})
-                if status == "matched":
+                if status == "matched" and check:
+                    kind, why, ground = check
+                    self._open_compliance_hold(op, inv["invoice_id"], kind, why, rct, M.fmt(amt), e["entry_id"],
+                                               "ACH or wire", str(ln["value_date"]), sanctions=ground)
+                    status = f"matched_held_{'compliance' if kind == 'refused' else 'unverified'}"
+                elif status == "matched":
                     self._client_receipt(op, rct, inv, M.fmt(amt), str(ln["value_date"]))
                 results.append({"receipt_id": rct, "status": status, "entry_id": e["entry_id"]})
             resp = self._idem_add(op, key, h, {"results": results, "ledger_event_ids": op.events,
@@ -704,7 +727,12 @@ class BooksMixin:
             return resp
 
     def apply_receipt(self, request_id: str, receipt_id: str, invoice_id: str) -> dict:
-        """Andre applies an unapplied receipt (in the deposits account) to an issued campaign deposit invoice."""
+        """Andre applies an unapplied receipt (in the deposits account) to an issued campaign deposit invoice. RTM-01:
+        for a brand Compliance does not currently ALLOW it is applied but HELD (no campaign funded, no receipt)."""
+        with self.lock:
+            inv0 = self.db["invoices"].get(invoice_id)
+        g_cmp = Gather(self, f"apply|{request_id}|compliance", "andre", receipt_id)
+        check = self._client_check(g_cmp, inv0["client_id"]) if inv0 is not None else None
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"receipt/{receipt_id}", invoice_id)
             if ent:
@@ -719,7 +747,7 @@ class BooksMixin:
             if not (rc["entity"] == "zbc" and rc["into_account"] == "1020" and inv["kind"] == "campaign_deposit"):
                 raise Conflict("only a receipt that landed in the deposits account can be applied to a deposit invoice "
                                "(a deposit in the operating account is moved by an Andre top-up first)")
-            op = Op(self, f"apply|{request_id}", "andre", receipt_id)
+            op = Op(self, f"apply|{request_id}", "andre", receipt_id, g_cmp)
             amt = M.D(rc["amount"])
             try:
                 e = self._post(op, "zbc", [J.dr("2070", amt), J.cr("2010", amt, f"campaign:{inv['campaign_id']}")], "F1",
@@ -729,7 +757,7 @@ class BooksMixin:
             op.put("receipts", receipt_id, {**rc, "status": "matched", "invoice_id": invoice_id})
             op.put("invoices", invoice_id, {**inv, "status": "paid", "paid_at": iso(self._now())})
             prof = self.db["profiles"].get(inv["campaign_id"])
-            if prof and prof["status"] == "approved":
+            if prof and prof["status"] == "approved" and not check:
                 op.put("profiles", inv["campaign_id"], {**prof, "status": "funded"})
             for b in self.db["breaks"].values():
                 if b.get("receipt_id") == receipt_id and b["status"] == "open":
@@ -741,7 +769,12 @@ class BooksMixin:
             op.record(derived_id("rcta", receipt_id), "receipt_matched", "andre", receipt_id,
                       {"receipt_id": receipt_id, "invoice_id": invoice_id, "amount": M.fmt(amt)},
                       "Andre applied an unapplied receipt")
-            self._client_receipt(op, receipt_id, inv, M.fmt(amt), rc["value_date"])
+            if check:
+                kind, why, ground = check
+                self._open_compliance_hold(op, invoice_id, kind, why, receipt_id, M.fmt(amt), e["entry_id"],
+                                           "ACH or wire", rc["value_date"], sanctions=ground)
+            else:
+                self._client_receipt(op, receipt_id, inv, M.fmt(amt), rc["value_date"])
             resp = self._idem_add(op, key, h, {"receipt_id": receipt_id, "entry_id": e["entry_id"],
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
