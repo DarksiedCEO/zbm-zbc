@@ -183,9 +183,11 @@ fn ch6_health_reports_degraded_when_the_disk_is_below_the_floor() {
     let s = start(&log, &[("LEDGER_MIN_FREE_BYTES", "18446744073709551615")]);
     let (st, body) = http(s.port, "GET", "/health", None, "");
     assert_eq!(st, 503, "{body}");
+    // AEGIS wave A F-15a: Railway's deploy healthcheck (/livez) still passes, so a degraded ledger can be redeployed
+    assert_eq!(http(s.port, "GET", "/livez", None, "").0, 200);
     let v: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["status"], "degraded");
-    assert!(v["reasons"][0].as_str().unwrap().starts_with("disk_low"), "{body}");
+    assert_eq!(v["reasons"][0].as_str().unwrap(), "disk_low", "{body}");
     assert!(!body.contains(log.0.to_str().unwrap()), "no path in the open /health body");
     drop(s);
     assert_eq!(refused(&log, &[("LEDGER_MIN_FREE_BYTES", "lots")]), Ok(1));
@@ -230,4 +232,67 @@ fn rtm07_external_anchor_is_served_signed_and_enforced_at_start() {
     assert!(log.stderr().contains("rewritten"), "{}", log.stderr());
     assert_eq!(refused(&log, &[("LEDGER_ANCHORED_HEAD", "garbage")]), Ok(1));
     assert_eq!(refused(&log, &[("LEDGER_HEAD_SIGNING_KEY", "short")]), Ok(1));
+}
+
+
+/// AEGIS wave A F-6: a log whose last entry was stamped 100 years ahead (a bad clock before a restart) used to pin
+/// every later `recorded_at` there. After the restart the wall clock is used as observed, /health warns
+/// `clock_skew`, and the chain still verifies; a second restart keeps it sane.
+#[test]
+fn f6_an_entry_100_years_ahead_does_not_pin_later_timestamps_after_restart() {
+    use ledger_rust::{EventInput, Ledger, LedgerEntry};
+    let log = Scratch::new("f6");
+    let mut l = Ledger::new();
+    let mut e = l.build_event_entry(EventInput {
+        event_id: "fin-future-0".into(), department: "finance".into(), event_type: "invoice_issued".into(),
+        actor: "oct31_test".into(), subject_id: "inv_1".into(), payload_sha256: "cd".repeat(32), summary: "future".into(),
+    });
+    if let LedgerEntry::Event(ev) = &mut e {
+        ev.recorded_at = chrono::Utc::now() + chrono::Duration::days(36525);
+        ev.hash = sha256_hex(&ledger_rust::event_canonical(ev));
+    }
+    l.push_entry(e);
+    assert_eq!(l.verify_chain(), Ok(()));
+    std::fs::write(&log.0, format!("{}\n", serde_json::to_string(&l.entries()[0]).unwrap())).unwrap();
+    common::write_head_for(&log.0);
+    for round in 0..2 {
+        let s = start(&log, &[]);
+        let id = format!("fin-now-{round}");
+        let (st, body) = http(s.port, "POST", "/ledger/events", Some(FINANCE_TOKEN), &event(&id, "finance", "now"));
+        assert_eq!(st, 201, "{body}");
+        let at: Value = serde_json::from_str(&body).unwrap();
+        let year: i32 = at["recorded_at"].as_str().unwrap()[..4].parse().unwrap();
+        assert!(year < 2100, "pinned to the bad clock: {}", at["recorded_at"]);
+        let (st, h) = http(s.port, "GET", "/health", None, "");
+        assert_eq!(st, 200, "{h}");
+        if round == 0 {
+            assert!(h.contains("clock_skew"), "{h}");
+        }
+        let (st, v) = http(s.port, "GET", "/ledger/verify", Some(FINANCE_TOKEN), "");
+        assert_eq!(st, 200, "{v}");
+    }
+}
+
+/// AEGIS wave A F-5: GET /ledger/anchor?at=N gives the anchor of an earlier head, so the off-ledger store can check
+/// that today's head extends the one it stored.
+#[test]
+fn f5_anchor_at_an_earlier_head() {
+    let log = Scratch::new("f5");
+    let s = start(&log, &[]);
+    for i in 0..3 {
+        let id = format!("fin-a-{i}");
+        assert_eq!(http(s.port, "POST", "/ledger/events", Some(FINANCE_TOKEN), &event(&id, "finance", "e")).0, 201);
+    }
+    let (_, now) = http(s.port, "GET", "/ledger/anchor", Some(FINANCE_TOKEN), "");
+    let now: Value = serde_json::from_str(&now).unwrap();
+    let (st, at3) = http(s.port, "GET", "/ledger/anchor?at=3", Some(FINANCE_TOKEN), "");
+    assert_eq!(st, 200);
+    let at3: Value = serde_json::from_str(&at3).unwrap();
+    assert_eq!(at3["anchor"], now["anchor"]);
+    let (st, at1) = http(s.port, "GET", "/ledger/anchor?at=1", Some(FINANCE_TOKEN), "");
+    assert_eq!(st, 200);
+    assert!(at1.contains("\"entries\":1"), "{at1}");
+    assert_eq!(http(s.port, "GET", "/ledger/anchor?at=9", Some(FINANCE_TOKEN), "").0, 404);
+    assert_eq!(http(s.port, "GET", "/ledger/anchor?x=1", Some(FINANCE_TOKEN), "").0, 400);
+    assert_eq!(http(s.port, "GET", "/ledger/anchor?at=1", None, "").0, 401);
 }

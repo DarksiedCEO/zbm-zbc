@@ -38,12 +38,14 @@ Every route except `GET /health` needs `Authorization: Bearer <token>` (401 othe
 
 | Route | Answers |
 |---|---|
-| `GET /health` | 200 `{"status":"ok","service":"ledger-rust"}`; fix wave A (CH-6): 503 `{"status":"degraded","service":"ledger-rust","reasons":[…]}` while the last append failed to persist (`last_append_failed`, cleared by the next append that persists; an `ALERT ledger_write_failing` line is logged once) or the disk is below `LEDGER_MIN_FREE_BYTES` (`disk_low: …`). |
+| `GET /livez` | AEGIS wave A F-1: 200 `{"status":"alive"}` whenever the process serves — Railway's deploy healthcheck (a ledger with `disk_low` must still redeploy). No token. |
+| `GET /health` | 200 `{"status":"ok","service":"ledger-rust"}` (plus `"warnings":["clock_skew"]` for an hour after a clock fault, AEGIS F-6); fix wave A (CH-6): 503 `{"status":"degraded","service":"ledger-rust","reasons":[…]}` while the last append failed to persist (`last_append_failed`, cleared by the next append that persists; an `ALERT ledger_write_failing` line is logged once) or the disk is below `LEDGER_MIN_FREE_BYTES` (`disk_low: …`). |
 | `POST /ledger/append` | A finding. 201 entry; 400 invalid; 413 body over 64 KiB; 500 not recorded. With `Idempotency-Key: <finding_id>` (must equal the body's `finding_id`, else 400): 201 new, 200 identical retry (existing entry), 409 same `finding_id` with different content. Without the header every post is appended (unchanged). |
 | `POST /ledger/events` | A department event, idempotent on `(department, event_id)`: 201 new, 200 identical retry, 409 conflicting content, 400 invalid. Fix wave A (RTA-1): event ids are namespaced per department, so one department's write can never pre-claim (and 409-block) another department's deterministic id; existing logs load unchanged (no migration step). |
 | `GET /ledger/entries` | No query: every entry the caller may read, as a JSON array (the whole ledger for the shared token and `read_all` callers, byte-identical to before). `?after_seq=&limit=&department=&event_type=`: entries with `seq > after_seq`, at most `limit` (default 1000, max 10000), filters match events only; the next page is `after_seq=<last seq>`, and fewer than `limit` entries means the end. Served from a per-department / per-event-type index (a page costs O(page + log n), not a scan). Unknown/repeated/malformed parameters: 400; a `department` outside the caller's read scope: 403. |
 | `GET /ledger/verify` | 200 `{"valid":true,"entries":N}` / 409 `{"valid":false,"error":…}`. Incremental (verifies only what is new since the last verified head; the whole chain is verified at every start); `?full=1` re-verifies the whole in-memory chain AND re-reads and re-hashes the log from disk, which must end at the in-memory head. |
 | `GET /ledger/head` | `{"entries":N,"head_seq":N-1,"head_hash":"…"}` — the durable head checkpoint (plus `migrated_from` / `reset_from` when an operator override was ever applied). |
+| `GET /ledger/anchor?at=N` | AEGIS wave A F-5: the anchor of entries `0..N` (`N:<hash of entry N-1>`); 404 when the ledger holds fewer than N entries. Compliance uses it daily to check the ledger still extends the anchor it stored. |
 | `GET /ledger/anchor` | Fix wave A (RTM-07): `{"anchor":"<entries>:<head_hash>","entries":N,"head_hash":"…","at":"…","signature_alg":"HMAC-SHA256"|null,"signature":"<hex>"|null}`. `signature` = HMAC-SHA256(`LEDGER_HEAD_SIGNING_KEY`, `zbm-ledger-anchor-v1|<entries>|<head_hash>|<at>`) when the key is set. |
 
 With `LEDGER_CALLERS_FILE` set: 403 when a caller writes an event for a department it is not scoped to, writes a
@@ -66,6 +68,25 @@ the head kept OUTSIDE the system, where no service can write:
    hash at that position (a rewrite).
 3. With `LEDGER_HEAD_SIGNING_KEY` set, the stored record also proves the head came from this ledger (verify the
    HMAC with the same key, kept by Andre).
+
+AEGIS wave A F-5: steps 1-2 are automatic now. Compliance's scheduler stores the anchor daily on its own volume and
+checks each day that the ledger still extends the last stored one (`services/compliance-py/src/ledger_anchor.py`);
+a mismatch turns Compliance's `/health` red. `LEDGER_ANCHORED_HEAD` stays an optional floor you may set from the
+latest `anchor` in that store (`GET` it with your token from Compliance's log line `ledger_anchor_stored`).
+
+## Time (`recorded_at`)
+
+Ordering is `seq`. `recorded_at` is the wall clock as observed, corrected only when implausible (AEGIS wave A F-6): a
+small backward step (≤ 5 min) is clamped to the previous entry; a forward jump of more than 5 minutes beyond real
+elapsed time is stamped at the plausible time; a previous entry more than 5 minutes in the future (a bad clock before a
+restart) never pins later entries. Every fault is logged with both readings and warned on `/health` for an hour.
+
+## Rollback (one-way change, AEGIS wave A F-10)
+
+Since fix wave A (RTA-1) event ids are unique per department: two departments may hold the same `event_id`. A
+ledger binary from before fix wave A treats that as a corrupt log and refuses to start. Once any such pair exists the
+ledger **cannot be rolled back** to an older binary; roll forward (fix and redeploy the current code) instead. Check
+before a rollback: `GET /ledger/entries` (a `read_all` token) and look for an `event_id` held by two departments.
 
 ## Per-caller tokens (`LEDGER_CALLERS_FILE`)
 

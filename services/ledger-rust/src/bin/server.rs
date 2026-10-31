@@ -481,6 +481,7 @@ struct HealthState {
     log_dir: PathBuf,
     min_free_bytes: u64,
     last_append_failed: std::sync::atomic::AtomicBool,
+    disk_low_logged: std::sync::atomic::AtomicBool,
 }
 
 impl HealthState {
@@ -489,7 +490,7 @@ impl HealthState {
             if !self.last_append_failed.swap(true, Ordering::SeqCst) {
                 ledger_log!("ledger-rust: ALERT ledger_write_failing — an append could not be persisted; /health is 503 until one persists");
             }
-        } else if (200..300).contains(&status) && self.last_append_failed.swap(false, Ordering::SeqCst) {
+        } else if status == 201 && self.last_append_failed.swap(false, Ordering::SeqCst) {
             ledger_log!("ledger-rust: ledger_write_recovered — appends persist again");
         }
     }
@@ -501,7 +502,13 @@ impl HealthState {
         }
         if let Some(free) = free_bytes(&self.log_dir) {
             if free < self.min_free_bytes {
-                out.push(format!("disk_low: {free} bytes free, floor {}", self.min_free_bytes));
+                // AEGIS wave A F-15a: a fixed code on the open /health (the byte counts go to the log)
+                if !self.disk_low_logged.swap(true, Ordering::SeqCst) {
+                    ledger_log!("ledger-rust: ALERT disk_low — {free} bytes free, floor {}", self.min_free_bytes);
+                }
+                out.push("disk_low".to_string());
+            } else {
+                self.disk_low_logged.store(false, Ordering::SeqCst);
             }
         }
         out
@@ -523,7 +530,14 @@ fn free_bytes(dir: &Path) -> Option<u64> {
 fn health(app: &App) -> (u16, String) {
     let reasons = app.health.reasons();
     if reasons.is_empty() {
-        (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string())
+        // AEGIS wave A F-6: a clock fault within the past hour is a warning (appends still persist; ordering is seq)
+        match ledger_rust::recent_clock_skew() {
+            None => (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string()),
+            Some(_) => (
+                200,
+                serde_json::json!({"status": "ok", "service": "ledger-rust", "warnings": ["clock_skew"]}).to_string(),
+            ),
+        }
     } else {
         (503, serde_json::json!({"status": "degraded", "service": "ledger-rust", "reasons": reasons}).to_string())
     }
@@ -550,6 +564,25 @@ fn anchor(app: &App) -> (u16, String) {
         })
         .to_string(),
     )
+}
+
+/// AEGIS wave A F-5: `{"anchor":"<n>:<hash of entry n-1>","entries":n,"head_hash":…}`; 404 when the ledger holds
+/// fewer than `n` entries (it was rolled back, or the store is ahead of it).
+fn anchor_at(app: &App, n: u64) -> (u16, String) {
+    let hash = app.gate.read(&app.ledger, |l| {
+        if n == 0 {
+            Some(genesis_hash())
+        } else {
+            l.entries().get((n - 1) as usize).map(|e| e.hash().to_string())
+        }
+    });
+    match hash {
+        Some(h) => (
+            200,
+            serde_json::json!({"anchor": anchor_string(n, &h), "entries": n, "head_hash": h}).to_string(),
+        ),
+        None => error_json(404, format!("the ledger holds fewer than {n} entries")),
+    }
 }
 
 /// Locks the ledger. A poisoned lock means a panic happened mid-operation;
@@ -1003,7 +1036,7 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
     // is read (fail-closed — an unmatched or malformed Authorization header
     // never falls through to a handler). /health stays open for basic
     // liveness checks, matching detection-py/fulfillment-py.
-    let principal = if url == "/health" {
+    let principal = if url == "/health" || url == "/livez" {
         None
     } else {
         match extract_bearer_token(&request).and_then(|t| app.auth.authenticate(&t)) {
@@ -1015,7 +1048,7 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
     // Sweep F-2: only GET /ledger/entries and GET /ledger/verify take a query
     // string; every other URL is matched whole, exactly as before.
     let (path, query) = match url.split_once('?') {
-        Some((p, q)) if p == "/ledger/entries" || p == "/ledger/verify" => (p, Some(q)),
+        Some((p, q)) if p == "/ledger/entries" || p == "/ledger/verify" || p == "/ledger/anchor" => (p, Some(q)),
         _ => (url.as_str(), None),
     };
 
@@ -1031,8 +1064,20 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
 
     match (method, path, query) {
         (Method::GET, "/health", None) => health(&app),
+        // AEGIS wave A F-1/F-15a: liveness for Railway's deploy healthcheck (200 whenever this process serves)
+        (Method::GET, "/livez", None) => (200, serde_json::json!({"status": "alive", "service": "ledger-rust"}).to_string()),
 
         (Method::GET, "/ledger/anchor", None) => on_blocking(&app, anchor).await,
+
+        // AEGIS wave A F-5: the anchor of an earlier head (`?at=N`: entries 0..N), so the off-ledger store can check
+        // that today's head EXTENDS the last stored one (same hash at position N)
+        (Method::GET, "/ledger/anchor", Some(q)) => {
+            let n = match q.strip_prefix("at=").and_then(|v| v.parse::<u64>().ok()) {
+                Some(n) => n,
+                None => return error_json(400, format!("unknown query {q:?} (accepted: at=<entries>)")),
+            };
+            on_blocking(&app, move |app| anchor_at(app, n)).await
+        }
 
         (Method::GET, "/ledger/entries", q) => {
             let scope = principal.as_ref().expect("authenticated above").read_scope();
@@ -1927,7 +1972,7 @@ fn main() {
         match check_anchor(ledger.entries(), a) {
             Ok(()) => ledger_log!("ledger-rust: external anchor {a} verified (LEDGER_ANCHORED_HEAD)"),
             Err(e) => refuse(format!(
-                "REFUSING TO START — LEDGER_ANCHORED_HEAD: {e}. Restore the ledger from a backup taken at or \
+                "LEDGER_ANCHORED_HEAD: {e}. Restore the ledger from a backup taken at or \
                  after the anchor (services/ledger-rust/README.md, 'External anchor')"
             )),
         }
@@ -1970,8 +2015,45 @@ fn main() {
                 .unwrap_or_else(|| PathBuf::from(".")),
             min_free_bytes,
             last_append_failed: std::sync::atomic::AtomicBool::new(false),
+            disk_low_logged: std::sync::atomic::AtomicBool::new(false),
         },
         head_key,
     });
     runtime.block_on(serve(listener, app, max_connections));
+}
+
+
+#[cfg(test)]
+mod health_tests {
+    use super::*;
+
+    fn state(min_free: u64) -> HealthState {
+        HealthState {
+            log_dir: std::env::temp_dir(),
+            min_free_bytes: min_free,
+            last_append_failed: std::sync::atomic::AtomicBool::new(false),
+            disk_low_logged: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// AEGIS wave A F-12 (mutant R5): a failed append must show on /health until an append persists again.
+    #[test]
+    fn a_failed_append_is_reported_until_one_persists() {
+        let h = state(0);
+        assert!(h.reasons().is_empty());
+        h.note_write(500);
+        assert_eq!(h.reasons(), vec!["last_append_failed".to_string()]);
+        h.note_write(409);
+        h.note_write(200);
+        assert_eq!(h.reasons(), vec!["last_append_failed".to_string()], "a refusal or a replay is not a persisted append");
+        h.note_write(201);
+        assert!(h.reasons().is_empty());
+    }
+
+    /// AEGIS wave A F-15a: the open /health carries a fixed code, never the byte counts.
+    #[test]
+    fn disk_low_is_a_fixed_code() {
+        let h = state(u64::MAX);
+        assert_eq!(h.reasons(), vec!["disk_low".to_string()]);
+    }
 }
