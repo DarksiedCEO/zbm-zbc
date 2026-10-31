@@ -77,7 +77,9 @@ PUT_KINDS = {
     "hold": ("holds", "hold_id"), "takedown": ("takedowns", "notice_id"), "filing": ("filings", "filing_id"),
     "ruling": ("rulings", "ruling_id"), "signoff": ("signoffs", "signoff_id"), "engagement": ("engagements", "counsel_ref"),
     "review": ("reviews", "review_id"), "package": ("packages", "package_id"), "outbound": ("outbound", "outbound_id"),
+    "invitation": ("invitations", "invitation_id"),
 }
+INVITATION_DAYS = 14          # money red team RTM-13: an acceptance invitation is valid for 14 days, used once
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -294,6 +296,7 @@ class LegalService:
         self.doc_versions: dict[str, dict] = {}
         self.blob_meta: dict[str, dict] = {}
         self.acceptances: dict[str, dict] = {}
+        self.invitations: dict[str, dict] = {}
         self.envelopes: dict[str, dict] = {}
         self.pb_proposals: dict[str, dict] = {}
         self.playbooks: dict[str, dict] = {}
@@ -1227,8 +1230,11 @@ class LegalService:
     # ================================================================== acceptances (§B.2, §C.3)
 
     def acceptance_view(self, a: dict) -> dict:
-        return {k: a.get(k) for k in ("acceptance_id", "doc_id", "version", "doc_sha256", "accepted_at", "method",
-                                      "evidence_sufficient", "party_ref")} | {"rules_pinned": self.rules_pinned}
+        out = {k: a.get(k) for k in ("acceptance_id", "doc_id", "version", "doc_sha256", "accepted_at", "method",
+                                     "evidence_sufficient", "party_ref")} | {"rules_pinned": self.rules_pinned}
+        if a.get("invitation_id"):
+            out["invitation_id"] = a["invitation_id"]                  # RTM-13
+        return out
 
     def get_acceptance(self, acceptance_id: str) -> dict:
         with self.lock:
@@ -1256,6 +1262,7 @@ class LegalService:
                     reasons.append(R.item("VERSION_NOT_IN_FORCE", f"{body['doc_id']} {body['version']} is not "
                                           "approved and in force at accepted_at"))
                 reasons += self._instance_reasons(v, body["party_ref"])
+                reasons += self._invitation_reasons(principal, v, body)
             if body["presented_sha256"] != body["doc_sha256"]:
                 reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the text shown is not the document exactly"))
             if body["affirmative_act"] is not True:
@@ -1289,6 +1296,9 @@ class LegalService:
                    "method": rec["method"], "evidence_sufficient": rec["evidence_sufficient"],
                    "signer_identity_ref_sha256": sha(rec["signer_identity_ref"])},
                   f"Acceptance of {rec['doc_id']} {rec['version']} recorded")
+            if body.get("invitation_id"):
+                rec["invitation_id"] = body["invitation_id"]
+                op.update("invitations", body["invitation_id"], {"used_by": aid, "used_at": iso(now)})
             op.add("acceptance", rec)
             obligations = self._bind_obligations(op, rec, v) if rec["evidence_sufficient"] else []
             reasons = [] if rec["evidence_sufficient"] else [
@@ -1296,6 +1306,45 @@ class LegalService:
                        cq_id="CQ-19")]
             return self._answer(op, key, h, {**self.acceptance_view(rec), "obligation_ids": obligations,
                                              "reasons": reasons, "reason_lines": R.lines(reasons)})
+
+    def _invitation_reasons(self, principal: str, v: dict, body: dict) -> list[dict]:
+        """Money red team RTM-13: the onboarding token records a STANDARD form's acceptance (a version bound to no
+        party) only with Andre's invitation for that party, document and version: unused and unexpired. A version
+        bound to a party keeps its own binding (``_instance_reasons``); other callers are unchanged."""
+        inv_id = body.get("invitation_id")
+        if principal != "onboarding" or v.get("party_ref"):
+            return []
+        inv = self.invitations.get(inv_id or "")
+        ok = (inv is not None and inv["party_ref"] == body["party_ref"] and inv["doc_id"] == body["doc_id"]
+              and inv["version"] == body["version"] and not inv.get("used_by")
+              and parse_iso(inv["expires_at"]) > self._now())
+        if ok:
+            return []
+        return [R.item("ACCEPTANCE_NOT_INVITED", "a standard form is accepted for a client only with Andre's unused, "
+                       "unexpired invitation for that client, document and version")]
+
+    def create_invitation(self, request_id: str, body: dict) -> dict:
+        """RTM-13: Andre invites ONE client to accept ONE document version (the acceptance page carries its id)."""
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, "acceptance-invitations", body)
+            if ent:
+                return ent["response"]
+            v = self.doc_versions.get(f"{body['doc_id']}@{body['version']}")
+            if v is None or not self._in_force(v):
+                raise Conflict(f"no approved, in-force {body['doc_id']} version {body['version']}")
+            now = self._now()
+            iid = rid("inv", "andre", request_id)
+            rec = {"invitation_id": iid, "doc_id": body["doc_id"], "version": body["version"],
+                   "party_ref": body["party_ref"], "created_at": iso(now),
+                   "expires_at": iso(now + timedelta(days=INVITATION_DAYS)), "used_by": None, "used_at": None}
+            op = Op(self, f"inv|{iid}", "andre", body["party_ref"])
+            op.ev("inv", "acceptance_invitation_issued", body["party_ref"],
+                  {"invitation_id": iid, "doc_id": rec["doc_id"], "version": rec["version"],
+                   "expires_at": rec["expires_at"]}, f"Acceptance invitation for {rec['doc_id']} {rec['version']}",
+                  actor="andre")
+            op.add("invitation", rec)
+            return self._answer(op, key, h, dict(rec))
 
     def _instance_reasons(self, v: dict, party_ref: str) -> list[dict]:
         """AEGIS N17-4: a party accepts only a document INSTANCE bound to it. A template (declared variables, or any
