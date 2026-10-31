@@ -70,7 +70,7 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/fin/v1/rate-cards/decisions$"), 64 * 1024),
     (re.compile(r"^/fin/v1/bank/events$"), 128 * 1024),
     (re.compile(r"^/fin/v1/rails/[a-z]+/events$"), 64 * 1024),
-    (re.compile(r"^/fin/v1/stripe/events$"), 300 * 1024),          # a raw Stripe event (<= 256 KiB) in JSON
+    (re.compile(r"^/fin/v1/stripe/events$"), 600 * 1024),          # a raw Stripe event (<= 256 KiB), JSON-escaped (RTM-10)
     (re.compile(r"^/fin/v1/invoices$"), 64 * 1024),
     (re.compile(r"^/fin/v1/payout-handoffs$"), 32 * 1024),
     (re.compile(r"^/fin/v1/journal/[a-z]+/corrections$"), 32 * 1024),
