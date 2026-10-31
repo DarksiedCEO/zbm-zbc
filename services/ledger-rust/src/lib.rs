@@ -415,29 +415,105 @@ pub enum LedgerError {
 #[derive(Debug, Default)]
 pub struct Ledger {
     entries: Vec<LedgerEntry>,
-    /// AEGIS wave A F-6: the wall time stamped on the last entry THIS process appended, and the monotonic instant it
-    /// was appended at: `wall + elapsed` is where a sane wall clock should be now (None after a restart, until the
-    /// first append).
-    last_append: Option<(DateTime<Utc>, std::time::Instant)>,
+    /// AEGIS wave A F-6 / round 2 N-1, N-5: this process's view of the wall clock (see `ClockState`).
+    clock: std::sync::Mutex<ClockState>,
 }
 
-/// AEGIS wave A F-6: how far a wall-clock reading may disagree with the previous entry / the monotonic clock before
-/// it is treated as a clock fault instead of real time (5 minutes).
+/// AEGIS wave A F-6: how far a wall-clock reading may disagree with the monotonic clock before it is treated as a
+/// clock fault instead of real time (5 minutes).
 pub const CLOCK_SKEW_TOLERANCE_SECS: i64 = 300;
+/// AEGIS round 2 N-1: a wall clock behind the previous entry by more than this is a clock fault (`clock_skew`); a
+/// smaller difference (an NTP slew) is absorbed silently by the +1 µs rule.
+pub const CLOCK_EPSILON_MICROS: i64 = 1_000_000;
+/// AEGIS round 2 N-5: a forward step of the wall clock (a slow clock corrected by NTP, a paused VM resumed) is adopted
+/// once it has been seen consistently for this long (monotonic time) ...
+pub const FORWARD_ADOPT_AFTER_SECS: u64 = 120;
+/// ... and only when it is at most this large. A bigger jump (the 100-years-ahead clock of F-6) is never adopted:
+/// entries keep the time derived from the monotonic clock and /health keeps warning `clock_skew`.
+pub const FORWARD_ADOPT_MAX_SECS: i64 = 86_400;
 
-/// What `Ledger::stamp` found about the wall clock.
+/// What the stamping rule found about the wall clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClockSkew {
-    /// The clock agrees with the previous entry and with elapsed real time.
+    /// The clock agrees with elapsed real time and is not behind the previous entry.
     None,
-    /// A small backward step (at most the tolerance, e.g. an NTP correction): stamped with the previous entry's time.
-    SmallBackward,
-    /// The wall clock jumped ahead of the monotonic clock by more than the tolerance (a bad clock, a VM resumed with
-    /// a wrong time): stamped with the plausible time (previous stamp + elapsed real time), never the jump.
+    /// The wall clock jumped ahead of the monotonic clock by more than the tolerance and has not (yet) been adopted:
+    /// stamped with the plausible time (last trusted wall reading + elapsed monotonic time), never the jump.
     ForwardJump,
-    /// The previous entry is more than the tolerance in the future of the wall clock (it was stamped under a bad
-    /// clock, possibly before a restart): stamped with the wall clock as observed; ordering stays `seq`.
-    PreviousInFuture,
+    /// A forward step that stayed consistent for `FORWARD_ADOPT_AFTER_SECS` (and is at most a day) was adopted as
+    /// the real time from now on (logged once per step).
+    ForwardStepAdopted,
+    /// The wall clock stepped back by more than the tolerance against the monotonic clock: stamped with the
+    /// plausible time (never the past); the wall clock is used again once it agrees with elapsed real time.
+    BackwardStep,
+    /// The previous entry is ahead of the wall clock by more than `CLOCK_EPSILON_MICROS` with no monotonic baseline
+    /// to tell which is wrong (right after a restart): stamped previous + 1 µs, so `recorded_at` never goes back.
+    PreviousAhead,
+}
+
+/// AEGIS round 2 N-1/N-5: the clock rule, kept per process.
+///
+/// * `base`: the last wall-clock reading that agreed with elapsed real time, and the monotonic instant of it.
+///   `base.wall + (mono - base.mono)` is the *plausible* time now. Only trusted readings move it; a stamp produced
+///   on a fault path never becomes the baseline (that was N-1: one bad reading kept every later stamp behind).
+/// * `forward`: a forward offset seen against the plausible time, and since when, to adopt a lasting forward step.
+///
+/// The stamp is `max(candidate, previous + 1 µs)`, where the candidate is the wall clock when it is plausible and the
+/// plausible time when it is not: `recorded_at` never goes backwards, and it follows the wall clock again as soon as
+/// the wall clock is plausible (and not behind the previous entry).
+#[derive(Debug, Default, Clone)]
+pub struct ClockState {
+    base: Option<(DateTime<Utc>, std::time::Instant)>,
+    forward: Option<(chrono::Duration, std::time::Instant)>,
+}
+
+impl ClockState {
+    pub fn stamp(&mut self, prev: Option<DateTime<Utc>>, now: DateTime<Utc>, mono: std::time::Instant) -> (DateTime<Utc>, ClockSkew) {
+        let tol = chrono::Duration::seconds(CLOCK_SKEW_TOLERANCE_SECS);
+        let plausible = self.base.map(|(wall, at)| {
+            wall + chrono::Duration::from_std(mono.saturating_duration_since(at)).unwrap_or_else(|_| chrono::Duration::zero())
+        });
+        let (candidate, mut skew, trusted) = match plausible {
+            None => (now, ClockSkew::None, true),
+            Some(pl) if now > pl + tol => {
+                let off = now - pl;
+                let since = match self.forward {
+                    Some((o, since)) if (off - o).abs() <= tol => since,
+                    _ => {
+                        self.forward = Some((off, mono));
+                        mono
+                    }
+                };
+                let stable = mono.saturating_duration_since(since) >= std::time::Duration::from_secs(FORWARD_ADOPT_AFTER_SECS);
+                if stable && off <= chrono::Duration::seconds(FORWARD_ADOPT_MAX_SECS) {
+                    (now, ClockSkew::ForwardStepAdopted, true)
+                } else {
+                    (pl, ClockSkew::ForwardJump, false)
+                }
+            }
+            Some(pl) if now < pl - tol => {
+                self.forward = None;
+                (pl, ClockSkew::BackwardStep, false)
+            }
+            Some(_) => (now, ClockSkew::None, true),
+        };
+        if trusted {
+            self.base = Some((now, mono));
+            self.forward = None;
+        }
+        let stamp = match prev {
+            Some(p) if p >= candidate => p + chrono::Duration::microseconds(1),
+            _ => candidate,
+        };
+        if skew == ClockSkew::None {
+            if let Some(p) = prev {
+                if p - now > chrono::Duration::microseconds(CLOCK_EPSILON_MICROS) {
+                    skew = ClockSkew::PreviousAhead;
+                }
+            }
+        }
+        (stamp, skew)
+    }
 }
 
 static LAST_SKEW: std::sync::Mutex<Option<(std::time::Instant, ClockSkew)>> = std::sync::Mutex::new(None);
@@ -605,7 +681,7 @@ pub fn genesis_hash() -> String {
 
 impl Ledger {
     pub fn new() -> Self {
-        Ledger { entries: Vec::new(), last_append: None }
+        Ledger { entries: Vec::new(), clock: Default::default() }
     }
 
     pub fn len(&self) -> usize {
@@ -620,55 +696,38 @@ impl Ledger {
         &self.entries
     }
 
-    /// CH-12 + AEGIS wave A F-6: the time stamped on a new entry. Ordering is `seq`, always; `recorded_at` is the
-    /// wall clock as observed, corrected only where a reading is implausible (see `stamp`). A clock fault is logged
-    /// with both readings and shows as a `clock_skew` warning on GET /health for an hour.
+    /// CH-12 + AEGIS wave A F-6 + round 2 N-1/N-5: the time stamped on a new entry (`ClockState::stamp`). Ordering
+    /// is `seq`; `recorded_at` never goes backwards. A clock fault is logged with both readings and shows as a
+    /// `clock_skew` warning on GET /health for an hour (and for as long as the last entry is ahead of the wall
+    /// clock, see `ahead_of_wall_clock`).
     pub fn next_recorded_at(&self) -> DateTime<Utc> {
-        let plausible = self.last_append.map(|(wall, at)| {
-            wall + chrono::Duration::from_std(at.elapsed()).unwrap_or_else(|_| chrono::Duration::zero())
-        });
         let now = Utc::now();
         let prev = self.entries.last().map(LedgerEntry::recorded_at);
-        let (stamp, skew) = Self::stamp(prev, now, plausible);
+        let (stamp, skew) = self
+            .clock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stamp(prev, now, std::time::Instant::now());
         if skew != ClockSkew::None {
             ledger_log!(
-                "ledger-rust: WARNING — clock_skew {skew:?}: wall clock {}, previous entry {}, plausible now {}; \
-                 stamped {} (ordering is seq)",
+                "ledger-rust: WARNING — clock_skew {skew:?}: wall clock {}, previous entry {}; stamped {} \
+                 (recorded_at never goes backwards; ordering is seq)",
                 now.to_rfc3339(),
                 prev.map(|p| p.to_rfc3339()).unwrap_or_default(),
-                plausible.map(|p| p.to_rfc3339()).unwrap_or_default(),
                 stamp.to_rfc3339()
             );
-            if skew != ClockSkew::SmallBackward {
-                *LAST_SKEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((std::time::Instant::now(), skew));
-            }
+            *LAST_SKEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((std::time::Instant::now(), skew));
         }
         stamp
     }
 
-    /// The pure rule of `next_recorded_at`. `plausible`: the previous stamp of this process plus the real time
-    /// elapsed since (None right after a restart).
-    pub fn stamp(prev: Option<DateTime<Utc>>, now: DateTime<Utc>, plausible: Option<DateTime<Utc>>) -> (DateTime<Utc>, ClockSkew) {
-        let tol = chrono::Duration::seconds(CLOCK_SKEW_TOLERANCE_SECS);
-        if let Some(pl) = plausible {
-            if now > pl + tol {
-                let at = match prev {
-                    Some(p) if p > pl => p,
-                    _ => pl,
-                };
-                return (at, ClockSkew::ForwardJump);
-            }
-        }
-        match prev {
-            Some(p) if p > now + tol => (now, ClockSkew::PreviousInFuture),
-            Some(p) if p > now => (p, ClockSkew::SmallBackward),
-            _ => (now, ClockSkew::None),
-        }
-    }
-
-    /// Records that this process just appended an entry stamped `at` (the baseline of the next plausibility check).
-    pub fn note_append(&mut self, at: DateTime<Utc>) {
-        self.last_append = Some((at, std::time::Instant::now()));
+    /// AEGIS round 2 N-1: the last entry is stamped more than the tolerance ahead of the wall clock (a bad clock at
+    /// some point; new entries are stamped after it). A standing `clock_skew` warning on GET /health.
+    pub fn ahead_of_wall_clock(&self) -> bool {
+        self.entries
+            .last()
+            .map(|e| e.recorded_at() > Utc::now() + chrono::Duration::seconds(CLOCK_SKEW_TOLERANCE_SECS))
+            .unwrap_or(false)
     }
 
     fn last_hash(&self) -> String {
@@ -752,7 +811,6 @@ impl Ledger {
     /// `persistence::PersistentLedger` instead.
     pub fn append(&mut self, record: LedgerRecordInput) -> &LedgerEntry {
         let entry = self.build_entry(record);
-        self.note_append(entry.recorded_at());
         self.push_entry(entry);
         self.entries.last().expect("just pushed")
     }
@@ -761,7 +819,6 @@ impl Ledger {
     /// `PersistentLedger::append_event` for the served behavior).
     pub fn append_event(&mut self, input: EventInput) -> &LedgerEntry {
         let entry = self.build_event_entry(input);
-        self.note_append(entry.recorded_at());
         self.push_entry(entry);
         self.entries.last().expect("just pushed")
     }
@@ -771,7 +828,7 @@ impl Ledger {
     /// chain itself — callers must call `verify_chain()` afterward before
     /// trusting the result.
     pub fn from_entries(entries: Vec<LedgerEntry>) -> Self {
-        Ledger { entries, last_append: None }
+        Ledger { entries, clock: Default::default() }
     }
 
     /// Recomputes every entry's hash (findings AND events) from its own
@@ -887,8 +944,8 @@ mod tests {
     fn ch12_recorded_at_never_goes_backwards() {
         let mut l = Ledger::new();
         l.append_event(sample_event("e-0"));
-        // the previous entry was recorded slightly "in the future" (the clock has since stepped back 2 minutes)
-        let future = Utc::now() + chrono::Duration::minutes(2);
+        // the previous entry was recorded "in the future" (the clock has since stepped back 3 days)
+        let future = Utc::now() + chrono::Duration::days(3);
         if let LedgerEntry::Event(e) = &mut l.entries[0] {
             e.recorded_at = future;
             e.hash = sha256_hex(&event_canonical(e));
@@ -899,10 +956,22 @@ mod tests {
         assert!(l.entries[1].recorded_at() >= future, "event stamped before the previous entry");
         assert!(l.entries[2].recorded_at() >= l.entries[1].recorded_at(), "finding stamped before the previous entry");
         assert_eq!(l.verify_chain(), Ok(()));
+        // a 2-minute step back (within the monotonic tolerance) is also never stamped before the previous entry
+        let mut l = Ledger::new();
+        l.append_event(sample_event("m-0"));
+        let ahead = Utc::now() + chrono::Duration::minutes(2);
+        if let LedgerEntry::Event(e) = &mut l.entries[0] {
+            e.recorded_at = ahead;
+            e.hash = sha256_hex(&event_canonical(e));
+        }
+        l.append_event(sample_event("m-1"));
+        assert!(l.entries[1].recorded_at() > ahead);
+        assert_eq!(l.verify_chain(), Ok(()));
         // a clock that moves on normally is used as is
         let now = Utc::now();
-        assert_eq!(Ledger::stamp(Some(now - chrono::Duration::seconds(5)), now, None), (now, ClockSkew::None));
-        assert_eq!(Ledger::stamp(None, now, None), (now, ClockSkew::None));
+        let mut c = ClockState::default();
+        assert_eq!(c.stamp(Some(now - chrono::Duration::seconds(5)), now, std::time::Instant::now()), (now, ClockSkew::None));
+        assert_eq!(ClockState::default().stamp(None, now, std::time::Instant::now()), (now, ClockSkew::None));
     }
 
     #[test]
@@ -939,26 +1008,106 @@ mod tests {
         assert!(check_anchor(l.entries(), "4:ABC").is_err());
     }
 
-    /// AEGIS wave A F-6: one append under a clock 100 years ahead used to pin every later `recorded_at` to 2126
-    /// (even after the clock was corrected and the ledger restarted).
+    /// Drives a `ClockState` through wall-clock readings at monotonic offsets (seconds after `m0`); returns the stamps.
+    fn drive(c: &mut ClockState, m0: std::time::Instant, prev: &mut Option<DateTime<Utc>>, steps: &[(u64, DateTime<Utc>)])
+        -> Vec<(DateTime<Utc>, ClockSkew)> {
+        steps
+            .iter()
+            .map(|&(secs, wall)| {
+                let r = c.stamp(*prev, wall, m0 + std::time::Duration::from_secs(secs));
+                assert!(prev.map(|p| r.0 > p).unwrap_or(true), "went backwards: {:?} after {:?}", r.0, prev);
+                *prev = Some(r.0);
+                r
+            })
+            .collect()
+    }
+
+    /// AEGIS wave A F-6: one append under a clock 100 years ahead used to pin every later `recorded_at` to 2126.
+    /// In-process the jump is never adopted (not even when it lasts), so nothing is stamped in 2126 at all.
     #[test]
     fn f6_a_forward_jump_never_pins_the_clock() {
-        let now = Utc::now();
+        let t0 = Utc::now();
         let century = chrono::Duration::days(36525);
-        // in-process: the wall clock jumps 100 years ahead of the monotonic clock -> the plausible time is stamped
-        let prev = now - chrono::Duration::seconds(1);
-        let (at, skew) = Ledger::stamp(Some(prev), now + century, Some(now));
-        assert_eq!(skew, ClockSkew::ForwardJump);
-        assert!(at <= now + chrono::Duration::seconds(1), "stamped {at}");
-        // after a restart (no monotonic baseline), the previous entry carries the bad time: the wall clock is used
-        let (at, skew) = Ledger::stamp(Some(now + century), now, None);
-        assert_eq!((at, skew), (now, ClockSkew::PreviousInFuture));
-        // a small NTP step back stays monotonic
-        let (at, skew) = Ledger::stamp(Some(now + chrono::Duration::seconds(30)), now, None);
-        assert_eq!((at, skew), (now + chrono::Duration::seconds(30), ClockSkew::SmallBackward));
+        let m0 = std::time::Instant::now();
+        let mut c = ClockState::default();
+        let mut prev = None;
+        let s = drive(&mut c, m0, &mut prev, &[(0, t0), (1, t0 + century), (200, t0 + century + chrono::Duration::seconds(199)),
+                                                (400, t0 + chrono::Duration::seconds(400))]);
+        assert_eq!(s[1].1, ClockSkew::ForwardJump);
+        assert_eq!(s[2].1, ClockSkew::ForwardJump, "a century jump must never be adopted");
+        assert!(s[2].0 <= t0 + chrono::Duration::seconds(201), "stamped {}", s[2].0);
+        assert_eq!(s[3], (t0 + chrono::Duration::seconds(400), ClockSkew::None), "the corrected clock is used again");
         // within the tolerance, a forward reading is real time passing
-        let (at, skew) = Ledger::stamp(Some(prev), now + chrono::Duration::seconds(60), Some(now));
-        assert_eq!((at, skew), (now + chrono::Duration::seconds(60), ClockSkew::None));
+        let mut c = ClockState::default();
+        let mut prev = None;
+        let s = drive(&mut c, m0, &mut prev, &[(0, t0), (1, t0 + chrono::Duration::seconds(60))]);
+        assert_eq!(s[1], (t0 + chrono::Duration::seconds(60), ClockSkew::None));
+    }
+
+    /// AEGIS round 2 N-1 (clamp_probe T1/T5, c04 L4): the wall clock steps back 3 days in a running ledger and is
+    /// corrected later. No stamp goes back, the stamps keep following real time while the clock is wrong, and the
+    /// wall clock is used again as soon as it is corrected (no permanent offset).
+    #[test]
+    fn n1_a_backward_step_then_correction_never_goes_back_and_resumes_the_wall_clock() {
+        let t0 = Utc::now();
+        let back = chrono::Duration::days(3);
+        let m0 = std::time::Instant::now();
+        let sec = chrono::Duration::seconds;
+        for step in [back, chrono::Duration::minutes(2), sec(10)] {
+            let mut c = ClockState::default();
+            let mut prev = None;
+            let s = drive(&mut c, m0, &mut prev, &[(0, t0), (1, t0 + sec(1)), (2, t0 + sec(2) - step), (3, t0 + sec(3) - step),
+                                                    (10, t0 + sec(10)), (12, t0 + sec(12))]);
+            assert_ne!(s[2].1, ClockSkew::None, "a {step} step back must raise clock_skew");
+            assert!(s[3].0 > s[2].0 && s[3].0 < t0 + sec(10), "stamps keep moving with real time: {:?}", s[3]);
+            assert_eq!(s[4], (t0 + sec(10), ClockSkew::None), "after the correction the wall clock is used again ({step})");
+            assert_eq!(s[5], (t0 + sec(12), ClockSkew::None));
+        }
+    }
+
+    /// AEGIS round 2 N-5 (clamp_probe T2): a clock 10 minutes slow is corrected by NTP. The step is adopted once it
+    /// has lasted FORWARD_ADOPT_AFTER_SECS, so the stamps do not stay 10 minutes behind real time until a restart.
+    #[test]
+    fn n5_a_slow_clock_corrected_forward_is_adopted_once_it_lasts() {
+        let t0 = Utc::now();
+        let m0 = std::time::Instant::now();
+        let sec = chrono::Duration::seconds;
+        let mut c = ClockState::default();
+        let mut prev = None;
+        let s = drive(&mut c, m0, &mut prev, &[(0, t0), (1, t0 + sec(601)), (60, t0 + sec(660)), (130, t0 + sec(730)),
+                                                (131, t0 + sec(731))]);
+        assert_eq!(s[1].1, ClockSkew::ForwardJump);
+        assert_eq!(s[2].1, ClockSkew::ForwardJump);
+        assert_eq!(s[3], (t0 + sec(730), ClockSkew::ForwardStepAdopted));
+        assert_eq!(s[4], (t0 + sec(731), ClockSkew::None), "tracks the wall clock from then on");
+        // a forward jump that does not stay put is not adopted
+        let mut c = ClockState::default();
+        let mut prev = None;
+        let s = drive(&mut c, m0, &mut prev, &[(0, t0), (1, t0 + sec(601)), (130, t0 + sec(130) + sec(3000))]);
+        assert_eq!(s[2].1, ClockSkew::ForwardJump);
+    }
+
+    /// AEGIS round 2 N-1: right after a restart there is no monotonic baseline, so an entry ahead of the wall clock
+    /// (stamped under a bad clock before the restart) cannot be overruled: the next stamp is previous + 1 µs, never
+    /// before it, and it is reported (`PreviousAhead`; GET /health keeps the `clock_skew` warning while it lasts).
+    #[test]
+    fn n1_after_a_restart_an_entry_ahead_of_the_wall_clock_is_never_undercut() {
+        let now = Utc::now();
+        let us = chrono::Duration::microseconds;
+        for ahead in [chrono::Duration::days(36525), chrono::Duration::days(3), chrono::Duration::seconds(30)] {
+            let (at, skew) = ClockState::default().stamp(Some(now + ahead), now, std::time::Instant::now());
+            assert_eq!((at, skew), (now + ahead + us(1), ClockSkew::PreviousAhead));
+        }
+        // an NTP slew below the epsilon is absorbed silently
+        let (at, skew) = ClockState::default().stamp(Some(now + us(300)), now, std::time::Instant::now());
+        assert_eq!((at, skew), (now + us(301), ClockSkew::None));
+        let mut l = Ledger::new();
+        l.append_event(sample_event("a-0"));
+        if let LedgerEntry::Event(e) = &mut l.entries[0] {
+            e.recorded_at = now + chrono::Duration::days(3);
+            e.hash = sha256_hex(&event_canonical(e));
+        }
+        assert!(l.ahead_of_wall_clock());
     }
 
     fn finding_mut(l: &mut Ledger, i: usize) -> &mut FindingEntry {

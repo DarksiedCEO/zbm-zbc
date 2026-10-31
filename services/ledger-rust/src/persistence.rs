@@ -1258,7 +1258,6 @@ impl PersistentLedger {
         let pos = self.ledger.len();
         self.read_index.add(pos, &entry);
         self.log_bytes = pre_len + line.len() as u64;
-        self.ledger.note_append(entry.recorded_at());
         self.ledger.push_entry(entry);
         Ok(self.ledger.entries().last().expect("just pushed"))
     }

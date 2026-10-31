@@ -530,8 +530,14 @@ fn free_bytes(dir: &Path) -> Option<u64> {
 fn health(app: &App) -> (u16, String) {
     let reasons = app.health.reasons();
     if reasons.is_empty() {
-        // AEGIS wave A F-6: a clock fault within the past hour is a warning (appends still persist; ordering is seq)
-        match ledger_rust::recent_clock_skew() {
+        // AEGIS wave A F-6 / round 2 N-1: a clock fault within the past hour, or a last entry stamped ahead of the
+        // wall clock, is a warning (appends still persist; recorded_at never goes backwards; ordering is seq)
+        let tol = chrono::Duration::seconds(ledger_rust::CLOCK_SKEW_TOLERANCE_SECS);
+        let ahead = app.gate.read(&app.ledger, |l| {
+            l.entries().last().map(|e| e.recorded_at() > chrono::Utc::now() + tol).unwrap_or(false)
+        });
+        let skew = ledger_rust::recent_clock_skew().or(if ahead { Some(ledger_rust::ClockSkew::PreviousAhead) } else { None });
+        match skew {
             None => (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string()),
             Some(_) => (
                 200,

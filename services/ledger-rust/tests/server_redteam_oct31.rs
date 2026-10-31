@@ -235,9 +235,11 @@ fn rtm07_external_anchor_is_served_signed_and_enforced_at_start() {
 }
 
 
-/// AEGIS wave A F-6: a log whose last entry was stamped 100 years ahead (a bad clock before a restart) used to pin
-/// every later `recorded_at` there. After the restart the wall clock is used as observed, /health warns
-/// `clock_skew`, and the chain still verifies; a second restart keeps it sane.
+/// AEGIS wave A F-6, revised by round 2 N-1: a log whose last entry was stamped 100 years ahead (a bad clock before
+/// a restart). `recorded_at` never goes backwards (N-1), so later entries are stamped just after it, and GET /health
+/// keeps a standing `clock_skew` warning for as long as the log is ahead of the wall clock (not only for an hour),
+/// across restarts, so the operator sees it. In-process a jump like this is never adopted (unit tests), so only a
+/// clock that was already wrong at boot can write such an entry. The chain still verifies.
 #[test]
 fn f6_an_entry_100_years_ahead_does_not_pin_later_timestamps_after_restart() {
     use ledger_rust::{EventInput, Ledger, LedgerEntry};
@@ -247,27 +249,29 @@ fn f6_an_entry_100_years_ahead_does_not_pin_later_timestamps_after_restart() {
         event_id: "fin-future-0".into(), department: "finance".into(), event_type: "invoice_issued".into(),
         actor: "oct31_test".into(), subject_id: "inv_1".into(), payload_sha256: "cd".repeat(32), summary: "future".into(),
     });
+    let future = chrono::Utc::now() + chrono::Duration::days(36525);
     if let LedgerEntry::Event(ev) = &mut e {
-        ev.recorded_at = chrono::Utc::now() + chrono::Duration::days(36525);
+        ev.recorded_at = future;
         ev.hash = sha256_hex(&ledger_rust::event_canonical(ev));
     }
     l.push_entry(e);
     assert_eq!(l.verify_chain(), Ok(()));
     std::fs::write(&log.0, format!("{}\n", serde_json::to_string(&l.entries()[0]).unwrap())).unwrap();
     common::write_head_for(&log.0);
+    let mut prev = future;
     for round in 0..2 {
         let s = start(&log, &[]);
         let id = format!("fin-now-{round}");
         let (st, body) = http(s.port, "POST", "/ledger/events", Some(FINANCE_TOKEN), &event(&id, "finance", "now"));
         assert_eq!(st, 201, "{body}");
         let at: Value = serde_json::from_str(&body).unwrap();
-        let year: i32 = at["recorded_at"].as_str().unwrap()[..4].parse().unwrap();
-        assert!(year < 2100, "pinned to the bad clock: {}", at["recorded_at"]);
+        let at: chrono::DateTime<chrono::Utc> = at["recorded_at"].as_str().unwrap().parse().unwrap();
+        assert!(at > prev, "recorded_at went backwards: {at} after {prev}");
+        assert!(at - prev < chrono::Duration::seconds(1), "stamped just after the previous entry: {at}");
+        prev = at;
         let (st, h) = http(s.port, "GET", "/health", None, "");
         assert_eq!(st, 200, "{h}");
-        if round == 0 {
-            assert!(h.contains("clock_skew"), "{h}");
-        }
+        assert!(h.contains("clock_skew"), "round {round}: {h}");
         let (st, v) = http(s.port, "GET", "/ledger/verify", Some(FINANCE_TOKEN), "");
         assert_eq!(st, 200, "{v}");
     }

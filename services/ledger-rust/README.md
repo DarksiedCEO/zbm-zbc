@@ -76,10 +76,21 @@ latest `anchor` in that store (`GET` it with your token from Compliance's log li
 
 ## Time (`recorded_at`)
 
-Ordering is `seq`. `recorded_at` is the wall clock as observed, corrected only when implausible (AEGIS wave A F-6): a
-small backward step (≤ 5 min) is clamped to the previous entry; a forward jump of more than 5 minutes beyond real
-elapsed time is stamped at the plausible time; a previous entry more than 5 minutes in the future (a bad clock before a
-restart) never pins later entries. Every fault is logged with both readings and warned on `/health` for an hour.
+Ordering is `seq`. `recorded_at` **never goes backwards** (CH-12; AEGIS round 2 N-1): each stamp is
+`max(candidate, previous + 1 µs)`. The candidate is the wall clock when it agrees (within 5 minutes) with the last
+trusted wall reading plus elapsed monotonic time, and that plausible time when it does not:
+
+- **Backward step** (a VM restored from a snapshot, a bad NTP source): entries keep following real time, never the
+  past; as soon as the wall clock is corrected it is used again (no lasting offset).
+- **Forward jump**: stamped at the plausible time. A step of at most one day that stays consistent for 2 minutes
+  (a slow clock corrected by NTP, a paused VM resumed; N-5) is adopted as real time. A larger jump (the 100-years-ahead
+  clock of F-6) is never adopted in-process.
+- **After a restart** there is no monotonic baseline: if the last entry is ahead of the wall clock (only possible when
+  the clock was already wrong at boot), new entries are stamped just after it until real time catches up.
+- Every fault is logged with both readings and is a `clock_skew` warning on `/health`: for an hour after the fault,
+  and for as long as the last entry is more than 5 minutes ahead of the wall clock. To resolve a standing warning,
+  fix the host clock; if the log itself carries a far-future entry, that is an incident for Andre (the entries stay
+  verifiable; `seq` is the order of record).
 
 ## Rollback (one-way change, AEGIS wave A F-10)
 
