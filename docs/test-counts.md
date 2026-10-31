@@ -20,11 +20,11 @@ the check.
 | `node:dashboard-ts` | 53 | node --test | — |
 | `python:bizdev-py` | 358 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
-| `python:compliance-py` | 739 | pytest collection | — |
+| `python:compliance-py` | 742 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 736 | pytest collection | — |
 | `python:detection-py` | 845 | pytest collection | — |
-| `python:finance-py` | 705 | pytest collection | — |
+| `python:finance-py` | 716 | pytest collection | — |
 | `python:fulfillment-py` | 1119 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
 | `python:legal-py` | 346 | pytest collection | — |
