@@ -932,6 +932,11 @@ class ComplianceService:
                       "request_sha256": h, "outcome_sha256": outcome_sha,
                       "first_used_at": iso(ent["at"]) if ent is not None else iso(now),
                       "replaces_ruling_id": ent.get("ruling_id") if ent is not None else None}
+            if gate == "activation":
+                # AEGIS r6 N1: every activation ruling, allowed or not, records where the client and its campaign
+                # targets are, so a refusal can be told to rest on sanctions (HR-07's list) or not
+                record["place"] = {"jurisdiction": ctx.facts.get("jurisdiction"),
+                                   "target_jurisdictions": ctx.facts.get("target_jurisdictions")}
             if gate == "activation" and allowed:
                 owners = [self.screens[s]["subject_id"] for s in ctx.facts.get("owner_screen_ids") or [] if s in self.screens]
                 record["profile"] = i02_activation_gate.profile(lane, ctx.facts, owners)
@@ -1221,6 +1226,8 @@ class ComplianceService:
             return False
         listed = set((hr07.get("parameters") or {}).get("refuse") or [])
         params = i07_jurisdiction.Params.from_rows(rows)
+        if not isinstance(prof, dict):
+            return False
         codes = [i07_jurisdiction.resolve_person(prof.get("jurisdiction"), params, "client").code]
         codes += [i07_jurisdiction.resolve_target(t, params).code for t in prof.get("target_jurisdictions") or []]
         return any(c in listed for c in codes if c)
@@ -1257,6 +1264,10 @@ class ComplianceService:
             prof = r.get("profile") or {}
             out.update(ruling_id=rid, evaluated_at=r["evaluated_at"],
                        jurisdiction=canonical_jurisdiction(prof.get("jurisdiction")))
+            # AEGIS r6 N1: before any early return, so a refused ruling that refused BECAUSE of a sanctioned place or
+            # target still says so
+            if self._on_sanctions_list(r.get("place") or prof, rows):
+                out["sanctions_grounded"] = True
             if not r["allowed"]:
                 reasons.append("the latest activation ruling refused this client: fix the unmet items and re-activate")
                 return out
@@ -1273,8 +1284,6 @@ class ComplianceService:
                 elif prints is not None and prints.get(oid) != rule_fingerprint(row):
                     reasons.append(f"{oid} changed since the ruling (approved amendment): re-activate")
             reasons += self._area_now(prof, rows)
-            if self._on_sanctions_list(prof, rows):
-                out["sanctions_grounded"] = True
             old = next((v for v in self.versions if v.version == r["register_version"]), None)
             old_ids = {x["id"] for x in old.rows} if old else set()
             gained = sorted(oid for oid, row in rows.items() if "activation" in row["gates"] and oid not in old_ids

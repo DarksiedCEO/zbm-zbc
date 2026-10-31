@@ -509,6 +509,9 @@ class ComplianceHoldRelease(Strict):
     # AEGIS r5 C1: the SHA-256 of the OFAC authorization (license or written guidance) that allows releasing a
     # sanctions hold; the document itself stays in Andre's evidence folder (references are never stored in clear)
     ofac_authorization_sha256: Optional[Sha] = None
+    # AEGIS r6 N5: which OFAC document it is: a specific license or authorization, an unblocking report filed under
+    # 31 CFR 501.603(b)(3) for property blocked in error (OFAC FAQ 1196), or a Compliance Release (31 CFR 501.806)
+    ofac_document_kind: Optional[Literal["license", "unblocking_report", "compliance_release"]] = None
 
 
 class RefundRepay(Strict):

@@ -538,13 +538,18 @@ def test_a_held_media_prepayment_never_pays_the_vendor(tmp_path):
 
 
 def test_the_client_reads_whether_a_refusal_is_sanctions_grounded():
-    """AEGIS r5 C1: only an explicit true on a refusal marks it sanctions-grounded (never on an ALLOW)."""
+    """AEGIS r5 C1, r6 N4: a refusal is sanctions-grounded unless Compliance says false explicitly (a missing or
+    malformed flag fails closed to sanctions); an ALLOW never is."""
     path = "/compliance/v1/clients/zbm-client-1/activation"
     refuse = {"decision": "REFUSE", "current": False, "reasons": ["hold open: sanctions_match (h)"]}
     a = cmp_client({path: (200, activation_doc(**refuse, sanctions_grounded=True))}).client_activation("zbm-client-1")
     assert a.allowed is False and a.sanctions is True
-    for v in (False, "true", 1, None):
+    a = cmp_client({path: (200, activation_doc(**refuse, sanctions_grounded=False))}).client_activation("zbm-client-1")
+    assert a.sanctions is False
+    for v in ("true", 1, None, 0, "false"):
         a = cmp_client({path: (200, activation_doc(**refuse, sanctions_grounded=v))}).client_activation("zbm-client-1")
-        assert a.sanctions is False, v
+        assert a.sanctions is True, v
+    a = cmp_client({path: (200, activation_doc(**refuse))}).client_activation("zbm-client-1")       # absent
+    assert a.sanctions is True
     a = cmp_client({path: (200, activation_doc(sanctions_grounded=True))}).client_activation("zbm-client-1")
     assert a.allowed is True and a.sanctions is False

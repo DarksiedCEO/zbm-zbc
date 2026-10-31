@@ -664,7 +664,7 @@ def test_aegis_m2_daily_job_closes_pages_that_should_no_longer_take_money(st):
     out = st.ok(st.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))
     assert out["summary"] == {"closed": 2, "failed": 0, "checked": 2, "refused_clients": 0,
                               "activation_unknown": 0, "activation_checked": 1, "holds_released": 0,
-                              "holds_converted": 0}
+                              "holds_converted": 0, "holds_upgraded": 0}
     assert st.sim.sessions[pa["session_id"]]["status"] == "expired"
     assert st.sim.sessions[pb["session_id"]]["status"] == "expired"
     assert st.sim.sessions[pc["session_id"]]["status"] == "open"
