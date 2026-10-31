@@ -317,6 +317,7 @@ class FinanceService:
         self.held_by_item: dict[str, set[str]] = {}
         # AEGIS 5a56a3a M2: treasury operations whose bank call is in flight in THIS process (under ``self.lock``)
         self.xfer_in_flight: set[str] = set()
+        self._funded_alerted: set = set()     # AEGIS r10 R10-1: (client, sanctions) Andre was already pushed about
         self.idem:"OrderedDict[tuple[str, str], dict]" = OrderedDict()
         self._ledger_conflict = False
         self.instance_id = secrets.token_hex(8)

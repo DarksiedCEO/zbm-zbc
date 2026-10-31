@@ -389,10 +389,13 @@ class StripeMixin:
 
         AEGIS F-5: also every open page of a client whose Compliance activation is now REFUSE (an OFAC hit, a service
         area change, a lapsed screening...). Compliance is asked once per client with an open page; an outage
-        (unknown) closes nothing and is counted ``activation_unknown`` (the checkout itself refuses meanwhile)."""
-        if not self.cfg.stripe_incoming:
-            return {"closed": 0, "failed": 0, "checked": 0, "refused_clients": 0, "activation_unknown": 0,
-                    "activation_checked": 0, "holds_released": 0, "holds_changed": 0}
+        (unknown) closes nothing and is counted ``activation_unknown`` (the checkout itself refuses meanwhile).
+
+        AEGIS r10: the hold part runs whether or not Stripe incoming is on (bank-path holds, R10-6); clients with a
+        funded campaign are asked too and Andre is pushed when one is no longer allowed (R10-1); every refused hold,
+        a sanctions match included, is re-read, and each one re-read with an answer writes the same records whether
+        its ground changed or not, so nothing a non-Andre reader sees tells an upgrade apart (R10-2):
+        ``holds_changed`` counts the holds whose record the run re-wrote (converted, or a refused hold re-read)."""
         # AEGIS r2 N-4: Compliance is read OUTSIDE the Stripe turn, for at most MAX_JOB_ACTIVATION_CHECKS clients per
         # run, rotating through the clients with an open page (a cursor after the last one checked)
         with self.lock:
@@ -409,9 +412,11 @@ class StripeMixin:
                 hk = (inv.get("held_compliance") or {}).get("kind")
                 if hk == "unverified":
                     unverified.setdefault(inv["client_id"], []).append(i)
-                elif hk == "refused" and inv["held_compliance"].get("sanctions_ground") != "match":
+                elif hk == "refused":                  # AEGIS r10 R10-2: a match hold too (the same summary)
                     refused_holds.setdefault(inv["client_id"], []).append(i)
-        clients = sorted(set(open_by_client) | set(unverified) | set(refused_holds))
+            # AEGIS r10 R10-1: clients whose deposit funds a campaign (accruals and payouts ask anyway; Andre is told)
+            funded = {p["client_id"] for p in self.db["profiles"].values() if p.get("status") in ("funded", "paused")}
+        clients = sorted(set(open_by_client) | set(unverified) | set(refused_holds) | funded)
         cursor = getattr(self, "_activation_sweep_cursor", "")
         clients = ([c for c in clients if c > cursor] + [c for c in clients if c <= cursor])[:MAX_JOB_ACTIVATION_CHECKS]
         ga = Gather(self, f"{prefix}|activation", ACTOR, "stripe-sessions")
@@ -427,10 +432,13 @@ class StripeMixin:
                 refused_ids.update(s["session_id"] for s in open_by_client.get(cid, []))
                 why = self._activation_reasons(act, full=True)[0]["message"]
                 settle += [(i, cid, "convert", why, act_ground(act)) for i in unverified.get(cid, [])]
-                if act.sanctions:
-                    settle += [(i, cid, "upgrade", why, act_ground(act)) for i in refused_holds.get(cid, [])]
+                # R10-2: every refused hold is re-read; "upgrade" re-writes it (with the new ground when there is one)
+                settle += [(i, cid, "upgrade", why, act_ground(act)) for i in refused_holds.get(cid, [])]
+                if cid in funded:
+                    self._funded_client_alert(cid, act)
             else:
                 settle += [(i, cid, "release", "", False) for i in unverified.get(cid, [])]
+                self._funded_alerted.difference_update({(cid, False), (cid, True)})    # allowed again: re-arm
         released = converted = upgraded = 0
         for iid, cid, what, why, sanctions in settle:
             g_h = Gather(self, f"{prefix}|hold|{iid}", ACTOR, iid)
@@ -447,10 +455,13 @@ class StripeMixin:
             with self.lock:
                 hold = (self.db["invoices"].get(iid) or {}).get("held_compliance") or {}
                 if what == "upgrade":
-                    if hold.get("kind") != "refused" or merge_ground(hold_ground(hold), sanctions) == hold_ground(hold):
+                    if hold.get("kind") != "refused":
                         continue
                     op_h = Op(self, f"{prefix}|hold|{iid}", ACTOR, iid, g_h)
-                    self._upgrade_to_sanctions(op_h, iid, why, ACTOR, sanctions)
+                    if merge_ground(hold_ground(hold), sanctions) == hold_ground(hold):
+                        self._recheck_hold(op_h, iid, ACTOR)        # R10-2: the same records as an upgrade writes
+                    else:
+                        self._upgrade_to_sanctions(op_h, iid, why, ACTOR, sanctions)
                     upgraded += 1
                     self._commit(op_h)
                     continue
@@ -471,6 +482,10 @@ class StripeMixin:
                 self._commit(op_h)
         if clients:
             self._activation_sweep_cursor = clients[-1]
+        if not self.cfg.stripe_incoming:               # AEGIS r10 R10-6: no Stripe pages to close, holds done above
+            return {"closed": 0, "failed": 0, "checked": 0, "refused_clients": refused_clients,
+                    "activation_unknown": unknown, "activation_checked": len(clients), "holds_released": released,
+                    "holds_changed": converted + upgraded}
         with self._stripe_turn("stripe-sessions job"):
             with self.lock:
                 todo = []
@@ -744,6 +759,38 @@ class StripeMixin:
                   f"Payment held ({kind}): {amount}")
         return hold
 
+    def _funded_client_alert(self, client_id: str, act) -> None:
+        """AEGIS r10 R10-1: a client whose deposit funds a campaign is no longer allowed: accruals, payout runs,
+        approvals, funding and releases for it are refused at each step; Andre is pushed once per state (his channel
+        only: nothing is written to the log, so no other reader sees it), with the OFAC line on a sanctions ground."""
+        key = (client_id, bool(act.sanctions))
+        if key in self._funded_alerted:
+            return
+        self._funded_alerted.add(key)
+        msg = (f"client {client_id}: a funded campaign's brand is no longer allowed by Compliance; no creator is "
+               "accrued or paid from its deposit until it is")
+        if act.sanctions:
+            msg += ("; OFAC: refused on sanctions grounds: its deposit is blocked property, do NOT return or move it; "
+                    "report to OFAC and follow runbook step G")
+        try:
+            self.ports.push.push("compliance_funded_client_refused", {"client_id": client_id, "message": msg})
+        except Exception:  # noqa: BLE001 - a push is best effort (stand-in); every money step refuses regardless
+            pass
+
+    def _recheck_hold(self, op: Op, invoice_id: str, actor: str) -> None:
+        """AEGIS r10 R10-2: a refused hold the job re-read without a ground change writes what an upgrade writes (its
+        invoice, its break and one hold event), so no reader but Andre tells an upgrade from a re-read."""
+        cur = op.get("invoices", invoice_id)
+        hold = cur["held_compliance"]
+        op.put("invoices", invoice_id, {**cur, "held_compliance": {**hold, "rechecked_at": iso(self._now())}})
+        b = op.get("breaks", hold["break_id"])
+        if b is not None:
+            op.put("breaks", b["break_id"], {**b})
+        op.record(derived_id("hold", "recheck", invoice_id, hold["receipt_id"], op.op_id),
+                  "compliance_hold_rechecked", actor, invoice_id,
+                  {"invoice_id": invoice_id, "receipt_id": hold["receipt_id"], "break_id": hold["break_id"],
+                   "ground": hold_ground(hold) or None}, "Held payment re-read: unchanged")
+
     def _upgrade_to_sanctions(self, op: Op, invoice_id: str, why: str, actor: str, ground=True) -> None:
         """AEGIS r6 N2, r8: Compliance now says the refusal rests on sanctions: the hold is marked (never unmarked),
         its ground merged (match wins, never back to place) and its open break carries the OFAC note."""
@@ -753,7 +800,7 @@ class StripeMixin:
         if hold.get("sanctions") and new_ground == hold.get("sanctions_ground"):
             return
         op.put("invoices", invoice_id, {**cur, "held_compliance": {
-            **hold, "sanctions": True, "sanctions_ground": new_ground,
+            **hold, "sanctions": True, "sanctions_ground": new_ground, "rechecked_at": iso(self._now()),
             "sanctions_since": hold.get("sanctions_since") or iso(self._now())}})
         b = op.get("breaks", hold["break_id"])
         if b is not None:
@@ -770,8 +817,10 @@ class StripeMixin:
         the client receipt that was held back is prepared now (a refund issues none)."""
         cur = op.get("invoices", invoice_id)
         hold = cur["held_compliance"]
-        if basis == "compliance_allow" and cur.get("kind") == "campaign_deposit":
-            # RTM-01: a held campaign deposit funds its campaign only when the hold is released on a current ALLOW
+        if basis == "compliance_allow" and cur.get("kind") == "campaign_deposit" \
+                and (op.get("receipts", hold["receipt_id"]) or {}).get("status") == "matched":
+            # RTM-01: a held campaign deposit funds its campaign only when the hold is released on a current ALLOW;
+            # AEGIS r10 R10-5: and only while its money is still there (not after the bank returned it)
             prof = op.get("profiles", cur.get("campaign_id") or "")
             if prof and prof["status"] == "approved":
                 op.put("profiles", cur["campaign_id"], {**prof, "status": "funded"})
