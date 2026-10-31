@@ -20,6 +20,7 @@ class AlertsMixin:
         d = getattr(self, "_founder_alerts", None)
         if d is None:
             cfg = getattr(self.cfg, "founder_alerts", None) or FA.AlertSettings()
+            cfg.tz = getattr(self.cfg, "business_tz", None) or cfg.tz
             sender = getattr(self.ports, "founder_mail", None)
             if cfg.enabled and sender is None:
                 cfg.problem = "no alert sender is wired (FOUNDER_ALERT_* and RESEND_API_KEY)"

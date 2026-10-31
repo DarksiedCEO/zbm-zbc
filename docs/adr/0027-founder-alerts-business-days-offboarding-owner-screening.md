@@ -53,8 +53,13 @@ Rejected: an alert sender in every service (N keys, N digests, N rate limits); a
 (needs the ledger, the thing most worth alerting about); a stateless cron that sends directly (no dedupe without
 state); Resend idempotency as the dedupe (24 hours only, and a changed digest is a 409).
 
-Residual risk: if Finance itself is down, no email can come (the cron runs fail red in Railway). A second,
-independent path (for example the heartbeat monitor in railway.md, or a Railway notification) covers that.
+**The independent path (dead-man's switch).** If Finance is down, nothing in Finance can email. So: (a) after every
+run in which Finance answered 2xx with alerts enabled and their state saved, the ops-alerts cron pings
+`FOUNDER_HEARTBEAT_URL` (optional, Sealed; an external check such as Healthchecks.io that emails Andre when the pings
+stop; the ping carries no token and no data; a failed ping is an ALERT line, never a failed run); (b)
+`FIN_ALERT_DAILY_SUMMARY=1` (on in the IaC) sends one summary email a day at `FIN_ALERT_DAILY_HOUR` local time: "all
+clear" or the open counts by category (frozen text, at most 6 attempts a day), so a day without it is noticed. Finance
+down, the cron stopped, Resend refusing, or alerts misconfigured each stop the ping or the summary.
 
 ### 2. Business days skip the federal legal public holidays as observed under 5 U.S.C. 6103
 

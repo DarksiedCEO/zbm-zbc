@@ -22,6 +22,22 @@ later) since the last email, at most one email per hour, at most 30 a day. It na
    the finance log). Typical causes: the address is not one address, the sender is not alerts@ or billing@, no
    Resend key.
 5. In your mail app, add a rule: from `alerts@zbestmedia.com` → mark important, never spam.
+6. **The dead-man's switch (15 minutes, free; do this too).** Alerts live in Finance, so if Finance (or the cron, or the
+   Resend key) is down, no alert email can come. An outside service watches for that:
+   1. Go to https://healthchecks.io, sign up (free plan) with the same inbox as `FOUNDER_ALERT_EMAIL`.
+   2. **Add Check**: name `zbm ops-alerts`; **Schedule**: Simple, **Period** 5 minutes, **Grace time** 20 minutes.
+      Save. Integrations: keep **Email** on (your address). Optional: add the SMS or phone app integration.
+   3. Copy the check's **ping URL** (`https://hc-ping.com/<uuid>`). Treat it like a password: anyone with it can
+      fake "all is well".
+   4. Railway → `ops-alerts` → Variables → `FOUNDER_HEARTBEAT_URL` = that URL, as a **Sealed** variable. Redeploy is
+      not needed for a cron service; the next run (within 5 minutes) uses it.
+   5. Within 10 minutes the check turns green in Healthchecks ("up"). The ops-alerts log shows `fin-cron: heartbeat
+      pinged`. If it shows `ALERT fin-cron: heartbeat NOT pinged`, alerts are off or Finance did not answer: A.4.
+   6. Test it once: in Healthchecks, **Pause** is not a test; instead temporarily clear `FOUNDER_HEARTBEAT_URL` in
+      Railway; after 25 minutes Healthchecks emails you "zbm ops-alerts is DOWN". Put the URL back; it emails "UP".
+7. **The daily summary email.** `FIN_ALERT_DAILY_SUMMARY` is `1` in the IaC: every day at about 8:00 Pacific
+   (`FIN_ALERT_DAILY_HOUR`) you get "ZBM daily check: all clear" or the number of open items per category. If a day
+   passes without it, the alert path is broken: section C.
 
 ## B. What each category means
 
@@ -41,9 +57,13 @@ A line marked `(reminder)` is still open 24 hours after the first email.
 
 ## C. When there is no email but there should be
 
-- **Finance is down**: the alerts live in Finance, so no email can come. The `ops-alerts` runs fail (Railway shows
-  them red) and print `ALERT fin-cron:`. The heartbeat check (`docs/deploy/railway.md`, Compliance step F) covers
-  this until a second alert path exists.
+- **Healthchecks says "DOWN"**, or **the daily summary did not come**: the alert path itself is broken. In order:
+  Railway → `finance` (running? its log), Railway → `ops-alerts` (latest runs: red? `ALERT fin-cron:` lines?), the
+  `enabled` flag in the run summary (A.4), Resend → Emails (refused sends). Fix it, then wait for the check to turn
+  "UP" and the next digest.
+- **Finance is down**: the alerts live in Finance, so no alert email can come. The `ops-alerts` runs fail (Railway shows
+  them red), the heartbeat ping stops, and Healthchecks emails you within about 25 minutes. The daily summary stops
+  too.
 - **Resend refused** (the key was revoked, the domain unverified): Finance retries the same email 8 times over about
   16 hours, then logs `ALERT finance: founder_alert_dropped`. Railway → `finance` → logs, search `founder_alert`.
 - **Alerts are off**: see A.4.
@@ -66,4 +86,6 @@ UNVERIFIED: nothing in this runbook has run against the real Railway, Resend or 
 - Resend idempotency keys are kept 24 hours (as ADR 0026 records): https://resend.com/docs/dashboard/emails/idempotency-keys
 - Railway cron jobs (shortest interval 5 minutes): https://docs.railway.com/reference/cron-jobs
 
-Both pages were not re-read in this pass (UNVERIFIED).
+- Healthchecks.io (checks, period and grace time, ping URLs, email integration): https://healthchecks.io/docs/
+
+These pages were not re-read in this pass (UNVERIFIED); the Healthchecks screen names in A.6 may differ slightly.

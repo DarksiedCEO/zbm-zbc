@@ -596,6 +596,7 @@ Set by IaC or by you:
 | `RESEND_API_KEY` | to send client email | yes | (you; Resend) | becomes `RESEND_API_KEY_FILE`. With `MAIL_FROM`, client email is ON (receipts, credit notes, refund confirmations, acknowledgements); unset = OFF, nothing is sent and nothing alerts |
 | `RESEND_API_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself; set without `MAIL_FROM` refuses start |
 | `FOUNDER_ALERT_EMAIL` | to get alert email | no (private) | (you: your own inbox) | ADR 0027: the ONE address founder alerts go to. With `FOUNDER_ALERT_FROM` and `RESEND_API_KEY`, alerts are ON; unset = OFF (the job's answer says why). A wrong value leaves alerts off, never stops Finance |
+| `FIN_ALERT_DAILY_SUMMARY` | no | no | `1` (IaC) | ADR 0027: one summary email a day ("all clear" or the open counts), so a silent alert path is noticed; `0` turns it off |
 | `FOUNDER_ALERT_FROM` | to get alert email | no | `Z Best Media Alerts <alerts@zbestmedia.com>` (IaC) | only alerts@ or billing@zbestmedia.com (the domain Resend has verified) |
 
 Everything else finance-py reads — leave at the default (services/finance-py/README.md has the meaning of each):
@@ -625,6 +626,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `FIN_RECONCILE_MODE` | unset | `1` only while reconciling after a refused start (finance README) |
 | `FIN_REQUEST_HEAD_TIMEOUT_SECONDS`, `FIN_KEEP_ALIVE_TIMEOUT_SECONDS`, `FIN_LIMIT_CONCURRENCY`, `FIN_SWITCH_INTERVAL_SECONDS`, `FIN_DRAINS_MAX` | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
 | `FIN_ALERT_WINDOW_MIN`, `FIN_ALERT_REMIND_HOURS`, `FIN_ALERT_LEDGER_DOWN_MIN`, `FIN_ALERT_MAX_PER_DAY` | `60`, `24`, `15`, `30` | founder alerts (ADR 0027): one digest per window, a reminder for what is still open, ledger/Compliance silence before it alerts, a daily cap |
+| `FIN_ALERT_DAILY_HOUR` | `8` | the local hour (`FIN_BUSINESS_TZ`) of the daily summary email |
 
 ### fin-cron (deploy/scheduler; ADR 0026)
 
@@ -660,10 +662,12 @@ else at Finance.
 | `FIN_CRON_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | as fin-cron |
 | `FIN_CRON_SERVICE_TOKEN` | yes | yes | ref `finance.FIN_SERVICE_TOKEN` (IaC) | Finance's bearer |
 | `FIN_CRON_CALLER_TOKEN` | yes | yes | (you; Secrets: `openssl rand -hex 32`, a NEW value, not fin-cron's) | `ops_alerts` at Finance |
+| `FOUNDER_HEARTBEAT_URL` | recommended | yes (Sealed) | (you: your Healthchecks.io check's ping URL) | the dead-man's switch: pinged (no token, no data) after every run in which Finance answered with alerts enabled and their state saved; unset = no ping. docs/runbooks/founder-alerts.md, A.6 |
 
 If Finance itself is down, this service cannot email (Finance holds the alert state and the Resend key): each run
-prints `ALERT fin-cron:` and Railway marks it failed. Watch for that with the heartbeat (Compliance step F) until a
-second, independent alert path exists (ADR 0027, residual risk).
+prints `ALERT fin-cron:` and Railway marks it failed, and the heartbeat ping stops. The external check behind
+`FOUNDER_HEARTBEAT_URL` then emails you on its own (the independent path); the daily summary email stopping is the
+second sign.
 
 ### legal (legal-py)
 

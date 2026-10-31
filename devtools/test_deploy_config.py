@@ -656,6 +656,70 @@ class OpsAlerts(unittest.TestCase):
         spec.loader.exec_module(mod)
         return mod
 
+    HB = "https://hc-ping.com/0b5c4a8e-7f1d-4e8b-9a52-1c2d3e4f5a6b"
+
+    def _run_alerts(self, answer, env_over=None, ping_status=200):
+        import io
+        from datetime import datetime, timezone
+        mod = self._mod()
+        env = {**FinCron.ENV, "FIN_CRON_JOBS": "alerts", "FOUNDER_HEARTBEAT_URL": self.HB, **(env_over or {})}
+        calls = []
+
+        def post(url, headers, body):
+            calls.append((url, dict(headers), body))
+            if url == self.HB:
+                return ping_status, None
+            return answer
+        out = io.StringIO()
+        code = mod.run(env, datetime(2026, 10, 31, 15, 5, tzinfo=timezone.utc), post, lambda s: None, out)
+        return code, calls, out.getvalue()
+
+    def test_a_successful_alerts_run_pings_the_heartbeat_without_any_token(self):
+        code, calls, out = self._run_alerts((200, {"summary": {"enabled": True, "state_saved": True, "open": 0}}))
+        self.assertEqual(code, 0)
+        self.assertEqual([c[0] for c in calls][-1], self.HB)
+        hdrs = calls[-1][1]
+        self.assertNotIn("Authorization", hdrs)
+        self.assertNotIn("X-FIN-Caller-Token", hdrs)
+        self.assertNotIn("s" * 64, json.dumps(hdrs) + str(calls[-1][2]))
+        self.assertNotIn(self.HB, out)                                  # the check URL is a secret too
+        self.assertIn("heartbeat", out)
+
+    def test_no_ping_when_the_run_failed_or_alerts_are_off(self):
+        for answer in ((503, None), (403, {"detail": "x"}), (200, {"summary": {"enabled": False}}),
+                       (200, {"summary": {"enabled": True, "state_saved": False}}), (200, {})):
+            with self.subTest(answer=answer):
+                _code, calls, _out = self._run_alerts(answer)
+                self.assertNotIn(self.HB, [c[0] for c in calls])
+
+    def test_a_failed_ping_is_an_alert_line_not_a_failed_run(self):
+        code, _calls, out = self._run_alerts((200, {"summary": {"enabled": True, "state_saved": True}}),
+                                            ping_status=0)
+        self.assertEqual(code, 0)
+        self.assertIn("ALERT fin-cron:", out)
+
+    def test_the_heartbeat_url_is_optional_https_only_and_never_used_by_housekeeping(self):
+        import io
+        from datetime import datetime, timezone
+        mod = self._mod()
+        for bad in ("http://hc-ping.com/x", "${{ops-alerts.FOUNDER_HEARTBEAT_URL}}", "https://", "ftp://x.example/y",
+                    "https://hc-ping.com/x y"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit):
+                    mod.settings({**FinCron.ENV, "FIN_CRON_JOBS": "alerts", "FOUNDER_HEARTBEAT_URL": bad})
+        calls = []
+        mod.run({**FinCron.ENV, "FOUNDER_HEARTBEAT_URL": self.HB}, datetime(2026, 10, 31, 15, 17, tzinfo=timezone.utc),
+                lambda u, h, b: calls.append(u) or (200, {"summary": {"enabled": True, "state_saved": True}}),
+                lambda s: None, io.StringIO())
+        self.assertNotIn(self.HB, calls)
+        _code, calls2, _out = self._run_alerts((200, {"summary": {"enabled": True, "state_saved": True}}),
+                                               env_over={"FOUNDER_HEARTBEAT_URL": ""})
+        self.assertEqual(len(calls2), 1)
+
+    def test_the_heartbeat_url_is_declared_and_kept_by_hand(self):
+        self.assertRegex(self.b, r"(?m)^\s+FOUNDER_HEARTBEAT_URL:\s*preserve\(\)")
+        self.assertRegex(self.blocks["finance"], r'(?m)^\s+FIN_ALERT_DAILY_SUMMARY:\s*"1"')
+
     def test_the_alerts_mode_calls_only_the_alerts_job_every_tick(self):
         import io
         from datetime import datetime, timezone

@@ -173,7 +173,10 @@ Webhook events to subscribe (the one list is `src/stripe_webhooks.py`; `devtools
   (5, 15, 30 ... 480 min), then dropped with an `ALERT finance: founder_alert_dropped` line. State in
   `founder_alerts.json` in the data directory, never in the log or the ledger. **Off until** `FOUNDER_ALERT_EMAIL`,
   `FOUNDER_ALERT_FROM` (alerts@ or billing@zbestmedia.com) and the Resend key are all set; a wrong value leaves it
-  off and the job's answer says why (never a refusal to start). Runbook: docs/runbooks/founder-alerts.md.
+  off and the job's answer says why (never a refusal to start). `FIN_ALERT_DAILY_SUMMARY=1` adds one summary email
+  a day at `FIN_ALERT_DAILY_HOUR` (default 8, `FIN_BUSINESS_TZ`): "all clear" or the open counts, so silence is
+  noticed; the ops-alerts cron pings `FOUNDER_HEARTBEAT_URL` after each healthy run (dead-man's switch). Runbook:
+  docs/runbooks/founder-alerts.md.
 - **Business days** (refunds 10, acknowledgements 2, billing disputes 15) skip weekends and the federal legal public
   holidays as observed under 5 U.S.C. 6103 (Saturday -> the Friday before, Sunday -> the Monday after; MSA 1),
   computed for any year (`bizdays.py`), the same dates as Legal's calendar.

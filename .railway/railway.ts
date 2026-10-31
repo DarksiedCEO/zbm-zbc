@@ -227,6 +227,8 @@ export default defineRailway(() => {
       // ADR 0027 founder alerts: OFF until FOUNDER_ALERT_EMAIL (your address, set by hand) and RESEND_API_KEY are set
       FOUNDER_ALERT_EMAIL: preserve(),
       FOUNDER_ALERT_FROM: "Z Best Media Alerts <alerts@zbestmedia.com>",
+      // ADR 0027: one all-clear (or open-count) summary email a day, so silence is noticeable
+      FIN_ALERT_DAILY_SUMMARY: "1",
     },
   }));
 
@@ -260,6 +262,9 @@ export default defineRailway(() => {
       FIN_CRON_FINANCE_URL: PRIVATE("finance", 8410),
       FIN_CRON_SERVICE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       FIN_CRON_CALLER_TOKEN: preserve(), // its own token; finance's FIN_CALLER_TOKENS references it as `ops_alerts`
+      // ADR 0027 dead-man's switch: an external check URL (e.g. Healthchecks.io) pinged after every healthy run; set by
+      // hand as a Sealed variable; unset = no ping
+      FOUNDER_HEARTBEAT_URL: preserve(),
     },
   });
 

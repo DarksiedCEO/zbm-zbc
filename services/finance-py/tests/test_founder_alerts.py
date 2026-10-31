@@ -382,3 +382,65 @@ def test_settings_load_from_the_environment():
     assert not s.founder_alerts.enabled and "RESEND_API_KEY" in s.founder_alerts.problem
     s = config_mod.load(base_env(FIN_ALERT_WINDOW_MIN="1"))
     assert not s.founder_alerts.enabled
+
+
+# --------------------------------------------------------------------------------------------- the daily all-clear
+
+def daily_cfg(**over):
+    return cfg(daily_summary=True, daily_hour=8, tz="America/Los_Angeles", **over)
+
+
+def test_the_daily_summary_is_off_unless_switched_on():
+    st, mail = FA.empty_state(), FA.FixtureAlertMail()
+    FA.run(st, [], NOW.replace(hour=16), cfg(), mail)                  # 09:00 Los Angeles
+    assert mail.attempts == []
+    s = FA.settings_from_env({"FOUNDER_ALERT_EMAIL": TO, "FOUNDER_ALERT_FROM": FROM, "FIN_ALERT_DAILY_SUMMARY": "1",
+                              "FIN_ALERT_DAILY_HOUR": "7"}, True)
+    assert s.daily_summary is True and s.daily_hour == 7
+    assert FA.settings_from_env({"FIN_ALERT_DAILY_SUMMARY": "yes"}, True).daily_summary is False
+
+
+def test_one_all_clear_a_day_after_the_hour_counts_only():
+    st, mail = FA.empty_state(), FA.FixtureAlertMail()
+    before = NOW.replace(hour=14, minute=55)                          # 07:55 Los Angeles
+    FA.run(st, [], before, daily_cfg(), mail)
+    assert mail.attempts == []
+    at8 = NOW.replace(hour=15, minute=5)                               # 08:05 Los Angeles
+    s = FA.run(st, [], at8, daily_cfg(), mail)
+    assert s["daily_sent"] is True and len(mail.sent) == 1
+    assert "all clear" in mail.sent[0]["subject"].lower()
+    for minutes in (5, 60, 600):
+        FA.run(st, [], at8 + timedelta(minutes=minutes), daily_cfg(), mail)
+    assert len(mail.sent) == 1
+    FA.run(st, [], at8 + timedelta(days=1), daily_cfg(), mail)
+    assert len(mail.sent) == 2
+
+
+def test_the_daily_summary_with_open_items_names_categories_and_counts_only():
+    st, mail = FA.empty_state(), FA.FixtureAlertMail()
+    at8 = NOW.replace(hour=15, minute=5)
+    conds = [C(ref="fin-brk-1"), C(ref="fin-brk-2"), C("compliance_hold", ref="hold-abcdefghijklmnopqrst",
+                                                       src="compliance")]
+    FA.run(st, conds, at8, daily_cfg(), mail)
+    daily = [m for m in mail.sent if m["subject"].startswith("ZBM daily")]
+    assert len(daily) == 1
+    t = daily[0]["text"]
+    assert "3 open" in daily[0]["subject"] and "finance_high_break: 2" in t and "compliance_hold: 1" in t
+    assert "fin-brk" not in t and "hold-" not in t
+
+
+def test_a_failed_daily_summary_is_retried_with_the_same_text_then_given_up_for_the_day(caplog):
+    st, mail = FA.empty_state(), FA.FixtureAlertMail()
+    mail.outcomes = [FA.SendOutcome(False, code="503:x")] * 10
+    at8 = NOW.replace(hour=15, minute=5)
+    with caplog.at_level(logging.ERROR, logger="finance.alert"):
+        for i in range(8):
+            FA.run(st, [], at8 + timedelta(minutes=5 * i), daily_cfg(), mail)
+    assert len(mail.attempts) == FA.DAILY_MAX_ATTEMPTS
+    assert len({(a["subject"], a["text"], a["idempotency_key"]) for a in mail.attempts}) == 1
+    assert "founder_daily_summary_failed" in caplog.text
+
+
+def test_finance_passes_its_business_zone_to_the_daily_summary():
+    hr = harness(FIN_ALERT_DAILY_SUMMARY="1")
+    assert hr.svc.alerts.cfg.daily_summary is True and hr.svc.alerts.cfg.tz == "America/Los_Angeles"

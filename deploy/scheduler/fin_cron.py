@@ -15,7 +15,11 @@ Compliance's own controls run inside Compliance (its in-process scheduler); noth
 
 The same image runs a second cron service, ``ops-alerts`` (ADR 0027), with ``FIN_CRON_JOBS=alerts``: every 5 minutes it
 calls only ``POST /fin/v1/jobs/founder-alerts/run`` (Finance's caller ``ops_alerts``), which emails Andre what needs
-him, deduplicated and rate-limited inside Finance.
+him, deduplicated and rate-limited inside Finance. Dead-man's switch: when that call succeeds and Finance reports the
+alerts enabled with their state saved, it pings ``FOUNDER_HEARTBEAT_URL`` (optional; e.g. a Healthchecks.io check
+that emails Andre when the pings stop). If Finance, the cron or the alert configuration is down, the pings stop and
+the external check tells him. The ping carries no token and no data; a failed ping prints an ALERT line but does not
+fail the run (the missing ping is the signal).
 
 A 503 (Finance quiesced for a backup, Stripe busy) is retried twice with a short wait; anything else that is not 2xx is
 a failed call. The process exits 1 if any call failed, so Railway marks the cron run failed.
@@ -29,6 +33,8 @@ Environment (all set in .railway/railway.ts):
   FIN_CRON_TZ              IANA zone, default America/Los_Angeles
   FIN_CRON_JOBS            housekeeping (default: the hourly jobs and the daily reconciliation) or alerts (only the
                            founder alerts; the ops-alerts service)
+  FOUNDER_HEARTBEAT_URL    alerts mode, optional: an https URL pinged after every successful run (a Sealed variable;
+                           never printed)
 """
 
 from __future__ import annotations
@@ -52,6 +58,7 @@ TIMEOUT_S = 120
 RETRY_WAIT_S = (10, 30)
 _URL = re.compile(r"(http://[a-z0-9-]{1,63}\.railway\.internal|https://[A-Za-z0-9.-]{1,253})(:[0-9]{1,5})?")
 _TOKEN = re.compile(r"[\x21-\x7e]{32,512}")
+_HEARTBEAT = re.compile(r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9._~%/-]{0,512})?")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -81,7 +88,11 @@ def settings(env) -> dict:
     mode = (env.get("FIN_CRON_JOBS") or "housekeeping").strip()
     if mode not in MODES:
         raise SystemExit("fin-cron: FIN_CRON_JOBS must be housekeeping or alerts")
-    return {"url": url, "bearer": bearer, "caller": caller, "hour": int(raw_hour), "tz": tz, "mode": mode}
+    heartbeat = (env.get("FOUNDER_HEARTBEAT_URL") or "").strip() if mode == "alerts" else ""
+    if heartbeat and ("{{" in heartbeat or not _HEARTBEAT.fullmatch(heartbeat)):
+        raise SystemExit("fin-cron: FOUNDER_HEARTBEAT_URL must be an https URL (or unset)")
+    return {"url": url, "bearer": bearer, "caller": caller, "hour": int(raw_hour), "tz": tz, "mode": mode,
+            "heartbeat": heartbeat or None}
 
 
 def http_post(url: str, headers: dict, body: bytes) -> tuple[int, Optional[dict]]:
@@ -134,6 +145,19 @@ def run(env, now: Optional[datetime] = None, post: Callable = http_post, sleep: 
             line["level"] = "ALERT"
         print(("ALERT fin-cron: " if not ok else "fin-cron: ") + json.dumps(line, sort_keys=True), file=out,
               flush=True)
+        if s["heartbeat"] and path in ALERTS:
+            healthy = ok and isinstance(summary, dict) and summary.get("enabled") is True and \
+                summary.get("state_saved") is not False
+            if healthy:
+                hb, _ = post(s["heartbeat"], {"User-Agent": "zbm-ops-alerts/1"}, b"")
+                if 200 <= hb < 300:
+                    print("fin-cron: heartbeat pinged", file=out, flush=True)
+                else:
+                    print(f"ALERT fin-cron: heartbeat ping failed (status {hb}); the external check will alert",
+                          file=out, flush=True)
+            else:
+                print("ALERT fin-cron: heartbeat NOT pinged (the alerts run failed or alerts are off)", file=out,
+                      flush=True)
     return 1 if failed else 0
 
 

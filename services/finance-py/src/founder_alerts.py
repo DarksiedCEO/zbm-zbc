@@ -90,6 +90,7 @@ WHAT_TO_DO = {
     "compliance_rule_expiring": "re-verify and approve the rule before it expires, or every client turns REFUSE",
 }
 BACKOFF_MIN = (5, 15, 30, 60, 120, 240, 480)
+DAILY_MAX_ATTEMPTS = 6
 MAX_ATTEMPTS = len(BACKOFF_MIN) + 1
 MAX_LINES = 40
 _REF = re.compile(r"[A-Za-z0-9._:-]{1,80}")
@@ -130,6 +131,9 @@ class AlertSettings:
     remind_hours: int = 24
     down_min: int = 15
     max_per_day: int = 30
+    daily_summary: bool = False         # FIN_ALERT_DAILY_SUMMARY=1: one all-clear / open-count email a day
+    daily_hour: int = 8                 # its local hour (FIN_ALERT_DAILY_HOUR) in ``tz``
+    tz: str = "America/Los_Angeles"     # Finance's business zone (FIN_BUSINESS_TZ)
     problem: Optional[str] = "not configured: set FOUNDER_ALERT_EMAIL, FOUNDER_ALERT_FROM and RESEND_API_KEY"
 
     @property
@@ -155,7 +159,9 @@ def settings_from_env(env, resend_key_present: bool) -> AlertSettings:
     s.remind_hours, p2 = _int(env, "FIN_ALERT_REMIND_HOURS", 24, 1, 168)
     s.down_min, p3 = _int(env, "FIN_ALERT_LEDGER_DOWN_MIN", 15, 5, 1440)
     s.max_per_day, p4 = _int(env, "FIN_ALERT_MAX_PER_DAY", 30, 1, 288)
-    problems += [p for p in (p1, p2, p3, p4) if p]
+    s.daily_hour, p5 = _int(env, "FIN_ALERT_DAILY_HOUR", 8, 0, 23)
+    s.daily_summary = (env.get("FIN_ALERT_DAILY_SUMMARY") or "").strip() == "1"
+    problems += [p for p in (p1, p2, p3, p4, p5) if p]
     to = (env.get("FOUNDER_ALERT_EMAIL") or "").strip()
     sender = (env.get("FOUNDER_ALERT_FROM") or "").strip()
     if not to and not sender:
@@ -401,6 +407,8 @@ def run(st: dict, conditions: list, now: datetime, cfg: AlertSettings, sender) -
     day = now.strftime("%Y-%m-%d")
     if st["day"].get("date") != day:
         st["day"] = {"date": day, "n": 0}
+    if cfg.daily_summary:
+        summary["daily_sent"] = _daily(st, now, cfg, sender)
 
     pend = st.get("pending")
     if pend:
@@ -453,6 +461,45 @@ def run(st: dict, conditions: list, now: datetime, cfg: AlertSettings, sender) -
         log.error("ALERT finance: founder_alert_send_failed digest=%s attempt=1 code=%s", digest_id, out.code)
         summary["send_failed"] += 1
     return summary
+
+
+def _daily(st: dict, now: datetime, cfg: AlertSettings, sender) -> Optional[bool]:
+    """The daily summary (dead-man's switch, the email half): once per local day at or after ``daily_hour``, whatever
+    is open, so a day without it means the alert path is broken. Frozen once built (same text, same key on a retry);
+    at most DAILY_MAX_ATTEMPTS a day. None = not due now."""
+    from zoneinfo import ZoneInfo
+    local = now.astimezone(ZoneInfo(cfg.tz))
+    if local.hour < cfg.daily_hour:
+        return None
+    today = local.strftime("%Y-%m-%d")
+    d = st.get("daily") or {}
+    if d.get("date") != today:
+        counts: dict[str, int] = {}
+        for rec in st["open"].values():
+            counts[rec["category"]] = counts.get(rec["category"], 0) + 1
+        n = sum(counts.values())
+        subject = f"ZBM daily check {today}: " + ("all clear" if n == 0 else f"{n} open ({', '.join(sorted(counts))})")
+        lines = [f"Z Best Media daily alert check, {today} ({cfg.tz}).", ""]
+        lines += ["Nothing is open." if n == 0 else "Open now (counts only; the alert emails and the service have the "
+                                                     "details):"]
+        lines += [f"- {c}: {counts[c]}" for c in sorted(counts)]
+        lines += ["", f"Last alert digest: {st.get('last_digest_at') or 'none yet'}.", "",
+                  "This email comes once a day. If it stops coming, the alert path itself is broken (Finance, the "
+                  "ops-alerts cron or the Resend key): docs/runbooks/founder-alerts.md, section C."]
+        d = {"date": today, "subject": subject[:200], "text": "\n".join(lines), "attempts": 0, "sent": False,
+             "key": f"zbm-daily-{today}"}
+        st["daily"] = d
+    if d.get("sent") or d.get("attempts", 0) >= DAILY_MAX_ATTEMPTS:
+        return None
+    out = _send(sender, d["subject"], d["text"], d["key"])
+    d["attempts"] = d.get("attempts", 0) + 1
+    if out.sent:
+        d["sent"] = True
+        return True
+    if out.permanent or d["attempts"] >= DAILY_MAX_ATTEMPTS:
+        d["attempts"] = DAILY_MAX_ATTEMPTS
+    log.error("ALERT finance: founder_daily_summary_failed attempt=%d code=%s", d["attempts"], out.code)
+    return False
 
 
 def _send(sender, subject: str, text: str, key: str) -> SendOutcome:
