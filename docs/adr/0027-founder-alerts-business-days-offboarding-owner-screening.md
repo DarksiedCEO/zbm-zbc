@@ -69,6 +69,41 @@ holiday moves to the Friday, so for example July 3, 2026 is a holiday there and 
 Reserve rule ZBM is never later than the other reading by more than that one Friday; the Friday-observed reading
 gives the client one more day. This ADR follows the instruction (Federal Reserve schedule); Legal is unchanged.
 
+### 4. OFAC owner screening and the 50 Percent Rule in the client activation gate
+
+- **Owner records (Andre enters them; clients attest).** `PUT /compliance/v1/clients/{id}/ownership` (Andre only):
+  `client_kind` (entity or sole_proprietor), owners (id, person or entity, share of the parent in basis points, parent,
+  country, SHA-256 of the name searched: never the name), `no_owner_25` for a widely held entity, and the client's
+  attestation of the disclosure (method, time, evidence hash). Validation refuses duplicates, shares above 100% per
+  parent, a person as parent, an unknown parent, cycles and chains deeper than 6. Recorded on the ledger first
+  (`client_ownership_recorded`, counts and the record's hash), then the local log (kind `ownership`).
+- **The same list engine.** Each owner is screened the way the client is: Andre's recorded OFAC Sanctions List Search
+  (`POST /compliance/v1/sanctions/attestations` with `owner_id`; `subject_id` stays the client). The search must be for
+  the owner's listed name (the hashes must match). An owner's search never stands in for the client's own (refused as
+  `sanctions_attestation_id`, and by the activation status).
+- **The gate (HR-14, seed v3).** Activation is refused unless: an ownership record exists; an entity has its
+  attestation and either owners or `no_owner_25`; every entity owner holding 25% or more of the client (effective
+  share through the chain) has its owners listed or `no_further_owners_25`; every owner has a no-match search no older
+  than 30 days; and the blocked owners hold less than 50% in aggregate. Unmet items are `HR-14 / owner_screening`.
+- **Hits.** Any non-no-match owner search opens a permanent hold on the CLIENT (no API release, as for the client's own
+  hit; founder rule "never investigated around"). Kind `sanctions_match` (sanctions-grounded: Finance never refunds,
+  Andre reports) when the blocked owners then hold 50% or more in aggregate, else `sanctions_owner_match` (refused, not
+  blocked property). The activation status also reports sanctions-grounded whenever the current record's blocked share
+  reaches 50%.
+- **The 50 Percent Rule, computed.** Bottom up: an owner is blocked when its own search hit, or when blocked owners hold
+  50% or more of it; the client's blocked share is the sum of its blocked direct owners' shares. So an entity owned 50%
+  by a listed person, owning 50% of the client, blocks the client although the entity is on no list (OFAC FAQ 401).
+  Shares are integers; effective shares exact fractions (no floats).
+- **Re-screen every 90 days with the client.** An ALLOW ruling records the ownership record's hash and each owner's
+  search id. The status refuses when the record changed since (re-activate), when any of those searches is older than
+  90 days, and `valid_until` is the earliest of the client's and the owners' searches plus 90 days.
+- **Seed v3.** HR-14's text names owners and the rule; two new reviewed parameters, `owner_disclosure_bp` (2500) and
+  `aggregate_block_bp` (5000). `devtools/make_seed_v3.py` rebuilds it from v2 byte for byte; the pin moves to
+  `02b8d0ae...7b2b`. Andre approves the seed as before. Fail-closed rules and the Andre-only release are unchanged.
+
+Runbook: docs/runbooks/ofac-owner-screening.md (from the draft on `docs/ops-runbooks-2026-10-30`, now matching the
+routes); railway.md step G points to it.
+
 ## Consequences
 
 - New caller name `ops_alerts` at Finance; new Railway service `ops-alerts`; new Finance variables
@@ -78,5 +113,7 @@ gives the client one more day. This ADR follows the instruction (Federal Reserve
 
 ## Verification
 
-finance-py: tests/test_founder_alerts.py, tests/test_bizdays.py; devtools/test_deploy_config.py (OpsAlerts). Nothing
+finance-py: tests/test_founder_alerts.py, tests/test_bizdays.py; devtools/test_deploy_config.py (OpsAlerts).
+compliance-py: tests/test_owner_screening.py (and the activation helpers in test_service_area_gate.py now record a
+default ownership). Nothing
 has run on Railway or against the real Resend API.

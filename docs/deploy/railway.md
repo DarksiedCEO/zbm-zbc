@@ -1024,6 +1024,11 @@ gates each one affects (on Oct 30: the ten platform rows; none blocks a US web c
    ```
 
    Keep the `attestation_id` it prints.
+
+   **Owners (ADR 0027).** Before step 4, record who owns the client (`PUT /compliance/v1/clients/$CLIENT/ownership`)
+   and the same OFAC search for each owner (this route with `"owner_id"`): docs/runbooks/ofac-owner-screening.md,
+   sections A.1 and C.1. Without them the activation refuses (`HR-14` / `owner_screening`). A sole proprietor needs only
+   `{"client_kind": "sole_proprietor", "owners": []}`.
 3. The client's MSA acceptance at Legal (the acceptance you record today with `LEGAL_ONBOARDING_CALLER_TOKEN`): note
    its `acceptance_id`, the `version` and the document's `doc_sha256`. The onboarding token records a standard form's
    acceptance only with an invitation you issued for that client first (`POST /legal/v1/acceptance-invitations` with

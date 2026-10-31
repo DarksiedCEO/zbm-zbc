@@ -45,9 +45,10 @@ from ports import (A11yAnswer, AccessibilityChecker, AgeAttestation, ClientDocum
 import readiness as readiness_mod
 from register import Version, effective_status, rows_sha256, sha256_text
 from store import DataDirBusy, RecordLog, StoreWriteError
+from svc_owners import OwnersMixin
 from textguard import injection_rules_in
 
-SPEC_SEED_SHA256 = "bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5"   # seed v2 (ADR 0024)
+SPEC_SEED_SHA256 = "02b8d0ae6fffe6589cf34a91d0c4fd7704870936b611a237f90b8b514c6c7b2b"   # seed v3 (ADR 0027); v2 bc6d371a... (ADR 0024)
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
 REGISTER_PAGE = 100
@@ -180,6 +181,10 @@ class GateEnv:
     def attestation(self, aid: str) -> Optional[dict]:
         return self.svc.attestations.get(aid)
 
+    def owner_problems(self, lane: str, subject_id: str, now) -> list[str]:
+        """ADR 0027: the client's disclosed owners, each screened, and the 50 Percent Rule."""
+        return self.svc.owner_screening_problems(lane, subject_id, now)
+
     def latest_screen(self, subject_id: str, role: str, owner_of: Optional[str]) -> Optional[dict]:
         cands = [s for s in self.svc.screens.values() if s["subject_id"] == subject_id and s["role"] == role
                  and (owner_of is None or s.get("owner_of") == owner_of)]
@@ -205,7 +210,7 @@ class GateEnv:
         return self.activation(lane, subject_id)[1]
 
 
-class ComplianceService:
+class ComplianceService(OwnersMixin):
     def __init__(self, config: Config, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str = SPEC_SEED_SHA256, ports: Optional[Ports] = None,
                  clock: Optional[Clock] = None, sources: Optional[list[Source]] = None, reconcile_mode: bool = False,
@@ -552,6 +557,8 @@ class ComplianceService:
             self.screens[r["screen_id"]] = r
         elif kind == "sanctions_attestation":
             self.attestations[r["attestation_id"]] = r
+        elif kind == "ownership":
+            self._apply_ownership(r)
         elif kind == "a11y":
             self.a11y.setdefault(r["content_sha256"], []).append(r)
         elif kind == "control_result":
@@ -940,6 +947,9 @@ class ComplianceService:
             if gate == "activation" and allowed:
                 owners = [self.screens[s]["subject_id"] for s in ctx.facts.get("owner_screen_ids") or [] if s in self.screens]
                 record["profile"] = i02_activation_gate.profile(lane, ctx.facts, owners)
+                if lane in ("client", "zbc_brand"):
+                    # ADR 0027: the ownership record and the owner searches this ALLOW rests on
+                    record["profile"]["ownership"] = self.ownership_snapshot(lane, subject_id)
             if gate == "payout":
                 record["disclosure_evidence_ref"] = (ctx.facts.get("disclosure") or {}).get("platform_toggle_evidence_ref")
                 record["clipper_id"] = ctx.facts.get("clipper_id")
@@ -1149,14 +1159,20 @@ class ComplianceService:
                    "list_version": body["list_version"], "lists": sorted(set(body["lists"])), "tool": body["tool"],
                    "result": body["result"], "evidence_sha256": body["evidence_sha256"],
                    "searched_name_sha256": body["searched_name_sha256"], "recorded_at": iso(now),
-                   "recorded_by": "andre"}
+                   "recorded_by": "andre", "owner_id": body.get("owner_id")}
             events = [self._record(derived_id("sat", aid), "sanctions_attestation_recorded", "andre", subject,
                                    {"attestation_id": aid, "result": rec["result"], "lists": rec["lists"],
                                     "searched_at": rec["searched_at"], "list_version_sha256": sha256_text(rec["list_version"]),
-                                    "evidence_sha256": rec["evidence_sha256"]},
+                                    "evidence_sha256": rec["evidence_sha256"], "owner": rec["owner_id"] is not None},
                                    f"OFAC search recorded by Andre: {rec['result']}")]
             hold = None
-            if rec["result"] != "no_match":
+            if rec["result"] != "no_match" and rec["owner_id"] is not None:
+                # ADR 0027: an owner's hit holds the CLIENT, permanently (sanctions-grounded at 50% in aggregate)
+                hold = self.owner_hold(subject, rec["lane"], rec["owner_id"], aid, now)
+                events.append(self._record(derived_id("hold", hold["hold_id"]), "hold_opened", i08_sanctions.ACTOR,
+                                           subject, {"hold_id": hold["hold_id"], "kind": hold["kind"],
+                                                     "obligation_id": "HR-14"}, f"Hold opened: {hold['kind']}"))
+            elif rec["result"] != "no_match":
                 hold = {"hold_id": "hold-" + _b32(f"sat|{aid}", 20), "subject_id": subject, "kind": "sanctions_match",
                         "obligation_id": "HR-14", "releasable": False, "status": "open", "opened_at": iso(now),
                         "released_at": None, "detail": f"OFAC search {aid}: {rec['result']}"}
@@ -1254,6 +1270,9 @@ class ComplianceService:
                    "sanctions_ground": None}
             # AEGIS r8: WHICH sanctions ground: "match" (an OFAC list match on the client) or "place" (the client's
             # place or a campaign target is comprehensively sanctioned); match wins when both apply
+            if self.ownership_blocked(lane, client_id):
+                # ADR 0027: blocked owners hold 50% or more in aggregate: the client is itself blocked property
+                out["sanctions_grounded"] = True
             if out["sanctions_grounded"]:
                 out["sanctions_ground"] = "match"
             reasons = out["reasons"]
@@ -1307,10 +1326,21 @@ class ComplianceService:
                 att = self.attestations.get(prof.get("sanctions_attestation_id") or "")
                 problem = i08_sanctions.attestation_problem(att, client_id, now, params, lane=lane,
                                                             age_key="rescreen_after_days")
+                if att is not None and att.get("owner_id") is not None:
+                    problem = "an owner's OFAC search is not the client's own: re-activate"
                 if problem:
                     reasons.append(f"HR-14: {problem}")
                 elif att is not None:
                     out["valid_until"] = iso(parse_iso(att["searched_at"]) + timedelta(days=params["rescreen_after_days"]))
+                # ADR 0027: the owners, re-screened with the client; valid until the earliest search expires
+                o_reasons, o_until, o_grounded = self.ownership_status(lane, client_id, prof, now,
+                                                                       params.get("rescreen_after_days", 90))
+                reasons += [f"HR-14: {x}" for x in o_reasons]
+                if o_until is not None and out["valid_until"] is not None and iso(o_until) < out["valid_until"]:
+                    out["valid_until"] = iso(o_until)
+                if o_grounded:
+                    out["sanctions_grounded"] = True
+                    out["sanctions_ground"] = "match"
             if not reasons:
                 out.update(decision="ALLOW", current=True, sanctions_grounded=False, sanctions_ground=None)
             return out

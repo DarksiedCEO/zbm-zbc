@@ -22,8 +22,8 @@ from register import SHELF_LIFE_DAYS, seed_checks
 from store import StoreCorrupt
 
 SRC = Path(__file__).resolve().parents[1] / "src"
-# Seed v2 (ADR 0024, the founder decisions of Oct 30, 2026); v1 (the spec's) was 4e3821d0...584d.
-SPEC_SHA = "bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5"
+# Seed v3 (ADR 0027: owners in HR-14, Oct 31, 2026); v2 (ADR 0024) was bc6d371a...070f5; v1 (the spec's) 4e3821d0...584d.
+SPEC_SHA = "02b8d0ae6fffe6589cf34a91d0c4fd7704870936b611a237f90b8b514c6c7b2b"
 MONEY_WORDS = ("amount", "usd", "price", "rate", "balance", "money", "fee", "payment", "cents", "currency")
 
 

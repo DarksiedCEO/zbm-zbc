@@ -19,9 +19,10 @@ CALLER_NAMES = ("onboarding", "creative_production", "finance_31", "verification
                 "seo_02", "revenue_recovery")
 CALLER_TOKEN_MIN = 32
 UNRESOLVED_REF_MARKERS = ("${{", "{{")
-# The pinned seed hash; service.SPEC_SEED_SHA256 is the same value. Seed v2 (ADR 0024: the founder decisions of Oct
-# 30, 2026); seed v1, the spec's ("SHA-256 at generation"), was 4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d.
-PINNED_SEED_SHA256 = "bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5"
+# The pinned seed hash; service.SPEC_SEED_SHA256 is the same value. Seed v3 (ADR 0027: owners and the 50 Percent Rule in
+# HR-14, Oct 31, 2026); seed v2 (ADR 0024: the founder decisions of Oct 30, 2026) was bc6d371a...070f5;
+# seed v1, the spec's ("SHA-256 at generation"), was 4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d.
+PINNED_SEED_SHA256 = "02b8d0ae6fffe6589cf34a91d0c4fd7704870936b611a237f90b8b514c6c7b2b"
 DEFAULT_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "seed",
                                  "compliance_obligations_seed.json")
 

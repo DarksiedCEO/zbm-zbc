@@ -379,6 +379,24 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         """ADR 0024 (HR-14): Andre records the OFAC search he made for a client (date, list version, result)."""
         return svc.record_attestation(req.request_id, req.model_dump())
 
+    @app.put("/compliance/v1/clients/{client_id}/ownership", dependencies=auth)
+    def ownership_put(client_id: str, _: str = Depends(andre("clients/ownership")),
+                      req: m.OwnershipRequest = Depends(body(m.OwnershipRequest))) -> dict:
+        """ADR 0027: Andre records who owns the client (owners, shares, chains, the client's attestation; name
+        hashes only). Each owner then needs his OFAC search (POST /compliance/v1/sanctions/attestations, owner_id)."""
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", client_id):
+            raise Invalid("client id format")
+        return svc.put_ownership(req.request_id, client_id, req.model_dump())
+
+    @app.get("/compliance/v1/clients/{client_id}/ownership", dependencies=auth)
+    def ownership_get(client_id: str, _: str = Depends(andre("clients/ownership")),
+                      lane: str = Query(default="client", pattern=r"^(client|zbc_brand)$")) -> dict:
+        """ADR 0027: the record, each owner's effective share and latest search, the blocked share (50 Percent Rule)
+        and what is still missing. Andre only."""
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", client_id):
+            raise Invalid("client id format")
+        return svc.ownership_view(client_id, lane)
+
     activation_callers = caller("finance_31", "seo_02", "revenue_recovery", "onboarding")
 
     def activation_reader(x_compliance_caller_token: Optional[str] = Header(default=None),

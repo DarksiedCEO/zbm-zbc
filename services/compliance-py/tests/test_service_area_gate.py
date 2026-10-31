@@ -46,9 +46,24 @@ def attest(h: Harness, subject: str, result: str = "no_match", searched_at: date
     return h.post("/compliance/v1/sanctions/attestations", body, andre=andre)
 
 
+def default_ownership(h: Harness, subject: str, lane: str = "client") -> None:
+    """ADR 0027: every client activation needs an ownership record; the default is an entity that attested nobody
+    owns 25% or more of it (owner screening has its own tests: test_owner_screening.py)."""
+    if (lane, subject) in h.svc.ownerships:
+        return
+    body = {"request_id": rid("own"), "lane": lane, "client_kind": "entity", "owners": [], "no_owner_25": True,
+            "client_attestation": {"attested_at": iso(h.clock.at), "method": "signed_form", "evidence_sha256": "c" * 64,
+                                   "attestation_ref": "ownership-form"}}
+    r = h.client.put(f"/compliance/v1/clients/{subject}/ownership", json=body, headers=h.headers(None, ANDRE_TOKEN))
+    assert r.status_code == 200, r.text
+
+
 def web_client(h: Harness, subject: str = "client-web", country: str = "US", region: str | None = "US-CA",
-               targets=("US",), platforms=("web",), docs=(MSA,), attest_first: bool = True, **over) -> dict:
+               targets=("US",), platforms=("web",), docs=(MSA,), attest_first: bool = True, ownership: bool = True,
+               **over) -> dict:
     f = client_facts(targets=targets, platforms=platforms, country=country, region=region)
+    if ownership and attest_first:
+        default_ownership(h, subject)
     if attest_first:
         a = attest(h, subject)
         assert a.status_code == 200, a.text

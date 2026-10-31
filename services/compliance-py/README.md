@@ -122,9 +122,9 @@ round 14"):
 | `intelligences/i01…i11` | The 11 intelligences (register keeper, three gates, control monitor, change watcher, jurisdiction resolver, sanctions, disclosure, accessibility, evidence/audit) |
 | `intelligences/engine.py` | The shared gate algorithm (C.2) and all C.10 checks |
 
-`seed/compliance_obligations_seed.json` — seed v2 (ADR 0024: the founder decisions of
-Oct 30, 2026 written into the spec's seed v1, whose SHA-256 `4e3821d0…584d` it records), SHA-256
-`bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5`, checked at every start.
+`seed/compliance_obligations_seed.json` — seed v3 (ADR 0027: HR-14 covers the client's disclosed owners and
+OFAC's 50 Percent Rule; built from seed v2 `bc6d371a…070f5` of ADR 0024 by `devtools/make_seed_v3.py`), SHA-256
+`02b8d0ae6fffe6589cf34a91d0c4fd7704870936b611a237f90b8b514c6c7b2b`, checked at every start.
 
 ## Routes
 
@@ -141,7 +141,9 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `POST /compliance/v1/gates/{activation,payout,publish}` | same | native form, same bodies |
 | `GET /compliance/v1/rulings/{id}` | any caller | one ruling |
 | `POST /compliance/v1/sanctions/screen` | onboarding, finance_31 | screen a payee or owner (DOB goes to the provider, never stored) |
-| `POST /compliance/v1/sanctions/attestations` | Andre only | ADR 0024: record his OFAC search for a client (HR-14); a hit opens a permanent hold |
+| `POST /compliance/v1/sanctions/attestations` | Andre only | ADR 0024: record his OFAC search for a client (HR-14); a hit opens a permanent hold. ADR 0027: with `owner_id`, the search of one of the client's disclosed owners (a hit holds the client) |
+| `PUT /compliance/v1/clients/{id}/ownership` | Andre only | ADR 0027: who owns the client (owners, shares in basis points, chains, the client's attestation; name hashes only) |
+| `GET /compliance/v1/clients/{id}/ownership` | Andre only | ADR 0027: the record, effective shares, each owner's latest search, the blocked share (50 Percent Rule), what is missing |
 | `GET /compliance/v1/sanctions/status` | finance_31, onboarding | ADR 0024: a payee's latest screen and its freshness |
 | `GET /compliance/v1/clients/{client_id}/activation` | `finance_31`, `seo_02`, `revenue_recovery`, `onboarding`, Andre | ADR 0024: the client's current activation decision (reasons: Finance and Andre only) |
 | `GET /compliance/v1/readiness` | any caller | ADR 0024: expired rules and the gates they affect |

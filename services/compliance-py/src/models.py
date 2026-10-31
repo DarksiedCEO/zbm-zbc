@@ -68,6 +68,45 @@ class SanctionsAttestationRequest(Strict):
     result: Literal["no_match", "potential_match", "match"]
     evidence_sha256: Sha
     searched_name_sha256: Sha
+    # ADR 0027: the search was for one of the client's disclosed owners (its id in the ownership record), not the
+    # client itself; a hit holds the CLIENT. An owner's search never stands in for the client's own.
+    owner_id: Optional[Id] = None
+
+
+def _iso2(v: str) -> str:
+    if not is_known_country(v):
+        raise ValueError("country is not a known ISO 3166-1 alpha-2 code")
+    return v
+
+
+class OwnerRecord(Strict):
+    """ADR 0027: one disclosed owner of a client. No name: the SHA-256 of the name Andre searched."""
+
+    owner_id: Id
+    kind: Literal["person", "entity"]
+    parent_owner_id: Optional[Id] = None          # None: owns the client directly; else the entity owner it owns
+    ownership_bp: int = Field(ge=1, le=10000)     # its share of the parent in basis points (2500 = 25%)
+    name_sha256: Sha
+    country: Annotated[str, Field(pattern=r"^[A-Z]{2}$"), AfterValidator(_iso2)]
+    no_further_owners_25: StrictBool = False      # an entity owner: it attests nobody owns 25% or more of it
+
+
+class OwnershipAttestation(Strict):
+    """The client's own statement of who owns it (MSA 1.5(c)), as Andre holds it."""
+
+    attested_at: Annotated[str, Field(min_length=20, max_length=40)]
+    method: Literal["msa_acceptance", "signed_form", "email_reply"]
+    evidence_sha256: Sha
+    attestation_ref: Id
+
+
+class OwnershipRequest(Strict):
+    request_id: Id
+    lane: Literal["client", "zbc_brand"]
+    client_kind: Literal["entity", "sole_proprietor"]
+    owners: list[OwnerRecord] = Field(default_factory=list, max_length=50)
+    no_owner_25: StrictBool = False               # an entity: nobody owns 25% or more of it (widely held)
+    client_attestation: Optional[OwnershipAttestation] = None
 
 
 class ScreenRequest(Strict):

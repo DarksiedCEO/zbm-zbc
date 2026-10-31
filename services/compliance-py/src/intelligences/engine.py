@@ -604,13 +604,21 @@ def c_required_docs(row, ctx):
 
 
 def c_client_sanctions_attested(row, ctx):
-    """HR-14 (ADR 0024): Andre's recorded OFAC search for THIS subject, no-match, every listed list, fresh."""
+    """HR-14 (ADR 0024): Andre's recorded OFAC search for THIS subject, no-match, every listed list, fresh. ADR 0027:
+    and for each owner the client disclosed (svc_owners.owner_screening_problems)."""
     sid = ctx.facts.get("sanctions_attestation_id")
     if not sid:
         return [ctx.missing(row["id"], "sanctions_attestation_id")]
-    p = i08_sanctions.attestation_problem(ctx.env.attestation(sid), ctx.subject_id, ctx.now,
-                                          row.get("parameters") or {}, lane=ctx.lane)
-    return [ctx.u(row["id"], "client_sanctions_attested", p)] if p else []
+    att = ctx.env.attestation(sid)
+    p = i08_sanctions.attestation_problem(att, ctx.subject_id, ctx.now, row.get("parameters") or {}, lane=ctx.lane)
+    if p is None and att is not None and att.get("owner_id") is not None:
+        p = "the OFAC search named is an owner's search, not the client's own"
+    out = [ctx.u(row["id"], "client_sanctions_attested", p)] if p else []
+    # ADR 0027: every disclosed owner screened, the ownership attested, the 50 Percent Rule (one item per problem)
+    owner_problems = getattr(ctx.env, "owner_problems", None)
+    if owner_problems is not None:
+        out += [ctx.u(row["id"], "owner_screening", x) for x in owner_problems(ctx.lane, ctx.subject_id, ctx.now)]
+    return out
 
 
 def c_client_docs_current(row, ctx):
