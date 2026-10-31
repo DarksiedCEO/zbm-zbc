@@ -371,7 +371,7 @@ def _main(work: Path) -> int:
               fired == 1 and rel2r.status_code == 200 and it2.get("status") == "submitted")
         rk = "fin-je-" + hashlib.sha256(json.dumps(["zbc", f"F4d|{it2.get('item_id')}"], separators=(",", ":"))
                                         .encode()).hexdigest()[:40]
-        ev = B.get("/fin/v1/audit/evidence", event_type="journal_entry_posted", limit=1000)
+        ev = B.get("/fin/v1/audit/evidence", andre=True, event_type="journal_entry_posted", limit=1000)   # r11: Andre
         check("B: /fin/v1/audit/evidence: the F4d booking committed exactly once, the lost try attempted",
               len([e for e in ev["events"] if e["status"] == "committed" and e["rk"] == rk]) == 1
               and ev["counts"]["attempted"] >= 1)

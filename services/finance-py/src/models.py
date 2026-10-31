@@ -520,6 +520,12 @@ class ComplianceHoldRelease(Strict):
     ofac_guidance_sha256: Optional[Sha] = None
 
 
+class RefundCancel(Strict):
+    """AEGIS r11: Andre cancels an approved refund whose payment never moved (refused at execution), with a reason."""
+    request_id: Id
+    reason: _text(1000, True)
+
+
 class RefundRepay(Strict):
     """Andre pays a refund again after its payment was settled ``not_moved`` (AEGIS c0869c4 H-N1)."""
     request_id: Id

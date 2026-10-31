@@ -188,8 +188,8 @@ def test_no_non_andre_response_names_sanctions_ofac_or_a_match(tmp_path):
     _ground(hr, "match")
     assert _job(hr)["holds_changed"] == 1
     # what onboarding (and every general caller) can read now
-    reads = [hr.get("/fin/v1/audit/export", caller="onboarding"),
-             hr.get("/fin/v1/audit/evidence", caller="onboarding"),
+    reads = [hr.redacted_get("/fin/v1/audit/export"),
+             hr.redacted_get("/fin/v1/audit/evidence"),
              hr.get(f"/fin/v1/invoices/{inv['invoice_id']}", caller="onboarding"),
              hr.get(f"/fin/v1/invoices/{inv2['invoice_id']}", caller="onboarding"),
              hr.get("/fin/v1/breaks", caller="onboarding"),
@@ -204,7 +204,7 @@ def test_no_non_andre_response_names_sanctions_ofac_or_a_match(tmp_path):
     # page through the whole export
     cur = 0
     while cur is not None:
-        page = hr.get("/fin/v1/audit/export", caller="onboarding", cursor=cur).json()
+        page = hr.redacted_get("/fin/v1/audit/export", cursor=cur).json()
         assert not _scan(json.dumps(page)), _scan(json.dumps(page))[:3]
         cur = page["next_cursor"]
     # Andre's token sees it all

@@ -171,7 +171,7 @@ def test_bf2_restart_after_a_retried_booking_starts_and_shows_the_attempt(tmp_pa
     spy(h, once_after(is_f4d))
     assert release(h, b["batch_id"]).status_code == 200
     iid = b["item_ids"][0]
-    ev = h.ok(h.get("/fin/v1/audit/evidence", event_type="journal_entry_posted"))
+    ev = h.ok(h.get("/fin/v1/audit/evidence", caller=None, andre=ANDRE_TOKEN, event_type="journal_entry_posted"))
     rk = derived_id("je", "zbc", f"F4d|{iid}")
     rows = [x for x in ev["events"] if x["status"] == "committed" and x["rk"] == rk]
     assert len(rows) == 1

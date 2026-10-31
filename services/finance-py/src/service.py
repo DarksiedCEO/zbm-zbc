@@ -317,7 +317,6 @@ class FinanceService:
         self.held_by_item: dict[str, set[str]] = {}
         # AEGIS 5a56a3a M2: treasury operations whose bank call is in flight in THIS process (under ``self.lock``)
         self.xfer_in_flight: set[str] = set()
-        self._funded_alerted: set = set()     # AEGIS r10 R10-1: (client, sanctions) Andre was already pushed about
         self.idem:"OrderedDict[tuple[str, str], dict]" = OrderedDict()
         self._ledger_conflict = False
         self.instance_id = secrets.token_hex(8)
@@ -1065,7 +1064,11 @@ class FinanceService:
 
     def health(self) -> dict:
         with self.lock:
-            holds = sum(1 for i in self.db["invoices"].values() if i.get("held_compliance"))
+            # AEGIS r11 R11-2/R11-4: held invoices, held unapplied money and open founder alerts (funded brands
+            # Compliance no longer allows) all stop the heartbeat
+            holds = sum(1 for i in self.db["invoices"].values() if i.get("held_compliance")) \
+                + sum(1 for r in self.db["receipts"].values() if r.get("held_compliance")) \
+                + sum(1 for b in self.db["breaks"].values() if b.get("kind") == "founder_alert" and b["status"] == "open")
         return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,

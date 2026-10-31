@@ -88,8 +88,8 @@ def _visible(hr):
     texts, shapes_rec, jobs = [], set(), set()
     cur = 0
     while cur is not None:
-        page = hr.get("/fin/v1/audit/export", caller="onboarding").json() if cur == 0 else \
-            hr.get("/fin/v1/audit/export", caller="onboarding", cursor=cur).json()
+        page = hr.redacted_get("/fin/v1/audit/export").json() if cur == 0 else \
+            hr.redacted_get("/fin/v1/audit/export", cursor=cur).json()
         texts.append(json.dumps(page))
         for e in next(v for v in page.values() if isinstance(v, list)):
             for r in e.get("records", []):
@@ -99,7 +99,7 @@ def _visible(hr):
                     if isinstance(rec.get("summary"), dict):
                         jobs.add(tuple(sorted(rec["summary"])))
         cur = page["next_cursor"]
-    texts.append(hr.get("/fin/v1/audit/evidence", caller="onboarding").text)
+    texts.append(hr.redacted_get("/fin/v1/audit/evidence").text)
     texts.append(hr.get("/fin/v1/breaks", caller="onboarding").text)
     for b in hr.get("/fin/v1/breaks", caller="onboarding").json().get("breaks", []):
         shapes_rec.add(("breaks-view", tuple(sorted(b))))

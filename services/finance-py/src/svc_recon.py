@@ -256,6 +256,10 @@ class ReconMixin:
                                "/fin/v1/invoices/{invoice_id}/compliance-hold/release")
             if b["status"] == "resolved":
                 raise Conflict("break already resolved")
+            if (self.db["receipts"].get(b.get("receipt_id") or "") or {}).get("held_compliance"):
+                # AEGIS r11 R11-1: held money's breaks close only with the hold's own release (its grounds)
+                raise Conflict("this money is held by Compliance: its breaks close only through POST "
+                               "/fin/v1/receipts/{receipt_id}/compliance-hold/release")
             now = self._now()
             status = None
             if body.get("entry_id"):

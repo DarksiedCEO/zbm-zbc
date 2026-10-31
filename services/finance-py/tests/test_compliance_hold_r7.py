@@ -48,7 +48,8 @@ def _upgraded(hr):
 def test_the_audit_export_hides_the_sanctions_marker_from_other_callers(tmp_path):
     hr = _stripe_hr(tmp_path)
     inv, pi = _upgraded(hr)
-    r = hr.get("/fin/v1/audit/export", caller="onboarding")
+    assert hr.get("/fin/v1/audit/export", caller="onboarding").status_code == 403    # AEGIS r11 R11-3: Andre only
+    r = hr.redacted_get("/fin/v1/audit/export")
     assert r.status_code == 200, r.text
     text = json.dumps(r.json())
     for word in ("sanctions", "sanctions_since", "ofac", '"held_compliance":', '"held_compliance_history":'):
@@ -61,11 +62,11 @@ def test_the_audit_export_hides_the_sanctions_marker_from_other_callers(tmp_path
 def test_the_audit_evidence_hides_the_sanctions_event_from_other_callers(tmp_path):
     hr = _stripe_hr(tmp_path)
     inv, pi = _upgraded(hr)
-    r = hr.get("/fin/v1/audit/evidence", caller="onboarding")
+    r = hr.redacted_get("/fin/v1/audit/evidence")
     assert r.status_code == 200, r.text
     assert "compliance_hold_sanctions" not in r.text and "ofac" not in r.text.lower()
     assert any(e["event_type"] == "compliance_hold_event" for e in r.json()["events"])
-    r = hr.get("/fin/v1/audit/evidence", caller="onboarding", event_type="compliance_hold_sanctions")
+    r = hr.redacted_get("/fin/v1/audit/evidence", event_type="compliance_hold_sanctions")
     assert r.status_code == 200 and r.json()["total"] == 0          # the filter cannot probe for it either
     full = _andre_get(hr, "/fin/v1/audit/evidence")
     assert full.status_code == 200 and "compliance_hold_sanctions" in full.text
@@ -76,7 +77,7 @@ def test_an_ofac_release_is_generic_in_the_export_for_other_callers(tmp_path):
     inv, pi, out = _pay_then(hr, lambda: _sanctioned(hr))
     doc = "7f" * 32                  # a hash no fixture uses, so finding it means it leaked
     hr.ok(_release(hr, inv, basis="ofac_authorization", ofac_authorization_sha256=doc, ofac_document_kind="license"))
-    text = json.dumps(hr.get("/fin/v1/audit/export", caller="onboarding").json()).lower()
+    text = json.dumps(hr.redacted_get("/fin/v1/audit/export").json()).lower()
     assert "ofac" not in text and "sanctions" not in text and doc not in text
     assert doc in json.dumps(_andre_get(hr, "/fin/v1/audit/export").json())
 
@@ -134,7 +135,7 @@ def test_a_rejected_payment_returned_to_the_sender_leaves_with_its_501_604_repor
     assert hist["entry_id"] == entry and hist["ofac_authorization_sha256"] == REPORT
     assert _hold(hr, inv) is None
     # v1e: returned_to_sender never reaches another caller
-    assert "returned_to_sender" not in hr.get("/fin/v1/audit/export", caller="onboarding").text
+    assert "returned_to_sender" not in hr.redacted_get("/fin/v1/audit/export").text
 
 
 def test_the_rejected_return_ground_is_for_sanctions_holds_only(tmp_path):

@@ -416,15 +416,25 @@ class StripeMixin:
                     refused_holds.setdefault(inv["client_id"], []).append(i)
             # AEGIS r10 R10-1: clients whose deposit funds a campaign (accruals and payouts ask anyway; Andre is told)
             funded = {p["client_id"] for p in self.db["profiles"].values() if p.get("status") in ("funded", "paused")}
-        clients = sorted(set(open_by_client) | set(unverified) | set(refused_holds) | funded)
+            # AEGIS r11 R11-4: clients with an open founder alert (closed once allowed again or no longer funded)
+            alerted = {b["subject"].split(":", 1)[1] for b in self.db["breaks"].values()
+                       if b.get("kind") == "founder_alert" and b["status"] == "open"}
+            # AEGIS r11 R11-2: held unapplied money is re-read like a held invoice
+            rcpt_holds: dict[str, list[str]] = {}
+            for r_id, rc in self.db["receipts"].items():
+                hc = rc.get("held_compliance") or {}
+                if hc.get("client_id"):
+                    rcpt_holds.setdefault(hc["client_id"], []).append(r_id)
+        clients = sorted(set(open_by_client) | set(unverified) | set(refused_holds) | funded | alerted | set(rcpt_holds))
         cursor = getattr(self, "_activation_sweep_cursor", "")
         clients = ([c for c in clients if c > cursor] + [c for c in clients if c <= cursor])[:MAX_JOB_ACTIVATION_CHECKS]
         ga = Gather(self, f"{prefix}|activation", ACTOR, "stripe-sessions")
         refused_ids: set[str] = set()
         refused_clients = unknown = 0
         settle: list[tuple[str, str, str, str, bool]] = []    # (invoice, client, "release" | "convert", why, sanctions)
+        acts: dict = {}
         for cid in clients:
-            act = self._activation(ga, cid)
+            act = acts[cid] = self._activation(ga, cid)
             if not act.available:
                 unknown += 1
             elif not act.allowed:
@@ -434,11 +444,8 @@ class StripeMixin:
                 settle += [(i, cid, "convert", why, act_ground(act)) for i in unverified.get(cid, [])]
                 # R10-2: every refused hold is re-read; "upgrade" re-writes it (with the new ground when there is one)
                 settle += [(i, cid, "upgrade", why, act_ground(act)) for i in refused_holds.get(cid, [])]
-                if cid in funded:
-                    self._funded_client_alert(cid, act)
             else:
                 settle += [(i, cid, "release", "", False) for i in unverified.get(cid, [])]
-                self._funded_alerted.difference_update({(cid, False), (cid, True)})    # allowed again: re-arm
         released = converted = upgraded = 0
         for iid, cid, what, why, sanctions in settle:
             g_h = Gather(self, f"{prefix}|hold|{iid}", ACTOR, iid)
@@ -480,6 +487,10 @@ class StripeMixin:
                                                sanctions=merge_ground(sanctions, hold_ground(hold)))
                     converted += 1
                 self._commit(op_h)
+        r_released, r_changed = self._job_receipt_holds(prefix, rcpt_holds, acts)
+        released += r_released
+        upgraded += r_changed
+        self._job_founder_alerts(prefix, funded, alerted, acts)
         if clients:
             self._activation_sweep_cursor = clients[-1]
         if not self.cfg.stripe_incoming:               # AEGIS r10 R10-6: no Stripe pages to close, holds done above
@@ -781,23 +792,205 @@ class StripeMixin:
                   f"Unapplied payment held ({kind}): {amount}")
         return f"unapplied_held_{'compliance' if kind == 'refused' else 'unverified'}"
 
-    def _funded_client_alert(self, client_id: str, act) -> None:
-        """AEGIS r10 R10-1: a client whose deposit funds a campaign is no longer allowed: accruals, payout runs,
-        approvals, funding and releases for it are refused at each step; Andre is pushed once per state (his channel
-        only: nothing is written to the log, so no other reader sees it), with the OFAC line on a sanctions ground."""
-        key = (client_id, bool(act.sanctions))
-        if key in self._funded_alerted:
-            return
-        self._funded_alerted.add(key)
-        msg = (f"client {client_id}: a funded campaign's brand is no longer allowed by Compliance; no creator is "
-               "accrued or paid from its deposit until it is")
-        if act.sanctions:
-            msg += ("; OFAC: refused on sanctions grounds: its deposit is blocked property, do NOT return or move it; "
-                    "report to OFAC and follow runbook step G")
-        try:
-            self.ports.push.push("compliance_funded_client_refused", {"client_id": client_id, "message": msg})
-        except Exception:  # noqa: BLE001 - a push is best effort (stand-in); every money step refuses regardless
-            pass
+    FUNDED_ALERT_NOTE = {
+        False: "a funded campaign's brand is no longer allowed by Compliance: no creator is accrued or paid from its "
+               "deposit until it is",
+        True: "a funded campaign's brand is refused on SANCTIONS grounds: its deposit is blocked property; do NOT "
+              "return or move it; report to OFAC (runbook step G)"}
+
+    def _job_founder_alerts(self, prefix: str, funded: set, alerted: set, acts: dict) -> None:
+        """AEGIS r11 R11-4: a DURABLE founder alert, recorded with the job's state change: an open high-severity
+        ``compliance_hold`` break (kind ``founder_alert``, category ``compliance_hold``, subject ``client:<id>``: ids
+        only) for each client whose deposit funds a campaign and whom Compliance no longer allows. The founder-alert
+        dispatcher of ADR 0027 (fix wave C) reads open breaks of the Compliance legs and emails Andre; delivery is its
+        record, never this one. The break closes when the client is allowed again or funds no campaign any more; an
+        unanswered client changes nothing. Non-Andre readers see a generic compliance break (no note, no severity)."""
+        with self.lock:
+            op = Op(self, f"{prefix}|founder-alerts", ACTOR, "founder-alerts")
+            for cid in sorted(funded | alerted):
+                act = acts.get(cid)
+                if act is None or not act.available:
+                    continue
+                bid = rid("brk", "founder_alert", "funded_client", cid)
+                b = op.get("breaks", bid)
+                if cid in funded and not act.allowed:
+                    note = self.FUNDED_ALERT_NOTE[bool(act.sanctions)]
+                    if b is None or b["status"] != "open":
+                        op.put("breaks", bid, {"break_id": bid, "leg": "compliance_hold", "kind": "founder_alert",
+                                               "category": "compliance_hold", "severity": "high",
+                                               "subject": f"client:{cid}", "difference": "0.00",
+                                               "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
+                                               "owner": "andre", "explanation_code": "unknown", "status": "open",
+                                               "resolution": None, "note": note})
+                        op.record(derived_id("brk", bid, iso(self._now())), "break_opened", "intel_07_reconciliation",
+                                  bid, {"break_id": bid, "leg": "compliance_hold", "difference": "0.00"},
+                                  "Break opened: founder alert (a funded client Compliance does not allow)")
+                    elif b.get("note") != note:
+                        op.put("breaks", bid, {**b, "note": note})
+                elif b is not None and b["status"] == "open":
+                    op.put("breaks", bid, {**b, "status": "resolved", "resolved_at": iso(self._now()),
+                                           "resolution": {"basis": "compliance_allow" if act.allowed
+                                                          else "no_funded_campaign"}})
+            if op.ops:
+                self._commit(op)
+
+    def _job_receipt_holds(self, prefix: str, rcpt_holds: dict, acts: dict) -> tuple[int, int]:
+        """AEGIS r11 R11-2: held unapplied money is re-read like a held invoice: an unverified hold is released on a
+        current ALLOW (read again for it) or converted on a refusal; a refused hold is re-written (its ground merged,
+        match wins) exactly as an invoice hold is (R10-2). Returns (released, changed)."""
+        released = changed = 0
+        for cid in sorted(rcpt_holds):
+            act = acts.get(cid)
+            if act is None or not act.available:
+                continue
+            for r_id in rcpt_holds[cid]:
+                g_h = Gather(self, f"{prefix}|rhold|{r_id}", ACTOR, r_id)
+                if act.allowed:
+                    act2 = self._activation(g_h, cid)        # R5-3: read again right before a release
+                    if not act2.available:
+                        continue
+                    a = act2
+                else:
+                    a = act
+                with self.lock:
+                    hold = (self.db["receipts"].get(r_id) or {}).get("held_compliance") or {}
+                    if not hold:
+                        continue
+                    op_h = Op(self, f"{prefix}|rhold|{r_id}", ACTOR, r_id, g_h)
+                    why = self._activation_reasons(a, full=True)[0]["message"] if not a.allowed else ""
+                    if a.allowed:
+                        if hold["kind"] != "unverified" or hold.get("sanctions"):
+                            continue                  # refused / sanctions holds leave only by Andre's release
+                        self._release_receipt_hold(op_h, r_id, "compliance_allow", {"ruling_id": a.ruling_id}, ACTOR)
+                        released += 1
+                    elif hold["kind"] == "unverified":
+                        self._release_receipt_hold(op_h, r_id, "converted_to_refused", {}, ACTOR)
+                        self._hold_unapplied(op_h, r_id, {"invoice_id": hold["attributed_invoice_id"],
+                                                          "client_id": cid},
+                                             ("refused", why, merge_ground(act_ground(a), hold_ground(hold))),
+                                             hold["amount"], hold["value_date"], hold["method_label"])
+                        changed += 1
+                    else:
+                        self._rewrite_receipt_hold(op_h, r_id, why, act_ground(a))
+                        changed += 1
+                    self._commit(op_h)
+        return released, changed
+
+    def _rewrite_receipt_hold(self, op: Op, r_id: str, why: str, ground) -> None:
+        """R11-2 / R10-2: a refused receipt hold re-read: the receipt, its break and one hold event, ground merged."""
+        rc = op.get("receipts", r_id)
+        hold = rc["held_compliance"]
+        new_ground = merge_ground(ground, hold_ground(hold))
+        upgrade = new_ground != hold_ground(hold)
+        nh = {**hold, "rechecked_at": iso(self._now())}
+        if upgrade:
+            nh.update(sanctions=True, sanctions_ground=new_ground,
+                      sanctions_since=hold.get("sanctions_since") or iso(self._now()))
+        op.put("receipts", r_id, {**rc, "held_compliance": nh})
+        b = op.get("breaks", hold["break_id"])
+        if b is not None:
+            op.put("breaks", b["break_id"], {**b, "note": self.HOLD_NOTE["sanctions"][1][:200]} if upgrade else {**b})
+        op.record(derived_id("hold", "recheck", hold["attributed_invoice_id"], r_id, op.op_id),
+                  "compliance_hold_sanctions" if upgrade else "compliance_hold_rechecked", ACTOR,
+                  hold["attributed_invoice_id"], {"invoice_id": hold["attributed_invoice_id"], "receipt_id": r_id,
+                                                  "break_id": hold["break_id"], "ground": new_ground},
+                  f"Held unapplied money re-read{': now sanctions-grounded' if upgrade else ''}"[:200])
+
+    def _release_receipt_hold(self, op: Op, r_id: str, basis: str, detail: dict, actor: str) -> None:
+        """R11-2: clear an unapplied receipt's hold: its break resolved with the basis, the hold kept in history."""
+        rc = op.get("receipts", r_id)
+        hold = rc["held_compliance"]
+        b = op.get("breaks", hold["break_id"])
+        if b is not None and b["status"] != "resolved":
+            op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolution": {"basis": basis, **detail},
+                                             "resolved_at": iso(self._now())})
+        hist = list(rc.get("held_compliance_history") or []) + [{**hold, "released_at": iso(self._now()),
+                                                                 "basis": basis, **detail}]
+        op.put("receipts", r_id, {**{k: v for k, v in rc.items() if k != "held_compliance"},
+                                  "held_compliance_history": hist})
+        op.record(derived_id("hold", "release", hold["attributed_invoice_id"], r_id, hold["kind"]),
+                  "compliance_hold_released", actor, hold["attributed_invoice_id"],
+                  {"invoice_id": hold["attributed_invoice_id"], "kind": hold["kind"], "basis": basis, **detail},
+                  f"Unapplied money hold released ({basis})")
+
+    def receipt_hold_release(self, request_id: str, receipt_id: str, body: dict) -> dict:
+        """AEGIS r11 R11-2 (Andre only): release the hold on held UNAPPLIED money, on the same grounds and with the
+        same OFAC document kinds as an invoice hold (``compliance_hold_release``):
+        - ``compliance_allow`` (not a sanctions hold): Compliance answers a current ALLOW for the source client now;
+        - ``refund`` (not a sanctions hold): the money was refunded at Stripe in full (an F7r of this receipt);
+        - ``ofac_authorization`` (a sanctions hold): a license, an unblocking report, a Compliance Release or a
+          delisting notice, hashed;
+        - ``ofac_rejected_return`` (a sanctions hold on a sanctioned PLACE only, with OFAC's written guidance): the money
+          was refunded to the sender in full and the 501.604 rejected-transaction report is hashed.
+        After a release the money is plain unapplied cash again (``apply_receipt`` asks Compliance again)."""
+        basis = body["basis"]
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"receipt-hold/{receipt_id}",
+                                     {"basis": basis, "entry_id": body.get("entry_id"),
+                                      "ofac_authorization_sha256": body.get("ofac_authorization_sha256"),
+                                      "ofac_document_kind": body.get("ofac_document_kind"),
+                                      "ofac_guidance_sha256": body.get("ofac_guidance_sha256")})
+            if ent:
+                return ent["response"]
+            rc = self.db["receipts"].get(receipt_id)
+            if rc is None:
+                raise NotFound("no such receipt")
+            hold = rc.get("held_compliance")
+            if not hold:
+                raise Conflict("this money has no Compliance hold")
+            self._release_ground_ok(hold, basis, body)
+            client = hold["client_id"]
+        g = Gather(self, f"rholdrel|{request_id}", "andre", receipt_id)
+        detail: dict = {}
+        if basis in ("compliance_allow", "refund", "ofac_rejected_return"):
+            act = self._activation(g, client)
+            if not act.available:
+                raise Refused("the hold stays: Compliance (38) cannot confirm the client's answer now",
+                              self._activation_reasons(act, full=True), ledger_event_ids=g.events)
+            if (basis != "ofac_rejected_return" and act.sanctions) or act_ground(act) == "match":
+                with self.lock:
+                    if (self.db["receipts"][receipt_id].get("held_compliance") or {}).get("kind") == "refused":
+                        op_u = Op(self, f"rholdrel|{request_id}|upgrade", "andre", receipt_id, g)
+                        self._rewrite_receipt_hold(op_u, receipt_id, act.reasons[0] if act.reasons else "",
+                                                   act_ground(act))
+                        self._commit(op_u)
+                raise Conflict("Compliance now says this refusal rests on SANCTIONS: the money stays blocked and is "
+                               "reported to OFAC (runbook step G)")
+            if basis == "compliance_allow":
+                reasons = self._activation_reasons(act, full=True)
+                if reasons:
+                    raise Refused("the hold stays: Compliance does not currently ALLOW this client", reasons,
+                                  ledger_event_ids=g.events)
+                detail = {"ruling_id": act.ruling_id}
+        with self.lock:
+            rc = self.db["receipts"][receipt_id]
+            hold = rc.get("held_compliance")
+            if not hold:
+                raise Conflict("this money has no Compliance hold")
+            self._release_ground_ok(hold, basis, body)
+            if basis == "ofac_authorization":
+                detail = {"ofac_authorization_sha256": body["ofac_authorization_sha256"],
+                          "ofac_document_kind": body["ofac_document_kind"]}
+            if basis in ("refund", "ofac_rejected_return"):
+                refunded = M.D((rc.get("stripe") or {}).get("refunded") or "0.00")
+                eid = body.get("entry_id")
+                e = self.entries_by_id.get(eid or "")
+                if e is None or e.get("memo_code") != "F7r" or (e.get("source") or {}).get("id") != receipt_id:
+                    raise Conflict("this release names a Stripe refund (F7r) of this money (entry_id); a bank receipt's "
+                                   "return to the sender is not built: release it with an OFAC document instead")
+                if refunded < M.D(hold["amount"]):
+                    raise Conflict(f"refunds booked ({M.fmt(refunded)}) do not cover the held amount ({hold['amount']})")
+                detail = {"entry_id": eid, "refunded": M.fmt(refunded)}
+                if basis == "ofac_rejected_return":
+                    detail.update(returned_to_sender=True, ofac_authorization_sha256=body["ofac_authorization_sha256"],
+                                  ofac_document_kind=body["ofac_document_kind"],
+                                  ofac_guidance_sha256=body["ofac_guidance_sha256"])
+            op = Op(self, f"rholdrel|{request_id}", "andre", receipt_id, g)
+            self._release_receipt_hold(op, receipt_id, basis, detail, "andre")
+            resp = self._idem_add(op, key, h, {"receipt_id": receipt_id, "released": True, "basis": basis, **detail,
+                                               "ledger_event_ids": op.events})
+            self._commit(op)
+            return resp
 
     def _recheck_hold(self, op: Op, invoice_id: str, actor: str) -> None:
         """AEGIS r10 R10-2: a refused hold the job re-read without a ground change writes what an upgrade writes (its
@@ -1313,17 +1506,9 @@ class StripeMixin:
         notes = notes or self.HELD_REFUND_NOTE
         b = op.get("breaks", held.get("break_id") or "")
         if b is not None:
-            op.put("breaks", b["break_id"], {**b, "severity": "high" if ground else "normal",
-                                             "note": notes[ground or False][:200]})
-        # AEGIS r10 RTM-05: Andre is pushed (his channel only; nothing in the log differs by ground)
-        msg = f"a payment held by Compliance was {how} ({M.fmt(delta)})" + (
-            "; OFAC: it was held on sanctions grounds: report it to OFAC (rejected-transaction path, runbook step G)"
-            if ground else "")
-        try:
-            self.ports.push.push("compliance_held_refund", {"invoice_id": inv.get("invoice_id"), "receipt_id": rct,
-                                                            "message": msg})
-        except Exception:  # noqa: BLE001 - a push is best effort (stand-in); the break is the durable signal
-            pass
+            # AEGIS r11 R11-4: the durable founder alert is this open, high-severity Compliance break (the ADR 0027
+            # dispatcher reads it); no in-process push is relied on
+            op.put("breaks", b["break_id"], {**b, "severity": "high", "note": notes[ground or False][:200]})
         op.record(derived_id("hold", "refund", inv["invoice_id"], rct, M.fmt(total)),
                   "compliance_hold_sanctions_refunded" if ground else "compliance_hold_refunded", ACTOR,
                   inv["invoice_id"], {"invoice_id": inv["invoice_id"], "kind": held.get("kind"), "receipt_id": rct,

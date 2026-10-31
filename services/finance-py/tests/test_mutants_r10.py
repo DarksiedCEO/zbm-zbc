@@ -72,7 +72,8 @@ def _export_breaks(hr, **who):
     out = []
     cur = 0
     while cur is not None:
-        page = hr.ok(hr.get("/fin/v1/audit/export", cursor=cur, **who))
+        page = (hr.redacted_get("/fin/v1/audit/export", cursor=cur).json() if who.get("caller")
+                else hr.ok(hr.get("/fin/v1/audit/export", cursor=cur, **who)))
         for e in page["records"]:
             for r in e["records"]:
                 rec = r["record"].get("rec") if isinstance(r["record"], dict) else None

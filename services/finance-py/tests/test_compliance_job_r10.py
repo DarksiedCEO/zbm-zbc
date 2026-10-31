@@ -1,8 +1,9 @@
 """AEGIS r10 R10-1 (job part), R10-2, R10-5, R10-6: the hourly hold job.
 
 - R10-6: the job re-checks bank-path holds even when Stripe incoming is off (it used to return zeros).
-- R10-1: it also asks Compliance about every client with a funded campaign and pushes Andre (only Andre) when one is
-  no longer allowed, with the OFAC line on a sanctions ground. Accruals and payouts are refused meanwhile anyway.
+- R10-1: it also asks Compliance about every client with a funded campaign and opens a durable founder alert (a
+  high-severity Compliance break, AEGIS r11 R11-4) when one is no longer allowed, with the OFAC line on a sanctions
+  ground. Accruals and payouts are refused meanwhile anyway.
 - R10-2: what a non-Andre reader sees is the same for a plain refused hold (N), a refused hold the job upgrades to a
   sanctions match (U) and a hold that was a sanctions match from the start (S): the job summary, the number and shape
   of the exported log lines, the (generic) audit evidence and /integrity. Every refused hold the job re-reads writes
@@ -78,26 +79,31 @@ def test_r10_6_a_refused_bank_hold_is_upgraded_to_a_match_with_stripe_incoming_o
 
 # --- R10-1: the job re-checks clients with funded campaigns and tells Andre ---------------------------------------------
 
-def test_r10_1_the_job_pushes_andre_when_a_funded_brand_becomes_a_match():
+def _alerts(hr):
+    return [b for b in hr.svc.db["breaks"].values() if b.get("kind") == "founder_alert" and b["status"] == "open"]
+
+
+def test_r10_1_the_job_alerts_andre_durably_when_a_funded_brand_becomes_a_match():
+    """AEGIS r11 R11-4: the alert is an open high-severity Compliance break (ADR 0027 dispatcher), not a push."""
     hr = Harness().ready()
     hr.fund_campaign()
     _match(hr)
     s = _job(hr)
     assert ("client_activation", "client-1") in hr.cmp.calls
-    pushed = [b for k, b in hr.f["push"].pushed if k == "compliance_funded_client_refused"]
-    assert len(pushed) == 1 and "OFAC" in json.dumps(pushed[0]), hr.f["push"].pushed
+    al = _alerts(hr)
+    assert len(al) == 1 and "OFAC" in al[0]["note"], al
     assert "OFAC" not in json.dumps(s) and "sanction" not in json.dumps(s).lower()
     _job(hr)                                                     # once per state, not every hour
-    assert len([1 for k, _ in hr.f["push"].pushed if k == "compliance_funded_client_refused"]) == 1
+    assert len(_alerts(hr)) == 1
 
 
-def test_r10_1_a_plain_refusal_of_a_funded_brand_is_pushed_without_the_ofac_line():
+def test_r10_1_a_plain_refusal_of_a_funded_brand_alerts_without_the_ofac_line():
     hr = Harness().ready()
     hr.fund_campaign()
     _refuse_plain(hr)
     _job(hr)
-    pushed = [b for k, b in hr.f["push"].pushed if k == "compliance_funded_client_refused"]
-    assert len(pushed) == 1 and "OFAC" not in json.dumps(pushed[0])
+    al = _alerts(hr)
+    assert len(al) == 1 and "OFAC" not in al[0]["note"]
 
 
 # --- R10-2: N vs U vs S look the same to every non-Andre reader ------------------------------------------------------------
@@ -113,7 +119,7 @@ def _visible(hr, summary):
     lines = []
     cur = 0
     while cur is not None:
-        page = hr.ok(hr.get("/fin/v1/audit/export", caller="onboarding", cursor=cur))
+        page = hr.ok(hr.redacted_get("/fin/v1/audit/export", cursor=cur))
         for e in page["records"]:
             lines.append((e["kind"], tuple((r["kind"], r["record"].get("coll") if isinstance(r["record"], dict)
                                             else None,
@@ -121,7 +127,7 @@ def _visible(hr, summary):
                                                          and isinstance(r["record"].get("rec"), dict) else ())))
                                            for r in e["records"]), len(e["ledger_event_ids"])))
         cur = page["next_cursor"]
-    ev = hr.ok(hr.get("/fin/v1/audit/evidence", caller="onboarding", limit=1000))
+    ev = hr.ok(hr.redacted_get("/fin/v1/audit/evidence", limit=1000))
     events = Counter((e["event_type"], e["status"]) for e in ev["events"])
     integ = hr.ok(hr.get("/fin/v1/integrity", caller="onboarding"))
     breaks = _norm(hr.ok(hr.get("/fin/v1/breaks", caller="onboarding")))

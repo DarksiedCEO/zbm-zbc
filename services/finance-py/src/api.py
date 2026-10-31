@@ -627,6 +627,12 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                      req: m.RefundRepay = Depends(body(m.RefundRepay))) -> dict:
         return svc.repay_refund(req.request_id, _id(refund_id), dump(req))
 
+    @app.post("/fin/v1/refunds/{refund_id}/cancel", dependencies=auth)
+    def refund_cancel(refund_id: str, _: str = Depends(andre("refunds/cancel")),
+                      req: m.RefundCancel = Depends(body(m.RefundCancel))) -> dict:
+        """AEGIS r11: an approved refund whose payment was refused at execution (no money moved) is cancelled."""
+        return svc.cancel_refund(req.request_id, _id(refund_id), dump(req))
+
     @app.post("/fin/v1/refunds/{refund_id}/decision", dependencies=auth)
     def refund_decide(refund_id: str, _: str = Depends(andre("refunds/decision")),
                       req: m.Decision = Depends(body(m.Decision))) -> dict:
@@ -717,6 +723,12 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def compliance_hold_release(invoice_id: str, _: str = Depends(andre("compliance-hold/release")),
                                 req: m.ComplianceHoldRelease = Depends(body(m.ComplianceHoldRelease))) -> dict:
         return svc.compliance_hold_release(req.request_id, _id(invoice_id), dump(req))
+
+    @app.post("/fin/v1/receipts/{receipt_id}/compliance-hold/release", dependencies=auth)
+    def receipt_hold_release(receipt_id: str, _: str = Depends(andre("receipts/compliance-hold/release")),
+                             req: m.ComplianceHoldRelease = Depends(body(m.ComplianceHoldRelease))) -> dict:
+        """AEGIS r11 R11-2: release the hold on held unapplied money (the invoice release's bases and kinds)."""
+        return svc.receipt_hold_release(req.request_id, _id(receipt_id), dump(req))
 
     @app.post("/fin/v1/breaks/{break_id}/resolution", dependencies=auth)
     def break_resolve(break_id: str, _: str = Depends(andre("breaks/resolution")),
@@ -821,17 +833,18 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.form_1099("andre", tax_year)
 
     @app.get("/fin/v1/audit/evidence", dependencies=auth)
-    def audit_evidence(who: str = Depends(andre_or_any_caller("audit/evidence")),
+    def audit_evidence(who: str = Depends(andre("audit/evidence")),
                        limit: int = Query(default=200, ge=1, le=1000),
                        offset: int = Query(default=0, ge=0, le=10_000_000),
                        event_type: Optional[str] = Query(default=None, pattern=r"^[a-z_]{1,64}$")) -> dict:
         """Sweep B-F2 (bizdev R6 M1): every Finance evidence event on the ledger, ``committed`` (named by an anchored
         local log line whose seq and request key its payload carries) or ``attempted`` (recorded first, never
-        committed under that id); unanchored evidence = attempted, not done."""
+        committed under that id); unanchored evidence = attempted, not done. AEGIS r11 R11-3: Andre's token only (a
+        row's rk, event id and payload hash let a reader recompute a hold event's real type)."""
         return svc.audit_evidence(limit, offset, event_type, full=who == "andre")
 
     @app.get("/fin/v1/audit/export", dependencies=auth)
-    def audit(who: str = Depends(andre_or_any_caller("audit/export")),
+    def audit(who: str = Depends(andre("audit/export")),           # AEGIS r11 R11-3: Andre's token only
               since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
               cursor: int = Query(default=0, ge=0, le=10**12)) -> dict:

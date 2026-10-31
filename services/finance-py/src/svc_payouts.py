@@ -428,7 +428,8 @@ class PayoutsMixin:
                                    and p["payable_id"] not in live_now), key=lambda p: p["payable_id"])
                 good = []
                 for p in payables:
-                    rs = self._payable_reasons(p, inputs)
+                    rs = self._payable_reasons(p, inputs) + self._local_hold_reasons(p["campaign_id"],
+                                                                                      [p["payable_id"]])   # R11-5
                     if rs:
                         excluded.append({"payee_id": pid, "payable_ids": [p["payable_id"]], "reasons": rs})
                     else:
@@ -609,6 +610,8 @@ class PayoutsMixin:
                 return resp
             if b.get("andre_approval"):
                 raise Conflict("Andre already approved this batch; it waits for the second approver")
+            client_reasons = client_reasons or R.dedupe([r for c in self._batch_campaigns(batch_id)
+                                                         for r in self._local_hold_reasons(c)])     # R11-5
             if client_reasons:
                 # AEGIS r10 R10-1: a brand of this batch is not a current ALLOW (on a sanctions ground Andre reads the
                 # OFAC warning here): nothing is approved; reject the batch and let the next run exclude it
@@ -770,6 +773,8 @@ class PayoutsMixin:
                 rs = []
                 for p in pays:
                     rs += self._payable_reasons(p, inputs)
+                    # AEGIS r11 R11-5: Finance's own holds re-read under the lock (one booked during the gather counts)
+                    rs += self._local_hold_reasons(p["campaign_id"], [p["payable_id"]])
                     if p["status"] != "batched" or p.get("batch_item_id") != it["item_id"] or \
                             p["current_amount"] != it["payable_amounts"].get(p["payable_id"]):
                         rs.append(R.item("CERT_CHANGED", "payable changed since Andre approved the batch (clawback or "

@@ -87,6 +87,7 @@ class PayablesMixin:
             if prof is not None:
                 # R10-1: no current ALLOW for the brand (or Compliance not asked / unreachable): nothing is accrued
                 asked = got.get("clients") or {}
+                reasons += self._local_hold_reasons(cert.campaign_id)         # AEGIS r11 R11-5: under the lock
                 reasons += asked[cert.campaign_id] if cert.campaign_id in asked else [R.item(
                     "DEPENDENCY_UNAVAILABLE:compliance_38", "Compliance (38) cannot confirm the client's activation: "
                                                             "refused")]

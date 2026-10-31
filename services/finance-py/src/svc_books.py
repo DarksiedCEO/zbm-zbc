@@ -751,13 +751,30 @@ class BooksMixin:
             self._commit(op)
             return resp
 
+    def _receipt_source_client(self, rc: dict) -> Optional[str]:
+        """AEGIS r11 R11-1: the client an unapplied receipt's money came from: its hold's client, else the client of
+        the invoice its reference token names (a bank line), else unknown."""
+        hold = rc.get("held_compliance") or {}
+        if hold.get("client_id"):
+            return hold["client_id"]
+        att = self.db["invoices"].get(rc.get("reference_token") or "")
+        return att["client_id"] if att is not None else None
+
     def apply_receipt(self, request_id: str, receipt_id: str, invoice_id: str) -> dict:
         """Andre applies an unapplied receipt (in the deposits account) to an issued campaign deposit invoice. RTM-01:
-        for a brand Compliance does not currently ALLOW it is applied but HELD (no campaign funded, no receipt)."""
+        for a brand Compliance does not currently ALLOW it is applied but HELD (no campaign funded, no receipt).
+        AEGIS r11 R11-1: money held by Compliance (the receipt's own hold) is never applied to any invoice until Andre
+        releases that hold on its grounds (``POST /fin/v1/receipts/{id}/compliance-hold/release``), and Compliance is
+        asked about the receipt's SOURCE client as well as the target invoice's: money from a client it does not
+        ALLOW now is refused (it is not moved onto another client's books)."""
         with self.lock:
             inv0 = self.db["invoices"].get(invoice_id)
+            rc0 = self.db["receipts"].get(receipt_id)
+            source = self._receipt_source_client(rc0) if rc0 is not None else None
         g_cmp = Gather(self, f"apply|{request_id}|compliance", "andre", receipt_id)
         check = self._client_check(g_cmp, inv0["client_id"]) if inv0 is not None else None
+        src_check = (self._client_check(g_cmp, source) if source and (inv0 is None or source != inv0["client_id"])
+                     else None)
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"receipt/{receipt_id}", invoice_id)
             if ent:
@@ -772,6 +789,14 @@ class BooksMixin:
             if not (rc["entity"] == "zbc" and rc["into_account"] == "1020" and inv["kind"] == "campaign_deposit"):
                 raise Conflict("only a receipt that landed in the deposits account can be applied to a deposit invoice "
                                "(a deposit in the operating account is moved by an Andre top-up first)")
+            if rc.get("held_compliance"):
+                raise Conflict("this money is held by Compliance: it is applied to no invoice until its hold is "
+                               "released on its grounds (POST /fin/v1/receipts/{receipt_id}/compliance-hold/release)")
+            if src_check and self._receipt_source_client(rc) != inv["client_id"]:
+                kind, why, _g = src_check
+                raise Refused("application refused", [R.item(
+                    "COMPLIANCE_NOT_ACTIVATED", f"the money came from a client Compliance does not currently ALLOW "
+                                                f"({kind}: {why})"[:300])], ledger_event_ids=g_cmp.events)
             op = Op(self, f"apply|{request_id}", "andre", receipt_id, g_cmp)
             amt = M.D(rc["amount"])
             try:
@@ -785,7 +810,8 @@ class BooksMixin:
             if prof and prof["status"] == "approved" and not check:
                 op.put("profiles", inv["campaign_id"], {**prof, "status": "funded"})
             for b in self.db["breaks"].values():
-                if b.get("receipt_id") == receipt_id and b["status"] == "open":
+                if b.get("receipt_id") == receipt_id and b["status"] == "open" \
+                        and b.get("leg") not in self.COMPLIANCE_LEGS:     # R11-1: never a Compliance break
                     op.put("breaks", b["break_id"], {**b, "status": "resolved", "resolution": {
                         "entry_id": e["entry_id"], "approved_by": "andre", "at": iso(self._now())}})
                     op.record(derived_id("brkr", b["break_id"], e["entry_id"]), "break_resolved_by_andre", "andre",
@@ -988,8 +1014,7 @@ class BooksMixin:
         act = self._activation(g, client_id)
         out = list(self._activation_reasons(act, full=full))
         with self.lock:
-            held = [i for i in self.db["invoices"].values()
-                    if i.get("client_id") == client_id and i.get("held_compliance")]
+            held = self._local_holds(client_id)
         sanctions = bool(act.available and not act.allowed and act.sanctions) or \
             any(i["held_compliance"].get("sanctions") for i in held)
         if held:
@@ -1001,6 +1026,24 @@ class BooksMixin:
                                                           "return or move its money; report to OFAC and follow "
                                                           "runbook step G"))
         return R.dedupe(out)
+
+    def _local_holds(self, client_id: Optional[str]) -> list[dict]:
+        """Finance's own Compliance holds of a client (under the lock): its held invoices and its held unapplied
+        money (AEGIS r11 R11-1/R11-5: read again under the lock right before money moves)."""
+        if not client_id:
+            return []
+        return [i for i in self.db["invoices"].values() if i.get("client_id") == client_id and i.get("held_compliance")] \
+            + [r for r in self.db["receipts"].values()
+               if (r.get("held_compliance") or {}).get("client_id") == client_id]
+
+    def _local_hold_reasons(self, campaign_id: str, ids=()) -> list[dict]:
+        """R11-5: under the lock, a hold booked after the Compliance read still stops the money (generic reason)."""
+        client = (self.db["profiles"].get(campaign_id) or {}).get("client_id")
+        if not self._local_holds(client):
+            return []
+        return [R.item("COMPLIANCE_NOT_ACTIVATED", "a payment of this client is held by Compliance: none of its money "
+                                                   "is spent, moved or returned until the hold is released",
+                       list(ids))]
 
     def _campaign_outflow(self, g: Gather, campaign_ids, full: bool) -> dict[str, list[dict]]:
         """AEGIS r10 R10-1: per campaign, ``_outflow_reasons`` for the client whose deposit funds it. Every step that
@@ -1131,6 +1174,52 @@ class BooksMixin:
              "approved_by": "andre", "attempts": 0}
         t["content_sha256"] = self.treasury_op_sha(t)        # AEGIS c0869c4 H-N1: same canonical form as other ops
         return t
+
+    CANCELLABLE_PAYMENT = ("refused_at_execution", "posting_refused", "not_moved")
+
+    def cancel_refund(self, request_id: str, refund_id: str, body: dict) -> dict:
+        """AEGIS r11 (the stuck approved refund): a refund Andre approved whose payment was refused at execution (the
+        client stopped being a current ALLOW, or the posting was refused) or settled not moved never paid anybody, but
+        it keeps the deposit in 2050 and reads ``approved``. Andre cancels it with a reason: F6 is reversed (Dr 2050,
+        Cr 2010: the unspent deposit is the campaign's again), the refund is ``cancelled`` and its payment operation
+        closed. Refused while a payment may have moved (executing, bank_unknown, done, or an unknown outcome). Once
+        the client is ALLOW again the scheduler proposes a new refund (which asks Compliance again)."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"refund-cancel/{refund_id}", body)
+            if ent:
+                return ent["response"]
+            self.require_rules()
+            r = self.db["refunds"].get(refund_id)
+            if r is None:
+                raise NotFound("no such refund")
+            if r["status"] not in ("approved", "payment_not_moved"):
+                raise Conflict(f"only an approved refund whose payment never moved is cancelled (it is {r['status']})")
+            tid = r.get("payment_op_id") or rid("trx", "refund", refund_id)
+            t = self.db["treasury_ops"].get(tid) or {}
+            if t.get("status") not in self.CANCELLABLE_PAYMENT or t.get("outcome_unknown"):
+                raise Conflict(f"the refund's payment is {t.get('status') or 'unknown'}: money may have moved; it is "
+                               "settled first (POST /fin/v1/treasury/operations/{op_id}/settlement)")
+            op = Op(self, f"rfdc|{request_id}", "andre", refund_id)
+            self._injection(op, {"reason": body.get("reason")})
+            amt = M.D(r["amount"])
+            try:
+                e = self._post(op, "zbc", [J.dr("2050", amt, f"client:{r['client_id']}"),
+                                           J.cr("2010", amt, f"campaign:{r['campaign_id']}")], "F6",
+                               {"kind": "refund_cancel", "id": refund_id}, f"F6c|{refund_id}", approval_ref=request_id,
+                               actor="andre")
+            except PostingRefused as exc:
+                raise Refused("refund cancellation refused", exc.reasons) from None
+            op.put("treasury_ops", tid, {**t, "status": "cancelled", "cancelled_at": iso(self._now())})
+            new = {**r, "status": "cancelled", "cancelled_at": iso(self._now()), "cancel_entry_id": e["entry_id"],
+                   "cancel_reason_sha256": sha(body["reason"])}
+            op.put("refunds", refund_id, new)
+            op.record(derived_id("rfdc", refund_id), "refund_cancelled", "andre", refund_id,
+                      {"refund_id": refund_id, "amount": r["amount"], "entry_id": e["entry_id"],
+                       "reason_sha256": sha(body["reason"])}, f"Andre cancelled an unpaid refund of {r['amount']}")
+            resp = self._idem_add(op, key, h, {"refund": new, "entry_id": e["entry_id"], "ledger_event_ids": op.events,
+                                               "request_id": request_id})
+            self._commit(op)
+            return resp
 
     def repay_refund(self, request_id: str, refund_id: str, body: dict) -> dict:
         """Andre pays a refund again after he settled its payment ``not_moved`` (AEGIS c0869c4 H-N1): a NEW refund

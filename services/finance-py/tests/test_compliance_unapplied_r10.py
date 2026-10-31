@@ -4,10 +4,10 @@ unapplied cash, and a refund or bank return of held money is loud for Andre.
 - R10-4: a wire carrying a refused client's invoice token with the wrong amount, or a second Stripe payment on a
   refused client's paid invoice, is booked as unapplied cash AND held: the receipt carries the hold (with its OFAC
   ground on a sanctions refusal) and a Compliance break; a Dashboard refund of it is an OFAC-held refund (the hold's
-  break goes high severity with the OFAC note, Andre is pushed), never a routine refund.
+  break goes high severity with the OFAC note, Andre is alerted through that durable break), never a routine refund.
 - RTM-05: a refund of a held payment keeps the invoice paid-held (it re-opens only when Andre releases the hold on its
-  refund), Andre is pushed on a sanctions ground, a failed refund updates the hold's note, and a bank return of a held
-  deposit marks the hold the same way.
+  refund), the open high-severity break alerts Andre (OFAC line on a sanctions ground), a failed refund updates the
+  hold's note, and a bank return of a held deposit marks the hold the same way.
 - RTM-08c: the refund's own ``stripe_refund`` break carries the OFAC note too (Andre's token only).
 """
 
@@ -28,8 +28,10 @@ def _plain(hr, client=CLIENT):
     refuse(hr, client=client, sanctions=False, ground=None)
 
 
-def _pushed(hr, kind):
-    return [b for k, b in hr.f["push"].pushed if k == kind]
+def _alerted(hr, inv_or_rc_hold):
+    """AEGIS r11 R11-4: Andre's alert is the hold's own break, open and high severity (ADR 0027 dispatcher)."""
+    b = hr.svc.db["breaks"][inv_or_rc_hold["break_id"]]
+    return b["status"] == "open" and b["severity"] == "high" and b["leg"] in ("compliance_hold", "compliance_unverified")
 
 
 def _rc(hr, rid_):
@@ -115,7 +117,7 @@ def test_r10_4_a_dashboard_refund_of_held_unapplied_money_is_an_ofac_held_refund
     brk = hr.svc.db["breaks"][rc["held_compliance"]["break_id"]]
     assert brk["severity"] == "high" and "OFAC" in brk["note"] and "rejected" in brk["note"], brk
     assert hr.ledger.of_type("compliance_hold_sanctions_refunded")
-    assert _pushed(hr, "compliance_held_refund")
+    assert _alerted(hr, rc["held_compliance"])
     low = _visible_breaks(hr).lower()
     assert "ofac" not in low and "sanction" not in low
 
@@ -144,22 +146,22 @@ def test_rtm05_a_refunded_held_invoice_stays_paid_held_until_andre_releases_it(t
     assert hr.svc.db["invoices"][inv["invoice_id"]]["status"] == "issued"      # re-opened by Andre's release
 
 
-def test_rtm05_andre_is_pushed_when_a_sanctions_held_payment_is_refunded(tmp_path):
+def test_rtm05_andre_is_alerted_when_a_sanctions_held_payment_is_refunded(tmp_path):
     hr = _stripe_hr(tmp_path)
     inv, pi = _held_paid(hr, refuse)
     hr.sim.refund(pi)
     sent(hr, "charge.refunded", charge_obj(hr, pi))
-    pushed = _pushed(hr, "compliance_held_refund")
-    assert len(pushed) == 1 and "OFAC" in json.dumps(pushed[0])
+    held = hr.svc.db["invoices"][inv["invoice_id"]]["held_compliance"]
+    assert _alerted(hr, held) and "OFAC" in hr.svc.db["breaks"][held["break_id"]]["note"]
 
 
-def test_rtm05_a_plain_held_refund_pushes_andre_without_the_ofac_line(tmp_path):
+def test_rtm05_a_plain_held_refund_alerts_andre_without_the_ofac_line(tmp_path):
     hr = _stripe_hr(tmp_path)
     inv, pi = _held_paid(hr, _plain)
     hr.sim.refund(pi)
     sent(hr, "charge.refunded", charge_obj(hr, pi))
-    pushed = _pushed(hr, "compliance_held_refund")
-    assert len(pushed) == 1 and "OFAC" not in json.dumps(pushed[0])
+    held = hr.svc.db["invoices"][inv["invoice_id"]]["held_compliance"]
+    assert _alerted(hr, held) and "OFAC" not in hr.svc.db["breaks"][held["break_id"]]["note"]
 
 
 def test_rtm05_f2_a_failed_refund_of_a_held_payment_keeps_it_paid_held_and_rewrites_the_note(tmp_path):
@@ -192,7 +194,7 @@ def test_rtm05_a_bank_return_of_a_sanctions_held_deposit_is_marked_for_andre():
     brk = hr.svc.db["breaks"][held["break_id"]]
     assert brk["severity"] == "high" and "OFAC" in brk["note"] and "returned" in brk["note"], brk
     assert hr.ledger.of_type("compliance_hold_sanctions_refunded")
-    assert _pushed(hr, "compliance_held_refund")
+    assert _alerted(hr, held)
     low = hr.get("/fin/v1/breaks", caller="onboarding").text.lower()
     assert "ofac" not in low and "sanction" not in low
 
