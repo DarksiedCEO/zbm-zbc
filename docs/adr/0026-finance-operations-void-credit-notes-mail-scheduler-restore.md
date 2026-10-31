@@ -73,6 +73,30 @@ The contracts promise things Finance could not do:
 10. **CH-10:** due dates count from the date in `FIN_BUSINESS_TZ` (default America/Los_Angeles; an unknown zone refuses
     start), the same day the journal uses.
 
+## Amendment: AEGIS wave B review (NOT_CERTIFIED at 6da61211), Oct 31 2026
+
+11. **F1.** The restore break records the backup's point in time (`restore_point`: the restored log's last line, its
+    commit time and its anchor's ledger position), read before the reconcile line is appended; `since` is that day.
+    A re-import counts toward closing it only when it ends clean (no failure, and a fresh plan for its window finds
+    nothing left); the break closes when such runs cover every day from `since` to the day it opened.
+12. **F2.** Credit notes and voids are not in Stripe. Their ledger events now carry every fact needed to rebuild them
+    in the summary (number, ids, amounts, refund date, reason, log line), and a rebuild counts only if those facts
+    hash to the payload SHA-256 the ledger holds. The re-import rebuilds them in ledger order together with the
+    payments and refunds (a refund the ledger saw in steps is booked in those steps), keeps the original number and
+    never re-emails the client. While a restore break is open no credit note, void or Stripe page is made. Evidence
+    that cannot be rebuilt fails the action and keeps the break open.
+13. **F4.** A refund-owing credit note states `refund_due_from`, the day the refund became due under MSA 4.10; the
+    10 business days count from it (a past due date opens the break late and high).
+14. **Lows.** A backup marker still open in the log keeps a restarted Finance paused until it is resumed (F6). The
+    billing contact's ledger hash is an HMAC keyed by `FIN_CONTACT_HASH_KEY` (required before a contact is recorded
+    and whenever mail is on; F8). The 4.12(f) acknowledgement and the 4.12(g) cancel-or-credit promises get deadline
+    breaks (`acknowledgement_due`, closed when the email is sent; `cancel_or_credit_due`, opened by
+    `POST /fin/v1/invoices/{id}/sow-ended` and closed by the void or credit note), and every overdue contract deadline
+    turns high with an ALERT line (F9). A credit note that absorbs every Stripe refund on an invoice resolves the
+    "refunded with no credit note" breaks (M2b). US bank holidays are left to fix wave C.
+    F3 (the SEO SOW text says card is not available) is a contract change for Andre, not code: until SOW 4.3 is
+    amended, SEO audit invoices are drafted without `card`.
+
 ## Consequences
 
 - New ledger event types: `invoice_voided`, `credit_note_issued`, `credit_note_refund_linked`, `client_contact_recorded`,

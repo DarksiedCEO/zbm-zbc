@@ -193,6 +193,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `SEO_FINANCE_CALLER_TOKEN` | `openssl rand -hex 32` | seo | finance `FIN_CALLER_TOKENS` (`seo_02`, interpolated) |
 | `FIN_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | finance | legal `LEGAL_CALLER_TOKENS` (`finance_31`, interpolated) |
 | `FIN_CRON_CALLER_TOKEN` | `openssl rand -hex 32` | fin-cron | finance `FIN_CALLER_TOKENS` (`ops_cron`, interpolated; ADR 0026) |
+| `FIN_CONTACT_HASH_KEY` | `openssl rand -hex 32` | finance | — (becomes `FIN_CONTACT_HASH_KEY_FILE`; the key of the HMAC that stands for a billing contact's address on the ledger. Required before any billing contact is recorded, and before `RESEND_API_KEY`: finance refuses to start with mail on and no key. Never rotate it casually: old ledger hashes stop matching) |
 | `RESEND_API_KEY` | Resend → API Keys → Create (permission **Sending access**, domain `zbestmedia.com`) | finance | — (becomes `RESEND_API_KEY_FILE`; client email stays OFF until it is set, ADR 0026) |
 | `FIN_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` | finance | finance `FIN_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-FIN-Caller-Token` (keep it in your password manager) |
 | `LEGAL_SERVICE_TOKEN` | `openssl rand -hex 32` | legal | finance `FIN_LEGAL_TOKEN` (reference) |
@@ -594,6 +595,8 @@ Set by IaC or by you:
 | `MAIL_FROM` | yes | no | `Z Best Media <billing@zbestmedia.com>` (IaC) | the only sender allowed (any other address refuses start); alone it does not switch mail on |
 | `RESEND_API_KEY` | to send client email | yes | (you; Resend) | becomes `RESEND_API_KEY_FILE`. With `MAIL_FROM`, client email is ON (receipts, credit notes, refund confirmations, acknowledgements); unset = OFF, nothing is sent and nothing alerts |
 | `RESEND_API_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself; set without `MAIL_FROM` refuses start |
+| `FIN_CONTACT_HASH_KEY` | before contacts or mail | yes | (you; Secrets) | becomes `FIN_CONTACT_HASH_KEY_FILE` (64 hex characters); the billing contact's ledger hash is an HMAC with it (AEGIS F8) |
+| `FIN_CONTACT_HASH_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself |
 
 Everything else finance-py reads — leave at the default (services/finance-py/README.md has the meaning of each):
 
@@ -1235,6 +1238,7 @@ Every route below takes Andre's approval token; none takes a caller token.
 surcharge, at most $5,000 by card, `FIN_CARD_PREPAYMENTS=1`). Other strategy work stays ACH or wire.
 
 **Billing contact first** (once per client, from the signed SOW): the only address client email ever goes to.
+It needs `FIN_CONTACT_HASH_KEY` set on finance (Secrets): the ledger keeps only an HMAC of the address.
 ```sh
 curl -sS -X PUT -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' $F/fin/v1/clients/<client id>/billing-contact \
   -d '{"request_id":"contact-<client id>-1","email":"ap@client.example","name":"Accounts payable"}'
@@ -1249,10 +1253,13 @@ the client already paid on a page, it refuses: wait for the payment, then credit
 `infringement_refund`, `audit_not_run`, `other`.
 
 **Reduce an invoice, or owe a refund: a credit note.** `POST $F/fin/v1/invoices/<id>/credit-notes` with
-`{"request_id", "content_sha256", "amount": "300.00", "reason_code"}`.
+`{"request_id", "content_sha256", "amount": "300.00", "reason_code", "refund_due_from": "2026-11-01"}`.
+`refund_due_from` is required when the credit note owes a refund: the day the refund BECAME due under MSA 4.10 (the
+day the SOW ended, the day you agreed the amount was not owed, ...), never later than today. The 10 business days run
+from it, and the client's email shows the same date. If that date has already passed, the break opens high and late.
 - Unpaid invoice: the amount due drops (a new Stripe page asks for the new amount; the old page is closed first).
 - Paid invoice: the credit note records a refund ZBM owes (account 2050) and opens a `credit_note_refund_due` break
-  with `due_by` = 10 business days (MSA 4.10; weekends skipped, US holidays NOT skipped, so the date is never late).
+  with `due_by` = 10 business days after `refund_due_from` (MSA 4.10).
   **Then refund it in the Stripe Dashboard** (Payments → the payment → Refund, the credit note's amount). The
   `charge.refunded` webhook books it against the credit note (F7r from 2050), marks the credit note `refunded`,
   resolves the break and queues the "refund sent" email. A refund made before the credit note is linked when the
@@ -1263,9 +1270,16 @@ the client already paid on a page, it refuses: wait for the payment, then credit
   instead), and no answer from Compliance refuses it.
 - `GET $F/fin/v1/invoices/<id>/credit-notes` lists them; `GET $F/fin/v1/credit-notes/<id>` reads one.
 
+**An SOW ended while its invoice is unpaid** (MSA 4.12(g)): record it the day you learn it,
+`POST $F/fin/v1/invoices/<id>/sow-ended` with `{"request_id", "sow_ended_on": "2026-11-01"}`. A
+`cancel_or_credit_due` break opens, due 10 business days later; the void or credit note on that invoice closes it.
+
 **Acknowledge a client request within 2 business days** (MSA 4.12(f)): `POST $F/fin/v1/clients/<client id>/acknowledgements`
 with `{"request_id", "topic": "refund_request" | "cancellation" | "billing_dispute" | "payment_question",
 "received_on": "2026-11-02", "invoice_id": "<optional>"}`. The answer gives `acknowledge_by` and says `late` if that date has passed.
+An `acknowledgement_due` break stays open until the acknowledgement email is actually sent (so record the billing
+contact first, and switch mail on). The hourly fin-cron run turns every contract deadline that has passed (refund,
+acknowledgement, cancel-or-credit) high severity and logs `ALERT finance: deadline_overdue`.
 
 **Client email** (off until configured). One time, in Resend: add and verify the domain `zbestmedia.com` (Resend shows
 the DNS records; adding them is your DNS change, not the code's), then in the domain's settings turn **Open tracking

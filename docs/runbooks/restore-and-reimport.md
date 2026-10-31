@@ -98,24 +98,36 @@ department. Expect more to re-import (section 5).
    ```
    Without `money_events_acknowledged` Finance answers 409 `RESTORE_GUARD`. With it, the answer says
    `"stripe_reimport_required": true` and names `reimport_break_id`: a high-severity break that stays open until
-   step 5 runs.
-4. Unset `FIN_RECONCILE_MODE`, redeploy finance. Invoices paid after the backup now show `issued`. **Do not chase any
-   client and do not void anything yet.** Stripe redeliveries of events Finance lost may arrive: a paid Checkout page
+   section 5 has covered every day from the backup to today. The break records the backup's point in time
+   (`restore_point`: the restored log's last line, its time and its ledger position) and its day as `since`.
+4. Unset `FIN_RECONCILE_MODE`, redeploy finance. If the backup was taken inside a pause window (section 2), the
+   restored Finance stays paused (every write answers 503 `QUIESCED`): resume that marker now
+   (`POST $F/fin/v1/backup/resume`; it answers `"consistent": false`, which is expected after a restore).
+   Invoices paid after the backup now show `issued`. **Do not chase any client.** Until section 5 is complete, Finance
+   refuses every credit note, void and new Stripe page (409): a void the restore lost must never make an invoice
+   payable, and a credit note number must never be issued twice. Stripe redeliveries of events Finance lost may arrive: a paid Checkout page
    Finance no longer knows answers 2xx, opens a `stripe_unknown_session` break and logs `ALERT finance:
    stripe_unknown_session` (CH-4). Leave those breaks; step 5 resolves them.
 
 ## 5. The Stripe re-import (always a dry run first)
 
 Covers at most 92 days per run; run it in parts for longer. Dates are Los Angeles dates (`FIN_BUSINESS_TZ`).
-`since` = the date of the backup you restored (the break's `since` field shows it); `until` = today.
+Read the restore break first (`GET $F/fin/v1/breaks`, leg `restore_reimport_required`): `since` is the day of the
+backup you restored, `opened_on` the day you reconciled. Run sections 5.1-5.2 until **every day from `since` to
+`opened_on`** is covered by a run that ended clean (in parts of at most 92 days; the break's `covered` lists what is
+done). A run that leaves anything missing (a fresh plan for its window is not empty) does not count. The break
+closes by itself on the run that completes the coverage; nothing else closes it.
 
 1. Dry run:
    ```
    curl -sS -X POST $H $F/fin/v1/stripe/reimport \
      -d '{"request_id":"imp-1","since":"2026-11-07","until":"2026-11-09","dry_run":true}' > dry.json
    ```
-   Read `plan.actions`: `relink_page` (a Checkout page Finance lost, read back from Stripe), `book_payment`,
-   `book_refund`, `book_dispute`. Compare with the Stripe Dashboard (Payments, filtered to the same dates). Nothing is
+   Read `plan.actions`, in the order they will be booked (the order the ledger saw them): `relink_page` (a Checkout
+   page Finance lost, read back from Stripe), `book_payment`, `book_refund`, `book_dispute`, and
+   `rebuild_credit_note` / `rebuild_void`: credit notes and voids made after the backup are not in Stripe, so they are
+   rebuilt from their evidence on the ledger (each checked against the payload SHA-256 the ledger holds; same number,
+   same amounts, same refund deadline; the client is not emailed again). Compare with the Stripe Dashboard (Payments, filtered to the same dates). Nothing is
    booked by a dry run.
 2. Real run, naming the dry run's plan:
    ```
@@ -125,9 +137,13 @@ Covers at most 92 days per run; run it in parts for longer. Dates are Los Angele
    If Stripe or the books changed since the dry run, the answer is 409: dry-run again and read it again.
    Each action is booked exactly as its webhook would have been (Compliance is asked for each payment; a payment from a
    client Compliance does not currently allow is booked and HELD, as always). Running it twice books nothing twice.
-3. Check: `results` has no `failed` items, `breaks_resolved` names the restore break, the paid invoices show `paid`
+3. Check: `results` has no `failed` items and `"clean": true`; on the run that completes the coverage,
+   `breaks_resolved` names the restore break, the paid invoices show `paid`
    again, and the next reconciliation (fin-cron at 07:xx, or `POST /fin/v1/reconciliations/run`) shows Stripe
-   balance leg L3 in balance. A `failed` item: fix its cause (usually Stripe unreachable) and run steps 1-2 again.
+   balance leg L3 in balance. A `failed` item: fix its cause (usually Stripe unreachable) and run steps 1-2 again. A
+   `rebuild_*` item that fails ("the ledger's evidence does not verify", "the restored books cannot carry it") is not
+   retried into success: re-issue that credit note or void by hand after reading the ledger event, and keep the break
+   open until you have.
 4. Anything Stripe does not know (a wire, an ACH credit to the bank) is not re-imported: re-post those bank lines
    through the bank feed as usual.
 
@@ -135,5 +151,6 @@ Covers at most 92 days per run; run it in parts for longer. Dates are Los Angele
 
 The red team requires one drill before real money is booked. On a **test-mode** project or a local stack:
 take a backup set (section 2), pay two invoices with Stripe test mode, make one Dashboard refund, restore the set
-(section 3), reconcile (section 4), re-import (section 5). Pass: the invoices are `paid` again, the refund is booked,
-the restore break is resolved, L3 is in balance, Finance integrity is green. Record the date and result in your notes.
+(section 3), reconcile (section 4), re-import (section 5). Include one credit note and one void made after the
+backup. Pass: the invoices are `paid` again, the refund is booked, the credit note (same number) and the void are
+back, the restore break is resolved, L3 is in balance, Finance integrity is green. Record the date and result in your notes.

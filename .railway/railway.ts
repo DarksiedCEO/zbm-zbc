@@ -223,6 +223,9 @@ export default defineRailway(() => {
       // ADR 0026 client email: OFF until RESEND_API_KEY is set too (written to RESEND_API_KEY_FILE by the entrypoint)
       MAIL_FROM: "Z Best Media <billing@zbestmedia.com>",
       RESEND_API_KEY: preserve(),
+      // AEGIS F8: the HMAC key for billing contacts on the ledger (written to FIN_CONTACT_HASH_KEY_FILE); required
+      // before a contact is recorded or mail is switched on
+      FIN_CONTACT_HASH_KEY: preserve(),
     },
   }));
 
