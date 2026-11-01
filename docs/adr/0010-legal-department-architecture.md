@@ -348,3 +348,16 @@ Residual (accepted, on record): `rules_proposal_decided` ids are content-derived
 decision with a DIFFERENT note on the same proposal is a 409 (the decision itself is unchanged; Andre re-sends the
 original note). `log.verify()` still holds the log's own lock while it reads the file (commits wait on it, reads
 under the service lock do not).
+
+
+## Amendment — founder-refusal audit route privacy (Nov 1, 2026)
+
+Founder refusal records use a static operation label. Acceptance lookup uses `acceptances/get`;
+if a caller dependency omits its label, the fallback is the server-registered route template,
+or `unclassified` when no template is available. Raw request targets and path identifiers do
+not become refusal audit payloads. Authentication, response codes and the existing refusal
+recording mechanism are unchanged. Existing journal records are neither rewritten nor deleted.
+
+Operators should identify refusal categories by these labels, rather than looking for a requested
+acceptance identifier in the journal. This amendment concerns founder-refusal records only;
+it does not establish general access-log redaction or erase previously stored records.
