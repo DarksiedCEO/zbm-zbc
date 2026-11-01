@@ -26,7 +26,7 @@ ENDPOINT = "https://api.resend.com/emails"
 MAX_BODY = 40 * 1024
 MAX_RESPONSE = 64 * 1024
 MAX_INPUT = 128 * 1024
-MAX_OUTPUT = 128
+MAX_OUTPUT = 512
 _LABEL = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 _KEY = re.compile(r"[A-Za-z0-9._:/-]{1,256}")
 _EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
@@ -109,14 +109,17 @@ def _json(raw):
 
 
 def _validate(transport: ResendReceiptTransport, request, now: datetime) -> bool:
-    if type(request) is not FrozenResendRequest or type(transport.profile) is not ResendTransportProfile:
+    return (type(transport.deadline_seconds) is int and 1 <= transport.deadline_seconds <= 30
+            and _string(transport.credential, 4096) and len(transport.credential) >= 32
+            and transport.credential.isascii() and not any(c.isspace() for c in transport.credential)
+            and "{{" not in transport.credential and validate_request(transport.profile, request, now))
+
+
+def validate_request(profile, request, now):
+    """Pure frozen request validation; no credential or current-time lookup."""
+    if type(request) is not FrozenResendRequest or type(profile) is not ResendTransportProfile:
         return False
-    profile = transport.profile
-    if not all(isinstance(s, str) and _LABEL.fullmatch(s) for s in (profile.profile_id, profile.revision)) \
-            or not _sender(profile.sender) or type(transport.deadline_seconds) is not int \
-            or not 1 <= transport.deadline_seconds <= 30 or not _string(transport.credential, 4096) \
-            or len(transport.credential) < 32 or not transport.credential.isascii() \
-            or any(c.isspace() for c in transport.credential) or "{{" in transport.credential:
+    if not all(type(s) is str and _LABEL.fullmatch(s) for s in (profile.profile_id, profile.revision)) or not _sender(profile.sender):
         return False
     if request.version != "resend-receipt-v1" or request.provider != "resend" \
             or request.profile_id != profile.profile_id or request.profile_revision != profile.revision \
@@ -136,46 +139,58 @@ def _client(timeout):
     return httpx.Client(verify=True, trust_env=False, follow_redirects=False, timeout=timeout)
 
 
-def _answer(status: int, raw: bytes) -> str:
+def _answer_result(status: int, raw: bytes) -> str:
     data = _json(raw)
     if not isinstance(data, dict):
-        return "uncertain"
+        return {"outcome": "uncertain"}
     if status == 200:
-        # Only the documented id is needed. Reject mixed/error/unknown shapes; never retain or emit the id.
         identifier = data.get("id")
-        return "accepted" if set(data) == {"id"} and isinstance(identifier, str) \
-            and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identifier) else "uncertain"
+        if set(data) == {"id"} and valid_message_id(identifier):
+            return {"outcome": "accepted", "provider_message_id": identifier}
+        return {"outcome": "uncertain"}
     if set(data) != {"name", "message", "statusCode"} or type(data["statusCode"]) is not int \
             or data["statusCode"] != status or not isinstance(data["name"], str) \
             or not isinstance(data["message"], str):
-        return "uncertain"
-    return "failed" if (status, data["name"]) in _PERMANENT else "uncertain"
+        return {"outcome": "uncertain"}
+    return {"outcome": "failed" if (status, data["name"]) in _PERMANENT else "uncertain"}
 
 
-def _attempt(transport: ResendReceiptTransport, request: FrozenResendRequest, now: datetime, remaining) -> str:
+def _attempt_result(transport: ResendReceiptTransport, request: FrozenResendRequest, now: datetime, remaining) -> str:
     try:
         if not _validate(transport, request, now) or remaining <= 0:
-            return "failed"
+            return {"outcome": "failed"}
         # All caller-provided bytes stay frozen. No templating, sender lookup, key generation or retries.
         local_deadline = time.monotonic() + remaining
         with _client(remaining) as client:
             if not _window(request, _utc_now()) or time.monotonic() >= local_deadline:
-                return "failed"  # still before HTTP I/O
+                return {"outcome": "failed"}  # still before HTTP I/O
             with client.stream("POST", ENDPOINT, content=request.body,
                                headers={"Authorization": "Bearer " + transport.credential,
                                         "Idempotency-Key": request.idempotency_key,
                                         "Content-Type": "application/json"}) as reply:
                 if reply.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json" \
                         or reply.headers.get("Content-Encoding", "identity") != "identity":
-                    return "uncertain"
+                    return {"outcome": "uncertain"}
                 raw = bytearray()
                 for chunk in reply.iter_raw(chunk_size=4096):
                     if len(raw) + len(chunk) > MAX_RESPONSE:
-                        return "uncertain"
+                        return {"outcome": "uncertain"}
                     raw.extend(chunk)
-                return _answer(reply.status_code, bytes(raw))
+                return _answer_result(reply.status_code, bytes(raw))
     except Exception:  # noqa: BLE001 - provider/private exception text never crosses this boundary
-        return "uncertain"
+        return {"outcome": "uncertain"}
+
+
+def valid_message_id(value):
+    return type(value) is str and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value) is not None
+
+
+def _answer(status, raw):
+    return _answer_result(status, raw)["outcome"]
+
+
+def _attempt(transport, request, now, remaining):
+    return _attempt_result(transport, request, now, remaining)["outcome"]
 
 
 def _worker_command() -> list[str]:
@@ -251,16 +266,18 @@ class ResendReceiptTransport:
         try:
             raw = _exchange(payload, time.monotonic() + remaining)
             result = _json(raw)
-            if isinstance(result, dict) and set(result) == {"outcome"} \
-                    and result["outcome"] in ("accepted", "failed", "uncertain"):
-                return ReceiptDeliveryOutcome(result["outcome"])
+            if isinstance(result, dict):
+                if set(result) == {"outcome", "provider_message_id"} and result["outcome"] == "accepted" and valid_message_id(result["provider_message_id"]):
+                    return ReceiptDeliveryOutcome("accepted", result["provider_message_id"])
+                if set(result) == {"outcome"} and result["outcome"] in ("failed", "uncertain"):
+                    return ReceiptDeliveryOutcome(result["outcome"])
         except Exception:  # noqa: BLE001 - launch/deadline/partial transport/output are ambiguous, never retry
             pass
         return ReceiptDeliveryOutcome("uncertain")
 
 
 def _worker_main() -> None:
-    outcome = "uncertain"
+    outcome = {"outcome": "uncertain"}
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT + 1)
         if len(raw) > MAX_INPUT:
@@ -274,10 +291,10 @@ def _worker_main() -> None:
                                           data["credential"], data["deadline_seconds"])
         now = _utc_now()
         remaining = min(transport.deadline_seconds, (request.retry_until - now).total_seconds())
-        outcome = _attempt(transport, request, now, remaining)
+        outcome = _attempt_result(transport, request, now, remaining)
     except Exception:  # noqa: BLE001 - never print malformed inputs or exception text
         pass
-    sys.stdout.write(json.dumps({"outcome": outcome}, separators=(",", ":")) + "\n")
+    sys.stdout.write(json.dumps(outcome, separators=(",", ":")) + "\n")
 
 
 if __name__ == "__main__":

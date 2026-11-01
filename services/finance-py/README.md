@@ -196,3 +196,13 @@ and `FIN_HOUSEKEEPING_DEADLINE_SECONDS` (integer1–120, default60). No mapping,
 or production activation is added here. The caller reaches only POST stripe-sessions/run; scheduler is unchanged.
 See [runner procedure](../../docs/runbooks/housekeeping-runner.md) and [ADR0036](../../docs/adr/0036-dormant-housekeeping-runner.md)
 for unknown/degraded outcomes, no automatic retries, owned-worker deadline/reaping and separate activation gates.
+
+### Optional ZBM receipt mail
+
+Default `FIN_RECEIPT_MAIL_PROVIDER=disabled` does not read receipt credentials or send mail. Explicit `resend`
+requires `FIN_RECEIPT_MAIL_PROFILE_ID`, `FIN_RECEIPT_MAIL_PROFILE_REVISION`, `FIN_RECEIPT_MAIL_FROM`,
+`FIN_RECEIPT_RESEND_KEY_FILE`; `FIN_RECEIPT_MAIL_DEADLINE_S` defaults to10 (1–30). Container entrypoint optionally
+materializes `FIN_RECEIPT_RESEND_KEY`, including when app mode is disabled. No provider activation is authorized by
+this implementation. See [ADR0038](../../docs/adr/0038-receipt-provider-workflow.md) and its runbook. Existing
+scheduler send route is retained; `sent` denotes API acceptance only. Legacy attempts require review, never a new
+key or guessed sender. Provider ID is private journal evidence. External rollback enforcement remains required.

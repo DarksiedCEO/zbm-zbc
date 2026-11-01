@@ -426,20 +426,20 @@ class NotBuiltPush:
         return False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class ReceiptDeliveryOutcome:
-    """Mock-only contract: accepted, retry (definitely not accepted), failed, or uncertain.
+    """Typed contract: accepted, retry (definitely not accepted), failed, or uncertain.
 
     Acceptance is provider acceptance, never proof of inbox delivery. Unknown values fail closed.
     """
     outcome: str
+    provider_message_id: Optional[str] = None
 
 
 class ClientMailPort(Protocol):
-    """ADR 0032 mock-only contract. Enabled adapters accept an immutable persisted envelope.
+    """ADR 0032/0038 contract. Enabled adapters accept an immutable persisted envelope.
 
-    A future real adapter requires separate review of its key retention, timeout, privacy and credential
-    controls. No real adapter is wired. ``accepted`` means provider acceptance, never inbox delivery;
+    Real Resend construction is explicit opt-in with complete frozen requests and no automatic retry. ``accepted`` means provider acceptance, never inbox delivery;
     ``retry`` guarantees no acceptance; ambiguous results must be ``uncertain``. The historical bool
     method is supported solely for explicitly marked injected test fixtures, never production configuration.
     """
