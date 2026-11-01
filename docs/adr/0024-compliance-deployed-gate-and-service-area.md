@@ -4,6 +4,20 @@ Status: **WIP, not merged** (branch `feat/compliance-gate-deploy` from `golive-n
 decisions of Oct 30, 2026, approved by Andre for this build. Amends ADR 0006 (Compliance architecture), ADR 0009
 (Finance), ADR 0017 (SEO) and ADR 0020 (Revenue Recovery store connector). Nothing here has been applied to Railway.
 
+### Local detection integration verification
+
+The detection live harness uses an authenticated loopback Compliance protocol fixture (`devtools/live_compliance.py`)
+with runtime-generated credentials. An ALLOW first lets the registered-client scenario reach its original
+record-first `LEDGER_UNAVAILABLE` and missing-snapshot `NOT_SYNCED` checks. The same client is then refused, expired,
+and unavailable; sync, snapshot and the orchestrator scan must refuse each time without writing a ledger entry or
+contacting a store. Invalid detection authentication must make no socket attempt. The socket audit has a positive
+control and permits only the exact fixture and probe ports, including for loopback destinations.
+
+This fixture verifies the HTTP integration contract, not Compliance's rule engine or a real Shopify store. Run the
+usual detection `devtools/live_run.py` with the local ledger binary and the repository-pinned Go toolchain; no
+operator token or provider connection is needed. Compliance's own live harness separately exercises its real
+rule/register behavior. Production adapters and service-area decisions are unchanged.
+
 ## Context
 
 The AEGIS review of Oct 30, 2026 ("is Compliance (38) enforced across the go-live flow?") found compliance-py built
