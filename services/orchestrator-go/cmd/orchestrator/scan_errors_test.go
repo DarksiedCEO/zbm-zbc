@@ -275,7 +275,7 @@ func TestFindingsRoute_LedgerDownIsGeneric502WithCorrelationID(t *testing.T) {
 	det := countingDetection(t, detRec)
 	ledger := deadURL(t)
 	srv := scanServer(t, det.URL, ledger)
-	code, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings", routeTestToken)
+	code, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings?scope=all", routeTestToken)
 	if code != http.StatusBadGateway {
 		t.Fatalf("want 502, got %d: %s", code, body)
 	}

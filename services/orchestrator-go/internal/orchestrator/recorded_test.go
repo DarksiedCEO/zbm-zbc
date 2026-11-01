@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -100,8 +101,23 @@ func scanID(n int) string { return fmt.Sprintf("%032x", n) }
 // before it is appended, to build broken scans.
 func (c *chain) writeScan(t *testing.T, id string, fs []client.Finding, mutate func([]client.EventInput) []client.EventInput) {
 	t.Helper()
-	evs := []client.EventInput{startedEvent(startedPayload{ScanID: id, ClientID: FixtureClientID,
-		AsOf: "2026-10-06T00:00:00Z", DataSource: "fixtures", Fixture: true, TenantDefaulted: true, Agents: []string{"x"}})}
+	for _, ev := range buildScan(t, id, FixtureClientID, fs, mutate) {
+		c.event(ev)
+	}
+}
+
+// buildScan builds one whole scan of tenant (fixture-pool: the fixture
+// store; any other tenant: a connected store) without appending it, so a test
+// can interleave scans; mutate (optional) edits the list to build broken scans.
+func buildScan(t *testing.T, id, tenant string, fs []client.Finding, mutate func([]client.EventInput) []client.EventInput) []client.EventInput {
+	t.Helper()
+	fixture := tenant == FixtureClientID
+	source := "fixtures"
+	if !fixture {
+		source = "store"
+	}
+	evs := []client.EventInput{startedEvent(startedPayload{ScanID: id, ClientID: tenant,
+		AsOf: "2026-10-06T00:00:00Z", DataSource: source, Fixture: fixture, TenantDefaulted: fixture, Agents: []string{"x"}})}
 	var manifest [][3]string
 	for _, f := range fs {
 		ev, err := findingEvent(id, f)
@@ -119,13 +135,11 @@ func (c *chain) writeScan(t *testing.T, id string, fs []client.Finding, mutate f
 			manifest = append(manifest, [3]string{bev.EventID, bev.PayloadSHA256, bev.Summary})
 		}
 	}
-	evs = append(evs, completedEvent(id, FixtureClientID, len(fs), manifest))
+	evs = append(evs, completedEvent(id, tenant, len(fs), manifest))
 	if mutate != nil {
 		evs = mutate(evs)
 	}
-	for _, ev := range evs {
-		c.event(ev)
-	}
+	return evs
 }
 
 // readRecorded serves entries and a valid verify verdict that counts them
@@ -136,7 +150,7 @@ func readRecorded(t *testing.T, entries string) (*RecordedFindingsResult, *fakeL
 	_ = json.Unmarshal([]byte(entries), &all)
 	fl := &fakeLedger{entries: entries, verify: fmt.Sprintf(`{"valid":true,"entries":%d}`, len(all))}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-	res, err := o.RecordedFindings(context.Background())
+	res, err := o.RecordedFindings(context.Background(), FindingsScope{AllTenants: true})
 	if err != nil {
 		t.Fatalf("recorded findings: %v", err)
 	}
@@ -285,7 +299,7 @@ func TestRecordedFindings_EmptyLedgerIsNotAnError(t *testing.T) {
 func TestRecordedFindings_TamperedChainIsReportedNotHidden(t *testing.T) {
 	fl := &fakeLedger{entries: `[]`, verify: `{"valid":false,"entries":7,"error":"ChainBroken { at_seq: 3 }"}`, verifyCode: http.StatusConflict}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-	res, err := o.RecordedFindings(context.Background())
+	res, err := o.RecordedFindings(context.Background(), FindingsScope{AllTenants: true})
 	if err != nil {
 		t.Fatalf("a failed verify verdict must be returned, not an error: %v", err)
 	}
@@ -297,7 +311,31 @@ func TestRecordedFindings_TamperedChainIsReportedNotHidden(t *testing.T) {
 func TestRecordedFindings_LedgerErrorIsAnError(t *testing.T) {
 	fl := &fakeLedger{entries: `not json`, verify: `{"valid":true,"entries":0}`}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-	if _, err := o.RecordedFindings(context.Background()); err == nil {
+	if _, err := o.RecordedFindings(context.Background(), FindingsScope{AllTenants: true}); err == nil {
 		t.Fatal("an unreadable ledger must be an error")
+	}
+}
+
+// ADR 0021 (AEGIS A2 M-1): the zero scope, both scopes at once, and an
+// invalid client id are refused before the ledger is read — no caller gets
+// every tenant by omission.
+func TestRecordedFindings_ScopeIsRequiredAndCheckedFirst(t *testing.T) {
+	fl := &fakeLedger{entries: `[]`, verify: `{"valid":true,"entries":0}`}
+	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
+	for _, s := range []FindingsScope{{}, {ClientID: "acme", AllTenants: true}, {ClientID: "a b"},
+		{ClientID: strings.Repeat("a", 65)}} {
+		if _, err := o.RecordedFindings(context.Background(), s); !errors.Is(err, ErrInvalidScope) {
+			t.Errorf("scope %+v: want ErrInvalidScope, got %v", s, err)
+		}
+	}
+	fl.mu.Lock()
+	n := len(fl.requests)
+	fl.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("a refused scope reached the ledger (%d calls)", n)
+	}
+	res, err := o.RecordedFindings(context.Background(), FindingsScope{ClientID: "acme"})
+	if err != nil || res.Scope != FindingsScopeClient || res.ScopeClientID == nil || *res.ScopeClientID != "acme" {
+		t.Fatalf("client scope: %+v %v", res, err)
 	}
 }

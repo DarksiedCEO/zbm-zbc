@@ -122,7 +122,7 @@ func do(t *testing.T, method, url, token string) (int, string) {
 func TestFindingsRoute_ReturnsRecordedFindingsAndNeverWrites(t *testing.T) {
 	srv, ledgerRec, _ := newTestServer(t)
 	for i := 0; i < 3; i++ {
-		code, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings", routeTestToken)
+		code, body := do(t, http.MethodGet, srv.URL+"/revenue-recovery/findings?scope=all", routeTestToken)
 		if code != http.StatusOK {
 			t.Fatalf("GET findings = %d: %s", code, body)
 		}
