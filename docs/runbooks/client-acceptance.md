@@ -240,3 +240,13 @@ does.)
 - Legal renders the page's words itself and refuses any other page text, and refuses a company that is not the
   client's legal name on the link.
 - No confirmation email is sent automatically yet (step 6.3).
+
+### Listener header deadline
+
+Start the portal through its supported `python -m api` entrypoint. It enforces a
+fixed 10-second absolute deadline for the initial request head and the next head
+after each response. Partial progress does not extend the deadline. The existing
+10-second form-body deadline begins after a complete head. No extra environment
+variable is required. A timed-out connection releases its concurrency slot before
+a bounded graceful drain. During deployment acceptance, verify the ingress proxy
+timeout and forwarding contract separately; backend tests do not establish it.

@@ -345,3 +345,15 @@ template retirement under the existing acceptance-basis rules. It does not prove
 that the SOW's scope or amount matches the invoice, bind an exact MSA snapshot, or
 prevent duplicate billing of the same contractual obligation. Those are separate
 requirements; this change is not full billing-contract validation.
+## Request-head deadline (2026-11-01)
+
+The portal launcher now uses the sibling services' `HeadDeadlineH11Protocol`
+instead of plain h11. Its fixed 10-second deadline starts on connect and after
+every response; partial header progress never resets it. Parsing a complete head
+cancels that deadline, leaving the existing application body deadline in charge.
+Arming before the parent response-completion hook preserves pipelined requests.
+The byte-identical shared `graceful_close.py` releases the concurrency slot before
+a bounded drain (64 KiB / 1 second, at most 512 drains), and disconnect cancels
+pending timers. Header size, concurrency, logging, proxy handling, and keep-alive
+settings remain the existing portal settings. These backend bounds do not attest
+Railway ingress behavior; deployment acceptance still verifies the proxy contract.
