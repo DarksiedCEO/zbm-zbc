@@ -20,11 +20,16 @@ from test_media_billing import issue
 
 SHA = "c" * 64
 ACC = "lg-acc-0123456789ABCDEFGHJKMNPQRS"
+SOW_ACC = "lg-acc-" + "S" * 26
 NOW = datetime(2026, 10, 2, 17, 0, tzinfo=timezone.utc)
 
 
+def sow_ref():
+    return {"doc_id": "sow", "version": "1.1", "doc_sha256": SHA, "acceptance_id": SOW_ACC}
+
+
 def version_doc(**over):
-    v = {"doc_id": "client_msa", "version": "1.1", "entity": "zbm", "sha256": SHA, "status": "approved",
+    v = {"doc_id": "client_msa", "version": "1.1", "entity": "zbm", "sha256": SHA, "status": "approved", "doc_type": "client_msa",
          "clause_ids": [], "template_variables": None, "template_ref": {"version": "1.0"}, "counsel_signoff": None,
          "approved_by": "andre", "approved_at": "2026-09-30T00:00:00+00:00",
          "effective_at": "2026-10-01T00:00:00+00:00", "review_by": "2027-10-01T00:00:00+00:00",
@@ -37,7 +42,7 @@ def version_doc(**over):
 def acceptance_doc(**over):
     a = {"acceptance_id": ACC, "doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA,
          "accepted_at": "2026-10-01T12:00:00+00:00", "method": "clickwrap_unticked_box", "evidence_sufficient": True,
-         "party_ref": "client:zbm-client-1", "rules_pinned": True}
+         "party_ref": "client:zbm-client-1", "rules_pinned": True, "via": "client_portal"}
     a.update(over)
     return a
 
@@ -48,6 +53,13 @@ def client(version=None, acceptance=None, status=200, seen=None):
             seen.append((req.url.path, dict(req.headers)))
         if status != 200:
             return httpx.Response(status, json={"detail": "x"})
+        # Two separate registered fixture documents; the MSA retains its type.
+        if req.url.path.startswith("/legal/v1/documents/sow/versions/"):
+            return httpx.Response(200, json={**(version if version is not None else version_doc()),
+                                             "doc_id": "sow", "doc_type": "sow"})
+        if req.url.path == f"/legal/v1/acceptances/{SOW_ACC}":
+            return httpx.Response(200, json={**(acceptance if acceptance is not None else acceptance_doc()),
+                                             "doc_id": "sow", "acceptance_id": SOW_ACC})
         if "/versions/" in req.url.path:
             return httpx.Response(200, json=version if version is not None else version_doc())
         if "/acceptances/" in req.url.path:
@@ -124,11 +136,10 @@ def test_every_contract_check_names_the_client_and_entity():
     hr = Harness().ready()
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-9", "kind": "service",
             "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "100.00"}],
-            "payment_methods": ["ach"], "legal_ref": {"doc_id": "client_msa", "version": "1.1",
-                                                      "doc_sha256": SHA, "acceptance_id": ACC}}
+            "payment_methods": ["ach"], "legal_ref": sow_ref()}
     inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
     issue(hr, inv)
-    assert hr.f["legal"].last == ("client_msa", "1.1", SHA, ACC, "client:zbm-client-9", "zbm")
+    assert hr.f["legal"].last == ("sow", "1.1", SHA, SOW_ACC, "client:zbm-client-9", "zbm")
 
 
 def test_without_legal_no_invoice_is_issued():
@@ -168,7 +179,7 @@ def test_a_founder_approved_contract_passes_and_only_its_renewal_date_is_carried
     assert (ans.renew_by, ans.renewal_lapsed) == ("2027-10-01T00:00:00+00:00", False)
     assert A.check(ans, LegalAnswer(False)) is ans
     assert set(vars(ans)) == {"available", "current", "acceptance_matches", "reason", "renew_by", "renewal_lapsed",
-                              "version_basis_in_force", "acceptance_basis_in_force"}
+                              "version_basis_in_force", "acceptance_basis_in_force", "doc_type", "acceptance_via"}
 
 
 def test_readiness_and_the_issued_invoice_carry_no_approval_or_evidence_basis():
@@ -183,7 +194,7 @@ def test_readiness_and_the_issued_invoice_carry_no_approval_or_evidence_basis():
                                               "renewal_lapsed": False}}
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
             "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "100.00"}],
-            "payment_methods": ["ach"], "legal_ref": msa}
+            "payment_methods": ["ach"], "legal_ref": sow_ref()}
     inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
     out = issue(hr, inv)
     assert out["status"] == "issued"
@@ -226,7 +237,7 @@ def test_the_sales_tax_row_is_named_neutrally_with_the_same_rule_and_code():
     assert rd["allowed"] is False and rd["unmet"] == [f"fin/FIN-27/TAX_TREATMENT_UNVERIFIED: {want}"]
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
             "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "100.00"}],
-            "payment_methods": ["ach"], "legal_ref": msa}
+            "payment_methods": ["ach"], "legal_ref": sow_ref()}
     inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
     r = hr.post(f"/fin/v1/invoices/{inv['invoice_id']}/decision",
                 {"request_id": rid(), "content_sha256": inv["content_sha256"], "decision": "approve"}, andre=ANDRE_TOKEN)
@@ -247,7 +258,7 @@ def test_aegis_m2_a_basis_legal_no_longer_holds_is_refused_at_invoice_issue(vers
     msa = {"doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA, "acceptance_id": ACC}
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
             "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "100.00"}],
-            "payment_methods": ["ach"], "legal_ref": msa}
+            "payment_methods": ["ach"], "legal_ref": sow_ref()}
     hr.svc.ports.legal = client(version=version_doc(**FOUNDER_VERSION), acceptance=acceptance_doc(**FOUNDER_ACCEPTANCE))
     inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
     # Legal changes its answer between drafting and issue: the issue-time check is what counts
