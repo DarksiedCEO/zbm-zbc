@@ -47,6 +47,8 @@ MONEY_IN_GATED = {
     ("POST", "/fin/v1/invoices/{invoice_id}/stripe-checkout"): "opens a payment page",
 }
 NOT_CLIENT_MONEY = {
+    ("PUT", "/fin/v1/clients/{client_id}/billing-contact"): "private receipt contact; no money movement",
+    ("POST", "/fin/v1/client-receipts/{client_receipt_id}/delivery-review"): "operator evidence; no send or money movement",
     ("POST", "/fin/v1/payees"): "creates a creator payee record",
     ("POST", "/fin/v1/payees/{payee_id}/offboarding-notices"): "payee lifecycle",
     ("POST", "/fin/v1/payees/{payee_id}/callbacks"): "payee callback confirmation",
