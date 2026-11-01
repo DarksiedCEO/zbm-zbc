@@ -1,0 +1,89 @@
+version: 2
+updates:
+  # Manifest and hash-lock updates still require the normal review and CI gates.
+  - package-ecosystem: pip
+    directories:
+      - /services/*-py
+      - /deploy/python
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    groups:
+      python-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      python-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # Delivery's uv.lock is a separate dependency graph from requirements.txt.
+  - package-ecosystem: uv
+    directory: /services/delivery-py
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    groups:
+      delivery-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      delivery-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /services/ledger-rust
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    groups:
+      ledger-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      ledger-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /services/orchestrator-go
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    groups:
+      orchestrator-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      orchestrator-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /apps/dashboard-ts
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    groups:
+      dashboard-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      dashboard-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    groups:
+      actions-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
