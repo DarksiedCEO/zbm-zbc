@@ -259,6 +259,12 @@ class Decision(Strict):
     acknowledge_weakening: Optional[bool] = None
 
 
+class InvoiceVoid(Strict):
+    request_id: Id
+    content_sha256: Sha
+    reason: Literal["issued_in_error", "client_cancelled", "duplicate_invoice"]
+
+
 class DocRef(Strict):
     """A contract held by Legal (37). ``version`` is Legal's ``major.minor`` text (``"1.1"``); a whole number is
     accepted for records written before Legal was wired and means ``"<n>.0"`` -- Legal then confirms it or refuses."""
