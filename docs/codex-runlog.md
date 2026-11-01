@@ -70,3 +70,12 @@ Backend PR11 at `dcc86b79c1273c9e86830f742533c8698b49eadb` received independent 
 PR10-DETECTION-001 repair is backend PR12 into the owner branch. Initial head `9bb2aeefb76d578c9fbe44ff6295008de0c51072` independently passed849 tests,30live checks,12mutants and clean hygiene; its remote dashboard CI failed due to a separate flaky test. Test-only remediation is pushed at `80817e763f619963de73a5c005df16976e2e6544`; fresh exact-head review/CI is pending. No self-certification or merge.
 
 Backend PR6 review at `e46b70f1084a0a4cdc8719a80e52032461cc7c06` is underway. Root Go177 race tests and backend dashboard55 tests pass with no skips/hygiene violations after correcting reviewer output formats and isolating generated dependency setup; original failed gate logs retained. Six selected guard mutants killed. Exact-head90 remote checks SUCCESS. Separate Finance execution was rejected by automatic approval review over trusted authorization/filesystem scope; a narrow approval question is pending while other work continues. A read-only integration preview of PR6+PR11 reports only a generated test-count conflict; no integration merge performed.
+
+## 2026-11-01 03:12 UTC — authorized backend merge checkpoint
+
+Andre approved local Finance execution, gated backend merges, public-only Claude review of PR12, and the actual22-update/zero-delete Railway plan. Founder confirmed onboarding Sealed tokens set and existing tokens hex; no secret values inspected.
+
+- PR2 squash merged at569b02960dc0d2eb6b6901c6ab4cb2e43f8d161a after exacthead3c37dbef independentCONDITIONAL and90/90greenCI. Approved configuration apply exited0. MainCI41267875155 pending; new Railway deployments waiting while existing instances remain running. Premerge publichealth200; /livez404 is existing baseline.
+- Postapply validation found11readback diffs. DirectAPI confirms all7restartpolicies ON_FAILURE/10; four daily backup schedules genuinely absent. Targeted repair being prepared under existing approval; not claimed complete.
+- PR6 exacte46b70f independent aggregateCONDITIONAL: Go177,dashboard55,Finance689;538attack assertions,54livechecks,13selected guard mutants. Final hygiene clean,90CIgreen. Retargetedmain; merge preview finds2documentation conflicts. Codex repair branch being prepared; noPR6merge.
+- PR12 exact80817e76 now independently reviewed by Codex and authenticated Claude public-source-only review, bothCONDITIONAL.86CIchecks successful,3delivery jobs stillrunning. No merge untilfullCIgreen.
