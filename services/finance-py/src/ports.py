@@ -426,19 +426,35 @@ class NotBuiltPush:
         return False
 
 
-class ClientMailPort(Protocol):
-    """Sends a client their payment receipt (founder, Oct 5 2026: "that receipt goes out to them with the explanation
-    of what they bought via email"). True only when the mail provider accepted the message for delivery.
+@dataclass(frozen=True)
+class ReceiptDeliveryOutcome:
+    """Mock-only contract: accepted, retry (definitely not accepted), failed, or uncertain.
 
-    Contract for a real adapter (AEGIS N1/N2): delivery is at-least-once -- a crash after the provider accepted the
-    message, or a call that outlives Finance's 15-minute stale-claim window, is retried. The adapter MUST pass
-    ``receipt["client_receipt_id"]`` to the provider as its idempotency / de-duplication key, and MUST time out well
-    inside 15 minutes, so a retry never reaches the client as a second email."""
-    def send_receipt(self, client_id: str, receipt: dict) -> bool: ...
+    Acceptance is provider acceptance, never proof of inbox delivery. Unknown values fail closed.
+    """
+    outcome: str
+
+
+class ClientMailPort(Protocol):
+    """ADR 0032 mock-only contract. Enabled adapters accept an immutable persisted envelope.
+
+    A future real adapter requires separate review of its key retention, timeout, privacy and credential
+    controls. No real adapter is wired. ``accepted`` means provider acceptance, never inbox delivery;
+    ``retry`` guarantees no acceptance; ambiguous results must be ``uncertain``. The historical bool
+    method is supported solely for explicitly marked injected test fixtures, never production configuration.
+    """
+    enabled: bool
+
+    def deliver_receipt(self, envelope: dict) -> ReceiptDeliveryOutcome: ...
 
 
 class NotBuiltClientMail:
     """No mail provider is chosen or wired: nothing is sent; the receipt stays ``pending_send``."""
+    enabled = False
+
+    def deliver_receipt(self, envelope: dict) -> ReceiptDeliveryOutcome:
+        return ReceiptDeliveryOutcome("disabled")
+
     def send_receipt(self, client_id, receipt):
         return False
 

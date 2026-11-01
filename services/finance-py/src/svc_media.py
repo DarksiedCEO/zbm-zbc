@@ -457,6 +457,14 @@ class MediaMixin:
     def send_client_receipt(self, principal: str, request_id: str, crid: str) -> dict:
         """The scheduler asks the client-mail port to send one receipt. The port call happens outside the lock and
         is recorded first; a refusal or the stand-in leaves the receipt ``pending_send`` (nothing claims a send)."""
+        # Only explicitly injected legacy test fixtures exercise the historical bool contract.
+        # Production construction wires NotBuiltClientMail; no request/config selects this marker.
+        with self.lock:
+            receipt = self.db["client_receipts"].get(crid, {})
+            durable_delivery = crid in self.db["receipt_envelopes"] or \
+                receipt.get("client_id") in self.db["client_contacts"]
+        if durable_delivery or getattr(self.ports.client_mail, "test_only_legacy_receipts", False) is not True:
+            return self.send_receipt_envelope(principal, request_id, crid)
         key, h, ent = self._idem(principal, request_id, f"client-receipts/{crid}/send", None)
         if ent:
             return ent["response"]
