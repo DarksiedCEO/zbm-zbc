@@ -47,6 +47,7 @@ MONEY_IN_GATED = {
     ("POST", "/fin/v1/invoices/{invoice_id}/stripe-checkout"): "opens a payment page",
 }
 NOT_CLIENT_MONEY = {
+    ("POST", "/fin/v1/invoices/{invoice_id}/void"): "cancels a wholly unpaid service receivable; no cash movement",
     ("PUT", "/fin/v1/clients/{client_id}/billing-contact"): "private receipt contact; no money movement",
     ("POST", "/fin/v1/client-receipts/{client_receipt_id}/delivery-review"): "operator evidence; no send or money movement",
     ("POST", "/fin/v1/payees"): "creates a creator payee record",
