@@ -27,7 +27,7 @@ from pydantic import (AfterValidator, BaseModel, ConfigDict, Field, StringConstr
 from clock import parse_iso
 from ports import (BankBalance, BankTransfer, Certification, ClawbackPage, ClientActivation, ComplianceRuling, GLAnswer,
                    HoldsAnswer, JurisdictionAnswer, LegalAnswer, RegisterParameters, RailAccount, RailBalance, RailLookup, RailSubmit, RegisterRow,
-                   SanctionsAnswer, StripeCheckout, StripeDispute, StripePayment, StripePayout, StripeSession,
+                   ReceiptDeliveryOutcome, SanctionsAnswer, StripeCheckout, StripeDispute, StripePayment, StripePayout, StripeSession,
                    TaxAgentAnswer, TierAnswer)
 
 DEFAULT_MAX_VIEWS = 10 ** 12
@@ -330,7 +330,12 @@ class StripePayoutM(_S):
         return self
 
 
+class ReceiptDeliveryOutcomeM(_S):
+    outcome: Literal["accepted", "retry", "failed", "uncertain"]
+
+
 MODELS: dict[type, type[BaseModel]] = {
+    ReceiptDeliveryOutcome: ReceiptDeliveryOutcomeM,
     Certification: CertificationM, ClawbackPage: ClawbackPageM, ComplianceRuling: ComplianceRulingM,
     HoldsAnswer: HoldsAnswerM, SanctionsAnswer: SanctionsAnswerM, RegisterRow: RegisterRowM,
     JurisdictionAnswer: JurisdictionAnswerM, TierAnswer: TierAnswerM, LegalAnswer: LegalAnswerM,
@@ -341,7 +346,7 @@ MODELS: dict[type, type[BaseModel]] = {
     StripeDispute: StripeDisputeM, StripePayout: StripePayoutM,
 }
 # answers without an ``available`` switch: every field is always checked
-_ALWAYS = (RailSubmit, BankTransfer, StripeCheckout)
+_ALWAYS = (RailSubmit, BankTransfer, StripeCheckout, ReceiptDeliveryOutcome)
 
 
 class Malformed(Exception):

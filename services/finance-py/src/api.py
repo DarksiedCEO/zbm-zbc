@@ -585,6 +585,16 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                      req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
         return svc.cancel_media_buy(req.request_id, _id(buy_id))
 
+    @app.put("/fin/v1/clients/{client_id}/billing-contact", dependencies=auth)
+    def billing_contact(client_id: str, _: str = Depends(andre("billing-contact")),
+                        req: m.BillingContact = Depends(body(m.BillingContact))) -> dict:
+        return svc.put_receipt_contact(req.request_id, _id(client_id), dump(req))
+
+    @app.post("/fin/v1/client-receipts/{client_receipt_id}/delivery-review", dependencies=auth)
+    def receipt_delivery_review(client_receipt_id: str, _: str = Depends(andre("receipt-delivery-review")),
+                                req: m.ReceiptDeliveryReview = Depends(body(m.ReceiptDeliveryReview))) -> dict:
+        return svc.review_receipt_delivery(req.request_id, _id(client_receipt_id), dump(req))
+
     @app.get("/fin/v1/client-receipts/{client_receipt_id}", dependencies=auth)
     def client_receipt_get(client_receipt_id: str, _: str = Depends(caller())) -> dict:
         return svc.get_client_receipt(_id(client_receipt_id))

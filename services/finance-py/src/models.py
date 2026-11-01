@@ -618,3 +618,22 @@ class ReconcileRequest(Strict):
 
 def texts(obj: Any) -> list[str]:
     return list(iter_strings(obj))
+
+
+def receipt_email(value: str) -> str:
+    # Deliberately narrow single ASCII mailbox; no display names, headers or recipient lists.
+    if len(value) > 254 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+", value):
+        raise ValueError("invalid billing mailbox")
+    if ".." in value or value.split("@")[0].endswith("."):
+        raise ValueError("invalid billing mailbox")
+    return value
+
+
+class BillingContact(Strict):
+    request_id: Id
+    email: Optional[Annotated[StrictStr, AfterValidator(receipt_email)]]
+
+
+class ReceiptDeliveryReview(Strict):
+    request_id: Id
+    evidence: Evidence
