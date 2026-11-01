@@ -559,6 +559,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                        req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.decide_invoice(req.request_id, _id(invoice_id), dump(req))
 
+    @app.post("/fin/v1/invoices/{invoice_id}/void", dependencies=auth)
+    def invoice_void(invoice_id: str, _: str = Depends(andre("invoices/void")),
+                     req: m.InvoiceVoid = Depends(body(m.InvoiceVoid))) -> dict:
+        return svc.void_invoice(req.request_id, _id(invoice_id), dump(req))
+
     # --- media buys and client receipts (ADR 0009 amendment, Oct 5 2026) ---------------------------------------------
 
     @app.post("/fin/v1/media-buys", dependencies=auth, status_code=201)

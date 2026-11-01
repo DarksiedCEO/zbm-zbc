@@ -634,6 +634,92 @@ class BooksMixin:
             self._commit(op)
             return resp
 
+    def _unpaid_service_original(self, inv: dict) -> dict:
+        """Conservative proof of one untouched service receivable, under self.lock."""
+        iid = inv["invoice_id"]
+        if (inv.get("entity"), inv.get("kind"), inv.get("status"), inv.get("currency")) != \
+                ("zbm", "service", "issued", "USD"):
+            raise Conflict("only an issued unpaid ZBM service invoice can be voided")
+        history_fields = ("paid_at", "returned_at", "refunded", "charged_back", "credited", "credit_notes",
+                          "refund_due", "held_compliance", "held_compliance_history")
+        if any(k in inv for k in history_fields):
+            raise Conflict("invoice has payment, adjustment or hold history")
+        if any(b.get("leg") == "stripe_unknown_session" and b.get("status") == "open"
+               for b in self.db["breaks"].values()):
+            raise Conflict("an unassessed Checkout payment requires external review before any invoice void")
+        for coll in ("receipts", "stripe_sessions", "stripe_disputes", "disputes", "refunds", "client_receipts"):
+            for rec in self.db[coll].values():
+                hold = rec.get("held_compliance")
+                if any(rec.get(field) == iid for field in ("invoice_id", "reference_token", "attributed_invoice_id")) or \
+                        (isinstance(hold, dict) and hold.get("attributed_invoice_id") == iid):
+                    raise Conflict("invoice has payment or Checkout history")
+        candidates = [e for e in self.entries if e.get("entity") == "zbm" and
+                      e.get("memo_code") == "F11" and e.get("source") == {"kind": "invoice", "id": iid}]
+        if len(candidates) != 1:
+            raise Conflict("invoice original posting is missing or ambiguous")
+        original = candidates[0]
+        try:
+            amount = M.parse(inv["total"])
+            valid_amount = amount > 0 and amount == I2.lines_total(inv["lines"])
+        except (M.MoneyError, KeyError, TypeError):
+            valid_amount = False
+        if not valid_amount:
+            raise Conflict("invoice amount cannot be verified")
+        expected = [J.dr("1100", amount, f"client:{inv['client_id']}"), J.cr("4110", amount)]
+        if original.get("lines") != expected or original.get("idempotency_key") != f"F11|{iid}" or \
+                original.get("entry_sha256") != J.entry_sha256(original) or \
+                self.entries_by_id.get(original["entry_id"]) != original or \
+                self.entry_keys.get(("zbm", f"F11|{iid}")) != original["entry_id"]:
+            raise Conflict("invoice original posting does not match the service receivable")
+        after_original = False
+        for entry in self.entries:
+            if entry is original:
+                after_original = True
+                continue
+            if entry.get("reverses_entry_id") == original["entry_id"] or \
+                    entry.get("source") == {"kind": "invoice", "id": iid}:
+                raise Conflict("invoice already has a journal adjustment")
+            if after_original and entry.get("entity") == "zbm" and entry.get("memo_code") == "correction" and \
+                    any(line.get("account") == "4110" or (line.get("account") == "1100" and
+                        line.get("subledger") == f"client:{inv['client_id']}") for line in entry["lines"]):
+                # Explicit-line corrections need not name the invoice. Revenue is not per-invoice;
+                # a later 4110 correction is therefore ambiguous even if another client was intended.
+                raise Conflict("later receivable or service revenue correction requires separate review")
+        return original
+
+    def void_invoice(self, request_id: str, invoice_id: str, body: dict) -> dict:
+        # Same order as Checkout: no remote call; serialize creation through its final commit.
+        with self._stripe_turn("unpaid invoice void"):
+            with self.lock:
+                key, digest, ent = self._idem("andre", request_id, f"invoices/{invoice_id}/void", body)
+                if ent:
+                    return ent["response"]
+                self.require_rules()
+                inv = self.db["invoices"].get(invoice_id)
+                if inv is None:
+                    raise NotFound("no such invoice")
+                if body["content_sha256"] != inv["content_sha256"]:
+                    raise Conflict("invoice changed since you read it")
+                original = self._unpaid_service_original(inv)
+                op = Op(self, f"invvoid|{request_id}", "andre", invoice_id)
+                try:
+                    reversal = self._post(op, "zbm", J.reversal_lines(original), "F11v",
+                        {"kind": "invoice", "id": invoice_id}, f"F11v|{invoice_id}",
+                        approval_ref=request_id, reverses=original["entry_id"])
+                except PostingRefused as exc:
+                    raise InvalidReasons("invoice void posting refused", exc.reasons) from None
+                new = {**inv, "status": "void", "voided_at": iso(self._now()), "void_reason": body["reason"],
+                       "void_entry_id": reversal["entry_id"]}
+                op.record(derived_id("invvoid", invoice_id), "invoice_voided", "andre", invoice_id,
+                          {"invoice_id": invoice_id, "reason": body["reason"],
+                           "original_entry_id": original["entry_id"], "reversal_entry_id": reversal["entry_id"]},
+                          "Founder voided an unpaid service invoice; no cash moved")
+                op.put("invoices", invoice_id, new)
+                response = self._idem_add(op, key, digest, {"invoice": new, "request_id": request_id,
+                                                           "ledger_event_ids": op.events})
+                self._commit(op)
+                return response
+
     def get_invoice(self, invoice_id: str, full: bool = True) -> dict:
         """``full``: Andre's read. Every other caller sees only ``held`` for a Compliance hold, never its sanctions
         marker, reason or history (AEGIS r6)."""
