@@ -169,6 +169,7 @@ class Settings:
     # founder alerts (ADR 0027): off unless FOUNDER_ALERT_EMAIL, FOUNDER_ALERT_FROM and the Resend key are all set;
     # a wrong or half configuration leaves them off with the reason (never a refusal to start)
     founder_alerts: object = None
+    ops_health_urls: str = ""
 
 
 _HELD: dict = {}
@@ -421,6 +422,7 @@ def load(env: Optional[dict] = None) -> Settings:
         business_tz=_tz(env, "FIN_BUSINESS_TZ", "America/Los_Angeles"),
         **stripe, **mail,
         founder_alerts=founder_alerts_mod.settings_from_env(env, mail.get("resend_api_key") is not None),
+        ops_health_urls=env.get("OPS_HEALTH_URLS", ""),
     )
     # the flock last: every other refusal above leaves the directory untouched
     s.data_dir_lock = hold_data_dir(data_dir) if data_dir else None

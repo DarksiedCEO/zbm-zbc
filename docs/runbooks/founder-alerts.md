@@ -89,3 +89,20 @@ UNVERIFIED: nothing in this runbook has run against the real Railway, Resend or 
 - Healthchecks.io (checks, period and grace time, ping URLs, email integration): https://healthchecks.io/docs/
 
 These pages were not re-read in this pass (UNVERIFIED); the Healthchecks screen names in A.6 may differ slightly.
+
+### Health polling inside Finance
+
+`OPS_HEALTH_URLS` belongs on **Finance**, where the alerts job executes. IaC supplies the private Compliance (8380),
+Finance (8410), Ledger (8090) and Legal (8420) roots; `/health` is appended. Do not point it at `/livez`.
+Missing/malformed configuration creates `health_poll_unconfigured`. Sustained degraded readiness or repeated
+failures create `service_unhealthy` or `service_flapping`; fixed reason codes pass through the existing digest.
+
+After correcting a target or restoring its service, run the alerts job and inspect its counts and the authenticated
+service health response. A healthy poll clears the matching open health condition. State is retained across
+Finance restarts in `founder_alerts.json`; invalid/future history is discarded and observed again. Alerts do not
+repair the underlying service, and an email or heartbeat does not prove that every department is ready.
+
+Limits: 16 configured roots, 64 KiB unencoded health responses, five seconds per-probe decision budget and 30 seconds
+across the poll set. No new request starts after that budget; timeout or exhausted-budget readings are non-healthy.
+An in-flight OS/DNS operation may outlast its requested timeout. Treat recurring budget failures as an operator
+issue and reduce/fix the target set; do not increase limits to hide unhealthy dependencies.

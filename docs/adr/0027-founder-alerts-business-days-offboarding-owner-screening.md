@@ -170,3 +170,24 @@ compliance-py: tests/test_owner_screening.py, tests/test_client_offboarding.py (
 test_service_area_gate.py now record a default ownership). finance-py: tests/test_client_offboarding.py.
 devtools/test_client_offboarding.py. Nothing
 has run on Railway or against the real Resend API.
+
+## Codex health-poll integration — November 1, 2026
+
+The dispatcher now calls the resilience health poller inside Finance and saves its health history in the same
+atomic alert-state file. Finance receives `OPS_HEALTH_URLS` for Compliance, Finance, Ledger and Legal from IaC;
+the scheduler still only invokes the authenticated alerts job. No new caller token or sender is introduced.
+`service_unhealthy`, `service_flapping` and `health_poll_unconfigured` use the existing digest, redaction, retry
+and deduplication path. Missing targets are an alert, not an all-clear. An unexpected poll failure produces a fixed
+configuration-alert code while other Finance alerts remain eligible for dispatch.
+
+Persisted poll history is treated as untrusted input: invalid containers and naive/future timestamps are discarded,
+clock rollback starts a new observation interval, and only boolean observations count. Response `write_ok`, when
+present, must be boolean. Configuration rejects invalid ports and more than 16 targets. Responses are capped at
+64 KiB and encoded responses are refused. Monotonic deadlines bound the poller's decisions to five seconds per
+probe and a 30-second aggregate budget; it does not start further requests after the budget. HTTPX I/O timeouts
+are capped by remaining time, but an already executing OS/DNS operation is not a forcibly cancellable process.
+No hard real-time scheduling guarantee is claimed.
+
+This takeover branch still inherits the original wave-C dependencies. Rebase/integration with the final Compliance
+head, independent review of inherited Finance restore work, full CI and deployment prerequisites remain required
+before a production merge. The code change does not enable a live email account or apply Railway configuration.

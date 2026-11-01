@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 import founder_alerts as FA
+import health_poll
 
 DISPUTE_LEGS = ("stripe_dispute", "dispute_receivable", "stripe_dispute_anomaly")
 
@@ -26,7 +27,9 @@ class AlertsMixin:
                 cfg.problem = "no alert sender is wired (FOUNDER_ALERT_* and RESEND_API_KEY)"
             url = getattr(self.cfg, "ledger_url", None)
             d = FA.Dispatcher(cfg, FA.StateFile(getattr(self.cfg, "data_dir", None)), sender,
-                              probe=lambda: FA.ledger_probe(url))
+                              probe=lambda: FA.ledger_probe(url),
+                              health_probe=lambda st, now: health_poll.run(
+                                  st, {"OPS_HEALTH_URLS": self.cfg.ops_health_urls}, now))
             self._founder_alerts = d
         return d
 
