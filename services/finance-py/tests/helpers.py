@@ -46,6 +46,20 @@ def make_fakes(clock) -> dict:
             "people": FakePeople(), "push": FakePush(), "client_mail": FakeClientMail()}
 
 
+class _Body:
+    """A 200 answer read straight from the service (``Harness.redacted_get``)."""
+    status_code = 200
+
+    def __init__(self, body):
+        import types
+        self._body = body
+        self.text = json.dumps(body)
+        self.request = types.SimpleNamespace(url="service:non-andre-redaction")
+
+    def json(self):
+        return self._body
+
+
 class Harness:
     def __init__(self, env: Optional[dict] = None, data_dir: Optional[str] = None, clock: Optional[FixedClock] = None,
                  ledger: Optional[FakeLedgerClient] = None, passing: bool = True, fakes: Optional[dict] = None,
@@ -127,6 +141,19 @@ class Harness:
     def ok(self, r, code=200):
         assert r.status_code == code, (r.status_code, r.text[:3000])
         return r.json()
+
+    def redacted_get(self, path, **params):
+        """AEGIS r11 R11-3: the audit routes answer Andre's token only. Their non-Andre redaction is kept as defence in
+        depth; this reads it straight from the service (the view any other reader would have had)."""
+        if path == "/fin/v1/audit/export":
+            body = self.svc.audit_export("onboarding", params.get("since"), params.get("until"),
+                                         int(params.get("cursor", 0)), full=False)
+        elif path == "/fin/v1/audit/evidence":
+            body = self.svc.audit_evidence(int(params.get("limit", 200)), int(params.get("offset", 0)),
+                                           params.get("event_type"), full=False)
+        else:
+            raise AssertionError(path)
+        return _Body(body)
 
     # --- rules ----------------------------------------------------------------------------------
     def rules(self):
@@ -299,7 +326,7 @@ class Harness:
         parts += [json.dumps(r) for r in self.svc.log.records]
         cur = 0
         while cur is not None:
-            page = self.ok(self.get("/fin/v1/audit/export", cursor=cur))
+            page = self.ok(self.get("/fin/v1/audit/export", caller=None, andre=ANDRE_TOKEN, cursor=cur))
             parts.append(json.dumps(page))
             cur = page["next_cursor"]
         return "\n".join(parts)

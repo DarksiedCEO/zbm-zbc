@@ -37,15 +37,17 @@ from intelligences.engine import Ctx, evaluate, finalize, unmet_line
 from ledger import DEPARTMENT as LEDGER_DEPARTMENT
 from ledger import (LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, clean_summary,
                     derived_id, payload_sha256)
-from ports import (A11yAnswer, AccessibilityChecker, AgeAttestation, ClipAttestation, DocVersion, Finance31Port,
+from ports import (A11yAnswer, AccessibilityChecker, AgeAttestation, ClientDocument, ClipAttestation, DocVersion,
+                   Finance31Port,
                    Legal37Port, NotBuiltFinance31, NotBuiltLegal37, NotBuiltVerificationIntegrity,
                    NotWiredAccessibilityChecker, NotWiredSanctionsProvider, RailStatus, SanctionsScreeningProvider,
                    ScreenAnswer, TaxStatus, VerificationIntegrityPort)
+import readiness as readiness_mod
 from register import Version, effective_status, rows_sha256, sha256_text
 from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
-SPEC_SEED_SHA256 = "4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d"
+SPEC_SEED_SHA256 = "bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5"   # seed v2 (ADR 0024)
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
 REGISTER_PAGE = 100
@@ -85,6 +87,27 @@ def _b32(s: str, n: int = 26) -> str:
 
 def _sha(obj: Any) -> str:
     return sha256_text(canonical(obj))
+
+
+# AEGIS F-1: what a rule SAYS (and therefore what an activation relied on). A re-verification moves only
+# verified_at / expires_at / status and the source bookkeeping, so it keeps the fingerprint; an amendment of the
+# obligation, its gates, its conditions, its check or its parameters (HR-05 operate, HR-07 refuse...) changes it.
+RULE_FINGERPRINT_FIELDS = ("id", "jurisdiction", "obligation", "gates", "applies_when", "check", "parameters",
+                           "effective_date")
+
+
+# AEGIS r2 N-1: the service-area rows' parameters (HR-05 operate..., HR-07 refuse) are left out of the fingerprint:
+# activation_status re-checks the client's jurisdiction and targets against them on every call (_area_now), so a
+# widening or a re-ordering refuses nobody and a narrowing refuses exactly the clients it takes out. Their other
+# fields (the obligation text, gates, check...) stay in.
+AREA_ROWS = ("HR-05", "HR-07")
+
+
+def rule_fingerprint(row: dict) -> str:
+    fields = {k: row.get(k) for k in RULE_FINGERPRINT_FIELDS}
+    if row.get("id") in AREA_ROWS:
+        fields.pop("parameters")
+    return _sha(fields)
 
 
 class PortCalls:
@@ -135,6 +158,15 @@ class PortCalls:
         p = self.svc.ports.legal
         return self._call("legal_37", "current_version", (doc_id,), lambda: p.current_version(doc_id), DocVersion(False))
 
+    def legal_client_doc(self, doc_id: str, version: str, doc_sha256: str, acceptance_id: str,
+                         party_ref: str) -> ClientDocument:
+        """ADR 0024 (HR-15): Legal's current version and the client's acceptance of it; a stand-in or a raising port
+        is unavailable; an answer of any other type is unavailable too (never a pass)."""
+        p = self.svc.ports.legal
+        args = (doc_id, version, doc_sha256, acceptance_id, party_ref)
+        ans = self._call("legal_37", "client_document", args, lambda: p.client_document(*args), ClientDocument(False))
+        return ans if isinstance(ans, ClientDocument) else ClientDocument(False)
+
 
 class GateEnv:
     """What the checks may read: ports (recorded), config, stored records."""
@@ -144,6 +176,9 @@ class GateEnv:
 
     def screen(self, sid: str) -> Optional[dict]:
         return self.svc.screens.get(sid)
+
+    def attestation(self, aid: str) -> Optional[dict]:
+        return self.svc.attestations.get(aid)
 
     def latest_screen(self, subject_id: str, role: str, owner_of: Optional[str]) -> Optional[dict]:
         cands = [s for s in self.svc.screens.values() if s["subject_id"] == subject_id and s["role"] == role
@@ -250,6 +285,7 @@ class ComplianceService:
         self.rulings: dict[str, dict] = {}
         self.latest_activation: dict[tuple[str, str], str] = {}   # (lane, subject) -> latest activation ruling id
         self.screens: dict[str, dict] = {}
+        self.attestations: dict[str, dict] = {}   # ADR 0024: Andre's recorded OFAC searches (HR-14)
         self.a11y: dict[str, list[dict]] = {}
         self.control_defs: dict[str, dict] = {c["control_id"]: dict(c) for c in SEED_CONTROLS}
         self.control_state: dict[str, dict] = {}
@@ -514,6 +550,8 @@ class ComplianceService:
                     self.idem.popitem(last=False)
         elif kind == "screen":
             self.screens[r["screen_id"]] = r
+        elif kind == "sanctions_attestation":
+            self.attestations[r["attestation_id"]] = r
         elif kind == "a11y":
             self.a11y.setdefault(r["content_sha256"], []).append(r)
         elif kind == "control_result":
@@ -886,11 +924,19 @@ class ComplianceService:
                       "subject_kind": subject_kind, "allowed": allowed, "unmet": unmet, "unmet_lines": lines,
                       "register_version": self.version_number, "evaluated_at": iso(now), "facts_sha256": facts_sha,
                       "caller_context_sha256": _sha(caller_context) if caller_context is not None else None,
-                      "row_ids_evaluated": sorted(set(ctx.evaluated)), "ledger_event_id": ruling_id,
+                      "row_ids_evaluated": sorted(set(ctx.evaluated)),
+                      "rule_fingerprints": {oid: rule_fingerprint(rows[oid]) for oid in sorted(set(ctx.evaluated))
+                                            if oid in rows},
+                      "ledger_event_id": ruling_id,
                       "ledger_event_ids": list(events), "principal": principal, "request_id": request_id,
                       "request_sha256": h, "outcome_sha256": outcome_sha,
                       "first_used_at": iso(ent["at"]) if ent is not None else iso(now),
                       "replaces_ruling_id": ent.get("ruling_id") if ent is not None else None}
+            if gate == "activation":
+                # AEGIS r6 N1: every activation ruling, allowed or not, records where the client and its campaign
+                # targets are, so a refusal can be told to rest on sanctions (HR-07's list) or not
+                record["place"] = {"jurisdiction": ctx.facts.get("jurisdiction"),
+                                   "target_jurisdictions": ctx.facts.get("target_jurisdictions")}
             if gate == "activation" and allowed:
                 owners = [self.screens[s]["subject_id"] for s in ctx.facts.get("owner_screen_ids") or [] if s in self.screens]
                 record["profile"] = i02_activation_gate.profile(lane, ctx.facts, owners)
@@ -1079,6 +1125,201 @@ class ComplianceService:
                                {"hold_id": hold_id, "reason_sha256": sha256_text(reason)}, f"Hold released by Andre: {hold['kind']}")
             self._commit("hold_release", {"hold_id": hold_id, "released_at": iso(now), "reason": reason}, [eid])
             return self._idem_store(key, h, {"hold_id": hold_id, "status": "released", "ledger_event_ids": [eid]})
+
+    # ------------------------------------------------------------------ ADR 0024: client screening, activation status
+
+    def record_attestation(self, request_id: str, body: dict) -> dict:
+        """Andre's recorded OFAC Sanctions List Search for a client (HR-14). Recorded on the ledger first; a potential
+        match or a match opens a PERMANENT hold on the subject (founder rule: refuse on any hit, never investigate
+        around it). The searched name is never stored: its SHA-256 only."""
+        with self.lock:
+            key, h, cached = self._idem_check("andre", request_id, "sanctions/attestations", body)
+            if cached:
+                return cached
+            now = self._now()
+            try:
+                at = parse_iso(body["searched_at"])
+            except (KeyError, TypeError, ValueError):
+                raise Invalid("searched_at must be an RFC 3339 timestamp with offset") from None
+            if at > now + timedelta(minutes=5):
+                raise Invalid("searched_at is in the future: record a search after it was made")
+            aid = "sat-" + _b32(f"andre|{request_id}", 20)
+            subject = body["subject_id"]
+            rec = {"attestation_id": aid, "subject_id": subject, "lane": body["lane"], "searched_at": iso(at),
+                   "list_version": body["list_version"], "lists": sorted(set(body["lists"])), "tool": body["tool"],
+                   "result": body["result"], "evidence_sha256": body["evidence_sha256"],
+                   "searched_name_sha256": body["searched_name_sha256"], "recorded_at": iso(now),
+                   "recorded_by": "andre"}
+            events = [self._record(derived_id("sat", aid), "sanctions_attestation_recorded", "andre", subject,
+                                   {"attestation_id": aid, "result": rec["result"], "lists": rec["lists"],
+                                    "searched_at": rec["searched_at"], "list_version_sha256": sha256_text(rec["list_version"]),
+                                    "evidence_sha256": rec["evidence_sha256"]},
+                                   f"OFAC search recorded by Andre: {rec['result']}")]
+            hold = None
+            if rec["result"] != "no_match":
+                hold = {"hold_id": "hold-" + _b32(f"sat|{aid}", 20), "subject_id": subject, "kind": "sanctions_match",
+                        "obligation_id": "HR-14", "releasable": False, "status": "open", "opened_at": iso(now),
+                        "released_at": None, "detail": f"OFAC search {aid}: {rec['result']}"}
+                events.append(self._record(derived_id("hold", hold["hold_id"]), "hold_opened", i08_sanctions.ACTOR,
+                                           subject, {"hold_id": hold["hold_id"], "kind": hold["kind"],
+                                                     "obligation_id": "HR-14"}, f"Hold opened: {hold['kind']}"))
+            self._commit("sanctions_attestation", rec, events[:1])
+            if hold:
+                self._commit("hold_open", hold, events[1:])
+            resp = {"attestation_id": aid, "subject_id": subject, "result": rec["result"],
+                    "searched_at": rec["searched_at"], "hold_id": hold["hold_id"] if hold else None,
+                    "ledger_event_ids": events}
+            return self._idem_store(key, h, resp)
+
+    def sanctions_status(self, subject_id: str, role: str) -> dict:
+        """ADR 0024: the latest provider screen of a payee or owner and whether it is fresh (i08 rules), for
+        Finance's payout gate (finance-py ``HttpCompliance.sanctions_status``). Read-only."""
+        with self.lock:
+            cands = [x for x in self.screens.values() if x["subject_id"] == subject_id and x["role"] == role]
+            out = {"subject_id": subject_id, "role": role, "screen_id": None, "result": None, "list_version": None,
+                   "list_current": False, "screened_at": None, "fresh": False, "problem": "no sanctions screen on record"}
+            if not cands:
+                return out
+            scr = max(cands, key=lambda x: x["seq"])
+            lv = (self.sanctions_list or {}).get("list_version")
+            problem = i08_sanctions.freshness_problem(scr, self._now(), self.config.sanctions_freshness_days, lv)
+            out.update(screen_id=scr["screen_id"], result=scr["result"], list_version=scr.get("list_version"),
+                       list_current=lv is not None and scr.get("list_version") == lv, screened_at=scr["screened_at"],
+                       fresh=problem is None, problem=problem)
+            return out
+
+    def _client_activation_blockers(self, lane: str) -> list[str]:
+        """Red controls that block a client-lane activation (the gate's own _control_items rule)."""
+        rows = self.rows_by_id()
+        now = self._now()
+        out = []
+        for cid, d in sorted(self.control_defs.items()):
+            if "activation" not in d["blocks_gates"] or (cid == "C-04" and lane != "zbc_creator"):
+                continue
+            st = control_status(d, self.control_state.get(cid, {}), rows, now)
+            if st["status"] != "green":
+                out.append(f"control_red:{cid}: {d['title']} ({st['reason']})")
+        return out
+
+    @staticmethod
+    def _area_now(prof: dict, rows: dict) -> list[str]:
+        """AEGIS F-1(b): the client's recorded jurisdiction and campaign targets against the service area IN FORCE
+        NOW (HR-05 operate, HR-07 refuse, sanctions regions), independent of the fingerprints: anything but operate
+        refuses."""
+        params = i07_jurisdiction.Params.from_rows(rows)
+        out = []
+        res = i07_jurisdiction.resolve_person(prof.get("jurisdiction"), params, "client")
+        if res.cls != "operate":
+            out.append(f"jurisdiction {res.code} is {res.cls} under the service area in force: {res.reason}")
+        for t in prof.get("target_jurisdictions") or []:
+            tr = i07_jurisdiction.resolve_target(t, params)
+            if tr.cls != "operate":
+                out.append(f"campaign target {tr.code} is {tr.cls} under the service area in force: {tr.reason}")
+        return out
+
+    @staticmethod
+    def _on_sanctions_list(prof: dict, rows: dict) -> bool:
+        """AEGIS r5 C1: the client's recorded jurisdiction or a campaign target resolves to a code on HR-07's refuse list
+        (the OFAC comprehensive sanctions list), as opposed to merely outside the US service area."""
+        hr07 = rows.get("HR-07") or {}
+        if hr07.get("status") == "superseded":
+            return False
+        listed = set((hr07.get("parameters") or {}).get("refuse") or [])
+        params = i07_jurisdiction.Params.from_rows(rows)
+        if not isinstance(prof, dict):
+            return False
+        codes = [i07_jurisdiction.resolve_person(prof.get("jurisdiction"), params, "client").code]
+        codes += [i07_jurisdiction.resolve_target(t, params).code for t in prof.get("target_jurisdictions") or []]
+        return any(c in listed for c in codes if c)
+
+    def activation_status(self, client_id: str, lane: str = "client") -> dict:
+        """ADR 0024: the client's CURRENT activation decision, for Finance, SEO and Revenue Recovery (read-only).
+        ALLOW only when every one holds now: the latest activation ruling for (lane, client) allowed it; every rule
+        it evaluated is still verified in the register in force (an expired rule is never extended) and says what it
+        said then (its fingerprint, AEGIS F-1); the client's jurisdiction and targets are operate under the service
+        area in force now; the register
+        gained no activation rule since that ruling; no control that blocks activation is red (C-11); no hold is
+        open on the client; its recorded OFAC search is within HR-14 ``rescreen_after_days``. Anything else is
+        REFUSE with the reasons."""
+        with self.lock:
+            now = self._now()
+            today = now.date()
+            out = {"client_id": client_id, "lane": lane, "decision": "REFUSE", "current": False, "ruling_id": None,
+                   "evaluated_at": None, "register_version": self.version_number, "jurisdiction": None,
+                   "valid_until": None, "reasons": [], "seed_pinned": self.seed_pinned,
+                   # AEGIS r5 C1: the refusal rests on sanctions (an open sanctions_match hold, or the client's
+                   # recorded place on HR-07's sanctions list); Finance never refunds such a payment
+                   "sanctions_grounded": any(hh["status"] == "open" and hh["subject_id"] == client_id
+                                             and hh["kind"] == "sanctions_match" for hh in self.holds.values()),
+                   "sanctions_ground": None}
+            # AEGIS r8: WHICH sanctions ground: "match" (an OFAC list match on the client) or "place" (the client's
+            # place or a campaign target is comprehensively sanctioned); match wins when both apply
+            if out["sanctions_grounded"]:
+                out["sanctions_ground"] = "match"
+            reasons = out["reasons"]
+            rows = self.rows_by_id()
+            if rows is None:
+                reasons.append("no register version is in force: Andre has not approved the seed")
+                return out
+            rid = self.latest_activation.get((lane, client_id))
+            if rid is None:
+                reasons.append("no activation ruling for this client: run the activation gate")
+                return out
+            r = self.rulings[rid]
+            prof = r.get("profile") or {}
+            out.update(ruling_id=rid, evaluated_at=r["evaluated_at"],
+                       jurisdiction=canonical_jurisdiction(prof.get("jurisdiction")))
+            # AEGIS r6 N1: before any early return, so a refused ruling that refused BECAUSE of a sanctioned place or
+            # target still says so
+            if self._on_sanctions_list(r.get("place") or prof, rows):
+                out["sanctions_grounded"] = True
+                out["sanctions_ground"] = out["sanctions_ground"] or "place"
+            if not r["allowed"]:
+                reasons.append("the latest activation ruling refused this client: fix the unmet items and re-activate")
+                return out
+            prints = r.get("rule_fingerprints")
+            if not isinstance(prints, dict):
+                reasons.append("the ruling carries no rule fingerprints (it predates them): re-activate")
+                prints = None
+            for oid in r.get("row_ids_evaluated") or []:
+                row = rows.get(oid)
+                st = "removed" if row is None else effective_status(row, today)
+                if st != "verified":
+                    reasons.append(f"{oid} is {st} since the ruling: it must be re-verified and approved, then the "
+                                   "client re-activated")
+                elif prints is not None and prints.get(oid) != rule_fingerprint(row):
+                    reasons.append(f"{oid} changed since the ruling (approved amendment): re-activate")
+            reasons += self._area_now(prof, rows)
+            old = next((v for v in self.versions if v.version == r["register_version"]), None)
+            old_ids = {x["id"] for x in old.rows} if old else set()
+            gained = sorted(oid for oid, row in rows.items() if "activation" in row["gates"] and oid not in old_ids
+                            and row["status"] != "superseded")
+            if gained:
+                reasons.append(f"the register gained activation rule(s) {', '.join(gained[:10])} since the ruling: "
+                               "re-activate")
+            reasons += self._client_activation_blockers(lane)
+            reasons += [f"hold open: {hh['kind']} ({hh['hold_id']})" for hh in sorted(self.holds.values(),
+                                                                                    key=lambda x: x["hold_id"])
+                        if hh["status"] == "open" and hh["subject_id"] == client_id]
+            hr14 = rows.get("HR-14")
+            if hr14 is not None and hr14["status"] != "superseded" and "HR-14" in (r.get("row_ids_evaluated") or []):
+                params = hr14.get("parameters") or {}
+                att = self.attestations.get(prof.get("sanctions_attestation_id") or "")
+                problem = i08_sanctions.attestation_problem(att, client_id, now, params, lane=lane,
+                                                            age_key="rescreen_after_days")
+                if problem:
+                    reasons.append(f"HR-14: {problem}")
+                elif att is not None:
+                    out["valid_until"] = iso(parse_iso(att["searched_at"]) + timedelta(days=params["rescreen_after_days"]))
+            if not reasons:
+                out.update(decision="ALLOW", current=True, sanctions_grounded=False, sanctions_ground=None)
+            return out
+
+    def readiness(self) -> dict:
+        with self.lock:
+            v = self.current
+            return readiness_mod.compute(list(v.rows) if v else None, self.version_number, self.seed_pinned,
+                                         self._now(), self._client_activation_blockers("client") if v else [])
 
     def resolve(self, principal: str, request_id: str, body: dict) -> dict:
         with self.lock:
@@ -1608,11 +1849,39 @@ class ComplianceService:
                 "events": rows[offset:offset + limit], "total": len(rows), "counts": counts, "limit": limit,
                 "offset": offset, "log_lines": len(raw), "epoch": epoch}
 
+    # the in-process scheduler (api.main attaches it when COMPLIANCE_SCHEDULER_ENABLED=1); its liveness is in /health
+    scheduler: Any = None
+
+    def _rules_expiring_summary(self) -> dict:
+        """RTM-06: counts only (no client data) for /health and the heartbeat check; never makes /health unhealthy."""
+        try:
+            r = self.readiness()
+        except Exception:  # noqa: BLE001 - a health answer never fails on the warning
+            return {"available": False}
+        ew = r["expiry_warnings"]
+        return {"available": True, **{k: len(v) for k, v in ew.items() if k.startswith("within_")},
+                "client_activation_rules_within_30_days": len(ew["client_activation_rules"]["within_30_days"]),
+                "next_client_activation_rule": ew["next_client_activation_rule"]}
+
     def health(self) -> dict:
-        return {"status": "ok", "service": "compliance-py", "register_version_in_force": self.version_number,
+        sched = self.scheduler.liveness() if self.scheduler is not None else {"enabled": False}
+        healthy = sched.get("healthy", True)
+        rules_expiring = self._rules_expiring_summary()
+        return {"status": "ok" if healthy else "unhealthy", "service": "compliance-py", "rules_expiring": rules_expiring,
+                "register_version_in_force": self.version_number,
                 "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
-                "log_write_fault": bool(self.log.fault)}
+                "log_write_fault": bool(self.log.fault), "scheduler": sched}
+
+
+def canonical_jurisdiction(j: Optional[dict]) -> Optional[str]:
+    """The client's recorded place as ONE code (ADR 0024): the state (US-CA, US-DC), or the territory's own ISO 3166-1
+    code however it was declared (US-PR or PR -> PR; likewise GU, VI, AS, MP)."""
+    if not isinstance(j, dict):
+        return None
+    code = j.get("declared_region") or j.get("declared_country")
+    territories = {"US-PR": "PR", "US-GU": "GU", "US-VI": "VI", "US-AS": "AS", "US-MP": "MP"}
+    return territories.get(code, code) if isinstance(code, str) else None
 
 
 def review_reason(r: dict) -> str:

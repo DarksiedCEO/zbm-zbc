@@ -315,7 +315,7 @@ def test_s14_ten_thousand_random_payables_sum_and_balance():
     """10,000 payables through the real accrual path (service calls, record-first, fakes), one weekly run: the sum
     of the items equals the batch total, the journal balances to zero, every amount is a §1 string."""
     import time
-    hr = Harness().ready()
+    hr = Harness(env={"FIN_MAX_INVOICE_TOTAL": "1000000.00"}).ready()     # large deposits on purpose (RTM-09 knob)
     rnd = random.Random(20260926)
     rates = ["0.01", "0.37", "1.00", "2.35", "3.99"]
     for i, rate in enumerate(rates):

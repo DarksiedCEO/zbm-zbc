@@ -603,6 +603,47 @@ def c_required_docs(row, ctx):
     return out
 
 
+def c_client_sanctions_attested(row, ctx):
+    """HR-14 (ADR 0024): Andre's recorded OFAC search for THIS subject, no-match, every listed list, fresh."""
+    sid = ctx.facts.get("sanctions_attestation_id")
+    if not sid:
+        return [ctx.missing(row["id"], "sanctions_attestation_id")]
+    p = i08_sanctions.attestation_problem(ctx.env.attestation(sid), ctx.subject_id, ctx.now,
+                                          row.get("parameters") or {}, lane=ctx.lane)
+    return [ctx.u(row["id"], "client_sanctions_attested", p)] if p else []
+
+
+def c_client_docs_current(row, ctx):
+    """HR-15 (ADR 0024): Legal (37) confirms each required document the client accepted is current and theirs."""
+    required = (row.get("parameters") or {}).get("required_doc_ids")
+    if not isinstance(required, list) or not required or not all(isinstance(x, str) and x for x in required):
+        return [ctx.u(row["id"], "client_docs_current", "required document list is invalid: blocked")]
+    docs = ctx.facts.get("legal_documents")
+    if not docs:
+        return [ctx.missing(row["id"], "legal_documents")]
+    ids = [d["doc_id"] for d in docs]
+    if len(set(ids)) != len(ids):
+        return [ctx.u(row["id"], "client_docs_current", "a document is listed twice: blocked")]
+    by_id = {d["doc_id"]: d for d in docs}
+    out = []
+    for doc_id in required:
+        d = by_id.get(doc_id)
+        if d is None:
+            out.append(ctx.missing(row["id"], "legal_documents", f"no accepted {doc_id} is listed"))
+            continue
+        a = ctx.env.ports.legal_client_doc(doc_id, d["version"], d["doc_sha256"], d["acceptance_id"],
+                                           f"client:{ctx.subject_id}")
+        if not a.available:
+            return [ctx.u(row["id"], "dependency_unavailable:legal_37",
+                          "Legal (37) cannot confirm the client's documents: not allowed yet")]
+        if not a.current:
+            out.append(ctx.u(row["id"], "client_docs_current", f"{doc_id} {d['version']} is not Legal's current version"))
+        if not a.accepted:
+            out.append(ctx.u(row["id"], "client_docs_current",
+                             f"the {doc_id} acceptance is not this client's for this version and hash"))
+    return out
+
+
 def _all_true(row, ctx, prefix, keys, code, extra=None):
     miss = _need(ctx, row, *(f"{prefix}.{k}" if prefix else k for k in keys))
     if miss:
@@ -678,7 +719,8 @@ CHECKS: dict[str, Check] = {
     "required_docs_current": c_required_docs, "canspam_elements": c_canspam, "sms_consent_artifact": c_sms,
     "subscription_terms": c_subscription, "chatbot_disclosure": c_chatbot, "flag_blocks": c_flag_blocks,
     "counsel_memo": c_counsel_memo, "control_sla": c_control_only, "threshold_counter": c_control_only,
-    "effective_date_reminder": c_control_only,
+    "effective_date_reminder": c_control_only, "client_sanctions_attested": c_client_sanctions_attested,
+    "client_docs_current": c_client_docs_current,
 }
 
 

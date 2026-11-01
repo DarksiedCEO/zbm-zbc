@@ -152,6 +152,21 @@ class AcceptanceCreate(Strict):
     affirmative_act: bool
     esign_consent: Optional[EsignConsent] = None
     evidence_ref: Optional[EvidenceRef] = None
+    invitation_id: Optional[Id] = None          # money red team RTM-13
+
+
+class QuarantineAck(Strict):
+    """AEGIS r11 R11-6: Andre acknowledges quarantined log lines (by seq) after reviewing them."""
+    request_id: Id
+    seqs: Annotated[list[Annotated[int, Field(ge=1, le=10**12)]], Field(min_length=1, max_length=500)]
+
+
+class InvitationCreate(Strict):
+    """RTM-13: Andre invites one client (party_ref) to accept one document version."""
+    request_id: Id
+    doc_id: DocId
+    version: Version
+    party_ref: PartyRef
 
 
 class EnvelopeCreate(Strict):

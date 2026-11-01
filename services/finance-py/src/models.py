@@ -501,6 +501,31 @@ class BreakResolution(Strict):
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)
 
 
+class ComplianceHoldRelease(Strict):
+    """AEGIS r4 R4-2: release a payment held by Compliance: by its refund (the F7r entry) or a current ALLOW."""
+    request_id: Id
+    basis: Literal["refund", "compliance_allow", "ofac_authorization", "ofac_rejected_return"]
+    entry_id: Optional[Id] = None
+    # AEGIS r5 C1: the SHA-256 of the OFAC authorization (license or written guidance) that allows releasing a
+    # sanctions hold; the document itself stays in Andre's evidence folder (references are never stored in clear)
+    ofac_authorization_sha256: Optional[Sha] = None
+    # AEGIS r6 N5: which OFAC document it is: a specific license or authorization, an unblocking report filed under
+    # 31 CFR 501.603(b)(3) for property blocked in error (OFAC FAQ 1196), or a Compliance Release (31 CFR 501.806)
+    # AEGIS r7: or a delisting notice (no license needed), or the filed 501.604 rejected-transaction report (with
+    # basis ofac_rejected_return: the payment was rejected and returned to the sender, not blocked)
+    ofac_document_kind: Optional[Literal["license", "unblocking_report", "compliance_release", "delisting",
+                                         "rejected_transaction_report"]] = None
+    # AEGIS r8: for ofac_rejected_return, the SHA-256 of OFAC's written guidance that the funds be rejected (document
+    # kind ofac_guidance), required besides the 501.604 report
+    ofac_guidance_sha256: Optional[Sha] = None
+
+
+class RefundCancel(Strict):
+    """AEGIS r11: Andre cancels an approved refund whose payment never moved (refused at execution), with a reason."""
+    request_id: Id
+    reason: _text(1000, True)
+
+
 class RefundRepay(Strict):
     """Andre pays a refund again after its payment was settled ``not_moved`` (AEGIS c0869c4 H-N1)."""
     request_id: Id

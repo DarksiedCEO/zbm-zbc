@@ -643,6 +643,7 @@ jobs:
             docker build -f services/finance-py/Dockerfile -t zbm-ci/finance-py:ci .
             docker build -f services/legal-py/Dockerfile -t zbm-ci/legal-py:ci .
             docker build -f services/seo-py/Dockerfile -t zbm-ci/seo-py:ci .
+            docker build -f services/compliance-py/Dockerfile -t zbm-ci/compliance-py:ci .
             docker build -f services/orchestrator-go/Dockerfile.orchestrator -t zbm-ci/orchestrator:ci .
             docker build -f services/orchestrator-go/Dockerfile.stripe-gateway -t zbm-ci/stripe-gateway:ci .
           } 2>&1 | tee "$RUNNER_TEMP/railway-build.log"

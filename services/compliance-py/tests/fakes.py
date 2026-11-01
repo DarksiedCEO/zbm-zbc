@@ -95,6 +95,10 @@ class PassingLegal:
     def current_version(self, doc_id):
         return DocVersion(True, self.versions.get(doc_id, "v1"))
 
+    def client_document(self, doc_id, version, doc_sha256, acceptance_id, party_ref):
+        from ports import ClientDocument
+        return ClientDocument(True, True, True)
+
 
 class FakeSanctions:
     def __init__(self, result="clear", list_version="L1"):

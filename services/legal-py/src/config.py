@@ -18,6 +18,12 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
+# Callers whose token is set on a service deployed in the same apply as Legal's new caller map (the pattern of the
+# client acceptance branch, ADR 0028 AEGIS M-1). An empty or unresolved entry for one of them is SKIPPED (no token
+# matches it; routes only it may call answer 503 and the start prints a warning) instead of refusing Legal's start. A
+# set value is checked like every other caller token. Every other caller stays strict. ``compliance_38`` joined the
+# deployed map on this branch (ADR 0024): on the first apply COMPLIANCE_LEGAL_CALLER_TOKEN does not exist yet.
+OPTIONAL_CALLERS = ("compliance_38",)
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
                 "finance_31", "hub", "esign_gateway", "scheduler")
 TOKEN_MIN = 32
@@ -45,6 +51,7 @@ _MONEY = re.compile(r"^(0|[1-9][0-9]*)\.[0-9]{2}$")
 class Settings:
     service_token: str
     caller_tokens: dict = field(default_factory=dict)
+    callers_not_configured: tuple = ()                            # optional callers left empty or unresolved
     andre_token: Optional[str] = None
     seed_dir: str = SEED_DIR
     seed_sha256: Optional[str] = None
@@ -128,6 +135,20 @@ def _check_token(value: str, what: str) -> None:
         raise RuntimeError(f"{what} must be >= {TOKEN_MIN} printable ASCII characters")
 
 
+def _optional_unset(name: str, tok: str) -> bool:
+    return name in OPTIONAL_CALLERS and (tok.strip() == "" or any(m in tok for m in UNRESOLVED_REF_MARKERS))
+
+
+def _not_configured(env, name) -> tuple:
+    raw = env.get(name)
+    try:
+        d = json.loads(raw) if raw else {}
+    except ValueError:
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    return tuple(c for c in OPTIONAL_CALLERS if not isinstance(d.get(c), str) or _optional_unset(c, d[c]))
+
+
 def _tokens(env, name) -> dict:
     raw = env.get(name)
     if not raw:
@@ -141,8 +162,10 @@ def _tokens(env, name) -> dict:
     for k, tok in d.items():
         if k not in CALLER_NAMES:
             raise RuntimeError(f"{name}: unknown name (allowed: {', '.join(CALLER_NAMES)})")
+        if _optional_unset(k, tok):
+            continue
         _check_token(tok, f"{name}: the {k} token")
-    return d
+    return {k: v for k, v in d.items() if not _optional_unset(k, v)}
 
 
 def _off(env, name, what: str) -> None:
@@ -200,6 +223,7 @@ def load(env: Optional[dict] = None) -> Settings:
         raise RuntimeError(f"LEGAL_BUSINESS_TZ={tz!r} is not a known IANA time zone on this host") from None
     s = Settings(
         service_token=token, caller_tokens=callers, andre_token=andre,
+        callers_not_configured=_not_configured(env, "LEGAL_CALLER_TOKENS"),
         seed_dir=env.get("LEGAL_SEED_DIR") or SEED_DIR, seed_sha256=seed_sha, allow_unpinned_seed=unpinned,
         data_dir=env.get("LEGAL_DATA_DIR") or None,
         ledger_url=env.get("LEDGER_SERVICE_URL") or None, ledger_token=env.get("LEDGER_SERVICE_TOKEN") or None,
