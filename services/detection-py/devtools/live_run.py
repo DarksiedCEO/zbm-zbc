@@ -7,25 +7,25 @@ loopback. No Shopify credential exists, so this proves the NOT_CONNECTED posture
 usage: LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py
 
 detection-py runs under an audit hook (``sys.addaudithook``) that writes every ``socket.connect`` and
-``socket.getaddrinfo`` the process attempts to a file; the run fails if there is even one. Proves:
+``socket.getaddrinfo`` the process attempts to a file; only the exact loopback fixture/probe destinations pass. Proves:
   1. a client with no registration: status NOT_CONNECTED, sync and snapshot 409 NOT_CONNECTED;
   2. orchestrator-go's scan of that client: 409 with reason NOT_CONNECTED, and the ledger did not change;
-  3. a registered client (a placeholder credential file, never a real token) while detection-py has no ledger: sync
-     LEDGER_UNAVAILABLE (record-first: nothing is read without the request on the ledger); snapshot NOT_SYNCED; the
-     orchestrator's scan 409 NOT_SYNCED;
+  3. a registered client (a placeholder credential file, never a real token) on a local Compliance ALLOW while
+     detection-py has no ledger: sync LEDGER_UNAVAILABLE (record-first); snapshot and orchestrator scan NOT_SYNCED;
   4. the kill switch file: sync and snapshot STORE_READS_DISABLED at once, no restart;
   5. the fixture scan still works (data_source fixtures, non_live_data_source true) and GET /ledger/verify is valid;
-  6. detection-py attempted no outbound connection and no name lookup other than its own loopback bind address.
+  6. Compliance REFUSE, expired activation and unavailable answers block sync, snapshot and scan;
+  7. detection-py contacts only the exact loopback Compliance/probe ports, never a store.
 
-Kills only the PIDs it started. Ports are free ports from bind(0). Tokens are derived here (sha256 of a live-run
-label), never secret-shaped literals. Exit 0 only if every check holds.
+Kills only the PIDs it started. Ports are free ports from bind(0). All credentials are generated at runtime.
+The local Compliance fixture speaks the HTTP contract; it does not evaluate real rules. Exit 0 only if every check holds.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
+import secrets
 import shutil
 import socket
 import subprocess
@@ -36,27 +36,27 @@ from pathlib import Path
 
 import httpx
 
+from live_compliance import ComplianceFixture, unexpected_socket_events
+
 HERE = Path(__file__).resolve()
 SVC = HERE.parents[1]
 REPO = HERE.parents[3]
 
 
-def derived(label: str) -> str:
-    return hashlib.sha256(f"detection-py rr-store live-run only {label}".encode()).hexdigest()
-
-
-LEDGER_TOKEN = derived("ledger token")
-DETECTION_TOKEN = derived("detection token")
-ORCH_TOKEN = derived("orchestrator token")
+LEDGER_TOKEN = secrets.token_hex(32)
+DETECTION_TOKEN = secrets.token_hex(32)
+ORCH_TOKEN = secrets.token_hex(32)
 PROCS: list[subprocess.Popen] = []
 CHECKS: list[tuple[str, bool, str]] = []
 
 AUDIT_BOOT = r"""
-import sys, runpy, os
+import sys, runpy, os, json
 _log = open(os.environ["RR_LIVE_AUDIT_FILE"], "a", buffering=1)
 def _hook(event, args):
-    if event in ("socket.connect", "socket.getaddrinfo"):
-        _log.write(f"{event} {args[1] if event == 'socket.connect' else args[0]!r}\n")
+    if event == "socket.connect":
+        _log.write(json.dumps({"event": event, "address": args[1]}) + "\n")
+    elif event == "socket.getaddrinfo":
+        _log.write(json.dumps({"event": event, "host": args[0], "port": args[1]}) + "\n")
 sys.addaudithook(_hook)
 import socket as _s
 _probe = _s.socket()
@@ -103,6 +103,11 @@ def start(cmd: list[str], env: dict, cwd: Path, log: Path) -> subprocess.Popen:
 
 
 def main() -> int:
+    with ComplianceFixture() as compliance:
+        return run(compliance)
+
+
+def run(compliance: ComplianceFixture) -> int:
     ledger_bin = os.environ.get("LEDGER_BIN")
     if not ledger_bin or not os.access(ledger_bin, os.X_OK):
         print("LEDGER_BIN must name the ledger-rust release server binary", file=sys.stderr)
@@ -126,7 +131,8 @@ def main() -> int:
 
         # ---- detection-py: one registered placeholder connection, no detection ledger, a kill-switch path
         placeholder = work / "lr-connected.token"
-        placeholder.write_text(derived("placeholder credential, not a Shopify token") + "\n")
+        placeholder_token = secrets.token_hex(32)
+        placeholder.write_text(placeholder_token + "\n")
         os.chmod(placeholder, 0o600)
         conns = work / "connections.json"
         conns.write_text(json.dumps({"version": 1, "connections": [{
@@ -134,6 +140,12 @@ def main() -> int:
             "credential": {"kind": "static_token", "token_file": str(placeholder)},
             "approval": {"approved_by": "andre", "approved_on": "2026-10-24", "approval_ref": "live-run-placeholder"}}]}))
         os.chmod(conns, 0o600)
+        compliance.set_mode("lr-connected", "allow")
+        cmp_token = work / "compliance.token"
+        cmp_caller = work / "compliance-caller.token"
+        for path, value in ((cmp_token, compliance.service_token), (cmp_caller, compliance.caller_token)):
+            path.write_text(value + "\n")
+            os.chmod(path, 0o600)
         kill = work / "KILL"
         audit = work / "detection-audit.log"
         audit.write_text("")
@@ -141,6 +153,9 @@ def main() -> int:
         det_env = {**base_env, "ZBM_SERVICE_TOKEN": DETECTION_TOKEN, "RR_STORE_CONNECTIONS_FILE": str(conns),
                    "RR_STORE_KILL_SWITCH_FILE": str(kill), "RR_LIVE_AUDIT_FILE": str(audit),
                    "RR_LIVE_AUDIT_PROBE_PORT": str(probe_port),
+                   "DETECTION_COMPLIANCE_URL": compliance.url,
+                   "DETECTION_COMPLIANCE_TOKEN_FILE": str(cmp_token),
+                   "DETECTION_COMPLIANCE_CALLER_TOKEN_FILE": str(cmp_caller),
                    "PYTHONDONTWRITEBYTECODE": "1"}
         det = start([sys.executable, "-c", AUDIT_BOOT, "--port", str(dp)], det_env, SVC / "src", work / "det.log")
         durl = f"http://127.0.0.1:{dp}"
@@ -198,8 +213,33 @@ def main() -> int:
         st = c.get(f"{durl}/stores/lr-connected/status", headers=dh).json()
         check("3 status shows the registration and never the credential",
               st.get("connected") is True and st.get("credential_kind") == "static_token"
-              and str(placeholder) not in json.dumps(st) and derived("placeholder credential, not a Shopify token")
+              and str(placeholder) not in json.dumps(st) and placeholder_token
               not in json.dumps(st), json.dumps(st))
+
+        # Each refusal happens before store access and before the scan records anything.
+        # Re-use the same registered client to prove an earlier ALLOW is never cached.
+        for mode, status, reason in (("refuse", 409, "COMPLIANCE_NOT_ACTIVATED"),
+                                    ("expired", 409, "COMPLIANCE_NOT_ACTIVATED"),
+                                    ("unavailable", 503, "COMPLIANCE_UNAVAILABLE")):
+            compliance.set_mode("lr-connected", mode)
+            before = ledger_entries()
+            for path in ("/stores/sync", "/stores/snapshot"):
+                r = c.post(f"{durl}{path}", json={"client_id": "lr-connected"}, headers=dh)
+                check(f"Compliance {mode}: {path} refuses before a store read",
+                      r.status_code == status and r.json().get("detail", {}).get("reason") == reason, r.text)
+            r = c.post(f"{ourl}/revenue-recovery/scan?client_id=lr-connected", headers=oh)
+            check(f"Compliance {mode}: orchestrator refuses the scan",
+                  r.status_code == status and r.json().get("reason") == reason, r.text)
+            check(f"Compliance {mode}: refusal writes nothing to the ledger", ledger_entries() == before)
+        compliance.set_mode("lr-connected", "allow")
+
+        # Invalid detection authentication must not even ask Compliance.
+        before_audit = audit.read_text()
+        for path in ("/stores/sync", "/stores/snapshot"):
+            r = c.post(f"{durl}{path}", json={"client_id": "lr-connected"},
+                       headers={"Authorization": "Bearer " + secrets.token_hex(32)})
+            check(f"unauthorized {path}: 401", r.status_code == 401, r.text)
+        check("unauthorized requests made no socket attempt", audit.read_text() == before_audit)
 
         # 4. kill switch, no restart
         kill.write_text("stop")
@@ -220,14 +260,15 @@ def main() -> int:
         check("5 GET /ledger/verify valid", v.get("valid") is True, json.dumps(v))
 
         # 6. no outbound attempt from detection-py
-        lines = [ln for ln in audit.read_text().splitlines() if ln.strip()]
-        loopback = ("'127.0.0.1'", "('127.0.0.1',", "'localhost'", "'::1'", "('::1',")
-        outbound = [ln for ln in lines if not any(t in ln for t in loopback)]
-        print(f"    detection-py socket audit: {len(lines)} event(s), all loopback: {not outbound}", flush=True)
+        events = [json.loads(ln) for ln in audit.read_text().splitlines() if ln.strip()]
+        outbound = unexpected_socket_events(events, {probe_port, compliance.port})
+        print(f"    detection-py socket audit: {len(events)} event(s), all expected: {not outbound}", flush=True)
         check("6 the socket audit hook works (its loopback positive control was recorded)",
-              any(f"('127.0.0.1', {probe_port})" in ln for ln in lines), "; ".join(lines[:5]))
-        check("6 detection-py attempted no outbound connection and no non-loopback name lookup", outbound == [],
-              "; ".join(outbound[:5]))
+              any(e.get("address") == ["127.0.0.1", probe_port] for e in events), json.dumps(events[:5]))
+        check("6 detection-py reached the configured Compliance fixture",
+              any(e.get("address") == ["127.0.0.1", compliance.port] for e in events))
+        check("6 detection-py contacted only the exact Compliance/probe destinations", outbound == [],
+              json.dumps(outbound[:5]))
     finally:
         for p in PROCS:
             if p.poll() is None:
