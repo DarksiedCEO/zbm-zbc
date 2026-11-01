@@ -106,3 +106,5 @@ Limits: 16 configured roots, 64 KiB unencoded health responses, five seconds per
 across the poll set. No new request starts after that budget; timeout or exhausted-budget readings are non-healthy.
 An in-flight OS/DNS operation may outlast its requested timeout. Treat recurring budget failures as an operator
 issue and reduce/fix the target set; do not increase limits to hide unhealthy dependencies.
+
+Health response codes use an explicit allowlist. Unknown status, reason or warning text becomes a fixed `bad_status`, `bad_reason` or `bad_warning` marker; inspect the protected service diagnostics for details. Adding a service code requires a reviewed allowlist update.

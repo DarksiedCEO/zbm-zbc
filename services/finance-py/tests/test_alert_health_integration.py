@@ -125,3 +125,21 @@ def test_unconfigured_health_alert_is_deduplicated():
     hr.clock.advance(minutes=65)
     assert tick(hr)['sent'] == 0
     assert len(hr.svc.alerts.sender.sent) == 1
+
+
+def test_code_shaped_private_health_values_never_reach_founder_email(monkeypatch):
+    import secrets
+    for field in ('status', 'reasons', 'degraded_reasons', 'warnings'):
+        with monkeypatch.context() as context:
+            canary = 'private' + secrets.token_hex(12)
+            hr = configured_alerts(OPS_HEALTH_URLS=TARGETS)
+            answers = healthy()
+            body = {'status': 'ok', field: canary if field == 'status' else [canary]}
+            answers['legal.test'] = (200, body)
+            health_responses(context, answers)
+            assert tick(hr)['open'] == 0
+            hr.clock.advance(minutes=10)
+            assert tick(hr)['sent'] == 1
+            text = hr.svc.alerts.sender.sent[0]['text']
+            assert canary not in text
+            assert 'service_unhealthy' in text

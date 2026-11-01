@@ -27,7 +27,7 @@ or any entry in ``warnings``. The code is the sorted SET of the body's reason co
 ``degraded_reasons``, text after a ``:`` dropped), so a new or worse reason on a service that is already alerting is a
 new condition (AEGIS round 4 N4-3: wave C keys a condition by source, category and ref). Only fixed codes leave this module (``unreachable``, ``http_503``, ``maintenance``,
 ``degraded``, ``write_refused``, ``warning:ledger_anchor_unkeyed`` ...): a value that is not a short lowercase code is
-replaced by ``bad_status``/``bad_warning``, so no id or free text from a body can reach an email.
+replaced by ``bad_status``/``bad_warning``, and only an explicit allowlist of operational codes is retained, so no arbitrary id or free text from a body can reach an email.
 
 ``OPS_HEALTH_URLS``: ``name=url`` pairs separated by commas, e.g.
 ``finance=http://finance.railway.internal:8080,legal=http://legal.railway.internal:8080,compliance=...,ledger=...``.
@@ -66,7 +66,16 @@ MAX_RESPONSE_BYTES = 64 * 1024
 ENV = "OPS_HEALTH_URLS"
 
 log = logging.getLogger("health_poll")
-_CODE = re.compile(r"[a-z][a-z0-9_]{0,47}")
+# Only these literal operational codes may leave a health response in an email.
+# Syntax validation alone would let a private identifier masquerade as a code.
+_CODES = frozenset({
+    "ok", "starting", "closed", "degraded", "maintenance", "unhealthy",
+    "reconcile_mode", "reconcile_required", "divergence", "log_write_fault",
+    "ledger_unreachable", "ledger_write_failing", "pending_unreconciled_writes",
+    "interrupted_write_anchored", "last_append_failed", "disk_low",
+    "ledger_clock_behind_log", "ledger_clock_behind_log_acknowledged",
+    "ledger_anchor_unkeyed", "rotation_expired", "rotation_expired_unpromoted",
+})
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 
 
@@ -78,7 +87,7 @@ class Reading:
 
 
 def _code(value, fallback: str) -> str:
-    return value if isinstance(value, str) and _CODE.fullmatch(value) else fallback
+    return value if isinstance(value, str) and value in _CODES else fallback
 
 
 def targets_from_env(env) -> dict[str, str]:
