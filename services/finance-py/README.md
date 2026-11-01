@@ -215,3 +215,13 @@ aliases identify trusted operator-configured HTTP(S) roots, without credentials/
 `ops_alerts` reaches exactly POST /fin/v1/ops/observations/run. No sender, cron, provider or IaC is activated.
 Coverage/unknown persistence must be inspected with counts; zero conditions is not complete health. See
 [ADR0039](../../docs/adr/0039-dormant-ops-observer.md) and [observer procedure](../../docs/runbooks/ops-observer.md).
+
+### Founder receipt backlog
+
+GET `/fin/v1/client-receipts/backlog` requires the service bearer and Andre approval, with optional strict `limit`
+(1..100, default50) and opaque `cursor`. It is a bounded read of recorded client receipts, including unknown states;
+authorized success writes nothing. Existing rejected-founder auditing remains. No settings or provider calls are added.
+Payment date, creation/elapsed age, legacy sent time and Finance-recorded acceptance-slot time are separate fields.
+Acceptance presence is not validation or delivery; no contractual receipt deadline is inferred. Snapshot changes return409;
+5,000-record capacity overflow returns503 rather than a partial complete-looking page. See
+[receipt backlog runbook](../../docs/runbooks/receipt-backlog.md) and [ADR0040](../../docs/adr/0040-founder-receipt-backlog.md).
