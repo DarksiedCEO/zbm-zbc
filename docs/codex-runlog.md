@@ -46,3 +46,9 @@ Andre explicitly added repair of website PRs #7–#10. All eight historical prev
 Backend PR #10 independent local suites passed: Finance 881, Compliance 777, Legal 383, Detection 845, Go 132 (race enabled), all zero skips and zero hygiene violations on corrected invocations. Go vet passed. Selected money/access/legal mutants were killed and restored. Finance, Compliance and Legal local live harnesses passed. Detection live gate failed (11/14); tracked privately as PR10-DETECTION-001, Medium. Other bounded findings: PR10-RESILIENCE-001 and PR10-RESILIENCE-002, Low. No reproduction details are published here. SEO verification remains in progress, so the aggregate review is not complete.
 
 No merges, production changes, or owner-branch commits were performed.
+
+### P0.1 review checkpoint
+
+Backend PR #10 at `cf65d17cc60325a3304798805805c230b14baaf8`: **NOT_CERTIFIED** for the complete required local integration gate. SEO also passed 1,233 tests, 31 focused tests, five selected mutants and 54/54 local live checks. GitHub review `5725967920` records only sanitized gate results and finding IDs. No Critical/High finding was reproduced in this bounded review. PR10-DETECTION-001 remains a required validation repair; production readiness and exhaustive mutation coverage are not claimed. Full private evidence is retained outside the repository.
+
+Website repairs remain active: PR #7 and #8 previews READY; #9 partly ready and #10 awaiting serialized retry. Full CI E2E jobs are still running at this checkpoint. No final website success claimed.
