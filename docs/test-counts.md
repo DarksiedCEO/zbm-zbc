@@ -16,7 +16,7 @@ the check.
 
 | Suite | Tests | Counted by | Platform-only tests |
 |---|---|---|---|
-| `go:orchestrator-go` | 189 | go test -v | — |
+| `go:orchestrator-go` | 191 | go test -v | — |
 | `node:dashboard-ts` | 55 | node --test | — |
 | `python:bizdev-py` | 358 | pytest collection | — |
 | `python:client-portal-py` | 205 | pytest collection | — |
@@ -25,7 +25,7 @@ the check.
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 736 | pytest collection | — |
 | `python:detection-py` | 849 | pytest collection | — |
-| `python:finance-py` | 897 | pytest collection | — |
+| `python:finance-py` | 925 | pytest collection | — |
 | `python:fulfillment-py` | 1119 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
 | `python:legal-py` | 824 | pytest collection | — |
