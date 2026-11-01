@@ -438,7 +438,8 @@ def _main(work: Path) -> int:
             return B.post("/fin/v1/stripe/events", {"request_id": rid(), **ev}, caller="rail_gateway").json()
 
         rr = B.post("/fin/v1/invoices", {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-rr",
-                                         "kind": "service", "payment_methods": ["ach", "card"], "legal_ref": io,
+                                         "kind": "service", "payment_methods": ["ach", "card"],
+                                         "legal_ref": {**io, "doc_id": "sow", "acceptance_id": "acc-sow"},
                                          "lines": [{"line_code": "revenue_recovery_services", "quantity": 1,
                                                     "unit_price": "2500.00"}]}, caller="onboarding").json()["invoice"]
         rr = B.post(f"/fin/v1/invoices/{rr['invoice_id']}/decision",

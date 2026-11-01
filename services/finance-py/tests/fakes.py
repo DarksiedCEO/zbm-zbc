@@ -218,12 +218,17 @@ class FakeLegal:
         self.available = True
         self.current = True
         self.acceptance = True
+        # Explicit fixture register: an MSA/IO/unknown reference is never a SOW.
+        self.doc_types = {"sow": "sow", "sow_seo_audit": "sow", "sow_revenue_recovery": "sow",
+                          "client_msa": "client_msa", "msa-1": "client_msa", "io-1": "insertion_order"}
+        self.acceptance_via = "client_portal"
 
     def document_status(self, doc_id, version, doc_sha256, acceptance_id, party_ref=None, entity=None):
         self.last = (doc_id, version, doc_sha256, acceptance_id, party_ref, entity)
         if not self.available:
             return LegalAnswer(False)
-        return LegalAnswer(True, self.current, self.acceptance)
+        return LegalAnswer(True, self.current, self.acceptance, doc_type=self.doc_types.get(doc_id),
+                           acceptance_via=self.acceptance_via)
 
 
 class FakeRail:

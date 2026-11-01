@@ -177,6 +177,9 @@ def main() -> int:
     out["billing_ready"] = ready["allowed"]
     code, body = invoice("acme-1", sow_ref, sow_acc)
     out["invoice_issue"] = [code, body.get("invoice", {}).get("status")]
+    # A real registered MSA is accepted for billing readiness, but is not a service SOW.
+    code, body = invoice("acme-1", msa_ref, msa_acc)
+    out["msa_service_invoice"] = [code, "LEGAL_NOT_CURRENT" in json.dumps(body)]
     # wrong client: globex presents acme's acceptance
     code, body = invoice("globex-2", sow_ref, sow_acc)
     out["wrong_client_invoice"] = [code, "LEGAL_NOT_CURRENT" in json.dumps(body)]

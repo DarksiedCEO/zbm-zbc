@@ -1248,6 +1248,7 @@ class LegalService:
         out = {k: v.get(k) for k in ("doc_id", "version", "entity", "sha256", "status", "clause_ids",
                                      "template_variables", "template_ref", "counsel_signoff", "approved_by",
                                      "approved_at", "effective_at", "review_by", "supersedes", "created_at", "created_by")}
+        out["doc_type"] = self._doc(v["doc_id"])["doc_type"]
         out["review_label"] = self._review_label(v)
         if v.get("approval_basis"):
             out["approval_basis"] = v["approval_basis"]      # LG-20: "founder_approval" (set only on that path)

@@ -371,4 +371,5 @@ class HttpLegal(_Base):
         except (KeyError, TypeError):
             return LegalAnswer(False, reason="Legal's acceptance answer was not understood")
         return LegalAnswer(True, current, accepted, renew_by=renew_by, renewal_lapsed=lapsed,
-                           version_basis_in_force=v_basis, acceptance_basis_in_force=a_basis)
+                           version_basis_in_force=v_basis, acceptance_basis_in_force=a_basis,
+                           doc_type=v.get("doc_type"), acceptance_via=a.get("via"))

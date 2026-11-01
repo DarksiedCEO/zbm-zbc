@@ -19,16 +19,16 @@ the check.
 | `go:orchestrator-go` | 191 | go test -v | — |
 | `node:dashboard-ts` | 55 | node --test | — |
 | `python:bizdev-py` | 358 | pytest collection | — |
-| `python:client-portal-py` | 205 | pytest collection | — |
+| `python:client-portal-py` | 206 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
 | `python:compliance-py` | 777 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 736 | pytest collection | — |
 | `python:detection-py` | 849 | pytest collection | — |
-| `python:finance-py` | 925 | pytest collection | — |
+| `python:finance-py` | 938 | pytest collection | — |
 | `python:fulfillment-py` | 1119 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
-| `python:legal-py` | 824 | pytest collection | — |
+| `python:legal-py` | 828 | pytest collection | — |
 | `python:onboarding-py` | 849 | pytest collection | — |
 | `python:ooh-py` | 212 | pytest collection | — |
 | `python:sales-py` | 874 | pytest collection | — |

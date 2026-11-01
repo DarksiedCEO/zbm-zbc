@@ -35,7 +35,7 @@ NEXUS = {"alert_ratio": "0.75", "periods": ["trailing_12_months", "calendar_year
 def draft(hr, client="zbm-client-1", amount="100.00"):
     body = {"request_id": rid(), "entity": "zbm", "client_id": client, "kind": "service",
             "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": amount}],
-            "payment_methods": ["ach"], "legal_ref": {"doc_id": "client_msa", "version": "1.1", "doc_sha256": SHA,
+            "payment_methods": ["ach"], "legal_ref": {"doc_id": "sow", "version": "1.1", "doc_sha256": SHA,
                                                       "acceptance_id": ACC}}
     return hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
 

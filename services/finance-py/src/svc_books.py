@@ -273,7 +273,7 @@ class BooksMixin:
         return {"renew_by": ans.renew_by, "renewal_due_soon": soon, "renewal_lapsed": ans.renewal_lapsed}
 
     def _legal_reasons(self, g: Gather, ref: dict, what: str, client_id: str, entity: str,
-                       renewal: Optional[dict] = None) -> list[dict]:
+                       renewal: Optional[dict] = None, *, require_sow: bool = False) -> list[dict]:
         ans = self._legal(g, ref, client_id, entity)
         if renewal is not None and ans.available:
             renewal[what] = self._renewal(ans)
@@ -296,6 +296,9 @@ class BooksMixin:
         elif not ans.acceptance_matches:
             out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} acceptance does not match this document, hash and "
                                                    "client"))
+        if require_sow and (ans.doc_type != "sow" or ans.acceptance_via != "client_portal"):
+            out.append(R.item("LEGAL_NOT_CURRENT", "a service invoice requires an accepted SOW recorded by the "
+                              "client acceptance page", rule="FIN-29"))
         return out
 
     def _activation(self, g: Gather, client_id: str) -> ClientActivation:
@@ -571,7 +574,7 @@ class BooksMixin:
             act = self._activation(g, inv["client_id"])
             reasons += self._activation_reasons(act, full=True)      # Andre's decision route
             reasons += self._legal_reasons(g, inv["legal_ref"], "contract (MSA/order form/SOW)", inv["client_id"],
-                                           inv["entity"])
+                                           inv["entity"], require_sow=inv["kind"] == "service")
             reasons += [R.item("TAX_TREATMENT_UNVERIFIED", TAX_DETERMINATION_MISSING,
                                obligation_id="FIN-CQ-11")] if not self.counsel_verified("FIN-CQ-11") else []
             if inv["kind"] == "campaign_deposit":

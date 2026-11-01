@@ -217,6 +217,9 @@ class LegalAnswer:
     # longer holds (LG-20 closed, CQ-19 determination ended), so the refusal can say so; None = not reported
     version_basis_in_force: Optional[bool] = None
     acceptance_basis_in_force: Optional[bool] = None
+    # Service issuance needs Legal's registered type and client acceptance provenance.
+    doc_type: Optional[str] = None
+    acceptance_via: Optional[str] = None
 
 
 class LegalPort(Protocol):
