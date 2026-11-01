@@ -89,7 +89,7 @@ class ReceiptDeliveryMixin:
             contact = self.db["client_contacts"].get(rec["client_id"])
             saved = self.db["receipt_envelopes"].get(crid)
             now = self._now()
-            # A live claim must never be terminalized by another caller while its worker owns I/O.
+            # A fresh claim must not be terminalized by another caller inside the existing claim interval.
             refusal = self._send_refusal(rec)
             if refusal and rec["status"] == "sending":
                 return self._receipt_stop(rec, request_id, refusal)

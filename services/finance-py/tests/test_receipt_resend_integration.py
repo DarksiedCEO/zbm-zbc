@@ -232,3 +232,28 @@ def test_history_binds_receipt_and_acceptance(world,monkeypatch,mutation):
               if kind=='put' and value.get('coll')=='client_receipts']
         rows[-1]['status']='pending_send'
     assert compatibility.assess_current(records)
+
+
+@pytest.mark.parametrize('mutation',['window_forward','claim_time','last_attempt','claim_identity','attempt_count'])
+def test_initial_frozen_window_matches_same_committed_claim(world,monkeypatch,mutation):
+    import receipt_compatibility as compatibility
+    from clock import iso,parse_iso
+    from datetime import timedelta
+    h,rec,adapter=world
+    monkeypatch.setattr(type(adapter),'deliver_receipt',lambda self,envelope:ReceiptDeliveryOutcome('uncertain'))
+    send(world)
+    records=copy.deepcopy(list(h.svc.log.iter_records()))
+    for record in records:
+        ops=record['data'].get('ops',[])
+        envelopes=[v['rec'] for k,v in ops if k=='put' and v.get('coll')=='receipt_envelopes']
+        if not envelopes:continue
+        claims=[v['rec'] for k,v in ops if k=='put' and v.get('coll')=='client_receipts']
+        assert len(envelopes)==len(claims)==1
+        if mutation=='window_forward':
+            for key in ('first_attempt_at','retry_until'):
+                envelopes[0][key]=iso(parse_iso(envelopes[0][key])+timedelta(days=1))
+        if mutation=='claim_time':claims[0]['claimed_at']=iso(parse_iso(claims[0]['claimed_at'])+timedelta(seconds=1))
+        if mutation=='last_attempt':claims[0]['last_attempt_at']=iso(parse_iso(claims[0]['last_attempt_at'])+timedelta(seconds=1))
+        if mutation=='claim_identity':claims[0]['claimed_by']=None
+        if mutation=='attempt_count':claims[0]['attempts']=0
+    assert compatibility.assess_current(records)

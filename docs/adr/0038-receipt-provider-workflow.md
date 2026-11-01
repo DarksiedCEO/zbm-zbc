@@ -50,7 +50,7 @@ Founder delivery-review is terminal evidence, never permission to resend.
 
 The fixed 8e632340 and 774e46b2 target profiles remain unchanged. A distinct current runtime evaluator validates all
 historical new-version records, strict nested fields/types, canonical bytes/digest, receipt/contact/entity/window
-binding, status/acceptance relationship, immutable request and nonreplaceable acceptance evidence. It accepts known
+binding (including initial first-attempt matching same-record claimed_at and last_attempt_at), status/acceptance relationship, immutable request and nonreplaceable acceptance evidence. It accepts known
 legacy history without rewriting it. Unknown/superseded semantics refuse startup under the same directory claim,
 before replay/lease/scheduler action; failed construction releases the claim. No current-artifact CLI target is
 invented: target profiles are not artifact attestations or deployment permission.
@@ -77,3 +77,6 @@ IaC type/deploy and secret scans supplement independent review; they do not cert
 Before activation: approved sender/domain/account, safe key custody/rotation and environment isolation, verified
 recipient contacts, external rollback enforcement, monitored ambiguity reconciliation and scheduler invocation
 ownership, plus explicit founder activation authorization. No real provider or production action is part of this ADR.
+
+Fresh claims use the existing15minute policy. A sufficiently large forward wall-clock jump can make an active
+claim appear stale and stop it uncertain; this is a disclosed availability limitation, never permission to resend.

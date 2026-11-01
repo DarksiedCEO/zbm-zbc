@@ -95,6 +95,8 @@ def assess_current(records):
     for record in records:
         cleaned = deepcopy(record)
         touched = set()
+        introduced = set()
+        receipt_puts = set()
         if not isinstance(record, dict) or not isinstance(record.get('data'), dict):
             return ('invalid_history',)
         ops = record['data'].get('ops', [])
@@ -110,6 +112,7 @@ def assess_current(records):
             if kind == 'put' and value.get('coll') == 'client_receipts':
                 receipts[value.get('id')] = value.get('rec')
                 touched.add(value.get('id'))
+                receipt_puts.add(value.get('id'))
             if kind == 'put' and value.get('coll') == 'client_contacts':
                 contacts[value.get('id')] = value.get('rec')
             if kind != 'put' or value.get('coll') != 'receipt_envelopes':
@@ -123,6 +126,7 @@ def assess_current(records):
                         not same_request(old, rec) or old['acceptance'] is not None and old['acceptance'] != rec['acceptance']):
                     reasons.add('unknown_receipt_semantics')
                 if old is None:
+                    introduced.add(key)
                     receipt = receipts.get(key)
                     try:
                         import json
@@ -142,6 +146,16 @@ def assess_current(records):
                 reasons.add('unknown_receipt_semantics')
             previous[key] = deepcopy(rec)
             touched.add(key)
+        # Envelope put precedes receipt put: bind the initial request only after this record's ops finish.
+        import re
+        for key in introduced:
+            claim = receipts.get(key) or {}
+            envelope = previous[key]
+            first = envelope.get('first_attempt_at')
+            if key not in receipt_puts or claim.get('status') != 'sending' or type(claim.get('attempts')) is not int or claim['attempts'] != 1 or \
+                    claim.get('claimed_at') != first or claim.get('last_attempt_at') != first or \
+                    type(claim.get('claimed_by')) is not str or not re.fullmatch(r'[A-Za-z0-9._:-]{1,128}', claim['claimed_by']):
+                reasons.add('unknown_receipt_semantics')
         for key in touched:
             envelope = previous.get(key) or {}
             if envelope.get('schema') == SCHEMA:

@@ -11,7 +11,7 @@ The optional container entrypoint can materialize FIN_RECEIPT_RESEND_KEY when la
 An explicitly supplied raw secret may be materialized even when app mode is disabled. IaC preserve() is source
 preservation only; this task does not authorize plan/apply, provisioning or changes to live variables.
 
-Use the existing scheduler-authorized POST /fin/v 1/client-receipts/{id}/send. The founder manages the contact;
+Use the existing scheduler-authorized POST /fin/v1/client-receipts/{id}/send. The founder manages the contact;
 this does not verify provider account/sender ownership. Only ZBM is enabled by this adapter. A new complete request
 is committed before I/O. Already attempted or legacy saved envelopes require review, not enrichment or a new key.
 Existing sent means API acceptance, not delivery. Private provider acceptance ID is stored only in the envelope;
