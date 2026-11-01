@@ -111,7 +111,8 @@ def test_paid_invoice_keeps_only_the_minimal_facts_and_sends_both_tokens():
     iid = f.add()
     facts = f.client().lookup(iid)
     assert facts == {"invoice_id": iid, "status": "paid", "entity": "zbm", "client_id": CLIENT, "kind": "service",
-                     "currency": "USD", "refunded": False, "charged_back": False, "paid_at": "2026-10-02T17:00:00Z"}
+                     "currency": "USD", "refunded": False, "charged_back": False, "paid_at": "2026-10-02T17:00:00Z",
+                     "held": False}
     assert fc.assess(facts, CLIENT) == fc.PAID
     (req,) = f.calls
     assert req.method == "GET" and str(req.url) == f"{BASE}/fin/v1/invoices/{iid}/status"
@@ -342,7 +343,7 @@ def test_unverifiable_refuses_with_nothing_recorded_and_andre_may_override(tmp_p
 
 def test_finance_not_configured_is_the_safe_default(tmp_path, srv):
     h = harness(tmp_path, srv, None)              # SEO_INVOICE_VERIFICATION unset, no Finance client
-    h.tenant("acme", domains=("site.test",))
+    client_tenant(h)                              # ADR 0024: a client tenant is bound before any client run
     r = h.refused(paid_audit(h, invoice_id=invoice_id(3)), 503, "FINANCE_NOT_CONFIGURED")
     assert r["override_allowed"] is True
     st = h.ok(h.get("/status"))["invoice_verification"]
@@ -436,11 +437,13 @@ def test_override_where_there_is_nothing_to_override_is_refused(tmp_path, srv):
                                              "invoice_override": "FINANCE_OUTAGE"}, caller="dashboard", andre=True),
               422, "INVOICE_OVERRIDE_NOT_ALLOWED")
     t = harness(tmp_path / "t", srv, FakeFinance(), SEO_INVOICE_VERIFICATION="trust")
-    t.tenant("acme", domains=("site.test",))
+    client_tenant(t)                              # ADR 0024: bound, even in trust mode
     t.refused(paid_audit(t, invoice_id=invoice_id(), invoice_override="FINANCE_OUTAGE"), 422,
               "INVOICE_OVERRIDE_NOT_ALLOWED")
     a = t.ok(paid_audit(t, invoice_id=invoice_id()), 201)
-    assert a["invoice_verification"] == {"mode": "trust", "verdict": "UNCHECKED"}
+    assert a["invoice_verification"] == {"mode": "trust", "verdict": "UNCHECKED",   # ADR 0024: Compliance still asked
+                                         "compliance": {"verdict": "ALLOW", "ruling_id": f"cmp-rul-{CLIENT}",
+                                                        "jurisdiction": "US-CA"}}
     assert t.ok(t.get("/status"))["invoice_verification"]["mode"] == "trust"
 
 

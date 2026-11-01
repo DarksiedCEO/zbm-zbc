@@ -73,7 +73,7 @@ class TheGrants(unittest.TestCase):
     def test_each_caller_writes_exactly_its_one_department(self):
         self.assertEqual({c: d for c, (d, _w) in lc.CALLERS.items()},
                          {"orchestrator-go": "revenue_recovery", "finance-py": "finance", "legal-py": "legal",
-                          "seo-py": "seo", "detection-py": "rr_store"})
+                          "seo-py": "seo", "detection-py": "rr_store", "compliance-py": "compliance"})   # ADR 0024
 
     def test_no_caller_reads_more_than_it_writes(self):
         for caller in lc.CALLERS:
@@ -147,8 +147,9 @@ class NewValue(unittest.TestCase):
         p = Prompt(twice(*(tok() for _ in lc.CALLERS)))
         run(["new"], p)
         self.assertEqual(len(p.asked), 2 * len(lc.CALLERS))
-        self.assertIn("DETECTION_LEDGER_TOKEN on detection", p.asked[-2])
-        self.assertIn("LEDGER_SERVICE_TOKEN on seo", p.asked[-4])
+        self.assertIn("LEDGER_SERVICE_TOKEN on compliance", p.asked[-2])     # ADR 0024: the sixth caller
+        self.assertIn("DETECTION_LEDGER_TOKEN on detection", p.asked[-4])
+        self.assertIn("LEDGER_SERVICE_TOKEN on seo", p.asked[-6])
 
 
 class AddAndRotate(unittest.TestCase):
@@ -181,6 +182,15 @@ class AddAndRotate(unittest.TestCase):
             self.assertEqual(new[h], e)
         self.assertEqual(new[sha(det)], {"caller": "detection-py", "departments": ["rr_store"], "scope": "write"})
         self.assertEqual(len(new), 5)
+        self.assertIn("not in this value: compliance-py", err)       # ADR 0024: compliance-py is added next
+        cmp_ = tok()
+        self.current.write_text(out)
+        self.deployed.write_text(out)
+        code, out2, err = run(["add", "compliance-py", *self.cd], Prompt([cmp_, cmp_]))
+        self.assertEqual(code, 0, err)
+        new = json.loads(out2)
+        self.assertEqual(new[sha(cmp_)], {"caller": "compliance-py", "departments": ["compliance"], "scope": "write"})
+        self.assertEqual(len(new), 6)
         self.assertIn("every caller in devtools/ledger_callers.py is present", err)
 
     def test_refuses_an_unknown_caller(self):

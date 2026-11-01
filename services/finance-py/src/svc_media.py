@@ -135,7 +135,13 @@ class MediaMixin:
 
     def record_vendor_payment(self, request_id: str, buy_id: str, body: dict) -> dict:
         """Andre records a payment he made to the vendor (M7). Refused unless the client's prepayment for THIS buy
-        has cleared and the hold has passed (M3), and never above the vendor cost (M1)."""
+        has cleared and the hold has passed (M3), and never above the vendor cost (M1). RTM-01: and only while
+        Compliance answers a current ALLOW for the client at the moment of payment (read outside the lock)."""
+        with self.lock:
+            buy0 = self.db["media_buys"].get(buy_id)
+            client0 = (self.db["invoices"].get((buy0 or {}).get("invoice_id")) or {}).get("client_id")
+        g_cmp = Gather(self, f"mbv|{request_id}|compliance", "andre", buy_id)
+        act_reasons = self._activation_reasons(self._activation(g_cmp, client0), full=True) if client0 else []
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"media-buys/{buy_id}/vendor-payments",
                                      {k: _d(v) for k, v in body.items()})
@@ -156,6 +162,16 @@ class MediaMixin:
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "part or all of the client's prepayment was refunded at "
                                                             "Stripe; the vendor is not paid until Andre settles it "
                                                             "(founder M3; sweep X-6)"))
+            held = (self.db["invoices"].get(buy.get("invoice_id")) or {}).get("held_compliance")
+            if held:
+                reasons.append(R.item("COLLECT_BEFORE_PAY", f"the client's payment is held by Compliance (38) "
+                                                            f"({held['kind']}); the vendor is not paid until the hold "
+                                                            "is released (AEGIS r3 N-9, r4 R4-1)"))
+            reasons += act_reasons
+            if self._local_holds(buy.get("client_id") or client0) and not held:
+                # AEGIS r12 R12-3: any of the client's money held by Compliance, re-read under the lock
+                reasons.append(R.item("COLLECT_BEFORE_PAY", "a payment of this client is held by Compliance (38); "
+                                                            "the vendor is not paid until the hold is released"))
             if buy.get("payment_disputed"):
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "the client disputed the prepayment at Stripe; the vendor "
                                                             "is not paid while that dispute is open (founder M3)"))
@@ -177,8 +193,8 @@ class MediaMixin:
             if any(p["payment_ref_sha256"] == body["payment_ref_sha256"] for p in buy["vendor_payments"]):
                 raise Conflict("this vendor payment reference is already recorded on this buy")
             if reasons:
-                raise Refused("vendor payment refused", R.dedupe(reasons))
-            op = Op(self, f"mbv|{request_id}", "andre", buy_id)
+                raise Refused("vendor payment refused", R.dedupe(reasons), ledger_event_ids=g_cmp.events)
+            op = Op(self, f"mbv|{request_id}", "andre", buy_id, g_cmp)
             n = len(buy["vendor_payments"]) + 1
             try:
                 e = self._post(op, "zbm", [J.dr("1150", amt, f"buy:{buy_id}"), J.cr("1010", amt)], "F12v",

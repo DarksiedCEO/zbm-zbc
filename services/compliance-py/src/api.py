@@ -230,6 +230,42 @@ class Callers:
         return found
 
 
+GENERIC_REFUSAL = "the client is not activated (the reasons go to Andre)"
+
+
+def generic_activation(out: dict) -> dict:
+    """AEGIS r9 R9-4: the activation answer for a department that only needs the decision: a refusal carries one
+    generic reason and no sanctions marker, so it reads the same whatever the reason. AEGIS r10 R10-3: and no field
+    that differs by reason either (a jurisdiction, a re-screen date, a ruling): every refusal is byte-identical."""
+    if out.get("decision") == "ALLOW":
+        return {**out, "sanctions_grounded": None, "sanctions_ground": None}
+    return {**out, "reasons": [GENERIC_REFUSAL], "sanctions_grounded": None, "sanctions_ground": None,
+            "ruling_id": None, "evaluated_at": None, "jurisdiction": None, "valid_until": None}
+
+
+# AEGIS r10 R9-4: what of an activation ruling only Andre reads: the client's sanctions screening (HR-14: missing,
+# stale or a hit) and any open hold (its kind and id). Other callers read one generic item in their place.
+GENERIC_RULING_ITEM = {"code": "andre_review", "obligation_id": None, "obligation_title": None, "source_url": None,
+                       "row_status": None, "message": "an item only Andre reviews (screening or hold)"}
+
+
+def generic_ruling(view: dict) -> dict:
+    if view.get("gate") != "activation" or view.get("allowed"):
+        return view
+    keep, hidden = [], False
+    for u in view.get("unmet") or []:
+        if u.get("obligation_id") == "HR-14" or str(u.get("code", "")).startswith("hold_open"):
+            hidden = True
+        else:
+            keep.append(u)
+    if not hidden:
+        return view
+    keep.append(dict(GENERIC_RULING_ITEM))
+    lines = [ln for ln in view.get("unmet_lines") or [] if "/HR-14/" not in ln and "/hold_open" not in ln]
+    lines.append(f"compliance_38/-/andre_review: {GENERIC_RULING_ITEM['message']} [no source url]")
+    return {**view, "unmet": keep, "unmet_lines": lines}
+
+
 def _sanitize(errors: list[dict]) -> dict:
     out = []
     for e in errors[:ERROR_MAX_ERRORS]:
@@ -303,8 +339,10 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
     app.add_middleware(InputLimits)
 
     @app.get("/health")
-    async def health() -> dict:
-        return svc.health()
+    async def health():
+        h = svc.health()
+        # AEGIS F-4: a dead or stalled scheduler (no successful controls run for two intervals) is a 503
+        return h if h["status"] == "ok" else JSONResponse(status_code=503, content=h)
 
     @app.get("/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(caller())) -> list[dict]:
@@ -313,25 +351,27 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
     # --- gates -----------------------------------------------------------------------
 
     @app.post("/compliance/v1/rule", dependencies=auth)
-    def rule(req: m.RuleRequest = Depends(body(m.RuleRequest)), who: str = Depends(caller("onboarding"))) -> dict:
-        return svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane, route="rule")
+    def rule(who: str = Depends(caller("onboarding")),
+             req: m.RuleRequest = Depends(body(m.RuleRequest))) -> dict:
+        return generic_ruling(svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane,
+                                       route="rule"))
 
     @app.post("/compliance/v1/review", dependencies=auth)
-    def review(req: m.ReviewRequest = Depends(body(m.ReviewRequest)),
-               who: str = Depends(caller("creative_production"))) -> dict:
+    def review(who: str = Depends(caller("creative_production")),
+               req: m.ReviewRequest = Depends(body(m.ReviewRequest))) -> dict:
         gate = "payout" if req.subject_kind == "zbc_clip" else "publish"
         return svc.gate(who, gate, req.request_id, req.subject_id, req.facts, subject_kind=req.subject_kind,
                         caller_context=req.caller_context, route="review")
 
     @app.post("/compliance/v1/gates/activation", dependencies=auth)
-    def gate_activation(req: m.RuleRequest = Depends(body(m.RuleRequest)),
-                        who: str = Depends(caller("onboarding"))) -> dict:
-        return svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane,
-                        route="gates/activation")
+    def gate_activation(who: str = Depends(caller("onboarding")),
+                        req: m.RuleRequest = Depends(body(m.RuleRequest))) -> dict:
+        return generic_ruling(svc.gate(who, "activation", req.request_id, req.subject_id, req.facts, lane=req.lane,
+                                       route="gates/activation"))
 
     def _native(gate: str, kind: str):
-        def handler(req: m.ReviewRequest = Depends(body(m.ReviewRequest)),
-                    who: str = Depends(caller("creative_production"))) -> dict:
+        def handler(who: str = Depends(caller("creative_production")),
+                    req: m.ReviewRequest = Depends(body(m.ReviewRequest))) -> dict:
             if req.subject_kind != kind:
                 raise Invalid(f"the {gate} gate takes subject_kind {kind}")
             return svc.gate(who, gate, req.request_id, req.subject_id, req.facts, subject_kind=kind,
@@ -343,21 +383,63 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
 
     @app.get("/compliance/v1/rulings/{ruling_id}", dependencies=auth)
     def ruling(ruling_id: str, _: str = Depends(caller())) -> dict:
-        return svc.get_ruling(ruling_id[:64])
+        return generic_ruling(svc.get_ruling(ruling_id[:64]))        # R9-4: HR-14 and holds go to Andre only
 
     # --- sanctions, accessibility, jurisdictions --------------------------------------
 
     @app.post("/compliance/v1/sanctions/screen", dependencies=auth)
-    def screen(req: m.ScreenRequest = Depends(body(m.ScreenRequest)),
-               who: str = Depends(caller("onboarding", "finance_31"))) -> dict:
+    def screen(who: str = Depends(caller("onboarding", "finance_31")),
+               req: m.ScreenRequest = Depends(body(m.ScreenRequest))) -> dict:
         return svc.screen(who, req.request_id, req.model_dump())
 
+    @app.get("/compliance/v1/sanctions/status", dependencies=auth)
+    def sanctions_status(_: str = Depends(caller("finance_31", "onboarding")),
+                         subject_id: str = Query(pattern=r"^[A-Za-z0-9._:-]{1,128}$"),
+                         role: str = Query(pattern=r"^(payee|owner)$")) -> dict:
+        """ADR 0024: the latest screen of a payee/owner and its freshness (Finance's payout OFAC gate)."""
+        return svc.sanctions_status(subject_id, role)
+
+    @app.post("/compliance/v1/sanctions/attestations", dependencies=auth)
+    def attestation(_: str = Depends(andre("sanctions/attestations")),
+                    req: m.SanctionsAttestationRequest = Depends(body(m.SanctionsAttestationRequest))) -> dict:
+        """ADR 0024 (HR-14): Andre records the OFAC search he made for a client (date, list version, result)."""
+        return svc.record_attestation(req.request_id, req.model_dump())
+
+    activation_callers = caller("finance_31", "seo_02", "revenue_recovery", "onboarding")
+
+    def activation_reader(x_compliance_caller_token: Optional[str] = Header(default=None),
+                          x_andre_approval_token: Optional[str] = Header(default=None)) -> str:
+        """AEGIS r9 R9-4: Andre's token, or one of the departments that act on the decision."""
+        if x_andre_approval_token is not None:
+            return andre("clients/activation")(x_andre_approval_token)
+        return activation_callers(x_compliance_caller_token)
+
+    @app.get("/compliance/v1/clients/{client_id}/activation", dependencies=auth)
+    def client_activation(client_id: str, who: str = Depends(activation_reader),
+                          lane: str = Query(default="client", pattern=r"^(client|zbc_brand)$")) -> dict:
+        """ADR 0024: the client's current activation decision (ALLOW / REFUSE with reasons), for Finance, SEO and
+        Revenue Recovery (detection-py reads as revenue_recovery) and onboarding. Read-only; anything but a current
+        ALLOW is a refusal for the caller. Other callers get 403 (AEGIS F-9). AEGIS r9 R9-4: the reasons and the
+        sanctions ground go to Finance (the money gate, which shows them only to Andre) and to Andre's token; SEO,
+        Revenue Recovery and onboarding get one generic refusal, the same whatever the reason."""
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", client_id):
+            raise Invalid("client id format")
+        out = svc.activation_status(client_id, lane)
+        return out if who in ("finance_31", "andre") else generic_activation(out)
+
+    @app.get("/compliance/v1/readiness", dependencies=auth)
+    def readiness(_: str = Depends(caller())) -> dict:
+        """ADR 0024: expired rules and the gates they affect; what a US web client's activation runs through."""
+        return svc.readiness()
+
     @app.post("/compliance/v1/accessibility/checks", dependencies=auth)
-    def a11y(req: m.A11yRequest = Depends(body(m.A11yRequest)), who: str = Depends(caller("creative_production"))) -> dict:
+    def a11y(who: str = Depends(caller("creative_production")),
+             req: m.A11yRequest = Depends(body(m.A11yRequest))) -> dict:
         return svc.accessibility_check(who, req.request_id, req.model_dump())
 
     @app.post("/compliance/v1/jurisdictions/resolve", dependencies=auth)
-    def resolve(req: m.ResolveRequest = Depends(body(m.ResolveRequest)), who: str = Depends(caller())) -> dict:
+    def resolve(who: str = Depends(caller()),
+                req: m.ResolveRequest = Depends(body(m.ResolveRequest))) -> dict:
         return svc.resolve(who, req.request_id, req.model_dump())
 
     # --- register -----------------------------------------------------------------------
@@ -382,8 +464,8 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
             raise Invalid("obligation id format")
         return svc.register_row(obligation_id)
 
-    @app.post("/compliance/v1/register/proposals", dependencies=auth, status_code=201)
-    def propose(request: Request, req: m.ProposalRequest = Depends(body(m.ProposalRequest))) -> dict:
+    def proposer(request: Request) -> str:
+        """RTM-11: who may propose, checked BEFORE the body is validated."""
         andre_hdr = request.headers.get(FOUNDER_HEADER)
         if andre_hdr is not None:
             try:
@@ -391,11 +473,14 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
             except FounderRefused as exc:
                 svc.founder_refused("register/proposals", exc.reason)
                 raise
-            who = "andre"
-        else:
-            who = callers.identify(request.headers.get(CALLER_HEADER))
-            if who != "legal_37":
-                raise Forbidden("only legal_37 or Andre may create a register proposal")
+            return "andre"
+        who = callers.identify(request.headers.get(CALLER_HEADER))
+        if who != "legal_37":
+            raise Forbidden("only legal_37 or Andre may create a register proposal")
+        return who
+
+    @app.post("/compliance/v1/register/proposals", dependencies=auth, status_code=201)
+    def propose(who: str = Depends(proposer), req: m.ProposalRequest = Depends(body(m.ProposalRequest))) -> dict:
         return svc.create_proposal(who, req.request_id, req.model_dump(exclude={"request_id"}))
 
     @app.get("/compliance/v1/inbox", dependencies=auth)
@@ -403,8 +488,8 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         return svc.inbox()
 
     @app.post("/compliance/v1/register/decisions", dependencies=auth)
-    def decisions(req: m.DecisionsRequest = Depends(body(m.DecisionsRequest)),
-                  _: str = Depends(andre("register/decisions"))) -> dict:
+    def decisions(_: str = Depends(andre("register/decisions")),
+                  req: m.DecisionsRequest = Depends(body(m.DecisionsRequest))) -> dict:
         return svc.decide(req.request_id, [d.model_dump() for d in req.decisions])
 
     # --- controls -------------------------------------------------------------------------
@@ -414,16 +499,16 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         return svc.controls_view()
 
     @app.post("/compliance/v1/controls/internal/run", dependencies=auth)
-    def internal_run(req: m.RunRequest = Depends(body(m.RunRequest)), _: str = Depends(caller("scheduler"))) -> dict:
+    def internal_run(_: str = Depends(caller("scheduler")),
+                     req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
         return svc.run_internal_controls(req.request_id)
 
     @app.get("/compliance/v1/controls/{control_id}", dependencies=auth)
     def control(control_id: str, _: str = Depends(caller())) -> dict:
         return svc.control_view(control_id[:16])
 
-    @app.post("/compliance/v1/controls/{control_id}/results", dependencies=auth)
-    def control_result(control_id: str, request: Request,
-                       req: m.ControlResultRequest = Depends(body(m.ControlResultRequest))) -> dict:
+    def control_pusher(control_id: str, request: Request) -> str:
+        """RTM-11: who may push this control's result, checked BEFORE the body is validated."""
         if not re.fullmatch(r"C-[0-9]{2,3}", control_id):
             raise Invalid("control id format")
         owner = svc.owner_caller(control_id)
@@ -433,11 +518,15 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
             except FounderRefused as exc:
                 svc.founder_refused(f"controls/{control_id}/results", exc.reason)
                 raise
-            who = "andre"
-        else:
-            who = callers.identify(request.headers.get(CALLER_HEADER))
-            if who is None:
-                raise Forbidden("caller token missing or not recognised")
+            return "andre"
+        who = callers.identify(request.headers.get(CALLER_HEADER))
+        if who is None:
+            raise Forbidden("caller token missing or not recognised")
+        return who
+
+    @app.post("/compliance/v1/controls/{control_id}/results", dependencies=auth)
+    def control_result(control_id: str, who: str = Depends(control_pusher),
+                       req: m.ControlResultRequest = Depends(body(m.ControlResultRequest))) -> dict:
         try:
             from clock import parse_iso
             parse_iso(req.tested_at)
@@ -451,13 +540,29 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
 
     # --- holds ------------------------------------------------------------------------------
 
+    finance_only = caller("finance_31")
+
+    def holds_reader(x_compliance_caller_token: Optional[str] = Header(default=None),
+                     x_andre_approval_token: Optional[str] = Header(default=None)) -> str:
+        """AEGIS r10 R10-3: Andre's token, or Finance (its payout gate needs which subject has an open hold)."""
+        if x_andre_approval_token is not None:
+            return andre("holds")(x_andre_approval_token)
+        return finance_only(x_compliance_caller_token)
+
     @app.get("/compliance/v1/holds", dependencies=auth)
-    def holds(_: str = Depends(caller())) -> list[dict]:
-        return svc.list_holds()
+    def holds(who: str = Depends(holds_reader)) -> list[dict]:
+        """AEGIS r10 R10-3: in full to Andre; to Finance each hold as a generic ``compliance_hold`` (id, subject,
+        status, dates), never its kind, obligation or detail (an OFAC search result); other callers 403."""
+        out = svc.list_holds()
+        if who == "andre":
+            return out
+        return [{**{k: hh.get(k) for k in ("hold_id", "subject_id", "status", "opened_at", "released_at")},
+                 "kind": "compliance_hold", "obligation_id": None} for hh in out]
 
     @app.post("/compliance/v1/holds/{hold_id}/release", dependencies=auth)
-    def release(hold_id: str, req: m.HoldReleaseRequest = Depends(body(m.HoldReleaseRequest)),
-                _: str = Depends(andre("holds/release"))) -> dict:
+    def release(hold_id: str,
+                _: str = Depends(andre("holds/release")),
+                req: m.HoldReleaseRequest = Depends(body(m.HoldReleaseRequest))) -> dict:
         if not re.fullmatch(r"hold-[a-z2-7]{20}", hold_id):
             raise Invalid("hold id format")
         return svc.release_hold(req.request_id, hold_id, req.reason)
@@ -469,25 +574,27 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
         return svc.reconcile_plan()
 
     @app.post("/compliance/v1/reconcile", dependencies=auth)
-    def reconcile(req: m.ReconcileRequest = Depends(body(m.ReconcileRequest)),
-                  _: str = Depends(andre("reconcile"))) -> dict:
+    def reconcile(_: str = Depends(andre("reconcile")),
+                  req: m.ReconcileRequest = Depends(body(m.ReconcileRequest))) -> dict:
         return svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines), list(req.void_event_ids))
 
     # --- watcher and audit -----------------------------------------------------------------------
 
     @app.post("/compliance/v1/watcher/run", dependencies=auth)
-    def watcher(req: m.RunRequest = Depends(body(m.RunRequest)), _: str = Depends(caller("scheduler"))) -> dict:
+    def watcher(_: str = Depends(caller("scheduler")),
+                req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
         return svc.watcher_run(req.request_id)
 
     @app.get("/compliance/v1/audit/evidence", dependencies=auth)
-    def audit_evidence(_: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+    def audit_evidence(_: str = Depends(andre("audit/evidence")), limit: int = Query(default=200, ge=1, le=1000),
                        offset: int = Query(default=0, ge=0, le=10_000_000),
                        event_type: Optional[str] = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
-        """Bug sweep C (R6): every Compliance evidence event on the ledger, committed / cited / attempted."""
+        """Bug sweep C (R6): every Compliance evidence event on the ledger, committed / cited / attempted. AEGIS r10
+        R10-3: Andre's token only (event types and subjects name sanctions holds)."""
         return svc.audit_evidence(limit, offset, event_type)
 
     @app.get("/compliance/v1/audit/export", dependencies=auth)
-    def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),
+    def audit(who: str = Depends(andre("audit/export")), since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
               cursor: int = Query(default=0, ge=0, le=10**12)) -> dict:
         try:
@@ -516,6 +623,9 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
     with open(settings.seed_path, "rb") as fh:
         seed_bytes = fh.read()
     ports = ports or Ports()
+    if settings.legal_url and ports.legal.__class__.__name__ == "NotBuiltLegal37":
+        from legal_client import HttpLegal37     # ADR 0024: Legal (37) wired only with all three COMPLIANCE_LEGAL_*
+        ports.legal = HttpLegal37(settings.legal_url, settings.legal_token, settings.legal_caller_token)
     if settings.watcher_enabled and ports.fetcher.__class__.__name__ == "NotWiredFetcher":
         rows = json.loads(seed_bytes)["rows"]
         ports.fetcher = HttpFeedFetcher(watcher_allowlist(rows), clock)
@@ -540,15 +650,37 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
 
 def _app_from_env() -> FastAPI:
     settings = config_mod.load()
-    return create_app(build_service(settings), settings)
+    application = create_app(build_service(settings), settings)
+    application.state.settings = settings
+    return application
 
 
 app = _app_from_env()
 
 
+def start_scheduler(svc: ComplianceService, settings) -> Optional["scheduler.Scheduler"]:
+    """ADR 0024 / AEGIS F-4: start the in-process scheduler when enabled and attach it to the service (its liveness is
+    in /health). A dead scheduler thread ends the process non-zero (Railway ON_FAILURE restarts it): ``os._exit``,
+    because sys.exit in a thread ends only that thread."""
+    import scheduler
+    if not settings.scheduler_enabled:
+        return None
+    svc.scheduler = scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s,
+                                        watcher=settings.watcher_enabled, clock=svc.clock,
+                                        on_thread_death=os._exit).start()
+    return svc.scheduler
+
+
 def main() -> None:
+    import readiness as readiness_mod
     import serve
 
+    svc: ComplianceService = app.state.service
+    settings: config_mod.Settings = app.state.settings
+    # ADR 0024: the operator sees, at every start, exactly which rules are expired and which gates they affect
+    for line in readiness_mod.summary_lines(svc.readiness()):
+        print(line, flush=True)
+    start_scheduler(svc, settings)
     host = os.environ.get("COMPLIANCE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("COMPLIANCE_PORT", "8380"))
     serve.run(app, host=host, port=port)

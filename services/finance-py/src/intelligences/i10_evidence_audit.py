@@ -307,8 +307,48 @@ def redact(kind: str, record: dict) -> dict:
     return r
 
 
-def export_entry(rec: dict) -> dict:
+# AEGIS r7 V1: what only Andre's token sees of a Compliance hold (ADR 0024): whether it rests on sanctions, and the
+# OFAC release details. Every other reader sees that a payment is held, and a generic event type.
+_HOLD_PRIVATE = ("sanctions", "sanctions_since", "sanctions_ground", "ofac_authorization_sha256", "ofac_document_kind",
+                 "ofac_guidance_sha256", "documents", "returned_to_sender")
+_COMPLIANCE_LEGS = ("compliance_hold", "compliance_unverified")
+_OFAC_BASES = ("ofac_authorization", "ofac_rejected_return")
+GENERIC_HOLD_EVENT = "compliance_hold_event"
+
+
+def hide_hold_details(obj):
+    """A copy of ``obj`` with a Compliance hold shown generically (no sanctions marker, no OFAC details)."""
+    if isinstance(obj, list):
+        return [hide_hold_details(x) for x in obj]
+    if not isinstance(obj, dict):
+        return obj
+    out = {}
+    for k, v in obj.items():
+        if k in _HOLD_PRIVATE or k == "held_compliance_history":
+            continue
+        if k == "held_compliance":
+            out["held"] = bool(v)
+            continue
+        if k == "basis" and v in _OFAC_BASES:
+            out[k] = "release"
+            continue
+        out[k] = hide_hold_details(v)
+    if out.get("leg") in _COMPLIANCE_LEGS:
+        out["leg"] = "compliance_hold"
+        for k in ("note", "note_sha256", "severity"):      # AEGIS r9 R9-2: a note's hash or a severity is a tell too
+            out.pop(k, None)
+        out["resolution"] = None
+    elif out.get("leg") == "stripe_refund":                 # AEGIS r10 RTM-08c: a held refund's note is Andre's
+        for k in ("note", "note_sha256", "severity"):
+            out.pop(k, None)
+    if isinstance(out.get("event_type"), str) and out["event_type"].startswith("compliance_hold_"):
+        out["event_type"] = GENERIC_HOLD_EVENT
+    return out
+
+
+def export_entry(rec: dict, full: bool = True) -> dict:
     data = rec["data"]
-    return {"seq": rec["seq"], "kind": rec["kind"], "at": rec["at"], "rules_version": data.get("rules_version"),
-            "ledger_event_ids": data.get("ledger_event_ids", []),
-            "records": [{"kind": k, "record": redact(k, r)} for k, r in data.get("ops", [])]}
+    out = {"seq": rec["seq"], "kind": rec["kind"], "at": rec["at"], "rules_version": data.get("rules_version"),
+           "ledger_event_ids": data.get("ledger_event_ids", []),
+           "records": [{"kind": k, "record": redact(k, r)} for k, r in data.get("ops", [])]}
+    return out if full else hide_hold_details(out)

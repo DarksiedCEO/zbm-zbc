@@ -371,7 +371,7 @@ def _main(work: Path) -> int:
               fired == 1 and rel2r.status_code == 200 and it2.get("status") == "submitted")
         rk = "fin-je-" + hashlib.sha256(json.dumps(["zbc", f"F4d|{it2.get('item_id')}"], separators=(",", ":"))
                                         .encode()).hexdigest()[:40]
-        ev = B.get("/fin/v1/audit/evidence", event_type="journal_entry_posted", limit=1000)
+        ev = B.get("/fin/v1/audit/evidence", andre=True, event_type="journal_entry_posted", limit=1000)   # r11: Andre
         check("B: /fin/v1/audit/evidence: the F4d booking committed exactly once, the lost try attempted",
               len([e for e in ev["events"] if e["status"] == "committed" and e["rk"] == rk]) == 1
               and ev["counts"]["attempted"] >= 1)
@@ -508,7 +508,9 @@ def _main(work: Path) -> int:
         check("S: reconciliation after Stripe: every leg matched", rs["fc01"])
         tb_before = B.get("/fin/v1/journal/zbc/trial-balance")
         check("B: ZBC trial balance difference 0.00", tb_before["difference"] == "0.00")
-        integ = B.get("/fin/v1/integrity")
+        integ = B.get("/fin/v1/integrity", caller=None, andre=True)   # AEGIS r12 R12-1: the counters are Andre's
+        check("B: integrity for a non-Andre caller is the verdict only (no counters)",
+              set(B.get("/fin/v1/integrity")) == {"status", "checked_at"})
         check("B: integrity green before restart (chain + anchors + /ledger/verify)", integ["status"] == "green")
         say(f"B: journal entries {integ['journal_entries']}, log lines {integ['log_lines']}")
         stop(fb, "finance_b")

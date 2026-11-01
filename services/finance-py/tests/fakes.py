@@ -168,6 +168,34 @@ class FakeCompliance:
             return JurisdictionAnswer(False)
         return JurisdictionAnswer(True, self.juris.get(country, "operate"))
 
+    # ADR 0024: a client's current activation (default: ALLOW in California) and the nexus thresholds row
+    activation_available = True
+    activations: Optional[dict] = None
+    nexus_params: Optional[dict] = None
+
+    def client_activation(self, client_id):
+        from ports import ClientActivation
+        self.calls.append(("client_activation", client_id))
+        if not self.activation_available:
+            return ClientActivation(False)
+        a = (self.activations or {}).get(client_id, {"allowed": True, "jurisdiction": "US-CA"})
+        return ClientActivation(True, a["allowed"], a.get("ruling_id", f"cmp-rul-{client_id}"), a.get("jurisdiction"),
+                                tuple(a.get("reasons", ())), sanctions=bool(a.get("sanctions")),
+                                ground=a.get("ground"))
+
+    rule_expiry_answer = None
+
+    def rule_expiry(self):
+        self.calls.append(("rule_expiry",))
+        return self.rule_expiry_answer
+
+    def row_parameters(self, oid):
+        from ports import RegisterParameters
+        if not self.rows_available or self.nexus_params is None:
+            return RegisterParameters(False, oid)
+        return RegisterParameters(True, oid, "unverified", self.nexus_params,
+                                  "https://trykintsugi.com/sales-tax-guides/usa/economic-nexus")
+
 
 class FakeCN:
     def __init__(self):

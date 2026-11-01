@@ -23,6 +23,7 @@ type seen struct {
 	calls   atomic.Int32
 	body    map[string]string
 	headers http.Header
+	raw     int
 }
 
 func financeStub(t *testing.T, status int, s *seen) *httptest.Server {
@@ -34,6 +35,7 @@ func financeStub(t *testing.T, status int, s *seen) *httptest.Server {
 		}
 		s.headers = r.Header.Clone()
 		raw, _ := io.ReadAll(r.Body)
+		s.raw = len(raw)
 		_ = json.Unmarshal(raw, &s.body)
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(`{"detail":"internal finance detail that must not leak"}`))
@@ -381,15 +383,57 @@ func TestHTTPSOffBoxAndNoProxy(t *testing.T) {
 	}
 }
 
-func TestEscapedBodyOverFinanceLimitIsRefused(t *testing.T) {
+// Money red team RTM-10: the body is forwarded without HTML-escaping (`&`, `<`, `>` stay one byte), and any valid
+// JSON body up to the 256 KiB cap fits Finance's route limit once JSON-escaped, so a legitimate event is never a
+// permanent 413.
+func TestHTMLCharactersAreNotReEscaped(t *testing.T) {
 	var s seen
 	fin := financeStub(t, 200, &s)
 	defer fin.Close()
 	g := gw(t, fin.URL)
 	defer g.Close()
-	// ~200 KiB of escaped quotes: under the 256 KiB body cap, about 400 KiB once JSON-escaped
-	resp, _ := post(t, g.URL, `{"x":"`+strings.Repeat(`\"`, 100<<10)+`"}`, "t=1,v1=00")
-	if resp.StatusCode != http.StatusRequestEntityTooLarge || s.calls.Load() != 0 {
+	body := `{"url":"https://x.test/?a=1&b=2&c=<3>","n":"` + strings.Repeat("&", 200<<10) + `"}`
+	resp, out := post(t, g.URL, body, "t=1,v1=00")
+	if resp.StatusCode != 200 || s.calls.Load() != 1 {
+		t.Fatalf("got %d %s, finance calls %d", resp.StatusCode, out, s.calls.Load())
+	}
+	if s.body["payload"] != body {
+		t.Fatalf("payload changed on the way")
+	}
+	if s.raw > len(body)+1024 {
+		t.Fatalf("forwarded %d bytes for a %d-byte body: HTML characters were re-escaped", s.raw, len(body))
+	}
+}
+
+func TestTheWorstCaseValidBodyStillFits(t *testing.T) {
+	var s seen
+	fin := financeStub(t, 200, &s)
+	defer fin.Close()
+	g := gw(t, fin.URL)
+	defer g.Close()
+	// every byte a quote to escape: the largest growth valid JSON can have, at the 256 KiB cap
+	inner := strings.Repeat(`\"`, (maxBodyBytes-16)/2)
+	body := `{"x":"` + inner + `"}`
+	if len(body) > maxBodyBytes {
+		t.Fatalf("test body %d over the cap", len(body))
+	}
+	resp, out := post(t, g.URL, body, "t=1,v1=00")
+	if resp.StatusCode != 200 || s.calls.Load() != 1 || s.body["payload"] != body {
+		t.Fatalf("got %d %s, finance calls %d", resp.StatusCode, out, s.calls.Load())
+	}
+	if s.raw > maxForwardBytes {
+		t.Fatalf("forwarded %d bytes, over the %d forward limit", s.raw, maxForwardBytes)
+	}
+}
+
+func TestABodyThatIsNotJSONIsRefused(t *testing.T) {
+	var s seen
+	fin := financeStub(t, 200, &s)
+	defer fin.Close()
+	g := gw(t, fin.URL)
+	defer g.Close()
+	resp, _ := post(t, g.URL, "not json \x01\x02", "t=1,v1=00")
+	if resp.StatusCode != http.StatusBadRequest || s.calls.Load() != 0 {
 		t.Fatalf("got %d, finance calls %d", resp.StatusCode, s.calls.Load())
 	}
 }

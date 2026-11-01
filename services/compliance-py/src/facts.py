@@ -223,10 +223,14 @@ CLAIMS = O(claims_present=B(), health_or_earnings_claim=B(), claim_file_id=ID(nu
 
 _COMMON = dict(jurisdiction=JURISDICTION, network_country_signal=F("iso2", nullable=True),
                flags=O(**{f: B() for f in ACTIVATION_FLAGS}))
+# ADR 0024: the client's recorded OFAC search (HR-14) and the Legal (37) documents it accepted (HR-15). Required by
+# those rows' own checks (fact_missing names the row), not by the lane's static list.
+LEGAL_DOCUMENT = OC(doc_id=ID(), version=ID(), doc_sha256=F("sha256"), acceptance_id=ID())
 _CLIENT = dict(_COMMON, target_jurisdictions=L(F("code"), min_items=1), platforms=L(E(*PLATFORMS), 10, min_items=1),
                client_category=E(*CATEGORIES), claims=CLAIMS, services_include_review_suppression=B(),
                outbound_cold_contact_countries=L(F("iso2")), hbnr_clause_signed=B(),
-               eu_kit_version_acknowledged=F("int", lo=0, hi=10_000), msa_eu_clause=B())
+               eu_kit_version_acknowledged=F("int", lo=0, hi=10_000), msa_eu_clause=B(),
+               sanctions_attestation_id=ID(), legal_documents=L(LEGAL_DOCUMENT, 10, min_items=1))
 _BRAND = dict(_CLIENT, pay_basis=E("verified_views", "raw_views", "engagement", "sentiment", "flat_fee", "other"),
               sentiment_conditions=B())
 _CREATOR = dict(_COMMON,

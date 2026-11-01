@@ -171,14 +171,14 @@ def test_bf2_restart_after_a_retried_booking_starts_and_shows_the_attempt(tmp_pa
     spy(h, once_after(is_f4d))
     assert release(h, b["batch_id"]).status_code == 200
     iid = b["item_ids"][0]
-    ev = h.ok(h.get("/fin/v1/audit/evidence", event_type="journal_entry_posted"))
+    ev = h.ok(h.get("/fin/v1/audit/evidence", caller=None, andre=ANDRE_TOKEN, event_type="journal_entry_posted"))
     rk = derived_id("je", "zbc", f"F4d|{iid}")
     rows = [x for x in ev["events"] if x["status"] == "committed" and x["rk"] == rk]
     assert len(rows) == 1
     assert ev["counts"]["attempted"] >= 1
     h2 = Harness(data_dir=d, ledger=h.ledger, clock=h.clock, fakes=h.f)
     assert h2.svc.db["items"][iid]["status"] == "submitted"
-    assert h2.ok(h2.get("/fin/v1/integrity"))["status"] == "green"
+    assert h2.ok(h2.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
 
 
 def test_bf2_one_stuck_item_never_blocks_the_others(hr):
@@ -511,5 +511,5 @@ def test_ledger_verify_runs_outside_the_service_lock(hr):
         seen["free"] = bool(got and got[0])
         return real()
     hr.ledger.verify = verify
-    assert hr.ok(hr.get("/fin/v1/integrity"))["status"] == "green"
+    assert hr.ok(hr.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
     assert seen["free"] is True

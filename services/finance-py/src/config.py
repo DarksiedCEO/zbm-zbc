@@ -142,6 +142,7 @@ class Settings:
     evidence_retention_days: int = 2557
     max_certified_views: int = 10 ** 12
     max_rate_per_1000: Decimal = Decimal("1000.00")
+    max_invoice_total: Decimal = Decimal("250000.00")   # RTM-09: FIN_MAX_INVOICE_TOTAL
     withholding_basis: str = "gross"
     # media billing (ADR 0009 amendment, Oct 5 2026; founder M4, M3)
     media_default_markup_pct: Decimal = Decimal("15.00")
@@ -390,6 +391,7 @@ def load(env: Optional[dict] = None) -> Settings:
         # count is accepted from V&I (a malformed answer): views x rate / 1000 then always fits the money bound.
         max_certified_views=_int(env, "FIN_MAX_CERTIFIED_VIEWS", 10 ** 12, 1, 10 ** 12),
         max_rate_per_1000=_money(env, "FIN_MAX_RATE_PER_1000", "1000.00", positive=True),
+        max_invoice_total=_money(env, "FIN_MAX_INVOICE_TOTAL", "250000.00", positive=True),
         # AEGIS N17-12: backup withholding basis. Spec §C.6 says 24% of GROSS (the default); whether clawback
         # netting reduces the basis is a CPA question (FIN-CQ-16 in ADR 0009); gross_minus_netting is the option.
         withholding_basis=_only(env, "FIN_WITHHOLDING_BASIS", ("gross", "gross_minus_netting"), "gross",

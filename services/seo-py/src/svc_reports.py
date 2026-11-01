@@ -28,7 +28,20 @@ class ReportsMixin:
         fmt = body["format"]
         with self.lock:
             self._gate()
-            self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            self.audit_view(tid, aid)                     # 404 AUDIT_NOT_FOUND first: nothing else is revealed
+            client = t.get("finance_client_id") if t["kind"] == "client" else None
+            if t["kind"] == "client" and not client:
+                raise Conflict(R("TENANT_FINANCE_CLIENT_UNBOUND"))
+        # ADR 0024: a client's report is delivered only while Compliance's activation is a current ALLOW (asked
+        # outside the lock; no override)
+        if client is not None:
+            self._verify_compliance(client)
+        with self.lock:
+            self._gate()
+            t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            if t["kind"] == "client" and t.get("finance_client_id") != client:
+                raise Conflict(R("TENANT_FINANCE_CLIENT_CHANGED"))
             view = self.audit_view(tid, aid)                     # 404 AUDIT_NOT_FOUND for another tenant's audit
             self.check_kill(tenant=tid, capability="reports", write=True)
             self.check_kill(capability="audit")

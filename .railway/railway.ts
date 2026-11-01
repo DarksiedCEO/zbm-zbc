@@ -68,6 +68,9 @@ export default defineRailway(() => {
   const legalData = volume("legal-data", VOLUME_AS_DEPLOYED);
   const financeData = volume("finance-data", VOLUME_AS_DEPLOYED);
   const seoData = volume("seo-data", VOLUME_AS_DEPLOYED);
+  // ADR 0024: new. Declared with the same region and size as the four live volumes, so the plan CREATES it and touches
+  // nothing else (docs/deploy/railway.md, "Compliance (38): the hard gate").
+  const complianceData = volume("compliance-data", VOLUME_AS_DEPLOYED);
 
   // ------------------------------------------------------------------------------------------------ ledger (first)
   const ledger = withDailyBackups(service("ledger", {
@@ -81,6 +84,69 @@ export default defineRailway(() => {
       LEDGER_LOG_PATH: "/data/ledger/ledger.jsonl",
       RAILWAY_RUN_UID: "0", // the entrypoint hands /data/ledger to uid 10001, then runs the ledger as 10001
       LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope (hashes only, set NOT Sealed); written to LEDGER_CALLERS_FILE
+    },
+  }));
+
+  // ------------------------------------------------------------------------------------------------ legal
+  const legal = withDailyBackups(service("legal", {
+    source: source(),
+    build: dockerfile("services/legal-py/Dockerfile", ["services/legal-py/**", "deploy/python/**"]),
+    deploy: deploy("/health", true),
+    volumeMounts: { "/data": legalData },
+    env: {
+      PORT: "8420",
+      LEGAL_BIND_ADDR: "::",
+      LEGAL_DATA_DIR: "/data/legal",
+      RAILWAY_RUN_UID: "0",
+      LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
+      LEDGER_SERVICE_TOKEN: preserve(), // legal's own ledger caller token
+      LEGAL_SERVICE_TOKEN: preserve(),
+      LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (records a client's clickwrap
+      // acceptance, POST /legal/v1/acceptances); `${{VARIABLE}}` is Railway's same-service reference
+      LEGAL_CALLER_TOKENS:
+        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}", "compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}"}',
+      LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
+      // ADR 0024: Legal delivers counsel-memo register proposals to Compliance (caller legal_37). Compliance's service
+      // token is set once, on compliance; Legal is declared before it (compliance reads Legal's token as code), so it
+      // takes it through Railway's own reference syntax
+      LEGAL_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      LEGAL_COMPLIANCE_TOKEN: "${{compliance.COMPLIANCE_SERVICE_TOKEN}}",
+      LEGAL_COMPLIANCE_CALLER_TOKEN: preserve(),
+    },
+  }));
+
+  // ------------------------------------------------------------------------------------------------ compliance
+  // ADR 0024: the hard gate before a client is served (activation), with the service-area geofence. PRIVATE: no
+  // domain; Finance, SEO, detection and Legal reach it at compliance.railway.internal:8380. Its own scheduler runs the
+  // internal controls every 6 h and the Change Watcher daily (in process: no `scheduler` token exists anywhere).
+  // Every gate stays closed until control C-11 (evidence integrity) has passed. Declared after legal (it reads Legal's
+  // service token) and before detection, finance and seo (they read its service token).
+  const compliance = withDailyBackups(service("compliance", {
+    source: source(),
+    build: dockerfile("services/compliance-py/Dockerfile", ["services/compliance-py/**", "deploy/python/**"]),
+    deploy: deploy("/health", true),
+    volumeMounts: { "/data": complianceData },
+    env: {
+      PORT: "8380",
+      COMPLIANCE_BIND_ADDR: "::",
+      COMPLIANCE_DATA_DIR: "/data/compliance",
+      RAILWAY_RUN_UID: "0",
+      LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
+      LEDGER_SERVICE_TOKEN: preserve(), // compliance's own ledger caller token (compliance-py, department compliance)
+      COMPLIANCE_SERVICE_TOKEN: preserve(),
+      COMPLIANCE_ANDRE_APPROVAL_TOKEN: preserve(),
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (runs a client's activation,
+      // POST /compliance/v1/rule); the others are each caller's own variable on its own service
+      COMPLIANCE_CALLER_TOKENS:
+        '{"onboarding": "${{COMPLIANCE_ONBOARDING_CALLER_TOKEN}}", "finance_31": "${{finance.FIN_COMPLIANCE_CALLER_TOKEN}}", "legal_37": "${{legal.LEGAL_COMPLIANCE_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_COMPLIANCE_CALLER_TOKEN}}", "revenue_recovery": "${{detection.DETECTION_COMPLIANCE_CALLER_TOKEN}}"}',
+      COMPLIANCE_ONBOARDING_CALLER_TOKEN: preserve(),
+      // Legal (37): a client's documents are current and accepted (HR-15)
+      COMPLIANCE_LEGAL_URL: PRIVATE("legal", 8420),
+      COMPLIANCE_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
+      COMPLIANCE_LEGAL_CALLER_TOKEN: preserve(),
+      COMPLIANCE_SCHEDULER_ENABLED: "1",
+      COMPLIANCE_WATCHER_ENABLED: "1",
     },
   }));
 
@@ -107,31 +173,13 @@ export default defineRailway(() => {
       // apply cannot release them. Unset/empty = off.
       RR_STORE_READS_DISABLED: preserve(),
       RR_STORE_KILL_SWITCH_FILE: preserve(),
+      // ADR 0024: every store sync and every snapshot handed to the scan path needs Compliance's current ALLOW for the
+      // client. Both tokens are written to files by the entrypoint (--secret-file in the image).
+      DETECTION_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      DETECTION_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      DETECTION_COMPLIANCE_CALLER_TOKEN: preserve(), // detection's `revenue_recovery` caller token at Compliance
     },
   });
-
-  // ------------------------------------------------------------------------------------------------ legal
-  const legal = withDailyBackups(service("legal", {
-    source: source(),
-    build: dockerfile("services/legal-py/Dockerfile", ["services/legal-py/**", "deploy/python/**"]),
-    deploy: deploy("/health", true),
-    volumeMounts: { "/data": legalData },
-    env: {
-      PORT: "8420",
-      LEGAL_BIND_ADDR: "::",
-      LEGAL_DATA_DIR: "/data/legal",
-      RAILWAY_RUN_UID: "0",
-      LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
-      LEDGER_SERVICE_TOKEN: preserve(), // legal's own ledger caller token
-      LEGAL_SERVICE_TOKEN: preserve(),
-      LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
-      // `onboarding`: Andre's operator-held token until an onboarding service exists (records a client's clickwrap
-      // acceptance, POST /legal/v1/acceptances); `${{VARIABLE}}` is Railway's same-service reference
-      LEGAL_CALLER_TOKENS:
-        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}"}',
-      LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
-    },
-  }));
 
   // ------------------------------------------------------------------------------------------------ finance
   const finance = withDailyBackups(service("finance", {
@@ -156,6 +204,11 @@ export default defineRailway(() => {
       FIN_LEGAL_URL: PRIVATE("legal", 8420),
       FIN_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
       FIN_LEGAL_CALLER_TOKEN: preserve(),
+      // ADR 0024: invoice approval, billing readiness and Stripe pages need Compliance's current ALLOW for the client;
+      // payouts stay blocked by their other gates
+      FIN_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      FIN_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      FIN_COMPLIANCE_CALLER_TOKEN: preserve(),
       FIN_STRIPE_INCOMING: "1",
       FIN_STRIPE_LIVE: "0", // test mode first; "1" only together with live keys (docs/deploy/railway.md, step 9)
       FIN_STRIPE_SECRET_KEY: preserve(), // written to FIN_STRIPE_SECRET_KEY_FILE by the entrypoint
@@ -223,6 +276,11 @@ export default defineRailway(() => {
       SEO_FINANCE_URL: PRIVATE("finance", 8410),
       SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       SEO_FINANCE_CALLER_TOKEN: preserve(),
+      // ADR 0024: a client tenant's paid run, every scheduled slot and every client report need Compliance's current
+      // ALLOW for the client (no override)
+      SEO_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      SEO_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      SEO_COMPLIANCE_CALLER_TOKEN: preserve(),
       // Set by hand in the dashboard (runbook, Secrets table): declared so a later apply cannot delete them. Unset or
       // 0 keeps the engine NOT_CONNECTED / OFF, exactly as before (seo-py config, ADR 0017 W4).
       SEO_PERPLEXITY_API_KEY: preserve(),
@@ -242,6 +300,7 @@ export default defineRailway(() => {
   }));
 
   return project("zbm-zbc", {
-    resources: [ledgerData, legalData, financeData, seoData, ledger, detection, legal, finance, orchestrator, stripeGateway, seo],
+    resources: [ledgerData, legalData, financeData, seoData, complianceData, ledger, detection, legal, compliance, finance,
+      orchestrator, stripeGateway, seo],
   });
 });

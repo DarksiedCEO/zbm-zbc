@@ -8,7 +8,7 @@ What is in the repository:
 
 | Piece | Where |
 |---|---|
-| One production Dockerfile per Railway service | `services/ledger-rust/Dockerfile`, `services/detection-py/Dockerfile`, `services/finance-py/Dockerfile`, `services/legal-py/Dockerfile`, `services/seo-py/Dockerfile`, `services/orchestrator-go/Dockerfile.orchestrator`, `services/orchestrator-go/Dockerfile.stripe-gateway` |
+| One production Dockerfile per Railway service | `services/ledger-rust/Dockerfile`, `services/detection-py/Dockerfile`, `services/finance-py/Dockerfile`, `services/legal-py/Dockerfile`, `services/seo-py/Dockerfile`, `services/compliance-py/Dockerfile`, `services/orchestrator-go/Dockerfile.orchestrator`, `services/orchestrator-go/Dockerfile.stripe-gateway` |
 | The entrypoint every image starts with | `deploy/docker/zbm-entrypoint.sh` |
 | The Python images' dependency lock (every transitive package, with hashes) | `deploy/python/requirements.in` → `deploy/python/requirements.lock.txt` |
 | Railway infrastructure as code | `.railway/railway.ts` (SDK pinned in `.railway/package.json` + lockfile) |
@@ -33,6 +33,7 @@ typechecks and evaluates to the intended configuration with that SDK.
 | `orchestrator` | `services/orchestrator-go`, `cmd/orchestrator` (Revenue Recovery orchestrator) | `services/orchestrator-go/Dockerfile.orchestrator` | 8080 | **public** (the dashboard on Vercel calls it) | — | 1 |
 | `stripe-gateway` | `services/orchestrator-go`, `cmd/stripe-gateway` | `services/orchestrator-go/Dockerfile.stripe-gateway` | 8470 | **public** (Stripe calls it) | — | 1 |
 | `seo` | `services/seo-py` (Search & Answer Intelligence 2) | `services/seo-py/Dockerfile` | 8500 | private network | `seo-data` at `/data` | 1 |
+| `compliance` | `services/compliance-py` (Compliance 38: the hard gate before a client is served, ADR 0024) | `services/compliance-py/Dockerfile` | 8380 | private network only (no domain) | `compliance-data` at `/data` | 1 |
 | dashboard | `apps/dashboard-ts` (Next.js) | — (Vercel builds it) | — | public, password session | — | Vercel |
 
 **The Stripe gateway is in orchestrator-go — verified.** `services/orchestrator-go/cmd/stripe-gateway/main.go` is a
@@ -74,6 +75,8 @@ ledger  ←  legal  ←  finance  ←  stripe-gateway          (each arrow: "cal
 | orchestrator, finance, legal, seo | ledger | `http://ledger.railway.internal:8090` |
 | finance | legal | `http://legal.railway.internal:8420` |
 | stripe-gateway, seo | finance | `http://finance.railway.internal:8410` |
+| finance, seo, detection, legal | compliance | `http://compliance.railway.internal:8380` (ADR 0024) |
+| compliance | legal, ledger | `http://legal.railway.internal:8420`, `http://ledger.railway.internal:8090` |
 | dashboard (Vercel) | orchestrator | `https://<orchestrator's Railway domain>` |
 | Stripe | stripe-gateway | `https://<stripe-gateway's Railway domain>/webhooks/stripe` |
 
@@ -182,6 +185,7 @@ be a different value: several services refuse to start when two of their tokens 
 | `LEDGER_SERVICE_TOKEN` (legal's) | `openssl rand -hex 32` | legal | its SHA-256 goes in `LEDGER_CALLERS` |
 | `LEDGER_SERVICE_TOKEN` (seo's) | `openssl rand -hex 32` | seo | its SHA-256 goes in `LEDGER_CALLERS` |
 | `DETECTION_LEDGER_TOKEN` | `openssl rand -hex 32` | detection | its SHA-256 goes in `LEDGER_CALLERS` (caller `detection-py`, department `rr_store`); becomes `DETECTION_LEDGER_TOKEN_FILE` |
+| `LEDGER_SERVICE_TOKEN` (compliance's) | `openssl rand -hex 32` | compliance | its SHA-256 goes in `LEDGER_CALLERS` (caller `compliance-py`, department `compliance`; ADR 0024) |
 | `LEDGER_CALLERS` | `devtools/ledger_callers.py` (below; hashes only, no token; **not Sealed**) | ledger | you: keep the file it writes (`~/zbm/ledger-callers.json`), your record of the value |
 | `FIN_SERVICE_TOKEN` | `openssl rand -hex 32` | finance | stripe-gateway `STRIPE_GATEWAY_FINANCE_TOKEN`, seo `SEO_FINANCE_TOKEN` (references) |
 | `FIN_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | finance | you (keep it in your password manager) |
@@ -196,6 +200,14 @@ be a different value: several services refuse to start when two of their tokens 
 | `SEO_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | seo | you |
 | `SEO_CALLER_TOKENS` | `{"dashboard": "<openssl rand -hex 32>"}` | seo | you (the `dashboard` caller is how your approvals reach seo) |
 | `SEO_LOG_HASH_KEY` | `openssl rand -hex 32` | seo | — (becomes `SEO_LOG_HASH_KEY_FILE`) |
+| `COMPLIANCE_SERVICE_TOKEN` | `openssl rand -hex 32` | compliance | finance `FIN_COMPLIANCE_TOKEN`, seo `SEO_COMPLIANCE_TOKEN`, detection `DETECTION_COMPLIANCE_TOKEN` (references), legal `LEGAL_COMPLIANCE_TOKEN` (interpolated); ADR 0024 |
+| `COMPLIANCE_ANDRE_APPROVAL_TOKEN` | `openssl rand -hex 32` | compliance | you (approving the register, recording OFAC searches, releasing holds) |
+| `COMPLIANCE_ONBOARDING_CALLER_TOKEN` | `openssl rand -hex 32` (different from the finance and legal onboarding tokens) | compliance | compliance `COMPLIANCE_CALLER_TOKENS` (`onboarding`, interpolated); you, as header `X-Compliance-Caller-Token` to run a client's activation |
+| `COMPLIANCE_LEGAL_CALLER_TOKEN` | `openssl rand -hex 32` | compliance | legal `LEGAL_CALLER_TOKENS` (`compliance_38`, interpolated) |
+| `FIN_COMPLIANCE_CALLER_TOKEN` | `openssl rand -hex 32` | finance | compliance `COMPLIANCE_CALLER_TOKENS` (`finance_31`, interpolated) |
+| `SEO_COMPLIANCE_CALLER_TOKEN` | `openssl rand -hex 32` | seo | compliance `COMPLIANCE_CALLER_TOKENS` (`seo_02`, interpolated) |
+| `DETECTION_COMPLIANCE_CALLER_TOKEN` | `openssl rand -hex 32` | detection | compliance `COMPLIANCE_CALLER_TOKENS` (`revenue_recovery`, interpolated); becomes `DETECTION_COMPLIANCE_CALLER_TOKEN_FILE` |
+| `LEGAL_COMPLIANCE_CALLER_TOKEN` | `openssl rand -hex 32` | legal | compliance `COMPLIANCE_CALLER_TOKENS` (`legal_37`, interpolated) |
 | `RR_STORE_CONNECTIONS` (only to connect a store) | the JSON in [Revenue Recovery: connecting a real store](#revenue-recovery-connecting-a-real-store) (references, no secret; setting it is your approval) | detection | — (becomes `RR_STORE_CONNECTIONS_FILE`) |
 | `RR_STORE_SECRET_1` (only to connect a store) | the store's Dev Dashboard app **Client ID** (or a legacy custom app's Admin API access token) | detection | — (becomes `/run/zbm-secrets/rr-store-secret-1-file`) |
 | `RR_STORE_SECRET_2` (only to connect a store) | the store's Dev Dashboard app **Client secret** (leave unset for a legacy token) | detection | — (becomes `/run/zbm-secrets/rr-store-secret-2-file`) |
@@ -228,13 +240,15 @@ Its table is the only place that sets what each caller may do:
 - legal-py writes `legal`;
 - seo-py writes `seo`;
 - detection-py writes `rr_store`, its store-read evidence (ADR 0020 section 7). It neither writes nor reads
-  `revenue_recovery` (the orchestrator's findings).
+  `revenue_recovery` (the orchestrator's findings);
+- compliance-py writes `compliance`, its rulings, register versions and log anchors (ADR 0024). Its control C-11
+  calls `GET /ledger/verify` (open to every caller) and reads `GET /ledger/entries` scoped to `compliance`.
 
 Each caller reads only its own department: no `read_departments`, no `read_all`. Every command prints one line per
 caller: its name, what it writes and what it reads. It never prints a token, and never a hash outside the value it
 writes.
 
-First time (step 5), after the five ledger tokens are set on their services:
+First time (step 5), after the six ledger tokens are set on their services:
 
 ```bash
 mkdir -p ~/zbm && chmod 700 ~/zbm
@@ -362,6 +376,7 @@ turn and paste this with that service's department as `D`:
 | legal | `legal` |
 | seo | `seo` |
 | detection | `rr_store` |
+| compliance | `compliance` |
 
 ```sh
 D=finance python3 - <<'PY'
@@ -509,6 +524,10 @@ otherwise. Examples are never real values.
 | `RR_STORE_KILL_SWITCH_FILE` | no | no | unset; set it to `/tmp/rr-store.KILL` | Revenue Recovery kill switch 2: a path; while a file exists there every sync stops (a running one at its next page) and held snapshots are not served, with no restart. Stop at once: `railway ssh` into detection, `touch /tmp/rr-store.KILL`. detection has no volume, so the file is gone after a restart or redeploy: use kill switch 1 for a stop that must survive one |
 | `RR_STORE_MAX_CONCURRENT_SYNCS` | no | no | `2` | store syncs at once across all clients, clamped 1..16 |
 | `RR_STORE_SYNC_DEADLINE_SECONDS` | no | no | `120` | hard deadline per sync, clamped 10..600 |
+| `DETECTION_COMPLIANCE_URL` | yes for store reads | no | `http://compliance.railway.internal:8380` (IaC) | ADR 0024: every sync and every snapshot handed to the scan path needs Compliance's current ALLOW for the client (`COMPLIANCE_NOT_ACTIVATED` 409 / `COMPLIANCE_UNAVAILABLE` 503, no store call made). Unset or unreadable token files: every client refused |
+| `DETECTION_COMPLIANCE_TOKEN` | yes for store reads | yes | ref `compliance.COMPLIANCE_SERVICE_TOKEN` (IaC) | becomes `DETECTION_COMPLIANCE_TOKEN_FILE`; read when detection starts |
+| `DETECTION_COMPLIANCE_CALLER_TOKEN` | yes for store reads | yes | (you) | detection's `revenue_recovery` caller token at Compliance; becomes `DETECTION_COMPLIANCE_CALLER_TOKEN_FILE` |
+| `DETECTION_COMPLIANCE_TOKEN_FILE`, `DETECTION_COMPLIANCE_CALLER_TOKEN_FILE` | — | — | (set by the entrypoint) | do not set yourself on Railway |
 
 ### orchestrator (orchestrator-go `cmd/orchestrator`)
 
@@ -558,6 +577,9 @@ Set by IaC or by you:
 | `FIN_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal. Without Legal no invoice can issue |
 | `FIN_LEGAL_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
 | `FIN_LEGAL_CALLER_TOKEN` | yes | yes | (you) | Finance's `finance_31` caller token at Legal |
+| `FIN_COMPLIANCE_URL` | yes | no | `http://compliance.railway.internal:8380` (IaC) | ADR 0024: invoice approval, billing readiness and every Stripe page need Compliance's current ALLOW for the client (`COMPLIANCE_NOT_ACTIVATED` / `DEPENDENCY_UNAVAILABLE:compliance_38`, rule FIN-08). Also the payout OFAC status and jurisdiction reads |
+| `FIN_COMPLIANCE_TOKEN` | yes | yes | ref `compliance.COMPLIANCE_SERVICE_TOKEN` (IaC) | |
+| `FIN_COMPLIANCE_CALLER_TOKEN` | yes | yes | (you) | Finance's `finance_31` caller token at Compliance |
 | `FIN_STRIPE_INCOMING` | yes | no | `1` (IaC) | Stripe client payments on; then the four settings below are required |
 | `FIN_STRIPE_LIVE` | yes | no | `0` (IaC) → `1` at go-live | `1` only with `sk_live_`/`rk_live_` keys |
 | `FIN_STRIPE_SECRET_KEY` | yes | yes | (you; Stripe) | becomes `FIN_STRIPE_SECRET_KEY_FILE` |
@@ -577,7 +599,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `FIN_RAIL_STRIPE`, `FIN_RAIL_TROLLEY`, `FIN_BANK_FEED`, `FIN_TAX_AGENT`, `FIN_VAULT`, `FIN_CN_URL`, `FIN_PEOPLE_URL`, `FIN_PUSH_URL`, `FIN_IDENTITY_HMAC_KEY` | unset | not built: setting any refuses to start |
 | `FIN_RAIL_REVERSAL_ENABLED`, `FIN_LATE_FEES` | unset | `1` refuses to start |
 | `FIN_REFUND_ADMIN_FEE_PCT`, `FIN_RESERVE_PCT` | `0` | must stay 0 |
-| `FIN_VI_URL` / `FIN_VI_TOKEN` / `FIN_VI_CALLER_TOKEN`, `FIN_COMPLIANCE_URL` / `FIN_COMPLIANCE_TOKEN` / `FIN_COMPLIANCE_CALLER_TOKEN` | unset | thin clients to services not deployed; all three or none |
+| `FIN_VI_URL` / `FIN_VI_TOKEN` / `FIN_VI_CALLER_TOKEN` | unset | thin client to a service not deployed; all three or none (the Compliance three are in the table above) |
 | `FIN_SECOND_APPROVER_TOKEN`, `FIN_DUAL_HUMAN_THRESHOLD` | unset, `0.00` | optional second approver for payout batches |
 | `FIN_RUN_WEEKDAY`, `FIN_RUN_LOCAL_TIME`, `FIN_RECON_LOCAL_TIME`, `FIN_CLOSE_WORKDAYS` | `FRI`, `10:00`, `07:00`, `5` | schedule |
 | `FIN_LIMIT_PAYEE_RUN`, `FIN_LIMIT_PAYEE_30D`, `FIN_LIMIT_FIRST_PAYOUT`, `FIN_LIMIT_BATCH_NET`, `FIN_LIMIT_BATCH_ITEMS` | `2500.00`, `10000.00`, `500.00`, `50000.00`, `500` | payout limits |
@@ -586,6 +608,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `FIN_PAYEE_CHANGE_COOLING_OFF_H`, `FIN_RELEASE_DELAY_H`, `FIN_APPROVAL_TTL_H` | `72`, `12`, `48` | hours |
 | `FIN_ACCESS_REVIEW_DAYS`, `FIN_OFAC_MAX_AGE_DAYS`, `FIN_CLAWBACK_WRITEOFF_MIN_DAYS`, `FIN_EVIDENCE_RETENTION_DAYS` | `90`, `1`, `180`, `2557` | days |
 | `FIN_MAX_RATE_PER_1000`, `FIN_MAX_CERTIFIED_VIEWS`, `FIN_WITHHOLDING_BASIS` | `1000.00`, 10^12, `gross` | |
+| `FIN_MAX_INVOICE_TOTAL` | `250000.00` | the largest invoice Finance drafts (RTM-09) |
 | `FIN_MEDIA_DEFAULT_MARKUP_PCT`, `FIN_MEDIA_MAX_MARKUP_PCT`, `FIN_MEDIA_RELEASE_HOLD_BD` | `15.00`, `100.00`, `2` | media buys |
 | `FIN_CARD_PREPAYMENTS`, `FIN_CARD_MAX_INVOICE` | off, `5000.00` | card rule (founder M10) |
 | `FIN_SEED_PATH`, `FIN_SEED_SHA256`, `FIN_ALLOW_UNPINNED_SEED` | the image's pinned seed, unset, unset | an unpinned seed is non-production only |
@@ -605,9 +628,11 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | legal's own ledger caller token |
 | `LEGAL_SERVICE_TOKEN` | yes | yes | (you) | |
 | `LEGAL_ANDRE_APPROVAL_TOKEN` | yes for anything to be approved | yes | (you) | |
-| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding` | `onboarding` is your operator-held token (Secrets) |
+| `LEGAL_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `finance_31`, `onboarding`, `compliance_38` | `onboarding` is your operator-held token (Secrets); `compliance_38` reads a client's acceptances (ADR 0024, HR-15) |
 | `LEGAL_ONBOARDING_CALLER_TOKEN` | yes to record acceptances | yes | (you) | the `onboarding` caller token you hold; ≥ 32 printable characters |
-| `LEGAL_COMPLIANCE_URL` / `LEGAL_COMPLIANCE_TOKEN` / `LEGAL_COMPLIANCE_CALLER_TOKEN` | no | — | unset | Compliance is not deployed: the stand-in (proposals stay `pending_delivery`) |
+| `LEGAL_COMPLIANCE_URL` | yes | no | `http://compliance.railway.internal:8380` (IaC) | ADR 0024: counsel-memo register proposals are delivered to Compliance's inbox |
+| `LEGAL_COMPLIANCE_TOKEN` | yes | yes | interpolated `${{compliance.COMPLIANCE_SERVICE_TOKEN}}` (IaC) | an unresolved reference refuses the start |
+| `LEGAL_COMPLIANCE_CALLER_TOKEN` | yes | yes | (you) | Legal's `legal_37` caller token at Compliance |
 | `LEGAL_COUNSEL_CHANNEL`, `LEGAL_ESIGN_PROVIDER` | no | — | unset | not built: setting either refuses to start |
 | `LEGAL_PORTAL_FAQ` | no | no | `0` | `1` refuses to start |
 | `LEGAL_AGENT_MAX_FALLBACK`, `LEGAL_DISPUTE_THRESHOLD`, `LEGAL_MEMO_REVIEW_DAYS`, `LEGAL_HOLD_RENOTICE_DAYS`, `LEGAL_FILING_ALERT_DAYS`, `LEGAL_ESIGN_CONSENT_REQUIRED`, `LEGAL_BUSINESS_TZ` | no | no | `1`, `5000.00`, `90`, `90`, `60`, `1`, `America/Los_Angeles` | services/legal-py/README.md |
@@ -635,6 +660,9 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_FINANCE_URL` | yes | no | `http://finance.railway.internal:8410` (IaC) | → finance (invoice status) |
 | `SEO_FINANCE_TOKEN` | yes | yes | ref `finance.FIN_SERVICE_TOKEN` (IaC) | |
 | `SEO_FINANCE_CALLER_TOKEN` | yes | yes | (you) | seo's `seo_02` caller token at Finance |
+| `SEO_COMPLIANCE_URL` | yes | no | `http://compliance.railway.internal:8380` (IaC) | ADR 0024: a client tenant's paid audit, every scheduled slot and every client report need Compliance's current ALLOW for the tenant's client (`finance_client_id`); no override. Unset: every client run refused `COMPLIANCE_NOT_CONFIGURED` |
+| `SEO_COMPLIANCE_TOKEN` | yes | yes | ref `compliance.COMPLIANCE_SERVICE_TOKEN` (IaC) | |
+| `SEO_COMPLIANCE_CALLER_TOKEN` | yes | yes | (you) | seo's `seo_02` caller token at Compliance |
 | `SEO_INVOICE_VERIFICATION` | no | no | `finance` | `trust` skips the invoice check (not for production) |
 | `SEO_NON_PRODUCTION` | no | no | `0` | `1` = in-memory, tests only |
 | `SEO_KILL_GLOBAL`, `SEO_KILLED_CAPABILITIES`, `SEO_KILLED_PROVIDERS` | no | no | `0`, empty, empty | kill switches at start (sticky) |
@@ -656,6 +684,36 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | no | no | `Z Best Media`, `#1f4e79` | white label of the client report (preparer name, `#RRGGBB` accent); a bad value refuses start |
 | `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`, `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL` | no | — | unset | not built (`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`: renamed): setting any refuses to start |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | no | no | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
+
+### compliance (compliance-py)
+
+ADR 0024. Private: no public domain. Settings not in this table must stay unset (the service refuses to start on
+them, services/compliance-py/README.md).
+
+| Variable | Required | Secret | Value / example | Notes |
+|---|---|---|---|---|
+| `PORT` | yes | no | `8380` (IaC) | copied to `COMPLIANCE_PORT` |
+| `COMPLIANCE_PORT` | — | no | (from `PORT`) | |
+| `COMPLIANCE_BIND_ADDR` | yes | no | `::` (IaC) | default `127.0.0.1` |
+| `COMPLIANCE_DATA_DIR` | yes | no | `/data/compliance` (IaC; image default) | the local log; unset = in memory (nothing in force after a restart) |
+| `RAILWAY_RUN_UID` | yes | no | `0` (IaC) | |
+| `LEDGER_SERVICE_URL` | yes | no | `http://ledger.railway.internal:8090` (IaC) | → ledger; at start the local log is verified against it |
+| `LEDGER_SERVICE_TOKEN` | yes | yes | (you) | compliance's own ledger caller token (`compliance-py` in `LEDGER_CALLERS`) |
+| `COMPLIANCE_SERVICE_TOKEN` | yes | yes | (you) | refuses to start without it |
+| `COMPLIANCE_ANDRE_APPROVAL_TOKEN` | yes for any approval | yes | (you) | header `X-Andre-Approval-Token` |
+| `COMPLIANCE_CALLER_TOKENS` | yes | yes | interpolated map (IaC): `onboarding`, `finance_31`, `legal_37`, `seo_02`, `revenue_recovery` | every referenced token must be set first: an empty or unresolved one refuses the start. No `scheduler` caller exists (the scheduler is in process) |
+| `COMPLIANCE_ONBOARDING_CALLER_TOKEN` | yes to activate clients | yes | (you) | the `onboarding` caller token you hold |
+| `COMPLIANCE_LEGAL_URL` | yes | no | `http://legal.railway.internal:8420` (IaC) | → legal: a client's documents are current and accepted (HR-15) |
+| `COMPLIANCE_LEGAL_TOKEN` | yes | yes | ref `legal.LEGAL_SERVICE_TOKEN` (IaC) | |
+| `COMPLIANCE_LEGAL_CALLER_TOKEN` | yes | yes | (you) | Compliance's `compliance_38` caller token at Legal. The three are set together or not at all (unset: every client activation refused) |
+| `COMPLIANCE_SCHEDULER_ENABLED` | yes | no | `1` (IaC) | the in-process scheduler: internal controls at start and every interval, the Change Watcher every 24 h |
+| `COMPLIANCE_SCHEDULER_INTERVAL_SECONDS` | no | no | `21600` | 300..86400; keep it well under C-11's 24 h SLA |
+| `COMPLIANCE_WATCHER_ENABLED` | yes | no | `1` (IaC) | the Change Watcher fetches the allowlisted government and platform pages and drafts proposals for you; it never changes the register |
+| `COMPLIANCE_SANCTIONS_FRESHNESS_DAYS`, `COMPLIANCE_DISCLOSURE_MAX_OFFSET_S`, `COMPLIANCE_A11Y_MAX_AGE_DAYS`, `COMPLIANCE_SITE_OWNER_CALLER`, `COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_CYCLE`, `COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE` | no | no | `1`, `3`, `30`, `creative_production`, `50`, `20` | services/compliance-py/README.md |
+| `COMPLIANCE_SANCTIONS_PROVIDER`, `COMPLIANCE_A11Y_PROVIDER`, `COMPLIANCE_AUTO_REVERIFY_UNCHANGED`, `COMPLIANCE_WAYBACK_CAPTURE` | no | — | unset | not built: setting any refuses to start |
+| `COMPLIANCE_SEED_PATH`, `COMPLIANCE_SEED_SHA256`, `COMPLIANCE_ALLOW_UNPINNED_SEED` | no | no | the image's pinned seed, unset, unset | an unpinned seed is non-production (every caller refuses its answers) |
+| `COMPLIANCE_RECONCILE_MODE` | no | no | unset | `1` only while reconciling after a refused start (compliance README) |
+| `COMPLIANCE_REQUEST_HEAD_TIMEOUT_SECONDS`, `COMPLIANCE_KEEP_ALIVE_TIMEOUT_SECONDS`, `COMPLIANCE_LIMIT_CONCURRENCY`, `COMPLIANCE_SWITCH_INTERVAL_SECONDS`, `COMPLIANCE_DRAINS_MAX` | no | no | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |
 
 ### dashboard (apps/dashboard-ts, on Vercel)
 
@@ -695,14 +753,14 @@ Do these in order. Nothing in the repository creates anything; each step is your
 
    ```bash
    cd .railway && npm ci && cd ..
-   railway config plan      # read it: 7 services, 4 volumes, every variable; secrets show as preserved
+   railway config plan      # read it: 8 services, 5 volumes, every variable; secrets show as preserved
    railway config apply     # creates the services and volumes; asks before anything destructive
    ```
    Services whose secrets are not set yet will fail their first deploy — expected, step 5 fixes it. If `plan` refuses
    because a preserved variable has no value yet (behaviour not documented by Railway; see Open items), stop there and
    bring the exact message back.
 5. **Secrets.** Generate each value from [Secrets](#secrets) on your machine and set it in the Railway dashboard on the
-   service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the five ledger tokens first, then
+   service in the "Set on" column (Variables tab → New Variable → mark Sealed). Do the six ledger tokens first, then
    `LEDGER_CALLERS` on the ledger with `devtools/ledger_callers.py new` (keep the file it writes; **not** Sealed: it
    holds hashes only). When Railway offers to deploy the changes, wait until step 8.
 6. **Public domains.** orchestrator → Settings → Networking → Generate Domain (port 8080). stripe-gateway → Generate
@@ -718,10 +776,10 @@ Do these in order. Nothing in the repository creates anything; each step is your
    - copy the endpoint's signing secret (`whsec_...`) into `FIN_STRIPE_WEBHOOK_SECRET` on finance.
 8. **Deploy, ledger first.** Deploy `ledger`; wait until it is Active and its log shows
    `ledger-rust: EVENT {"event":"ledger_created",...}` and `listening on [::]:8090`, and does **not** show the
-   `LEDGER_CALLERS_FILE is not set` warning. Then deploy `detection` and `legal`; then `finance`; then `orchestrator`,
+   `LEDGER_CALLERS_FILE is not set` warning. Then deploy `legal`; then `compliance`; then `detection`; then `finance`; then `orchestrator`,
    `stripe-gateway` and `seo`. A department that crashed because the ledger was not up yet: Redeploy it.
-9. **Volume backups.** The IaC declares a daily backup schedule for `ledger-data`, `finance-data`, `legal-data` and
-   `seo-data` (`backupSchedules: ["DAILY"]` on each service's volume attachment, the SDK field; AEGIS L6). Check that
+9. **Volume backups.** The IaC declares a daily backup schedule for `ledger-data`, `finance-data`, `legal-data`,
+   `seo-data` and `compliance-data` (`backupSchedules: ["DAILY"]` on each service's volume attachment, the SDK field; AEGIS L6). Check that
    `railway config plan` shows the schedule and that each volume → Backups shows Daily after the apply; if the plan
    does not carry it (the engine that applies it is in the Railway CLI, not the SDK, and has not been run against
    this file), enable daily backups there by hand. Restoring a backup later makes the ledger refuse to start until
@@ -739,6 +797,426 @@ Do these in order. Nothing in the repository creates anything; each step is your
 
 Operating the private services (your approval routes on finance, legal and seo) goes through `railway ssh` into that
 service and a request to `127.0.0.1:<port>` from inside it; there is deliberately no public route to them.
+
+### Compliance (38): the hard gate (ADR 0024)
+
+From the day this is applied, Compliance decides whether a client may be served. Finance refuses to approve an
+invoice, report billing readiness or make a Stripe page, seo refuses a client's paid audit, scheduled slot or client
+report, and detection refuses to read a client's store, unless Compliance answers a **current ALLOW** for that client.
+ALLOW needs: the client in the service area (the 50 states, DC, Puerto Rico, Guam, the US Virgin Islands, American
+Samoa, the Northern Mariana Islands), your recorded OFAC search (no
+match, at most 30 days old at activation, 90 days of validity), the client's MSA current and accepted at Legal, every
+rule it ran through still verified and unchanged, and control C-11 green. The service area is re-checked on every
+read: change HR-05 or HR-07 and a client outside the new area is refused at once. When a client turns REFUSE (an OFAC
+hit, an area change, a lapsed search) Finance closes its open Stripe pages (at the next checkout request, and in the
+hourly `stripe-sessions` job). Compliance has no public domain.
+
+**A. Tokens.** Generate each on your machine with `openssl rand -hex 32` and set it, Sealed, on the service named
+([Secrets](#secrets)). All nine before step C: Compliance refuses to start while any token its caller map references
+is missing.
+
+| Variable | Set on |
+|---|---|
+| `COMPLIANCE_SERVICE_TOKEN` | compliance |
+| `COMPLIANCE_ANDRE_APPROVAL_TOKEN` | compliance (keep a copy in your password manager) |
+| `COMPLIANCE_ONBOARDING_CALLER_TOKEN` | compliance (keep a copy: you activate clients with it) |
+| `COMPLIANCE_LEGAL_CALLER_TOKEN` | compliance |
+| `LEDGER_SERVICE_TOKEN` | compliance (compliance's own ledger caller) |
+| `FIN_COMPLIANCE_CALLER_TOKEN` | finance |
+| `SEO_COMPLIANCE_CALLER_TOKEN` | seo |
+| `DETECTION_COMPLIANCE_CALLER_TOKEN` | detection |
+| `LEGAL_COMPLIANCE_CALLER_TOKEN` | legal |
+
+The service variables `compliance`, `compliance-data` and these tokens only exist after step C's apply: if Railway has
+no `compliance` service yet when you start, do step C's `plan`/`apply` first, then set the five compliance tokens
+before its first deploy (it fails to start without them; that is expected and harmless).
+
+**B. Ledger caller.** Add `compliance-py` to `LEDGER_CALLERS` with the procedure in
+[Changing `LEDGER_CALLERS`](#changing-ledger_callers-adding-a-caller-rotating-one-token) (copy the deployed value
+first; the script asks only for compliance's `LEDGER_SERVICE_TOKEN`):
+
+```bash
+python3 devtools/ledger_callers.py compare --current ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json
+python3 devtools/ledger_callers.py add compliance-py --current ~/zbm/ledger-callers.json --deployed ~/zbm/ledger-callers.deployed.json --out ~/zbm/ledger-callers.next.json
+```
+
+**C. Plan, check 0 destroy, apply.**
+
+```bash
+git switch main && git pull                      # the merged commit; .railway/railway.ts deploys main
+cd .railway && npm ci && cd ..
+railway config plan 2>&1 | tee ~/zbm/plan-compliance.txt
+grep -inE "destroy|delete|remove|destructive" ~/zbm/plan-compliance.txt
+```
+
+Read the plan. It must show exactly: one service created (`compliance`), one volume created (`compliance-data`, region
+`us-west2`, 5000 MB, daily backups), variables **added** on finance, seo, detection and legal (`*_COMPLIANCE_*`), and
+`LEGAL_CALLER_TOKENS` changed (it gains `compliance_38`). The `grep` must print nothing, or only `0 destructive`. Any
+destroy, delete or a change to an existing volume: **stop** and bring the plan back. Then:
+
+```bash
+railway config apply
+```
+
+**D. Deploy order.** The order that matters for Legal: after `railway config apply` (step C) Legal's
+`LEGAL_CALLER_TOKENS` names `compliance_38`, whose `COMPLIANCE_LEGAL_CALLER_TOKEN` exists only once the apply created
+the `compliance` service. Legal starts anyway (the entry is optional: its log warns that compliance_38 is not set
+yet, the route only Compliance calls answers 503, and its `/health` says `"status": "warning"` with
+`optional_caller_unset:compliance_38` until the token is set), so:
+
+1. `railway config apply` (step C);
+2. set `COMPLIANCE_LEGAL_CALLER_TOKEN` (and the other compliance tokens of step A) on compliance;
+3. redeploy legal (it now resolves the reference; the warning is gone and `/health` says `"ok"`);
+4. redeploy compliance.
+
+Then: ledger (with the new `LEDGER_CALLERS`, before compliance's first start), detection, seo, then finance. seo must run this version **before or together with** finance: this finance adds `held` to the invoice
+status seo reads, and an older seo refuses any field it does not know (`FINANCE_RESPONSE_INVALID` on every paid run:
+safe, but an outage until seo is updated). compliance's log prints its readiness at start (`compliance readiness ...`, `register not in force` until step
+E) and `compliance scheduler: controls every 21600 s; Change Watcher every 24 h`.
+
+**E. Approve the register (seed v2).** Read ADR 0024, decision 1 (what changed from v1), then open a tunnel and
+approve. Get compliance's **service instance ID** as for seo (Ctrl+K / Cmd+K → Copy Service Instance ID).
+
+```sh
+ssh -N -L 127.0.0.1:18380:127.0.0.1:8380 <compliance-service-instance-id>@ssh.railway.com     # terminal 1, leave open
+```
+
+```sh
+# terminal 2: header files only you can read (printf is a shell builtin: the token is never on a command line)
+umask 077 && mkdir -p ~/.zbm-cmp && cd ~/.zbm-cmp
+read -rs T && printf 'Authorization: Bearer %s\n' "$T" > auth.hdr && unset T            # paste COMPLIANCE_SERVICE_TOKEN
+read -rs T && printf 'X-Compliance-Caller-Token: %s\n' "$T" > caller.hdr && unset T     # paste COMPLIANCE_ONBOARDING_CALLER_TOKEN
+read -rs T && printf 'X-Andre-Approval-Token: %s\n' "$T" > andre.hdr && unset T         # paste COMPLIANCE_ANDRE_APPROVAL_TOKEN
+C=http://127.0.0.1:18380
+curl -sS $C/health
+curl -sS -H @auth.hdr -H @caller.hdr $C/compliance/v1/inbox > inbox.json
+python3 -c 'import json; p=[x for x in json.load(open("inbox.json")) if x["kind"]=="seed"][0]; print(p["proposal_id"], p["content_sha256"], len(p["proposed_rows"]))'
+```
+
+It must print one proposal with `121` rows. Approve it (one decision):
+
+```sh
+python3 -c 'import json,uuid; p=[x for x in json.load(open("inbox.json")) if x["kind"]=="seed"][0]; print(json.dumps({"request_id": "seed-"+uuid.uuid4().hex[:12], "decisions": [{"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"], "decision": "approve"}]}))' > decide.json
+curl -sS -H @auth.hdr -H @andre.hdr -H 'Content-Type: application/json' --data @decide.json $C/compliance/v1/register/decisions
+curl -sS $C/health                                             # register_version_in_force: 1, seed_pinned: true
+```
+
+`/health` also shows `scheduler`: `alive: true` and `last_controls_ok_at` (the start's run).
+
+- If the scheduler thread itself dies, compliance logs `compliance scheduler: scheduler thread stopped unexpectedly`
+  and exits with code 1; Railway restarts it by itself (ON_FAILURE, at most 10 times). A run of restarts in the
+  deployment's history means look at that log line.
+- If the controls keep failing (most often the ledger is down), compliance does **not** restart: `/health` answers
+  **503** after 12 h without a successful controls run, and after 24 h C-11 closes every gate. Look at compliance's
+  log (`compliance scheduler: controls run failed`, with the error type), fix the cause (usually: get the ledger
+  Active again); the next 60 s tick runs the controls. Redeploying compliance does not help while the cause is there.
+
+Railway checks `/health` only while a deployment starts, and compliance has no public domain, so an outside uptime
+monitor cannot reach it directly. Set up a **private check with a heartbeat** (once, about 20 minutes):
+
+1. At an uptime service that offers heartbeat (dead-man) monitors (for example Better Stack or Healthchecks.io), make a
+   heartbeat monitor with a 15-minute period and a 15-minute grace, alerting your phone/email. Copy its ping URL
+   (treat it as a secret).
+2. In the Railway project, add a service from the public `curlimages/curl` image (pin its digest), no domain, no volume,
+   with a cron schedule `*/10 * * * *` and the start command
+
+   ```sh
+   sh -c 'curl -fsS --max-time 10 http://compliance.railway.internal:8380/health >/dev/null && curl -fsS --max-time 10 http://finance.railway.internal:8410/health | grep -Eq "\"compliance_holds_open\":0[,}]" && curl -fsS --max-time 10 http://legal.railway.internal:8420/health | grep -Eq "\"status\": ?\"ok\"" && curl -fsS --max-time 10 "$HEARTBEAT_URL" >/dev/null'
+   ```
+
+   and a Sealed variable `HEARTBEAT_URL` (the ping URL). It reaches compliance and finance over the private network
+   (`/health` needs no token) and pings the monitor only while compliance's `/health` answers 200 **and** finance has
+   no payment held by Compliance (`compliance_holds_open` is 0: held invoices, held unapplied money and open founder
+   alerts), and legal's `/health` says `"status": "ok"` (it is `degraded` while a log line the replay did not apply is
+   unacknowledged: review it with `GET /legal/v1/replay-quarantine` and acknowledge it with `POST
+   /legal/v1/replay-quarantine/acknowledgements`, your token; it is `warning` while `COMPLIANCE_LEGAL_CALLER_TOKEN` is
+   unset: finish step D). A 503, a dead or unreachable service, an open hold, or
+   the check itself failing all stop the pings, and the monitor alerts you. An alert therefore means one of two
+   things: look at compliance's `/health`, then at finance's `/fin/v1/breaks` (step G, "A payment Compliance holds").
+3. This service is not in `.railway/railway.ts`; add it there in a later change (the plan must then show it as already
+   existing, not created twice), or leave it as the one hand-made service and note it in your Railway checklist.
+
+Until it exists, and as a fallback when it does: **every day**, through the tunnels, check compliance's `/health` and
+finance's `compliance_holds_open` (`curl -sS http://127.0.0.1:18410/health`). A hold grounded in sanctions has a
+10-business-day OFAC reporting deadline, so a hold must not wait for a weekly look.
+
+```sh
+```
+
+**F. Readiness.** C-11 passed at start (the scheduler's first run); check that nothing closes the gates:
+
+```sh
+curl -sS -H @auth.hdr -H @caller.hdr $C/compliance/v1/readiness | python3 -m json.tool
+```
+
+`gate_blockers` must be `[]` and `us_web_client_activation.blocking_now` `[]`. A `control_red:C-11` blocker: redeploy
+compliance (the scheduler runs the controls at start) and look again. `expired` lists the rules already expired and the
+gates each one affects (on Oct 30: the ten platform rows; none blocks a US web client).
+
+**G. Activate a client** (about 10 minutes per client). The client id is the one you use at Finance and Legal.
+
+1. OFAC search: open https://sanctionssearch.ofac.treas.gov/, search the client's exact legal name with the SDN and
+   the Consolidated (non-SDN) lists both selected, and save the result page (or its export) as a file. Note the list
+   date the page shows. Any hit: stop, do not serve the client, do not look for a way around it. Keep the saved file
+   (your evidence folder, named after the client and the date): the record stores only its SHA-256, so the file is what
+   proves the search later.
+2. Record it (the name is stored only as a hash):
+
+   ```sh
+   CLIENT=<client id>
+   EVIDENCE_SHA=$(shasum -a 256 <saved result file> | cut -d' ' -f1)
+   read -r NAME && NAME_SHA=$(printf '%s' "$NAME" | shasum -a 256 | cut -d' ' -f1) && unset NAME   # type the legal name
+   cat > att.json <<JSON
+   {"request_id": "att-$CLIENT-$(date +%s)", "subject_id": "$CLIENT", "lane": "client",
+    "searched_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "list_version": "<list date shown on the page>",
+    "lists": ["SDN", "Consolidated"], "tool": "ofac_sanctions_list_search", "result": "no_match",
+    "evidence_sha256": "$EVIDENCE_SHA", "searched_name_sha256": "$NAME_SHA"}
+   JSON
+   curl -sS -H @auth.hdr -H @andre.hdr -H 'Content-Type: application/json' --data @att.json $C/compliance/v1/sanctions/attestations
+   ```
+
+   Keep the `attestation_id` it prints.
+3. The client's MSA acceptance at Legal (the acceptance you record today with `LEGAL_ONBOARDING_CALLER_TOKEN`): note
+   its `acceptance_id`, the `version` and the document's `doc_sha256`. The onboarding token records a standard form's
+   acceptance only with an invitation you issued for that client first (`POST /legal/v1/acceptance-invitations` with
+   your Legal approval token and `{"request_id", "doc_id", "version", "party_ref": "client:<client id>"}`, valid 14
+   days); the acceptance names its `invitation_id`, otherwise Legal answers `ACCEPTANCE_NOT_INVITED` (RTM-13).
+4. Run the activation (edit the values in `<...>`; the state is the client's ISO 3166-2 code: `US-CA`, `US-NY`;
+   a territory `PR`, `GU`, `VI`, `AS` or `MP`; set a flag `true` only if it is true of the client):
+
+   ```sh
+   cat > rule.json <<JSON
+   {"request_id": "act-$CLIENT-$(date +%s)", "subject_id": "$CLIENT", "lane": "client", "facts": {
+     "jurisdiction": {"declared_country": "US", "declared_region": "<US-CA>", "attested": true,
+                      "attestation_ref": "<the MSA acceptance id: the client stated its address there>"},
+     "flags": {"political_content": false, "child_directed": false, "health_data_shared": false,
+               "biz_opp_client": false, "audience_data_sale": false, "marketplace": false, "pooled_client_funds": false},
+     "target_jurisdictions": ["US"], "platforms": ["web"], "client_category": "general",
+     "claims": {"claims_present": false, "health_or_earnings_claim": false, "claim_file_id": null,
+                "claim_file_approved": false},
+     "services_include_review_suppression": false, "outbound_cold_contact_countries": [], "hbnr_clause_signed": false,
+     "sanctions_attestation_id": "<attestation_id>",
+     "legal_documents": [{"doc_id": "client_msa", "version": "<1.0>", "doc_sha256": "<sha>",
+                          "acceptance_id": "<lg-acc-...>"}]}}
+   JSON
+   curl -sS -H @auth.hdr -H @caller.hdr -H 'Content-Type: application/json' --data @rule.json $C/compliance/v1/rule
+   curl -sS -H @auth.hdr -H @andre.hdr $C/compliance/v1/clients/$CLIENT/activation
+   ```
+
+   Read the status with your Andre header (`andre.hdr`): it shows the reasons. With the onboarding token a refusal
+   reads only "the client is not activated (the reasons go to Andre)" (AEGIS r9 R9-4).
+
+   For a territory use `"declared_country": "PR"` (or `"GU"`, `"VI"`, `"AS"`, `"MP"`), `"declared_region": null` and
+   `"target_jurisdictions": ["PR"]` (the same code). `allowed: false` lists every unmet item with the rule it cites; fix it and run
+   the rule again with a new `request_id`. The status must say `"decision": "ALLOW"`. Only then: invoice it at
+   Finance, run its SEO audit, or connect its store. Re-run the search and the activation every 90 days
+   (`valid_until`), after you approve an amendment of a rule the client ran through (the status says `<rule> changed
+   since the ruling: re-activate`), and when Legal publishes a new MSA version that must bind existing clients (the
+   documents are checked at activation, not on every read). A ZBC brand needs its own search with `"lane":
+   "zbc_brand"`: a search recorded for one lane does not count for the other.
+
+   **Which register changes force re-activating clients.** Approving an amendment of HR-05 or HR-07 other than their
+   `parameters`, or any amendment of HR-03, HR-08, HR-14, HR-15, US-FTC-465-07 or US-OFAC-04 (parameters included;
+   a re-verification is not an amendment), or a new rule on the activation gate, turns **every** client to REFUSE until each is re-activated (a new OFAC search
+   first for any client whose last one is over 30 days old); the hourly job then closes their open Stripe pages.
+   Changing only the service area (HR-05 `operate`, HR-07 `refuse`) refuses exactly the clients it takes out: adding a
+   state or territory refuses nobody. Plan such an amendment for a day you can re-activate every client.
+   A checkout request repeated with the same `request_id` after a client is re-activated returns its earlier answer
+   (a page now expired); use a new `request_id` for a new page.
+
+   **A payment Compliance holds.** When a client's payment is booked (a Stripe payment, a wire or ACH line from the
+   bank feed, your application of an unapplied receipt, a ZBC campaign deposit), Finance asks Compliance first. If the
+   answer is REFUSE, or Compliance cannot be reached, Finance still books the payment (the money arrived) but holds it:
+   the
+   invoice carries `held_compliance` (`kind` `refused` or `unverified`, and `sanctions` true or false), no receipt goes
+   to the client, no media vendor is paid for it, the invoice status seo reads says `held: true` (seo refuses the run
+   with `INVOICE_HELD`), and a break opens for you (`compliance_hold` or `compliance_unverified`). These breaks do not
+   turn FC-02 red (they hold this client's money only); the private heartbeat check above alerts on them. No new
+   checkout page is made on an invoice that carries a hold. Make a header file for your Finance approval token, as in
+   step E (`read -rs T && printf 'X-Andre-Approval-Token: %s\n' "$T" > fin-andre.hdr && unset T`, paste
+   `FIN_ANDRE_APPROVAL_TOKEN`), and read the holds through the finance tunnel of step I with it (other tokens see only
+   that a payment is held, never whether it is a sanctions hold, including in the audit export and evidence and in
+   the reasons of a refused checkout or billing readiness, which say only "compliance hold"): `curl -sS -H @fin-auth.hdr -H @fin-andre.hdr
+   http://127.0.0.1:18410/fin/v1/breaks`. The hourly job asks Compliance again about every held client and marks a hold
+   `sanctions: true` as soon as Compliance says the refusal rests on sanctions; a hold never loses that mark (its
+   summary counts every change as `holds_changed`). While any of the client's invoices is held, or Compliance does not
+   ALLOW the client, Finance also refuses every payment out for that client: a media vendor payment and a campaign
+   deposit refund (proposal, your approval and its payment); your approval shows an OFAC warning on a sanctions
+   ground. A held ZBC deposit does not fund its campaign until the hold is released on a current ALLOW. If a held
+   payment is refunded at Stripe anyway, Finance books the refund as it happened, keeps the hold, and marks the
+   hold's break (high severity and an OFAC note on a sanctions ground: report it and contact Stripe at once).
+
+   **Read the hold's live ground** (your token only) at any time, and always immediately before you refund anything
+   at Stripe:
+
+   ```sh
+   curl -sS -H @fin-auth.hdr -H @fin-andre.hdr http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold
+   ```
+
+   It shows the stored `sanctions_ground`, Compliance's answer now (`compliance_now`), the merged `ground_now`, and
+   `rejected_return_possible` (true only for a `place` Compliance confirms now). What to do depends on why it is
+   held:
+
+   - **`sanctions: true` (an OFAC match or potential match, or a place or campaign target under OFAC comprehensive
+     sanctions). Do not refund, return or move the money: it is blocked unless OFAC tells you otherwise in
+     writing.** Finance refuses a refund release and an ALLOW release for it; a refund made at Stripe is booked
+     truthfully but releases nothing by itself. You run these steps yourself. Primary sources: 31 CFR 501.603
+     (https://www.law.cornell.edu/cfr/text/31/501.603) and 501.604; OFAC's FAQs on blocking and rejecting
+     (https://ofac.treasury.gov/faqs/topic/1601: FAQs 32, 35, 36, 53) and on reporting
+     (https://ofac.treasury.gov/faqs/topic/1606: FAQs 49, 50, 1196).
+     - **The default is BLOCKED, for every sanctions hold.** Never refund or return a sanctions hold on your own
+       judgement. Finance shows the hold's `sanctions_ground` (Andre's token): `match` (an OFAC list match on the
+       client) or `place` (the client's place or a campaign target is comprehensively sanctioned, with no match).
+       - A `match` is always blocked. Finance refuses any return for it.
+       - A `place` is blocked too unless OFAC tells you in writing that the funds are to be rejected. OFAC's general
+         rule (FAQs 35, 36, 53) is that property a blocked person has an interest in is blocked, and a transaction
+         that is prohibited with no blocked interest is rejected; but **each program's own regulations decide**. For
+         example, under the Cuban Assets Control Regulations, dealings in any property in which Cuba or a Cuban
+         national has an interest are prohibited (31 CFR 515.201, https://www.law.cornell.edu/cfr/text/31/515.201)
+         and such blocked funds are held in an interest-bearing account at a domestic bank (31 CFR 515.205,
+         https://www.law.cornell.edu/cfr/text/31/515.205): Cuba-related money is blocked, not returned. For any other
+         program, read its regulations on ofac.treasury.gov and check with OFAC.
+       - **Before any money moves, contact OFAC** (https://ofac.treasury.gov/contact-ofac) with the facts and ask in
+         writing whether to block or reject. Keep their written answer. Without it, the payment stays blocked.
+     - **Blocked.** The money stays frozen. FAQ 32 says blocked funds are held in a separate interest-earning account;
+       31 CFR 501.603 lists "a blocked, interest-bearing account" as the usual place, and each program's regulation
+       sets the rule (for example 31 CFR 515.205 above, or 31 CFR 510.203 for North Korea:
+       https://www.law.cornell.edu/cfr/text/31/510.203). Ask your bank to open such a blocked account and move the
+       funds there only as that regulation and OFAC direct. File a report of blocked property through the OFAC
+       Reporting System (ORS) **within 10 business days** (501.603(b)(1)), and every year you still hold it on
+       **June 30**, the Annual Report of Blocked Property by **September 30** (501.603(b)(2); form TD F 90-22.50
+       through ORS, FAQ 50). The hold leaves only with one OFAC document, kept in your evidence folder, released with
+       basis `ofac_authorization`, its SHA-256 and its kind:
+       - `license`: a specific license or other written authorization from OFAC;
+       - `unblocking_report`: the match was a **false positive** (mistaken identity): per FAQ 1196 you may unblock it
+         and file an unblocking report within 10 business days (501.603(b)(3)), citing FAQ 1196 as the authorization.
+         For error cases only: a payment correctly blocked needs a license;
+       - `compliance_release`: OFAC's Compliance Release under 31 CFR 501.806 (mistaken identity or a similar error);
+       - `delisting`: OFAC removed the person from the SDN List; no license is needed to unblock (FAQ 1196). Keep
+         OFAC's notice of the removal.
+     - **Rejected (only a `place` hold, only with OFAC's written guidance).** If OFAC has told you in writing that the
+       payment is to be rejected, it is returned to the sender (FAQ 36: "rejected and returned to the originator").
+       **Immediately before refunding**, read the hold's live ground (above): refund only if
+       `rejected_return_possible` is `true`; if `compliance_now` is unavailable or `ground_now` is `match`, stop: the
+       payment is blocked. Refund it to the client in the Stripe Dashboard, file a report of the rejected transaction
+       through ORS **within 10 business days** (501.604), keep the ORS confirmation, and release with basis
+       `ofac_rejected_return`: the refund's `F7r` journal entry, kind `rejected_transaction_report`, the
+       confirmation's SHA-256, and `ofac_guidance_sha256`, the SHA-256 of OFAC's written guidance. Finance refuses it
+       for a `match`, without the guidance hash, or unless the refund is this very payment's, booked after it,
+       covering it; it asks Compliance again at release and refuses (and marks the hold `match`) if the refusal now
+       rests on a match, or if Compliance cannot answer.
+     - **Stripe.** Stripe screens too and may block, hold or report the same payment on its side. Contact Stripe
+       support, tell them what you found and what you decided, and coordinate so neither side moves the money in a
+       way the other did not expect.
+
+     ```sh
+     # blocked, leaving with an OFAC document
+     curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
+       --data "{\"request_id\": \"rel-<invoice>-1\", \"basis\": \"ofac_authorization\", \"ofac_document_kind\": \"<license|unblocking_report|compliance_release|delisting>\", \"ofac_authorization_sha256\": \"$(shasum -a 256 <the OFAC document> | cut -d' ' -f1)\"}" \
+       http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold/release
+     # rejected (a place hold, with OFAC's written guidance), returned to the sender and reported
+     curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
+       --data "{\"request_id\": \"rel-<invoice>-1\", \"basis\": \"ofac_rejected_return\", \"entry_id\": \"<the F7r entry id>\", \"ofac_document_kind\": \"rejected_transaction_report\", \"ofac_authorization_sha256\": \"$(shasum -a 256 <the ORS confirmation> | cut -d' ' -f1)\", \"ofac_guidance_sha256\": \"$(shasum -a 256 <OFAC's written guidance> | cut -d' ' -f1)\"}" \
+       http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold/release
+     ```
+
+   - **`sanctions: false`, `kind: refused`** (out of the service area, re-screen overdue, documents not current...):
+     refunding is the normal path. **Immediately before refunding at Stripe**, read the hold's live ground (above) and
+     check `compliance_now` is available with `sanctions_ground` null: if it names a ground, follow the sanctions case
+     instead; if Compliance is unavailable, wait. Refund the payment in the Stripe Dashboard; Finance books the refund
+     from Stripe's event (an `F7r` journal entry). Then release the hold with that entry (Finance asks Compliance again
+     and refuses if the refusal now rests on sanctions, or if Compliance cannot answer):
+
+     ```sh
+     curl -sS -H @fin-auth.hdr -H @fin-andre.hdr -H 'Content-Type: application/json' \
+       --data '{"request_id": "rel-<invoice>-1", "basis": "refund", "entry_id": "<the F7r entry id>"}' \
+       http://127.0.0.1:18410/fin/v1/invoices/<invoice id>/compliance-hold/release
+     ```
+
+     It is refused unless the entry is a refund of this very payment, booked after it, and the refunds cover the held
+     amount. After the refund the invoice is `issued` again (the client owes it on paper): there is no void for an
+     issued invoice yet, so note it for your accountant until that exists. If instead the client is re-activated at
+     Compliance and you keep the payment, release with `{"basis": "compliance_allow"}`: it is refused unless Compliance
+     answers a current ALLOW now, and the held receipt then goes out (none if anything was refunded).
+   - **A wire or ACH payment** (the bank path) cannot be refunded through Finance: there is no wire-return flow yet.
+     It leaves with `compliance_allow` once the client is re-activated, or with an OFAC ground; for a non-sanctions
+     refusal you want to return, make the return at the bank by hand and note it for your accountant.
+   - **`kind: unverified`**: the hourly `stripe-sessions` job asks Compliance again for each such payment just before
+     acting. A current ALLOW releases the hold and the receipt goes out; a REFUSE turns it into a `refused` hold (with
+     `sanctions` set as Compliance says). Nothing to do unless Compliance stays down.
+   - `POST /fin/v1/breaks/{break_id}/resolution` refuses these breaks; only the release above clears a hold.
+   - **Held unapplied money** (AEGIS r11): a wire or Stripe payment that names a refused client but matches no invoice
+     (wrong amount, an invoice already paid) is booked as unapplied cash and held on the RECEIPT
+     (`unapplied_held_compliance` / `unapplied_held_unverified`; it counts in `compliance_holds_open`). It is applied to
+     no invoice (`receipts/{id}/apply` refuses it, and refuses unheld money whose source client Compliance does not
+     allow now) until you release it: `POST /fin/v1/receipts/{receipt_id}/compliance-hold/release` with the same bases
+     and OFAC document kinds as an invoice hold (`compliance_allow` or `refund` for a non-sanctions hold;
+     `ofac_authorization` with a license, unblocking report, Compliance Release or delisting for a sanctions hold;
+     `ofac_rejected_return` only for a place ground with OFAC's written guidance). The hourly job releases an
+     unverified one on ALLOW and upgrades a refused one's ground.
+   - **A founder alert** (AEGIS r11, r12): a client whose money ZBC holds (an unspent deposit, a refund owed or open,
+     held unapplied money or a held payment) and whom Compliance no longer allows opens an open, high-severity
+     `compliance_hold` break (kind `founder_alert`, subject `client:<id>`, your token only); it counts in
+     `compliance_holds_open`, the founder-alert email of ADR 0027 reads it, and it closes by itself once the client is
+     allowed again or ZBC holds none of its money. No accrual, payout, funding or refund moves that client's money
+     meanwhile.
+   - **A refund stuck as `approved`** (Compliance refused the client between your approval and the payment, so the
+     payment was `refused_at_execution` and nothing moved): cancel it, with a reason,
+     `POST /fin/v1/refunds/{refund_id}/cancel` `{"request_id": "...", "reason": "..."}` (your token). The deposit goes
+     back to the campaign (2050 to 2010); once Compliance allows the client again the scheduler proposes a new refund.
+5. Close the tunnel (Ctrl-C) when done; delete `~/.zbm-cmp/*.hdr` if you do not activate another client today.
+
+**H. Re-verify before rules expire (nothing is extended by itself).** The readiness answer lists every expired rule and
+every rule a US web client runs through with its expiry date. Re-verify = read the rule's source page today, confirm
+the rule still says what the register says, save the page, then:
+
+```sh
+cd ~/.zbm-cmp && ID=US-OFAC-04
+curl -sS -H @auth.hdr -H @caller.hdr $C/compliance/v1/register/$ID > row.json
+python3 <your checkout>/services/compliance-py/devtools/reverify_proposal.py --row row.json --page <saved page> \
+  --excerpt "<the sentence that still holds>" > reverify.json
+curl -sS -H @auth.hdr -H @andre.hdr -H 'Content-Type: application/json' --data @reverify.json $C/compliance/v1/register/proposals
+curl -sS -H @auth.hdr -H @caller.hdr $C/compliance/v1/inbox > inbox.json
+python3 -c 'import json,sys; p=[x for x in json.load(open("inbox.json")) if x["kind"]=="reverify" and x["target_id"]==sys.argv[1]][0]; print(json.dumps({"request_id": "rv-"+p["proposal_id"], "decisions": [{"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"], "decision": "approve"}]}))' $ID > decide.json
+curl -sS -H @auth.hdr -H @andre.hdr -H 'Content-Type: application/json' --data @decide.json $C/compliance/v1/register/decisions
+```
+
+**Early warning (RTM-06).** Compliance's readiness answer carries `expiry_warnings` (rules expiring within 30, 14 and 7
+days, and separately those a client's activation relies on, with the next one), every start and scheduled run prints
+a `WARNING` line for them, compliance's `/health` carries `rules_expiring`, and Finance's billing readiness shows you
+`compliance_rule_expiry` (your token only). Check it weekly with the heartbeat check; re-verify at the 30-day warning.
+
+The scheduler also drafts these by itself when the Change Watcher fetched the row's page in the last 2 days and the
+rule expires within 7 days: they appear in the inbox; approve them the same way. Checklist (dates on the seed approved
+Oct 30, 2026):
+
+| By | Rules | Why | Time |
+|---|---|---|---|
+| now | seed v2 (step E) | nothing is in force before it | 20 min reading ADR 0024 + 1 decision |
+| **2026-12-25** | **US-OFAC-04** | every client activation status turns REFUSE that day (it is in every client's rule set): no invoices, audits or store reads | 10 min |
+| 2026-12-25, same sitting | US-OFAC-01, US-OFAC-02, US-OFAC-03 | same OFAC pages; the basis of HR-14; ZBC creators and entity payees | 5 min each |
+| 2027-03-25 | US-FTC-465-07 | in every client's rule set (review suppression) | 10 min |
+| only for TikTok, X, YouTube or Snapchat clients, or Stripe Connect payouts | PLT-TT-01..04, PLT-X-01, PLT-X-02, PLT-YT-01, PLT-YT-02, PLT-SNAP-01, US-STRIPE-KYC (expired 2026-10-26) | they block those platforms only; every 30 days after | 5 min each, about 50 min |
+| 2026-12-25, when ZBC payouts, email campaigns or claims are in scope | US-FTC-D101-01, US-FTC-D101-02, US-FTC-FAQ-01, US-FTC-5-01, US-FTC-437-01, US-FTC-CANSPAM, US-FTC-HBNR, US-IRS-BWH, US-IRS-TIN, US-IRS-1099K, US-IRS-FOREIGN, AGE-01, US-CPPA-2025, PRG-ECCP | not in a plain US web client's activation | 5-10 min each, about 2 h |
+| when convenient | US-SALESTAX-NEXUS | unverified (vendor table); it only feeds Finance's report, never a gate | 30 min with each state's own page |
+
+**I. Monthly: per-jurisdiction sales.** Through a tunnel to finance (as in step E, finance's instance ID, port 8410
+→ 18410), with two header files made as in step E:
+
+```sh
+ssh -N -L 127.0.0.1:18410:127.0.0.1:8410 <finance-service-instance-id>@ssh.railway.com      # terminal 1
+cd ~/.zbm-cmp
+read -rs T && printf 'Authorization: Bearer %s\n' "$T" > fin-auth.hdr && unset T             # paste FIN_SERVICE_TOKEN
+read -rs T && printf 'X-FIN-Caller-Token: %s\n' "$T" > fin-onboarding.hdr && unset T        # paste FIN_ONBOARDING_CALLER_TOKEN
+curl -sS -H @fin-auth.hdr -H @fin-onboarding.hdr http://127.0.0.1:18410/fin/v1/readiness/sales-tax-nexus | python3 -m json.tool
+```
+
+`flagged` lists every state or territory at 75% or more of its economic-nexus threshold (trailing 12 months, the
+calendar year or the previous calendar year; Hawaii, Nevada and Puerto Rico also by transactions): register there before the threshold is crossed
+(memo MEMO-FIN-CQ-11-2026-10-30). `unknown` holds invoices issued before this change (no recorded jurisdiction).
+Guam, the US Virgin Islands, American Samoa and the Northern Mariana Islands have no threshold number: the report lists
+them under `thresholds.check_before_first_client` ("local gross receipts/business tax — check before first client")
+and flags any of them with a sale. Do that check before the first client there.
 
 ### Connecting Search Console (optional)
 
@@ -973,7 +1451,7 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
 
 - [ ] Every service is Active and passed its healthcheck (`/health`).
 - [ ] ledger log: `ledger_created` on the first deploy, the callers listed (orchestrator-go, finance-py, legal-py,
-      seo-py, detection-py, each with its one department), no shared-token warning.
+      seo-py, detection-py, compliance-py, each with its one department), no shared-token warning.
 - [ ] finance, legal, seo logs: no `REFUSING TO START` / `refusing to start`.
 - [ ] SEO report delivery path: open the seo tunnel (steps 1-2 of "Delivering an SEO client report from Railway"),
       `curl -sS http://127.0.0.1:18500/health` → 200 `{"status":"ok"}`, then close it.
@@ -1043,8 +1521,8 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   peer: Railway's docs say private DNS in environments created after Oct 16 2025 resolves to IPv4 and IPv6 (legacy
   environments: IPv6 only), and do not state the health check's address family (a Railway community report shows
   uvicorn on `::` failing the health check where `0.0.0.0` passed). The launchers now bind `::` themselves with
-  `IPV6_V6ONLY` cleared (`src/dual_stack.py`, the same file in the four Railway Python services; only the IPv6
-  wildcard takes the new path) and hand uvicorn that socket, so one socket serves IPv4 and IPv6. This box's kernel has no IPv6; the CI job
+  `IPV6_V6ONLY` cleared (`src/dual_stack.py`, the same file in every Railway Python service, compliance-py included
+  since PR #10's `railway-images` run reset its `/health` the same way; only the IPv6 wildcard takes the new path) and hand uvicorn that socket, so one socket serves IPv4 and IPv6. This box's kernel has no IPv6; the CI job
   runs the production values. If a service on Railway fails with "Address family not supported", set its bind
   variable to `0.0.0.0`.
 - **Railway behaviours taken from the docs or the SDK types, not observed:** `preserve()` on a variable that does not
