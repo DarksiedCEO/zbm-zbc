@@ -21,7 +21,7 @@ from intelligences import i02_receivables as I2
 from intelligences import i07_reconciliation as I7
 from ledger import derived_id
 from ports import ClientActivation, LegalAnswer, RegisterParameters
-from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha, sha_text
+from service import LA, Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha, sha_text
 from textguard import banned_words_in
 
 TAX_DETERMINATION_MISSING = ("sales-tax determination FIN-CQ-11 is not verified: Andre amends FIN-CQ-11 to verified "
@@ -601,7 +601,8 @@ class BooksMixin:
                     buy = self.db["media_buys"][inv["media_buy_id"]]
                     op.put("media_buys", buy["buy_id"], {**buy, "status": "cancelled", "cancelled_at": iso(now)})
             else:
-                due = (now.date() + timedelta(days=inv["due_days"])).isoformat()
+                # ADR 0031: calendar terms start on Finance's LA day at the captured issuance instant.
+                due = (now.astimezone(LA).date() + timedelta(days=inv["due_days"])).isoformat()
                 new = {**inv, "status": "issued", "approved_by": "andre", "issued_at": iso(now), "due_at": due,
                        # ADR 0024: where the client is (Compliance's activation), for the per-jurisdiction totals
                        "client_jurisdiction": act.jurisdiction, "compliance_ruling_id": act.ruling_id}
