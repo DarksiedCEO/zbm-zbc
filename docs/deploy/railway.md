@@ -806,11 +806,14 @@ Do these in order. Nothing in the repository creates anything; each step is your
 7. **Stripe (test mode).** Create the restricted key and set `FIN_STRIPE_SECRET_KEY` on finance; set
    `FIN_STRIPE_SUCCESS_URL` / `FIN_STRIPE_CANCEL_URL`. Then Developers → Webhooks → Add endpoint:
    - URL: **`https://<stripe-gateway's Railway domain>/webhooks/stripe`**
-   - events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-     `checkout.session.async_payment_failed`, `checkout.session.expired`, `payment_intent.succeeded`,
-     `payment_intent.payment_failed`, `charge.failed`, `charge.dispute.created`, `charge.dispute.updated`,
-     `charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
-     `payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled` (services/finance-py/README.md)
+   - WEBHOOK EVENTS (services/finance-py/src/stripe_webhooks.py): `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
+     `checkout.session.expired`, `payment_intent.succeeded`, `payment_intent.payment_failed`,
+     `charge.failed`, `charge.refunded`, `charge.refund.updated`,
+     `refund.created`, `refund.updated`, `refund.failed`,
+     `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+     `charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
+     `payout.updated`, `payout.paid`, `payout.failed`,
+     `payout.canceled`.
    - copy the endpoint's signing secret (`whsec_...`) into `FIN_STRIPE_WEBHOOK_SECRET` on finance.
 8. **Deploy, ledger first.** Deploy `ledger`; wait until it is Active and its log shows
    `ledger-rust: EVENT {"event":"ledger_created",...}` and `listening on [::]:8090`, and does **not** show the

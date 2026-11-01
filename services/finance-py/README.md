@@ -114,7 +114,7 @@ Every matched payment makes a client receipt; the scheduler sends it with
 `POST /fin/v1/client-receipts/{id}/send` (client-mail stand-in: nothing is sent, it stays `pending_send`).
 Settings: `FIN_MEDIA_DEFAULT_MARKUP_PCT` (`"15.00"`), `FIN_MEDIA_MAX_MARKUP_PCT` (`"100.00"`, at most `"500.00"`),
 `FIN_MEDIA_RELEASE_HOLD_BD` (2 business days, 2..10; founder M11, the business-account ACH dispute window).
-Card (founder M10): only on a Revenue Recovery-only invoice of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also
+Card (founder M10): only on an invoice containing Revenue Recovery or SEO audit services of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also
 the maximum), never with a surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (default off).
 
 ## Stripe: ZBM client payments (ADR 0009 amendment, Oct 5 2026)
@@ -138,11 +138,14 @@ Settings (all required when on; refuses to start otherwise):
 - `FIN_STRIPE_WEBHOOK_SECRET_FILE`: the endpoint's `whsec_` secret, same file rules.
 - `FIN_STRIPE_SUCCESS_URL`, `FIN_STRIPE_CANCEL_URL`: https pages Stripe sends the client back to.
 - `FIN_STRIPE_LIVE`: `1` only for live keys.
-Webhook events to subscribe: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-`checkout.session.async_payment_failed`, `checkout.session.expired`, `payment_intent.succeeded`,
-`payment_intent.payment_failed`, `charge.failed`, `charge.dispute.created`, `charge.dispute.updated`,
-`charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
-`payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
+Webhook events to subscribe (services/finance-py/src/stripe_webhooks.py): `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
+`checkout.session.expired`, `payment_intent.succeeded`, `payment_intent.payment_failed`,
+`charge.failed`, `charge.refunded`, `charge.refund.updated`,
+`refund.created`, `refund.updated`, `refund.failed`,
+`charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+`charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
+`payout.updated`, `payout.paid`, `payout.failed`,
+`payout.canceled`.
 
 ## Reconciling the local log with the ledger
 
@@ -176,3 +179,9 @@ production). `devtools/gen_rules_seed.py` regenerates the seed (its SHA-256 is p
 
 A client id starting `zz-test-` is a test client (the client acceptance runbook, step 8): Finance refuses its
 billing profile, any invoice draft and any invoice approval (409).
+
+
+SEO Technical Audit invoices use `seo_audit_services`. Like Revenue Recovery, they may accept cards only with
+`FIN_CARD_PREPAYMENTS=1`, up to $5,000 in USD with no surcharge; mixed media or strategy invoices stay ACH/wire.
+This code change does not enable the switch or change any deployed Stripe endpoint. The read-only helper
+`python devtools/stripe_webhook_events.py` prints the canonical webhook subscription list, including refund events.
