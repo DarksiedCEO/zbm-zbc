@@ -23,7 +23,7 @@ from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 # invoice before the run (ADR 0017 W3-2). seo_02, rail_gateway (the stripe-gateway: POST /fin/v1/stripe/events only)
 # and payout_rail_gateway (payout-rail webhooks only) reach ONLY their own routes (api.NAMED_ROUTES, ADR 0023).
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
-                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02", "payout_rail_gateway", "ops_cron")
+                "legal_37", "scheduler", "rail_gateway", "bank_feed", "seo_02", "payout_rail_gateway", "ops_cron", "ops_alerts")
 TOKEN_MIN = 32
 # AEGIS night review M-2: a Railway variable reference that was not resolved reaches the service as its literal text.
 # "${{FIN_ONBOARDING_CALLER_TOKEN}}" is exactly 32 printable characters and is public in the repo (.railway/railway.ts),
@@ -106,6 +106,8 @@ class Settings:
     seed_path: str = DEFAULT_SEED_PATH
     seed_sha256: Optional[str] = None
     allow_unpinned_seed: bool = False
+    ops_observer_enabled: bool = False
+    ops_health_targets: dict = field(default_factory=dict, repr=False)
     data_dir: Optional[str] = None
     data_dir_lock: Optional[object] = field(default=None, repr=False)   # store.DataDirLock (config.load takes it)
     ledger_url: Optional[str] = None
@@ -365,12 +367,22 @@ def load(env: Optional[dict] = None) -> Settings:
     media_default = _money(env, "FIN_MEDIA_DEFAULT_MARKUP_PCT", "15.00")
     if media_default > media_max:
         raise RuntimeError("FIN_MEDIA_DEFAULT_MARKUP_PCT must not exceed FIN_MEDIA_MAX_MARKUP_PCT")
+    from health_poll import targets_from_env
+    observer_flag = env.get("FIN_OPS_OBSERVER_ENABLED", "0")
+    if observer_flag not in ("0", "1"):
+        raise RuntimeError("FIN_OPS_OBSERVER_ENABLED must be 0 or 1")
+    try:
+        observer_targets = targets_from_env(env)
+    except ValueError:
+        raise RuntimeError("FIN_OPS_HEALTH_URLS is invalid") from None
     data_dir = env.get("FIN_DATA_DIR") or None
+    if observer_flag == "1" and not data_dir:
+        raise RuntimeError("the observer requires FIN_DATA_DIR")
     s = Settings(
         service_token=token, caller_tokens=callers, andre_token=andre, second_approver_token=second,
         dual_human_threshold=second_threshold,
         seed_path=env.get("FIN_SEED_PATH") or DEFAULT_SEED_PATH, seed_sha256=seed_sha, allow_unpinned_seed=unpinned,
-        data_dir=data_dir,
+        data_dir=data_dir, ops_observer_enabled=observer_flag == "1", ops_health_targets=observer_targets,
         ledger_url=env.get("LEDGER_SERVICE_URL") or None, ledger_token=env.get("LEDGER_SERVICE_TOKEN") or None,
         reconcile_mode=_flag(env, "FIN_RECONCILE_MODE", False),
         vi_url=vi[0], vi_token=vi[1], vi_caller_token=vi[2],

@@ -255,6 +255,8 @@ class FinanceService:
         # process. ``api.build_service`` claims the flock BEFORE the log is built and passes the claim's token; this
         # instance adopts that claim only if the token IS the current claim (single use) and gives it back on close()
         # or a failed start.
+        self._observer_lock = threading.RLock()
+        self._ops_observer = None
         self._closed = False
         self._dir_lock = getattr(settings, "data_dir_lock", None)
         self._lock_token: Optional[str] = None
@@ -269,6 +271,11 @@ class FinanceService:
             self._lock_token = adopted
         try:
             self._start(settings, seed_bytes, expected_seed_sha256, pinned_sha256)
+            if settings.ops_observer_enabled:
+                from ops_observer import ObserverState
+                if self._dir_lock is None or self._lock_token is None:
+                    raise RuntimeError("observer requires the Finance directory claim")
+                self._ops_observer = ObserverState(settings.data_dir)
         except BaseException:
             self.close()
             raise
@@ -278,7 +285,7 @@ class FinanceService:
         instance is inert: its log refuses every write and every ledger record is refused (503 SERVICE_CLOSED), so
         it can never write over the instance that now owns the directory. Taken under the service lock: it never
         interleaves with a commit."""
-        with self.lock:
+        with self._observer_lock, self.lock:
             self._closed = True
             with self.log.lock:
                 self.log.closed = True
@@ -1088,8 +1095,9 @@ from svc_payees import PayeesMixin  # noqa: E402
 from svc_payouts import PayoutsMixin  # noqa: E402
 from svc_recon import ReconMixin  # noqa: E402
 from svc_stripe import StripeMixin  # noqa: E402
+from svc_alerts import AlertsMixin  # noqa: E402
 
 
-class Service(BooksMixin, ReceiptDeliveryMixin, MediaMixin, StripeMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin,
+class Service(AlertsMixin, BooksMixin, ReceiptDeliveryMixin, MediaMixin, StripeMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin,
               FinanceService):
     """The assembled Finance service."""
