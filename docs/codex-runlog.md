@@ -95,3 +95,17 @@ Andre requested two continuous hours of backend work (03:14:19–05:14:19 UTC) a
 - Local SOW guard at `9eaae90a7a88cca4479cef03945281b01480b70a` has builder evidence for 1,972 affected tests; independent review is running. A separate local acceptance/invoice/simulated-bank/SEO scenario completed with zero replay additions, tenant rejection and retrievable PARTIAL report anchored to a fake ledger. Real providers, comprehensive billing-contract binding and production operation remain unverified. Private harness failures and corrections are retained.
 
 Public entries omit unpatched reproduction details; raw evidence and reviews remain private. No additional production changes or merges at this checkpoint. Continue gated work through the requested interval.
+
+## 2026-11-01 04:53 UTC — deployment recovery and targeted CI repairs
+
+Main CI41267875155 succeeded, but the Finance/Legal rollout did not pass startup validation. Approved rollback restored prior-code successful/running deployment metadata. A founder-confirmed configuration correction was followed by one ordered Legal retry; that retry still failed, so Legal was rolled back again and Finance was not retried. Full operational health and corrected-main deployment remain unproven. Production merges remain blocked. No production stress, data deletion or billing change was performed. Private evidence preserves command errors, successful rollback responses, exact deployment identities and configuration observations without secret values.
+
+PR12 at80817e763f619963de73a5c005df16976e2e6544 reached90/90 successful checks and merged only into PR10's owner branch at2e8015786d25c0070c9620b49cfbfcc417892369. The reviewed and merged trees match; owner-head CI is pending.
+
+Independent bounded reviews completed for draft PR17 (SOW guard,9eaae90a7a88cca4479cef03945281b01480b70a), PR18 (Legal audit-route privacy,610baaf4f3c33d0e3e6251035712450e02b66558) and PR19 (opt-in SEO card policy and canonical webhook list,6c4d8509d50ccf1327c29fe76c2fd46fa4f10ae5). Each remains CONDITIONAL with exact-head CI and integration/provider conditions; none activates production payments.
+
+PR15 CI exposed five failed jobs: dependency audit, Go count hygiene, two SEO live variants and container health. Three isolated repairs are underway. The SEO baseline failure was reproduced; the repaired local live harness completes54/54 checks with cleanup hygiene intact, while full suite and independent review continue. Existing fail-closed controls remain in place.
+
+Original portal-head sustained soak has reached90minutes with zero unexpected outcomes at the latest checkpoint. A separate real-hour rate-limit test demonstrated recovery without restart, clock alteration or counter reset. This is evidence for the original head only; the fixed-end soak will be approximately110minutes, not the full7200-second final-candidate requirement.
+
+Authoritative NIST, Railway and Stripe documentation has been cross-checked privately against implementation and observed behavior. Documentation supports control design; it does not prove our deployment or constitute bank/government certification. Each test is mapped to a concrete launch risk and remaining acceptance evidence.
