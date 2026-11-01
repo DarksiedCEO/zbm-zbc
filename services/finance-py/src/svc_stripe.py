@@ -57,6 +57,7 @@ MIN_CHARGE = Decimal("0.50")                      # Stripe's USD minimum
 MAX_CHARGE = Decimal("999999.99")                 # eight digits of cents
 MAX_PAYLOAD = 256 * 1024
 STRIPE_WAIT_S = 30                                # longest a Stripe request waits for its turn before a 503 (AEGIS N3)
+MAX_CLOSE_SWEEP_ORDER = (1 << 63) - 1             # bounded durable scheduling ordinal, never a success marker
 MAX_JOB_CLOSES = 25                               # pages one job run closes (bounds how long it holds the turn)
 # AEGIS r2 N-4: bounds for the activation sweep. A refused checkout closes at most this many of the client's pages in
 # one request (the rest: the next request or the hourly job); a job run reads Compliance for at most this many clients
@@ -385,7 +386,7 @@ class StripeMixin:
         """Scheduler, hourly (it may run any number of times a day, AEGIS N2): close every open Stripe page that should
         no longer take money -- its invoice is no longer issued, its amount changed, or it offers a method the invoice
         may no longer be paid with (a card after FIN_CARD_PREPAYMENTS was turned off). At most MAX_JOB_CLOSES pages a
-        run; a page that cannot be closed is tried again on the next run. A card payment that still lands on such a
+        run; a page that cannot be closed stays eligible for a later fair sweep. A card payment that still lands on such a
         page is re-checked when it arrives (unapplied + a break, never applied).
 
         AEGIS F-5: also every open page of a client whose Compliance activation is now REFUSE (an OFAC hit, a service
@@ -501,7 +502,12 @@ class StripeMixin:
         with self._stripe_turn("stripe-sessions job"):
             with self.lock:
                 todo = []
+                last_order = 0
                 for s in self.db["stripe_sessions"].values():
+                    order = s.get("close_sweep_order", 0)
+                    if type(order) is not int or not 0 <= order <= MAX_CLOSE_SWEEP_ORDER:
+                        raise Unavailable("Stripe close scheduling state is invalid")
+                    last_order = max(last_order, order)
                     if s["status"] not in ("open", "invoice_paid"):
                         continue
                     inv = self.db["invoices"].get(s["invoice_id"]) or {}
@@ -509,7 +515,17 @@ class StripeMixin:
                     if inv.get("status") != "issued" or inv.get("total") != s["total"] \
                             or any(m not in methods for m in s["methods"]) or s["session_id"] in refused_ids:
                         todo.append(dict(s))
-                todo = sorted(todo, key=lambda s: s["created_at"])[:MAX_JOB_CLOSES]
+                todo = sorted(todo, key=lambda s: (s.get("close_sweep_order", 0), s["created_at"],
+                                                   s["session_id"]))[:MAX_JOB_CLOSES]
+                if last_order > MAX_CLOSE_SWEEP_ORDER - len(todo):
+                    raise Unavailable("Stripe close scheduling ordinal is exhausted")
+                # Reserve before contacting Stripe. A failed/ambiguous call (or crash after reservation) must not
+                # monopolize the next sweep. This is scheduling history, not a claim that a call or expiry happened.
+                # Existing generic put replay preserves it; no new collection or financial posting is introduced.
+                reserve = Op(self, f"{prefix}|stripe-reserve", ACTOR, "stripe-sessions")
+                for offset, s in enumerate(todo, 1):
+                    reserve.put("stripe_sessions", s["session_id"], {**s, "close_sweep_order": last_order + offset})
+                self._commit(reserve)
             g = Gather(self, f"{prefix}|stripe", ACTOR, "stripe-sessions")
             results = {s["session_id"]: self._expire_page(g, s["session_id"]) for s in todo}
             with self.lock:
