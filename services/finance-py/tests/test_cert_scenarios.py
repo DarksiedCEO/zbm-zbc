@@ -186,7 +186,7 @@ def test_s8_refund_of_unspent_deposit_only_without_open_dispute(hr):
 def _zbm_invoice(hr, kind="service", code="creative_services", **extra):
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": kind,
             "lines": [{"line_code": code, "quantity": 2, "unit_price": "250.00"}], "payment_methods": ["ach"],
-            "legal_ref": {"doc_id": "msa-1", "version": 1, "doc_sha256": "b" * 64, "acceptance_id": "acc-z"}, **extra}
+            "legal_ref": {"doc_id": "sow", "version": 1, "doc_sha256": "b" * 64, "acceptance_id": "acc-z"}, **extra}
     return hr.post("/fin/v1/invoices", body, caller="onboarding")
 
 

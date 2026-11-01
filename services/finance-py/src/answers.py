@@ -167,6 +167,8 @@ class LegalAnswerM(_S):
     renewal_lapsed: Optional[bool] = None
     version_basis_in_force: Optional[bool] = None                                     # AEGIS r2 N6
     acceptance_basis_in_force: Optional[bool] = None
+    doc_type: Optional[Word] = None
+    acceptance_via: Optional[Word] = None
 
 
 class RailAccountM(_S):
