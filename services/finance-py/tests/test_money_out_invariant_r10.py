@@ -19,7 +19,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 SERVICE_MODULES = ("service.py", "svc_books.py", "svc_media.py", "svc_payables.py", "svc_payees.py", "svc_payouts.py",
-                   "svc_recon.py", "svc_stripe.py")
+                   "svc_recon.py", "svc_stripe.py", "svc_alerts.py")
 TARGET = "_activation"
 
 MONEY_OUT = {
@@ -47,6 +47,7 @@ MONEY_IN_GATED = {
     ("POST", "/fin/v1/invoices/{invoice_id}/stripe-checkout"): "opens a payment page",
 }
 NOT_CLIENT_MONEY = {
+    ("POST", "/fin/v1/ops/observations/run"): "reads local breaks; private observation sidecar only, no financial Op or ledger posting",
     ("POST", "/fin/v1/invoices/{invoice_id}/void"): "cancels a wholly unpaid service receivable; no cash movement",
     ("PUT", "/fin/v1/clients/{client_id}/billing-contact"): "private receipt contact; no money movement",
     ("POST", "/fin/v1/client-receipts/{client_receipt_id}/delivery-review"): "operator evidence; no send or money movement",

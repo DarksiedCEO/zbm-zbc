@@ -206,3 +206,12 @@ materializes `FIN_RECEIPT_RESEND_KEY`, including when app mode is disabled. No p
 this implementation. See [ADR0038](../../docs/adr/0038-receipt-provider-workflow.md) and its runbook. Existing
 scheduler send route is retained; `sent` denotes API acceptance only. Legacy attempts require review, never a new
 key or guessed sender. Provider ID is private journal evidence. External rollback enforcement remains required.
+
+### Dormant operational observations
+
+`FIN_OPS_OBSERVER_ENABLED` defaults to0; exactly1 enables the observation-only core with the existing claimed
+`FIN_DATA_DIR`. `FIN_OPS_HEALTH_URLS` defaults to empty/unconfigured; optional fixed finance/legal/compliance/ledger
+aliases identify trusted operator-configured HTTP(S) roots, without credentials/query/fragment. Optional distinct
+`ops_alerts` reaches exactly POST /fin/v1/ops/observations/run. No sender, cron, provider or IaC is activated.
+Coverage/unknown persistence must be inspected with counts; zero conditions is not complete health. See
+[ADR0039](../../docs/adr/0039-dormant-ops-observer.md) and [observer procedure](../../docs/runbooks/ops-observer.md).
