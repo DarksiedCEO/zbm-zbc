@@ -229,6 +229,13 @@ export default defineRailway(() => {
       FOUNDER_ALERT_FROM: "Z Best Media Alerts <alerts@zbestmedia.com>",
       // ADR 0027: one all-clear (or open-count) summary email a day, so silence is noticeable
       FIN_ALERT_DAILY_SUMMARY: "1",
+      // The alert job executes inside Finance; poll actual readiness, not deployment liveness.
+      OPS_HEALTH_URLS: [
+        "compliance=" + PRIVATE("compliance", 8380),
+        "finance=" + PRIVATE("finance", 8410),
+        "ledger=" + PRIVATE("ledger", 8090),
+        "legal=" + PRIVATE("legal", 8420),
+      ].join(","),
     },
   }));
 

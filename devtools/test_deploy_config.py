@@ -649,6 +649,17 @@ class OpsAlerts(unittest.TestCase):
         self.assertRegex(fin, r"(?m)^\s+FOUNDER_ALERT_EMAIL:\s*preserve\(\)")
         self.assertRegex(fin, r'(?m)^\s+FOUNDER_ALERT_FROM:\s*"[^"]*<alerts@zbestmedia\.com>"')
 
+    def test_finance_health_alert_targets_cover_required_private_services(self):
+        fin = self.blocks["finance"]
+        match = re.search(r'OPS_HEALTH_URLS:\s*\[(.*?)\]\.join\(","\)', fin, re.S)
+        self.assertIsNotNone(match)
+        pairs = re.findall(r'"([a-z-]+)="\s*\+\s*PRIVATE\("([a-z-]+)",\s*(\d+)\)', match.group(1))
+        self.assertEqual(len(pairs), 4)
+        targets = {name: f"http://{host}.railway.internal:{port}" for name, host, port in pairs}
+        self.assertEqual(targets, {name: f"http://{name}.railway.internal:{port}"
+                                  for name, port in (("compliance", 8380), ("finance", 8410),
+                                                     ("ledger", 8090), ("legal", 8420))})
+
     def _mod(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("fin_cron_alerts_under_test", CRON_SCRIPT)
@@ -775,7 +786,8 @@ class VariableScan(unittest.TestCase):
         # finance-py: the client-mail settings named in ADR 0026 (RESEND_API_KEY becomes RESEND_API_KEY_FILE) and the
         # founder-alert settings of ADR 0027
         outside_prefixes = {"detection-py": set(), "finance-py": {"RESEND_API_KEY_FILE", "MAIL_FROM",
-                                                                  "FOUNDER_ALERT_EMAIL", "FOUNDER_ALERT_FROM"},
+                                                                  "FOUNDER_ALERT_EMAIL", "FOUNDER_ALERT_FROM",
+                                                                  "OPS_HEALTH_URLS"},
                             "legal-py": set(),
                             "seo-py": set(), "compliance-py": set()}
         for svc, prefixes in PY_SERVICES.items():

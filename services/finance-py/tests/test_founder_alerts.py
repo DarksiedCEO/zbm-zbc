@@ -214,6 +214,8 @@ def harness(alerts=True, data_dir=None, mail=None, **env) -> Harness:
     hr = Harness(clock=clock, fakes=f, env=e, data_dir=data_dir).ready()
     hr.alert_mail = mail or FA.FixtureAlertMail()
     hr.svc.alerts.sender = hr.alert_mail
+    # These tests isolate money/Compliance/mail conditions; health polling has its own real-job integration suite.
+    hr.svc.alerts.health_probe = lambda state, now: []
     if alerts:
         hr.svc.alerts.cfg.problem = None          # the harness has no Resend key file; the fixture sender stands in
     return hr

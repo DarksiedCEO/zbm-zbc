@@ -595,6 +595,7 @@ Set by IaC or by you:
 | `MAIL_FROM` | yes | no | `Z Best Media <billing@zbestmedia.com>` (IaC) | the only sender allowed (any other address refuses start); alone it does not switch mail on |
 | `RESEND_API_KEY` | to send client email | yes | (you; Resend) | becomes `RESEND_API_KEY_FILE`. With `MAIL_FROM`, client email is ON (receipts, credit notes, refund confirmations, acknowledgements); unset = OFF, nothing is sent and nothing alerts |
 | `RESEND_API_KEY_FILE` | — | — | (set by the entrypoint) | do not set yourself; set without `MAIL_FROM` refuses start |
+| `OPS_HEALTH_URLS` | founder health alerts | no | IaC: compliance, finance, ledger, legal private service roots | comma-separated `name=http(s)://host:port` roots; polls `/health`, max 16 targets, 64 KiB response, five-second probe and 30-second poll budget. Missing/malformed targets open an alert; no credentials or redirects. |
 | `FOUNDER_ALERT_EMAIL` | to get alert email | no (private) | (you: your own inbox) | ADR 0027: the ONE address founder alerts go to. With `FOUNDER_ALERT_FROM` and `RESEND_API_KEY`, alerts are ON; unset = OFF (the job's answer says why). A wrong value leaves alerts off, never stops Finance |
 | `FIN_ALERT_DAILY_SUMMARY` | no | no | `1` (IaC) | ADR 0027: one summary email a day ("all clear" or the open counts), so a silent alert path is noticed; `0` turns it off |
 | `FOUNDER_ALERT_FROM` | to get alert email | no | `Z Best Media Alerts <alerts@zbestmedia.com>` (IaC) | only alerts@ or billing@zbestmedia.com (the domain Resend has verified) |

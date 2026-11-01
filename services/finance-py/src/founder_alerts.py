@@ -66,6 +66,9 @@ RESEND_URL = "https://api.resend.com/emails"
 TIMEOUT_S = 20
 
 SEVERITY = {
+    "service_unhealthy": "high",
+    "service_flapping": "high",
+    "health_poll_unconfigured": "high",
     "ledger_unreachable": "critical",
     "finance_high_break": "high",
     "compliance_hold": "high",
@@ -78,6 +81,9 @@ SEVERITY = {
 }
 CATEGORIES = tuple(SEVERITY)
 WHAT_TO_DO = {
+    "service_unhealthy": "inspect the service /health response and its recovery runbook",
+    "service_flapping": "inspect recurring service /health failures and dependency recovery",
+    "health_poll_unconfigured": "check Finance OPS_HEALTH_URLS and the health-poll configuration",
     "ledger_unreachable": "every department refuses writes until the ledger answers: check the ledger service and its "
                           "volume (Railway)",
     "finance_high_break": "GET /fin/v1/breaks with your token",
@@ -527,6 +533,7 @@ class Dispatcher:
     state: StateFile
     sender: object = None
     probe: Callable[[], Optional[bool]] = field(default=lambda: None)
+    health_probe: Optional[Callable[[dict, datetime], list]] = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def run(self, now: datetime, conditions: list, compliance_up: Optional[bool]) -> dict:
@@ -539,6 +546,12 @@ class Dispatcher:
             except Exception:  # noqa: BLE001
                 up = False
             conds = list(conditions)
+            if self.health_probe is not None:
+                try:
+                    conds += [Condition.make(*item) for item in self.health_probe(st, now)]
+                except Exception as exc:  # noqa: BLE001 - preserve other alerts if polling fails
+                    log.error("ALERT finance: health_poll_failed (%s)", type(exc).__name__)
+                    conds.append(Condition.make("health_poll_unconfigured", "ops-alerts", "probe_failed"))
             conds += track_down(st, "ledger", up, now, self.cfg.down_min, "ledger_unreachable")
             conds += track_down(st, "compliance", compliance_up, now, self.cfg.down_min, "compliance_unreachable")
             summary = run(st, conds, now, self.cfg, self.sender)
