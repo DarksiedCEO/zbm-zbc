@@ -31,6 +31,7 @@ import answers as A
 import chart as C
 import money as M
 import reasons as R
+import receipt_compatibility
 import rules as RU
 from clock import Clock, SystemClock, iso, parse_iso
 from config import Settings
@@ -323,6 +324,7 @@ class FinanceService:
         self.reconcile_mode = settings.reconcile_mode
         self.reconcile_required: list[str] = []
         self._reconciling = False
+        receipt_compatibility.require_current(self.log.iter_records())
         self._replaying = True
         for rec in self.log.iter_records():
             for kind, r in rec["data"].get("ops", []):
