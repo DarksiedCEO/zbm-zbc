@@ -48,15 +48,25 @@ def _silent_server(port: int, cert: str, key: str):
             if stopped.is_set():
                 c.close()
                 return
+            tc = None
             try:
                 tc = ctx.wrap_socket(c, server_side=True)
+                # Publish cleanup ownership before headers can let a client finish/abort and call release().
+                # Do not hold the lock across I/O: release must also be able to close a stalled connection.
+                with lock:
+                    held.append(tc)
                 tc.recv(65536)
                 tc.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
             except OSError:
-                c.close()
+                with lock:
+                    if tc is not None:
+                        if tc in held:
+                            held.remove(tc)
+                        if tc.fileno() != -1:
+                            tc.close()
+                    else:
+                        c.close()
                 continue
-            with lock:
-                held.append(tc)
 
     def release():
         with lock:
@@ -205,3 +215,79 @@ def test_300_aborts_close_each_response_and_socket_once_and_leave_no_descriptor(
     assert got["sockets_closed_other_than_once"] == [], got["sockets_closed_other_than_once"]   # (round, closes)
     before, after = got["descriptors"]
     assert after == before, f"open descriptors: {before} before {ROUNDS} aborts, {after} after"
+
+
+def test_release_owns_tls_socket_before_headers_are_published(tmp_path, monkeypatch):
+    """A client may finish immediately after headers: cleanup ownership must precede publication."""
+    cert, key = _cert(str(tmp_path))
+    at_headers, resume = threading.Event(), threading.Event()
+    accepted = []
+    real_sendall = ssl.SSLSocket.sendall
+
+    def paused_headers(sock, *args, **kwargs):
+        if sock.server_side:
+            accepted.append(sock)
+            at_headers.set()
+            assert resume.wait(10), "test did not release the server header barrier"
+        return real_sendall(sock, *args, **kwargs)
+
+    monkeypatch.setattr(ssl.SSLSocket, "sendall", paused_headers)
+    srv, stop, release = _silent_server(_free_port(), cert, key)
+    client = None
+    try:
+        ctx = ssl.create_default_context(cafile=cert)
+        client = ctx.wrap_socket(socket.create_connection(srv.getsockname(), timeout=5), server_hostname="localhost")
+        client.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        assert at_headers.wait(10), "server never reached headers"
+        release()
+        assert len(accepted) == 1 and accepted[0].fileno() == -1, "TLS socket was not owned before headers"
+    finally:
+        resume.set()
+        if client is not None:
+            client.close()
+        stop()
+        for sock in accepted:
+            sock.close()  # detector cleanup even on the failing baseline
+
+
+def test_header_failure_closes_the_owned_tls_socket(tmp_path, monkeypatch):
+    """Retain the detached TLS object: closing the original accepted socket cannot hide a leak via GC."""
+    cert, key = _cert(str(tmp_path))
+    failed, handled = threading.Event(), threading.Event()
+    accept_count = 0
+    real_accept = socket.socket.accept
+
+    def observed_accept(sock, *args, **kwargs):
+        nonlocal accept_count
+        accept_count += 1
+        if accept_count == 2:
+            handled.set()  # the first connection error handler has returned, before teardown
+        return real_accept(sock, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "accept", observed_accept)
+    accepted = []
+    real_sendall = ssl.SSLSocket.sendall
+
+    def failing_headers(sock, *args, **kwargs):
+        if sock.server_side:
+            accepted.append(sock)
+            failed.set()
+            raise OSError("owned fixture header failure")
+        return real_sendall(sock, *args, **kwargs)
+
+    monkeypatch.setattr(ssl.SSLSocket, "sendall", failing_headers)
+    srv, stop, _ = _silent_server(_free_port(), cert, key)
+    client = None
+    try:
+        ctx = ssl.create_default_context(cafile=cert)
+        client = ctx.wrap_socket(socket.create_connection(srv.getsockname(), timeout=5), server_hostname="localhost")
+        client.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        assert failed.wait(10), "server never reached injected failure"
+        assert handled.wait(10), "server did not finish handling the failed connection"
+        assert len(accepted) == 1 and accepted[0].fileno() == -1, "failed TLS socket remained open before teardown"
+    finally:
+        if client is not None:
+            client.close()
+        stop()
+        for sock in accepted:
+            sock.close()  # detector cleanup even on the failing baseline
