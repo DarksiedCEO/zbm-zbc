@@ -327,3 +327,16 @@ approves the client contracts himself and his CQ-19 determination makes such a c
   empty. Its runbook must set that token before the apply, or the entry must become optional like `client_portal`.
 - The confirmation page and Part D say "(Pacific Time)" while `PORTAL_DISPLAY_TZ` is configurable (the text's own
   wording; keep the default).
+
+## Request-head deadline (2026-11-01)
+
+The portal launcher now uses the sibling services' `HeadDeadlineH11Protocol`
+instead of plain h11. Its fixed 10-second deadline starts on connect and after
+every response; partial header progress never resets it. Parsing a complete head
+cancels that deadline, leaving the existing application body deadline in charge.
+Arming before the parent response-completion hook preserves pipelined requests.
+The byte-identical shared `graceful_close.py` releases the concurrency slot before
+a bounded drain (64 KiB / 1 second, at most 512 drains), and disconnect cancels
+pending timers. Header size, concurrency, logging, proxy handling, and keep-alive
+settings remain the existing portal settings. These backend bounds do not attest
+Railway ingress behavior; deployment acceptance still verifies the proxy contract.

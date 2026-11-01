@@ -2,7 +2,7 @@
 
 uvicorn with h11, no access log (a request path holds the acceptance token), no ``Server`` header, no proxy-header
 rewriting (the app reads X-Forwarded-For itself, PORTAL_TRUSTED_PROXY_HOPS from the end), bounded concurrency, a
-short keep-alive and a bounded request head. Refuses to start on any configuration error (config.py).
+short keep-alive and a request head bounded in bytes and time. Refuses to start on any configuration error (config.py).
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import sys
 
 import config as config_mod
 from app import create_app
+from http_limits import HeadDeadlineH11Protocol
 
 HEAD_MAX = 16 * 1024
 
@@ -27,7 +28,8 @@ def main() -> int:
     import uvicorn
     app = create_app(settings)
     import dual_stack   # "::" is bound dual-stack (asyncio alone binds it IPv6-only; Docker's IPv4 mapping reset)
-    dual_stack.serve(uvicorn, app, settings.bind_addr, settings.port, "client-portal-py", http="h11",
+    dual_stack.serve(uvicorn, app, settings.bind_addr, settings.port, "client-portal-py",
+                     http=HeadDeadlineH11Protocol,
                      access_log=False, server_header=False, proxy_headers=False, forwarded_allow_ips="",
                      limit_concurrency=64, timeout_keep_alive=5, h11_max_incomplete_event_size=HEAD_MAX,
                      log_level="warning", lifespan="on")
