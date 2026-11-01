@@ -244,6 +244,9 @@ class ReconMixin:
                                resolution=None)
                     if b.get("kind") == "founder_alert":     # AEGIS r12 R12-1: no client named outside Andre's token
                         row["subject"] = "compliance"
+                elif not full and b.get("leg") == "stripe_unknown_session":
+                    row = {k: row[k] for k in self.SHARED_BREAK_FIELDS if k in row}
+                    row.update(amount_unassessed=True, resolution=None)
                 elif not full and b.get("leg") == "stripe_refund":
                     # AEGIS r10 RTM-08c: a held refund's note and severity are Andre's (allow-list: AEGIS r13 R13-1)
                     row = {k: row[k] for k in (*self.SHARED_BREAK_FIELDS, "resolution") if k in row}
@@ -271,7 +274,14 @@ class ReconMixin:
                                "/fin/v1/receipts/{receipt_id}/compliance-hold/release")
             now = self._now()
             status = None
-            if body.get("entry_id"):
+            if b.get("leg") == "stripe_unknown_session":
+                # An arbitrary journal entry or timing explanation cannot prove recovery. Andre's
+                # bounded external evidence closes only this operator review, never a money obligation.
+                if body.get("entry_id") or body.get("clears_by") or not body.get("evidence") \
+                        or body["explanation_code"] != "unknown":
+                    raise Invalid("unknown Checkout review needs external evidence and explanation unknown only")
+                status = "resolved"
+            elif body.get("entry_id"):
                 e = self.entries_by_id.get(body["entry_id"])
                 if e is None or e["posted_at"] < b["opened_at"]:
                     raise Invalid("entry_id must name a journal entry posted after the break opened")
