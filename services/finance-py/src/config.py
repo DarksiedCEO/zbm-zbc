@@ -53,7 +53,7 @@ class Secret:
     __str__ = __repr__
 
 
-def _secret_file(env, name: str, prefixes: tuple) -> Secret:
+def _secret_file(env, name: str, prefixes: tuple, *, receipt=False) -> Secret:
     """Interim secret handling until the Cybersecurity 22 vault exists: a regular file, readable by its owner only
     (mode 0600 or 0400), at most 4 KiB, whose content starts with one of ``prefixes``. Anything else refuses start."""
     path = (env.get(name) or "").strip()
@@ -82,7 +82,8 @@ def _secret_file(env, name: str, prefixes: tuple) -> Secret:
         value = raw.decode("ascii").strip()
     except UnicodeDecodeError:
         raise RuntimeError(f"{name}: the file does not hold a key of the expected kind") from None
-    if not value.startswith(prefixes) or not re.fullmatch(r"[A-Za-z0-9_]{16,256}", value):
+    pattern = r"[\x21-\x7e]{32,4096}" if receipt else r"[A-Za-z0-9_]{16,256}"
+    if not value.startswith(prefixes) or not re.fullmatch(pattern, value) or receipt and "{{" in value:
         raise RuntimeError(f"{name}: the file does not hold a key of the expected kind ({', '.join(prefixes)}...)")
     return Secret(value)
 
@@ -150,6 +151,10 @@ class Settings:
     media_max_markup_pct: Decimal = Decimal("100.00")
     media_release_hold_bd: int = 2
     card_prepayments: bool = False
+    receipt_mail_provider: str = "disabled"
+    receipt_mail_profile: Optional[object] = field(default=None, repr=False)
+    receipt_mail_key: Optional[Secret] = field(default=None, repr=False)
+    receipt_mail_deadline: int = 10
     stripe_incoming: bool = False
     stripe_secret_key: Optional[Secret] = field(default=None, repr=False)
     stripe_webhook_secret: Optional[Secret] = field(default=None, repr=False)
@@ -356,6 +361,7 @@ def load(env: Optional[dict] = None) -> Settings:
     if media_max > Decimal("500.00"):
         raise RuntimeError("FIN_MEDIA_MAX_MARKUP_PCT must be at most 500.00 (a typo guard on the fee)")
     stripe = _stripe(env)
+    receipt_mail = _receipt_mail(env)
     media_default = _money(env, "FIN_MEDIA_DEFAULT_MARKUP_PCT", "15.00")
     if media_default > media_max:
         raise RuntimeError("FIN_MEDIA_DEFAULT_MARKUP_PCT must not exceed FIN_MEDIA_MAX_MARKUP_PCT")
@@ -405,7 +411,7 @@ def load(env: Optional[dict] = None) -> Settings:
         media_default_markup_pct=media_default, media_max_markup_pct=media_max,
         media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 2, 2, 10),
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
-        **stripe,
+        **stripe, **receipt_mail,
     )
     # the flock last: every other refusal above leaves the directory untouched
     s.data_dir_lock = hold_data_dir(data_dir) if data_dir else None
@@ -431,3 +437,20 @@ def _stripe(env) -> dict:
     return {"stripe_incoming": True, "stripe_secret_key": key, "stripe_webhook_secret": whsec,
             "stripe_livemode": live, "stripe_success_url": _https_url(env, "FIN_STRIPE_SUCCESS_URL"),
             "stripe_cancel_url": _https_url(env, "FIN_STRIPE_CANCEL_URL")}
+
+
+def _receipt_mail(env):
+    provider = env.get("FIN_RECEIPT_MAIL_PROVIDER", "disabled")
+    if provider == "disabled":
+        return {}
+    if provider != "resend":
+        raise RuntimeError("FIN_RECEIPT_MAIL_PROVIDER must be disabled or resend")
+    from resend_receipts import ResendTransportProfile, _LABEL, _sender
+    values = [env.get(name, "") for name in ("FIN_RECEIPT_MAIL_PROFILE_ID", "FIN_RECEIPT_MAIL_PROFILE_REVISION", "FIN_RECEIPT_MAIL_FROM")]
+    if not all(type(v) is str and _LABEL.fullmatch(v) for v in values[:2]) or not _sender(values[2]):
+        raise RuntimeError("receipt mail profile configuration invalid")
+    key = _secret_file(env, "FIN_RECEIPT_RESEND_KEY_FILE", ("re_",), receipt=True)
+    if len(key.reveal()) < 32:
+        raise RuntimeError("FIN_RECEIPT_RESEND_KEY_FILE invalid length")
+    return {"receipt_mail_provider":"resend", "receipt_mail_profile":ResendTransportProfile(*values),
+            "receipt_mail_key":key, "receipt_mail_deadline":_int(env, "FIN_RECEIPT_MAIL_DEADLINE_S", 10, 1, 30)}

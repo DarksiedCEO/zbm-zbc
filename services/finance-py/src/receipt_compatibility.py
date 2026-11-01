@@ -84,9 +84,96 @@ def assess(records: Iterable[dict], target: str) -> tuple[str, ...]:
     return tuple(sorted(reasons))
 
 
+def assess_current(records):
+    """Current runtime semantics, distinct from immutable historical target profiles."""
+    from copy import deepcopy
+    from receipt_resend_adapter import SCHEMA, validate_saved, same_request
+    reasons = set()
+    previous = {}
+    receipts = {}
+    contacts = {}
+    for record in records:
+        cleaned = deepcopy(record)
+        touched = set()
+        introduced = set()
+        receipt_puts = set()
+        if not isinstance(record, dict) or not isinstance(record.get('data'), dict):
+            return ('invalid_history',)
+        ops = record['data'].get('ops', [])
+        if not isinstance(ops, list):
+            return ('invalid_history',)
+        for index, op in enumerate(ops):
+            if not isinstance(op, (list, tuple)) or len(op) != 2 or not isinstance(op[1], dict):
+                return ('invalid_history',)
+            kind, value = op
+            if kind == 'put' and value.get('coll') in ('client_receipts', 'client_contacts') and (
+                    type(value.get('id')) is not str or type(value.get('rec')) is not dict):
+                return ('invalid_history',)
+            if kind == 'put' and value.get('coll') == 'client_receipts':
+                receipts[value.get('id')] = value.get('rec')
+                touched.add(value.get('id'))
+                receipt_puts.add(value.get('id'))
+            if kind == 'put' and value.get('coll') == 'client_contacts':
+                contacts[value.get('id')] = value.get('rec')
+            if kind != 'put' or value.get('coll') != 'receipt_envelopes':
+                continue
+            rec, key = value.get('rec'), value.get('id')
+            if not isinstance(rec, dict) or type(key) is not str:
+                return ('invalid_history',)
+            old = previous.get(key)
+            if rec.get('schema') == SCHEMA:
+                if not validate_saved(rec, key) or old is not None and (old.get('schema') != SCHEMA or
+                        not same_request(old, rec) or old['acceptance'] is not None and old['acceptance'] != rec['acceptance']):
+                    reasons.add('unknown_receipt_semantics')
+                if old is None:
+                    introduced.add(key)
+                    receipt = receipts.get(key)
+                    try:
+                        import json
+                        body = json.loads(rec['request']['body'])
+                        view = {k: receipt[k] for k in ('client_receipt_id', 'entity', 'invoice_id', 'what_you_bought',
+                            'items', 'period', 'amount_paid', 'currency', 'paid_on', 'method')}
+                        contact = contacts[receipt['client_id']]
+                        expected = 'Payment receipt\n' + json.dumps(view, ensure_ascii=True, sort_keys=True)
+                        if rec['acceptance'] is not None or receipt['entity'] != 'zbm' or body['text'] != expected or \
+                                body['to'] != [contact['email']] or rec['contact_revision'] != contact['revision']:
+                            reasons.add('unknown_receipt_semantics')
+                    except (KeyError, TypeError, ValueError):
+                        reasons.add('unknown_receipt_semantics')
+                # Only validated new vocabulary is projected for the frozen older evaluator.
+                cleaned['data']['ops'][index] = ['evidence', {}]
+            elif old is not None and old.get('schema') == SCHEMA:
+                reasons.add('unknown_receipt_semantics')
+            previous[key] = deepcopy(rec)
+            touched.add(key)
+        # Envelope put precedes receipt put: bind the initial request only after this record's ops finish.
+        import re
+        for key in introduced:
+            claim = receipts.get(key) or {}
+            envelope = previous[key]
+            first = envelope.get('first_attempt_at')
+            if key not in receipt_puts or claim.get('status') != 'sending' or type(claim.get('attempts')) is not int or claim['attempts'] != 1 or \
+                    claim.get('claimed_at') != first or claim.get('last_attempt_at') != first or \
+                    type(claim.get('claimed_by')) is not str or not re.fullmatch(r'[A-Za-z0-9._:-]{1,128}', claim['claimed_by']):
+                reasons.add('unknown_receipt_semantics')
+        for key in touched:
+            envelope = previous.get(key) or {}
+            if envelope.get('schema') == SCHEMA:
+                receipt = receipts.get(key) or {}
+                if receipt.get('entity') != 'zbm' or receipt.get('client_receipt_id') != key:
+                    reasons.add('unknown_receipt_semantics')
+                if receipt.get('status') in ('sent', 'withdrawn_after_send') and envelope.get('acceptance') is None:
+                    reasons.add('unknown_receipt_semantics')
+                if envelope.get('acceptance') is not None and receipt.get('status') not in (
+                        'sent', 'withdrawn_after_send', 'delivery_uncertain', 'delivery_failed', 'delivery_reviewed'):
+                    reasons.add('unknown_receipt_semantics')
+        reasons.update(assess([cleaned], RECEIPT_SOURCE))
+    return tuple(sorted(reasons))
+
+
 def require_current(records: Iterable[dict]) -> None:
     """Called under the service's existing ownership claim, before replay/writes."""
-    if assess(records, RECEIPT_SOURCE):
+    if assess_current(records):
         raise RuntimeError('receipt_compatibility_refused')
 
 

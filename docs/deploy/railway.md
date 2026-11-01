@@ -1881,3 +1881,14 @@ existing Finance deployments do not need a new caller token to start. Do not giv
 No values are supplied here. See [dormant runner procedure](../runbooks/housekeeping-runner.md) for exact restrictions,
 no-retry/unknown-outcome semantics, and the separate review/CI/operator activation gates. Never mount Finance's volume
 into a runner; optional caller support alone does not activate a recurring job.
+
+### Optional ZBM receipt transport (disabled by default)
+
+`FIN_RECEIPT_MAIL_PROVIDER` defaults to `disabled`; the opt-in value is `resend`.
+Required only when enabled: `FIN_RECEIPT_MAIL_PROFILE_ID`, `FIN_RECEIPT_MAIL_PROFILE_REVISION`,
+`FIN_RECEIPT_MAIL_FROM`, `FIN_RECEIPT_RESEND_KEY_FILE`; `FIN_RECEIPT_MAIL_DEADLINE_S` defaults to10, range1–30.
+The optional entrypoint argument materializes explicitly supplied `FIN_RECEIPT_RESEND_KEY` as the key file
+when launched as root, then drops to uid10001. Its IaC preserve declaration preserves an existing value only;
+it does not provision one or enable mail. Generic entrypoint processing may materialize a supplied secret even
+while the application is disabled. Disabled application configuration does not read the file. Do not apply IaC
+or activate this path without separate approval, verified sender/account custody and external rollback enforcement.

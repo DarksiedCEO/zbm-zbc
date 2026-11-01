@@ -25,7 +25,7 @@ def mailworld(tmp_path):
     rec, = h.svc.db['client_receipts'].values()
     port = MockEnvelopeMail()
     h.svc.ports.client_mail = port
-    address = 'owned-' + secrets.token_hex(8) + '@example.invalid'
+    address = 'owned-x' + '-x'.join(secrets.token_hex(8)) + '@example.invalid'
     return h, rec, port, address
 
 
@@ -91,8 +91,10 @@ def test_changed_contact_never_rewrites_or_retries_frozen_envelope(mailworld):
 @pytest.mark.parametrize('advance', [{'hours': 23}, {'hours': 48}, {'minutes': -1}])
 def test_deadline_or_clock_rollback_stops_automatic_retry(mailworld, advance):
     h, rec, port, _ = mailworld
-    contact(mailworld, andre=ANDRE_TOKEN)
-    send(mailworld)
+    assert contact(mailworld, andre=ANDRE_TOKEN).status_code == 200
+    first = send(mailworld)
+    assert first.status_code == 200 and first.json()['detail'] == 'retry'
+    assert len(port.calls) == 1
     h.clock.advance(**advance)
     assert send(mailworld).status_code == 200
     assert len(port.calls) == 1
@@ -297,3 +299,17 @@ def test_historical_attempt_without_envelope_never_mints_new_key(mailworld, stat
     assert send(mailworld).json()['sent'] is False
     assert not port.calls and not h.svc.db['receipt_envelopes']
     assert h.svc.db['client_receipts'][rec['client_receipt_id']]['status'] == 'delivery_uncertain'
+
+
+@pytest.mark.parametrize('address,status', [('owned-0979285605491730@example.invalid',422),
+                                         ('owned-x0-x9-x7-x9-x2-x8-x5-x6-x0-x5-x4-x9-x1-x7-x3-x0@example.invalid',200)])
+def test_fixture_contact_shape_preserves_sensitive_data_refusal(mailworld,address,status):
+    h,rec,port,_=mailworld
+    response=contact(mailworld,address,andre=ANDRE_TOKEN)
+    assert response.status_code==status
+    first=send(mailworld)
+    if status==422:
+        assert 'SENSITIVE_DATA_REFUSED' in response.text
+        assert first.json()['detail']=='contact_missing' and port.calls==[]
+    else:
+        assert first.json()['detail']=='retry' and len(port.calls)==1

@@ -608,7 +608,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     @app.post("/fin/v1/client-receipts/{client_receipt_id}/send", dependencies=auth)
     def client_receipt_send(client_receipt_id: str, who: str = Depends(caller("scheduler")),
                             req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
-        return svc.send_client_receipt(who, req.request_id, _id(client_receipt_id))
+        try:
+            return svc.send_client_receipt(who, req.request_id, _id(client_receipt_id))
+        except Unavailable:
+            raise Unavailable("Receipt delivery outcome is unknown; inspect state before another invocation",
+                              took_effect=None, outcome="outcome_unknown") from None
 
     @app.post("/fin/v1/bank/events", dependencies=auth)
     def bank_events(who: str = Depends(caller("bank_feed")), req: m.BankEvents = Depends(body(m.BankEvents))) -> dict:
@@ -930,6 +934,10 @@ def build_ports(settings: config_mod.Settings) -> Ports:
     each wired only when all three of its FIN_VI_* / FIN_COMPLIANCE_* / FIN_LEGAL_* settings are present, and Stripe
     incoming when FIN_STRIPE_INCOMING=1."""
     ports = Ports()
+    if settings.receipt_mail_provider == "resend":
+        from receipt_resend_adapter import ResendReceiptMail
+        ports.client_mail = ResendReceiptMail(settings.receipt_mail_profile, settings.receipt_mail_key.reveal(),
+                                              settings.receipt_mail_deadline)
     if settings.vi_url:
         from clients import HttpVerification
         ports.vi = HttpVerification(settings.vi_url, settings.vi_token, settings.vi_caller_token)

@@ -216,6 +216,8 @@ export default defineRailway(() => {
       FIN_COMPLIANCE_CALLER_TOKEN: preserve(),
       FIN_STRIPE_INCOMING: "1",
       FIN_STRIPE_LIVE: "0", // test mode first; "1" only together with live keys (docs/deploy/railway.md, step 9)
+      // Optional dormant receipt transport secret: preservation only, not provisioning or enablement.
+      FIN_RECEIPT_RESEND_KEY: preserve(),
       FIN_STRIPE_SECRET_KEY: preserve(), // written to FIN_STRIPE_SECRET_KEY_FILE by the entrypoint
       FIN_STRIPE_WEBHOOK_SECRET: preserve(), // written to FIN_STRIPE_WEBHOOK_SECRET_FILE by the entrypoint
       FIN_STRIPE_SUCCESS_URL: preserve(),

@@ -332,6 +332,13 @@ class StripePayoutM(_S):
 
 class ReceiptDeliveryOutcomeM(_S):
     outcome: Literal["accepted", "retry", "failed", "uncertain"]
+    provider_message_id: Optional[Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,128}$")]] = None
+
+    @model_validator(mode="after")
+    def private_acceptance_only(self):
+        if self.provider_message_id is not None and self.outcome != "accepted":
+            raise ValueError("identity requires acceptance")
+        return self
 
 
 MODELS: dict[type, type[BaseModel]] = {
