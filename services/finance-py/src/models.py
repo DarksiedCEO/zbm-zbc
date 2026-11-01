@@ -355,7 +355,7 @@ class BNotice(Strict):
 class InvoiceLine(Strict):
     # media_spend / media_fee are not here: Finance writes them itself from a media buy (POST /fin/v1/media-buys).
     line_code: Literal["campaign_deposit", "creative_services", "strategy_services", "production_services",
-                       "retainer_fee", "subscription_fee", "revenue_recovery_services"]
+                       "retainer_fee", "subscription_fee", "revenue_recovery_services", "seo_audit_services"]
     quantity: int = Field(ge=1, le=1_000_000)
     unit_price: PositiveMoney
     description: Optional[Short] = None

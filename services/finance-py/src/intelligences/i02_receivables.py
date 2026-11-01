@@ -18,10 +18,10 @@ NUMBER, NAME, ACTOR = 2, "Receivables & Billing", "intel_02_receivables"
 # Media codes (ADR 0009 amendment, Oct 5 2026) are written by Finance itself from an Andre-approved media buy, never
 # sent by a caller: ``media_spend`` = the vendor cost, ``media_fee`` = ZBM's markup on it.
 MEDIA_LINE_CODES = ("media_spend", "media_fee")
-CARD_ELIGIBLE_CODES = ("revenue_recovery_services",)
+CARD_ELIGIBLE_CODES = ("revenue_recovery_services", "seo_audit_services")
 LINE_CODES = {"zbc": ("campaign_deposit",),
               "zbm": ("creative_services", "strategy_services", "production_services", "retainer_fee",
-                      "subscription_fee", "revenue_recovery_services") + MEDIA_LINE_CODES}
+                      "subscription_fee", "revenue_recovery_services", "seo_audit_services") + MEDIA_LINE_CODES}
 KINDS = ("campaign_deposit", "service", "retainer", "subscription", "media_prepayment")
 RECURRING_KINDS = ("retainer", "subscription")
 MEDIA_KIND = "media_prepayment"
@@ -74,14 +74,14 @@ def recurring_problems(inv: dict) -> list[dict]:
 
 
 def card_problems(line_codes: list[str], total: Decimal, enabled: bool, cap: Decimal) -> list[dict]:
-    """Founder decisions M6/M9/M10 (Oct 5 2026): a card is accepted only on an invoice that is Revenue Recovery work
-    and nothing else (only that work stays inside ZBM), and only up to ``cap`` ($5,000; above it, ACH). Anything that
+    """Founder decisions M6/M9/M10 and Oct 30 2026: cards cover only Revenue Recovery or SEO audit work
+    (work that stays inside ZBM), and only up to ``cap`` ($5,000; above it, ACH). Anything that
     carries third-party spend (media) or other services is ACH or wire, permanently: a card can be disputed after the
     vendor is paid. Card acceptance itself is switched on with FIN_CARD_PREPAYMENTS=1; there is never a surcharge or
     card-fee line (FIN-21)."""
     if any(c not in CARD_ELIGIBLE_CODES for c in line_codes):
-        return [R.item("CARD_NOT_ALLOWED", "card is accepted only for Revenue Recovery invoices; media and every other "
-                                           "service are paid by ACH or wire")]
+        return [R.item("CARD_NOT_ALLOWED", "card is accepted only for Revenue Recovery and SEO audit invoices; "
+                                           "media and every other service are paid by ACH or wire")]
     if total > cap:
         return [R.item("CARD_NOT_ALLOWED", f"card is accepted only up to {M.fmt(cap)}; this invoice is {M.fmt(total)}: "
                                            "ACH or wire")]
