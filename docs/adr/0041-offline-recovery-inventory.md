@@ -5,7 +5,7 @@
 ## Boundary
 
 `services/finance-py/devtools/inventory_copies.py` reads explicitly supplied owned copies and writes one new private
-report. The pure `recovery_inventory.py` imports only stdlib and store.verify_lines/StoreCorrupt. No Service, API,
+report file under an explicitly supplied existing private parent. The pure `recovery_inventory.py` imports only stdlib and store.verify_lines/StoreCorrupt. No Service, API,
 RecordLog/DataDirLock construction, replay, ledger client, provider, configuration, environment or live-data lookup.
 No --apply, repair, balance calculation, movement association/deduplication, receipt compatibility or launch permission.
 Optional ledger exports are deferred until a complete exact representation contract exists. All current rollback,
@@ -67,14 +67,22 @@ tails cannot be authenticated by local hashes alone. No green readiness or safe-
 
 ## Output durability and failure
 
-Explicit new report directory under an existing owned0700 parent, descriptor-verified and outside input directory
-ancestry. Never overwrite an existing directory/file. Create child exclusively0700; fchmod only owned output descriptors
-to exact modes. Fsync parent after mkdir, construct report.json with O_EXCL/NOFOLLOW0600, write-all/fsync file, fsync child
-then parent, recheck identities/metadata before success. This is protected exclusive final-file construction, NOT
-atomic visibility: private partial bytes may exist before completion. Only success reports report_written:true.
-Report cap64KiB. No fallback path. On failure cleanup is identity-checked, nonrecursive and only for created entries;
-failed durability/cleanup stays OUTPUT_UNKNOWN/residual_possible:true/exit4 even if best-effort cleanup appears complete.
-No unowned/replacement entries are removed. No raw exception/argument/path output. Stdout contains only fixed status,
+Required --report-file is an absolute NEW file under an explicitly supplied existing current-user-owned0700 parent,
+descriptor-verified and outside input directory ancestry. No destination directory is created, adopted, chmodded or
+removed. The previous unpublished --report-dir interface is refused. The tool does not provision or establish durability
+of the preexisting parent name; that setup remains external. Existing file/symlink/directory destinations are refused.
+
+O_CREAT|O_EXCL|O_NOFOLLOW returns the descriptor for the file this syscall created. Retain that descriptor and the
+verified parent/ancestor identities; fchmod only the known-created file to0600, write-all, fsync file then containing
+parent, recheck parent identity/privacy and named-file identity/metadata before success. This eliminates the initial
+mkdir-to-open directory ownership ambiguity; no post-mkdir inode guess is made. It is protected exclusive final-file
+construction, NOT atomic visibility: private partial bytes may exist before completion. Same-owner interference is
+not assumed impossible; replacement of the parent/name prevents success, and only the opened created inode is written.
+
+Only success reports report_written:true. Report cap64KiB. No fallback path. On failure unlink only when the entry
+under the retained parent still binds the created inode, then fsync parent. Never unlink a replacement or remove any
+directory; no recursive cleanup. Failed durability/cleanup stays OUTPUT_UNKNOWN/residual_possible:true/exit4 even if
+best-effort cleanup appears complete. No raw exception/argument/path output. Stdout contains only fixed status,
 report_written, report_sha256/null, fixed reason/null and residual_possible. Unavailable inputs never acquire fabricated
 zero-byte hashes. Input acquisition failure may prevent a report; the fixed small stdout failure remains honest.
 
@@ -82,6 +90,6 @@ zero-byte hashes. Input acquisition failure may prevent a report; the fixed smal
 
 Owned fixture controls cover genuine journal byte inventory without replay, hash framing, matching/mismatched metadata,
 strict nested JSON and caps, unknown tags/full counts, post-second-read and evaluation-boundary changes, path/descriptor
-refusals, output collision/shortwrites/fsync/cleanup failures, exact modes, determinism/privacy and import/network/constructor
+refusals, original directory-replacement reproduction, created-file/parent replacement, output collision/shortwrites/fsync/cleanup failures, exact modes, determinism/privacy and import/network/constructor
 prohibition. This is not a recovery drill or closure of historical restore findings. Independent exact-head AEGIS,
 separate local acceptance and existing affected/shared gates remain required before publication.

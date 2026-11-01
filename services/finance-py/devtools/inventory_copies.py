@@ -127,45 +127,36 @@ def _publish(path,data,input_ancestry):
         parent,links,ancestors=_directory(parent_path,stack)
         if input_ancestry[-1] in ancestors: raise BoundaryError('OUTPUT_OVERLAP')
         _links_unchanged(links)
-        os.mkdir(name,mode=0o700,dir_fd=parent)  # Exclusive new directory; never overwrite an existing destination.
-        child=None;file_fd=None;file_identity=None;child_identity=None
+        # The existing parent is supplied, not created/adopted/chmodded. O_EXCL returns a descriptor
+        # for the FILE this syscall created, even if its name is subsequently exchanged.
+        fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=parent)
+        file_identity=None
         try:
-            child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
-            child_identity=_identity(os.fstat(child))
-            os.fchmod(child,0o700)
-            os.fsync(parent)  # Durably establish the new name before publishing its private contents.
-            file_fd=os.open('report.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=child)
-            file_identity=_identity(os.fstat(file_fd))
-            os.fchmod(file_fd,0o600)
-            # Exclusive final-file construction, NOT atomic visibility: private partial bytes may exist until fsync.
-            _write_all(file_fd,data);os.fsync(file_fd)
-            file_version=_version(os.fstat(file_fd))
-            os.close(file_fd);file_fd=None
-            os.fsync(child);os.fsync(parent)
+            file_identity=_identity(os.fstat(fd))
+            os.fchmod(fd,0o600)
+            # Exclusive construction, NOT atomic visibility: partial private bytes can precede success.
+            _write_all(fd,data);os.fsync(fd)
+            version=_version(os.fstat(fd))
+            os.fsync(parent)
             _links_unchanged(links)
-            if (_identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=child_identity
-                    or _version(os.stat('report.json',dir_fd=child,follow_symlinks=False))!=file_version):
+            st=os.fstat(parent)
+            if (st.st_uid!=os.getuid() or stat.S_IMODE(st.st_mode)!=0o700
+                    or _version(os.stat(name,dir_fd=parent,follow_symlinks=False))!=version):
                 raise BoundaryError('OUTPUT_UNKNOWN')
         except Exception:
-            # Best effort, identity-checked, nonrecursive cleanup. Never remove someone else's replacement.
-            if file_fd is not None: os.close(file_fd)
-            if child is not None:
-                try:
-                    if file_identity is not None and _identity(os.stat('report.json',dir_fd=child,follow_symlinks=False))==file_identity:
-                        os.unlink('report.json',dir_fd=child)
-                    os.fsync(child)
-                except OSError: pass
+            # Only the still-bound created inode may be unlinked. Never remove a replacement or directory.
             try:
-                if child_identity is not None and _identity(os.stat(name,dir_fd=parent,follow_symlinks=False))==child_identity:
-                    os.rmdir(name,dir_fd=parent)
+                if file_identity is not None and _identity(os.stat(name,dir_fd=parent,follow_symlinks=False))==file_identity:
+                    os.unlink(name,dir_fd=parent)
                 os.fsync(parent)
             except OSError: pass
             raise BoundaryError('OUTPUT_UNKNOWN') from None
         finally:
-            if child is not None: os.close(child)
+            os.close(fd)
 
 
-def run(copies_dir,report_dir):
+def run(copies_dir,report_file):
+    publication_started=False
     try:
         # Acquisition descriptors remain retained through evaluation. No source files are written or claimed.
         with ExitStack() as stack:
@@ -176,7 +167,8 @@ def run(copies_dir,report_dir):
             unchanged()
             data=inventory.canonical(result)+b'\n'
             if len(data)>inventory.MAX_REPORT: raise BoundaryError('REPORT_LIMIT')
-            _publish(report_dir,data,ancestry)
+            publication_started=True
+            _publish(report_file,data,ancestry)
         return {'evaluation':result['evaluation'],'report_written':True,'report_sha256':hashlib.sha256(data).hexdigest(),
                 'reason':None,'residual_possible':False},inventory.exit_code(result)
     except BoundaryError as exc:
@@ -184,7 +176,8 @@ def run(copies_dir,report_dir):
                 'reason':exc.code,'residual_possible':exc.code=='OUTPUT_UNKNOWN'},4
     except (OSError,ValueError,OverflowError,RecursionError,AttributeError,NotImplementedError):
         return {'evaluation':'OPERATIONAL_FAILURE','report_written':False,'report_sha256':None,
-                'reason':'OPERATIONAL_FAILURE','residual_possible':False},4
+                'reason':'OUTPUT_UNKNOWN' if publication_started else 'OPERATIONAL_FAILURE',
+                'residual_possible':publication_started},4
 
 
 class Parser(argparse.ArgumentParser):
@@ -194,9 +187,9 @@ class Parser(argparse.ArgumentParser):
 def main(argv=None):
     try:
         parser=Parser(add_help=False,allow_abbrev=False)
-        parser.add_argument('--copies-dir',required=True);parser.add_argument('--report-dir',required=True)
+        parser.add_argument('--copies-dir',required=True);parser.add_argument('--report-file',required=True)
         args=parser.parse_args(argv)
-        result,code=run(args.copies_dir,args.report_dir)
+        result,code=run(args.copies_dir,args.report_file)
     except BoundaryError:
         result={'evaluation':'INVALID_INPUT','report_written':False,'report_sha256':None,
                 'reason':'INVALID_ARGUMENTS','residual_possible':False};code=2

@@ -138,10 +138,10 @@ def test_cli_determinism_modes_and_inputs_unchanged(tmp_path):
     root,parent=bundle(tmp_path);before={p.name:p.read_bytes() for p in root.iterdir()}
     answers=[]
     for n in range(2):
-        run=subprocess.run([sys.executable,'-B',str(CLI),'--copies-dir',str(root),'--report-dir',str(parent/str(n))],capture_output=True,check=False)
+        run=subprocess.run([sys.executable,'-B',str(CLI),'--copies-dir',str(root),'--report-file',str(parent/str(n))],capture_output=True,check=False)
         assert run.returncode==0,(run.stdout,run.stderr)
         assert not run.stderr and json.loads(run.stdout)['report_written'] is True
-        report=parent/str(n)/'report.json';answers.append(report.read_bytes())
+        report=parent/str(n);answers.append(report.read_bytes())
         assert report.stat().st_mode&0o777==0o600
         assert report.parent.stat().st_mode&0o777==0o700
     assert answers[0]==answers[1]
@@ -175,7 +175,7 @@ def test_change_during_second_read_is_detected(tmp_path,monkeypatch):
     assert code==4 and out['reason']=='INPUT_CHANGED' and not out['report_written']
 
 
-@pytest.mark.parametrize('stage',[1,2,3,4])
+@pytest.mark.parametrize('stage',[1,2])
 def test_each_durability_fsync_failure_stays_unknown(tmp_path,monkeypatch,stage):
     root,parent=bundle(tmp_path);m=cli_module();original=os.fsync;calls=[]
     def fail(fd):
@@ -246,20 +246,18 @@ def test_output_exact_permissions_with_restrictive_file_umask(tmp_path):
     try:out,code=m.run(str(root),str(parent/'result'))
     finally:os.umask(old)
     assert code==0 and out['report_written']
-    assert (parent/'result'/'report.json').stat().st_mode&0o777==0o600
-    assert (parent/'result').stat().st_mode&0o777==0o700
+    assert (parent/'result').stat().st_mode&0o777==0o600
+    assert parent.stat().st_mode&0o777==0o700
 
 
-def test_final_report_collision_is_not_replaced_or_deleted(tmp_path,monkeypatch):
-    root,parent=bundle(tmp_path);m=cli_module();original=m.os.fsync;calls=[]
-    def collide(fd):
-        calls.append(fd)
-        if len(calls)==1:(parent/'result'/'report.json').write_text('owned-collision')
-        return original(fd)
-    monkeypatch.setattr(m.os,'fsync',collide)
-    out,code=m.run(str(root),str(parent/'result'))
-    assert code==4 and out['reason']=='OUTPUT_UNKNOWN' and out['residual_possible']
-    assert (parent/'result'/'report.json').read_text()=='owned-collision'
+def test_final_report_collision_is_not_replaced_or_deleted(tmp_path):
+    root,parent=bundle(tmp_path);m=cli_module();target=parent/'result'
+    target.write_text('owned-collision');target.chmod(0o640)
+    before=target.stat()
+    out,code=m.run(str(root),str(target))
+    assert code==4 and not out['report_written']
+    assert target.read_text()=='owned-collision' and target.stat().st_mode==before.st_mode
+    assert target.stat().st_ino==before.st_ino
 
 
 def test_cleanup_failure_is_truthfully_unknown_and_never_recursive(tmp_path,monkeypatch):
@@ -268,13 +266,17 @@ def test_cleanup_failure_is_truthfully_unknown_and_never_recursive(tmp_path,monk
     monkeypatch.setattr(m.os,'unlink',lambda *args,**kwargs: (_ for _ in ()).throw(OSError('private')))
     out,code=m.run(str(root),str(parent/'result'))
     assert code==4 and out['residual_possible'] and out['reason']=='OUTPUT_UNKNOWN'
-    assert (parent/'result'/'report.json').exists()
+    assert (parent/'result').exists()
 
 
 def test_short_writes_complete_and_zero_write_fails(tmp_path,monkeypatch):
     root,parent=bundle(tmp_path);m=cli_module();original=m.os.write
     monkeypatch.setattr(m.os,'write',lambda fd,data:original(fd,data[:7]))
-    assert m.run(str(root),str(parent/'short'))[1]==0
+    answer,code=m.run(str(root),str(parent/'short'))
+    assert code==0
+    data=(parent/'short').read_bytes()
+    assert json.loads(data)['evaluation']=='EVALUATED'
+    assert hashlib.sha256(data).hexdigest()==answer['report_sha256']
     monkeypatch.setattr(m.os,'write',lambda *args:0)
     assert m.run(str(root),str(parent/'zero'))[1]==4
 
@@ -302,9 +304,9 @@ def test_actual_byte_manifest_and_record_limits():
 def test_cli_invalid_arguments_and_input_canaries_never_echo(tmp_path):
     root,parent=bundle(tmp_path)
     (root/'provenance.json').write_text('{"private-canary":"never-output"}')
-    run=subprocess.run([sys.executable,'-B',str(CLI),'--copies-dir',str(root),'--report-dir',str(parent/'result')],capture_output=True,check=False)
+    run=subprocess.run([sys.executable,'-B',str(CLI),'--copies-dir',str(root),'--report-file',str(parent/'result')],capture_output=True,check=False)
     assert run.returncode==2 and not run.stderr
-    assert b'private-canary' not in run.stdout+(parent/'result'/'report.json').read_bytes()
+    assert b'private-canary' not in run.stdout+(parent/'result').read_bytes()
     bad=subprocess.run([sys.executable,'-B',str(CLI),'--private-secret-argument'],capture_output=True,check=False)
     assert bad.returncode==2 and b'private-secret' not in bad.stdout+bad.stderr
 
@@ -336,3 +338,80 @@ def test_finite_number_capability_bound_uses_decimal_not_money_float():
         m._json(b'{"n":1.1e308}',20)
     with pytest.raises(m.InvalidCopy):
         m._json(b'{"n":1e999}',20)
+
+
+def test_original_mkdir_replacement_is_not_adopted_or_chmodded(tmp_path,monkeypatch):
+    m=cli_module();tmp_path.chmod(0o700);target=tmp_path/'report';replacement=tmp_path/'replacement'
+    replacement.mkdir(mode=0o750);before=replacement.stat();original=m.os.mkdir
+    def raced(name,mode=0o777,*,dir_fd=None):
+        original(name,mode,dir_fd=dir_fd)
+        if name=='report':
+            os.rmdir(name,dir_fd=dir_fd);os.rename(replacement,target)
+    monkeypatch.setattr(m.os,'mkdir',raced)
+    m._publish(str(target),b'{}\n',[(-1,-1)])
+    assert replacement.exists() and replacement.stat().st_ino==before.st_ino
+    assert replacement.stat().st_mode==before.st_mode
+    assert target.is_file() and target.read_bytes()==b'{}\n'
+
+
+def test_publication_never_creates_removes_or_chmods_directories(tmp_path,monkeypatch):
+    root,parent=bundle(tmp_path);m=cli_module();fchmod=m.os.fchmod
+    def no_directory(*args,**kwargs):raise AssertionError('directory mutation')
+    def file_only(fd,mode):
+        import stat
+        assert stat.S_ISREG(os.fstat(fd).st_mode)
+        return fchmod(fd,mode)
+    monkeypatch.setattr(m.os,'mkdir',no_directory);monkeypatch.setattr(m.os,'rmdir',no_directory)
+    monkeypatch.setattr(m.os,'fchmod',file_only)
+    assert m.run(str(root),str(parent/'result'))[1]==0
+
+
+def test_parent_replacement_refuses_success_preserves_replacement(tmp_path,monkeypatch):
+    root,parent=bundle(tmp_path);m=cli_module();replacement=tmp_path/'replacement'
+    replacement.mkdir(mode=0o700);marker=replacement/'keep';marker.write_text('owned')
+    retained=tmp_path/'retained';original=m.os.open;fired=[]
+    def swapping(path,flags,*args,**kwargs):
+        if path=='result.json' and flags&os.O_CREAT and not fired:
+            fired.append(True);parent.rename(retained);replacement.rename(parent)
+        return original(path,flags,*args,**kwargs)
+    monkeypatch.setattr(m.os,'open',swapping)
+    out,code=m.run(str(root),str(parent/'result.json'))
+    assert fired and code==4 and out['reason']=='OUTPUT_UNKNOWN'
+    assert (parent/'keep').read_text()=='owned' and not (parent/'result.json').exists()
+    assert parent.stat().st_mode&0o777==0o700 and not (retained/'result.json').exists()
+
+
+def test_only_created_file_descriptor_is_written_or_chmodded(tmp_path,monkeypatch):
+    root,parent=bundle(tmp_path);m=cli_module();target=parent/'result.json';original=m.os.open;fired=[]
+    moved=parent/'created-moved'
+    def swapping(path,flags,*args,**kwargs):
+        fd=original(path,flags,*args,**kwargs)
+        if path=='result.json' and flags&os.O_CREAT and not fired:
+            fired.append(True);target.rename(moved);target.write_text('replacement-owned');target.chmod(0o640)
+        return fd
+    monkeypatch.setattr(m.os,'open',swapping)
+    out,code=m.run(str(root),str(target))
+    assert fired and code==4 and out['reason']=='OUTPUT_UNKNOWN' and out['residual_possible']
+    assert target.read_text()=='replacement-owned' and target.stat().st_mode&0o777==0o640
+    assert json.loads(moved.read_bytes())['evaluation']=='EVALUATED' and moved.stat().st_mode&0o777==0o600
+
+
+def test_legacy_report_directory_cli_option_refused_privately(tmp_path):
+    run=subprocess.run([sys.executable,'-B',str(CLI),'--copies-dir',str(tmp_path),'--report-dir','private-old-path'],capture_output=True,check=False)
+    assert run.returncode==2 and not run.stderr and b'private-old-path' not in run.stdout
+
+
+def test_close_failure_after_publication_does_not_claim_no_residual(tmp_path,monkeypatch):
+    root,parent=bundle(tmp_path);m=cli_module();open_fd=m.os.open;close_fd=m.os.close;owned=[];failed=[]
+    def capture(path,flags,*args,**kwargs):
+        fd=open_fd(path,flags,*args,**kwargs)
+        if path=='result' and flags&os.O_CREAT:owned.append(fd)
+        return fd
+    def fail_close(fd):
+        close_fd(fd)
+        if fd in owned and not failed:
+            failed.append(True);raise OSError('private close fault')
+    monkeypatch.setattr(m.os,'open',capture);monkeypatch.setattr(m.os,'close',fail_close)
+    out,code=m.run(str(root),str(parent/'result'))
+    assert failed and code==4 and out['reason']=='OUTPUT_UNKNOWN' and out['residual_possible']
+    assert not out['report_written'] and 'private close' not in json.dumps(out)
