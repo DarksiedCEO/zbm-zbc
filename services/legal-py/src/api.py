@@ -81,6 +81,12 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
 DEFAULT_ROUTE_LIMIT = 256 * 1024
 
 
+def _founder_audit_route(request: Request) -> str:
+    """Audit the server's route template, never identifiers from the raw target."""
+    template = getattr(request.scope.get("route"), "path", None)
+    return template if isinstance(template, str) and template else "unclassified"
+
+
 def route_limit(path: str) -> int:
     for rx, limit in ROUTE_LIMITS:
         if rx.match(path):
@@ -288,7 +294,7 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         """A recognised caller token (in ``allowed`` when given); with ``andre_ok`` Andre's token also passes."""
         def dep(request: Request) -> str:
             if andre_ok and request.headers.get(FOUNDER_HEADER) is not None:
-                return _andre(route or request.url.path[:64], request.headers.get(FOUNDER_HEADER))
+                return _andre(route or _founder_audit_route(request), request.headers.get(FOUNDER_HEADER))
             name = callers.identify(request.headers.get(CALLER_HEADER))
             if name is None and allowed and set(allowed) <= set(settings.callers_not_configured):
                 # an optional caller not configured yet (first deploy): its routes answer 503 until its token is set
@@ -525,7 +531,7 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/legal/v1/acceptances/{acceptance_id}", dependencies=auth)
     def acceptance_get(acceptance_id: str, _: str = Depends(caller("clipper_network", "finance_31", "onboarding",
-                                                                   "compliance_38", andre_ok=True))) -> dict:
+                                                                   "compliance_38", andre_ok=True, route="acceptances/get"))) -> dict:
         # compliance_38 (ADR 0024, HR-15): a client's activation needs Legal to confirm the client's own acceptance
         return svc.get_acceptance(_id(acceptance_id, LG_ID))
 
