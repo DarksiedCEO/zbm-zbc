@@ -23,7 +23,9 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import hmac
 import json
+import logging
 import re
 import secrets
 import sys
@@ -35,6 +37,8 @@ from decimal import Decimal
 from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
+import clickwrap_page as CP
+import link_tag as LT
 import reasons as R
 import rules as RU
 from advice import AdviceGuard
@@ -49,7 +53,7 @@ from ledger import DEPARTMENT, LedgerQueryFailed, LedgerRecordError, Recorder, c
 from models import ID_RE
 import answers as A
 from ports import ComplianceRow, Delivery, EnvelopeAnswer, ProposalAnswer, Ports
-from store import BlobStore, DataDirBusy, RecordLog, StoreWriteError
+from store import BlobStore, DataDirBusy, RecordLog, StoreReadError, StoreWriteError
 from textguard import injection_rules_in
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -66,7 +70,9 @@ BLOB_CLASS = {"document": "contracts_and_esign_evidence", "variables": "contract
               "certificate": "contracts_and_esign_evidence", "paper": "contracts_and_esign_evidence",
               "clause": "contracts_and_esign_evidence", "memo": "legal_memos", "excerpt": "legal_memos",
               "question": "legal_memos", "evidence": "acceptance_records", "notice": "holds",
-              "outbound": "takedowns"}
+              "outbound": "takedowns", "rationale": "contracts_and_esign_evidence"}
+# LG-20 / ADR 0022: the CQ rows Andre may answer with a founder determination (client contracts only)
+FOUNDER_CQ = ("CQ-19",)
 PERIOD_RE = re.compile(r"^P([0-9]{1,3})(Y|M|D)$")
 # collections that log records ``put`` into (kind -> (attribute, key field))
 PUT_KINDS = {
@@ -79,8 +85,14 @@ PUT_KINDS = {
     "ruling": ("rulings", "ruling_id"), "signoff": ("signoffs", "signoff_id"), "engagement": ("engagements", "counsel_ref"),
     "review": ("reviews", "review_id"), "package": ("packages", "package_id"), "outbound": ("outbound", "outbound_id"),
     "invitation": ("invitations", "invitation_id"),
+    "client_invitation": ("client_invitations", "invitation_id"),      # ADR 0028: the client acceptance page
 }
 INVITATION_DAYS = 14          # money red team RTM-13: an acceptance invitation is valid for 14 days, used once
+# ADR 0028: the client acceptance page. A client's acceptance is recorded only by this caller, on its own route.
+PORTAL_CALLER = "client_portal"
+SOW_DOCS = ("sow", "sow_seo_audit", "sow_revenue_recovery")
+CLIENT_PAGE_DOCS = ("client_msa",) + SOW_DOCS
+TOKEN_BYTES = 32              # 256-bit acceptance token, base64url (43 characters); only its SHA-256 is stored
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -118,6 +130,8 @@ def b64decode(value: str, what: str) -> bytes:
         raise Invalid(f"{what}: 1 byte .. 5 MiB decoded")
     return data
 
+
+log = logging.getLogger("legal.service")
 
 class Refused(Conflict):
     """409 carrying reason items (every refusal cites a rule id, §0.1.6)."""
@@ -298,6 +312,7 @@ class LegalService:
         self.blob_meta: dict[str, dict] = {}
         self.acceptances: dict[str, dict] = {}
         self.invitations: dict[str, dict] = {}
+        self.client_invitations: dict[str, dict] = {}       # ADR 0028
         self.envelopes: dict[str, dict] = {}
         self.pb_proposals: dict[str, dict] = {}
         self.playbooks: dict[str, dict] = {}
@@ -748,10 +763,16 @@ class LegalService:
             entries = self._ledger_entries()
         except LedgerQueryFailed as exc:
             return None, f"ledger unreadable: {exc}", False, 0
-        bad = sum(1 for h in live if self.blobs.get(h) is None)
-        return entries, None, self.log.verify(), bad
+        missing = unreadable = 0
+        for h in live:
+            try:
+                if self.blobs.get(h) is None:
+                    missing += 1
+            except StoreReadError:        # AEGIS r5 N5-L2: its own red line, never a 503 for the whole report
+                unreadable += 1
+        return entries, None, self.log.verify(), (missing, unreadable)
 
-    def _integrity_from(self, entries, unreadable: Optional[str], chain: bool, bad: int) -> dict:
+    def _integrity_from(self, entries, unreadable: Optional[str], chain: bool, bad: tuple = (0, 0)) -> dict:
         with self.lock:
             if unreadable is not None:
                 return {"status": "red", "problems": [unreadable]}
@@ -764,8 +785,11 @@ class LegalService:
                 problems.append("local log hash chain does not verify")
             if self.log.fault:                   # bug sweep E: a failed write could not be cut back
                 problems.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
-            if bad:
-                problems.append(f"{bad} blob(s) missing or not matching their SHA-256")
+            missing, read_errors = bad
+            if missing:
+                problems.append(f"{missing} blob(s) missing or not matching their SHA-256")
+            if read_errors:
+                problems.append(f"{read_errors} blob(s) unreadable (read error)")
             return {"status": "red" if problems else "green", "problems": problems, "log_lines": len(self.log),
                     "rules_version": self.rules_version}
 
@@ -1024,7 +1048,111 @@ class LegalService:
                                         "alias_of", "related")},
                 "status": self.cq_status(cq_id), "memo_ids": list(self.register[c]["memo_ids"]),
                 "review_by": self.register[c]["review_by"], "check": "counsel_memo",
-                "compliance": self.register[c].get("compliance"), "rules_pinned": self.rules_pinned}
+                "compliance": self.register[c].get("compliance"),
+                "founder_determination": self._founder_determination_view(c), "rules_pinned": self.rules_pinned}
+
+    # --- LG-20 / ADR 0022: founder path for client commercial contracts ---------------------------------------
+
+    def _founder_path_in_force(self) -> bool:
+        """LG-20 is in the Andre-approved rule version in force, verified (a live Legal approved before ADR 0022 has
+        to add it first: the seed alone never opens the path)."""
+        row = self.current.by_id().get("LG-20") if self.current else None
+        return row is not None and row["status"] == "verified"
+
+    def _founder_determination_status(self, cq_id: str) -> Optional[str]:
+        fd = (self.register.get(cq_id) or {}).get("founder_determination")
+        if not fd:
+            return None
+        if fd.get("status") != "active":
+            return fd.get("status")
+        if not self._founder_path_in_force():
+            return "lg20_not_in_force"
+        if self._today() >= date.fromisoformat(fd["renew_by"]):
+            return "expired"
+        return "active"
+
+    def _founder_determination_view(self, cq_id: str) -> Optional[dict]:
+        fd = (self.register.get(cq_id) or {}).get("founder_determination")
+        if not fd:
+            return None
+        return {**{k: fd[k] for k in ("determined_by", "determined_at", "renew_by", "rationale_sha256",
+                                       "scope_doc_ids", "rule_id")},
+                "status": self._founder_determination_status(cq_id)}
+
+    def _clickwrap_basis(self, doc_id: str) -> Optional[str]:
+        """What makes clickwrap evidence sufficient for ``doc_id`` now: a filed memo verifying CQ-19 (``memo``), else
+        (client commercial contracts only) Andre's founder determination on CQ-19 (``founder_determination``), else
+        nothing."""
+        if self.cq_verified("CQ-19"):
+            return "memo"
+        d = self.documents.get(doc_id) or {}
+        fd = self.register.get("CQ-19", {}).get("founder_determination") or {}
+        # AEGIS L3: only the documents the determination recorded, and only while the document is still flagged
+        if (d.get("founder_approval_allowed") and doc_id in (fd.get("scope_doc_ids") or [])
+                and self._founder_determination_status("CQ-19") == "active"):
+            return "founder_determination"
+        return None
+
+    def _acceptance_basis_ok(self, a: dict) -> bool:
+        """AEGIS M2: an acceptance whose evidence rests on Andre's CQ-19 determination counts only while LG-20 is in
+        force and the determination was not invalidated (its renewal date passing does not cut off what it already
+        covered). Any other basis is unaffected."""
+        if a.get("evidence_basis") != "founder_determination":
+            return True
+        fd = self.register.get("CQ-19", {}).get("founder_determination") or {}
+        # AEGIS r2 N5: only under the determination lineage the acceptance was recorded under
+        return (self._founder_determination_status("CQ-19") in ("active", "expired")
+                and a.get("evidence_lineage") is not None
+                and a.get("evidence_lineage") == (fd.get("lineage") or fd.get("determined_at")))
+
+    def _acceptance_sufficient(self, a: dict) -> bool:
+        # ADR 0028: a client's acceptance counts only when the client acceptance page recorded it (an older record made
+        # on the onboarding path, with Andre's token, stays in the log and never counts)
+        if str(a.get("party_ref") or "").startswith("client:") and a.get("entry_by") != PORTAL_CALLER:
+            return False
+        return bool(a.get("evidence_sufficient")) and self._acceptance_basis_ok(a)
+
+    def founder_determine(self, request_id: str, cq_id: str, body: dict) -> dict:
+        """Andre's founder determination on CQ-19 for client commercial contracts (LG-20). The row's own status and
+        memo list are untouched; only clickwrap acceptances of documents marked ``founder_approval_allowed`` become
+        evidence-sufficient while the determination is in force."""
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, f"register/{cq_id}/founder-determination", body)
+            if ent:
+                return ent["response"]
+            c = self.canonical_cq(cq_id)
+            if c is None:
+                raise NotFound("no such register row")
+            reasons = []
+            if c not in FOUNDER_CQ:
+                reasons.append(R.item("FOUNDER_PATH_NOT_ALLOWED", f"{c}: LG-07 applies; the founder path covers CQ-19 "
+                                      "for client commercial contracts only", cq_id=c))
+            if not self._founder_path_in_force():
+                reasons.append(R.item("FOUNDER_PATH_NOT_IN_FORCE", "LG-20 is not in the rule version in force: add it "
+                                      "(rules proposal) and approve it first"))
+            if reasons:
+                self._refuse("founder_determination_refused", c, reasons, op_id=request_id)
+            now = self._now()
+            op = Op(self, f"fdt|{request_id}", "andre", c)
+            self._injection(op, {"rationale": body["rationale"]})
+            rsha = op.blob(body["rationale"].encode("utf-8"), "rationale", [f"register:{c}"])
+            scope = sorted(d for d, x in self.documents.items() if x.get("founder_approval_allowed"))
+            renew_by = (self._today() + timedelta(days=self.cfg.memo_review_days)).isoformat()
+            # AEGIS r2 N5: a determination continues the LINEAGE of the one before it when that one was never ended
+            # (still active, or only past its renewal date); after an invalidation (or with none before) a new
+            # lineage starts, so acceptances recorded under the invalidated one never count again
+            prev = self.register[c].get("founder_determination") or {}
+            continues = self._founder_determination_status(c) in ("active", "expired")
+            lineage = (prev.get("lineage") or prev.get("determined_at")) if continues else f"{iso(now)}#{request_id}"
+            fd = {"status": "active", "determined_by": "andre", "determined_at": iso(now), "renew_by": renew_by,
+                  "rationale_sha256": rsha, "scope_doc_ids": scope, "rule_id": "LG-20", "lineage": lineage}
+            op.ev("fdt", "register_row_founder_determined", c,
+                  {"cq_id": c, "rule_id": "LG-20", "renew_by": renew_by, "rationale_sha256": rsha,
+                   "scope_doc_ids": scope, "lineage": lineage},
+                  f"Andre recorded a founder determination on {c}")
+            op.update("register", c, {"founder_determination": fd})
+            return self._answer(op, key, h, {"cq_id": c, "founder_determination": dict(fd)})
 
     def register_view(self) -> dict:
         with self.lock:
@@ -1056,7 +1184,11 @@ class LegalService:
                   {"target": target, "canonical": k, "was": was, "source_ref_sha256": sha(source_ref),
                    "detected_change_sha256": change_sha}, f"Compliance invalidated {target} (tighten only)",
                   actor="compliance_38")
-            op.update(coll, k, {"status": "unverified"})
+            fields = {"status": "unverified"}
+            if coll == "register" and (self.register[k].get("founder_determination") or {}).get("status") == "active":
+                # tighten only: a founder determination (LG-20) on the row falls with it
+                fields["founder_determination"] = {**self.register[k]["founder_determination"], "status": "invalidated"}
+            op.update(coll, k, fields)
             return self._answer(op, key, h, {"target": target, "canonical": k, "status": "unverified", "was": was})
 
     # ================================================================== documents (§B.1, §C.1)
@@ -1070,12 +1202,19 @@ class LegalService:
     def _versions_of(self, doc_id: str) -> list[dict]:
         return [v for v in self.doc_versions.values() if v["doc_id"] == doc_id]
 
+    def _basis_in_force(self, v: dict) -> bool:
+        """AEGIS M2: a founder-approved version counts only while LG-20 is in force; closing the path stops it."""
+        return v.get("approval_basis") != "founder_approval" or self._founder_path_in_force()
+
     def _current(self, doc_id: str) -> Optional[dict]:
-        return i01.current(self._versions_of(doc_id), self._now())
+        # AEGIS M5: "current" is the document every party sees, so it never names a version bound to one party (a
+        # client fill or a per-client upload): those are accepted by their own party, version by version
+        return i01.current([v for v in self._versions_of(doc_id) if not v.get("party_ref") and self._basis_in_force(v)],
+                           self._now())
 
     def _in_force(self, v: dict) -> bool:
         """Approved, effective and not past review_by at this instant (spec §B.2 "approved at accepted_at")."""
-        return i01.current([v], self._now()) is not None
+        return i01.current([v], self._now()) is not None and self._basis_in_force(v)
 
     def _template(self, doc_id: str) -> Optional[dict]:
         """The version a scheduler fill uses: the highest in-force approved version that is itself a template
@@ -1096,7 +1235,12 @@ class LegalService:
             return f"counsel_memo:{so['memo_id']}"
         if so and so.get("counsel_ref"):
             return f"counsel_countersigned:{so['counsel_ref']}"
+        if v.get("approval_basis") == "founder_approval":
+            return "founder_approval"
         if v.get("template_ref"):
+            tpl = self.doc_versions.get(f"{v['doc_id']}@{v['template_ref']['version']}") or {}
+            if tpl.get("approval_basis") == "founder_approval":
+                return f"founder_template:{v['doc_id']}@{v['template_ref']['version']}"
             return f"counsel_template:{v['doc_id']}@{v['template_ref']['version']}"
         return "unreviewed"
 
@@ -1105,6 +1249,11 @@ class LegalService:
                                      "template_variables", "template_ref", "counsel_signoff", "approved_by",
                                      "approved_at", "effective_at", "review_by", "supersedes", "created_at", "created_by")}
         out["review_label"] = self._review_label(v)
+        if v.get("approval_basis"):
+            out["approval_basis"] = v["approval_basis"]      # LG-20: "founder_approval" (set only on that path)
+        out["basis_in_force"] = self._basis_in_force(v)      # AEGIS M2: false once LG-20 is closed
+        if v.get("founder_rationale_sha256"):
+            out["founder_rationale_sha256"] = v["founder_rationale_sha256"]
         return out
 
     def document_view(self, doc_id: str) -> dict:
@@ -1113,6 +1262,7 @@ class LegalService:
             cur = self._current(doc_id)
             vs = sorted(self._versions_of(doc_id), key=lambda v: i01.vkey(v["version"]))
             return {**{k: d[k] for k in ("doc_id", "title", "doc_type", "entities", "counsel_required")},
+                    "founder_approval_allowed": bool(d.get("founder_approval_allowed")),
                     "current_version": cur["version"] if cur else None,
                     "versions": [self.version_view(v) for v in vs], "rules_pinned": self.rules_pinned}
 
@@ -1180,7 +1330,12 @@ class LegalService:
             date_vars: dict[str, str] = {}
             template_ref = None
             variables_sha = None
-            if principal == "andre":
+            # ADR 0022: Andre may also FILL the current template for one client (variables + party_ref, no text),
+            # exactly as the scheduler does; the fill is a new draft that still needs its own approval
+            andre_fill = principal == "andre" and body.get("variables") is not None and body.get("text") is None
+            if andre_fill and (body.get("template_variables") or body.get("bump") != "minor"):
+                raise Invalid("a template fill carries variables only (the template is the current version)")
+            if principal == "andre" and not andre_fill:
                 if body.get("text") is None or body.get("variables") is not None:
                     raise Invalid("Andre's upload carries the document text (counsel's draft) and no variables")
                 text = body["text"]
@@ -1204,8 +1359,20 @@ class LegalService:
                 if not body.get("party_ref"):
                     raise Invalid("a fill names the party it is for (party_ref): only that party can accept it")
                 schema = tpl["template_variables"] or {}
+                supplied = dict(body["variables"]) if isinstance(body["variables"], dict) else body["variables"]
+                facts = sorted(n for n in schema if n.startswith("zbm_"))
+                if facts and isinstance(supplied, dict):
+                    # ADR 0028: ZBM's own entity facts come from LEGAL_ZBM_FACTS, never from the request
+                    if any(n.startswith("zbm_") for n in supplied):
+                        raise Invalid("zbm_* values are ZBM's entity facts, set in LEGAL_ZBM_FACTS, never in a request")
+                    missing = [n for n in facts if n not in self.cfg.zbm_facts]
+                    if missing:
+                        raise Refused("ZBM_FACT_MISSING", reasons=[R.item(
+                            "ZBM_FACT_MISSING", f"the template names {len(missing)} ZBM entity fact(s) that "
+                            f"LEGAL_ZBM_FACTS does not set: {', '.join(missing)[:120]}")], recorded=False)
+                    supplied = {**supplied, **{n: self.cfg.zbm_facts[n] for n in facts}}
                 try:
-                    values = i01.check_variables(schema, body["variables"])
+                    values = i01.check_variables(schema, supplied)
                 except ValueError as exc:
                     raise Invalid(str(exc)) from None
                 self._guard([v for n, v in values.items() if schema[n]["type"] == "string"], f"doc:{doc_id}",
@@ -1327,10 +1494,38 @@ class LegalService:
             _ = d
             return self._answer(op, key, h, {"doc_id": doc_id, "version": version, "counsel_signoff": signoff})
 
+    def _placeholder_precount(self, doc_id: str, version: str, request_id: str, route: str,
+                              body: dict) -> Optional[tuple[str, Optional[int]]]:
+        """AEGIS r3 C1: count unfilled placeholders OUTSIDE the service lock, on the version's immutable,
+        content-addressed blob, so a long text never stalls the other Legal routes. Returns (sha256, count), with
+        count None when the text is not held; None when there is no such version (the locked path then refuses) or
+        when the request is a replay (r4 C4: the locked path answers it from the idempotency record, uncounted)."""
+        with self.lock:
+            try:
+                if self._idem("andre", request_id, route, body)[2] is not None:
+                    return None
+            except (Invalid, Conflict):
+                pass                                     # the locked path raises the same error in its own order
+            v = self.doc_versions.get(f"{doc_id}@{version}")
+            if v is None:
+                return None
+            sha_, declared = v["sha256"], set(v.get("template_variables") or {})
+        data = self.blobs.get(sha_)
+        return sha_, (i01.bracket_placeholders(data.decode("utf-8", "replace"), declared) if data is not None else None)
+
+    def _placeholders_for(self, v: dict, pre: Optional[tuple[str, Optional[int]]]) -> int:
+        if pre is not None and pre[0] == v["sha256"]:
+            return pre[1] or 0
+        text = self._text_of(v)                          # not precounted (no such version then): count here
+        return i01.bracket_placeholders(text, set(v.get("template_variables") or {})) if text is not None else 0
+
     def decide_version(self, request_id: str, doc_id: str, version: str, body: dict) -> dict:
+        route = f"decision/{doc_id}/{version}"
+        pre = (self._placeholder_precount(doc_id, version, request_id, route, body)
+               if body.get("decision") == "approve" else None)
         with self.lock:
             self._require_rules()
-            key, h, ent = self._idem("andre", request_id, f"decision/{doc_id}/{version}", body)
+            key, h, ent = self._idem("andre", request_id, route, body)
             if ent:
                 return ent["response"]
             d = self._doc(doc_id)
@@ -1342,7 +1537,8 @@ class LegalService:
                              "different content hash than this version's")], op_id=request_id)
             op = Op(self, f"dd|{request_id}", "andre", subject)
             if body["decision"] == "approve":
-                reasons = i01.approval_reasons(d, v, self.cq_verified, now)
+                reasons = i01.approval_reasons(d, v, self.cq_verified, now,
+                                               placeholders=self._placeholders_for(v, pre))
                 if reasons:
                     missing = any(r["code"] == "COUNSEL_RECORD_MISSING" for r in reasons)
                     self._refuse("approval_refused_no_counsel" if missing else "document_approval_refused", subject,
@@ -1378,14 +1574,122 @@ class LegalService:
             op.update("doc_versions", v["key"], fields)
             return self._answer(op, key, h, {"doc_id": doc_id, "version": version, **fields})
 
+    def _text_of(self, v: dict) -> Optional[str]:
+        data = self.blobs.get(v["sha256"])
+        return data.decode("utf-8", "replace") if data is not None else None
+
+    def _rationale(self, sha: Optional[str], what: str) -> dict:
+        data = self.blobs.get(sha) if sha else None
+        if data is None:
+            raise NotFound(f"no founder rationale is held for {what}")
+        return {"rationale": data.decode("utf-8"), "rationale_sha256": sha}
+
+    def version_rationale(self, doc_id: str, version: str) -> dict:
+        """AEGIS M4: Andre reads back the rationale he gave for a founder approval (Andre's token only)."""
+        with self.lock:
+            v = self._version(doc_id, version)
+            return {"doc_id": doc_id, "version": version,
+                    **self._rationale(v.get("founder_rationale_sha256"), f"{doc_id} {version}")}
+
+    def determination_rationale(self, cq_id: str) -> dict:
+        with self.lock:
+            c = self.canonical_cq(cq_id)
+            if c is None:
+                raise NotFound("no such register row")
+            fd = self.register[c].get("founder_determination") or {}
+            return {"cq_id": c, **self._rationale(fd.get("rationale_sha256"), c)}
+
+    def founder_approve_version(self, request_id: str, doc_id: str, version: str, body: dict) -> dict:
+        """LG-20 / ADR 0022: Andre approves a client commercial contract version as founder, on its content hash,
+        with a written rationale. Recorded with ``approval_basis: founder_approval`` and ``approved_by: andre`` (on the
+        version and on the ledger). Every other approval precondition stays."""
+        route = f"founder-approval/{doc_id}/{version}"
+        pre = self._placeholder_precount(doc_id, version, request_id, route, body)    # r3 C1: outside the lock
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, route, body)
+            if ent:
+                return ent["response"]
+            d = self._doc(doc_id)
+            v = self._version(doc_id, version)
+            subject = f"doc:{doc_id}"
+            now = self._now()
+            if body["version_sha256"] != v["sha256"]:
+                self._refuse("document_approval_refused", subject, [R.item("HASH_MISMATCH", "Andre's decision names a "
+                             "different content hash than this version's")], op_id=request_id)
+            renewal = v["status"] == "approved" and v.get("approval_basis") == "founder_approval"
+            # every document check runs again on a renewal too (AEGIS L2); only the draft-status check is skipped
+            reasons = [r for r in i01.approval_reasons(d, v, self.cq_verified, now, founder=True,
+                                                       placeholders=self._placeholders_for(v, pre))
+                       if not (renewal and r["code"] == "VERSION_NOT_APPROVABLE")]
+            if renewal and not body.get("renew_superseded"):
+                # ADR 0022: a renewal moves the version's date and keeps its acceptances valid, so live clients are not
+                # cut off at review_by. AEGIS L1: it never brings back a version a newer approved one of the same
+                # instance (same party, or both standard forms) replaced, unless Andre says so explicitly.
+                newer = [x for x in self._versions_of(doc_id) if x["status"] == "approved"
+                         and x.get("party_ref") == v.get("party_ref") and i01.vkey(x["version"]) > i01.vkey(version)]
+                if newer:
+                    reasons.append(R.item("VERSION_SUPERSEDED", f"{doc_id} {version} was replaced by a newer approved "
+                                          "version: send renew_superseded true to renew it anyway"))
+            # AEGIS M3 + r2 N7: the template a fill was made from must still be approved and in force, for a first
+            # approval and for a renewal alike
+            reasons += self._template_reasons(v)
+            if not self._founder_path_in_force():
+                reasons.append(R.item("FOUNDER_PATH_NOT_IN_FORCE", "LG-20 is not in the rule version in force: add it "
+                                      "(rules proposal) and approve it first"))
+            if reasons:
+                self._refuse("document_approval_refused", subject, reasons, op_id=request_id)
+            op = Op(self, f"fap|{request_id}", "andre", subject)
+            self._injection(op, {"rationale": body["rationale"]})
+            rsha = op.blob(body["rationale"].encode("utf-8"), "rationale", [subject, f"doc:{doc_id}@{version}"])
+            eff = now
+            if body.get("effective_at"):
+                eff = max(now, parse_iso(body["effective_at"]))
+            fields = {"status": "approved", "approved_by": "andre", "approved_at": iso(now), "effective_at": iso(eff),
+                      "review_by": iso(now + timedelta(days=self.cfg.memo_review_days)),
+                      "approval_basis": "founder_approval", "founder_rationale_sha256": rsha}
+            if renewal:
+                fields = {"review_by": fields["review_by"], "founder_rationale_sha256": rsha,
+                          "renewed_at": iso(now), "approved_at": v["approved_at"], "effective_at": v["effective_at"],
+                          "status": "approved", "approved_by": "andre", "approval_basis": "founder_approval"}
+            op.ev("fap", "document_version_founder_renewed" if renewal else "document_version_founder_approved", subject,
+                  {"doc_id": doc_id, "version": version, "sha256": v["sha256"], "effective_at": fields["effective_at"],
+                   "review_by": fields["review_by"], "approval_basis": "founder_approval", "approved_by": "andre",
+                   "rationale_sha256": rsha, "rule_id": "LG-20"},
+                  f"Andre {'renewed' if renewal else 'approved'} {doc_id} {version} as founder")
+            op.update("doc_versions", v["key"], fields)
+            if not renewal and v.get("party_ref") and v.get("template_ref") and doc_id in CLIENT_PAGE_DOCS:
+                self._revoke_older_fill_links(op, v["party_ref"], doc_id, version, now)
+            return self._answer(op, key, h, {"doc_id": doc_id, "version": version, **fields,
+                                             "review_label": self._review_label({**v, **fields})})
+
+    def _revoke_older_fill_links(self, op: "Op", party: str, doc_id: str, version: str, now) -> None:
+        """AEGIS L-3: Andre approved a newer fill of ``doc_id`` for ``party``: that client's open links to another
+        version of the document are revoked (in the same operation), so the client can no longer accept the older
+        terms."""
+        for inv in self.client_invitations.values():
+            if inv["party_ref"] != party or self._client_invitation_status(inv) != "open":
+                continue
+            if any(d["doc_id"] == doc_id and d["version"] != version for d in inv["documents"]):
+                op.ev("cin", "client_acceptance_link_revoked", party,
+                      {"invitation_id": inv["invitation_id"], "reason": "newer_fill_approved", "doc_id": doc_id,
+                       "version": version}, "Client acceptance link revoked: a newer fill was approved", actor="andre")
+                op.update("client_invitations", inv["invitation_id"], {"revoked_at": iso(now),
+                                                                       "revoked_reason": "newer_fill_approved"})
+
     # ================================================================== acceptances (§B.2, §C.3)
 
     def acceptance_view(self, a: dict) -> dict:
         out = {k: a.get(k) for k in ("acceptance_id", "doc_id", "version", "doc_sha256", "accepted_at", "method",
-                                     "evidence_sufficient", "party_ref")} | {"rules_pinned": self.rules_pinned}
+                                     "party_ref", "evidence_basis")}
+        # AEGIS M2: sufficiency as of NOW (the stored record never changes; its basis can stop counting)
+        out["evidence_sufficient"] = self._acceptance_sufficient(a)
+        out["basis_in_force"] = self._acceptance_basis_ok(a)
         if a.get("invitation_id"):
             out["invitation_id"] = a["invitation_id"]                  # RTM-13
-        return out
+        if a.get("entry_by") == PORTAL_CALLER:
+            out["via"] = PORTAL_CALLER                                 # ADR 0028: the client acceptance page
+        return out | {"rules_pinned": self.rules_pinned}
 
     def get_acceptance(self, acceptance_id: str) -> dict:
         with self.lock:
@@ -1413,6 +1717,7 @@ class LegalService:
                     reasons.append(R.item("VERSION_NOT_IN_FORCE", f"{body['doc_id']} {body['version']} is not "
                                           "approved and in force at accepted_at"))
                 reasons += self._instance_reasons(v, body["party_ref"])
+                reasons += self._template_reasons(v)
             reasons += self._invitation_reasons(principal, v, body)
             if body["presented_sha256"] != body["doc_sha256"]:
                 reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the text shown is not the document exactly"))
@@ -1439,12 +1744,19 @@ class LegalService:
                    "esign_consent": body.get("esign_consent"),
                    "evidence_ref": {"kind": ev["kind"], "sha256": ev["sha256"], "blob": blob} if ev else None,
                    "entry_by": principal}
-            rec["evidence_sufficient"] = i03.clickwrap_sufficient(rec, self.cq_verified("CQ-19"),
+            basis = self._clickwrap_basis(rec["doc_id"])
+            rec["evidence_sufficient"] = i03.clickwrap_sufficient(rec, basis is not None,
                                                                   self.cfg.esign_consent_required,
                                                                   not self._instance_reasons(v, rec["party_ref"]))
+            # LG-20: say WHY the evidence counts -- a memo verifying CQ-19, or Andre's founder determination
+            rec["evidence_basis"] = basis if rec["evidence_sufficient"] else None
+            if rec["evidence_basis"] == "founder_determination":
+                fd = self.register["CQ-19"]["founder_determination"]
+                rec["evidence_lineage"] = fd.get("lineage") or fd.get("determined_at")
             op.ev("acc", "acceptance_recorded", subject,
                   {"acceptance_id": aid, "doc_id": rec["doc_id"], "version": rec["version"], "doc_sha256": rec["doc_sha256"],
                    "method": rec["method"], "evidence_sufficient": rec["evidence_sufficient"],
+                   "evidence_basis": rec["evidence_basis"], "evidence_lineage": rec.get("evidence_lineage"),
                    "signer_identity_ref_sha256": sha(rec["signer_identity_ref"])},
                   f"Acceptance of {rec['doc_id']} {rec['version']} recorded")
             if body.get("invitation_id") and body["invitation_id"] in self.invitations:     # validated above (R10-L1)
@@ -1461,8 +1773,8 @@ class LegalService:
     def _invitation_reasons(self, principal: str, v: Optional[dict], body: dict) -> list[dict]:
         """Money red team RTM-13, AEGIS r10 R10-L1/L2/L3:
 
-        * a ``client:*`` acceptance is recorded only on the onboarding path (ADR 0022: founder/onboarding); ``hub``
-          and ``clipper_network`` never record one, with or without an invitation;
+        * no caller records a ``client:*`` acceptance on this route, the onboarding token included (ADR 0028: only
+          the client acceptance page does, ``POST /legal/v1/portal/acceptances``);
         * an ``invitation_id``, from ANY caller, must name Andre's invitation for exactly this party, document and
           version, unused and unexpired (an unknown id is a 409 that writes nothing, never a 500 or a log line that
           updates a record that does not exist; no caller can use up another party's invitation);
@@ -1470,9 +1782,11 @@ class LegalService:
           invitation. A version bound to a party keeps its own binding (``_instance_reasons``)."""
         inv_id = body.get("invitation_id")
         out = []
-        if str(body.get("party_ref") or "").startswith("client:") and principal != "onboarding":
-            out.append(R.item("ACCEPTANCE_NOT_INVITED", "a client's acceptance is recorded only on the onboarding "
-                                                        "path, with Andre's invitation for that client"))
+        if str(body.get("party_ref") or "").startswith("client:"):
+            # ADR 0028 (closes RTM-13's residual, AEGIS r11 L3): no caller records a client's acceptance here, the
+            # onboarding token included; only the client acceptance page does (POST /legal/v1/portal/acceptances)
+            out.append(R.item("ACCEPTANCE_NOT_INVITED", "a client's acceptance is recorded only through the client "
+                                                        "acceptance page, from Andre's acceptance link"))
         if inv_id is not None:
             inv = self.invitations.get(inv_id)
             ok = (inv is not None and inv["party_ref"] == body["party_ref"] and inv["doc_id"] == body["doc_id"]
@@ -1494,6 +1808,12 @@ class LegalService:
             key, h, ent = self._idem("andre", request_id, "acceptance-invitations", body)
             if ent:
                 return ent["response"]
+            if str(body["party_ref"]).startswith("client:"):
+                # AEGIS L-4 (ADR 0028): a client accepts only on the client acceptance page; its link is
+                # POST /legal/v1/client-acceptance-invitations
+                raise Refused("ACCEPTANCE_NOT_INVITED", reasons=[R.item(
+                    "ACCEPTANCE_NOT_INVITED", "a client's acceptance link is a client acceptance invitation "
+                    "(the client acceptance page), not this one")], recorded=False)
             v = self.doc_versions.get(f"{body['doc_id']}@{body['version']}")
             if v is None or not self._in_force(v):
                 raise Conflict(f"no approved, in-force {body['doc_id']} version {body['version']}")
@@ -1509,6 +1829,445 @@ class LegalService:
                   actor="andre")
             op.add("invitation", rec)
             return self._answer(op, key, h, dict(rec))
+
+    # ================================================================== ADR 0028: the client acceptance page
+
+    @staticmethod
+    def _token_sha(token: str) -> str:
+        return hashlib.sha256(token.encode("ascii", "replace")).hexdigest()
+
+    def _client_invitation_by_token(self, token: str) -> Optional[dict]:
+        """Every record is compared (constant time each, no early exit): the answer's timing does not depend on where,
+        or whether, the token's hash matches."""
+        want = self._token_sha(token)
+        found = None
+        for inv in self.client_invitations.values():
+            if hmac.compare_digest(inv["token_sha256"], want):
+                found = inv
+        return found
+
+    def _client_invitation_status(self, inv: dict) -> str:
+        if inv.get("revoked_at"):
+            return "revoked"
+        if inv.get("used_at"):
+            return "accepted"
+        if self._now() >= parse_iso(inv["expires_at"]):
+            return "expired"
+        return "open"
+
+    def _client_doc_reasons(self, party: str, d: dict) -> list[dict]:
+        """Whether ``party`` can validly accept this exact document version NOW: it exists with this hash, is approved
+        and in force, is bound to this party (or is the CURRENT standard form), its template is in force, and a
+        clickwrap acceptance of it would be evidence-sufficient (a memo or Andre's founder determination on CQ-19)."""
+        v = self.doc_versions.get(f"{d['doc_id']}@{d['version']}")
+        if v is None:
+            return [R.item("DOCUMENT_UNKNOWN", f"no {d['doc_id']} version {d['version']}")]
+        out = []
+        if v["sha256"] != d["doc_sha256"]:
+            out.append(R.item("ACCEPTANCE_HASH_MISMATCH", f"{d['doc_id']} {d['version']} has another content hash"))
+        if not self._in_force(v):
+            out.append(R.item("VERSION_NOT_IN_FORCE", f"{d['doc_id']} {d['version']} is not approved and in force"))
+        out += self._instance_reasons(v, party)
+        out += self._template_reasons(v)
+        if v.get("party_ref") and v.get("template_ref"):
+            # AEGIS r2 N-L2: only the latest approved fill of this document for this client
+            newer = [x for x in self._versions_of(d["doc_id"]) if x.get("party_ref") == party and x.get("template_ref")
+                     and x["status"] == "approved" and i01.vkey(x["version"]) > i01.vkey(v["version"])]
+            if newer:
+                out.append(R.item("VERSION_SUPERSEDED", f"{d['doc_id']} {d['version']} is not this client's latest "
+                                  f"approved fill ({max(newer, key=lambda x: i01.vkey(x['version']))['version']} is)"))
+        if not v.get("party_ref") and not v.get("template_variables"):
+            cur = self._current(d["doc_id"])
+            if cur is not None and cur["version"] != v["version"]:
+                out.append(R.item("VERSION_SUPERSEDED", f"{d['doc_id']} {d['version']} is not the current standard "
+                                  f"form ({cur['version']} is)"))
+        if self._clickwrap_basis(d["doc_id"]) is None:
+            out.append(R.item("EVIDENCE_INSUFFICIENT", f"a clickwrap acceptance of {d['doc_id']} would not be "
+                              "evidence-sufficient (CQ-19 has no memo and no founder determination in force)",
+                              cq_id="CQ-19"))
+        return out
+
+    def _client_invitation_reasons(self, inv: dict) -> list[dict]:
+        out = []
+        for d in inv["documents"]:
+            out += self._client_doc_reasons(inv["party_ref"], d)
+        return out or self._msa_version_reasons(inv["party_ref"], inv["documents"])
+
+    UNREADABLE = "\x00unreadable"
+
+    def _fill_variable(self, v: dict, name: str) -> Optional[str]:
+        """A fill's stored value. AEGIS r2 N-L8: a fill whose stored values are missing or unreadable answers
+        UNREADABLE (the rule then fails closed), never "no value"."""
+        if not v.get("variables_sha256"):
+            return None
+        data = self.blobs.get(v["variables_sha256"])
+        try:
+            vals = json.loads(data) if data is not None else None
+        except ValueError:
+            vals = None
+        if not isinstance(vals, dict):
+            return self.UNREADABLE
+        val = vals.get(name)
+        return val if isinstance(val, str) else None
+
+    def _msa_version_reasons(self, party: str, docs: list[dict]) -> list[dict]:
+        """AEGIS L-2(e), clickwrap text Part C: a SOW names the MSA version it is made under (its ``msa_version``
+        value). It must be the MSA in the same link, or (a SOW alone) the MSA version the client has accepted. A SOW
+        whose template has no ``msa_version`` names none and is not checked."""
+        msa = next((d for d in docs if d["doc_id"] == "client_msa"), None)
+        out = []
+        for d in docs:
+            if d["doc_id"] not in SOW_DOCS:
+                continue
+            v = self.doc_versions.get(f"{d['doc_id']}@{d['version']}")
+            cited = self._fill_variable(v, "msa_version") if v else None
+            if cited is None:
+                continue
+            if msa is not None:
+                want = msa["version"]
+            else:
+                acc = self._msa_acceptance(party)
+                want = acc["version"] if acc else None
+            if cited == self.UNREADABLE:
+                out.append(R.item("MSA_VERSION_MISMATCH", f"{d['doc_id']} {d['version']}: its stored fill values "
+                                  "cannot be read, so the MSA version it is made under cannot be checked"))
+            elif cited != want:
+                out.append(R.item("MSA_VERSION_MISMATCH", f"{d['doc_id']} {d['version']} is made under MSA version "
+                                  f"{cited}, which is not {'the MSA of this link' if msa else 'the MSA the client accepted'}"))
+        return out
+
+    def _msa_acceptance(self, party: str) -> Optional[dict]:
+        """The client's latest acceptance of a client_msa that counts now (for the new-SOW page, clickwrap text Part C)."""
+        accs = [a for a in self.acceptances.values() if a.get("party_ref") == party and a.get("doc_id") == "client_msa"
+                and self._acceptance_sufficient(a)]
+        a = max(accs, key=lambda x: x["accepted_at"], default=None)
+        return {"version": a["version"], "accepted_at": a["accepted_at"]} if a else None
+
+    def _client_page(self, party: str, docs: list[dict]) -> tuple[str, list[str]]:
+        ids = [d["doc_id"] for d in docs]
+        has_msa, has_sow = "client_msa" in ids, any(i in SOW_DOCS for i in ids)
+        if has_msa and has_sow:
+            return "first_engagement", []
+        if has_sow:
+            if self._msa_acceptance(party):
+                return "new_sow", []
+            return "new_sow", ["this client has no MSA acceptance on record yet: the acceptance page opens a SOW-only "
+                               "link only after the client has accepted the MSA"]
+        return "msa_only", ["the acceptance page serves the MSA together with a SOW, or a SOW alone after the MSA: "
+                            "this MSA-only link does not open there; invite the MSA with the client's first SOW"]
+
+    def _client_invitation_view(self, inv: dict) -> dict:
+        status = self._client_invitation_status(inv)
+        reasons = self._client_invitation_reasons(inv) if status == "open" else []
+        return {"invitation_id": inv["invitation_id"], "party_ref": inv["party_ref"], "documents": inv["documents"],
+                "page": inv["page"], "created_at": inv["created_at"], "expires_at": inv["expires_at"],
+                "log_fingerprint": inv["token_sha256"][:8],
+                "status": status, "usable": status == "open" and not reasons, "reasons": reasons,
+                "reason_lines": R.lines(reasons), "acceptance_ids": list(inv.get("acceptance_ids") or []),
+                "used_at": inv.get("used_at"), "revoked_at": inv.get("revoked_at")}
+
+    def create_client_invitation(self, request_id: str, body: dict) -> dict:
+        """ADR 0028: Andre invites ONE client to accept these exact document versions. The answer carries a 256-bit
+        acceptance token ONCE: Legal keeps only its SHA-256 (the record, the ledger, the export and the idempotency
+        record never hold the token; a replay of this request answers without it)."""
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, "client-acceptance-invitations", body)
+            if ent:
+                return ent["response"]
+            party = body["party_ref"]
+            docs = [{"doc_id": d["doc_id"], "version": d["version"], "doc_sha256": d["doc_sha256"]}
+                    for d in body["documents"]]
+            reasons = []
+            for d in docs:
+                reasons += self._client_doc_reasons(party, d)
+            reasons = reasons or self._msa_version_reasons(party, docs)
+            if reasons:
+                self._refuse("client_acceptance_link_refused", party, reasons, op_id=request_id)
+            self._require_link_tags()
+            now = self._now()
+            token = LT.mint(self.cfg.link_tag_key)              # AEGIS r2 N-M1: self-authenticating
+            iid = rid("cin", "andre", request_id)
+            op = Op(self, f"cin|{iid}", "andre", party)
+            display_sha = op.blob(canonical(body["display"]).encode("utf-8"), "evidence",
+                                  [party, f"client_invitation:{iid}"])
+            page, warnings = self._client_page(party, docs)
+            rec = {"invitation_id": iid, "party_ref": party, "documents": docs, "page": page,
+                   "display_sha256": display_sha, "token_sha256": self._token_sha(token), "created_at": iso(now),
+                   "expires_at": iso(now + timedelta(days=body["expires_in_days"])), "used_at": None,
+                   "used_request_sha256": None, "acceptance_ids": [], "revoked_at": None}
+            op.ev("cin", "client_acceptance_link_issued", party,
+                  {"invitation_id": iid, "documents": docs, "page": page, "expires_at": rec["expires_at"]},
+                  f"Client acceptance link issued ({page}, {len(docs)} document(s))", actor="andre")
+            op.add("client_invitation", rec)
+            stored = {"invitation_id": iid, "party_ref": party, "documents": docs, "page": page, "warnings": warnings,
+                      "expires_at": rec["expires_at"], "token": None, "accept_path": None, "token_shown_once": True}
+            resp = self._answer(op, key, h, stored)
+            return {**resp, "token": token, "accept_path": f"/accept/{token}"}
+
+    def client_invitation_get(self, invitation_id: str) -> dict:
+        with self.lock:
+            inv = self.client_invitations.get(invitation_id)
+            if inv is None:
+                raise NotFound("no such client acceptance link")
+            return self._client_invitation_view(inv)
+
+    def client_invitation_evidence(self, invitation_id: str) -> dict:
+        """Andre only: what the client accepted on the page -- the signatory as typed, the client's display block, the
+        page text as shown, the HMACs and the acceptance ids (for the confirmation email and any dispute)."""
+        with self.lock:
+            inv = self.client_invitations.get(invitation_id)
+            if inv is None:
+                raise NotFound("no such client acceptance link")
+            if not inv.get("used_at"):
+                raise Conflict("this link has not been used: there is no acceptance evidence yet")
+            accs = [self.acceptances[a] for a in inv["acceptance_ids"] if a in self.acceptances]
+            if not accs:
+                raise Unavailable("the link's acceptance records are not held")
+            pe = accs[0]["portal_evidence"]
+            sig, page, disp = (self.blobs.get(pe["signatory_sha256"]), self.blobs.get(pe["page_sha256"]),
+                               self.blobs.get(inv["display_sha256"]))
+            if sig is None or page is None or disp is None:
+                raise Unavailable("an evidence blob is not readable")
+            return {"invitation_id": invitation_id, "party_ref": inv["party_ref"], "accepted_at": inv["used_at"],
+                    "display": json.loads(disp), "signatory": json.loads(sig),
+                    "acceptances": [{k: a[k] for k in ("acceptance_id", "doc_id", "version", "doc_sha256")}
+                                    for a in accs],
+                    "page_sha256": pe["page_sha256"], "page_text_b64": base64.b64encode(page).decode("ascii"),
+                    "ip_hmac_sha256": pe["ip_hmac_sha256"], "user_agent_hmac_sha256": pe["user_agent_hmac_sha256"],
+                    "hmac_key_id": pe["hmac_key_id"]}
+
+    def revoke_client_invitation(self, request_id: str, invitation_id: str, body: dict) -> dict:
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, f"client-acceptance-invitations/{invitation_id}/revoke", body)
+            if ent:
+                return ent["response"]
+            inv = self.client_invitations.get(invitation_id)
+            if inv is None:
+                raise NotFound("no such client acceptance link")
+            status = self._client_invitation_status(inv)
+            if status == "accepted":
+                raise Conflict("this link was already used: the client's acceptance stands (a link is revoked only "
+                               "before it is used)")
+            if status == "revoked":
+                return self._client_invitation_view(inv)
+            now = self._now()
+            op = Op(self, f"cinr|{invitation_id}", "andre", inv["party_ref"])
+            op.ev("cin", "client_acceptance_link_revoked", inv["party_ref"],
+                  {"invitation_id": invitation_id, "reason": "andre"},
+                  "Client acceptance link revoked", actor="andre")
+            op.update("client_invitations", invitation_id, {"revoked_at": iso(now)})
+            return self._answer(op, key, h, self._client_invitation_view({**inv, "revoked_at": iso(now)}))
+
+    def _usable_client_invitation(self, token: str) -> dict:
+        """The open, unexpired, unrevoked, unused invitation this token names whose documents are all still valid to
+        accept; otherwise the ONE answer every case gets (404 "not found"): no enumeration oracle."""
+        self._require_link_tags()
+        if not LT.valid(token, self.cfg.link_tag_key or b""):       # AEGIS r2 N-M1: before any record is read
+            self._count_foreign_version(token)
+            raise NotFound("not found", final=True)
+        inv = self._client_invitation_by_token(token)
+        # AEGIS r4 N4-L2: on this private call a 404 says whether it is final (unknown, used, expired, revoked: the
+        # portal may stop asking) or not (the documents cannot be served now: rules not loaded, a document retired
+        # or superseded, a blob missing). The client's page is the same 404 either way.
+        if inv is None or self._client_invitation_status(inv) != "open":
+            raise NotFound("not found", final=True)
+        if self.current is None or self._client_invitation_reasons(inv):
+            raise NotFound("not found")
+        return inv
+
+    def _count_foreign_version(self, token: str) -> None:
+        """AEGIS r4 N4-L3: a right-shaped token in another format version (the portal and Legal run different
+        link_tag.py): counted on this private /health and logged once per version."""
+        v = LT.version_of(token)
+        if v is None or v == LT.VERSION:
+            return
+        seen = self.__dict__.setdefault("_foreign_versions", {})
+        if v not in seen:
+            log.warning("a link in format version %d reached Legal, which reads version %d: redeploy legal and "
+                        "client-portal from the same commit (runbook step 9)", v, LT.VERSION)
+        seen[v] = seen.get(v, 0) + 1
+
+    def _link_documents(self, inv: dict) -> tuple[dict, list[dict]]:
+        """The link's display block and its documents (the MSA first) with their exact registered text and label."""
+        disp = self.blobs.get(inv["display_sha256"])
+        if disp is None:
+            raise NotFound("not found")
+        display = json.loads(disp)
+        docs = []
+        for d in sorted(inv["documents"], key=lambda x: x["doc_id"] != "client_msa"):
+            v = self.doc_versions[f"{d['doc_id']}@{d['version']}"]
+            data = self.blobs.get(v["sha256"])
+            if data is None or sha_bytes(data) != d["doc_sha256"]:
+                raise NotFound("not found")
+            docs.append({**d, "title": self.documents[d["doc_id"]]["title"],
+                         "label": CP.doc_label(d["doc_id"], display), "text": data.decode("utf-8")})
+        return display, docs
+
+    def _page(self, inv: dict) -> tuple[dict, list[dict], Optional[dict], list[dict]]:
+        """AEGIS M-5: the page Legal renders for this link now (clickwrap text v1, Part B or C)."""
+        display, docs = self._link_documents(inv)
+        msa_acc = self._msa_acceptance(inv["party_ref"])
+        bl = []
+        if inv["page"] == "first_engagement" or (inv["page"] == "new_sow" and msa_acc):
+            bl = CP.blocks(inv["page"], display, docs, msa_acc, self.cfg.business_tz)
+        return display, docs, msa_acc, bl
+
+    def _require_link_tags(self) -> None:
+        """AEGIS r3 N3-L4: no link is issued or used while the tag key is unset or malformed (503, with the reason)."""
+        if not self.cfg.link_tag_key:
+            raise Unavailable((self.cfg.link_tag_problem or "off: LEGAL_LINK_TAG_KEY is not set")
+                              + " (client acceptance links are off; it must equal client-portal's PORTAL_LINK_TAG_KEY)")
+
+    def link_tag_health(self) -> dict:
+        if not self.cfg.link_tag_key:
+            return {"status": self.cfg.link_tag_problem or "off: LEGAL_LINK_TAG_KEY is not set", "version": LT.VERSION}
+        out = {"status": "ok", "version": LT.VERSION, "key_id": LT.key_id(self.cfg.link_tag_key)}
+        seen = self.__dict__.get("_foreign_versions")
+        if seen:
+            out["foreign_versions_seen"] = {str(k): n for k, n in sorted(seen.items())}
+        return out
+
+    def client_invitations_by_fingerprint(self, fp: str) -> dict:
+        """AEGIS r3 N3-M1 (Andre only): the links whose log fingerprint (the portal's 429 log line) is ``fp``."""
+        with self.lock:
+            hits = [inv for inv in self.client_invitations.values() if inv["token_sha256"].startswith(fp)]
+            return {"fingerprint": fp, "links": [self._client_invitation_view(inv) for inv in hits]}
+
+    def _zone(self) -> dict:
+        """AEGIS r2 N-L5: the zone Legal dates the page in, and its label, for the portal's confirmation."""
+        return {"time_zone": self.cfg.business_tz, "time_zone_label": CP.zone_label(self.cfg.business_tz)}
+
+    def portal_resolve(self, token: str) -> dict:
+        """ADR 0028 (caller client_portal): the page Legal renders for the link (blocks and the hash of their text) and
+        the documents' exact registered text. A page Legal does not render (an MSA-only link, a SOW alone for a client
+        with no counted MSA acceptance) has no blocks; the portal answers its 404."""
+        with self.lock:
+            inv = self._usable_client_invitation(token)
+            display, docs, msa_acc, bl = self._page(inv)
+            return {"invitation_id": inv["invitation_id"], "page": inv["page"], "expires_at": inv["expires_at"],
+                    "display": display, "documents": docs, "msa_acceptance": msa_acc, "blocks": bl, **self._zone(),
+                    "page_sha256": hashlib.sha256(CP.page_text(bl).encode("utf-8")).hexdigest() if bl else None}
+
+    def portal_receipt(self, token: str, request_id: str, form_sha256: str = "") -> dict:
+        """AEGIS M-2 (caller client_portal): the receipt of the submission that used this link, for a retry after a
+        lost response or a refresh. Only for the same token AND the same request id (the portal derives it from the
+        submission); anything else is the one 404."""
+        with self.lock:
+            self._require_link_tags()
+            if not LT.valid(token, self.cfg.link_tag_key or b""):
+                raise NotFound("not found")
+            inv = self._client_invitation_by_token(token)
+            if inv is None or not inv.get("used_at") or inv.get("used_request_sha256") is None \
+                    or not hmac.compare_digest(inv["used_request_sha256"], sha(request_id)) \
+                    or not hmac.compare_digest(inv.get("used_form_sha256") or "", form_sha256):
+                raise NotFound("not found")
+            display, docs = self._link_documents(inv)
+            accs = [self.acceptances[a] for a in inv["acceptance_ids"] if a in self.acceptances]
+            return {"invitation_id": inv["invitation_id"], "page": inv["page"], "accepted_at": inv["used_at"],
+                    "display": display, "documents": docs, **self._zone(),
+                    "acceptances": [self.acceptance_view(a) for a in accs]}
+
+    def portal_accept(self, request_id: str, body: dict) -> dict:
+        """ADR 0028 (caller client_portal): the client accepted every document of the link on the acceptance page. One
+        operation records one acceptance per document and uses the link up: exactly once (the service lock), and a
+        retry of the same submission is answered from its idempotency record. The signatory block and the page text
+        are blobs; the records, the ledger and the export carry only their hashes."""
+        with self.lock:
+            key, h, ent = self._idem(PORTAL_CALLER, request_id, "portal/acceptances", body)
+            if ent:
+                return ent["response"]
+            inv = self._usable_client_invitation(body["token"])
+            iid, party = inv["invitation_id"], inv["party_ref"]
+            reasons = []
+            want = sorted((d["doc_id"], d["version"], d["doc_sha256"]) for d in inv["documents"])
+            got = sorted((d["doc_id"], d["version"], d["doc_sha256"]) for d in body["documents"])
+            if got != want:
+                reasons.append(R.item("ACCEPTANCE_HASH_MISMATCH", "the documents submitted are not exactly the "
+                                      "documents (versions and hashes) of this acceptance link"))
+            for d in body["documents"]:
+                if d["presented_sha256"] != d["doc_sha256"]:
+                    reasons.append(R.item("PRESENTED_TEXT_MISMATCH", f"the text shown for {d['doc_id']} is not the "
+                                          "document exactly"))
+                if d["affirmative_act"] is not True:
+                    reasons.append(R.item("AFFIRMATIVE_ACT_MISSING", f"{d['doc_id']} needs its own unticked box "
+                                          "ticked"))
+            page = b64decode(body["page_text_b64"], "page_text_b64")
+            if sha_bytes(page) != body["page_sha256"]:
+                reasons.append(R.item("ACCEPTANCE_HASH_MISMATCH", "page_text_b64 does not match page_sha256"))
+            # AEGIS M-5: the screen evidence must be the page Legal renders for this link now, and the company typed
+            # must be the client's legal name on the link (case, spaces and punctuation ignored)
+            display, _docs, _msa, bl = self._page(inv)
+            if not bl or not hmac.compare_digest(sha_bytes(CP.page_text(bl).encode("utf-8")), sha_bytes(page)):
+                reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the page text submitted is not the acceptance page "
+                                      "Legal renders for this link"))
+            if CP.norm_company(body["signatory"]["company"]) != CP.norm_company(display["client_legal_name"]):
+                reasons.append(R.item("COMPANY_MISMATCH", "the company typed is not the client's legal name on the "
+                                      "link"))
+            if reasons:
+                self._refuse("acceptance_refused", party, reasons, op_id=request_id)
+            now = self._now()
+            sig = {k: body["signatory"][k] for k in ("full_name", "title", "company")}
+            op = Op(self, f"pac|{iid}", i03.ACTOR, party)
+            self._injection(op, {"signatory": sig})
+            refs = [party, f"client_invitation:{iid}"]
+            page_sha = op.blob(page, "evidence", refs)
+            sig_sha = op.blob(canonical(sig).encode("utf-8"), "evidence", refs)
+            pe = {"page_sha256": page_sha, "signatory_sha256": sig_sha, "ip_hmac_sha256": body["ip_hmac_sha256"],
+                  "user_agent_hmac_sha256": body["user_agent_hmac_sha256"], "hmac_key_id": body["hmac_key_id"]}
+            views, aids, obligations = [], [], []
+            for d in sorted(inv["documents"], key=lambda x: x["doc_id"] != "client_msa"):
+                v = self.doc_versions[f"{d['doc_id']}@{d['version']}"]
+                aid = rid("acc", PORTAL_CALLER, iid, d["doc_id"])
+                rec = {"acceptance_id": aid, "party_ref": party, "signer_identity_ref": f"sig:{sig_sha[:40]}",
+                       "doc_id": d["doc_id"], "version": d["version"], "doc_sha256": d["doc_sha256"],
+                       "presented_sha256": d["doc_sha256"], "accepted_at": iso(now), "method": "clickwrap_unticked_box",
+                       "presentation": "inline", "affirmative_act": True, "esign_consent": None,
+                       "evidence_ref": {"kind": "session_ref", "sha256": page_sha, "blob": page_sha},
+                       "entry_by": PORTAL_CALLER, "invitation_id": iid, "portal_evidence": dict(pe)}
+                basis = self._clickwrap_basis(d["doc_id"])
+                rec["evidence_sufficient"] = i03.clickwrap_sufficient(rec, basis is not None,
+                                                                      self.cfg.esign_consent_required,
+                                                                      not self._instance_reasons(v, party))
+                if not rec["evidence_sufficient"]:            # checked by _usable_client_invitation; never reached
+                    raise Conflict("the acceptance would not be evidence-sufficient; nothing was recorded")
+                rec["evidence_basis"] = basis
+                if basis == "founder_determination":
+                    fd = self.register["CQ-19"]["founder_determination"]
+                    rec["evidence_lineage"] = fd.get("lineage") or fd.get("determined_at")
+                op.ev("acc", "acceptance_recorded", party,
+                      {"acceptance_id": aid, "doc_id": rec["doc_id"], "version": rec["version"],
+                       "doc_sha256": rec["doc_sha256"], "method": rec["method"], "evidence_sufficient": True,
+                       "evidence_basis": basis, "evidence_lineage": rec.get("evidence_lineage"),
+                       "signer_identity_ref_sha256": sha(rec["signer_identity_ref"]), "via": PORTAL_CALLER,
+                       "invitation_id": iid, "page_sha256": page_sha, "signatory_sha256": sig_sha},
+                      f"Acceptance of {rec['doc_id']} {rec['version']} recorded (client acceptance page)")
+                op.add("acceptance", rec)
+                obligations += self._bind_obligations(op, rec, v)
+                views.append(self.acceptance_view(rec))
+                aids.append(aid)
+            op.ev("cin", "client_acceptance_link_used", party,
+                  {"invitation_id": iid, "acceptance_ids": aids, "page_sha256": page_sha},
+                  "Client acceptance link used (accepted on the acceptance page)")
+            op.update("client_invitations", iid, {"used_at": iso(now), "acceptance_ids": aids,
+                                                  "used_request_sha256": sha(request_id),
+                                                  "used_form_sha256": body["form_sha256"]})
+            return self._answer(op, key, h, {"invitation_id": iid, "accepted_at": iso(now), "acceptances": views,
+                                             "obligation_ids": obligations, "reasons": [], "reason_lines": []})
+
+    def _template_reasons(self, v: dict) -> list[dict]:
+        """ADR 0022 / AEGIS r2 N7: a fill counts only while the template it was made from is approved and in force.
+        Retiring (or letting lapse) the template stops new approvals, renewals and acceptances of its fills; an
+        acceptance already recorded stays valid until the fill's own renewal date, or until Andre withdraws the fill."""
+        ref = v.get("template_ref")
+        if not ref:
+            return []
+        tpl = self.doc_versions.get(f"{v['doc_id']}@{ref['version']}")
+        if tpl is not None and self._in_force(tpl):
+            return []
+        return [R.item("TEMPLATE_NOT_IN_FORCE", f"the template {v['doc_id']} {ref['version']} this fill was made from "
+                       "is not in force")]
 
     def _instance_reasons(self, v: dict, party_ref: str) -> list[dict]:
         """AEGIS N17-4: a party accepts only a document INSTANCE bound to it. A template (declared variables, or any
@@ -1893,7 +2652,7 @@ class LegalService:
                 return None
             a = self.acceptances.get(c["acceptance_id"])
             terms = dict(c["terms"])
-            terms["signed"] = bool(a and a["evidence_sufficient"])
+            terms["signed"] = bool(a and self._acceptance_sufficient(a))
             terms["signed_at"] = a["accepted_at"] if terms["signed"] else None
             terms["ccpa_cpra_clause_present"] = self._ccpa_present(c["doc_id"], c["version"])
             return terms
@@ -1926,7 +2685,7 @@ class LegalService:
                     reasons.append(R.item("NO_SUFFICIENT_ACCEPTANCE", "the acceptance belongs to another party"))
                 if ex["doc_id"] != "client_msa":
                     reasons.append(R.item("NO_SUFFICIENT_ACCEPTANCE", "contract terms come from an executed client_msa"))
-            signed = bool(a and not reasons and a["evidence_sufficient"])
+            signed = bool(a and not reasons and self._acceptance_sufficient(a))
             if t["signed"] and not signed:
                 reasons.append(R.item("NO_SUFFICIENT_ACCEPTANCE", "signed: true needs an evidence-sufficient acceptance "
                                       "of the executed MSA version", cq_id="CQ-19"))
@@ -3089,4 +3848,5 @@ class LegalService:
                 "log_write_fault": bool(self.log.fault),
                 "counsel_channel_wired": not type(self.ports.counsel).__name__.startswith("NotWired"),
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
-                "replay_quarantined": len(self.unacknowledged_quarantine())}
+                "replay_quarantined": len(self.unacknowledged_quarantine()),
+                "link_tags": self.link_tag_health()}

@@ -24,6 +24,9 @@ from ports import ClientActivation, LegalAnswer, RegisterParameters
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha, sha_text
 from textguard import banned_words_in
 
+TAX_DETERMINATION_MISSING = ("sales-tax determination FIN-CQ-11 is not verified: Andre amends FIN-CQ-11 to verified "
+                             "with the memo reference")
+CONTRACT_RENEWAL_WARN_DAYS = 14   # ADR 0022: readiness flags a contract whose renewal date is this close
 CLOSE_TASKS = ("preclose_review", "subledgers_closed", "balance_sheet_recs", "restricted_recon_signed",
                "exception_aging", "rollforward_2020_1200")
 
@@ -35,6 +38,8 @@ def legal_version(v) -> str:
 
 _RATIO = Decimal("0.0001")
 
+
+TEST_CLIENT_PREFIX = "zz-test-"        # ADR 0028, AEGIS r2 N-L7: test clients are never billed
 
 class BooksMixin:
     # ================================================================== rate cards (§B.3)
@@ -222,7 +227,16 @@ class BooksMixin:
             self._commit(op)
             return resp
 
+    @staticmethod
+    def _refuse_test_client(client_id: str) -> None:
+        """ADR 0028, AEGIS r2 N-L7: a ``zz-test-`` client (the client acceptance runbook's test client) is never
+        billed."""
+        if str(client_id).casefold().startswith(TEST_CLIENT_PREFIX):     # AEGIS r3 N3-L6: any letter case
+            raise Conflict(f"{TEST_CLIENT_PREFIX}* is a test client: it is never billed (no billing profile, no "
+                           "invoice)")
+
     def put_billing_profile(self, request_id: str, client_id: str, body: dict) -> dict:
+        self._refuse_test_client(client_id)
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"billing/{client_id}", body)
             if ent:
@@ -248,14 +262,38 @@ class BooksMixin:
         ans = g.call("legal_37", "document_status", args, lambda: legal.document_status(*args), LegalAnswer(False))
         return ans if isinstance(ans, LegalAnswer) else LegalAnswer(False)
 
-    def _legal_reasons(self, g: Gather, ref: dict, what: str, client_id: str, entity: str) -> list[dict]:
+    def _renewal(self, ans: LegalAnswer) -> dict:
+        """ADR 0022: the contract's renewal reminder for Andre (never a gate here)."""
+        soon = None
+        if ans.renew_by and ans.renewal_lapsed is False:
+            try:
+                soon = parse_iso(ans.renew_by) - self._now() <= timedelta(days=CONTRACT_RENEWAL_WARN_DAYS)
+            except ValueError:
+                soon = None
+        return {"renew_by": ans.renew_by, "renewal_due_soon": soon, "renewal_lapsed": ans.renewal_lapsed}
+
+    def _legal_reasons(self, g: Gather, ref: dict, what: str, client_id: str, entity: str,
+                       renewal: Optional[dict] = None) -> list[dict]:
         ans = self._legal(g, ref, client_id, entity)
+        if renewal is not None and ans.available:
+            renewal[what] = self._renewal(ans)
         if not ans.available:
             return [R.item("DEPENDENCY_UNAVAILABLE:legal_37", f"Legal (37) cannot confirm the {what}", rule="FIN-29")]
         out = []
-        if not ans.current:
+        if ans.version_basis_in_force is False:
+            # AEGIS r2 N6: the version is fine as a document; what Legal no longer counts is its approval basis
+            out.append(R.item("LEGAL_NOT_CURRENT", f"the {what}'s approval basis is not in force at Legal: the founder "
+                                                   "approval path (LG-20) is closed; Andre reviews it at Legal"))
+        elif not ans.current and ans.renewal_lapsed:
+            out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} version's renewal date passed on "
+                                                   f"{(ans.renew_by or '')[:10]}: Andre renews it at Legal"))
+        elif not ans.current:
             out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} version is not current at Legal"))
-        if not ans.acceptance_matches:
+        if ans.acceptance_basis_in_force is False:
+            out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} acceptance's evidence basis is not in force at Legal: "
+                                                   "the CQ-19 founder determination it was recorded under has ended "
+                                                   "or LG-20 is closed; the client accepts again"))
+        elif not ans.acceptance_matches:
             out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} acceptance does not match this document, hash and "
                                                    "client"))
         return out
@@ -296,12 +334,13 @@ class BooksMixin:
         g = Gather(self, f"bready|{client_id}|{iso(self._now())}", "intel_02_receivables", client_id)
         unmet = list(self._rules_reasons())
         unmet += self._activation_reasons(self._activation(g, client_id))     # ADR 0024: the Compliance hard gate
+        renewal: dict = {}
         prof = self.db["client_profiles"].get(client_id)
         if prof is None:
             unmet.append(R.item("LEGAL_NOT_CURRENT", "no Andre-approved client billing profile (entity, payment method, "
                                                      "MSA)"))
         else:
-            unmet += self._legal_reasons(g, prof["msa"], "MSA", client_id, prof["entity"])
+            unmet += self._legal_reasons(g, prof["msa"], "MSA", client_id, prof["entity"], renewal)
             if prof["payment_method"] not in I2.PAYMENT_METHODS:
                 unmet.append(R.item("CARD_DISABLED", "payment method must be ACH or wire"))
             if prof["entity"] == "zbc":
@@ -310,7 +349,7 @@ class BooksMixin:
                     unmet.append(R.item("CAMPAIGN_NOT_FUNDED", "no ZBC campaign commercial profile for this client"))
                 elif all(self._fundable_reasons(g, c) for c in camps):
                     unmet += self._fundable_reasons(g, camps[0])
-        unmet += [R.item("TAX_TREATMENT_UNVERIFIED", x["message"], obligation_id="FIN-CQ-11")
+        unmet += [R.item("TAX_TREATMENT_UNVERIFIED", TAX_DETERMINATION_MISSING, obligation_id="FIN-CQ-11")
                   for x in self._counsel_reasons("FIN-CQ-11")]
         unmet = R.dedupe(unmet)
         extra = {}
@@ -322,7 +361,7 @@ class BooksMixin:
             extra["compliance_rule_expiry"] = ans if isinstance(ans, dict) else {"available": False}
         return {**extra, "client_id": client_id, "allowed": not unmet, "unmet": R.lines(unmet), "reasons": unmet,
                 "detail": "billing ready" if not unmet else f"{len(unmet)} requirement(s) unmet",
-                "rules_pinned": self.rules_pinned, "ledger_event_ids": g.events}
+                "contract_renewal": renewal, "rules_pinned": self.rules_pinned, "ledger_event_ids": g.events}
 
     # ================================================================== ADR 0024: per-jurisdiction sales (nexus)
 
@@ -457,6 +496,7 @@ class BooksMixin:
     # ================================================================== invoices (§B.9, §C.2)
 
     def draft_invoice(self, principal: str, request_id: str, body: dict) -> dict:
+        self._refuse_test_client(body.get("client_id"))
         with self.lock:
             key, h, ent = self._idem(principal, request_id, "invoices", body)
             if ent:
@@ -521,6 +561,8 @@ class BooksMixin:
         inv = self.db["invoices"].get(invoice_id)
         if inv is None:
             raise NotFound("no such invoice")
+        if body["decision"] == "approve":
+            self._refuse_test_client(inv["client_id"])
         g = Gather(self, f"invdec|{request_id}", "intel_02_receivables", invoice_id)
         reasons = list(self._rules_reasons())
         act = ClientActivation(False)
@@ -530,7 +572,7 @@ class BooksMixin:
             reasons += self._activation_reasons(act, full=True)      # Andre's decision route
             reasons += self._legal_reasons(g, inv["legal_ref"], "contract (MSA/order form/SOW)", inv["client_id"],
                                            inv["entity"])
-            reasons += [R.item("TAX_TREATMENT_UNVERIFIED", "sales-tax treatment (FIN-CQ-11) is unverified",
+            reasons += [R.item("TAX_TREATMENT_UNVERIFIED", TAX_DETERMINATION_MISSING,
                                obligation_id="FIN-CQ-11")] if not self.counsel_verified("FIN-CQ-11") else []
             if inv["kind"] == "campaign_deposit":
                 reasons += self._fundable_reasons(g, inv["campaign_id"])

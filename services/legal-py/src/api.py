@@ -48,12 +48,13 @@ from intelligences.i03_acceptance import forbidden_keys
 from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
 from ports import Ports
 from service import JOBS, LegalService, Seeds
-from store import BlobStore, RecordLog
+from store import BlobStore, RecordLog, StoreReadError
 from textguard import ip_fields, ip_in
 
 log = logging.getLogger("legal.api")
 
 CALLER_HEADER = "X-LEGAL-Caller-Token"
+NARROW_CALLERS = frozenset({"client_portal"})       # ADR 0028: only routes that name them
 FOUNDER_HEADER = "X-Andre-Approval-Token"
 MAX_BODY_BYTES = 7 * 1024 * 1024
 MAX_TARGET_BYTES = 4096
@@ -73,6 +74,9 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/legal/v1/playbooks/[^/]+/reviews$"), BLOB),
     (re.compile(r"^/legal/v1/playbooks/proposals$"), BLOB),
     (re.compile(r"^/legal/v1/reconcile$"), 1024 * 1024),
+    (re.compile(r"^/legal/v1/portal/acceptances$"), 4 * 1024 * 1024),     # ADR 0028: the page text as shown (base64)
+    (re.compile(r"^/legal/v1/portal/invitations/resolve$"), 1024),
+    (re.compile(r"^/legal/v1/portal/receipts$"), 1024),
 ]
 DEFAULT_ROUTE_LIMIT = 256 * 1024
 
@@ -294,6 +298,10 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                 raise Forbidden("caller token missing or not recognised")
             if allowed and name not in allowed:
                 raise Forbidden("this caller is not authorized for this route")
+            if not allowed and name in NARROW_CALLERS:
+                # ADR 0028: the client-portal token (held by the one public-facing service) reaches only the routes
+                # that name it, never the generic reader routes every other caller may use
+                raise Forbidden("this caller is not authorized for this route")
             return name
         return dep
 
@@ -304,9 +312,22 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
 
     reader = caller(andre_ok=True, route="read")
 
+    def portal() -> Callable:
+        """ADR 0028: the client-portal caller. AEGIS M-1: while its token is not set (the first deploy), its routes
+        answer 503 and Legal keeps running."""
+        inner = caller("client_portal")
+
+        def dep(request: Request) -> str:
+            if "client_portal" not in settings.caller_tokens:
+                raise Unavailable("the client_portal caller token is not set in LEGAL_CALLER_TOKENS: the client "
+                                  "acceptance page is closed until it is")
+            return inner(request)
+        return dep
+
     if settings.callers_not_configured:
         log.warning("LEGAL_CALLER_TOKENS: %s not set; the routes only it may call answer 503 until it is "
-                    "(docs/deploy/railway.md, ADR 0024 step D)", ", ".join(settings.callers_not_configured))
+                    "(docs/deploy/railway.md: ADR 0024 step D for compliance_38, 'Client acceptance page' for "
+                    "client_portal)", ", ".join(settings.callers_not_configured))
 
     def body(model: type[BaseModel]) -> Callable:
         def parse(payload: Any = Body(default=None)) -> Any:
@@ -341,6 +362,13 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
             content["issued"] = False
             return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content=content)
         return JSONResponse(status_code=exc.status_code, content=content)
+
+    @app.exception_handler(StoreReadError)
+    def _store_read(_: Request, exc: StoreReadError):
+        # AEGIS r4 N4-L2: a blob that exists but cannot be read now is a 503 (try again), never a 404
+        log.error("store read error: %s", exc)
+        return JSONResponse(status_code=503, headers={"Retry-After": "1"},
+                            content={"detail": "the local store could not be read; try again", "issued": False})
 
     @app.middleware("http")
     async def _unhandled(request: Request, call_next):
@@ -411,6 +439,18 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         return _echo(req.request_id, svc.decide_version(req.request_id, _id(doc_id, DOC_ID), _id(version, VERSION),
                                                         req.model_dump()))
 
+    @app.get("/legal/v1/documents/{doc_id}/versions/{version}/founder-approval/rationale", dependencies=auth)
+    def doc_founder_rationale(doc_id: str, version: str, _: str = Depends(andre("documents/founder-rationale"))) -> dict:
+        """AEGIS M4: Andre reads back his founder-approval rationale; nobody else can."""
+        return svc.version_rationale(_id(doc_id, DOC_ID), _id(version, VERSION))
+
+    @app.post("/legal/v1/documents/{doc_id}/versions/{version}/founder-approval", dependencies=auth)
+    def doc_founder_approval(doc_id: str, version: str, _: str = Depends(andre("documents/founder-approval")),
+                             req: m.FounderApproval = Depends(body(m.FounderApproval))) -> dict:
+        """LG-20 / ADR 0022: Andre approves a client commercial contract as founder."""
+        return _echo(req.request_id, svc.founder_approve_version(req.request_id, _id(doc_id, DOC_ID),
+                                                                 _id(version, VERSION), req.model_dump()))
+
     # --- acceptances and envelopes -------------------------------------------------------------------------------
 
     @app.post("/legal/v1/acceptances", dependencies=auth, status_code=201)
@@ -432,6 +472,56 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     def acceptance_invitation(_: str = Depends(andre("acceptance-invitations")),
                               req: m.InvitationCreate = Depends(body(m.InvitationCreate))) -> dict:
         return _echo(req.request_id, svc.create_invitation(req.request_id, req.model_dump()))
+
+    # --- ADR 0028: the client acceptance page ----------------------------------------------------------------------
+
+    @app.post("/legal/v1/client-acceptance-invitations", dependencies=auth, status_code=201)
+    def client_invitation(_: str = Depends(andre("client-acceptance-invitations")),
+                          req: m.ClientInvitationCreate = Depends(body(m.ClientInvitationCreate))) -> dict:
+        """Andre invites one client to accept these document versions; the answer shows the acceptance token ONCE."""
+        return _echo(req.request_id, svc.create_client_invitation(req.request_id, req.model_dump()))
+
+    @app.get("/legal/v1/client-acceptance-invitations/by-fingerprint/{fp}", dependencies=auth)
+    def client_invitation_by_fingerprint(fp: str,
+                                         _: str = Depends(andre("client-acceptance-invitations/fingerprint"))) -> dict:
+        """AEGIS r3 N3-M1: which link the portal's log line names (8 hex characters)."""
+        if not re.fullmatch(r"[0-9a-f]{8}", fp):
+            raise Invalid("a log fingerprint is 8 lower-case hex characters")
+        return svc.client_invitations_by_fingerprint(fp)
+
+    @app.get("/legal/v1/client-acceptance-invitations/{invitation_id}", dependencies=auth)
+    def client_invitation_get(invitation_id: str,
+                              _: str = Depends(andre("client-acceptance-invitations/read"))) -> dict:
+        return svc.client_invitation_get(_id(invitation_id, LG_ID))
+
+    @app.get("/legal/v1/client-acceptance-invitations/{invitation_id}/evidence", dependencies=auth)
+    def client_invitation_evidence(invitation_id: str,
+                                   _: str = Depends(andre("client-acceptance-invitations/evidence"))) -> dict:
+        """Andre only: the signatory, the page text as shown and the HMACs of a used link."""
+        return svc.client_invitation_evidence(_id(invitation_id, LG_ID))
+
+    @app.post("/legal/v1/client-acceptance-invitations/{invitation_id}/revoke", dependencies=auth)
+    def client_invitation_revoke(invitation_id: str, _: str = Depends(andre("client-acceptance-invitations/revoke")),
+                                 req: m.InvitationRevoke = Depends(body(m.InvitationRevoke))) -> dict:
+        return _echo(req.request_id, svc.revoke_client_invitation(req.request_id, _id(invitation_id, LG_ID),
+                                                                  req.model_dump()))
+
+    @app.post("/legal/v1/portal/invitations/resolve", dependencies=auth)
+    def portal_resolve(_: str = Depends(portal()),
+                       req: m.PortalResolve = Depends(body(m.PortalResolve))) -> dict:
+        """The client-portal service's read of one acceptance link: every unusable token is the same 404."""
+        return svc.portal_resolve(req.token)
+
+    @app.post("/legal/v1/portal/receipts", dependencies=auth)
+    def portal_receipt(_: str = Depends(portal()), req: m.PortalReceipt = Depends(body(m.PortalReceipt))) -> dict:
+        """AEGIS M-2: the receipt of the submission that used a link (same token, same request id); else 404."""
+        return svc.portal_receipt(req.token, req.request_id, req.form_sha256)
+
+    @app.post("/legal/v1/portal/acceptances", dependencies=auth, status_code=201)
+    def portal_acceptance(_: str = Depends(portal()),
+                          req: m.PortalAcceptanceCreate = Depends(body(m.PortalAcceptanceCreate))) -> dict:
+        """The ONLY way a client's acceptance is recorded (ADR 0028)."""
+        return _echo(req.request_id, svc.portal_accept(req.request_id, req.model_dump()))
 
     @app.get("/legal/v1/acceptances/{acceptance_id}", dependencies=auth)
     def acceptance_get(acceptance_id: str, _: str = Depends(caller("clipper_network", "finance_31", "onboarding",
@@ -517,6 +607,17 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     def register_row(cq_id: str, _: str = Depends(reader)) -> dict:
         with svc.lock:
             return svc.register_row_view(_id(cq_id, CQ_OR_TARGET))
+
+    @app.get("/legal/v1/register/{cq_id}/founder-determination/rationale", dependencies=auth)
+    def founder_determination_rationale(cq_id: str, _: str = Depends(andre("register/founder-determination/rationale"))
+                                        ) -> dict:
+        return svc.determination_rationale(_id(cq_id, CQ_OR_TARGET))
+
+    @app.post("/legal/v1/register/{cq_id}/founder-determination", dependencies=auth)
+    def founder_determination(cq_id: str, _: str = Depends(andre("register/founder-determination")),
+                              req: m.FounderDetermination = Depends(body(m.FounderDetermination))) -> dict:
+        """LG-20 / ADR 0022: Andre's founder determination on CQ-19 (client commercial contracts only)."""
+        return _echo(req.request_id, svc.founder_determine(req.request_id, _id(cq_id, CQ_OR_TARGET), req.model_dump()))
 
     @app.post("/legal/v1/register/{cq_id}/invalidate", dependencies=auth)
     def invalidate(cq_id: str, _: str = Depends(caller("compliance_38")),

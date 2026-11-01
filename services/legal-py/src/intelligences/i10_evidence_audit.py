@@ -45,7 +45,9 @@ RECONCILE_TYPE = "reconcile"
 LEASE_TYPE = "instance_lease"
 RULING_TYPES = ("document_version_approved", "document_version_retired", "acceptance_recorded", "memo_filed",
                 "music_ruling", "signoff_answered", "hold_issued", "hold_released_by_andre", "obligation_created",
-                "compliance_proposal_created", "register_row_verified", "restore_window_set", "playbook_version_published")
+                "compliance_proposal_created", "register_row_verified", "restore_window_set", "playbook_version_published",
+                "document_version_founder_approved", "register_row_founder_determined",
+                "document_version_founder_renewed")
 LOG_SUBJECT = "lg-log"
 _ANCHOR_RE = re.compile(r"lg-log-([0-9a-f]{16})-([0-9]{1,12})-([0-9a-f]{40})")
 _VERSION_RE = re.compile(r"lg-ver-([0-9a-f]{16})-([0-9]{1,9})-[0-9a-f]{32}")

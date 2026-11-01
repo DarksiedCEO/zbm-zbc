@@ -9,6 +9,8 @@ the register.
   consent block while ``LEGAL_ESIGN_CONSENT_REQUIRED=1``. ``evidence_sufficient`` is false until CQ-19 is
   verified by a counsel memo, then true when every §B.2 field is present (L1: attribution rests on identity ref
   + document hash + timestamp + presentation + affirmative act, never on an IP).
+- LG-20 (ADR 0022): for the documents marked ``founder_approval_allowed``, Andre's founder determination on CQ-19
+  counts the same while it is in force (the caller passes it as ``cq19_verified``).
 - Envelopes: sufficient only when the provider's ``signed_document_sha256`` equals ``doc_sha256``; the provider's
   certificate is stored by hash in Legal's own blob store. The UETA §1633.3 exclusions are UNVERIFIED, so only
   ordinary commercial contract types may go out for e-sign.
