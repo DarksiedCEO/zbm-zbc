@@ -1869,3 +1869,15 @@ STRIPE_GATEWAY_ALLOWED_IPS=127.0.0.1` (as `services/finance-py/devtools/live_run
     pinned SDK (it was evaluated by hand with `node --experimental-strip-types` and type-checked with `tsc --strict`).
 - **Startup order** is enforced only by retries: a department that exhausted its retries before the ledger was up stays
   down until redeployed.
+
+### Dormant Finance housekeeping client (not deployed)
+
+The standalone `services/finance-py/src/housekeeping_runner.py` does not use Finance's volume/server entrypoint.
+No IaC, command, image, schedule or production secret is configured by this slice. Its `FIN_HOUSEKEEPING_` prefix
+contains `FIN_HOUSEKEEPING_ENABLED` (absent/0 disabled, exactly1 enabled), `FIN_HOUSEKEEPING_ORIGIN` (trusted Finance
+origin), `FIN_HOUSEKEEPING_SERVICE_TOKEN`, `FIN_HOUSEKEEPING_CALLER_TOKEN` (distinct dedicated optional `ops_cron`),
+and `FIN_HOUSEKEEPING_DEADLINE_SECONDS` (integer1–120, default60). All are separate from Finance's existing settings;
+existing Finance deployments do not need a new caller token to start. Do not give it the broad scheduler/founder token.
+No values are supplied here. See [dormant runner procedure](../runbooks/housekeeping-runner.md) for exact restrictions,
+no-retry/unknown-outcome semantics, and the separate review/CI/operator activation gates. Never mount Finance's volume
+into a runner; optional caller support alone does not activate a recurring job.
