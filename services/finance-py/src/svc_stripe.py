@@ -31,6 +31,7 @@ earlier than Stripe's: a late webhook only makes the hold longer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -612,7 +613,10 @@ class StripeMixin:
                 elif kind is None:
                     status = "ignored_type"
                 elif kind == "session":
-                    status = self._stripe_session(op, truth["session"], truth.get("payment"))
+                    session = truth["session"]
+                    if session.found and session.session_id != ev["object_id"]:
+                        raise Invalid("Stripe session identity does not match the requested object")
+                    status = self._stripe_session(op, session, truth.get("payment"))
                 elif kind == "dispute":
                     status = self._stripe_dispute(op, truth["dispute"])
                 elif "payment" in truth:
@@ -683,12 +687,51 @@ class StripeMixin:
     def _stripe_session(self, op: Op, s: StripeSession, p: Optional[StripePayment]) -> str:
         rec = op.get("stripe_sessions", s.session_id) if s.found else None
         if rec is None:
+            if s.found and p is not None and p.found:
+                return self._unknown_checkout(op, s, p)
             return "unknown_session"
         if rec["status"] != s.status and s.status in ("complete", "expired"):
             op.put("stripe_sessions", rec["session_id"], {**rec, "status": s.status, "payment_intent": s.payment_intent})
         if p is not None and p.found:
             return self._stripe_payment(op, p)
         return f"session_{s.status}"
+
+    def _unknown_checkout(self, op: Op, s: StripeSession, p: StripePayment) -> str:
+        """Record an anomaly, never infer attribution or move money (ADR 0030)."""
+        if not (isinstance(s.session_id, str) and s.session_id.startswith("cs_")
+                and _SID.fullmatch(s.session_id) and isinstance(s.payment_intent, str)
+                and s.payment_intent.startswith("pi_") and _SID.fullmatch(s.payment_intent)
+                and p.payment_intent == s.payment_intent and s.status in ("open", "complete", "expired")):
+            raise Invalid("Stripe checkout payment identity or state is inconsistent")
+        if p.status not in ("processing", "succeeded"):
+            return "unknown_session"
+        session_ref = hashlib.sha256(("checkout-session:" + s.session_id).encode()).hexdigest()
+        payment_ref = hashlib.sha256(("checkout-payment:" + p.payment_intent).encode()).hexdigest()
+        bid = rid("brk", "stripe_unknown_session", session_ref)
+        prior = op.get("breaks", bid)
+        if prior is not None:
+            if prior["payment_ref"] != payment_ref:
+                raise Invalid("Stripe checkout payment identity changed; operator review required")
+            if prior["payment_state"] == "succeeded" or p.status == "processing":
+                return "unknown_session_break"
+        # Only processing -> succeeded advances. No amount is assessed: a provider's amount may be
+        # foreign currency, incomplete or subsequently refunded. Zero is not a reconciled balance.
+        record = {**(prior or {}), "break_id": bid, "leg": "stripe_unknown_session", "subject": "stripe:checkout",
+                  "difference": "0.00", "amount_unassessed": True,
+                  "opened_at": (prior or {}).get("opened_at", iso(self._now())),
+                  "opened_on": (prior or {}).get("opened_on", self._today_la().isoformat()),
+                  "owner": "andre", "severity": "high", "explanation_code": "unknown", "status": "open",
+                  "receipt_id": None, "session_ref": session_ref, "payment_ref": payment_ref,
+                  "payment_state": p.status, "resolution": None, "clears_by": None,
+                  "note": "Unknown Checkout payment requires external operator review; amount unassessed; no money booked."}
+        if prior and prior.get("resolution"):
+            record["prior_resolution"] = prior["resolution"]
+        op.put("breaks", bid, record)
+        op.record(derived_id("brk", bid, p.status), "break_opened", "intel_07_reconciliation", bid,
+                  {"break_id": bid, "leg": "stripe_unknown_session", "payment_state": p.status,
+                   "session_ref": session_ref, "payment_ref": payment_ref, "amount_unassessed": True},
+                  "Unknown Checkout payment requires operator review; no money booked")
+        return "unknown_session_break"
 
     # --- payments --------------------------------------------------------------------------------------------------
 
