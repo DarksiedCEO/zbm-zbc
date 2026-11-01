@@ -69,7 +69,9 @@ serve) gets the same 404 page.
 - **Limits.** Request target 2 KiB, head 8 KiB, form body 8 KiB, 10 s body deadline; rate limits per client address,
   a global ceiling on Legal calls charged before each call, per confirmed link, and on not-found answers, keyed by
   HMACs (AEGIS M-3; the attacker cost is in ADR 0028); uvicorn: 64 concurrent connections, 5 s keep-alive, 16 KiB
-  head.
+  head, and a 10 s absolute request-head deadline from connect and again after each response. Partial header
+  progress does not extend it. Complete heads hand timeout responsibility to the body reader. Closing releases
+  the concurrency slot before the shared graceful drain (at most 64 KiB or 1 s; at most 512 drains).
 - **What Legal receives.** The documents with their hashes, each box's own tick, the page text as shown and its hash,
   the typed name, title and company, and HMAC-SHA256 values of the client's IP address and user agent with the key's
   id. Never the IP address or the user agent themselves.
@@ -100,6 +102,8 @@ invitation id as the provider's idempotency key.
 
 - `tests/test_page.py`, `tests/test_submit.py`, `tests/test_config_and_adapter.py`: the app in process (an ASGI
   driver, a fake of Legal's two routes).
+- `tests/test_header_deadline.py`: real launcher protocol with deterministic timer advancement, initial and reused
+  connections, pipelined requests, body handoff and cleanup; bounded loopback launcher controls.
 - `tests/test_launcher.py`: the real launcher (refusals; one live start on 127.0.0.1).
 - `tests/test_e2e_real.py` runs `tests/contract_e2e_real.py`: the REAL legal-py and finance-py apps with this page in
   one process (no network): invite -> accept -> Finance issues the invoice, and the negative cases (used, expired,
