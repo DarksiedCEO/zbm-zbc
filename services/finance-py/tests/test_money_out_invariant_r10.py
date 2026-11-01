@@ -258,7 +258,7 @@ def test_the_invariant_catches_a_route_that_stops_asking():
     assert not _reaches(g2, "propose_refund")
 
 
-def test_every_money_route_is_paired_with_behavioural_tests_that_pass():
+def test_every_money_route_is_paired_with_behavioural_tests_that_pass(tmp_path):
     """AEGIS r11 R11-7: each money route has behavioural proof that the REFUSED client's money does not move through
     it (the right client asked, on every branch to the effect); the named tests exist and are run here."""
     import re
@@ -276,7 +276,8 @@ def test_every_money_route_is_paired_with_behavioural_tests_that_pass():
             mod, fn = t.split("::")
             assert re.search(rf"^def {re.escape(fn)}\(", (here / mod).read_text(), re.M), (key, t)
             ids.append(str(here / mod) + "::" + fn)
-    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *sorted(set(ids))],
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                        "--basetemp", str(tmp_path / "behavioural-proof"), *sorted(set(ids))],
                        cwd=str(here.parent), capture_output=True, text=True, timeout=900)
     assert r.returncode == 0, (r.stdout[-3000:], r.stderr[-1000:])
 
