@@ -262,3 +262,7 @@ Official-release restic binary/archive digests recorded. Builder transport15guar
 Separate Legal plus matching-ledger drill independently reproduced47original assertions, stopped owned writers, encrypted/restored23files including17blobs, and restarted readers with valid integrity and two matching acceptance records. Exact source a46591c, existing ledger binary83955119/source-subtree binding retained, not independently rebuilt. Negative/setup evidence retained privately. No five-service or cold-key recovery claim.
 
 Gate3 INSUFFICIENT_EVIDENCE: consistent full-store acquisition, approved no-charge offsite destination/runner, production key custody, actual scheduling/alerts and supervised full application recovery remain open. No evidence establishes Pro mandatory. Latest RC CI41339464778 has90success/two running, not final green. No PR closures or merge.
+
+## 2026-11-01 — coordinated local recovery evidence
+
+RC remains a46591c93fca949ce61c46adea180cd746c1d44f, unchanged. Separate builder and validator reproduced representative five-store capture against one shared ledger and encrypted exact-ID restoration; fresh readers reopened recovered state. Same-host evidence is CONDITIONAL, not release certification. Financial transaction, pending-intent, cold-key, production acquisition, offsite schedule/alert and supervised restore gates remain open. Pro deferred; no spending, cloud activation or production mutation. Private evidence and free-destination terms shortlist retained outside repository.
