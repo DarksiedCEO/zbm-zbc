@@ -228,7 +228,7 @@ Acceptance presence is not validation or delivery; no contractual receipt deadli
 
 ### Offline copied-evidence inventory
 
-Standalone `devtools/inventory_copies.py` accepts an explicit owned copies directory and a new private report directory.
+Standalone `devtools/inventory_copies.py` accepts an explicit owned copies directory and a new report file under an existing owned0700parent.
 It reads copied bytes only; no Service/API/ledger/provider startup, replay, financial action or restore permission.
 Exit0 means structural inventory, not authenticity/completeness/readiness. See
 [offline inventory runbook](../../docs/runbooks/offline-recovery-inventory.md) and
