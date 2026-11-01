@@ -10,7 +10,9 @@
 # PORT onto the service's own port variable and prepares the data directory; every launch guard is the service's own
 # (src/serve.py, src/launch_guard.py) and unchanged.
 # State: SEO_DATA_DIR (the volume; owner-only, one process per directory). SEO_LOG_HASH_KEY_FILE is written
-# from the SEO_LOG_HASH_KEY variable by the entrypoint. Bind: SEO_BIND_ADDR.
+# from the SEO_LOG_HASH_KEY variable by the entrypoint, and SEO_GSC_SERVICE_ACCOUNT_FILE from SEO_GSC_SERVICE_ACCOUNT
+# (the Search Console JSON key; optional: unset or empty, no file is written, the variable stays unset and Search
+# Console stays NOT_CONNECTED). Bind: SEO_BIND_ADDR.
 FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -36,4 +38,4 @@ COPY services/seo-py/src /app/services/seo-py/src
 WORKDIR /app/services/seo-py/src
 ENV SEO_DATA_DIR=/data/seo
 USER 10001:10001
-ENTRYPOINT ["/usr/local/bin/zbm-entrypoint", "--port-var", "SEO_PORT", "--state-dir-var", "SEO_DATA_DIR", "--secret-file", "SEO_LOG_HASH_KEY_FILE", "--", "/opt/venv/bin/python", "-m", "api"]
+ENTRYPOINT ["/usr/local/bin/zbm-entrypoint", "--port-var", "SEO_PORT", "--state-dir-var", "SEO_DATA_DIR", "--secret-file", "SEO_LOG_HASH_KEY_FILE", "--secret-file", "SEO_GSC_SERVICE_ACCOUNT_FILE", "--", "/opt/venv/bin/python", "-m", "api"]

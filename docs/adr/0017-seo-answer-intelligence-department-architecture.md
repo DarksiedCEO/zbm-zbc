@@ -576,7 +576,12 @@ on the standard library was not an option. AEGIS gl-gsc (info) suggested 50.0.2:
 would put a second cryptography version in the repository; the bump belongs in one change that moves security-py's
 pin, regenerates delivery-py's hashed `uv.lock` and reruns all three suites.
 
-GSC-9. **The key on Railway.** Railway variables are environment strings, and this service reads the key only from a
+GSC-9. **The key on Railway.** *Superseded (2026-10-29): the seo image now passes `--secret-file
+SEO_GSC_SERVICE_ACCOUNT_FILE` to deploy/docker/zbm-entrypoint.sh, which writes the plain (not base64) JSON key from the
+Railway variable `SEO_GSC_SERVICE_ACCOUNT` to a 0600 file owned by uid 10001 and then runs seo as 10001; unset, no file
+and NOT_CONNECTED. Use that (docs/deploy/railway.md, "Connecting Search Console"), not the start command below, which
+would bypass the entrypoint (the step that drops seo to uid 10001 on a RAILWAY_RUN_UID=0 service).* The original text: Railway
+variables are environment strings, and this service reads the key only from a
 file (the *_FILE rules). Store the JSON key base64-encoded in a Railway variable (e.g. `SEO_GSC_SERVICE_ACCOUNT_B64`;
 the service never reads it) and make the start command write it to a 0600 file before exec'ing the service:
 `sh -c 'umask 077 && mkdir -p /tmp/seo-secrets && printf %s "$SEO_GSC_SERVICE_ACCOUNT_B64" | base64 -d > /tmp/seo-secrets/gsc.json && unset SEO_GSC_SERVICE_ACCOUNT_B64 && SEO_GSC_SERVICE_ACCOUNT_FILE=/tmp/seo-secrets/gsc.json exec python3 -m api'`
@@ -590,7 +595,8 @@ GSC-10. **Andre's steps** (nothing here can be done for him; the connector stays
       403 accessNotConfigured, which this service reports as `GSC_AUTH_REFUSED`).
    3. IAM & Admin -> Service accounts: create a service account (no project roles are needed; skip that step). On it,
       Keys -> Add key -> Create new key -> **JSON**. The download is the only copy. Note its `client_email`.
-   4. Railway: add the key as a secret variable and the start command of GSC-9; deploy. Delete the downloaded file
+   4. Railway: paste the whole JSON key into the seo variable `SEO_GSC_SERVICE_ACCOUNT` (Sealed; GSC-9 as superseded,
+      docs/deploy/railway.md "Connecting Search Console"); deploy. Delete the downloaded file
       from the laptop once Railway holds it (a lost key is replaced by creating a new one and deleting the old).
    5. Check `GET /seo/v1/status`: `search_console.state` is `connected` and `service_account` shows the e-mail.
    6. For each client: the client (an owner of the property) opens Search Console -> the property -> Settings ->
