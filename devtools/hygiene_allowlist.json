@@ -28,6 +28,20 @@
       "function": "test_new3_idle_keep_alive_is_closed_and_keep_alive_still_works",
       "contains": "took <= KEEP_ALIVE_TIMEOUT_S + 2",
       "reason": "Ordering, not speed: the idle connection must be closed BY the server's own keep-alive deadline (KEEP_ALIVE_TIMEOUT_S, pinned equal to serve.KEEP_ALIVE_TIMEOUT_S by test_new3_launcher_config_is_pinned) plus 2 s slack, not by the client's 5 s socket timeout or by the test giving up; _closed_within waits that long at most (a stall bound). Visible to L1 since fix wave 26b (F-9: a delta returned by a helper is a delta); the construct is unchanged since wave 25."
+    },
+    {
+      "rule": "L1-wallclock",
+      "path": "services/finance-py/tests/test_housekeeping_runner.py",
+      "function": "test_trickle_deadline_kills_owned_worker",
+      "contains": "time.monotonic() - start < 3",
+      "reason": "Required total deadline, not throughput: an owned HTTP peer trickles for 10 seconds despite a 1 second socket timeout. The configured 1 second parent deadline must return within 3 seconds and terminate/reap only its owned worker. No timeout increase, retry, or skip; ADR0036. Exact named test only."
+    },
+    {
+      "rule": "L1-wallclock",
+      "path": "services/finance-py/tests/test_housekeeping_runner.py",
+      "function": "test_dns_is_inside_owned_worker_deadline",
+      "contains": "time.monotonic() - start < 3",
+      "reason": "Required total deadline, not throughput: the actual worker DNS entry blocks for 10 seconds before any connection. The configured 1 second parent deadline must return within 3 seconds and terminate/reap only its owned worker. No timeout increase, retry, or skip; ADR0036. Exact named test only."
     }
   ],
   "expected_skips": {

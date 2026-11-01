@@ -263,6 +263,7 @@ NAMED_ROUTES: dict[str, tuple[tuple[str, re.Pattern], ...]] = {
     "seo_02": (("GET", SEO_STATUS_ROUTE),),
     "rail_gateway": (("POST", STRIPE_EVENTS_ROUTE),),
     "payout_rail_gateway": (("POST", PAYOUT_RAIL_EVENTS_ROUTE),),
+    "ops_cron": (("POST", re.compile(r"/fin/v1/jobs/stripe-sessions/run")),),
 }
 # Callers that reach only routes naming them explicitly.
 NAMED_ONLY = frozenset(NAMED_ROUTES)
@@ -686,7 +687,9 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     # --- jobs, payouts ----------------------------------------------------------------------------------------------
 
     @app.post("/fin/v1/jobs/{job}/run", dependencies=auth)
-    def job(job: str, who: str = Depends(caller("scheduler")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+    def job(job: str, who: str = Depends(caller("scheduler", "ops_cron")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        if who == "ops_cron" and job != "stripe-sessions":
+            raise Forbidden("this caller is not authorized for this job")
         try:
             return svc.run_job(who, req.request_id, job)
         except Unavailable:
