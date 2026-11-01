@@ -314,7 +314,8 @@ approves the client contracts himself and his CQ-19 determination makes such a c
    address or browser, but cannot produce one, and losing the key loses even that.
 4. **The checkbox rule on the server.** The server, not a disabled button, refuses a submission with a box unticked
    or a field empty (no script on the page).
-5. "Not now" opens a page saying nothing was recorded, instead of closing the page.
+5. "Not now" opens a page explaining that it does not submit an acceptance, instead of closing the page.
+   It does not deny an earlier submission or promise that a previously consumed link remains usable.
 
 ## Open items
 
@@ -372,3 +373,14 @@ The regression fixture uses the actual portal and HTTP adapter with a synthetic
 Legal boundary that persists the request before raising a read timeout. It checks
 truthful copy, no pre-dispatch acceptance, and exact original-form receipt replay
 without a second acceptance dispatch. It does not prove real Legal crash recovery.
+
+## Refusal messages after an earlier submission (2026-11-01)
+
+An expired or invalid form, an oversized retry, a changed-document refusal, or
+selecting Not now cannot establish that an earlier acceptance was not recorded.
+These messages now describe this attempt and acknowledge a possible earlier
+submission. Clients who already submitted are directed to contact Z Best Media
+to confirm its status; the existing unknown-outcome page still recommends the
+same signed-form retry while that form remains valid. No form lifetime,
+authentication, receipt lookup, or acceptance dispatch rule changes. Manual
+confirmation remains necessary when the original signed form has expired.

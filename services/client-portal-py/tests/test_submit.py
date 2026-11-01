@@ -64,7 +64,7 @@ def test_legal_never_receives_the_ip_address_or_the_user_agent():
 def test_csrf_and_content_type_are_refused_before_anything_is_recorded(headers, code):
     app, legal, *_ = make()
     r = form_post(app, headers=headers)
-    assert r.status == code and "Nothing was recorded" in r.text
+    assert r.status == code and "This attempt was refused" in r.text
     assert legal.accepts == []
 
 

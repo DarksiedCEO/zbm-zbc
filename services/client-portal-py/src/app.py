@@ -6,7 +6,7 @@ Routes (anything else: the uniform 404 page; any other method: 405):
                                                 format version and the tag key's 8-hex id are logged at startup, to
                                                 match with Legal's private /health: AEGIS r4 N4-L3)
   GET  /robots.txt                           -> disallow everything
-  GET  /accept/not-now                       -> "Nothing was recorded"
+  GET  /accept/not-now                       -> request-scoped deferral message
   GET  /accept/{token}                       -> the acceptance page for this link (Legal resolves the token)
   POST /accept/{token}                       -> record the acceptance at Legal; the confirmation page
   GET  /accept/{token}/document/{n}          -> document n's exact registered text (text/plain, inline)

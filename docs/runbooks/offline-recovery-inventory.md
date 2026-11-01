@@ -35,3 +35,14 @@ independent completeness/checkpoint/bank evidence; actual target image/reader co
 traffic freeze/single-writer ownership; RPO/RTO and isolated destination; explicit founder restore/resume authority.
 Do not use this report as --apply instructions or substitute unavailable balances with zero. Provider activation,
 receipt/acknowledgement policy and credit decisions are outside this inventory and remain open.
+
+### SEO privacy-key continuity
+
+Preserve the original `SEO_LOG_HASH_KEY_FILE` alongside the encrypted recovery
+configuration. A syntactically valid replacement is not equivalent to the original
+key: unfinished log ingests refuse new chunks with `LOG_HASH_KEY_MISMATCH`.
+Restore the original key and retry the same uncommitted sequence; do not alter
+the stored fingerprint or bypass the check. Existing reads and already-computed
+aggregates remain available. Starting a new ingest with an intentionally rotated
+key is separate from continuing a restored ingest. This key pseudonymizes client
+IP addresses; it does not sign the ledger or SEO journal.

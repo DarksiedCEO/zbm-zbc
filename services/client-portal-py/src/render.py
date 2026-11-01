@@ -218,16 +218,16 @@ RATE_LIMITED = message_page("Too many requests", "Please wait a few minutes, the
 UNAVAILABLE = message_page("We cannot confirm the result right now",
                            "Please wait a minute. If you submitted the form, retry the same submission so we can "
                            "check its receipt. Otherwise, try opening your link again.")
-NOT_NOW = message_page("Nothing was recorded",
-                       "Your link stays valid until it expires. You can close this page.")
+NOT_NOW = message_page("You can close this page",
+                       "This page does not submit an acceptance. An earlier submission may already have been recorded. If you submitted earlier, contact Z Best Media to confirm its status.")
 FORM_REFUSED = message_page("This form could not be accepted",
-                            "Nothing was recorded. Open your acceptance link again and submit the form from that page.")
-TOO_LARGE = message_page("This form could not be accepted", "Nothing was recorded. The form was too large.")
+                            "This attempt was refused. An earlier submission may already have been recorded. If you submitted earlier, contact Z Best Media to confirm its status.")
+TOO_LARGE = message_page("This form could not be accepted", "This attempt was refused because the form was too large. An earlier submission may already have been recorded. If you submitted earlier, contact Z Best Media to confirm its status.")
 
 
 def changed_page(token: str) -> Page:
     return message_page("The documents changed after you opened this page",
-                        "Nothing was recorded. Open the page again to review the current documents.",
+                        "This attempt was refused. An earlier submission may already have been recorded. If you submitted earlier, contact Z Best Media to confirm its status. Otherwise, open the page again to review the current documents.",
                         link=(f"/accept/{token}", "Open the page again"))
 
 

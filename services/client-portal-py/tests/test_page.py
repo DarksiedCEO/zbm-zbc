@@ -244,7 +244,7 @@ def test_health_robots_and_not_now_say_nothing_else():
     assert h.status == 200 and h.body == b'{"status":"ok"}'      # AEGIS r4 N4-L3: nothing about the link key
     assert call(app, "GET", "/robots.txt").body == b"User-agent: *\nDisallow: /\n"
     n = call(app, "GET", "/accept/not-now")
-    assert n.status == 200 and "Nothing was recorded" in n.text and "Your link stays valid until it expires." in n.text
+    assert n.status == 200 and "This page does not submit an acceptance" in n.text and "An earlier submission may already have been recorded" in n.text
     assert call(app, "GET", "/").status == 404
 
 
