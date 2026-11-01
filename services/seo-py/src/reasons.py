@@ -37,7 +37,7 @@ CODES = frozenset({
     # department manager
     "AGENT_UNKNOWN", "AGENT_STATE_STALE", "AGENT_MOVE_NOT_ALLOWED", "AGENT_RESTRICTED",
     # entity records
-    "ENTITY_NOT_FOUND", "ENTITY_FIELD_UNKNOWN", "ENTITY_VALUE_INVALID", "ENTITY_VERSION_STALE",
+    "ENTITY_NOT_FOUND", "ENTITY_FIELD_UNKNOWN", "ENTITY_VALUE_INVALID", "ENTITY_VERSION_STALE", "ENTITY_EXISTS", "ENTITY_TENANT_KIND_INVALID",
     # prompt sets and probes
     "PROMPT_SET_NOT_FOUND", "PROMPT_SET_EXISTS", "PROMPT_SET_INVALID", "PROVIDER_UNKNOWN", "PROMPT_PERSONAL_DATA",
     # answer-engine adapters (Wave 4; perplexity.py): the closed set an engine run reports
