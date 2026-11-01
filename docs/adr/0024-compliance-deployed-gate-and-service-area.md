@@ -396,3 +396,7 @@ Evaluated with the pinned SDK (railway 3.13.1) against the base commit: 2 resour
   heartbeat is Andre's step). Railway does not restart a running service on a 503; only the dead-thread exit restarts.
 - The images were not built and the smoke was not run here (no Docker daemon); `railway config plan` was not run (no
   Railway access). Both are in Andre's steps.
+
+### Finance dependency retry identity
+
+The bounded Finance thin-client retry keeps the original request separate from the response payload. A transient connection failure or server error must retry the same method, URL and body, including a jurisdiction request ID; GET retries remain bodyless. The existing attempt limit and shared deadline remain unchanged. Permanent HTTP refusals are not retried, and a recovered REFUSE response never becomes ALLOW. Regression controls use an owned mock transport and cover recovery, repeated unavailability and permanent refusal.

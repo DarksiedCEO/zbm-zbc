@@ -119,7 +119,7 @@ class _Base:
                                                                      cancel, params, body), remaining)
             if res is None:
                 break
-            kind, status, body = res
+            kind, status, response_body = res
             if kind == "error":
                 continue
             if kind == "too_large":
@@ -129,7 +129,7 @@ class _Base:
             if status != 200:
                 return None
             try:
-                return json.loads(body)
+                return json.loads(response_body)
             except ValueError:
                 return None
         return None
