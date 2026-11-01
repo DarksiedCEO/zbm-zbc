@@ -3,8 +3,7 @@ it in the `hygiene-static` job, and `python -m pytest devtools/` collects it:
 
     python3 -B -m unittest devtools/test_deploy_config.py -v
 
-- every Railway Dockerfile pins its runtime base by digest, names an exact version for any other stage (and marks
-  it an OPEN ITEM), runs as uid/gid 10001 through deploy/docker/zbm-entrypoint.sh, and gives the entrypoint the port
+- every Railway Dockerfile pins its runtime and build-stage bases by digest, runs as uid/gid 10001 through deploy/docker/zbm-entrypoint.sh, and gives the entrypoint the port
   variable the service's code actually reads;
 - the Python images install only deploy/python/requirements.lock.txt, with hashes, and its direct pins are the
   services' requirements.txt pins without pytest;
@@ -69,7 +68,6 @@ ENV_READ = re.compile(r"""(?:\benviron\.get|\benviron\[|\bgetenv|\benv\.get|\ben
 # (`_thin(env, "FIN_VI", ...)` reads FIN_VI_URL / _TOKEN / _CALLER_TOKEN, which are named) and a reason code
 NOT_VARIABLES = {"FIN_VI", "FIN_COMPLIANCE", "FIN_LEGAL", "LEDGER_UNAVAILABLE"}
 DIGEST_FROM = re.compile(r"^FROM\s+\S+@sha256:[0-9a-f]{64}(\s+AS\s+\w+)?\s*$", re.I)
-TAG_FROM = re.compile(r"^FROM\s+[a-z0-9./-]+:\d+\.\d+\.\d+[a-z0-9.-]*(\s+AS\s+\w+)?\s*$", re.I)
 
 
 def logical_lines(text: str) -> list[str]:
@@ -156,9 +154,13 @@ class Dockerfiles(unittest.TestCase):
                 self.assertTrue(froms, "no FROM")
                 self.assertRegex(froms[-1], DIGEST_FROM, "the runtime stage must be pinned by digest")
                 for f in froms[:-1]:
-                    if not DIGEST_FROM.match(f):
-                        self.assertRegex(f, TAG_FROM, "a build stage must name an exact x.y.z version")
-                        self.assertIn("OPEN ITEM", (REPO / df).read_text(), "a stage pinned by tag only is an OPEN ITEM")
+                    self.assertRegex(f, DIGEST_FROM, "a build stage must be pinned by digest")
+
+    def test_delivery_uv_tool_image_is_pinned_by_digest(self):
+        text = (REPO / "services/delivery-py/docker/Dockerfile").read_text()
+        refs = re.findall(r"(?m)^COPY --from=(\S+)", text)
+        self.assertEqual(len(refs), 1)
+        self.assertRegex(refs[0], r"^ghcr\.io/astral-sh/uv:0\.8\.17@sha256:[0-9a-f]{64}$")
 
     def test_non_root_through_the_entrypoint_with_the_right_port_variable(self):
         reads = code_variables()

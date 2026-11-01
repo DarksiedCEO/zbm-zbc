@@ -21,7 +21,7 @@ from helpers import ANDRE_TOKEN, NOW, Harness, rid
 from intelligences import i01_journal as J
 from stripe_incoming import API_VERSION, StripeIncoming
 from stripe_sim import TEST_KEY, TEST_WHSEC, SimStripe
-from test_media_billing import LEGAL, buy, create, issue, pay_vendor
+from test_media_billing import LEGAL, SERVICE_LEGAL, buy, create, issue, pay_vendor
 
 SUCCESS, CANCEL = "https://zbestmedia.com/pay/thanks", "https://zbestmedia.com/pay/cancelled"
 
@@ -57,7 +57,7 @@ def st(keys):
 def rr_invoice(hr, price="1200.00", methods=("ach", "card"), codes=("revenue_recovery_services",)):
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-7", "kind": "service",
             "lines": [{"line_code": c, "quantity": 1, "unit_price": price} for c in codes],
-            "payment_methods": list(methods), "legal_ref": LEGAL}
+            "payment_methods": list(methods), "legal_ref": SERVICE_LEGAL}
     inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
     return issue(hr, inv)
 

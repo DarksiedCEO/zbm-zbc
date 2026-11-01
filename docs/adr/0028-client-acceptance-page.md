@@ -65,7 +65,8 @@ approves the client contracts himself and his CQ-19 determination makes such a c
    stays in the log and never counts). The RTM-13 single-document invitations remain for non-client parties only.
    Because Legal issues no link while evidence would be insufficient, an insufficient client acceptance can no longer
    be produced at all.
-5. **Finance is unchanged.** FIN-29 reads Legal's acceptance view, which for a page acceptance says
+5. **Initial portal implementation left Finance unchanged.** The service invoice gate below supersedes that
+   behavior for new service approvals. FIN-29 reads Legal's acceptance view, which for a page acceptance says
    `evidence_sufficient: true`, `basis_in_force: true` and `via: client_portal`. The end-to-end contract
    (`services/client-portal-py/tests/contract_e2e_real.py`) runs the real legal-py, the page and the real finance-py:
    invite -> accept -> billing readiness allowed -> the invoice is ISSUED; and the used link, another client's
@@ -317,13 +318,42 @@ approves the client contracts himself and his CQ-19 determination makes such a c
 
 ## Open items
 
-- **Finance does not tie an invoice to a SOW acceptance** (AEGIS L-6, pre-existing FIN-29 behaviour): an invoice's
-  `legal_ref` may be the MSA's acceptance, so a new-SOW invoice can issue with only the MSA accepted, and Finance
-  relies on Legal's `evidence_sufficient` without itself requiring `via: client_portal`. Not changed here (Finance's
-  contract check is shared with other invoice kinds); the fix is to require a SOW `legal_ref` for `kind: service` and
-  `via: client_portal` for client acceptances.
+- **SOW billing scope remains unbound** (AEGIS L-6): the service invoice document gate below now requires
+  an accepted SOW with portal provenance, but does not prove scope/amount agreement, exact MSA linkage, or
+  uniqueness of the billed obligation.
 - **The same first-deploy hazard exists for `compliance_38`** in Legal's caller map (ADR 0024: Compliance is new and its
   `COMPLIANCE_LEGAL_CALLER_TOKEN` is `preserve()`), on the compliance branch: Legal refuses to start while it is
   empty. Its runbook must set that token before the apply, or the entry must become optional like `client_portal`.
 - The confirmation page and Part D say "(Pacific Time)" while `PORTAL_DISPLAY_TZ` is configurable (the text's own
   wording; keep the default).
+
+
+### Service invoice document gate
+
+New Finance approvals of `kind=service` require Legal's registered document type
+to be literal `sow` and the acceptance provenance to be literal `client_portal`.
+Legal exposes the registered type on its version read; Finance keeps its existing
+exact document/version/hash/acceptance, entity, party, current-status and fill-basis
+checks. Missing or malformed metadata fails closed. The invoice's existing
+`legal_ref` remains part of its content hash. Other invoice kinds and MSA billing
+readiness retain their existing semantics. Deploy Legal's additive response before
+Finance's new guard; older Legal responses cannot approve new service invoices.
+
+This guard does not reclassify registered MSAs, change stored invoices, or rerun
+approval on a successful idempotency replay. Accepted fills remain usable after
+template retirement under the existing acceptance-basis rules. It does not prove
+that the SOW's scope or amount matches the invoice, bind an exact MSA snapshot, or
+prevent duplicate billing of the same contractual obligation. Those are separate
+requirements; this change is not full billing-contract validation.
+## Request-head deadline (2026-11-01)
+
+The portal launcher now uses the sibling services' `HeadDeadlineH11Protocol`
+instead of plain h11. Its fixed 10-second deadline starts on connect and after
+every response; partial header progress never resets it. Parsing a complete head
+cancels that deadline, leaving the existing application body deadline in charge.
+Arming before the parent response-completion hook preserves pipelined requests.
+The byte-identical shared `graceful_close.py` releases the concurrency slot before
+a bounded drain (64 KiB / 1 second, at most 512 drains), and disconnect cancels
+pending timers. Header size, concurrency, logging, proxy handling, and keep-alive
+settings remain the existing portal settings. These backend bounds do not attest
+Railway ingress behavior; deployment acceptance still verifies the proxy contract.

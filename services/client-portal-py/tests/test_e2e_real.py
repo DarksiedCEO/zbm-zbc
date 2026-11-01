@@ -64,3 +64,9 @@ def test_an_expired_link_and_an_msa_only_link(run):
     assert run["msa_only_page"] == 404
     assert run["expired_resolve"] == [200, 404]
     assert run["acceptances_total"] == 2
+
+
+def test_accepted_msa_supports_readiness_but_cannot_replace_service_sow(run):
+    assert run["billing_profile"] == 200 and run["billing_ready"] is True
+    assert run["msa_service_invoice"] == [409, True]
+    assert run["invoice_issue"] == [200, "issued"]

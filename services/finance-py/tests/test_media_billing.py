@@ -16,6 +16,7 @@ import pytest
 from helpers import ANDRE_TOKEN, Harness, rid
 from intelligences import i01_journal as J
 
+SERVICE_LEGAL = {"doc_id": "sow", "version": 1, "doc_sha256": "c" * 64, "acceptance_id": "acc-sow"}
 LEGAL = {"doc_id": "io-1", "version": 1, "doc_sha256": "c" * 64, "acceptance_id": "acc-io-1"}
 
 
@@ -311,7 +312,7 @@ def test_cancel_a_draft_posts_nothing_and_rejecting_the_invoice_cancels_the_buy(
 def _zbm_invoice(hr, codes, methods, price="500.00"):
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
             "lines": [{"line_code": c, "quantity": 1, "unit_price": price} for c in codes],
-            "payment_methods": methods, "legal_ref": LEGAL}
+            "payment_methods": methods, "legal_ref": SERVICE_LEGAL}
     return hr.post("/fin/v1/invoices", body, caller="onboarding")
 
 

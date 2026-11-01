@@ -47,7 +47,8 @@ MEDIA_LABELS = {"broadcast_tv": "Broadcast TV", "cable_tv": "Cable TV", "streami
 LINE_LABELS = {"campaign_deposit": "Campaign deposit", "creative_services": "Creative services",
                "strategy_services": "Strategy services", "production_services": "Production services",
                "retainer_fee": "Retainer", "subscription_fee": "Subscription",
-               "revenue_recovery_services": "Revenue Recovery services", "media_spend": "Media",
+               "revenue_recovery_services": "Revenue Recovery services", "seo_audit_services": "SEO Technical Audit",
+               "media_spend": "Media",
                "media_fee": "Media placement and management"}
 OPEN_FOR_VENDOR = ("prepaid", "vendor_partially_paid")
 
