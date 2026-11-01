@@ -357,3 +357,18 @@ a bounded drain (64 KiB / 1 second, at most 512 drains), and disconnect cancels
 pending timers. Header size, concurrency, logging, proxy handling, and keep-alive
 settings remain the existing portal settings. These backend bounds do not attest
 Railway ingress behavior; deployment acceptance still verifies the proxy contract.
+
+## Unknown acceptance outcomes (2026-11-01)
+
+A dependency timeout or unusable response can occur after Legal has recorded an
+acceptance. The shared portal503 page therefore reports that the result cannot
+be confirmed, rather than claiming no record exists. It directs a submitting
+client to retry the same submission, preserving the existing signed-form and
+durable receipt lookup; page viewers can reopen their link. HTTP503 and
+Retry-After:60 remain unchanged. This does not add an incoming queue, automatic
+resubmission, maintenance admission controller, or extend form/link validity.
+
+The regression fixture uses the actual portal and HTTP adapter with a synthetic
+Legal boundary that persists the request before raising a read timeout. It checks
+truthful copy, no pre-dispatch acceptance, and exact original-form receipt replay
+without a second acceptance dispatch. It does not prove real Legal crash recovery.

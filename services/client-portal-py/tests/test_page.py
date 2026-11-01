@@ -156,7 +156,7 @@ def test_legal_down_or_a_text_whose_hash_does_not_match_shows_nothing():
     legal = FakeLegal(views={TOKEN: view()}, unavailable=True)
     app, *_ = make(legal)
     r = call(app, "GET", f"/accept/{TOKEN}")
-    assert r.status == 503 and "Nothing was recorded" in r.text and MSA_TEXT[:20] not in r.text
+    assert r.status == 503 and "We cannot confirm the result right now" in r.text and MSA_TEXT[:20] not in r.text
 
 
 def test_rate_limits_per_client_address_per_link_and_for_not_found():

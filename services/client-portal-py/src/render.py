@@ -215,8 +215,9 @@ NOT_FOUND = message_page(
     "It may have expired, been used already, or been replaced by a newer link. If you need a new link, write to "
     f"{CONTACT}.")
 RATE_LIMITED = message_page("Too many requests", "Please wait a few minutes, then open your link again.")
-UNAVAILABLE = message_page("We cannot show your documents right now",
-                           "Nothing was recorded. Please try again in a few minutes.")
+UNAVAILABLE = message_page("We cannot confirm the result right now",
+                           "Please wait a minute. If you submitted the form, retry the same submission so we can "
+                           "check its receipt. Otherwise, try opening your link again.")
 NOT_NOW = message_page("Nothing was recorded",
                        "Your link stays valid until it expires. You can close this page.")
 FORM_REFUSED = message_page("This form could not be accepted",
