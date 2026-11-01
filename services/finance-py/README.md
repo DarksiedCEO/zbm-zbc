@@ -225,3 +225,11 @@ Payment date, creation/elapsed age, legacy sent time and Finance-recorded accept
 Acceptance presence is not validation or delivery; no contractual receipt deadline is inferred. Snapshot changes return409;
 5,000-record capacity overflow returns503 rather than a partial complete-looking page. See
 [receipt backlog runbook](../../docs/runbooks/receipt-backlog.md) and [ADR0040](../../docs/adr/0040-founder-receipt-backlog.md).
+
+### Offline copied-evidence inventory
+
+Standalone `devtools/inventory_copies.py` accepts an explicit owned copies directory and a new private report directory.
+It reads copied bytes only; no Service/API/ledger/provider startup, replay, financial action or restore permission.
+Exit0 means structural inventory, not authenticity/completeness/readiness. See
+[offline inventory runbook](../../docs/runbooks/offline-recovery-inventory.md) and
+[ADR0041](../../docs/adr/0041-offline-recovery-inventory.md). No new environment or production wiring is added.
