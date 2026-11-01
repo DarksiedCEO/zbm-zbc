@@ -79,3 +79,19 @@ Andre approved local Finance execution, gated backend merges, public-only Claude
 - Postapply validation found11readback diffs. DirectAPI confirms all7restartpolicies ON_FAILURE/10; four daily backup schedules genuinely absent. Targeted repair being prepared under existing approval; not claimed complete.
 - PR6 exacte46b70f independent aggregateCONDITIONAL: Go177,dashboard55,Finance689;538attack assertions,54livechecks,13selected guard mutants. Final hygiene clean,90CIgreen. Retargetedmain; merge preview finds2documentation conflicts. Codex repair branch being prepared; noPR6merge.
 - PR12 exact80817e76 now independently reviewed by Codex and authenticated Claude public-source-only review, bothCONDITIONAL.86CIchecks successful,3delivery jobs stillrunning. No merge untilfullCIgreen.
+
+
+## 2026-11-01 04:21 UTC — backend evidence checkpoint
+
+Andre requested two continuous hours of backend work (03:14:19–05:14:19 UTC) and reinforced independent AEGIS zero-trust and local stress testing. Builder, validator and aggregate claims remain separated. Same-host/model-family execution is E3, not E4; no complete launch certification.
+
+- PR2 deployment gate remains open: main CI has 88 successful jobs and one macOS Delivery job running. The approved daily backups could not be created: Railway requires a Pro workspace. The CLI's zero exit did not prove successful backup configuration. Founder billing choice is pending; no upgrade or repeated apply performed. PR6 also awaits confirmation of its separate orchestrator token prerequisite.
+- PR12 at `80817e763f619963de73a5c005df16976e2e6544`: independent Codex and authorized Claude CONDITIONAL, 88 successful checks and one running. No merge yet.
+- PR13 at `62a857442c2948a77e6cafc000d6c5bd9fb258a6`: independent CONDITIONAL main-sync repair into PR6; 87 successful checks and two pending. No merge yet.
+- RC `b44f0f632c97795ac7cca60312f7e6191abce7ac`: CI still pending. Local builder gates and separate bounded operator/storage/scenario evidence exist, but do not certify the complete RC. Separate storage evidence covered 45 recovery checks and three 25,000-record capacity checks; no physical power-loss claim.
+- Draft PR14 at `382460ecfcc1f807917f4bd749b32df010b55e49` repairs portal finding PORTAL-HEADER-001 into PR11's branch. Independent CONDITIONAL for the bounded delta, 214 tests and negative control; exact-head CI pending. Original-head sustained soak is still running and must not be attributed to the repaired head or called a completed two-hour soak.
+- Draft PR15 at `c09e5c15e7631d10319990260575852da2eaac8f` wires bounded founder health polling and contains a privacy correction identified by independent review. Builder 976 tests and 54 live checks; independent affected checks and nine selected mutants support a bounded CONDITIONAL. Inherited restore blockers and final PR10 integration remain open; this does not certify wave C.
+- Draft PR16 at `e7b9b0c5c744ef66607ff12e65a179a349c9f4e0` pins four backend image references. Independent registry hashes, complete tracked-file inventory and four pin-removal mutants support CONDITIONAL. Forty-five deployment/Docker checks completed with one existing root-only skip. Actual image builds and exact-head CI are pending; no local Docker daemon was available.
+- Local SOW guard at `9eaae90a7a88cca4479cef03945281b01480b70a` has builder evidence for 1,972 affected tests; independent review is running. A separate local acceptance/invoice/simulated-bank/SEO scenario completed with zero replay additions, tenant rejection and retrievable PARTIAL report anchored to a fake ledger. Real providers, comprehensive billing-contract binding and production operation remain unverified. Private harness failures and corrections are retained.
+
+Public entries omit unpatched reproduction details; raw evidence and reviews remain private. No additional production changes or merges at this checkpoint. Continue gated work through the requested interval.
