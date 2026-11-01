@@ -317,3 +317,73 @@ def test_http_snapshot_releases_money_lock_before_page_and_mutation_invalidates_
     assert first['rows'][0]['status'] == 'pending_send'
     monkeypatch.setattr(receipt_backlog,'page',original)
     assert h.get(PATH,caller=None,andre=ANDRE_TOKEN,cursor=first['next_cursor']).status_code == 409
+
+
+@pytest.mark.parametrize('clock_value', [datetime(2026,11,1), None, 'private-clock', True, 17])
+def test_actual_route_invalid_clock_stays_unknown(clock_value):
+    h = Harness().ready()
+    h.fund_campaign()
+    before = copy.deepcopy(h.svc.db), copy.deepcopy(h.ledger.events)
+    h.clock.at = clock_value
+    response = h.ok(h.get(PATH,caller=None,andre=ANDRE_TOKEN))
+    assert response['as_of'] is None and response['issues'] == ['clock_unknown']
+    assert response['rows'][0]['creation_age_seconds'] is None
+    assert (h.svc.db,h.ledger.events) == before
+    assert 'private-clock' not in json.dumps(response)
+
+
+@pytest.mark.parametrize('instant', ['2026-11-01T00:00:00+00:00','2026-10-31T17:00:00-07:00'])
+def test_actual_route_aware_clock_normalizes_and_ages(instant):
+    h = Harness().ready()
+    h.fund_campaign()
+    h.clock.at = datetime.fromisoformat(instant)
+    response = h.ok(h.get(PATH,caller=None,andre=ANDRE_TOKEN))
+    assert response['as_of'] == '2026-11-01T00:00:00Z' and response['issues'] == []
+    created = datetime.fromisoformat(response['rows'][0]['created_at'])
+    assert response['rows'][0]['creation_age_seconds'] == int((NOW-created).total_seconds())
+
+
+def test_actual_route_failed_clock_is_private_unknown(monkeypatch):
+    h = Harness().ready()
+    h.fund_campaign()
+    def broken():
+        raise RuntimeError('private-clock-detail')
+    monkeypatch.setattr(h.clock,'now',broken)
+    response = h.ok(h.get(PATH,caller=None,andre=ANDRE_TOKEN))
+    assert response['as_of'] is None and response['issues'] == ['clock_unknown']
+    assert 'private-clock-detail' not in json.dumps(response)
+
+
+@pytest.mark.parametrize('identity', ['oversized_key', 'nonstring_key', 'mismatched_record'])
+def test_uninspected_or_unbound_acceptance_is_unknown_not_absent(identity):
+    key, rec = record()
+    if identity == 'oversized_key':
+        key = 'x' * 100000
+    elif identity == 'nonstring_key':
+        class PrivateKey:
+            armed = False
+            def __hash__(self):
+                assert not self.armed, 'unsafe key was hashed'
+                return 1
+            def __repr__(self):
+                raise AssertionError('unsafe key was represented')
+        key = PrivateKey()
+    else:
+        rec['client_receipt_id'] = rid('crc', 'different')
+    records = {key:rec}
+    envelopes = {key:{'acceptance':{'accepted_at':'2026-10-31T23:00:00Z'}}}
+    if identity == 'nonstring_key':
+        key.armed = True
+    row, = project(records, envelopes)['rows']
+    assert row['client_receipt_id'] is None
+    assert row['acceptance_record'] == 'unknown' and 'acceptance_unknown' in row['issues']
+    # Unbound identity cannot prove absence even when the collection has no envelope entry.
+    row, = project(records, {})['rows']
+    assert row['acceptance_record'] == 'unknown'
+
+
+def test_valid_bound_record_with_missing_envelope_is_absent():
+    key, rec = record()
+    row, = project({key:rec}, {})['rows']
+    assert row['client_receipt_id'] == key and row['acceptance_record'] == 'absent'
+    assert 'acceptance_unknown' not in row['issues']

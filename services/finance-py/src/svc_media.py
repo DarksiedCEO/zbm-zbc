@@ -432,7 +432,12 @@ class MediaMixin:
             if self._closed:
                 raise Unavailable("SERVICE_CLOSED: this Finance instance is closed")
             rows = receipt_backlog.snapshot_rows(self.db["client_receipts"], self.db["receipt_envelopes"])
-            now = self._now()
+            try:
+                # Preserve naive/malformed readings for the projection's unknown-clock guard;
+                # _now() normalizes naive datetimes using host timezone before that guard.
+                now = self.clock.now()
+            except Exception:  # Clock failure is unknown age, never private exception text.
+                now = None
         return receipt_backlog.page(rows, now, limit, cursor)
 
     def get_client_receipt(self, crid: str) -> dict:

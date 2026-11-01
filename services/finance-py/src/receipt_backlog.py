@@ -88,7 +88,9 @@ def _row(key, rec, envelope, ordinal):
     if row['manual_delivery_review_recorded'] == 'unknown':
         issues.append('review_unknown')
     acceptance, recorded = 'unknown', None
-    if envelope is _MISSING:
+    if not valid_identity:
+        pass  # Skipped/unbound lookup cannot establish absence. Never inspect unsafe keys.
+    elif envelope is _MISSING:
         acceptance = 'absent'
     elif type(envelope) is dict:
         schema = envelope.get('schema')
