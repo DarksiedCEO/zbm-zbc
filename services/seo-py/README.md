@@ -169,3 +169,19 @@ plumbing in `src/service.py` and `src/store.py` is bizdev-py's.
 
 Tests talk only to an in-process HTTP fixture server on 127.0.0.1 (`tests/fixture_server.py`); every other connect
 attempt raises.
+
+## Homepage phone observation
+
+New entity checks expose `homepage_phone_observation` (`homepage-phone-sample/1`):
+`found`, `not_found_in_sample`, or `unknown`. It covers only explicitly selected `/`
+with exact configured/requested/final URL agreement and valid raw-HTML parser evidence.
+Other pages and redirects to another URL cannot satisfy it. Its limit is the first
+20,000 extracted text characters; nonmatch is not whole-page absence or a claim about
+visual visibility. The historical all-page `phone_in_visible_text` fact is not homepage proof.
+
+Client reports use renderer/3 whenever the new field is present, including explicit
+unknown presentation for malformed/future schemas. Field absence preserves renderer/2
+bytes for historical reports; no stored audit or document hash is rewritten. A changed
+retry still returns `REPORT_CHANGED`. Review unknown reasons before making a homepage
+recommendation; do not treat it as an instruction to expand crawl scope. See
+[ADR 0042](../../docs/adr/0042-homepage-phone-sample-evidence.md).

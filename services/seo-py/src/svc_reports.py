@@ -50,7 +50,7 @@ class ReportsMixin:
             rk = self.rk("client_report", f"{tid}/{aid}", body)
             prev = self._idem("andre", rk, body)
             try:
-                data, _model = client_report.render(view, tid, fmt, self.settings.report_branding)
+                data, model = client_report.render(view, tid, fmt, self.settings.report_branding)
             except client_report.ReportInputError:
                 raise Conflict(R("REPORT_NOT_RENDERABLE")) from None
             dsha = client_report.document_sha256(data)
@@ -61,7 +61,7 @@ class ReportsMixin:
                 return self._report_answer(rec, data)
             rid = derived_id("rpt", tid, aid, rk)
             rec = {"report_id": rid, "tenant_id": tid, "audit_id": aid, "format": fmt,
-                   "renderer_version": client_report.RENDERER_VERSION,
+                   "renderer_version": model["renderer_version"],
                    "audit_report_sha256": view["report_sha256"], "document_sha256": dsha, "bytes": len(data),
                    "branding_sha256": self.settings.report_branding.digest()}
             self._commit("client_report_rendered", self._req(rec, "andre", rk, body, rid), "andre",

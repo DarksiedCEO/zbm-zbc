@@ -383,7 +383,7 @@ def test_route_renders_a_real_audit_recorded_first_with_its_hash(tmp_path, srv):
     data = r["content"].encode()
     assert r["document_sha256"] == hashlib.sha256(data).hexdigest() and r["bytes"] == len(data)
     assert r["audit_report_sha256"] == a["report_sha256"] and r["media_type"] == "text/html; charset=utf-8"
-    assert r["renderer_version"] == cr.RENDERER_VERSION and r["format"] == "html"
+    assert r["renderer_version"] == "seo-client-report/3" and r["format"] == "html"
     ev = h.ledger.of_type("client_report_rendered")
     assert len(ev) == 1
     p = ev[0]["_payload"]
@@ -1023,3 +1023,27 @@ def test_callum_methodology_is_shown_even_when_the_prompt_set_hash_has_a_digit_r
     assert "cited = returned by search" in shown
     # removal only: a phone number elsewhere in the text is still withheld
     assert cr.safe_text(cr._PS_HASH.sub("", method + " Call 562 248 6617."), 1500) == cr.WITHHELD
+
+
+def test_historical_view_replays_recorded_renderer_two_without_backfill(h, monkeypatch):
+    """Real recording/idempotency over a retained legacy view; provider/delivery is not involved."""
+    h.tenant('acme', kind='own', domains=('acme.test',))
+    legacy = fx.fresh('full')
+    original = copy.deepcopy(legacy)
+    monkeypatch.setattr(h.svc, 'audit_view', lambda *a, **kw: copy.deepcopy(legacy))
+    req = {'request_id': rid(), 'format': 'html'}
+    first = h.svc.render_client_report('acme', legacy['audit_id'], req)
+    events = len(h.ledger.of_type('client_report_rendered'))
+    second = h.svc.render_client_report('acme', legacy['audit_id'], req)
+    assert first == second and first['renderer_version'] == 'seo-client-report/2'
+    assert first['document_sha256'] == hashlib.sha256(cr.render(legacy, 'acme', 'html')[0]).hexdigest()
+    assert len(h.ledger.of_type('client_report_rendered')) == events == 1
+    assert legacy == original
+    entity = next(e for e in legacy['report']['agents'] if e['agent']=='entity_check')
+    entity.setdefault('facts', {})['homepage_phone_observation'] = None
+    from errors import Conflict
+    with pytest.raises(Conflict) as exc:
+        h.svc.render_client_report('acme', legacy['audit_id'], req)
+    assert 'REPORT_CHANGED' in str(exc.value)
+    assert h.svc.client_reports[first['report_id']]['document_sha256'] == first['document_sha256']
+    assert len(h.ledger.of_type('client_report_rendered')) == events
