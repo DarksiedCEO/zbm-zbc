@@ -38,3 +38,11 @@ Static hygiene lint reports zero violations. Counts checker reports 20 suite row
 Seven-day two-hour heartbeat was explicitly authorized by Andre and enabled after the initial scheduler approval rejection. Scheduled endpoint: 2026-11-08 01:49 UTC. Report every sixth cycle, and for material blockers or required decisions.
 
 Continue P0.1 to an evidence-bound verdict, then P0.2 PR #11. Merge authority is withheld pending Andre's explicit yes, green exact-head CI, and qualifying independent review. No secrets, live payments, emails, DNS, production changes or merges performed.
+
+### Cycle 001 follow-up — 2026-11-01 02:00 UTC
+
+Andre explicitly added repair of website PRs #7–#10. All eight historical preview failures occurred before compilation. Exact-source preview retries and missing full-CI dispatches are underway; no source fix or successful final check is claimed yet. Existing owner branches remain unchanged.
+
+Backend PR #10 independent local suites passed: Finance 881, Compliance 777, Legal 383, Detection 845, Go 132 (race enabled), all zero skips and zero hygiene violations on corrected invocations. Go vet passed. Selected money/access/legal mutants were killed and restored. Finance, Compliance and Legal local live harnesses passed. Detection live gate failed (11/14); tracked privately as PR10-DETECTION-001, Medium. Other bounded findings: PR10-RESILIENCE-001 and PR10-RESILIENCE-002, Low. No reproduction details are published here. SEO verification remains in progress, so the aggregate review is not complete.
+
+No merges, production changes, or owner-branch commits were performed.
