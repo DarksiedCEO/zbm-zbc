@@ -264,6 +264,7 @@ NAMED_ROUTES: dict[str, tuple[tuple[str, re.Pattern], ...]] = {
     "rail_gateway": (("POST", STRIPE_EVENTS_ROUTE),),
     "payout_rail_gateway": (("POST", PAYOUT_RAIL_EVENTS_ROUTE),),
     "ops_cron": (("POST", re.compile(r"/fin/v1/jobs/stripe-sessions/run")),),
+    "ops_alerts": (("POST", re.compile(r"/fin/v1/ops/observations/run")),),
 }
 # Callers that reach only routes naming them explicitly.
 NAMED_ONLY = frozenset(NAMED_ROUTES)
@@ -692,6 +693,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     def refund_decide(refund_id: str, _: str = Depends(andre("refunds/decision")),
                       req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.decide_refund(req.request_id, _id(refund_id), dump(req))
+
+    @app.post("/fin/v1/ops/observations/run", dependencies=auth)
+    def ops_observations(_: str = Depends(caller("ops_alerts")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        # request_id is syntax-validated, not a delivery/idempotency claim: each call observes anew.
+        return svc.observe_ops()
 
     # --- jobs, payouts ----------------------------------------------------------------------------------------------
 

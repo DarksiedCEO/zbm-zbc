@@ -1892,3 +1892,10 @@ when launched as root, then drops to uid10001. Its IaC preserve declaration pres
 it does not provision one or enable mail. Generic entrypoint processing may materialize a supplied secret even
 while the application is disabled. Disabled application configuration does not read the file. Do not apply IaC
 or activate this path without separate approval, verified sender/account custody and external rollback enforcement.
+
+### Dormant observation-only core
+
+Optional `FIN_OPS_OBSERVER_ENABLED` is exactly0(default) or1; enabled requires the existing claimed `FIN_DATA_DIR`.
+`FIN_OPS_HEALTH_URLS` is an optional bounded map of the fixed finance/legal/compliance/ledger aliases to trusted
+HTTP(S) health roots. Optional distinct `ops_alerts` in `FIN_CALLER_TOKENS` reaches only the observation POST route.
+No sender, cron, Docker change or IaC activation is supplied. See [observer procedure](../runbooks/ops-observer.md).
