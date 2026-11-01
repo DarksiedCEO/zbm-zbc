@@ -215,7 +215,11 @@ test("AEGIS A-4: the client key is never the client's X-Forwarded-For; a known d
   const id = verifyDevice(cfg, dev, 1001);
   assert.ok(id && id.length >= 16);
   assert.notEqual(verifyDevice(cfg, issueDevice(cfg, 1000), 1001), id, "a re-issued device cookie kept its id");
-  assert.equal(verifyDevice(cfg, dev.slice(0, -2) + "AA", 1001), null, "tampered");
+  // Flip an interior signature character: a fixed suffix can already match the random signature.
+  const [deviceBody, deviceSignature] = dev.split(".");
+  const tamperedSignature = (deviceSignature[0] === "A" ? "B" : "A") + deviceSignature.slice(1);
+  assert.notEqual(tamperedSignature, deviceSignature);
+  assert.equal(verifyDevice(cfg, `${deviceBody}.${tamperedSignature}`, 1001), null, "tampered");
   assert.equal(verifyDevice(cfg, dev, 1000 + DEVICE_TTL_S), null, "expired");
   const other = ok(authConfig({ ...AUTH, DASHBOARD_SESSION_SECRET: "another-secret-another-secret-0123456789" }));
   assert.equal(verifyDevice(other, dev, 1001), null, "a rotated secret kept the device cookie");
