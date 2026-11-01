@@ -147,6 +147,7 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `POST /tenants/{tid}/finance-client` | Andre | bind a client tenant to its Finance (31) client id, against which paid runs' invoices are checked (W3-2) |
 | `GET`, `POST /kill-switches` | dashboard, compliance_38 | engage any switch; releasing needs Andre |
 | `GET /tenants/{tid}/entity` | scoped | the canonical entity record with source, provenance, authority, freshness, history |
+| `POST /tenants/{tid}/entity` | Andre | create a client tenant canonical record from1–5 supplied field records; exact replay returns its current view |
 | `POST /entities/{eid}/fields` | Andre | set one field (version-checked; the old value goes to history) |
 | `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets |
 | `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant and verified with Finance; `invoice_override` (Andre, only when Finance cannot answer) |
@@ -185,3 +186,10 @@ bytes for historical reports; no stored audit or document hash is rewritten. A c
 retry still returns `REPORT_CHANGED`. Review unknown reasons before making a homepage
 recommendation; do not treat it as an instruction to expand crawl scope. See
 [ADR 0042](../../docs/adr/0042-homepage-phone-sample-evidence.md).
+
+
+### Client canonical facts (ADR0045)
+
+Create an existing client tenant's entity through `POST /seo/v1/tenants/{tid}/entity` with the existing dashboard caller and Andre approval. Supply a request UUID and a `fields` list, for example `{"field":"telephone","value":"202-555-0100","source":"client_statement","provenance":"Explicit synthetic example","authority":"first_party"}`. The example is synthetic, not client data. Each list entry must name one of name, street_address, locality, region or telephone;1–5distinct entries are permitted and omitted fields stay absent. The existing personal-data key scanner is unchanged; use the strict field-record shape, not arbitrary extra keys.
+
+Creation stores supplied provenance without independently verifying it. It requires no payment or Compliance fact and grants no audit entitlement. Paid audits retain their existing Finance/Compliance gates. Use the returned entity ID and existing expected-version field update route for later corrections. Reuse the exact creation body/request ID only for replay; it returns the current view after later updates or restart. A changed/reordered body under that ID conflicts, and a new creation request cannot replace an existing entity. No facts, provider configuration, report delivery or human review are inferred.

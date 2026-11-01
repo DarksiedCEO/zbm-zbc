@@ -46,6 +46,19 @@ class SwitchSet(Strict):
     engaged: StrictBool
 
 
+class EntityValue(Strict):
+    field: Literal["name", "street_address", "locality", "region", "telephone"]
+    value: Annotated[StrictStr, Field(min_length=1, max_length=200)]
+    source: Annotated[StrictStr, Field(max_length=40)]
+    provenance: Annotated[StrictStr, Field(min_length=1, max_length=200)]
+    authority: Annotated[StrictStr, Field(max_length=40)]
+
+
+class EntityCreate(Strict):
+    request_id: RequestId
+    fields: Annotated[list[EntityValue], Field(min_length=1, max_length=5)]
+
+
 class EntityFieldSet(Strict):
     request_id: RequestId
     field: Annotated[StrictStr, Field(max_length=40)]

@@ -444,6 +444,10 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
             raise NotFound(R("ENTITY_NOT_FOUND"))
         return e
 
+    @app.post(P + "/tenants/{tid}/entity", dependencies=auth, status_code=201)
+    def create_entity(tid: str, req: dict = Depends(body(m.EntityCreate)), who: str = Depends(andre)) -> dict:
+        return svc.create_entity(_id(tid, TENANT_RX), req)
+
     @app.post(P + "/entities/{eid}/fields", dependencies=auth)
     def entity_field(eid: str, req: dict = Depends(body(m.EntityFieldSet)), who: str = Depends(andre)) -> dict:
         return svc.update_entity_field(_id(eid, ENTITY_ID), req)
