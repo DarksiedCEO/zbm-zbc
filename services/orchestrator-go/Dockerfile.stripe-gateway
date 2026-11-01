@@ -3,15 +3,14 @@
 #   docker build -f services/orchestrator-go/Dockerfile.stripe-gateway -t zbm/stripe-gateway .
 #
 # Build stage: golang:1.27.3-bookworm, the go.mod version CI tests with (actions/setup-go reads go.mod); Go 1.27.3 is
-# the newest supported release (go.dev/doc/devel/release, 2026-10-19; AEGIS M1). OPEN ITEM: pinned by exact tag only
-# — the build box this was written on cannot reach any container registry to resolve a digest (the tag is listed in
-# docker-library/official-images library/golang); pin it by digest (docs/deploy/railway.md, "Open items"). The module has no dependencies (no go.sum), so nothing is downloaded.
+# pinned to the OCI index digest used by successful CI and rechecked against the registry on 2026-11-01.
+# The module has no dependencies (no go.sum), so nothing is downloaded.
 # Static binary (CGO off), no VCS stamping (the build context has no .git), GOTOOLCHAIN=local (never fetch a toolchain).
 #
 # Runtime stage: python:3.12-slim pinned by the digest ADR 0011 records — the one base image digest this repository
 # records and CI has built; it carries /bin/sh and setpriv for deploy/docker/zbm-entrypoint.sh. Runs as uid/gid 10001.
 # Bind: STRIPE_GATEWAY_BIND_ADDR (127.0.0.1 unless set; :: for every interface). No state, no Stripe secret.
-FROM golang:1.27.3-bookworm AS build
+FROM golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS build
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath GOTELEMETRY=off
 WORKDIR /src
 COPY services/orchestrator-go/go.mod ./

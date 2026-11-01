@@ -1025,14 +1025,13 @@ Test mode, after step 11. `$ORCH` = the orchestrator's domain, `$GW` = the strip
   per-caller tokens, the second-writer refusal, every entrypoint refusal, and SIGTERM as PID 1 in a PID namespace.
 - **Base images.** Runtime stages: `python:3.12-slim` pinned by the digest ADR 0011 records (2026-10-02); it gets no
   OS security updates until the digest is moved. Build stages `golang:1.27.3-bookworm` and `rust:1.99.1-slim-bookworm`
-  are pinned by exact tag only (no digest could be resolved here): the CI job prints the digests it pulled — record
-  them in the Dockerfiles as `@sha256:` pins. The Go and Rust runtime stages reuse the pinned Python base for
+  are pinned by OCI index digest, matching the successful CI build and registry manifests checked on 2026-11-01.
+  Delivery's `uv:0.8.17` tool image is also pinned by OCI index digest. See `docs/ci-image-pins.md` for provenance. The Go and Rust runtime stages reuse the pinned Python base for
   `/bin/sh` and `setpriv`, so they carry a Python interpreter they do not use; move to a digest-pinned
   `debian:trixie-slim` once one can be resolved.
 - **Go: 1.27.3** (AEGIS M1, done). Go 1.24.7 was past its end of support. `go.mod`, both CI Go jobs and both Go
   Dockerfiles now use Go 1.27.3, the newest release on go.dev/doc/devel/release (2026-10-19; 1.27.3 and 1.26.10 are
-  the supported lines). The build stage is pinned by exact tag only (`golang:1.27.3-bookworm`, present in
-  docker-library/official-images); no digest could be resolved from the build box — record the digest CI prints.
+  the supported lines). The build stage keeps the versioned tag plus its verified OCI index digest; update both together.
   `go.mod` says `go 1.27.3` with no separate `toolchain` line: `go mod tidy` (1.27.3) deletes a toolchain line equal
   to the go line, and the go line alone makes an older Go refuse to build (`go.mod requires go >= 1.27.3`, with the
   images' `GOTOOLCHAIN=local`) and is what setup-go reads. Keep the four places equal on every Go bump: `go.mod`, the delivery-py job's `go-version`, the two `FROM` lines

@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 65532 zbm && useradd -u 65532 -g 65532 -m -d /srv/delivery zbm
 # uv is pinned to the version the lock was produced with (spec 0.3: uv 0.8.17)
-COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.8.17@sha256:e4644cb5bd56fdc2c5ea3ee0525d9d21eed1603bccd6a21f887a938be7e85be1 /uv /usr/local/bin/uv
 WORKDIR /srv/delivery
 COPY --chown=65532:65532 pyproject.toml uv.lock requirements.txt ./
 RUN uv sync --frozen --no-dev --no-group extensions --no-install-project
