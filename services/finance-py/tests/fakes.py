@@ -378,6 +378,7 @@ class FakePeople:
 
 
 class FakeClientMail:
+    test_only_legacy_receipts = True
     def __init__(self):
         self.sent: list = []
         self.accept = True
