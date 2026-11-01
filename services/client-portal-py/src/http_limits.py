@@ -59,4 +59,3 @@ class HeadDeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
     def connection_lost(self, exc) -> None:
         self._disarm_head_deadline()
         super().connection_lost(exc)
-
