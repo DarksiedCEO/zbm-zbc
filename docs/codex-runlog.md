@@ -252,3 +252,13 @@ Whole-range independent review found and reproduced a dependency-retry defect. A
 Exact-head full CI41339464778 is still running; latest observed85successful jobs with seven in progress and no failures. Prior Delivery jobs took55–81minutes, so no incomplete run is called green. Thirty donor heads match the inclusion inventory; no supersession closure yet. PR15/20/21/23/30 retain separate or partial work. Final CI, fresh remote subject checks and recorded gate disposition precede closures. No merge or deployment.
 
 Andre deferred Railway and Pro. Production configuration, independent final release review, complete observer guard evidence, notification delivery, compatible rollback, tested backup/restore and controlled deployed business-flow proof remain open. Automation stays paused. Private review evidence and hashes archived; no actual secrets, payments, emails or customer operations. Branch-owner merge process after Andre approval applies.
+
+## 2026-11-01 — no-spend recovery path evidence
+
+Andre explicitly deferred Railway Pro and prohibited spending without approval. Private local-only backup development leaves RC a46591c unchanged. Independent frozen-source review identifies no coordinated five-store acquisition; Finance-only pause is insufficient. No production export, cloud upload, paid provisioning, scheduler installation or production stop occurred.
+
+Official-release restic binary/archive digests recorded. Builder transport15guard tests are separate from independent19assertions: real exact-ID encrypted roundtrip, wrong key, corrupt pack and actual partial-backup exit3 refusal. Same-host evidence conservatively E3 CONDITIONAL; synthetic bytes alone are not application recovery.
+
+Separate Legal plus matching-ledger drill independently reproduced47original assertions, stopped owned writers, encrypted/restored23files including17blobs, and restarted readers with valid integrity and two matching acceptance records. Exact source a46591c, existing ledger binary83955119/source-subtree binding retained, not independently rebuilt. Negative/setup evidence retained privately. No five-service or cold-key recovery claim.
+
+Gate3 INSUFFICIENT_EVIDENCE: consistent full-store acquisition, approved no-charge offsite destination/runner, production key custody, actual scheduling/alerts and supervised full application recovery remain open. No evidence establishes Pro mandatory. Latest RC CI41339464778 has90success/two running, not final green. No PR closures or merge.
