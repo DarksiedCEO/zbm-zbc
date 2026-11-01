@@ -146,3 +146,21 @@ def test_both_reason_arrays_classified_without_silent_preference():
 def test_excessive_warnings_are_unknown():
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json={'status':'ok','warnings':['ledger_anchor_unkeyed'] * 9}))
     assert HP.probe('finance', 'http://finance.test', transport).code == 'bad_warning'
+
+@pytest.mark.parametrize('body,expected', [
+    ({'status':'degraded','reasons':['maintenance'],'warnings':False}, 'bad_warning'),
+    ({'status':'ok','reasons':['maintenance'],'write_ok':'private'}, 'bad_write_ok'),
+    ({'status':None}, 'bad_status'),
+    ({'status':'degraded','reasons':['maintenance'],'warnings':['private_code']}, 'bad_warning'),
+    ({'status':'ok','write_ok':False,'warnings':False}, 'bad_warning'),
+    ({'status':'maintenance','degraded_reasons':[None]}, 'bad_reason'),
+    ({'status':1,'reasons':['maintenance']}, 'bad_status'),
+])
+def test_all_recognized_fields_validate_before_definitive_result(body, expected):
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+    assert HP.probe('finance', 'http://finance.test', transport).code == expected
+
+
+def test_non_json_error_response_is_unknown_feed():
+    transport = httpx.MockTransport(lambda request: httpx.Response(503, content=b'not-json'))
+    assert HP.probe('finance', 'http://finance.test', transport).code == 'bad_body'

@@ -120,34 +120,36 @@ def probe(name: str, base_url: str, transport: Optional[httpx.BaseTransport] = N
     except ValueError:
         body = None
     if not isinstance(body, dict):
-        return Reading(name, False, f"http_{r.status_code}" if r.status_code != 200 else "bad_body")
+        return Reading(name, False, "bad_body")
+    # Validate EVERY recognized field before selecting a definitive reason. A valid reason
+    # must not hide malformed warnings/write status and authorize removal of prior observations.
     status = body.get("status")
+    if not isinstance(status, str) or status not in _CODES:
+        return Reading(name, False, "bad_status")
+    if "write_ok" in body and type(body["write_ok"]) is not bool:
+        return Reading(name, False, "bad_write_ok")
+    warnings = body.get("warnings", [])
+    if not isinstance(warnings, list) or len(warnings) > 8 or any(
+            not isinstance(w, str) or w not in _CODES for w in warnings):
+        return Reading(name, False, "bad_warning")
     raw = []
     for field in ("reasons", "degraded_reasons"):
         if field in body:
             if not isinstance(body[field], list) or len(body[field]) > 16:
                 return Reading(name, False, "bad_reason")
             raw.extend(body[field])
-    if len(raw) > 16:
+    if len(raw) > 16 or any(not isinstance(x, str) or x.split(":", 1)[0].strip() not in _CODES for x in raw):
         return Reading(name, False, "bad_reason")
     if r.status_code != 200 or status != "ok" or raw:
-        if isinstance(raw, list) and raw:
-            codes = sorted({_code(x.split(":", 1)[0].strip() if isinstance(x, str) else None, "bad_reason")
-                            for x in raw[:16]})
-            return Reading(name, False, ",".join(codes))
-        if status != "ok" and status is not None:
-            return Reading(name, False, _code(status, "bad_status"))
+        if raw:
+            return Reading(name, False, ",".join(sorted({x.split(":", 1)[0].strip() for x in raw})))
+        if status != "ok":
+            return Reading(name, False, status)
         return Reading(name, False, f"http_{r.status_code}")
-    if "write_ok" in body and type(body["write_ok"]) is not bool:
-        return Reading(name, False, "bad_write_ok")
     if body.get("write_ok") is False:
         return Reading(name, False, "write_refused")
-    warnings = body.get("warnings")
-    if "warnings" in body and (not isinstance(warnings, list) or len(warnings) > 8):
-        return Reading(name, False, "bad_warning")
     if warnings:
-        codes = [_code(w, "bad_warning") for w in (warnings if isinstance(warnings, list) else [None])][:8]
-        return Reading(name, False, "warning:" + ",".join(sorted(set(codes))))   # every code (round 3 N3-8)
+        return Reading(name, False, "warning:" + ",".join(sorted(set(warnings))))
     return Reading(name, True, "ok")
 
 

@@ -158,3 +158,24 @@ def test_all_other_routes_refuse_ops_alerts(hr):
             assert r.status_code == 403, (method, path)
             checked += 1
     assert checked > 50
+
+@pytest.mark.parametrize('malformed', [
+    {'status':'degraded','reasons':['maintenance'],'warnings':False},
+    {'status':'ok','reasons':['maintenance'],'write_ok':'private'}, {'status':None},
+])
+def test_mixed_malformed_health_retains_prior_condition(tmp_path, monkeypatch, malformed):
+    import httpx
+    body = [{'status':'ok','write_ok':False}]
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, json=body[0]))
+    real = health_poll.probe
+    monkeypatch.setattr(health_poll, 'probe', lambda name, url, **k: real(name, url, transport=transport, **k))
+    h = harness(tmp_path, FIN_OPS_HEALTH_URLS='finance=http://owned.example.test')
+    try:
+        assert run(h).json()['persisted']
+        assert h.svc._ops_observer.current['sources']['health:finance']['items'] == {'write_refused':'service_unhealthy'}
+        body[0] = malformed
+        r = run(h).json()
+        assert r['persisted'] and r['coverage']['health:finance'] == 'UNKNOWN'
+        assert 'write_refused' in h.svc._ops_observer.current['sources']['health:finance']['items']
+        assert r['stale_count'] >= 1
+    finally: h.svc.close()

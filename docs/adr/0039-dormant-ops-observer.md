@@ -13,7 +13,9 @@ provider, cron, Docker or Railway setting is introduced. Disabled calls return d
 
 Health classifier comes from c09e5c15e7631d10319990260575852da2eaac8f; its URL variable is renamed, aliases restricted,
 and module description updated for this consumer. Malformed/oversized reasons or warnings now classify unknown;
-both supported reason arrays are combined rather than silently preferring one. The observer uses immediate health readings, not the donor's
+both supported reason arrays are combined rather than silently preferring one. Every supplied recognized field
+is validated before selecting a definitive result, so a valid reason cannot hide malformed warnings/write status;
+null/missing status and non-JSON error bodies yield unknown feed coverage. The observer uses immediate health readings, not the donor's
 notification thresholds or dispatcher. The copied standalone track/run helpers retain their own regression tests;
 they do not govern observer persistence or source removal. Five-second probe/30-second aggregate operation budgets
 are not forced DNS/OS cancellation. No money lock is held during network or filesystem operations. Total Finance
