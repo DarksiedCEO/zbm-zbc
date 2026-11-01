@@ -185,3 +185,14 @@ SEO Technical Audit invoices use `seo_audit_services`. Like Revenue Recovery, th
 `FIN_CARD_PREPAYMENTS=1`, up to $5,000 in USD with no surcharge; mixed media or strategy invoices stay ACH/wire.
 This code change does not enable the switch or change any deployed Stripe endpoint. The read-only helper
 `python devtools/stripe_webhook_events.py` prints the canonical webhook subscription list, including refund events.
+
+### Dormant standalone housekeeping runner
+
+`src/housekeeping_runner.py` is an optional one-shot client, not the Finance server or its scheduler. It is disabled
+by default and never opens `FIN_DATA_DIR`. Its `FIN_HOUSEKEEPING_` configuration prefix comprises
+`FIN_HOUSEKEEPING_ENABLED` (absent/0 disabled, exactly1 enabled), `FIN_HOUSEKEEPING_ORIGIN` (trusted origin only),
+`FIN_HOUSEKEEPING_SERVICE_TOKEN`, `FIN_HOUSEKEEPING_CALLER_TOKEN` (dedicated optional `ops_cron`, distinct from bearer),
+and `FIN_HOUSEKEEPING_DEADLINE_SECONDS` (integer1–120, default60). No mapping, secrets, schedule, image entrypoint
+or production activation is added here. The caller reaches only POST stripe-sessions/run; scheduler is unchanged.
+See [runner procedure](../../docs/runbooks/housekeeping-runner.md) and [ADR0036](../../docs/adr/0036-dormant-housekeeping-runner.md)
+for unknown/degraded outcomes, no automatic retries, owned-worker deadline/reaping and separate activation gates.
