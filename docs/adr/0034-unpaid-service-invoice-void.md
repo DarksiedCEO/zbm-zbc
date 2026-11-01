@@ -1,0 +1,17 @@
+# ADR 0034: founder void of an untouched service receivable
+
+Status: implementation candidate; independent review required.
+
+Andre may POST `/fin/v1/invoices/{invoice_id}/void` with request_id, the exact content_sha256 and a fixed reason (`issued_in_error`, `client_cancelled`, or `duplicate_invoice`). The route uses the existing founder gate with a static refusal-audit label. This records an internal cancellation; it does not establish contractual authority, send notification or move client cash.
+
+Eligibility is deliberately narrow: an issued USD ZBM service invoice, with no payment/hold/adjustment indicators, associated receipt (including an unapplied bank receipt's reference_token), Checkout session of any status, dispute or refund history. Media, retainers, ZBC, paid or partially paid invoices, and credit notes are outside this increment. No provider page is expired or queried.
+
+The service requires one original F11 entry with the invoice source/key and exact Dr1100[client] / Cr4110 lines equal to the immutable invoice total and line amounts. Its hash and entry indexes must agree. A missing, duplicate, altered or already adjusted original refuses. Any later ZBM correction touching this client's1100 or any4110 service revenue also refuses: explicit-line corrections need not identify an invoice, and revenue has no invoice subledger. This intentionally includes a correction an operator intended for another client. It is an ambiguity boundary, not a new correction prohibition; the existing correction route remains unchanged. No special approval bypass is introduced.
+
+Checkout and void acquire the existing Stripe turn before the service lock; void makes no remote call. Eligibility is evaluated under the same lock held through posting and commit. Bank matching rechecks issued status under that lock. A bank fact arriving after a committed void is still retained as unapplied/held money; it cannot reopen the invoice.
+
+The new F11v journal flow must exactly reverse an original service F11, in the current business period through the existing posting validator. Locked-current-period refusal is unchanged; reversing an older entry into an open current period does not modify the locked original. The reversal key is per invoice. Status, reversal reference and fixed reason commit atomically with the normal anchored journal. Same-request replay returns the recorded result; a terminal void cannot add a second reversal after cache expiry, a new request or restart.
+
+Only1100 and4110 change. Bank, Stripe, restricted accounts, refund/payable balances and the original invoice content/dates/number remain unchanged. Existing money, ownership, ledger/log-fault and reconciliation gates still apply. There is no credit-note amount-due abstraction, retainer recognition, paid refund, mail, deadline, restore or infrastructure transplant. Broader adjustments require a separate reviewed design rather than weakening this operation's eligibility checks.
+
+An open unknown-Checkout payment break blocks this operation for all service invoices because its amount and invoice attribution are unassessed. Founder acknowledgement does not establish that an invoice is unpaid and does not remove this block. No break resolution or automatic closure behavior is changed here. Resolve attribution through a separately reviewed process; do not clear the break merely to enable cancellation.

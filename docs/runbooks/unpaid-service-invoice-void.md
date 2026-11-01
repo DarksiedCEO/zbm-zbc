@@ -1,0 +1,13 @@
+# Unpaid service invoice cancellation
+
+Use the founder-only invoice void route only for an issued, wholly unpaid USD ZBM service invoice whose current content hash has been reviewed. Supply request_id, content_sha256 and one fixed reason: issued_in_error, client_cancelled or duplicate_invoice. Do not supply an amount or arbitrary notes. A successful result records status void and its reversal entry reference; it does not notify the client or prove legal cancellation authority.
+
+The operation refuses payment/hold/adjustment history, any associated receipt (including unapplied reference-token matches), any Checkout history, and an ambiguous original posting. A later relevant manual correction also refuses; because service revenue has no invoice subledger, even an unrelated4110 correction can make attribution ambiguous. Do not delete history, change receipt associations, reset the invoice, or seek a special override to force this route. Preserve the evidence and use a separately reviewed accounting/adjustment process when the narrow proof is unavailable. Existing founder journal correction capability is unchanged; this runbook does not authorize an arbitrary correction as a workaround.
+
+A retry must reuse the request_id and identical body after an ambiguous transport or dependency failure. Inspect the invoice and journal before deciding any next action. The journal reversal is keyed per invoice and terminal status prevents a second financial reversal. Log/ledger failures and reconciliation-required states retain existing fail-closed behavior; follow the existing reconciliation process rather than rewriting the journal.
+
+The reversal posts into the current business period. If that period is locked, it refuses; no period is unlocked by this endpoint. A prior-period original remains immutable. Money received after cancellation remains a recorded bank/Stripe fact and requires ordinary unapplied/held-money handling; cancellation never silently discards it. No cash refund, credit note, provider expiry, receipt email or automatic client communication is performed.
+
+This is a local implementation candidate until independent exact-head review and CI are complete. Existing production activation, receipt rollback enforcement, credentials and provider gates are not waived.
+
+An open unknown-Checkout payment break blocks this operation for all service invoices because its amount and invoice attribution are unassessed. Founder acknowledgement does not establish that an invoice is unpaid and does not remove this block. No break resolution or automatic closure behavior is changed here. Resolve attribution through a separately reviewed process; do not clear the break merely to enable cancellation.
