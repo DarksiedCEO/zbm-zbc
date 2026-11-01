@@ -179,3 +179,72 @@ def test_mixed_malformed_health_retains_prior_condition(tmp_path, monkeypatch, m
         assert 'write_refused' in h.svc._ops_observer.current['sources']['health:finance']['items']
         assert r['stale_count'] >= 1
     finally: h.svc.close()
+
+
+def actual_health_method(service, **changes):
+    """Execute exact service health method AST without importing sibling API/startup."""
+    import ast
+    import types
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[2] / (service + '-py') / 'src' / 'service.py'
+    tree = ast.parse(path.read_text())
+    methods = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == 'health']
+    assert len(methods) == 1
+    node = methods[0]; node.decorator_list = []
+    namespace = {'C': types.SimpleNamespace(ENTITIES=('zbm','zbc'))}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), 'exec'), namespace)
+    owned = types.SimpleNamespace(lock=threading.RLock(), db={'invoices':{},'receipts':{},'breaks':{}},
+        rules_version='owned', log=types.SimpleNamespace(in_memory=True, fault=False), rules_pinned=True,
+        reconcile_mode=False, reconcile_required=[], cfg=types.SimpleNamespace(stripe_incoming=False,stripe_livemode=False),
+        scheduler=None, _rules_expiring_summary=lambda:{'available':False}, version_number='owned', seed_pinned=True,
+        _closed=False, unacknowledged_quarantine=lambda:[], apply_fault=False,
+        ports=types.SimpleNamespace(counsel=object()), link_tag_health=lambda:{})
+    for key, value in changes.items():
+        if key == 'log_write_fault': owned.log.fault = value
+        else: setattr(owned, key, value)
+    return namespace['health'](owned)
+
+
+@pytest.mark.parametrize('service', ['finance', 'compliance', 'legal'])
+@pytest.mark.parametrize('flag', ['log_write_fault', 'reconcile_required', 'reconcile_mode'])
+def test_actual_service_integrity_shape_keeps_unhealthy_condition(tmp_path, monkeypatch, service, flag):
+    import httpx
+    body = [actual_health_method(service, **{flag:True})]
+    transport = httpx.MockTransport(lambda request: httpx.Response(200,json=body[0]))
+    real = health_poll.probe
+    monkeypatch.setattr(health_poll, 'probe', lambda name, url, **k: real(name,url,transport=transport,**k))
+    h = harness(tmp_path, FIN_OPS_HEALTH_URLS=service+'=http://owned.example.test')
+    try:
+        r = run(h).json()
+        assert r['persisted'] and r['coverage']['health:'+service] == 'COMPLETE'
+        assert r['open_count'] == 1
+        assert flag in next(iter(h.svc._ops_observer.current['sources']['health:'+service]['items'])).split(',')
+        body[0] = actual_health_method(service)
+        assert run(h).json()['open_count'] == 0
+    finally: h.svc.close()
+
+
+def test_actual_legal_endpoint_warning_shape(tmp_path, monkeypatch):
+    import ast
+    import asyncio
+    import types
+    import httpx
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[2] / 'legal-py' / 'src' / 'api.py'
+    nodes = [n for n in ast.walk(ast.parse(path.read_text())) if isinstance(n,ast.AsyncFunctionDef) and n.name=='health']
+    assert len(nodes)==1
+    node=nodes[0]; node.decorator_list=[]
+    namespace={'svc':types.SimpleNamespace(health=lambda:actual_health_method('legal')),
+               'settings':types.SimpleNamespace(callers_not_configured=['onboarding'])}
+    exec(compile(ast.Module(body=[node],type_ignores=[]),str(path),'exec'),namespace)
+    body=asyncio.run(namespace['health']())
+    transport=httpx.MockTransport(lambda request:httpx.Response(200,json=body))
+    real=health_poll.probe
+    monkeypatch.setattr(health_poll,'probe',lambda name,url,**k:real(name,url,transport=transport,**k))
+    h=harness(tmp_path,FIN_OPS_HEALTH_URLS='legal=http://owned.example.test')
+    try:
+        r=run(h)
+        assert r.json()['persisted'] and r.json()['coverage']['health:legal']=='COMPLETE'
+        assert h.svc._ops_observer.current['sources']['health:legal']['items']=={'warning:optional_caller_unset':'service_unhealthy'}
+        assert 'onboarding' not in r.text+(tmp_path/'finance'/'ops-observer.json').read_text()
+    finally:h.svc.close()

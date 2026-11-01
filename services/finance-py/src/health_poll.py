@@ -38,7 +38,7 @@ log = logging.getLogger("health_poll")
 # Only these literal operational codes may leave a health response in an email.
 # Syntax validation alone would let a private identifier masquerade as a code.
 _CODES = frozenset({
-    "ok", "starting", "closed", "degraded", "maintenance", "unhealthy",
+    "ok", "starting", "closed", "degraded", "maintenance", "unhealthy", "warning", "optional_caller_unset",
     "reconcile_mode", "reconcile_required", "divergence", "log_write_fault",
     "ledger_unreachable", "ledger_write_failing", "pending_unreconciled_writes",
     "interrupted_write_anchored", "last_append_failed", "disk_low",
@@ -128,10 +128,26 @@ def probe(name: str, base_url: str, transport: Optional[httpx.BaseTransport] = N
         return Reading(name, False, "bad_status")
     if "write_ok" in body and type(body["write_ok"]) is not bool:
         return Reading(name, False, "bad_write_ok")
+    integrity_flags = ("log_write_fault", "reconcile_required", "reconcile_mode")
+    if any(field in body and type(body[field]) is not bool for field in integrity_flags):
+        return Reading(name, False, "bad_body")
     warnings = body.get("warnings", [])
-    if not isinstance(warnings, list) or len(warnings) > 8 or any(
-            not isinstance(w, str) or w not in _CODES for w in warnings):
+    if not isinstance(warnings, list) or len(warnings) > 8:
         return Reading(name, False, "bad_warning")
+    normalized_warnings = []
+    for warning in warnings:
+        if not isinstance(warning, str):
+            return Reading(name, False, "bad_warning")
+        # Actual Legal /health has this one documented parameterized warning. The caller
+        # suffix is checked only as bounded syntax and discarded; it never leaves this module.
+        if warning.startswith("optional_caller_unset:"):
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", warning.partition(":")[2]):
+                return Reading(name, False, "bad_warning")
+            warning = "optional_caller_unset"
+        if warning not in _CODES:
+            return Reading(name, False, "bad_warning")
+        normalized_warnings.append(warning)
+    warnings = normalized_warnings
     raw = []
     for field in ("reasons", "degraded_reasons"):
         if field in body:
@@ -140,17 +156,19 @@ def probe(name: str, base_url: str, transport: Optional[httpx.BaseTransport] = N
             raw.extend(body[field])
     if len(raw) > 16 or any(not isinstance(x, str) or x.split(":", 1)[0].strip() not in _CODES for x in raw):
         return Reading(name, False, "bad_reason")
-    if r.status_code != 200 or status != "ok" or raw:
-        if raw:
-            return Reading(name, False, ",".join(sorted({x.split(":", 1)[0].strip() for x in raw})))
-        if status != "ok":
-            return Reading(name, False, status)
-        return Reading(name, False, f"http_{r.status_code}")
+    causes = {x.split(":", 1)[0].strip() for x in raw}
+    causes.update(field for field in integrity_flags if body.get(field) is True)
     if body.get("write_ok") is False:
-        return Reading(name, False, "write_refused")
+        causes.add("write_refused")
+    if causes:
+        return Reading(name, False, ",".join(sorted(causes)))
+    if r.status_code != 200:
+        return Reading(name, False, status if status != "ok" else f"http_{r.status_code}")
+    if status not in ("ok", "warning"):
+        return Reading(name, False, status)
     if warnings:
         return Reading(name, False, "warning:" + ",".join(sorted(set(warnings))))
-    return Reading(name, True, "ok")
+    return Reading(name, status == "ok", status)
 
 
 def poll(targets: dict[str, str], transport: Optional[httpx.BaseTransport] = None) -> list[Reading]:

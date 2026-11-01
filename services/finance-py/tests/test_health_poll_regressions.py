@@ -164,3 +164,27 @@ def test_all_recognized_fields_validate_before_definitive_result(body, expected)
 def test_non_json_error_response_is_unknown_feed():
     transport = httpx.MockTransport(lambda request: httpx.Response(503, content=b'not-json'))
     assert HP.probe('finance', 'http://finance.test', transport).code == 'bad_body'
+
+@pytest.mark.parametrize('field', ['log_write_fault', 'reconcile_required', 'reconcile_mode'])
+@pytest.mark.parametrize('value', [0, 1, 'false', None, [], {}])
+def test_integrity_flags_are_strict_booleans_before_reason_selection(field, value):
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        'status':'ok', 'reasons':['maintenance'], field:value}))
+    assert HP.probe('finance', 'http://finance.test', transport).code == 'bad_body'
+
+
+def test_integrity_flags_cannot_be_hidden_by_known_reasons():
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        'status':'ok','reasons':['maintenance'],'log_write_fault':True,'reconcile_mode':True}))
+    reading = HP.probe('finance', 'http://finance.test', transport)
+    assert not reading.ok and set(reading.code.split(',')) == {'maintenance','log_write_fault','reconcile_mode'}
+
+
+def test_legal_optional_warning_discards_caller_canary():
+    import secrets
+    canary = 'owned_' + secrets.token_hex(16)
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        'status':'warning','warnings':['optional_caller_unset:' + canary]}))
+    r = HP.probe('legal', 'http://legal.test', transport)
+    assert r == HP.Reading('legal', False, 'warning:optional_caller_unset')
+    assert canary not in repr(r)

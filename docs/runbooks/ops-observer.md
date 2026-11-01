@@ -10,7 +10,9 @@ endpoints, not caller-provided URLs. Do not point tests at live services. No not
 Inspect fixed response status, persisted, persistence, generation, preview_id, coverage, open_count, stale_count and
 preview category counts together. Remote holds/expiry are UNCONFIGURED. Zero counts or HTTP200 never establishes
 complete operational health. A disabled result means no observation occurred. Repeated requests observe anew; no
-sent/delivered/notification-success semantics exist. Health codes are immediate observations, not paging thresholds.
+sent/delivered/notification-success semantics exist. Health codes are immediate observations, not paging thresholds. Known log_write_fault/reconcile_required/
+reconcile_mode true flags remain unhealthy even with status ok; malformed flags are UNKNOWN. Legal's optional
+caller warning is retained only as a fixed optional_caller_unset code; no caller name is exposed.
 
 Only COMPLETE scope coverage can remove its prior conditions. Removed sources retain stale conditions. Source data
 older than300seconds/future timestamps does not clear. Clock rollback, bounds or persistence refusal must not be
