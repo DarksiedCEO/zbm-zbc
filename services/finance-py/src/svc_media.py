@@ -34,7 +34,8 @@ from typing import Optional
 import money as M
 import reasons as R
 from clock import iso, parse_iso
-from errors import Conflict, NotFound
+from errors import Conflict, NotFound, Unavailable
+import receipt_backlog
 from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from intelligences import i06_tax as I6
@@ -424,6 +425,15 @@ class MediaMixin:
             op.record(derived_id("crcw", crid), "client_receipt_withdrawn", I2.ACTOR, crid,
                       {"client_receipt_id": crid, "receipt_id": receipt_id, "status": status},
                       "Client receipt withdrawn: the bank returned the payment")
+
+    def get_receipt_backlog(self, limit=None, cursor=None) -> dict:
+        receipt_backlog.query(limit, cursor)
+        with self.lock:
+            if self._closed:
+                raise Unavailable("SERVICE_CLOSED: this Finance instance is closed")
+            rows = receipt_backlog.snapshot_rows(self.db["client_receipts"], self.db["receipt_envelopes"])
+            now = self._now()
+        return receipt_backlog.page(rows, now, limit, cursor)
 
     def get_client_receipt(self, crid: str) -> dict:
         with self.lock:
