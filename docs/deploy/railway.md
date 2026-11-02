@@ -1930,7 +1930,7 @@ launch environment: the original disabled path deliberately preserves ambient en
 Application-only safeguards remain opt-in internal interfaces. Legal, Finance and Compliance constructors accept
 strict-boolean `require_existing_seed=True` to refuse an absent/mismatched persisted seed before provisioning;
 default construction still provisions normally. Compliance Scheduler exposes bounded pause/drain and explicit
-resume primitives; they are not connected to a backup trigger. SEO's observational integrity helper reports
-existing evidence without calling Ledger or writing state. No new HTTP permission or coordination bypass is added.
+resume primitives; they are not connected to a backup trigger. SEO's observational integrity helper reads existing evidence and checks Ledger entries/integrity
+without repairing or writing application state. No new HTTP permission or coordination bypass is added.
 Repository tests cover these primitives; production backup scheduling and safe global coordination remain separate
 unfinished work. Do not enable the launcher merely because image builds or application health checks succeed.
