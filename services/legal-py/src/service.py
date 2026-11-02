@@ -243,7 +243,7 @@ class Seeds:
 class LegalService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, blobs: BlobStore, seeds: Seeds,
                  ports: Optional[Ports] = None, clock: Optional[Clock] = None, rules_pinned: bool = True,
-                 lock_token: Optional[str] = None):
+                 lock_token: Optional[str] = None, *, require_existing_seed: bool = False):
         # bug sweep E (E-5/F-3; service-py V5-L1 / round 5c / a5dd261 L4 pattern): one service instance per data
         # directory, also within one process. api.build_service claims BEFORE the log is built and passes the
         # claim's token; this instance adopts that claim only if the token IS the current claim (single use), and
@@ -265,6 +265,9 @@ class LegalService:
                                   "stale, another instance's, or already adopted); refusing to start")
             self._lock_token = adopted
         try:
+            if type(require_existing_seed) is not bool:
+                raise RuntimeError("require_existing_seed must be boolean")
+            self._require_existing_seed = require_existing_seed
             self._start(settings, recorder, log, blobs, seeds, ports, clock, rules_pinned)
         except BaseException:
             self.close()
@@ -393,6 +396,13 @@ class LegalService:
                         "(README, 'Reconciling the local log with the ledger')")
                 raise RuntimeError("refusing to start: " + "; ".join(a.problems) + hint)
             self.reconcile_required = list(a.voidable)
+        # Opt-in existing-store construction: replay+Ledger assessment above must
+        # establish the current seed proposal before any provisioning or lease write.
+        if self._require_existing_seed:
+            if self.log.in_memory or not any(
+                    p.get("kind") == "seed" and p.get("seed_sha256") == self.seed_sha and
+                    p.get("proposed_rows") == self.seed_rows for p in self.proposals.values()):
+                raise RuntimeError("existing-store startup requires the expected persisted seed proposal")
         if self.reconcile_mode:
             return
         try:

@@ -21,19 +21,19 @@ the check.
 | `python:bizdev-py` | 358 | pytest collection | — |
 | `python:client-portal-py` | 222 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
-| `python:compliance-py` | 777 | pytest collection | — |
+| `python:compliance-py` | 787 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 738 | pytest collection | — |
 | `python:detection-py` | 860 | pytest collection | — |
-| `python:finance-py` | 1611 | pytest collection | — |
+| `python:finance-py` | 1616 | pytest collection | — |
 | `python:fulfillment-py` | 1119 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
-| `python:legal-py` | 833 | pytest collection | — |
+| `python:legal-py` | 838 | pytest collection | — |
 | `python:onboarding-py` | 849 | pytest collection | — |
 | `python:ooh-py` | 212 | pytest collection | — |
 | `python:sales-py` | 874 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
-| `python:seo-py` | 1340 | pytest collection | — |
+| `python:seo-py` | 1353 | pytest collection | — |
 | `python:service-py` | 815 | pytest collection | — |
 | `python:verification-py` | 350 | pytest collection | — |
 | `rust:ledger-rust` | 159 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

@@ -36,14 +36,14 @@ from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
 from svc_engines import EnginesMixin
-from svc_entity import EntityMixin
+from svc_entity import EntityMixin, ZBM_ENTITY
 from svc_gsc import GscMixin
 from svc_invoices import InvoicesMixin
 from svc_logs import LogsMixin
 from svc_manager import ManagerMixin
 from svc_reports import ReportsMixin
 from svc_schedules import SchedulesMixin
-from svc_tenants import TenantsMixin
+from svc_tenants import TenantsMixin, OWN_TENANT
 
 INTERNAL = "seo"
 INTEGRITY_RETRY_S = 15
@@ -336,6 +336,70 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
 
     def _closed_integrity(self) -> dict:
         return {"ok": False, "checked_at": self.integrity.get("checked_at"), "problem": "this service instance is closed"}
+
+    def observe_integrity(self) -> dict:
+        """Opt-in observational hook; never repair, seed, or update integrity caches.
+
+        Caller must separately prevent new work for a final readiness barrier. This
+        result only covers a stable local snapshot over these fresh Ledger reads;
+        it is neither an admission permission nor a durable/global readiness proof.
+        Existing audit/job/startup verification retains its repairing behavior.
+        """
+        def snapshot():
+            # Called with the service lock; log lock also excludes direct log writes.
+            if self._closed:
+                raise Unavailable(R("SERVICE_CLOSED"))
+            with self.log.lock:
+                lines = tuple(self.log._lines)
+                if self._own_pending is not None or self.log.read_pending() is not None \
+                        or self.log.read_discarded() is not None:
+                    return lines, "pending reconciliation required"
+                if OWN_TENANT not in self.tenants or ZBM_ENTITY not in self.entities:
+                    return lines, "seed initialization required"
+                if self.log.fault:
+                    return lines, "local log write fault"
+                if self.log.path:
+                    with open(self.log.path, "rb") as fh:
+                        for line in lines:
+                            for offset in range(0, len(line), 65536):
+                                chunk = line[offset:offset + 65536]
+                                if fh.read(len(chunk)) != chunk:
+                                    return lines, "local log differs from replayed state"
+                            if fh.read(1) != b"\n":
+                                return lines, "local log differs from replayed state"
+                        if fh.read(1):
+                            return lines, "local log differs from replayed state"
+                verify_lines(list(lines))
+                return lines, None
+
+        def result(problem, ledger_ok, lines):
+            return {"integrity": {"ok": problem is None and ledger_ok is True,
+                                  "checked_at": iso(self.now()), "problem": problem},
+                    "ledger_valid": ledger_ok is True, "log_length": len(lines),
+                    "log_head_sha256": sha256_hex(lines[-1]) if lines else None}
+
+        try:
+            with self.lock:
+                lines, problem = snapshot()
+                if problem is not None:
+                    return result(problem, False, lines)
+            # Keep slow Ledger reads outside the service lock, as with existing audit.
+            entries = self.rec.client.entries()
+            ledger_ok = self.rec.client.verify() is True
+            with self.lock:
+                current, problem = snapshot()
+                if current != lines:
+                    problem = "local state changed during observation"
+                if problem is None:
+                    mine = [e for e in entries if e.get("department") == DEPARTMENT
+                            and e.get("event_type") == "log_anchor"]
+                    problem = self._anchor_problem(mine, {e.get("event_id"): e for e in mine})
+                if problem is None and not ledger_ok:
+                    problem = "the ledger chain could not be verified"
+                return result(problem, ledger_ok, current)
+        except (LedgerQueryFailed, OSError, StoreCorrupt):
+            # No cached green result and no local reconciliation on read failure.
+            return result("integrity evidence could not be read", False, ())
 
     def audit_integrity(self) -> dict:
         """``/seo/v1/audit/integrity``: a closed instance refuses 503 SERVICE_CLOSED."""

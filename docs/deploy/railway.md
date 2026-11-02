@@ -1899,3 +1899,38 @@ Optional `FIN_OPS_OBSERVER_ENABLED` is exactly0(default) or1; enabled requires t
 `FIN_OPS_HEALTH_URLS` is an optional bounded map of the fixed finance/legal/compliance/ledger aliases to trusted
 HTTP(S) health roots. Optional distinct `ops_alerts` in `FIN_CALLER_TOKENS` reaches only the observation POST route.
 No sender, cron, Docker change or IaC activation is supplied. See [observer procedure](../runbooks/ops-observer.md).
+
+### Dormant maintenance launcher and application safeguards
+
+The Ledger, Finance, Legal, Compliance and SEO images package a maintenance launcher but set
+`BACKUP_LAUNCH_ENABLED=0`. The existing application commands, UID10001 default, ports and state paths remain.
+No backup engine, Restic binary, capture/upload coordinator, admission/drain protocol, observer schedule or
+restore workflow is activated by this package. These components do not constitute a complete backup deployment.
+
+The opt-in launcher accepts only `BACKUP_LAUNCH_ENABLED=1`; other nonzero values refuse startup. Enabled mode
+requires root, a trusted `BACKUP_MEMBER` from `ledger`, `finance`, `legal`, `compliance`, `seo`, and a distinct
+64-hex `BACKUP_COORD_TOKEN` supplied through trusted operator configuration, never an application token.
+It also requires a fresh root-owned0700 writable `/run/zbm-backup-secrets`; an existing coordination file refuses
+startup. This directory is separate from application-owned `/run/zbm-secrets`. No credential, runtime mount,
+root override or enabled setting is added to Railway configuration by this package.
+
+The parent filters the post-materialization child environment before exec, retaining inventoried application
+settings while excluding backup/B2/Restic/AWS/Rclone credentials. Unknown service-prefixed settings refuse rather
+than silently dropping application authentication. Application secret raw values still follow the existing
+entrypoint's file materialization. The child runs as UID/GID10001 with no supplementary groups, no_new_privs and
+empty capability sets; the privileged parent forwards TERM and INT as TERM and propagates the child exit status.
+This is deterministic launch/shutdown only: it provides no crash adoption, automatic recovery or drain authority.
+
+Build-time checks cover the pinned package's Python3.12 interpreter and setpriv options. Enabled deployment still
+requires verified platform capabilities and private writable storage. Local synthetic Linux evidence used parent
+capabilities CHOWN, SETUID, SETGID, FOWNER, DAC_OVERRIDE, KILL and SETPCAP; this is not a minimum-capability or Railway
+availability claim. Before disabling or reverting an enabled launcher, remove maintenance credentials from its
+launch environment: the original disabled path deliberately preserves ambient environment inheritance.
+
+Application-only safeguards remain opt-in internal interfaces. Legal, Finance and Compliance constructors accept
+strict-boolean `require_existing_seed=True` to refuse an absent/mismatched persisted seed before provisioning;
+default construction still provisions normally. Compliance Scheduler exposes bounded pause/drain and explicit
+resume primitives; they are not connected to a backup trigger. SEO's observational integrity helper reports
+existing evidence without calling Ledger or writing state. No new HTTP permission or coordination bypass is added.
+Repository tests cover these primitives; production backup scheduling and safe global coordination remain separate
+unfinished work. Do not enable the launcher merely because image builds or application health checks succeed.

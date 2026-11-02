@@ -889,7 +889,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -B -m unittest devtools/test_deploy_config.py -v 2>&1 | tee "$RUNNER_TEMP/test-deploy-config.log"
+          python -B -m unittest devtools/test_deploy_config.py devtools/test_maintenance_config.py -v 2>&1 | tee "$RUNNER_TEMP/test-deploy-config.log"
           code=${PIPESTATUS[0]}
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-deploy-config.log" --code "$code" \
             --suite "devtools:test_deploy_config"

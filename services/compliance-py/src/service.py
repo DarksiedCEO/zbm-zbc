@@ -209,7 +209,7 @@ class ComplianceService:
     def __init__(self, config: Config, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str = SPEC_SEED_SHA256, ports: Optional[Ports] = None,
                  clock: Optional[Clock] = None, sources: Optional[list[Source]] = None, reconcile_mode: bool = False,
-                 dir_lock=None, lock_token: Optional[str] = None):
+                 dir_lock=None, lock_token: Optional[str] = None, *, require_existing_seed: bool = False):
         """``expected_seed_sha256`` other than the spec's pinned hash marks the service NON-PRODUCTION
         (``seed_pinned: false`` in /health and in every ruling; AEGIS N14-13). config.py allows that only
         with COMPLIANCE_ALLOW_UNPINNED_SEED=1.
@@ -247,6 +247,9 @@ class ComplianceService:
                                   "stale, another instance's, or already adopted); refusing to start")
             self._lock_token = adopted
         try:
+            if type(require_existing_seed) is not bool:
+                raise RuntimeError("require_existing_seed must be boolean")
+            self._require_existing_seed = require_existing_seed
             self._start(seed_bytes, expected_seed_sha256)
         except BaseException:
             self.close()
@@ -319,6 +322,14 @@ class ComplianceService:
                         "/compliance/v1/reconcile (README, 'Reconciling the local log with the ledger')")
                 raise RuntimeError("refusing to start: " + "; ".join(a.problems) + hint)
             self.reconcile_required = list(a.voidable)
+        # Opt-in existing-store construction: replay+Ledger assessment above must
+        # establish the current seed proposal before any provisioning or lease write.
+        if self._require_existing_seed:
+            if self.log.in_memory or not any(
+                    p.get("kind") == "seed" and p.get("evidence", {}).get("snapshot_sha256") == self.seed_sha and
+                        p.get("evidence", {}).get("normalized_text_sha256") == self.seed_sha and
+                    p.get("proposed_rows") == self.seed_rows for p in self.proposals.values()):
+                raise RuntimeError("existing-store startup requires the expected persisted seed proposal")
         if self.reconcile_mode:
             return  # nothing is written (no seed proposal, no lease) until Andre reconciles and the service restarts
         try:

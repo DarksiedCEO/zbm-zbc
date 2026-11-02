@@ -174,6 +174,17 @@ if [ -n "$SECRETS" ]; then
     done
 fi
 
+# Opt-in launch bootstrap only; no backup engine or admission authority.
+case "${BACKUP_LAUNCH_ENABLED-0}" in
+    0) ;;
+    1)
+        [ "$AS_ROOT" = 1 ] || die "maintenance launch requires root"
+        # Fixed packaged launcher, never a request-selected executable.
+        exec /usr/local/bin/python3 -I /opt/zbm-maintenance/launcher.py "$@"
+        ;;
+    *) die "BACKUP_LAUNCH_ENABLED must be 0 or 1" ;;
+esac
+
 if [ "$AS_ROOT" = 1 ]; then
     command -v setpriv >/dev/null 2>&1 || die "started as root and setpriv is missing: the service never runs as root"
     set -- setpriv "--reuid=$APP_UID" "--regid=$APP_GID" --clear-groups --no-new-privs -- "$@"

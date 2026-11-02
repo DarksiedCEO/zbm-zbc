@@ -242,7 +242,7 @@ class Op:
 class FinanceService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str, ports: Optional[Ports] = None, clock: Optional[Clock] = None,
-                 pinned_sha256: Optional[str] = None, lock_token: Optional[str] = None):
+                 pinned_sha256: Optional[str] = None, lock_token: Optional[str] = None, *, require_existing_seed: bool = False):
         self.cfg = settings
         self.recorder = recorder
         self.log = log
@@ -270,6 +270,9 @@ class FinanceService:
                                   "stale, another instance's, or already adopted); refusing to start")
             self._lock_token = adopted
         try:
+            if type(require_existing_seed) is not bool:
+                raise RuntimeError("require_existing_seed must be boolean")
+            self._require_existing_seed = require_existing_seed
             self._start(settings, seed_bytes, expected_seed_sha256, pinned_sha256)
             if settings.ops_observer_enabled:
                 from ops_observer import ObserverState
@@ -355,6 +358,13 @@ class FinanceService:
         if settings.unmatched_tin_policy == "withhold_24" and not self.counsel_verified("FIN-CQ-06"):
             raise RuntimeError("FIN_UNMATCHED_TIN_POLICY=withhold_24 needs counsel row FIN-CQ-06 verified (spec C.6); "
                                "refusing to start")
+        # Opt-in existing-store construction: replay+Ledger assessment above must
+        # establish the current seed proposal before any provisioning or lease write.
+        if self._require_existing_seed:
+            if self.log.in_memory or not any(
+                    p.get("kind") == "seed" and p.get("seed_sha256") == self.seed_sha and
+                    p.get("proposed_rows") == self.seed_rows for p in self.proposals.values()):
+                raise RuntimeError("existing-store startup requires the expected persisted seed proposal")
         if self.reconcile_mode:
             return
         try:

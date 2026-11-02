@@ -27,6 +27,18 @@ RUN groupadd --gid 10001 zbm \
     && chmod 0700 /data /run/zbm-secrets
 COPY deploy/docker/zbm-entrypoint.sh /usr/local/bin/zbm-entrypoint
 RUN chmod 0755 /usr/local/bin/zbm-entrypoint
+
+# Dormant maintenance launch package; no backup engine or enabled credentials.
+COPY deploy/docker/maintenance/launcher.py deploy/docker/maintenance/backup_config.py deploy/docker/maintenance/app_env_names.json /opt/zbm-maintenance/
+RUN chown -R 0:0 /opt/zbm-maintenance \
+    && chmod 0755 /opt/zbm-maintenance \
+    && chmod 0644 /opt/zbm-maintenance/launcher.py /opt/zbm-maintenance/backup_config.py /opt/zbm-maintenance/app_env_names.json \
+    && /usr/local/bin/python3 -I -B -c 'import sys; assert sys.version_info[:2] == (3, 12); sys.path.insert(0, "/opt/zbm-maintenance"); import backup_config; assert len(backup_config.MEMBERS) == 5; compile(open("/opt/zbm-maintenance/launcher.py").read(), "launcher.py", "exec")' \
+    && test -x /usr/bin/setpriv \
+    && /usr/bin/setpriv --help > /tmp/zbm-setpriv-help \
+    && for flag in reuid regid clear-groups no-new-privs bounding-set inh-caps ambient-caps; do grep -q -- "--$flag" /tmp/zbm-setpriv-help || exit 1; done \
+    && rm /tmp/zbm-setpriv-help
+ENV BACKUP_LAUNCH_ENABLED=0
 COPY --from=build /ledger-server /usr/local/bin/ledger-server
 ENV LEDGER_LOG_PATH=/data/ledger/ledger.jsonl
 USER 10001:10001

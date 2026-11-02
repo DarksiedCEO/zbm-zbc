@@ -28,7 +28,9 @@ gate: it only produces the evidence the gates require.
 
 from __future__ import annotations
 
+import math
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
@@ -42,7 +44,13 @@ WATCHER_EVERY = timedelta(hours=24)
 class Scheduler:
     def __init__(self, svc, interval_s: int = 21600, watcher: bool = False, clock: Optional[Clock] = None,
                  out: Callable[[str], None] = lambda line: print(line, flush=True),
-                 on_thread_death: Optional[Callable[[int], None]] = None):
+                 on_thread_death: Optional[Callable[[int], None]] = None, *, startup_paused: bool = False):
+        if type(startup_paused) is not bool:
+            raise ValueError("startup_paused must be boolean")
+        self._pause_condition = threading.Condition()
+        self._pause_control = threading.Lock()
+        self._pause_requested = startup_paused
+        self._inflight_ticks = 0
         self.svc, self.interval = svc, timedelta(seconds=interval_s)
         self.watcher, self.clock, self.out = watcher, clock or SystemClock(), out
         self.last_controls: Optional[datetime] = None
@@ -78,7 +86,68 @@ class Scheduler:
         self.last_error = {"at": iso(now), "where": where, "error": type(exc).__name__}
         self.out(f"compliance scheduler: {where} run failed at {iso(now)} ({err}); retried at the next tick")
 
-    def tick(self) -> None:
+    def tick(self) -> Optional[bool]:
+        """False explicitly refuses a paused tick; admitted ticks retain their None result.
+
+        Admission counts the whole existing tick, including a subsequent watcher
+        and readiness summary. Pause is not cancellation of admitted work.
+        """
+        with self._pause_condition:
+            if self._pause_requested:
+                return False
+            self._inflight_ticks += 1
+        try:
+            return self._admitted_tick()
+        finally:
+            with self._pause_condition:
+                self._inflight_ticks -= 1
+                self._pause_condition.notify_all()
+
+    def pause_and_drain(self, timeout: float) -> bool:
+        """Close new ticks and wait a bounded time for admitted ticks; timeout stays paused.
+
+        True proves only tick drainage, not thread liveness or application readiness.
+        The caller must separately check backup_state and global startup/open policy.
+        """
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300:
+            raise ValueError("finite drain timeout required")
+        end = time.monotonic() + timeout
+        if not self._pause_control.acquire(blocking=False):
+            raise RuntimeError("scheduler pause/resume operation active")
+        try:
+            with self._pause_condition:
+                self._pause_requested = True
+                while self._inflight_ticks:
+                    remaining = end - time.monotonic()
+                    if remaining <= 0:
+                        return False
+                    self._pause_condition.wait(remaining)
+                return True
+        finally:
+            self._pause_control.release()
+
+    def resume(self) -> None:
+        """Explicit caller-authorized resume; no automatic reopen after drain/timeout."""
+        if not self._pause_control.acquire(blocking=False):
+            raise RuntimeError("scheduler pause/resume operation active")
+        try:
+            with self._pause_condition:
+                if self._inflight_ticks or self._stop.is_set():
+                    raise RuntimeError("admitted tick active or scheduler stopped")
+                self._pause_requested = False
+        finally:
+            self._pause_control.release()
+
+    def backup_state(self) -> dict:
+        """Point-in-time tick state, separate from unchanged business/SLA liveness."""
+        with self._pause_condition:
+            alive = self.alive()
+            return {"pause_requested": self._pause_requested, "inflight_ticks": self._inflight_ticks,
+                    "thread_alive": alive,
+                    "ready_for_backup": self._pause_requested and not self._inflight_ticks
+                                        and alive and not self._stop.is_set()}
+
+    def _admitted_tick(self) -> None:
         """One pass; never raises (AEGIS F-4): an error anywhere is recorded and printed, the thread goes on."""
         try:
             self._tick()
