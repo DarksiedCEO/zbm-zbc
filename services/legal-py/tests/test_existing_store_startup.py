@@ -8,11 +8,12 @@ from store import RecordLog
 
 
 def _existing_mode(monkeypatch, value=True):
-    # The public builder does not expose the dormant constructor option yet.
-    # Forward its real arguments to the real constructor, adding only this flag.
+    # Exercise the constructor guard independently of factory input validation.
+    # Override the forwarded keyword rather than passing it twice.
     constructor = api.LegalService
     def construct(*args, **kwargs):
-        return constructor(*args, **kwargs, require_existing_seed=value)
+        kwargs["require_existing_seed"] = value
+        return constructor(*args, **kwargs)
     monkeypatch.setattr(api, "LegalService", construct)
 
 

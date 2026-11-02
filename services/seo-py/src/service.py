@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import threading
 import time
@@ -33,7 +34,7 @@ from config import Settings
 from errors import Conflict, NotFound, Unavailable
 from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
 from reasons import R
-from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
+from store import DISCARDED_NAME, PENDING_NAME, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
 from svc_engines import EnginesMixin
 from svc_entity import EntityMixin, ZBM_ENTITY
@@ -73,7 +74,10 @@ def request_sha(body: dict) -> str:
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
                  GscMixin, EnginesMixin, ReportsMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
-                 clock: Optional[Clock] = None, lock_token: Optional[str] = None):
+                 clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
+                 observe_existing_on_start: bool = False):
+        if type(observe_existing_on_start) is not bool:
+            raise TypeError("observe_existing_on_start must be a bool")
         import ports as ports_mod
         self.settings = settings
         self.rec = recorder
@@ -124,7 +128,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             if not isinstance(getattr(settings, "report_branding", None), client_report.Branding):
                 # AEGIS L-8: refuse to start rather than answer the client-report route with a 500
                 raise RuntimeError("settings.report_branding must be a client_report.Branding")
-            self._start()
+            self._start(observe_existing_on_start=observe_existing_on_start)
         except BaseException:
             self.close()
             raise
@@ -145,11 +149,22 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
     def closed(self) -> bool:
         return self._closed
 
-    def _start(self) -> None:
+    def _start(self, *, observe_existing_on_start: bool = False) -> None:
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
         self._sweep_ingests()                    # expired log ingests keep counts only (AEGIS 4c0a805 T4)
-        self.verify_integrity(force=True)
+        if observe_existing_on_start:
+            # Constructor-only: refuse provisioning/repair, but retain normal lock
+            # acquisition and memory reconstruction. Later operations are unchanged.
+            if self.log.in_memory or not self.log.path or not len(self.log):
+                raise Unavailable(R("INTEGRITY_UNVERIFIED"))
+            observed = self.observe_integrity()
+            if observed["integrity"]["ok"] is not True or observed["ledger_valid"] is not True:
+                raise Unavailable(R("INTEGRITY_UNVERIFIED"))
+            with self.lock:
+                self.integrity = dict(observed["integrity"])
+        else:
+            self.verify_integrity(force=True)
 
     # ================================================================================================ plumbing
 
@@ -351,6 +366,15 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 raise Unavailable(R("SERVICE_CLOSED"))
             with self.log.lock:
                 lines = tuple(self.log._lines)
+                if self.log.data_dir:
+                    # Observation requires absence, not an empty-reader result.
+                    # Preserve even empty/malformed sidecars for ordinary recovery.
+                    for name in (PENDING_NAME, DISCARDED_NAME):
+                        try:
+                            os.lstat(os.path.join(self.log.data_dir, name))
+                        except FileNotFoundError:
+                            continue
+                        return lines, "pending reconciliation required"
                 if self._own_pending is not None or self.log.read_pending() is not None \
                         or self.log.read_discarded() is not None:
                     return lines, "pending reconciliation required"

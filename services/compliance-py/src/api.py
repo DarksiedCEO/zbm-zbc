@@ -615,7 +615,9 @@ def watcher_allowlist(seed_rows: list[dict]) -> frozenset[str]:
 
 
 def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, ports: Optional[Ports] = None,
-                  ledger=None) -> ComplianceService:
+                  ledger=None, *, require_existing_seed: bool = False) -> ComplianceService:
+    if type(require_existing_seed) is not bool:
+        raise ValueError("require_existing_seed must be boolean")
     clock = clock or SystemClock()
     if ledger is None:
         ledger = (HttpLedgerClient(settings.ledger_url, settings.ledger_token)
@@ -641,7 +643,8 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
     token = lock.claim() if lock is not None else None  # claimed BEFORE the log is built (bug sweep C, E-5/F-3)
     try:
         return ComplianceService(cfg, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes, expected, ports, clock,
-                                 reconcile_mode=settings.reconcile_mode, dir_lock=lock, lock_token=token)
+                                 reconcile_mode=settings.reconcile_mode, dir_lock=lock, lock_token=token,
+                                 require_existing_seed=require_existing_seed)
     except BaseException:
         if lock is not None:
             lock.release_claim(token)
@@ -658,16 +661,18 @@ def _app_from_env() -> FastAPI:
 app = _app_from_env()
 
 
-def start_scheduler(svc: ComplianceService, settings) -> Optional["scheduler.Scheduler"]:
+def start_scheduler(svc: ComplianceService, settings, *, startup_paused: bool = False) -> Optional["scheduler.Scheduler"]:
     """ADR 0024 / AEGIS F-4: start the in-process scheduler when enabled and attach it to the service (its liveness is
     in /health). A dead scheduler thread ends the process non-zero (Railway ON_FAILURE restarts it): ``os._exit``,
     because sys.exit in a thread ends only that thread."""
     import scheduler
+    if type(startup_paused) is not bool:
+        raise ValueError("startup_paused must be boolean")
     if not settings.scheduler_enabled:
         return None
     svc.scheduler = scheduler.Scheduler(svc, interval_s=settings.scheduler_interval_s,
                                         watcher=settings.watcher_enabled, clock=svc.clock,
-                                        on_thread_death=os._exit).start()
+                                        on_thread_death=os._exit, startup_paused=startup_paused).start()
     return svc.scheduler
 
 

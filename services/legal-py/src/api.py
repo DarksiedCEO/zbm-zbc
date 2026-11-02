@@ -809,7 +809,9 @@ def build_ports(settings: config_mod.Settings) -> Ports:
 
 
 def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, ports: Optional[Ports] = None,
-                  ledger=None) -> LegalService:
+                  ledger=None, *, require_existing_seed: bool = False) -> LegalService:
+    if type(require_existing_seed) is not bool:
+        raise ValueError("require_existing_seed must be boolean")
     clock = clock or SystemClock()
     if ledger is None:
         ledger = (HttpLedgerClient(settings.ledger_url, settings.ledger_token)
@@ -823,7 +825,8 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
     token = lock.claim() if lock is not None else None   # claimed BEFORE the log is built
     try:
         return LegalService(settings, Recorder(ledger), RecordLog(settings.data_dir), BlobStore(settings.data_dir),
-                            seeds, ports or build_ports(settings), clock, pinned, lock_token=token)
+                            seeds, ports or build_ports(settings), clock, pinned, lock_token=token,
+                            require_existing_seed=require_existing_seed)
     except BaseException:
         if lock is not None:
             lock.release_claim(token)

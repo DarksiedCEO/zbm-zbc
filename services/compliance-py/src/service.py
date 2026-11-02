@@ -44,7 +44,7 @@ from ports import (A11yAnswer, AccessibilityChecker, AgeAttestation, ClientDocum
                    ScreenAnswer, TaxStatus, VerificationIntegrityPort)
 import readiness as readiness_mod
 from register import Version, effective_status, rows_sha256, sha256_text
-from store import DataDirBusy, RecordLog, StoreWriteError
+from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from textguard import injection_rules_in
 
 SPEC_SEED_SHA256 = "bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5"   # seed v2 (ADR 0024)
@@ -466,6 +466,61 @@ class ComplianceService:
                                          reconciles=reconciles,
                                          local_versions=i11_evidence_audit.local_version_events(self.log.epoch, metas),
                                          committed_actions=named)
+
+    def observe_integrity(self) -> dict:
+        """Observe persistent local/Ledger evidence without controls, repair or recording.
+
+        This reuses the startup assessment, not the business control/readiness gates.
+        Ledger reads are separate requests; a stable local snapshot does not prove an
+        atomic global snapshot or exclude later writes. Caller must separately drain
+        writers and bind any wider verification round. No state/cache is updated here.
+        """
+        def snapshot():
+            # Same lock order as application commits; filesystem reads are chunked
+            # and compared to replayed bytes, not only a separately valid hash chain.
+            with self.log.lock:
+                if self._closed or self.log.closed or self.log.fault:
+                    raise ValueError("local evidence unavailable")
+                lines = tuple(self.log.raw_lines())
+                if self.log.in_memory or not self.log.path or not lines:
+                    raise ValueError("persistent evidence required")
+                with open(self.log.path, "rb") as fh:
+                    for line in lines:
+                        for offset in range(0, len(line), 65536):
+                            chunk = line[offset:offset + 65536]
+                            if fh.read(len(chunk)) != chunk:
+                                raise ValueError("local evidence differs from replay")
+                        if fh.read(1) != b"\n":
+                            raise ValueError("local evidence differs from replay")
+                    if fh.read(1):
+                        raise ValueError("local evidence differs from replay")
+                verify_lines(list(lines))
+                return lines
+
+        def result(problem, ledger_valid, lines=None):
+            return {"integrity": {"ok": problem is None and ledger_valid is True,
+                                  "checked_at": iso(self._now()), "problem": problem},
+                    "ledger_valid": ledger_valid is True,
+                    "log_length": len(lines) if lines is not None else None,
+                    "log_head_sha256": hashlib.sha256(lines[-1]).hexdigest() if lines else None}
+
+        try:
+            with self.lock:
+                before = snapshot()
+            entries = self.recorder.client.entries()
+            ledger_valid = self.recorder.client.verify() is True
+            with self.lock:
+                after = snapshot()
+                if after != before:
+                    return result("local evidence changed during observation", ledger_valid, after)
+                assessment = self._assess(entries)
+                problem = "local evidence does not match Ledger" if assessment.problems else None
+                if not ledger_valid:
+                    problem = "Ledger verification unavailable or invalid"
+                return result(problem, ledger_valid, after)
+        except (OSError, StoreCorrupt, LedgerQueryFailed, ValueError, TypeError, KeyError):
+            # Do not expose exception contents (which can contain paths or records).
+            return result("evidence observation unavailable", False)
 
     def anchor_problems(self) -> list[str]:
         return self.assess_log().problems

@@ -580,9 +580,11 @@ def _wrap(app: FastAPI):
     return InputLimits(NoStore(app))
 
 
-def build(env: Optional[dict] = None):
+def build(env: Optional[dict] = None, *, observe_existing_on_start: bool = False):
     """The production wiring: settings, ledger, log, ports; returns (asgi, service). The only connected port is the
     web fetcher; every other port is NOT_CONNECTED (config.NOT_BUILT refuses start if one is selected)."""
+    if type(observe_existing_on_start) is not bool:
+        raise TypeError("observe_existing_on_start must be a bool")
     settings = config_mod.load(env)
     lock = settings.data_dir_lock              # the flock, taken by config.load before the log is opened
     token = lock.claim() if lock is not None else None   # claimed BEFORE the log is built
@@ -591,7 +593,8 @@ def build(env: Optional[dict] = None):
             ledger = HttpLedgerClient(settings.ledger_url, settings.ledger_token)
         else:
             ledger = UnconfiguredLedgerClient()
-        svc = SeoService(settings, Recorder(ledger), RecordLog(settings.data_dir), lock_token=token)
+        svc = SeoService(settings, Recorder(ledger), RecordLog(settings.data_dir), lock_token=token,
+                         observe_existing_on_start=observe_existing_on_start)
     except BaseException:
         if lock is not None:
             lock.release_claim(token)
