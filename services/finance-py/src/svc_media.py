@@ -19,7 +19,7 @@ Flows (ZBM only; posted nowhere else, i01 refuses the media accounts to every ot
 
 Revenue and cost are recognised together when the media has run (F12r, like ADR 0009 choice 4): a buy can never
 show revenue without its cost. WHEN revenue is recognised for a flight that spans months, and whether California
-sales tax applies, are the tax questions of counsel row FIN-CQ-11; no invoice issues until Andre verifies it (M8).
+sales tax applies, are the tax questions of row FIN-CQ-11 (the sales-tax determination); no invoice issues until Andre verifies it (M8).
 
 Client receipts: every matched payment (ZBC and ZBM) produces a receipt that says what the client bought; the
 scheduler sends it through the client-mail port (stand-in: nothing is sent, the receipt stays ``pending_send``).
@@ -34,7 +34,8 @@ from typing import Optional
 import money as M
 import reasons as R
 from clock import iso, parse_iso
-from errors import Conflict, NotFound
+from errors import Conflict, NotFound, Unavailable
+import receipt_backlog
 from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from intelligences import i06_tax as I6
@@ -47,7 +48,8 @@ MEDIA_LABELS = {"broadcast_tv": "Broadcast TV", "cable_tv": "Cable TV", "streami
 LINE_LABELS = {"campaign_deposit": "Campaign deposit", "creative_services": "Creative services",
                "strategy_services": "Strategy services", "production_services": "Production services",
                "retainer_fee": "Retainer", "subscription_fee": "Subscription",
-               "revenue_recovery_services": "Revenue Recovery services", "media_spend": "Media",
+               "revenue_recovery_services": "Revenue Recovery services", "seo_audit_services": "SEO Technical Audit",
+               "media_spend": "Media",
                "media_fee": "Media placement and management"}
 OPEN_FOR_VENDOR = ("prepaid", "vendor_partially_paid")
 
@@ -135,7 +137,13 @@ class MediaMixin:
 
     def record_vendor_payment(self, request_id: str, buy_id: str, body: dict) -> dict:
         """Andre records a payment he made to the vendor (M7). Refused unless the client's prepayment for THIS buy
-        has cleared and the hold has passed (M3), and never above the vendor cost (M1)."""
+        has cleared and the hold has passed (M3), and never above the vendor cost (M1). RTM-01: and only while
+        Compliance answers a current ALLOW for the client at the moment of payment (read outside the lock)."""
+        with self.lock:
+            buy0 = self.db["media_buys"].get(buy_id)
+            client0 = (self.db["invoices"].get((buy0 or {}).get("invoice_id")) or {}).get("client_id")
+        g_cmp = Gather(self, f"mbv|{request_id}|compliance", "andre", buy_id)
+        act_reasons = self._activation_reasons(self._activation(g_cmp, client0), full=True) if client0 else []
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"media-buys/{buy_id}/vendor-payments",
                                      {k: _d(v) for k, v in body.items()})
@@ -156,6 +164,16 @@ class MediaMixin:
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "part or all of the client's prepayment was refunded at "
                                                             "Stripe; the vendor is not paid until Andre settles it "
                                                             "(founder M3; sweep X-6)"))
+            held = (self.db["invoices"].get(buy.get("invoice_id")) or {}).get("held_compliance")
+            if held:
+                reasons.append(R.item("COLLECT_BEFORE_PAY", f"the client's payment is held by Compliance (38) "
+                                                            f"({held['kind']}); the vendor is not paid until the hold "
+                                                            "is released (AEGIS r3 N-9, r4 R4-1)"))
+            reasons += act_reasons
+            if self._local_holds(buy.get("client_id") or client0) and not held:
+                # AEGIS r12 R12-3: any of the client's money held by Compliance, re-read under the lock
+                reasons.append(R.item("COLLECT_BEFORE_PAY", "a payment of this client is held by Compliance (38); "
+                                                            "the vendor is not paid until the hold is released"))
             if buy.get("payment_disputed"):
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "the client disputed the prepayment at Stripe; the vendor "
                                                             "is not paid while that dispute is open (founder M3)"))
@@ -177,8 +195,8 @@ class MediaMixin:
             if any(p["payment_ref_sha256"] == body["payment_ref_sha256"] for p in buy["vendor_payments"]):
                 raise Conflict("this vendor payment reference is already recorded on this buy")
             if reasons:
-                raise Refused("vendor payment refused", R.dedupe(reasons))
-            op = Op(self, f"mbv|{request_id}", "andre", buy_id)
+                raise Refused("vendor payment refused", R.dedupe(reasons), ledger_event_ids=g_cmp.events)
+            op = Op(self, f"mbv|{request_id}", "andre", buy_id, g_cmp)
             n = len(buy["vendor_payments"]) + 1
             try:
                 e = self._post(op, "zbm", [J.dr("1150", amt, f"buy:{buy_id}"), J.cr("1010", amt)], "F12v",
@@ -408,6 +426,20 @@ class MediaMixin:
                       {"client_receipt_id": crid, "receipt_id": receipt_id, "status": status},
                       "Client receipt withdrawn: the bank returned the payment")
 
+    def get_receipt_backlog(self, limit=None, cursor=None) -> dict:
+        receipt_backlog.query(limit, cursor)
+        with self.lock:
+            if self._closed:
+                raise Unavailable("SERVICE_CLOSED: this Finance instance is closed")
+            rows = receipt_backlog.snapshot_rows(self.db["client_receipts"], self.db["receipt_envelopes"])
+            try:
+                # Preserve naive/malformed readings for the projection's unknown-clock guard;
+                # _now() normalizes naive datetimes using host timezone before that guard.
+                now = self.clock.now()
+            except Exception:  # Clock failure is unknown age, never private exception text.
+                now = None
+        return receipt_backlog.page(rows, now, limit, cursor)
+
     def get_client_receipt(self, crid: str) -> dict:
         with self.lock:
             rec = self.db["client_receipts"].get(crid)
@@ -440,6 +472,14 @@ class MediaMixin:
     def send_client_receipt(self, principal: str, request_id: str, crid: str) -> dict:
         """The scheduler asks the client-mail port to send one receipt. The port call happens outside the lock and
         is recorded first; a refusal or the stand-in leaves the receipt ``pending_send`` (nothing claims a send)."""
+        # Only explicitly injected legacy test fixtures exercise the historical bool contract.
+        # Production construction wires NotBuiltClientMail; no request/config selects this marker.
+        with self.lock:
+            receipt = self.db["client_receipts"].get(crid, {})
+            durable_delivery = crid in self.db["receipt_envelopes"] or \
+                receipt.get("client_id") in self.db["client_contacts"]
+        if durable_delivery or getattr(self.ports.client_mail, "test_only_legacy_receipts", False) is not True:
+            return self.send_receipt_envelope(principal, request_id, crid)
         key, h, ent = self._idem(principal, request_id, f"client-receipts/{crid}/send", None)
         if ent:
             return ent["response"]

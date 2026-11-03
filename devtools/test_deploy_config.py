@@ -3,8 +3,7 @@ it in the `hygiene-static` job, and `python -m pytest devtools/` collects it:
 
     python3 -B -m unittest devtools/test_deploy_config.py -v
 
-- every Railway Dockerfile pins its runtime base by digest, names an exact version for any other stage (and marks
-  it an OPEN ITEM), runs as uid/gid 10001 through deploy/docker/zbm-entrypoint.sh, and gives the entrypoint the port
+- every Railway Dockerfile pins its runtime and build-stage bases by digest, runs as uid/gid 10001 through deploy/docker/zbm-entrypoint.sh, and gives the entrypoint the port
   variable the service's code actually reads;
 - the Python images install only deploy/python/requirements.lock.txt, with hashes, and its direct pins are the
   services' requirements.txt pins without pytest;
@@ -25,6 +24,7 @@ import ast
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -50,9 +50,15 @@ SERVICES = {
     "stripe-gateway": ("services/orchestrator-go/Dockerfile.stripe-gateway", "STRIPE_GATEWAY_PORT", 8470,
                        "stripe-gateway", False),
     "seo": ("services/seo-py/Dockerfile", "SEO_PORT", 8500, "seo-py", True),
+    "compliance": ("services/compliance-py/Dockerfile", "COMPLIANCE_PORT", 8380, "compliance-py", True),   # ADR 0024
+    "client-portal": ("services/client-portal-py/Dockerfile", "PORTAL_PORT", 8480, "client-portal-py", False),  # ADR 0028
 }
 PY_SERVICES = {"detection-py": ("ZBM_", "DETECTION_", "RR_STORE_"), "finance-py": ("FIN_",), "legal-py": ("LEGAL_",),
-               "seo-py": ("SEO_",)}
+               "seo-py": ("SEO_",), "compliance-py": ("COMPLIANCE_",), "client-portal-py": ("PORTAL_",)}
+# ADR 0024: compliance-py's requirements.txt is clipper-network-py's (that suite checks the two are identical) and has
+# no use for cryptography; its pins must be a SUBSET of requirements.in, each locked at its pin. The image installs the
+# whole lock, like every Python image.
+LOCK_SUBSET = {"compliance-py", "client-portal-py"}   # ADR 0028: uvicorn and httpx only
 # AEGIS final go-live M-2: the prefix scan alone missed detection-py's RR_STORE_* variables (both Revenue Recovery
 # kill switches among them). Besides the prefixes, any upper-case name in an environment-read position is collected
 # whatever its prefix: os.environ.get("X"), os.environ["X"], os.getenv("X"), env.get("X"), env["X"] (the services'
@@ -62,7 +68,6 @@ ENV_READ = re.compile(r"""(?:\benviron\.get|\benviron\[|\bgetenv|\benv\.get|\ben
 # (`_thin(env, "FIN_VI", ...)` reads FIN_VI_URL / _TOKEN / _CALLER_TOKEN, which are named) and a reason code
 NOT_VARIABLES = {"FIN_VI", "FIN_COMPLIANCE", "FIN_LEGAL", "LEDGER_UNAVAILABLE"}
 DIGEST_FROM = re.compile(r"^FROM\s+\S+@sha256:[0-9a-f]{64}(\s+AS\s+\w+)?\s*$", re.I)
-TAG_FROM = re.compile(r"^FROM\s+[a-z0-9./-]+:\d+\.\d+\.\d+[a-z0-9.-]*(\s+AS\s+\w+)?\s*$", re.I)
 
 
 def logical_lines(text: str) -> list[str]:
@@ -149,9 +154,13 @@ class Dockerfiles(unittest.TestCase):
                 self.assertTrue(froms, "no FROM")
                 self.assertRegex(froms[-1], DIGEST_FROM, "the runtime stage must be pinned by digest")
                 for f in froms[:-1]:
-                    if not DIGEST_FROM.match(f):
-                        self.assertRegex(f, TAG_FROM, "a build stage must name an exact x.y.z version")
-                        self.assertIn("OPEN ITEM", (REPO / df).read_text(), "a stage pinned by tag only is an OPEN ITEM")
+                    self.assertRegex(f, DIGEST_FROM, "a build stage must be pinned by digest")
+
+    def test_delivery_uv_tool_image_is_pinned_by_digest(self):
+        text = (REPO / "services/delivery-py/docker/Dockerfile").read_text()
+        refs = re.findall(r"(?m)^COPY --from=(\S+)", text)
+        self.assertEqual(len(refs), 1)
+        self.assertRegex(refs[0], r"^ghcr\.io/astral-sh/uv:0\.8\.17@sha256:[0-9a-f]{64}$")
 
     def test_non_root_through_the_entrypoint_with_the_right_port_variable(self):
         reads = code_variables()
@@ -184,7 +193,11 @@ class Dockerfiles(unittest.TestCase):
         want = pins(REQ_IN.read_text())
         for svc in PY_SERVICES:
             with self.subTest(service=svc):
-                self.assertEqual(pins((REPO / "services" / svc / "requirements.txt").read_text()), want)
+                have = pins((REPO / "services" / svc / "requirements.txt").read_text())
+                if svc in LOCK_SUBSET:
+                    self.assertTrue(have and have <= want, f"{svc}: every pin must be one of requirements.in's")
+                else:
+                    self.assertEqual(have, want)
         lock = LOCK.read_text()
         entries = re.findall(r"^([a-z0-9._-]+)==(\S+) \\\n((?:\s+--hash=sha256:[0-9a-f]{64}(?: \\)?\n)+)", lock, re.M)
         names = {n for n, _v, _h in entries}
@@ -204,10 +217,15 @@ REF = re.compile(r"\$\{\{(?:[a-z][a-z0-9-]*\.)?[A-Z][A-Z0-9_]*\}\}")
 
 
 def secret_value_ok(value: str) -> bool:
-    """A secret in the IaC is preserve(), a reference (`finance.env.X`), or a JSON map literal whose EVERY value is
-    exactly one `${{service.VARIABLE}}` reference (AEGIS L5): a literal secret placed next to a reference is refused."""
+    """A secret in the IaC is preserve(), a reference (`finance.env.X`), exactly one Railway reference in a string
+    (`"${{compliance.X}}"`, ADR 0024: a service declared before the one holding the value), or a JSON map literal whose
+    EVERY value is exactly one `${{service.VARIABLE}}` reference (AEGIS L5): a literal secret next to a reference is
+    refused."""
     if re.fullmatch(r"preserve\(\)|[a-z][A-Za-z]*\.env\.[A-Z0-9_]+", value):
         return True
+    one = re.fullmatch(r'"(.*)"', value)
+    if one:
+        return REF.fullmatch(one.group(1)) is not None
     m = re.fullmatch(r"'(\{.*\})'", value)
     if not m:
         return False
@@ -241,19 +259,21 @@ class RailwayIac(unittest.TestCase):
 
     def test_every_secret_file_value_variable_is_preserved(self):
         # an image's --secret-file NAME_FILE is written from the Railway variable NAME; a plan that dropped NAME would
-        # delete the secret on the next apply (and with it the feature: a ledger caller, a Stripe key, a store)
+        # delete the secret on the next apply (and with it the feature: a ledger caller, a Stripe key, a store). ADR
+        # 0024: a reference to the service that holds the value (`compliance.env.X`) is declared too, and kept.
         for svc, (df, *_r) in SERVICES.items():
             for file_var in secret_files(REPO / df):
                 with self.subTest(service=svc, variable=file_var):
                     self.assertTrue(file_var.endswith("_FILE"))
-                    self.assertTrue(self._declared_preserved(svc, file_var[:-len("_FILE")]),
-                                    f"{file_var[:-5]} is not preserve() on {svc}")
+                    name = file_var[:-len("_FILE")]
+                    self.assertTrue(self._declared_preserved(svc, name) or self._declared_reference(svc, name),
+                                    f"{name} is neither preserve() nor a reference on {svc}")
 
     def test_detection_store_connector_is_wired_without_a_volume(self):
         # AEGIS A2 H-2: the store connector needs its ledger token, the connections JSON and the credential files; the
         # service keeps no state (snapshots in memory), so no volume and no secret on a backed-up disk
         want = ["DETECTION_LEDGER_TOKEN_FILE", "RR_STORE_CONNECTIONS_FILE", "RR_STORE_SECRET_1_FILE",
-                "RR_STORE_SECRET_2_FILE"]
+                "RR_STORE_SECRET_2_FILE", "DETECTION_COMPLIANCE_TOKEN_FILE", "DETECTION_COMPLIANCE_CALLER_TOKEN_FILE"]
         self.assertEqual(secret_files(REPO / SERVICES["detection"][0]), want)
         b = self.blocks["detection"]
         self.assertIn('DETECTION_LEDGER_URL: PRIVATE("ledger", 8090),', b)
@@ -293,6 +313,10 @@ class RailwayIac(unittest.TestCase):
                         self.assertTrue(secret_value_ok(value), f"{value}: a secret must be preserve(), a reference, "
                                         "or a JSON map whose every value is one ${{service.VARIABLE}}")
 
+    def _declared_reference(self, svc: str, name: str) -> bool:
+        code = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", self.blocks[svc], flags=re.S))
+        return re.search(rf"^\s+{name}:\s*[a-z][A-Za-z]*\.env\.[A-Z0-9_]+,", code, re.M) is not None
+
     def _declared_preserved(self, svc: str, name: str) -> bool:
         # comments stripped first, so a declaration inside /* ... */ or after // does not count
         code = re.sub(r"/\*.*?\*/", "", self.blocks[svc], flags=re.S)
@@ -324,11 +348,24 @@ class RailwayIac(unittest.TestCase):
                     "SEO_KILL_GLOBAL", "SEO_KILLED_CAPABILITIES", "SEO_KILLED_PROVIDERS"),
             "finance": ("FIN_STRIPE_SUCCESS_URL", "FIN_STRIPE_CANCEL_URL"),
             "detection": ("RR_STORE_READS_DISABLED", "RR_STORE_KILL_SWITCH_FILE"),
+            # ADR 0023: public edge overrides, kill switch and limits
+            "stripe-gateway": ("STRIPE_GATEWAY_ALLOWED_IPS", "STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED",
+                               "STRIPE_GATEWAY_RATE_PER_MIN", "STRIPE_GATEWAY_RATE_BURST"),
+            "orchestrator": ("ORCHESTRATOR_RATE_PER_MIN", "ORCHESTRATOR_RATE_BURST", "ORCHESTRATOR_AUTH_FAIL_MAX",
+                             "ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS"),
         }
         for svc, names in hand_set.items():
             for name in names:
                 with self.subTest(service=svc, variable=name):
                     self.assertTrue(self._declared_preserved(svc, name), f"{name} is not preserve() on {svc}")
+
+    def test_public_services_take_the_client_address_from_railways_edge(self):
+        # ADR 0023: behind Railway's edge the TCP peer is the edge itself; remote-addr there would put every client in
+        # one bucket and refuse every Stripe delivery. The IaC pins the edge header on both public services.
+        for svc, name in (("orchestrator", "ORCHESTRATOR_CLIENT_IP_SOURCE"),
+                          ("stripe-gateway", "STRIPE_GATEWAY_CLIENT_IP_SOURCE")):
+            with self.subTest(service=svc):
+                self.assertRegex(self.blocks[svc], rf'(?m)^\s+{name}:\s*"x-real-ip",')
 
     def test_the_preserve_check_ignores_comments(self):
         saved = self.blocks
@@ -365,7 +402,8 @@ class RailwayIac(unittest.TestCase):
         # name outside the service's CALLER_NAMES makes it refuse to start (config._tokens). Each reference must name
         # a variable declared in the service it points at (the same service for `${{VARIABLE}}`).
         maps = {"finance": ("FIN_CALLER_TOKENS", "services/finance-py/src/config.py"),
-                "legal": ("LEGAL_CALLER_TOKENS", "services/legal-py/src/config.py")}
+                "legal": ("LEGAL_CALLER_TOKENS", "services/legal-py/src/config.py"),
+                "compliance": ("COMPLIANCE_CALLER_TOKENS", "services/compliance-py/src/config.py")}
         for svc, (name, config_py) in maps.items():
             tree = ast.parse((REPO / config_py).read_text())
             accepted = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
@@ -394,13 +432,166 @@ class RailwayIac(unittest.TestCase):
                          "scheduler reaches payout runs, releases, refunds and sweeps: not for a hand-held token")
 
 
+class ComplianceGate(unittest.TestCase):
+    """ADR 0024: Compliance (38) is deployed PRIVATE, with its volume, ledger, Legal wiring and scheduler, and every
+    go-live caller is wired to it (Finance, SEO, detection; Legal delivers memo proposals)."""
+
+    def setUp(self):
+        self.blocks = iac_services()
+        self.text = IAC.read_text()
+
+    # The callers of Legal's deployed map before this branch (golive-next 783c96a8): they stay strict.
+    LEGAL_CALLERS_BEFORE = ("finance_31", "onboarding")
+
+    def test_every_caller_this_branch_adds_to_legals_map_is_optional_in_legal(self):
+        """A caller added to LEGAL_CALLER_TOKENS on this branch references a token that does not exist until the same
+        apply creates it (compliance_38 -> COMPLIANCE_LEGAL_CALLER_TOKEN): Legal must skip that entry (OPTIONAL_CALLERS
+        in its config.py: the routes only that caller may call answer 503) instead of refusing to start. Callers that
+        were already deployed stay strict. The runbook orders apply -> set the token -> redeploy legal -> redeploy
+        compliance."""
+        tree = ast.parse((REPO / "services/legal-py/src/config.py").read_text())
+        optional = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                        and any(getattr(t, "id", None) == "OPTIONAL_CALLERS" for t in n.targets))
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        callers = json.loads(m.group(1))
+        for caller in callers:
+            with self.subTest(caller=caller):
+                if caller in self.LEGAL_CALLERS_BEFORE:
+                    self.assertNotIn(caller, optional, f"{caller} was deployed before: it stays strict")
+                else:
+                    self.assertIn(caller, optional, f"{caller} is new in Legal's map: an empty value would stop Legal")
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = runbook.split("**D. Deploy order.**", 1)[1].split("**E.", 1)[0]
+        order = [step.index(x) for x in ("railway config apply", "COMPLIANCE_LEGAL_CALLER_TOKEN", "redeploy legal",
+                                         "redeploy compliance")]
+        self.assertEqual(order, sorted(order), "runbook order: apply, set the token, redeploy legal, then compliance")
+
+    def test_compliance_is_private_with_its_volume_ledger_and_scheduler(self):
+        b = self.blocks["compliance"]
+        for forbidden in ("serviceDomains", "customDomains", "tcpProxies", "networking", "domain"):
+            self.assertNotIn(forbidden, re.sub(r"//[^\n]*", "", b), "Compliance is private: no public domain")
+        self.assertIn('withDailyBackups(service("compliance", ', self.text)
+        self.assertIn('const complianceData = volume("compliance-data", VOLUME_AS_DEPLOYED);', self.text)
+        for line in ('COMPLIANCE_DATA_DIR: "/data/compliance",', 'LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),',
+                     'COMPLIANCE_LEGAL_URL: PRIVATE("legal", 8420),', "COMPLIANCE_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,",
+                     'COMPLIANCE_SCHEDULER_ENABLED: "1",', 'COMPLIANCE_WATCHER_ENABLED: "1",'):
+            self.assertIn(line, b)
+        for name in ("LEDGER_SERVICE_TOKEN", "COMPLIANCE_SERVICE_TOKEN", "COMPLIANCE_ANDRE_APPROVAL_TOKEN",
+                     "COMPLIANCE_ONBOARDING_CALLER_TOKEN", "COMPLIANCE_LEGAL_CALLER_TOKEN"):
+            self.assertRegex(b, rf"(?m)^\s+{name}:\s*preserve\(\)")
+        # nothing that must stay unset is set (config.py refuses to start on them)
+        for name in ("COMPLIANCE_SANCTIONS_PROVIDER", "COMPLIANCE_A11Y_PROVIDER", "COMPLIANCE_ALLOW_UNPINNED_SEED",
+                     "COMPLIANCE_SEED_PATH", "COMPLIANCE_SEED_SHA256", "COMPLIANCE_RECONCILE_MODE"):
+            self.assertNotIn(name, b)
+
+    def test_no_scheduler_token_exists(self):
+        m = re.search(r"COMPLIANCE_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["compliance"])
+        callers = json.loads(m.group(1))
+        self.assertEqual(sorted(callers), ["finance_31", "legal_37", "onboarding", "revenue_recovery", "seo_02"])
+
+    def test_every_go_live_caller_is_wired_to_compliance(self):
+        for svc, prefix in (("finance", "FIN_COMPLIANCE"), ("seo", "SEO_COMPLIANCE"),
+                            ("detection", "DETECTION_COMPLIANCE")):
+            b = self.blocks[svc]
+            with self.subTest(service=svc):
+                self.assertIn(f'{prefix}_URL: PRIVATE("compliance", 8380),', b)
+                self.assertIn(f"{prefix}_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,", b)
+                self.assertRegex(b, rf"(?m)^\s+{prefix}_CALLER_TOKEN:\s*preserve\(\)")
+        legal = self.blocks["legal"]
+        self.assertIn('LEGAL_COMPLIANCE_URL: PRIVATE("compliance", 8380),', legal)
+        self.assertIn('LEGAL_COMPLIANCE_TOKEN: "${{compliance.COMPLIANCE_SERVICE_TOKEN}}",', legal)
+        self.assertIn('"compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}"', legal)
+
+    def test_resources_list_every_service_and_volume_once(self):
+        res = re.search(r"resources:\s*\[([^\]]*)\]", self.text).group(1)
+        names = [x.strip() for x in res.split(",") if x.strip()]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("compliance", names)
+        self.assertIn("complianceData", names)
+
+
+class ClientPortal(unittest.TestCase):
+    """ADR 0028: the client acceptance page is a separate, stateless service. Its only secrets are Legal's service
+    token (a reference), its own client_portal caller token at Legal and its evidence key; it reaches Legal only, over
+    the private network; it holds no ledger, Finance or Compliance credential and no volume."""
+
+    def setUp(self):
+        self.blocks = iac_services()
+        self.text = IAC.read_text()
+        self.b = self.blocks["client-portal"]
+        self.code = re.sub(r"//[^\n]*", "", self.b)
+
+    def test_the_portal_is_stateless_and_wired_to_legal_only(self):
+        for line in ('PORT: "8480",', 'PORTAL_BIND_ADDR: "::",', 'PORTAL_LEGAL_URL: PRIVATE("legal", 8420),',
+                     "PORTAL_LEGAL_SERVICE_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,", 'PORTAL_TRUSTED_PROXY_HOPS: "1",'):
+            self.assertIn(line, self.b)
+        for name in ("PORTAL_LEGAL_CALLER_TOKEN", "PORTAL_EVIDENCE_KEY", "PORTAL_PUBLIC_ORIGIN"):
+            self.assertRegex(self.code, rf"(?m)^\s+{name}:\s*preserve\(\)", f"{name} is not preserve()")
+        self.assertNotIn("volumeMounts", self.code)
+        self.assertNotIn("RAILWAY_RUN_UID", self.code)
+        names = set(re.findall(r"(?m)^\s+([A-Z][A-Z0-9_]+):", self.code))
+        self.assertEqual({n for n in names if not n.startswith("PORTAL_")}, {"PORT"},
+                         "the portal gets no ledger, Finance, Compliance or other service variable")
+        self.assertNotRegex(self.code, r"(ledger|finance|compliance|seo|detection)\.env\.")
+        self.assertEqual(set(re.findall(r"\b([a-z]+)\.env\.([A-Z_]+)", self.code)),
+                         {("legal", "LEGAL_SERVICE_TOKEN"), ("legal", "LEGAL_LINK_TAG_KEY")})
+
+    def test_legal_accepts_the_portal_caller_from_the_portal_service(self):
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        callers = json.loads(m.group(1))
+        self.assertEqual(callers.get("client_portal"), "${{client-portal.PORTAL_LEGAL_CALLER_TOKEN}}")
+        for svc in ("finance", "compliance"):
+            mm = re.search(r"_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks[svc])
+            self.assertNotIn("client-portal", mm.group(1), f"{svc} must not accept the portal")
+
+    def test_a_first_deploy_cannot_take_legal_down(self):
+        """AEGIS M-1: Legal's caller map names client-portal's preserve()d token, which is empty until Andre sets it
+        after the first apply. Legal must skip that entry (OPTIONAL_CALLERS in its config.py: the portal routes
+        answer 503) instead of refusing to start. Generally: an entry referencing a service this change adds (any
+        service other than those already deployed or ordered by their own runbook: finance, compliance) must be
+        optional in Legal."""
+        tree = ast.parse((REPO / "services/legal-py/src/config.py").read_text())
+        optional = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                        and any(getattr(t, "id", None) == "OPTIONAL_CALLERS" for t in n.targets))
+        m = re.search(r"LEGAL_CALLER_TOKENS:\s*'(\{[^']*\})'", self.blocks["legal"])
+        for caller, ref in json.loads(m.group(1)).items():
+            target = ref[3:-2].rpartition(".")[0]
+            if target and target not in ("finance", "compliance"):
+                with self.subTest(caller=caller, service=target):
+                    self.assertIn(caller, optional, f"{caller} -> {target}: an empty value would stop Legal starting")
+        self.assertEqual(tuple(optional), ("compliance_38", "client_portal"))     # ADR 0024 and ADR 0028
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        section = runbook.split("### Client acceptance page (ADR 0028)", 1)[1].split("\n### ", 1)[0]
+        self.assertNotIn("**before**", section, "the runbook must not ask for the impossible order (AEGIS M-1)")
+        self.assertIn("answer 503", section)
+
+    def test_the_link_tag_key_is_set_once_on_legal_and_referenced_by_the_portal(self):
+        """AEGIS r2 N-M1: the portal refuses junk links with Legal's tag key; one value, owned by Legal (which issues
+        no link without it and keeps running), read by the portal as a reference."""
+        self.assertRegex(re.sub(r"//[^\n]*", "", self.blocks["legal"]), r"(?m)^\s+LEGAL_LINK_TAG_KEY:\s*preserve\(\)")
+        self.assertIn("PORTAL_LINK_TAG_KEY: legal.env.LEGAL_LINK_TAG_KEY,", self.b)
+
+    def test_declared_after_legal_and_listed_once(self):
+        self.assertLess(self.text.index('service("legal",'), self.text.index('service("client-portal",'))
+        res = re.search(r"resources:\s*\[([^\]]*)\]", self.text).group(1)
+        self.assertEqual([x.strip() for x in res.split(",")].count("clientPortal"), 1)
+
+    def test_the_runbook_says_how_the_public_domain_is_made(self):
+        runbook = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        self.assertIn("### Client acceptance page (ADR 0028)", runbook)
+        self.assertIn("docs/runbooks/client-acceptance.md", runbook)
+        self.assertTrue((REPO / "docs" / "runbooks" / "client-acceptance.md").is_file())
+
+
 class CiAndSmoke(unittest.TestCase):
     def test_ci_builds_every_dockerfile_and_the_smoke_covers_it(self):
         ci = CI.read_text()
         smoke = SMOKE.read_text()
         for svc, (df, _pv, port, name, _v) in SERVICES.items():
             with self.subTest(service=svc):
-                self.assertIn(f"docker build -f {df} -t zbm-ci/{name}:ci .", ci)
+                cold = svc in {"ledger", "finance", "legal", "compliance", "seo"}
+                flags = " --platform linux/amd64 --build-arg TARGETARCH=amd64" if cold else ""
+                self.assertIn(f"docker build{flags} -f {df} -t zbm-ci/{name}:ci .", ci)
                 self.assertRegex(smoke, rf'"{re.escape(name)}": \({port}, ')
         self.assertIn("      - railway-images\n", ci.split("  required:", 1)[1])
 
@@ -421,7 +612,8 @@ class VariableScan(unittest.TestCase):
     def test_no_python_service_reads_a_variable_outside_its_prefixes_unseen(self):
         """Every upper-case name a Python service reads in an environment-read position is either under the
         service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
-        outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set()}
+        outside_prefixes = {"detection-py": set(), "finance-py": {"ZBM_STARTUP_PROFILE"}, "legal-py": {"ZBM_STARTUP_PROFILE"}, "seo-py": {"ZBM_STARTUP_PROFILE"},
+                            "compliance-py": {"ZBM_STARTUP_PROFILE"}, "client-portal-py": set()}
         for svc, prefixes in PY_SERVICES.items():
             found = set()
             for p in (REPO / "services" / svc / "src").rglob("*.py"):
@@ -660,5 +852,144 @@ class SeoSearchConsoleKey(unittest.TestCase):
         self.assertEqual((r.returncode, r.stdout), (0, FAKE_GSC_KEY.encode()), r.stderr)
 
 
+class Heartbeat(unittest.TestCase):
+    """AEGIS rebase review RB-L1: the cron heartbeat (railway.md step E.2) is the only push alarm for a payment held by
+    Compliance (a sanctions hold carries a 10-business-day OFAC deadline). An optional caller token left unset (Legal's
+    /health ``warning`` whose ONLY warnings are ``optional_caller_unset:*``) must not silence that alarm; it is reported
+    by a second ping (HEARTBEAT_CONFIG_URL) instead. The command is run as written in the runbook, with a fake curl."""
+
+    FAKE_CURL = r"""#!/bin/sh
+for a in "$@"; do url="$a"; done
+case "$url" in
+  *legal.railway.internal*) [ -n "$LEGAL_BODY" ] || exit 22; printf %s "$LEGAL_BODY";;
+  *compliance.railway.internal*) [ -n "$COMPLIANCE_UP" ] || exit 22; printf %s '{"status":"ok"}';;
+  *finance.railway.internal*) printf %s "$FIN_BODY";;
+  *) echo "$url" >> "$PINGS";;
+esac
+"""
+
+    def command(self) -> str:
+        text = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = text.split("**E. ", 1)[1].split("**F. ", 1)[0]
+        lines = [ln.strip() for ln in step.splitlines() if ln.strip().startswith("sh -c '") and "HEARTBEAT_URL" in ln]
+        self.assertEqual(len(lines), 1, "step E.2 has exactly one heartbeat start command")
+        return lines[0]
+
+    def run_with(self, legal, holds=0, compliance=True) -> list:
+        d = Path(tempfile.mkdtemp())
+        try:
+            curl = d / "curl"
+            curl.write_text(self.FAKE_CURL)
+            curl.chmod(0o755)
+            pings = d / "pings"
+            env = {"PATH": f"{d}:/usr/bin:/bin", "PINGS": str(pings),
+                   "HEARTBEAT_URL": "https://hb.example/alive", "HEARTBEAT_CONFIG_URL": "https://hb.example/config",
+                   # compact JSON, as FastAPI answers
+                   "LEGAL_BODY": json.dumps(legal, separators=(",", ":")) if legal is not None else "",
+                   "COMPLIANCE_UP": "1" if compliance else "",
+                   "FIN_BODY": json.dumps({"status": "ok", "compliance_holds_open": holds}, separators=(",", ":"))}
+            argv = shlex.split(self.command())             # exactly as Railway runs the start command
+            self.assertEqual(argv[:2], ["sh", "-c"])
+            subprocess.run(argv, env=env, capture_output=True, timeout=30)
+            return sorted(pings.read_text().split()) if pings.exists() else []
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_an_unset_optional_caller_never_silences_the_hold_alarm(self):
+        alive, config = "https://hb.example/alive", "https://hb.example/config"
+        ok = {"status": "ok", "link_tags": {"status": "ok"}}
+        one = {"status": "warning", "warnings": ["optional_caller_unset:client_portal"]}
+        both = {"status": "warning", "warnings": ["optional_caller_unset:compliance_38",
+                                                  "optional_caller_unset:client_portal"]}
+        cases = [
+            ("all ok", ok, 0, True, [alive, config]),
+            ("portal caller unset", one, 0, True, [alive]),
+            ("both optional callers unset", both, 0, True, [alive]),
+            ("an open hold", ok, 1, True, []),
+            ("an open hold while a caller is unset", one, 2, True, []),
+            ("legal degraded", {"status": "degraded"}, 0, True, []),
+            ("legal degraded while a caller is unset", {**one, "status": "degraded"}, 0, True, []),
+            ("a warning that is not an optional caller", {"status": "warning", "warnings": ["something_else"]}, 0,
+             True, []),
+            ("a mixed warning", {"status": "warning", "warnings": ["optional_caller_unset:client_portal", "x"]}, 0,
+             True, []),
+            ("legal unreachable", None, 0, True, []),
+            ("compliance down", ok, 0, False, []),
+        ]
+        for name, legal, holds, comp, want in cases:
+            with self.subTest(name):
+                self.assertEqual(self.run_with(legal, holds, comp), sorted(want))
+
+    def test_the_runbook_names_both_monitors(self):
+        text = (REPO / "docs" / "deploy" / "railway.md").read_text()
+        step = text.split("**E. ", 1)[1].split("**F. ", 1)[0]
+        self.assertIn("HEARTBEAT_CONFIG_URL", step)
+        self.assertIn("optional_caller_unset", step)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveSpoofProbe(unittest.TestCase):
+    """ADR 0023 / AEGIS edge review M-2, r2 D-3: railway_smoke.py --live-spoof-probe tells an edge that replaces
+    X-Real-IP from one that passes it through. Run here against local stand-ins for both behaviours (port 0)."""
+
+    @staticmethod
+    def _server(passes_through: bool):
+        import http.server
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _answer(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                if n:
+                    self.rfile.read(n)
+                vals = self.headers.get_all("X-Real-IP") or []
+                if self.path == "/webhooks/stripe":
+                    if not passes_through or len(vals) > 1:
+                        code = 403          # replaced by the edge: the real (non-Stripe) address is refused
+                    else:
+                        code = 400 if vals == ["3.18.12.63"] else 403
+                else:
+                    code = 403 if passes_through and vals == ["not-an-ip"] else 401
+                self.send_response(code)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_GET = do_POST = _answer
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
+    def _probe(self, passes_through: bool):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("railway_smoke_mod", SMOKE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        srv = self._server(passes_through)
+        try:
+            url = f"http://127.0.0.1:{srv.server_address[1]}"
+            return mod.spoof_probe(url, url, timeout=5)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_an_edge_that_replaces_the_header_passes_all_three(self):
+        res = self._probe(False)
+        self.assertEqual(len(res), 3)
+        self.assertTrue(all(ok for _n, ok, _d in res), res)
+
+    def test_an_edge_that_passes_the_header_through_fails_the_single_header_probes(self):
+        res = {n.split(":")[0] + str(i): ok for i, (n, ok, _d) in enumerate(self._probe(True))}
+        self.assertEqual(list(res.values()), [False, True, False], res)
+
+    def test_live_mode_is_off_by_default(self):
+        text = SMOKE.read_text()
+        self.assertIn('ap.add_argument("--live-spoof-probe", action="store_true"', text)
+        ci = (REPO / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertNotIn("--live-spoof-probe", ci)

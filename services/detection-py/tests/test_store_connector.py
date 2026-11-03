@@ -25,6 +25,7 @@ from store_connector.shop_domain import ShopDomainError, graphql_url, shop_handl
 from store_connector.shopify_client import ShopifySession, check_scopes
 from store_connector.translate import CUSTOMER_NOT_COLLECTED, translate
 from zbm_schema import EvidenceClass, Order
+from _store_fakes import AllowCompliance  # noqa: E402  (ADR 0024: the Compliance gate passes)
 
 
 # ---- harness -------------------------------------------------------------------------------------------------
@@ -40,7 +41,8 @@ def _service(tmp_path, fake: FakeShopify, conns=None, *, ledger=None, clock=None
     svc = StoreService(connections_file=path, kill_file=kill_file, disabled=disabled,
                        ledger=ledger if ledger is not None else MemoryLedger(), transport=fake.transport,
                        monotonic=clock.monotonic, sleep=clock.sleep, now=lambda: holder["now"],
-                       sync_deadline_s=deadline, new_sync_id=iter(f"{i:032x}" for i in range(1, 99)).__next__, **kw)
+                       sync_deadline_s=deadline, new_sync_id=iter(f"{i:032x}" for i in range(1, 99)).__next__,
+                       **{"compliance": AllowCompliance(), **kw})
     svc._holder, svc._clock = holder, clock
     return svc
 

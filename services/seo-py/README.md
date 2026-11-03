@@ -90,6 +90,7 @@ MUST failure or ERROR.
 | `SEO_SCHEDULE_PERIOD_DAYS` | `30` | the budget period (1..365) |
 | `SEO_INVOICE_VERIFICATION` | `finance` | `finance`: a paying client's audit or schedule runs only when Finance (31) confirms its invoice is paid, Z Best Media's, this tenant's Finance client's, not refunded and not used before (ADR 0017 W3-2); `trust`: the Wave 1/2 behaviour (the id is not checked), shown in `/status` |
 | `SEO_FINANCE_URL`, `SEO_FINANCE_TOKEN`, `SEO_FINANCE_CALLER_TOKEN` | unset | Finance (31)'s base URL, its service token and this service's `seo_02` caller token there (all three or none). Unset with `finance`: every paid run is refused `FINANCE_NOT_CONFIGURED` unless Andre overrides |
+| `SEO_COMPLIANCE_URL`, `SEO_COMPLIANCE_TOKEN`, `SEO_COMPLIANCE_CALLER_TOKEN` | unset | ADR 0024: Compliance (38)'s base URL, its service token and this service's `seo_02` caller token there (all three or none). A client tenant's paid audit, every scheduled slot of it and every client report need Compliance's CURRENT activation of the tenant's client (`finance_client_id`, which must be bound first); no override. Unset: every client run is refused `COMPLIANCE_NOT_CONFIGURED`; own-tenant runs never ask |
 | `SEO_FINANCE_TIMEOUT_SECONDS` | `5` | per-attempt timeout of the invoice lookup (1..30); at most three attempts within one overall deadline |
 | `SEO_GSC_SERVICE_ACCOUNT_FILE` | unset | Google Search Console: absolute path to the Google service-account JSON key (regular file owned by the service user, mode 0600/0400, no symlink, ≤ 16 KiB). Unset = `NOT_CONNECTED` (no outbound call ever); a key that cannot be parsed refuses start. ADR 0017, "Search Console" |
 | `SEO_GSC_WINDOW_DAYS` | `28` | days of final Search Analytics data per read (1..90), ending three Pacific-Time days ago |
@@ -146,6 +147,7 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `POST /tenants/{tid}/finance-client` | Andre | bind a client tenant to its Finance (31) client id, against which paid runs' invoices are checked (W3-2) |
 | `GET`, `POST /kill-switches` | dashboard, compliance_38 | engage any switch; releasing needs Andre |
 | `GET /tenants/{tid}/entity` | scoped | the canonical entity record with source, provenance, authority, freshness, history |
+| `POST /tenants/{tid}/entity` | Andre | create a client tenant canonical record from1–5 supplied field records; exact replay returns its current view |
 | `POST /entities/{eid}/fields` | Andre | set one field (version-checked; the old value goes to history) |
 | `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets |
 | `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant and verified with Finance; `invoice_override` (Andre, only when Finance cannot answer) |
@@ -168,3 +170,26 @@ plumbing in `src/service.py` and `src/store.py` is bizdev-py's.
 
 Tests talk only to an in-process HTTP fixture server on 127.0.0.1 (`tests/fixture_server.py`); every other connect
 attempt raises.
+
+## Homepage phone observation
+
+New entity checks expose `homepage_phone_observation` (`homepage-phone-sample/1`):
+`found`, `not_found_in_sample`, or `unknown`. It covers only explicitly selected `/`
+with exact configured/requested/final URL agreement and valid raw-HTML parser evidence.
+Other pages and redirects to another URL cannot satisfy it. Its limit is the first
+20,000 extracted text characters; nonmatch is not whole-page absence or a claim about
+visual visibility. The historical all-page `phone_in_visible_text` fact is not homepage proof.
+
+Client reports use renderer/3 whenever the new field is present, including explicit
+unknown presentation for malformed/future schemas. Field absence preserves renderer/2
+bytes for historical reports; no stored audit or document hash is rewritten. A changed
+retry still returns `REPORT_CHANGED`. Review unknown reasons before making a homepage
+recommendation; do not treat it as an instruction to expand crawl scope. See
+[ADR 0042](../../docs/adr/0042-homepage-phone-sample-evidence.md).
+
+
+### Client canonical facts (ADR0045)
+
+Create an existing client tenant's entity through `POST /seo/v1/tenants/{tid}/entity` with the existing dashboard caller and Andre approval. Supply a request UUID and a `fields` list, for example `{"field":"telephone","value":"202-555-0100","source":"client_statement","provenance":"Explicit synthetic example","authority":"first_party"}`. The example is synthetic, not client data. Each list entry must name one of name, street_address, locality, region or telephone;1–5distinct entries are permitted and omitted fields stay absent. The existing personal-data key scanner is unchanged; use the strict field-record shape, not arbitrary extra keys.
+
+Creation stores supplied provenance without independently verifying it. It requires no payment or Compliance fact and grants no audit entitlement. Paid audits retain their existing Finance/Compliance gates. Use the returned entity ID and existing expected-version field update route for later corrections. Reuse the exact creation body/request ID only for replay; it returns the current view after later updates or restart. A changed/reordered body under that ID conflicts, and a new creation request cannot replace an existing entity. No facts, provider configuration, report delivery or human review are inferred.

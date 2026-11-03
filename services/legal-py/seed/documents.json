@@ -14,6 +14,7 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": true,
    "required_clause_ids": [],
    "title": "Client MSA"
   },
@@ -27,8 +28,35 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": true,
    "required_clause_ids": [],
    "title": "SOW / campaign brief"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "sow_seo_audit",
+   "doc_type": "sow",
+   "entities": [
+    "zbm"
+   ],
+   "esign_allowed": true,
+   "founder_approval_allowed": true,
+   "required_clause_ids": [],
+   "title": "SOW: SEO / AI-visibility audit"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "sow_revenue_recovery",
+   "doc_type": "sow",
+   "entities": [
+    "zbm"
+   ],
+   "esign_allowed": true,
+   "founder_approval_allowed": true,
+   "required_clause_ids": [],
+   "title": "SOW: Revenue Recovery"
   },
   {
    "approval_blocked_by": [],
@@ -39,6 +67,7 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": true,
    "required_clause_ids": [],
    "title": "ZBC campaign order form"
   },
@@ -51,6 +80,7 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Clipper / creator agreement"
   },
@@ -66,6 +96,7 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Independent-contractor agreement"
   },
@@ -79,6 +110,7 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Mutual NDA"
   },
@@ -92,6 +124,7 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "One-way NDA"
   },
@@ -105,6 +138,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Privacy policy"
   },
@@ -118,6 +152,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Website / portal terms of service"
   },
@@ -131,6 +166,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Cookie / consent notice"
   },
@@ -143,6 +179,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "DMCA agent designation and takedown procedure"
   },
@@ -155,6 +192,7 @@
     "zbm"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Trademark application: Z Best Media"
   },
@@ -167,6 +205,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Trademark application: Z Best Clips"
   },
@@ -179,6 +218,7 @@
     "zbm"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": false,
    "required_clause_ids": [
     "ENG-AI-01"
    ],
@@ -194,6 +234,7 @@
     "zbc"
    ],
    "esign_allowed": true,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Data processing addendum (EU/UK)"
   },
@@ -207,6 +248,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Litigation hold notice template"
   },
@@ -220,6 +262,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Subpoena response template"
   },
@@ -233,6 +276,7 @@
     "zbc"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "DSAR response template"
   },
@@ -249,6 +293,7 @@
     "silverback"
    ],
    "esign_allowed": false,
+   "founder_approval_allowed": false,
    "required_clause_ids": [],
    "title": "Routing notice (not legal advice)"
   }

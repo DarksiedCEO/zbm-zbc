@@ -31,6 +31,7 @@ import answers as A
 import chart as C
 import money as M
 import reasons as R
+import receipt_compatibility
 import rules as RU
 from clock import Clock, SystemClock, iso, parse_iso
 from config import Settings
@@ -55,7 +56,7 @@ COLLECTIONS = ("rc_proposals", "rate_cards", "profiles", "client_profiles", "pay
                "payables", "batches", "items", "exceptions", "recon_runs", "breaks", "invoices", "receipts", "disputes",
                "refunds", "treasury_ops", "controls", "close", "locks", "tax_readiness", "job_runs", "rail_events",
                "integrity_checks", "clawbacks", "offboarding", "shortfalls", "media_buys", "client_receipts",
-               "stripe_sessions", "stripe_events", "stripe_disputes", "stripe_payouts")
+               "client_contacts", "receipt_envelopes", "stripe_sessions", "stripe_events", "stripe_disputes", "stripe_payouts")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -241,7 +242,7 @@ class Op:
 class FinanceService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str, ports: Optional[Ports] = None, clock: Optional[Clock] = None,
-                 pinned_sha256: Optional[str] = None, lock_token: Optional[str] = None):
+                 pinned_sha256: Optional[str] = None, lock_token: Optional[str] = None, *, require_existing_seed: bool = False):
         self.cfg = settings
         self.recorder = recorder
         self.log = log
@@ -254,6 +255,8 @@ class FinanceService:
         # process. ``api.build_service`` claims the flock BEFORE the log is built and passes the claim's token; this
         # instance adopts that claim only if the token IS the current claim (single use) and gives it back on close()
         # or a failed start.
+        self._observer_lock = threading.RLock()
+        self._ops_observer = None
         self._closed = False
         self._dir_lock = getattr(settings, "data_dir_lock", None)
         self._lock_token: Optional[str] = None
@@ -267,7 +270,15 @@ class FinanceService:
                                   "stale, another instance's, or already adopted); refusing to start")
             self._lock_token = adopted
         try:
+            if type(require_existing_seed) is not bool:
+                raise RuntimeError("require_existing_seed must be boolean")
+            self._require_existing_seed = require_existing_seed
             self._start(settings, seed_bytes, expected_seed_sha256, pinned_sha256)
+            if settings.ops_observer_enabled:
+                from ops_observer import ObserverState
+                if self._dir_lock is None or self._lock_token is None:
+                    raise RuntimeError("observer requires the Finance directory claim")
+                self._ops_observer = ObserverState(settings.data_dir)
         except BaseException:
             self.close()
             raise
@@ -277,7 +288,7 @@ class FinanceService:
         instance is inert: its log refuses every write and every ledger record is refused (503 SERVICE_CLOSED), so
         it can never write over the instance that now owns the directory. Taken under the service lock: it never
         interleaves with a commit."""
-        with self.lock:
+        with self._observer_lock, self.lock:
             self._closed = True
             with self.log.lock:
                 self.log.closed = True
@@ -323,6 +334,7 @@ class FinanceService:
         self.reconcile_mode = settings.reconcile_mode
         self.reconcile_required: list[str] = []
         self._reconciling = False
+        receipt_compatibility.require_current(self.log.iter_records())
         self._replaying = True
         for rec in self.log.iter_records():
             for kind, r in rec["data"].get("ops", []):
@@ -346,6 +358,13 @@ class FinanceService:
         if settings.unmatched_tin_policy == "withhold_24" and not self.counsel_verified("FIN-CQ-06"):
             raise RuntimeError("FIN_UNMATCHED_TIN_POLICY=withhold_24 needs counsel row FIN-CQ-06 verified (spec C.6); "
                                "refusing to start")
+        # Opt-in existing-store construction: replay+Ledger assessment above must
+        # establish the current seed proposal before any provisioning or lease write.
+        if self._require_existing_seed:
+            if self.log.in_memory or not any(
+                    p.get("kind") == "seed" and p.get("seed_sha256") == self.seed_sha and
+                    p.get("proposed_rows") == self.seed_rows for p in self.proposals.values()):
+                raise RuntimeError("existing-store startup requires the expected persisted seed proposal")
         if self.reconcile_mode:
             return
         try:
@@ -976,7 +995,8 @@ class FinanceService:
 
     # ================================================================== audit, health
 
-    def audit_export(self, principal: str, since: Optional[str], until: Optional[str], cursor: int) -> dict:
+    def audit_export(self, principal: str, since: Optional[str], until: Optional[str], cursor: int,
+                     full: bool = True) -> dict:
         with self.lock:
             s = parse_iso(since) if since else None
             u = parse_iso(until) if until else None
@@ -986,7 +1006,7 @@ class FinanceService:
                 at = parse_iso(rec["at"])
                 if (s and at < s) or (u and at > u):
                     continue
-                out.append(i10.export_entry(rec))
+                out.append(i10.export_entry(rec, full=full))
                 if len(out) >= i10.PAGE:
                     break
             more = last < len(self.log)
@@ -997,7 +1017,7 @@ class FinanceService:
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "rules_version": self.rules_version}
 
-    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None, full: bool = True) -> dict:
         """``GET /fin/v1/audit/evidence`` (sweep B-F2; bizdev-py ``audit_evidence``, AEGIS round 6 M1). Every Finance
         event on the ledger except the log anchors, each marked:
 
@@ -1041,13 +1061,15 @@ class FinanceService:
                 cited.setdefault(eid, r["seq"])
         rows, counts = [], {"committed": 0, "cited": 0, "attempted": 0}
         for e in mine:
-            et = e.get("event_type")
-            if et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
+            et = real_et = e.get("event_type")
+            if not full and isinstance(et, str) and et.startswith("compliance_hold_"):
+                et = i10.GENERIC_HOLD_EVENT     # AEGIS r7 V1: Andre's token alone sees which hold event it is
+            if real_et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
                 continue
             eid = e.get("event_id")
             n = named.get(eid)
             if n is not None and n[2] == e.get("payload_sha256") \
-                    and eid == i10.evidence_id(n[1] or "", et, e.get("payload_sha256") or ""):
+                    and eid == i10.evidence_id(n[1] or "", real_et, e.get("payload_sha256") or ""):
                 status, seq, rk = "committed", n[0], n[1]
             elif n is None and eid in cited:
                 status, seq, rk = "cited", cited[eid], None
@@ -1060,22 +1082,32 @@ class FinanceService:
                 "offset": offset, "log_lines": len(raw), "epoch": epoch}
 
     def health(self) -> dict:
+        with self.lock:
+            # AEGIS r11 R11-2/R11-4: held invoices, held unapplied money and open founder alerts (funded brands
+            # Compliance no longer allows) all stop the heartbeat
+            holds = sum(1 for i in self.db["invoices"].values() if i.get("held_compliance")) \
+                + sum(1 for r in self.db["receipts"].values() if r.get("held_compliance")) \
+                + sum(1 for b in self.db["breaks"].values() if b.get("kind") == "founder_alert" and b["status"] == "open")
         return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,
                 "reconcile_required": bool(self.reconcile_required), "log_write_fault": bool(self.log.fault),
-                "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode}}
+                "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode},
+                # AEGIS r5 C2: a count only (no ids): the private heartbeat check pings only while this is 0
+                "compliance_holds_open": holds}
 
 
 from svc_books import BooksMixin  # noqa: E402
 from svc_media import MediaMixin  # noqa: E402
+from receipt_delivery import ReceiptDeliveryMixin  # noqa: E402
 from svc_payables import PayablesMixin  # noqa: E402
 from svc_payees import PayeesMixin  # noqa: E402
 from svc_payouts import PayoutsMixin  # noqa: E402
 from svc_recon import ReconMixin  # noqa: E402
 from svc_stripe import StripeMixin  # noqa: E402
+from svc_alerts import AlertsMixin  # noqa: E402
 
 
-class Service(BooksMixin, MediaMixin, StripeMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin,
+class Service(AlertsMixin, BooksMixin, ReceiptDeliveryMixin, MediaMixin, StripeMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin,
               FinanceService):
     """The assembled Finance service."""

@@ -162,6 +162,7 @@ jobs:
           - bizdev-py
           - seo-py
           - ooh-py
+          - client-portal-py
         # macOS (Apple Silicon): every service once, on Python 3.13
         include:
           - {os: macos-26, python: "3.13", service: detection-py}
@@ -180,6 +181,7 @@ jobs:
           - {os: macos-26, python: "3.13", service: bizdev-py}
           - {os: macos-26, python: "3.13", service: seo-py}
           - {os: macos-26, python: "3.13", service: ooh-py}
+          - {os: macos-26, python: "3.13", service: client-portal-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -199,6 +201,11 @@ jobs:
           workspaces: services/ledger-rust -> target
       - name: Install pinned requirements
         run: python -m pip install -r services/${{ matrix.service }}/requirements.txt
+      # ADR 0028: client-portal-py's end-to-end contract (tests/contract_e2e_real.py) runs the REAL legal-py and
+      # finance-py apps in its process; their pins (identical files) are installed for that suite only
+      - name: Install the peer services' pins (client-portal-py end-to-end contract)
+        if: matrix.service == 'client-portal-py'
+        run: python -m pip install -r services/legal-py/requirements.txt
       # Annotated (see "Reading a red job" in docs/ci.md): the output is tee'd to $RUNNER_TEMP (outside the checkout,
       # /tmp and the wrapper's private TMPDIR) and devtools/ci_annotate.py turns it into check-run annotations; the step
       # exits with the suite's own code. -rfEs: FAILED/ERROR summary lines as well as the skips. faulthandler_timeout
@@ -329,6 +336,21 @@ jobs:
             --allow-ignored services/ledger-rust/target -- cargo test --locked 2>&1 | tee "$RUNNER_TEMP/test.log"
           code=${PIPESTATUS[0]}
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test.log" --code "$code" --suite "rust:ledger-rust"
+          exit "$code"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.13'
+      - name: Native shutdown parent test dependency
+        run: python3 -m pip install pytest==9.1.1
+      - name: Native Ledger shutdown parent regression
+        working-directory: .
+        shell: bash
+        run: |
+          set +e
+          python3 devtools/hygiene_check.py run --suite python:cold-ledger-shutdown --kind pytest --cwd . \
+            --allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -p no:cacheprovider devtools/test_cold_ledger_shutdown.py -rfEs -o faulthandler_timeout=60 2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"
           exit "$code"
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
@@ -638,11 +660,22 @@ jobs:
           set +e
           {
             set -e
-            docker build -f services/ledger-rust/Dockerfile -t zbm-ci/ledger-rust:ci .
+            docker build --platform linux/amd64 --build-arg TARGETARCH=amd64 -f services/ledger-rust/Dockerfile -t zbm-ci/ledger-rust:ci .
             docker build -f services/detection-py/Dockerfile -t zbm-ci/detection-py:ci .
-            docker build -f services/finance-py/Dockerfile -t zbm-ci/finance-py:ci .
-            docker build -f services/legal-py/Dockerfile -t zbm-ci/legal-py:ci .
-            docker build -f services/seo-py/Dockerfile -t zbm-ci/seo-py:ci .
+            docker build --platform linux/amd64 --build-arg TARGETARCH=amd64 -f services/finance-py/Dockerfile -t zbm-ci/finance-py:ci .
+            docker build --platform linux/amd64 --build-arg TARGETARCH=amd64 -f services/legal-py/Dockerfile -t zbm-ci/legal-py:ci .
+            docker build --platform linux/amd64 --build-arg TARGETARCH=amd64 -f services/seo-py/Dockerfile -t zbm-ci/seo-py:ci .
+            docker build --platform linux/amd64 --build-arg TARGETARCH=amd64 -f services/compliance-py/Dockerfile -t zbm-ci/compliance-py:ci .
+            docker build --platform linux/amd64 --build-arg TARGETARCH=amd64 -f deploy/docker/maintenance/Dockerfile -t zbm-ci/maintenance:ci .
+            set +e
+            docker run --rm --network none --read-only zbm-ci/maintenance:ci > "$RUNNER_TEMP/maintenance-disabled.log" 2>&1
+            maintenance_code=$?
+            set -e
+            cat "$RUNNER_TEMP/maintenance-disabled.log"
+            test "$maintenance_code" -eq 2
+            grep -q 'BACKUP_ADMIN_REFUSED' "$RUNNER_TEMP/maintenance-disabled.log"
+            docker run --rm --network none --read-only --entrypoint /opt/venv/bin/python zbm-ci/maintenance:ci -I -B -c 'import sys,pathlib,importlib; p=pathlib.Path("/opt/zbm-maintenance/cold"); sys.path.insert(0,str(p)); names=sorted(f.stem for f in p.glob("*.py")); assert names; [importlib.import_module(n) for n in names]; print("Imported",len(names),"packaged modules")'
+            docker build -f services/client-portal-py/Dockerfile -t zbm-ci/client-portal-py:ci .
             docker build -f services/orchestrator-go/Dockerfile.orchestrator -t zbm-ci/orchestrator:ci .
             docker build -f services/orchestrator-go/Dockerfile.stripe-gateway -t zbm-ci/stripe-gateway:ci .
           } 2>&1 | tee "$RUNNER_TEMP/railway-build.log"
@@ -880,11 +913,23 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -B -m unittest devtools/test_deploy_config.py -v 2>&1 | tee "$RUNNER_TEMP/test-deploy-config.log"
+          python -B -m unittest devtools/test_deploy_config.py devtools/test_maintenance_config.py devtools/test_cold_existing_store.py devtools/test_cold_owner_config.py devtools/test_cold_admin.py devtools/test_cold_intake.py devtools/test_cold_package_pins.py devtools/test_cold_startup_hooks.py -v 2>&1 | tee "$RUNNER_TEMP/test-deploy-config.log"
           code=${PIPESTATUS[0]}
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/test-deploy-config.log" --code "$code" \
             --suite "devtools:test_deploy_config"
           exit "$code"
+      - name: Install the cold runtime pinned dependencies for offline tests
+        run: |
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r deploy/python/requirements.lock.txt
+      - name: Cold backup restart and bounded archive regressions
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest discover -s devtools/cold_tests -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/cold-backup.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-backup.log" --code "$code" --suite "python:cold-backup"
+          exit "$code"
+
       - name: The LEDGER_CALLERS generator refuses bad tokens and pins each caller's grant (devtools/ledger_callers.py)
         shell: bash
         run: |

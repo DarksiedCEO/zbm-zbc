@@ -47,6 +47,7 @@ CALLERS: dict[str, tuple[str, str]] = {
     "legal-py": ("legal", "LEDGER_SERVICE_TOKEN on legal"),
     "seo-py": ("seo", "LEDGER_SERVICE_TOKEN on seo"),
     "detection-py": ("rr_store", "DETECTION_LEDGER_TOKEN on detection"),
+    "compliance-py": ("compliance", "LEDGER_SERVICE_TOKEN on compliance"),   # ADR 0024
 }
 KNOWN_DEPARTMENTS = frozenset(d for d, _where in CALLERS.values())
 MIN_TOKEN_BYTES = 32                       # ledger-rust MIN_TOKEN_BYTES: a shorter configured token is refused (401)

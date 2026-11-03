@@ -203,12 +203,15 @@ class Ports:
     clientfix: object = None
     bot_verifier: object = None
     finance: object = None
+    compliance: object = None            # ADR 0024: compliance_client.py; NOT_CONNECTED refuses every client run
 
     @classmethod
     def default(cls, settings=None) -> "Ports":
+        from compliance_client import ComplianceClient, NotConnectedCompliance
         from finance_client import FinanceClient, NotConnectedFinance
         fetcher = None
         finance = NotConnectedFinance()
+        compliance = NotConnectedCompliance()
         engines = {n: NotConnectedEngine(n) for n in ANSWER_ENGINES}
         if settings is not None:
             engines["perplexity"] = perplexity_engine(settings)
@@ -217,6 +220,9 @@ class Ports:
             if settings.finance_url:
                 finance = FinanceClient(settings.finance_url, settings.finance_token, settings.finance_caller_token,
                                         timeout_s=settings.finance_timeout_s)
+            if getattr(settings, "compliance_url", None):
+                compliance = ComplianceClient(settings.compliance_url, settings.compliance_token,
+                                              settings.compliance_caller_token, timeout_s=settings.finance_timeout_s)
         first_party = {n: NotConnectedSource(n) for n in FIRST_PARTY}
         if settings is not None and getattr(settings, "gsc_key", None) is not None:
             first_party["search_console"] = gsc_from_settings(settings)
@@ -227,7 +233,7 @@ class Ports:
                    zero_day=NotConnectedSource("zero_day"), orca_publish=NotConnectedSource("orca_publish"),
                    clientfix=NotConnectedSource("clientfix"),
                    bot_verifier=DnsBotVerifier() if settings is not None and settings.bot_verify_dns
-                   else NotConnectedBotVerifier(), finance=finance)
+                   else NotConnectedBotVerifier(), finance=finance, compliance=compliance)
 
     def status(self) -> dict:
         def st(p) -> str:
@@ -239,7 +245,7 @@ class Ports:
                 "first_party": {n: st(p) for n, p in self.first_party.items()},
                 "zero_day": st(self.zero_day), "orca_publish": st(self.orca_publish), "clientfix": st(self.clientfix),
                 "bot_dns_verification": st(self.bot_verifier), "bot_ip_range_verification": NOT_CONNECTED,
-                "finance": st(self.finance)}
+                "finance": st(self.finance), "compliance": st(self.compliance)}
 
     def engine_details(self) -> dict:
         """What /status shows of each answer engine: state, model, limits and the key's SOURCE (file or env), never

@@ -311,6 +311,9 @@ _R = {
                               "record.", (("field", "token"),)),
     "PHONE_NOT_IN_VISIBLE_TEXT": ("Business phone number not in the visible text", "Show the phone number from your "
                                   "business record as text on the home page.", ()),
+    "HOMEPAGE_PHONE_NOT_IN_TEXT_SAMPLE": ("Business phone not found in the homepage text sample",
+        "Review the sampled raw-HTML homepage text. This is not proof of absence from the whole page or site.",
+        (("sample_limit_chars", "num"), ("sample_chars", "num"))),
     # Callum: AI visibility
     "CITATION_STRENGTH": ("Cited in at least half of the answers", "Keep the cited pages current and accurate.",
                           (("engine", "token"), ("prompt_index", "prompt"), ("usable_answers", "num"),
@@ -529,6 +532,36 @@ def _ts_plus(s: str, days: int) -> str:
     return d.strftime("%Y-%m-%d")
 
 
+def _homepage_block(env, ctx):
+    facts = env.get("facts") if isinstance(env, dict) else None
+    if not isinstance(facts, dict) or "homepage_phone_observation" not in facts:
+        return None
+    # Presence is versioned, including invalid/future schemas. Never fall back to legacy clean output.
+    from agents.entity_check import HOME_REASONS, HOME_SCHEMA, _home_url
+    o = facts["homepage_phone_observation"]
+    prefix = "Homepage phone sample: UNKNOWN (not checked; invalid observation)."
+    if isinstance(o, dict) and o.get("schema") == HOME_SCHEMA and isinstance(o.get("reason"), str) and o["reason"] in HOME_REASONS \
+            and o.get("state") in ("found", "not_found_in_sample", "unknown"):
+        state, reason = o["state"], o["reason"]
+        sizes = all(type(o.get(k)) is int for k in ("sample_chars", "extracted_text_chars", "sample_limit_chars"))
+        valid = sizes and o["sample_limit_chars"] == 20000 and 0 <= o["extracted_text_chars"] <= 4 * 1024 * 1024 \
+            and o["sample_chars"] == min(o["extracted_text_chars"], 20000) \
+            and type(o.get("sample_truncated")) is bool \
+            and o["sample_truncated"] == (o["extracted_text_chars"] > o["sample_chars"])
+        root = _home_url(o.get("configured_url"))
+        valid = valid and root is not None and "/" in ctx.paths and root == ctx.page_url("/") \
+            and root == o.get("requested_url") == o.get("final_url")
+        if state == "unknown" and reason not in ("FOUND", "NOT_FOUND_IN_SAMPLE"):
+            prefix = "Homepage phone sample: UNKNOWN (not checked; " + reason + ")."
+        elif valid and (state, reason) in (("found", "FOUND"), ("not_found_in_sample", "NOT_FOUND_IN_SAMPLE")):
+            label = "FOUND" if state == "found" else "NOT FOUND IN SAMPLE"
+            prefix = ("Homepage phone sample: " + label + ". Checked location: " + ctx.template(root)
+                      + ". Sample characters: " + str(o["sample_chars"]) + "; extracted text characters: "
+                      + str(o["extracted_text_chars"]) + ".")
+    return prefix + (" Sampled raw-HTML text only (limit 20000 characters); not visual visibility or whole-page "
+                     "absence. Other pages cannot establish this observation.")
+
+
 def _status(env: Optional[dict]) -> dict:
     outcome = None if env is None else env.get("outcome")
     label, why = STATUS.get(outcome, STATUS["FAILED"])
@@ -741,12 +774,17 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
     for key, title, at, what in SECTIONS:
         env = envs.get(at)
         st = _status(env)
+        home = _homepage_block(env, ctx) if key == "entity" else None
+        if home and "sample: UNKNOWN" in home and st["outcome"] == "OK":
+            st = _status({"outcome": "PARTIAL"})
         sec = {"key": key, "title": title, "what": what, "status": st,
                "freshness": _freshness(key, report, env, tiers),
                "groups": _groups(env.get("findings") or [], ctx) if env and st["outcome"] != "NOT_COVERED" else [],
                "dropped": _num(env.get("findings_dropped")) if env and env.get("findings_dropped") else None,
                "search": _search_block(env, report.get("search_performance")) if key == "search" else None,
                "ai": _ai_block(env) if key == "ai" else None}
+        if home is not None:
+            sec["homepage"] = home
         if key == "ai":
             naomi = envs.get(("naomi", "prompt_volume"))
             sec["volume"] = _status(naomi)
@@ -780,7 +818,7 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
             q_counts[q["reason"]] = q_counts.get(q["reason"], 0) + 1
     versions = report.get("versions") if isinstance(report.get("versions"), dict) else {}
     return {
-        "renderer_version": RENDERER_VERSION, "preview": bool(preview),
+        "renderer_version": "seo-client-report/3" if any("homepage" in x for x in sections) else RENDERER_VERSION, "preview": bool(preview),
         "brand": {"name": branding.name, "accent": branding.accent},
         "audit_id": aid, "report_sha256": rsha, "domain": domain, "scheme": scheme,
         "pages": [{"path": ctx.shown[p][0], "url": ctx.page_url(ctx.shown[p][0]) if ctx.shown[p][1] else None}
@@ -918,6 +956,8 @@ def _md_section(s: dict) -> list:
         L.append("")
     elif st["why"]:
         L += [md(st["why"]), ""]
+    if "homepage" in s:
+        L += [md(s["homepage"]), ""]
     if s["key"] == "search" and s["search"]:
         L += _md_search(s["search"])
     if s["key"] == "ai":
@@ -1146,6 +1186,8 @@ def _h_section(s: dict, pages: dict) -> list:
         o.append(f'<p class="notclean">{h(st["why"] or "")} {h(NOT_CLEAN)}{reason}</p>')
     elif st["why"]:
         o.append(f"<p>{h(st['why'])}</p>")
+    if "homepage" in s:
+        o.append(f"<p>{h(s['homepage'])}</p>")
     if s["key"] == "search" and s["search"]:
         o += _h_search(s["search"])
     if s["key"] == "ai":

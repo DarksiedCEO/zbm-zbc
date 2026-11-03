@@ -68,6 +68,9 @@ export default defineRailway(() => {
   const legalData = volume("legal-data", VOLUME_AS_DEPLOYED);
   const financeData = volume("finance-data", VOLUME_AS_DEPLOYED);
   const seoData = volume("seo-data", VOLUME_AS_DEPLOYED);
+  // ADR 0024: new. Declared with the same region and size as the four live volumes, so the plan CREATES it and touches
+  // nothing else (docs/deploy/railway.md, "Compliance (38): the hard gate").
+  const complianceData = volume("compliance-data", VOLUME_AS_DEPLOYED);
 
   // ------------------------------------------------------------------------------------------------ ledger (first)
   const ledger = withDailyBackups(service("ledger", {
@@ -81,6 +84,74 @@ export default defineRailway(() => {
       LEDGER_LOG_PATH: "/data/ledger/ledger.jsonl",
       RAILWAY_RUN_UID: "0", // the entrypoint hands /data/ledger to uid 10001, then runs the ledger as 10001
       LEDGER_CALLERS: preserve(), // JSON map of sha256(token) -> caller scope (hashes only, set NOT Sealed); written to LEDGER_CALLERS_FILE
+    },
+  }));
+
+  // ------------------------------------------------------------------------------------------------ legal
+  const legal = withDailyBackups(service("legal", {
+    source: source(),
+    build: dockerfile("services/legal-py/Dockerfile", ["services/legal-py/**", "deploy/python/**"]),
+    deploy: deploy("/health", true),
+    volumeMounts: { "/data": legalData },
+    env: {
+      PORT: "8420",
+      LEGAL_BIND_ADDR: "::",
+      LEGAL_DATA_DIR: "/data/legal",
+      RAILWAY_RUN_UID: "0",
+      LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
+      LEDGER_SERVICE_TOKEN: preserve(), // legal's own ledger caller token
+      LEGAL_SERVICE_TOKEN: preserve(),
+      LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (contract terms, obligations;
+      // never a client's acceptance: ADR 0028); `client_portal`: the client acceptance page, which reaches only
+      // Legal's two portal routes (its value is set once, on client-portal); `${{VARIABLE}}` is Railway's same-service
+      // reference
+      LEGAL_CALLER_TOKENS:
+        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}", "compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}", "client_portal": "${{client-portal.PORTAL_LEGAL_CALLER_TOKEN}}"}',
+      LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
+      // ADR 0028, AEGIS r2 N-M1: tags client acceptance link tokens; client-portal reads it (a reference) to refuse
+      // junk links without asking Legal. Unset: Legal runs and issues no link (503)
+      LEGAL_LINK_TAG_KEY: preserve(),
+      // ADR 0024: Legal delivers counsel-memo register proposals to Compliance (caller legal_37). Compliance's service
+      // token is set once, on compliance; Legal is declared before it (compliance reads Legal's token as code), so it
+      // takes it through Railway's own reference syntax
+      LEGAL_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      LEGAL_COMPLIANCE_TOKEN: "${{compliance.COMPLIANCE_SERVICE_TOKEN}}",
+      LEGAL_COMPLIANCE_CALLER_TOKEN: preserve(),
+    },
+  }));
+
+  // ------------------------------------------------------------------------------------------------ compliance
+  // ADR 0024: the hard gate before a client is served (activation), with the service-area geofence. PRIVATE: no
+  // domain; Finance, SEO, detection and Legal reach it at compliance.railway.internal:8380. Its own scheduler runs the
+  // internal controls every 6 h and the Change Watcher daily (in process: no `scheduler` token exists anywhere).
+  // Every gate stays closed until control C-11 (evidence integrity) has passed. Declared after legal (it reads Legal's
+  // service token) and before detection, finance and seo (they read its service token).
+  const compliance = withDailyBackups(service("compliance", {
+    source: source(),
+    build: dockerfile("services/compliance-py/Dockerfile", ["services/compliance-py/**", "deploy/python/**"]),
+    deploy: deploy("/health", true),
+    volumeMounts: { "/data": complianceData },
+    env: {
+      PORT: "8380",
+      COMPLIANCE_BIND_ADDR: "::",
+      COMPLIANCE_DATA_DIR: "/data/compliance",
+      RAILWAY_RUN_UID: "0",
+      LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
+      LEDGER_SERVICE_TOKEN: preserve(), // compliance's own ledger caller token (compliance-py, department compliance)
+      COMPLIANCE_SERVICE_TOKEN: preserve(),
+      COMPLIANCE_ANDRE_APPROVAL_TOKEN: preserve(),
+      // `onboarding`: Andre's operator-held token until an onboarding service exists (runs a client's activation,
+      // POST /compliance/v1/rule); the others are each caller's own variable on its own service
+      COMPLIANCE_CALLER_TOKENS:
+        '{"onboarding": "${{COMPLIANCE_ONBOARDING_CALLER_TOKEN}}", "finance_31": "${{finance.FIN_COMPLIANCE_CALLER_TOKEN}}", "legal_37": "${{legal.LEGAL_COMPLIANCE_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_COMPLIANCE_CALLER_TOKEN}}", "revenue_recovery": "${{detection.DETECTION_COMPLIANCE_CALLER_TOKEN}}"}',
+      COMPLIANCE_ONBOARDING_CALLER_TOKEN: preserve(),
+      // Legal (37): a client's documents are current and accepted (HR-15)
+      COMPLIANCE_LEGAL_URL: PRIVATE("legal", 8420),
+      COMPLIANCE_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
+      COMPLIANCE_LEGAL_CALLER_TOKEN: preserve(),
+      COMPLIANCE_SCHEDULER_ENABLED: "1",
+      COMPLIANCE_WATCHER_ENABLED: "1",
     },
   }));
 
@@ -107,31 +178,13 @@ export default defineRailway(() => {
       // apply cannot release them. Unset/empty = off.
       RR_STORE_READS_DISABLED: preserve(),
       RR_STORE_KILL_SWITCH_FILE: preserve(),
+      // ADR 0024: every store sync and every snapshot handed to the scan path needs Compliance's current ALLOW for the
+      // client. Both tokens are written to files by the entrypoint (--secret-file in the image).
+      DETECTION_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      DETECTION_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      DETECTION_COMPLIANCE_CALLER_TOKEN: preserve(), // detection's `revenue_recovery` caller token at Compliance
     },
   });
-
-  // ------------------------------------------------------------------------------------------------ legal
-  const legal = withDailyBackups(service("legal", {
-    source: source(),
-    build: dockerfile("services/legal-py/Dockerfile", ["services/legal-py/**", "deploy/python/**"]),
-    deploy: deploy("/health", true),
-    volumeMounts: { "/data": legalData },
-    env: {
-      PORT: "8420",
-      LEGAL_BIND_ADDR: "::",
-      LEGAL_DATA_DIR: "/data/legal",
-      RAILWAY_RUN_UID: "0",
-      LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
-      LEDGER_SERVICE_TOKEN: preserve(), // legal's own ledger caller token
-      LEGAL_SERVICE_TOKEN: preserve(),
-      LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
-      // `onboarding`: Andre's operator-held token until an onboarding service exists (records a client's clickwrap
-      // acceptance, POST /legal/v1/acceptances); `${{VARIABLE}}` is Railway's same-service reference
-      LEGAL_CALLER_TOKENS:
-        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}"}',
-      LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
-    },
-  }));
 
   // ------------------------------------------------------------------------------------------------ finance
   const finance = withDailyBackups(service("finance", {
@@ -156,8 +209,15 @@ export default defineRailway(() => {
       FIN_LEGAL_URL: PRIVATE("legal", 8420),
       FIN_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
       FIN_LEGAL_CALLER_TOKEN: preserve(),
+      // ADR 0024: invoice approval, billing readiness and Stripe pages need Compliance's current ALLOW for the client;
+      // payouts stay blocked by their other gates
+      FIN_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      FIN_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      FIN_COMPLIANCE_CALLER_TOKEN: preserve(),
       FIN_STRIPE_INCOMING: "1",
       FIN_STRIPE_LIVE: "0", // test mode first; "1" only together with live keys (docs/deploy/railway.md, step 9)
+      // Optional dormant receipt transport secret: preservation only, not provisioning or enablement.
+      FIN_RECEIPT_RESEND_KEY: preserve(),
       FIN_STRIPE_SECRET_KEY: preserve(), // written to FIN_STRIPE_SECRET_KEY_FILE by the entrypoint
       FIN_STRIPE_WEBHOOK_SECRET: preserve(), // written to FIN_STRIPE_WEBHOOK_SECRET_FILE by the entrypoint
       FIN_STRIPE_SUCCESS_URL: preserve(),
@@ -179,6 +239,13 @@ export default defineRailway(() => {
       DETECTION_SERVICE_TOKEN: detection.env.ZBM_SERVICE_TOKEN,
       LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
       LEDGER_SERVICE_TOKEN: preserve(), // the orchestrator's own ledger caller token
+      // Public edge (ADR 0023): the client address is the X-Real-IP Railway's edge sets; the limits below are operator
+      // settings set by hand when needed (unset = the documented defaults), declared so an apply cannot reset them.
+      ORCHESTRATOR_CLIENT_IP_SOURCE: "x-real-ip",
+      ORCHESTRATOR_RATE_PER_MIN: preserve(),
+      ORCHESTRATOR_RATE_BURST: preserve(),
+      ORCHESTRATOR_AUTH_FAIL_MAX: preserve(),
+      ORCHESTRATOR_AUTH_FAIL_WINDOW_SECONDS: preserve(),
     },
   });
 
@@ -197,6 +264,14 @@ export default defineRailway(() => {
       STRIPE_GATEWAY_FINANCE_PRIVATE_NAME: "finance",
       STRIPE_GATEWAY_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       STRIPE_GATEWAY_CALLER_TOKEN: preserve(),
+      // Public edge (ADR 0023): Stripe source-IP allowlist ON by default (compiled-in list); the override, the kill
+      // switch and the rate limits are operator settings set by hand in an incident, declared so an apply cannot
+      // silently undo them (a kill switch released, an override dropped).
+      STRIPE_GATEWAY_CLIENT_IP_SOURCE: "x-real-ip",
+      STRIPE_GATEWAY_ALLOWED_IPS: preserve(),
+      STRIPE_GATEWAY_IP_ALLOWLIST_DISABLED: preserve(),
+      STRIPE_GATEWAY_RATE_PER_MIN: preserve(),
+      STRIPE_GATEWAY_RATE_BURST: preserve(),
     },
   });
 
@@ -223,6 +298,11 @@ export default defineRailway(() => {
       SEO_FINANCE_URL: PRIVATE("finance", 8410),
       SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
       SEO_FINANCE_CALLER_TOKEN: preserve(),
+      // ADR 0024: a client tenant's paid run, every scheduled slot and every client report need Compliance's current
+      // ALLOW for the client (no override)
+      SEO_COMPLIANCE_URL: PRIVATE("compliance", 8380),
+      SEO_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      SEO_COMPLIANCE_CALLER_TOKEN: preserve(),
       // Set by hand in the dashboard (runbook, Secrets table): declared so a later apply cannot delete them. Unset or
       // 0 keeps the engine NOT_CONNECTED / OFF, exactly as before (seo-py config, ADR 0017 W4).
       SEO_PERPLEXITY_API_KEY: preserve(),
@@ -241,7 +321,31 @@ export default defineRailway(() => {
     },
   }));
 
+  // ------------------------------------------------------------------------------------------------ client-portal
+  // ADR 0028: the client acceptance page. Public: Andre generates its Railway domain once (runbook, "Client acceptance
+  // page (ADR 0028)") and sets PORTAL_PUBLIC_ORIGIN to it; nothing else of this project gains a domain. Stateless: no
+  // volume, no ledger; it holds Legal's service token (a reference), its own client_portal caller token at Legal and
+  // its evidence key (HMAC of the client's IP address and user agent), and reaches Legal only, over the private network.
+  // Declared after legal (it reads Legal's service token).
+  const clientPortal = service("client-portal", {
+    source: source(),
+    build: dockerfile("services/client-portal-py/Dockerfile", ["services/client-portal-py/**", "deploy/python/**"]),
+    deploy: deploy("/health", false),
+    env: {
+      PORT: "8480",
+      PORTAL_BIND_ADDR: "::",
+      PORTAL_LEGAL_URL: PRIVATE("legal", 8420),
+      PORTAL_LEGAL_SERVICE_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
+      PORTAL_LEGAL_CALLER_TOKEN: preserve(), // Legal's client_portal caller token (read by legal's LEGAL_CALLER_TOKENS map)
+      PORTAL_EVIDENCE_KEY: preserve(), // HMAC key: client IP and user agent, form signatures; set once, rotate on suspicion
+      PORTAL_LINK_TAG_KEY: legal.env.LEGAL_LINK_TAG_KEY, // AEGIS r2 N-M1: refuse a link Legal did not mint, locally
+      PORTAL_PUBLIC_ORIGIN: preserve(), // https://<this service's Railway domain>, set by hand after the domain exists
+      PORTAL_TRUSTED_PROXY_HOPS: "1", // Railway's edge adds the client to X-Forwarded-For (UNVERIFIED, runbook)
+    },
+  });
+
   return project("zbm-zbc", {
-    resources: [ledgerData, legalData, financeData, seoData, ledger, detection, legal, finance, orchestrator, stripeGateway, seo],
+    resources: [ledgerData, legalData, financeData, seoData, complianceData, ledger, detection, legal, compliance, finance,
+      orchestrator, stripeGateway, seo, clientPortal],
   });
 });

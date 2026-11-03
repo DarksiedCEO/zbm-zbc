@@ -15,7 +15,7 @@ cd services/finance-py/src
 FIN_SERVICE_TOKEN=... FIN_ANDRE_APPROVAL_TOKEN=... \
 FIN_CALLER_TOKENS='{"scheduler":"...","creative_production":"...","onboarding":"...","clipper_network":"...",
                     "compliance_38":"...","verification_integrity":"...","rail_gateway":"...","bank_feed":"...",
-                    "seo_02":"..."}' \
+                    "seo_02":"...","payout_rail_gateway":"..."}' \
 LEDGER_SERVICE_URL=http://127.0.0.1:8080 LEDGER_SERVICE_TOKEN=... FIN_DATA_DIR=/var/lib/zbc/finance \
 python3 -m api                                   # 127.0.0.1:8410 (FIN_BIND_ADDR, FIN_PORT)
 ```
@@ -54,6 +54,9 @@ every variable it reads is also named here (wave 25: 35 were not, `tests/test_en
 1. `GET /fin/v1/rules` → approve the seed proposal: `POST /fin/v1/rules/decisions` quoting its `content_sha256`.
 2. Counsel/CPA memos become rows: amend `FIN-CQ-01` / `FIN-CQ-11` with `status: verified` and
    `parameters.memo_ref`, approve with `acknowledge_weakening: true`.
+   Contracts Andre approves at Legal as founder (ADR 0022) clear Legal's side of an invoice; `billing-readiness`
+   shows each contract's renewal date under `contract_renewal`. Steps: `docs/deploy/railway.md`, "Founder contract
+   approval (ADR 0022)".
 3. `POST /fin/v1/controls/FC-05/results` — the token-roster access review (every 90 days).
 4. Rate cards: `POST /fin/v1/rate-cards/proposals` then `/decisions`; profiles: `PUT /fin/v1/campaigns/{id}/commercial-profile`.
 
@@ -63,8 +66,9 @@ every variable it reads is also named here (wave 25: 35 were not, `tests/test_en
 `content_sha256`) → Andre `POST /fin/v1/payout-batches/{id}/decision` (checker; above `FIN_DUAL_HUMAN_THRESHOLD` the
 second approver sends its OWN request, `POST /fin/v1/payout-batches/{id}/second-approval` with only its token) → scheduler
 `POST /fin/v1/treasury/funding` + Andre's funding decision (F4a) → after `FIN_RELEASE_DELAY_H` (12 h) the scheduler
-`POST /fin/v1/payout-batches/{id}/release` (every gate re-runs per item) → rail webhooks via `rail_gateway`
-(`paid` / `failed` / `returned` / `destination_changed`). Andre's token on the release route is refused (403); no
+`POST /fin/v1/payout-batches/{id}/release` (every gate re-runs per item) → rail webhooks via `payout_rail_gateway`
+(`paid` / `failed` / `returned` / `destination_changed`; `POST /fin/v1/rails/{stripe|trolley}/events`, the only route
+that caller reaches, ADR 0023). Andre's token on the release route is refused (403); no
 caller token can approve.
 
 ## Search & Answer Intelligence (2): one read
@@ -73,6 +77,15 @@ caller token can approve.
 paid time and whether anything was refunded or charged back — no amounts, lines or legal references. `seo_02`
 reaches no other route but the token-free `GET /health` (403 everywhere else, `tests/test_seo_route_allowlist.py`; ADR 0009 decision 2, ADR 0017
 W3-2 / W3-5).
+
+## Gateway callers: one route each (ADR 0023)
+
+`rail_gateway` (the internet-facing `stripe-gateway`'s caller) reaches exactly `POST /fin/v1/stripe/events`;
+`payout_rail_gateway` (payout-rail webhooks; no deployed service holds it yet) reaches exactly
+`POST /fin/v1/rails/{stripe|trolley}/events`. Both get the token-free `GET /health` like anyone else and 403
+everywhere else (`api.NAMED_ROUTES`, enforced before any route; `tests/test_gateway_route_allowlist.py`). Until ADR
+0023 the gateway's token read every route open to any caller (invoices, treasury, breaks, audit export) and could post
+payout-rail events (AEGIS A1 M1); on Railway, read `GET /fin/v1/rules` with your `onboarding` token instead.
 
 ## Money that comes back, and sweeps (AEGIS round 17, ADR 0009 amendment)
 
@@ -85,6 +98,8 @@ W3-2 / W3-5).
 - Treasury liabilities are absolute per sub-ledger; reconciliation L4 compares every sub-ledger, not only totals.
 - New settings: `FIN_MAX_RATE_PER_1000` (`"1000.00"`), `FIN_MAX_CERTIFIED_VIEWS` (10^12), `FIN_WITHHOLDING_BASIS`
   (`gross`; `gross_minus_netting` only with CPA row FIN-CQ-16 verified).
+- `FIN_MAX_INVOICE_TOTAL` (`"250000.00"`, money red team RTM-09): an invoice draft above it is refused with
+  `INVOICE_ABOVE_MAXIMUM`.
 
 ## Media buys and client receipts (ADR 0009 amendment, Oct 5 2026)
 
@@ -99,7 +114,7 @@ Every matched payment makes a client receipt; the scheduler sends it with
 `POST /fin/v1/client-receipts/{id}/send` (client-mail stand-in: nothing is sent, it stays `pending_send`).
 Settings: `FIN_MEDIA_DEFAULT_MARKUP_PCT` (`"15.00"`), `FIN_MEDIA_MAX_MARKUP_PCT` (`"100.00"`, at most `"500.00"`),
 `FIN_MEDIA_RELEASE_HOLD_BD` (2 business days, 2..10; founder M11, the business-account ACH dispute window).
-Card (founder M10): only on a Revenue Recovery-only invoice of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also
+Card (founder M10): only on an invoice containing Revenue Recovery or SEO audit services of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also
 the maximum), never with a surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (default off).
 
 ## Stripe: ZBM client payments (ADR 0009 amendment, Oct 5 2026)
@@ -123,11 +138,14 @@ Settings (all required when on; refuses to start otherwise):
 - `FIN_STRIPE_WEBHOOK_SECRET_FILE`: the endpoint's `whsec_` secret, same file rules.
 - `FIN_STRIPE_SUCCESS_URL`, `FIN_STRIPE_CANCEL_URL`: https pages Stripe sends the client back to.
 - `FIN_STRIPE_LIVE`: `1` only for live keys.
-Webhook events to subscribe: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-`checkout.session.async_payment_failed`, `checkout.session.expired`, `payment_intent.succeeded`,
-`payment_intent.payment_failed`, `charge.failed`, `charge.dispute.created`, `charge.dispute.updated`,
-`charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
-`payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
+Webhook events to subscribe (services/finance-py/src/stripe_webhooks.py): `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
+`checkout.session.expired`, `payment_intent.succeeded`, `payment_intent.payment_failed`,
+`charge.failed`, `charge.refunded`, `charge.refund.updated`,
+`refund.created`, `refund.updated`, `refund.failed`,
+`charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+`charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
+`payout.updated`, `payout.paid`, `payout.failed`,
+`payout.canceled`.
 
 ## Reconciling the local log with the ledger
 
@@ -156,3 +174,62 @@ is 19450-19453, as above).
 
 `devtools/live_server.py` runs the service with the test fakes and a settable clock (devtools only, never
 production). `devtools/gen_rules_seed.py` regenerates the seed (its SHA-256 is pinned).
+
+## Test clients (ADR 0028)
+
+A client id starting `zz-test-` is a test client (the client acceptance runbook, step 8): Finance refuses its
+billing profile, any invoice draft and any invoice approval (409).
+
+
+SEO Technical Audit invoices use `seo_audit_services`. Like Revenue Recovery, they may accept cards only with
+`FIN_CARD_PREPAYMENTS=1`, up to $5,000 in USD with no surcharge; mixed media or strategy invoices stay ACH/wire.
+This code change does not enable the switch or change any deployed Stripe endpoint. The read-only helper
+`python devtools/stripe_webhook_events.py` prints the canonical webhook subscription list, including refund events.
+
+### Dormant standalone housekeeping runner
+
+`src/housekeeping_runner.py` is an optional one-shot client, not the Finance server or its scheduler. It is disabled
+by default and never opens `FIN_DATA_DIR`. Its `FIN_HOUSEKEEPING_` configuration prefix comprises
+`FIN_HOUSEKEEPING_ENABLED` (absent/0 disabled, exactly1 enabled), `FIN_HOUSEKEEPING_ORIGIN` (trusted origin only),
+`FIN_HOUSEKEEPING_SERVICE_TOKEN`, `FIN_HOUSEKEEPING_CALLER_TOKEN` (dedicated optional `ops_cron`, distinct from bearer),
+and `FIN_HOUSEKEEPING_DEADLINE_SECONDS` (integer1–120, default60). No mapping, secrets, schedule, image entrypoint
+or production activation is added here. The caller reaches only POST stripe-sessions/run; scheduler is unchanged.
+See [runner procedure](../../docs/runbooks/housekeeping-runner.md) and [ADR0036](../../docs/adr/0036-dormant-housekeeping-runner.md)
+for unknown/degraded outcomes, no automatic retries, owned-worker deadline/reaping and separate activation gates.
+
+### Optional ZBM receipt mail
+
+Default `FIN_RECEIPT_MAIL_PROVIDER=disabled` does not read receipt credentials or send mail. Explicit `resend`
+requires `FIN_RECEIPT_MAIL_PROFILE_ID`, `FIN_RECEIPT_MAIL_PROFILE_REVISION`, `FIN_RECEIPT_MAIL_FROM`,
+`FIN_RECEIPT_RESEND_KEY_FILE`; `FIN_RECEIPT_MAIL_DEADLINE_S` defaults to10 (1–30). Container entrypoint optionally
+materializes `FIN_RECEIPT_RESEND_KEY`, including when app mode is disabled. No provider activation is authorized by
+this implementation. See [ADR0038](../../docs/adr/0038-receipt-provider-workflow.md) and its runbook. Existing
+scheduler send route is retained; `sent` denotes API acceptance only. Legacy attempts require review, never a new
+key or guessed sender. Provider ID is private journal evidence. External rollback enforcement remains required.
+
+### Dormant operational observations
+
+`FIN_OPS_OBSERVER_ENABLED` defaults to0; exactly1 enables the observation-only core with the existing claimed
+`FIN_DATA_DIR`. `FIN_OPS_HEALTH_URLS` defaults to empty/unconfigured; optional fixed finance/legal/compliance/ledger
+aliases identify trusted operator-configured HTTP(S) roots, without credentials/query/fragment. Optional distinct
+`ops_alerts` reaches exactly POST /fin/v1/ops/observations/run. No sender, cron, provider or IaC is activated.
+Coverage/unknown persistence must be inspected with counts; zero conditions is not complete health. See
+[ADR0039](../../docs/adr/0039-dormant-ops-observer.md) and [observer procedure](../../docs/runbooks/ops-observer.md).
+
+### Founder receipt backlog
+
+GET `/fin/v1/client-receipts/backlog` requires the service bearer and Andre approval, with optional strict `limit`
+(1..100, default50) and opaque `cursor`. It is a bounded read of recorded client receipts, including unknown states;
+authorized success writes nothing. Existing rejected-founder auditing remains. No settings or provider calls are added.
+Payment date, creation/elapsed age, legacy sent time and Finance-recorded acceptance-slot time are separate fields.
+Acceptance presence is not validation or delivery; no contractual receipt deadline is inferred. Snapshot changes return409;
+5,000-record capacity overflow returns503 rather than a partial complete-looking page. See
+[receipt backlog runbook](../../docs/runbooks/receipt-backlog.md) and [ADR0040](../../docs/adr/0040-founder-receipt-backlog.md).
+
+### Offline copied-evidence inventory
+
+Standalone `devtools/inventory_copies.py` accepts an explicit owned copies directory and a new report file under an existing owned0700parent.
+It reads copied bytes only; no Service/API/ledger/provider startup, replay, financial action or restore permission.
+Exit0 means structural inventory, not authenticity/completeness/readiness. See
+[offline inventory runbook](../../docs/runbooks/offline-recovery-inventory.md) and
+[ADR0041](../../docs/adr/0041-offline-recovery-inventory.md). No new environment or production wiring is added.

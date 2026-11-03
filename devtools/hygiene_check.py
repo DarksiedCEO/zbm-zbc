@@ -85,7 +85,7 @@ MARKER_ENV = "ZBM_HYGIENE_RUN"
 
 PY_SERVICES = ("detection-py", "fulfillment-py", "onboarding-py", "creative-py", "compliance-py", "verification-py",
                "clipper-network-py", "finance-py", "legal-py", "delivery-py", "security-py",
-               "sales-py", "service-py", "influencer-py", "bizdev-py", "seo-py", "ooh-py")
+               "sales-py", "service-py", "influencer-py", "bizdev-py", "seo-py", "ooh-py", "client-portal-py")
 
 
 def violation(rule: str, where: str, detail: str) -> str:
@@ -325,11 +325,11 @@ def platform_note(entries: list[dict]) -> str:
 
 def _skips_from_output(kind: str, text: str) -> list[dict]:
     if kind == "cargo":
-        out = []
-        for m in re.finditer(r"test result: \w+\. \d+ passed; \d+ failed; (\d+) ignored", text):
-            if int(m.group(1)):
-                out.append({"nodeid": "(cargo)", "kind": "ignored", "reason": f"{m.group(1)} ignored test(s)"})
-        return out
+        names = re.findall(r"^test (\S+) \.\.\. ignored(?:,.*)?$", text, re.M)
+        total = sum(int(x) for x in re.findall(r"test result: \w+\. \d+ passed; \d+ failed; (\d+) ignored", text))
+        if len(names) != total or len(set(names)) != len(names):
+            return [{"nodeid": "(cargo)", "kind": "ignored", "reason": f"{total} ignored test(s); missing or duplicate names"}] if total or names else []
+        return [{"nodeid": n, "kind": "ignored", "reason": "cargo test ignored"} for n in names]
     if kind == "go":
         return [{"nodeid": n, "kind": "skip", "reason": "go test SKIP"} for n in re.findall(r"--- SKIP: (\S+)", text)]
     if kind == "node":
@@ -338,6 +338,45 @@ def _skips_from_output(kind: str, text: str) -> list[dict]:
         return [{"nodeid": "(node)", "kind": "skip", "reason": f"{n} skipped test(s)"}] if n else []
     return []
 
+
+COLD_CHILD = "cold_tests::held_blocking_child"
+COLD_PARENT = "devtools/test_cold_ledger_shutdown.py"
+COLD_METHODS = {"test_held_blocking_write_waits_then_persists", "test_timeout_unknown_and_queued_job", "test_accepted_http_body_drains_before_clean_exit"}
+
+def cold_child_contract(root=None):
+    """Exact source/mandatory CI parent linkage; no aggregate ignored allowance."""
+    root = Path(root) if root is not None else REPO
+    source = root / "services/ledger-rust/src/bin/server.rs"
+    if not source.exists() or "mod cold_tests" not in source.read_text():
+        return ["native child fixture source absent"]
+    text = source.read_text()
+    if not re.search(r"mod cold_tests\s*\{[\s\S]*?#\[test\]\s*#\[ignore\]\s*fn held_blocking_child\(", text):
+        return ["native child fixture declaration changed"]
+    parent = root / COLD_PARENT
+    try:
+        tree = ast.parse(parent.read_text())
+        tests = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")}
+        literals = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    except (OSError, SyntaxError):
+        return ["native parent test unavailable"]
+    if tests != COLD_METHODS or COLD_CHILD not in literals or not {"--ignored", "--exact"} <= literals:
+        return ["native parent methods or exact child invocation changed"]
+    workflow = root / ".github/workflows/ci.yml"
+    try: ci = workflow.read_text()
+    except OSError: return ["native parent CI missing"]
+    step = re.search(r"(?m)^      - name: Native Ledger shutdown parent regression\n([\s\S]*?)(?=^      - |^  [^ ]|\Z)", ci)
+    if step is None: return ["mandatory native parent CI step missing"]
+    block = step.group(1)
+    required = ["--suite python:cold-ledger-shutdown --kind pytest", "--allow-ignored services/ledger-rust/target", "python3 -B -m pytest -q -p no:cacheprovider " + COLD_PARENT,
+                "set +e", '2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"', "code=${PIPESTATUS[0]}",
+                'python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"',
+                'exit "$code"']
+    if any(x not in block for x in required) or re.search(r"(?m)^        (?:if|continue-on-error):", block) or "--counts off" in block or "|| true" in block:
+        return ["native parent CI is not mandatory/counted"]
+    return []
+
+def orchestrated_ignore(suite, skipped):
+    return suite == "rust:ledger-rust" and skipped == {"nodeid": COLD_CHILD, "kind": "ignored", "reason": "cargo test ignored"} and not cold_child_contract()
 
 def read_counts_doc() -> dict[str, int]:
     rows = {}
@@ -501,7 +540,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         skips = _skips_from_output(kind, out_text)
     expected = allow.get("expected_skips", {}).get(suite, [])
     for s in skips:
-        if not any(re.search(e["reason_regex"], s["reason"]) for e in expected):
+        if not orchestrated_ignore(suite, s) and not any(re.search(e["reason_regex"], s["reason"]) for e in expected):
             problems.append(violation("R5-skips", suite, f"unexpected {s['kind']}: {s['nodeid']}: {s['reason']}"))
     count_note = ""
     if a.counts != "off" and kind != "none":
@@ -1168,6 +1207,9 @@ def cmd_lint(a: argparse.Namespace) -> int:
             if e.get("rule") in ("L1-wallclock", "L2-ports") and id(e) not in used:
                 problems.append(violation("L9-allowlist", e.get("path", "?"), f"allowlist entry matches nothing: {e}"))
         problems += lint_expected_skips(allow)
+        native_source = REPO / "services/ledger-rust/src/bin/server.rs"
+        if native_source.exists() and "mod cold_tests" in native_source.read_text():
+            problems += [violation("L9-cold-parent", COLD_PARENT, x) for x in cold_child_contract()]
     by_service: dict[str, int] = {}
     for line in problems:
         where = line.split(" ", 3)[2]
@@ -1181,7 +1223,7 @@ def cmd_lint(a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-SUITES = tuple(f"python:{s}" for s in PY_SERVICES) + ("rust:ledger-rust", "go:orchestrator-go", "node:dashboard-ts")
+SUITES = tuple(f"python:{s}" for s in PY_SERVICES) + ("python:cold-ledger-shutdown", "rust:ledger-rust", "go:orchestrator-go", "node:dashboard-ts")
 
 
 def cmd_counts(a: argparse.Namespace) -> int:

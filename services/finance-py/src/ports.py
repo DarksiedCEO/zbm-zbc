@@ -110,6 +110,33 @@ class JurisdictionAnswer:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class ClientActivation:
+    """ADR 0024: Compliance's CURRENT activation decision for a client (GET /compliance/v1/clients/{id}/activation).
+    ``allowed`` only for a current ALLOW; ``jurisdiction`` is the client's recorded place (US-CA, US-DC, PR, GU)."""
+
+    available: bool
+    allowed: bool = False
+    ruling_id: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    reasons: tuple = ()
+    reason: str = ""
+    sanctions: bool = False      # AEGIS r5 C1: Compliance says the refusal rests on sanctions (never refunded)
+    ground: Optional[str] = None  # AEGIS r8: "match" (OFAC list match) or "place" (sanctioned place or target)
+
+
+@dataclass(frozen=True)
+class RegisterParameters:
+    """ADR 0024: one Compliance register row's parameters (the economic-nexus thresholds, US-SALESTAX-NEXUS)."""
+
+    available: bool
+    obligation_id: str = ""
+    effective_status: str = "unknown"
+    parameters: Optional[dict] = None
+    source_url: Optional[str] = None
+    reason: str = ""
+
+
 class CompliancePort(Protocol):
     def ruling(self, ruling_id: str) -> ComplianceRuling: ...
 
@@ -120,6 +147,10 @@ class CompliancePort(Protocol):
     def row(self, obligation_id: str) -> RegisterRow: ...
 
     def jurisdiction(self, country: str, region: Optional[str]) -> JurisdictionAnswer: ...
+
+    def client_activation(self, client_id: str) -> ClientActivation: ...
+
+    def row_parameters(self, obligation_id: str) -> RegisterParameters: ...
 
 
 class NotWiredCompliance:
@@ -139,6 +170,12 @@ class NotWiredCompliance:
 
     def jurisdiction(self, country, region):
         return JurisdictionAnswer(False, reason=self.REASON)
+
+    def client_activation(self, client_id):
+        return ClientActivation(False, reason=self.REASON)
+
+    def row_parameters(self, obligation_id):
+        return RegisterParameters(False, obligation_id, reason=self.REASON)
 
 
 # --- Clipper Network, Legal 37 ------------------------------------------------------------------------------------
@@ -172,6 +209,17 @@ class LegalAnswer:
     current: bool = False
     acceptance_matches: bool = False
     reason: str = ""
+    # ADR 0022 (renewal reminder, never a pass on its own): the date Legal's approval of the version must be renewed
+    # by, and whether that date has passed (then the version is not current until Andre renews it at Legal)
+    renew_by: Optional[str] = None
+    renewal_lapsed: Optional[bool] = None
+    # AEGIS r2 N6: False when Legal says the basis the version was approved on / the acceptance's evidence basis no
+    # longer holds (LG-20 closed, CQ-19 determination ended), so the refusal can say so; None = not reported
+    version_basis_in_force: Optional[bool] = None
+    acceptance_basis_in_force: Optional[bool] = None
+    # Service issuance needs Legal's registered type and client acceptance provenance.
+    doc_type: Optional[str] = None
+    acceptance_via: Optional[str] = None
 
 
 class LegalPort(Protocol):
@@ -378,19 +426,35 @@ class NotBuiltPush:
         return False
 
 
-class ClientMailPort(Protocol):
-    """Sends a client their payment receipt (founder, Oct 5 2026: "that receipt goes out to them with the explanation
-    of what they bought via email"). True only when the mail provider accepted the message for delivery.
+@dataclass(frozen=True, repr=False)
+class ReceiptDeliveryOutcome:
+    """Typed contract: accepted, retry (definitely not accepted), failed, or uncertain.
 
-    Contract for a real adapter (AEGIS N1/N2): delivery is at-least-once -- a crash after the provider accepted the
-    message, or a call that outlives Finance's 15-minute stale-claim window, is retried. The adapter MUST pass
-    ``receipt["client_receipt_id"]`` to the provider as its idempotency / de-duplication key, and MUST time out well
-    inside 15 minutes, so a retry never reaches the client as a second email."""
-    def send_receipt(self, client_id: str, receipt: dict) -> bool: ...
+    Acceptance is provider acceptance, never proof of inbox delivery. Unknown values fail closed.
+    """
+    outcome: str
+    provider_message_id: Optional[str] = None
+
+
+class ClientMailPort(Protocol):
+    """ADR 0032/0038 contract. Enabled adapters accept an immutable persisted envelope.
+
+    Real Resend construction is explicit opt-in with complete frozen requests and no automatic retry. ``accepted`` means provider acceptance, never inbox delivery;
+    ``retry`` guarantees no acceptance; ambiguous results must be ``uncertain``. The historical bool
+    method is supported solely for explicitly marked injected test fixtures, never production configuration.
+    """
+    enabled: bool
+
+    def deliver_receipt(self, envelope: dict) -> ReceiptDeliveryOutcome: ...
 
 
 class NotBuiltClientMail:
     """No mail provider is chosen or wired: nothing is sent; the receipt stays ``pending_send``."""
+    enabled = False
+
+    def deliver_receipt(self, envelope: dict) -> ReceiptDeliveryOutcome:
+        return ReceiptDeliveryOutcome("disabled")
+
     def send_receipt(self, client_id, receipt):
         return False
 

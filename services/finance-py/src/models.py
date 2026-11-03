@@ -259,6 +259,12 @@ class Decision(Strict):
     acknowledge_weakening: Optional[bool] = None
 
 
+class InvoiceVoid(Strict):
+    request_id: Id
+    content_sha256: Sha
+    reason: Literal["issued_in_error", "client_cancelled", "duplicate_invoice"]
+
+
 class DocRef(Strict):
     """A contract held by Legal (37). ``version`` is Legal's ``major.minor`` text (``"1.1"``); a whole number is
     accepted for records written before Legal was wired and means ``"<n>.0"`` -- Legal then confirms it or refuses."""
@@ -355,7 +361,7 @@ class BNotice(Strict):
 class InvoiceLine(Strict):
     # media_spend / media_fee are not here: Finance writes them itself from a media buy (POST /fin/v1/media-buys).
     line_code: Literal["campaign_deposit", "creative_services", "strategy_services", "production_services",
-                       "retainer_fee", "subscription_fee", "revenue_recovery_services"]
+                       "retainer_fee", "subscription_fee", "revenue_recovery_services", "seo_audit_services"]
     quantity: int = Field(ge=1, le=1_000_000)
     unit_price: PositiveMoney
     description: Optional[Short] = None
@@ -501,6 +507,31 @@ class BreakResolution(Strict):
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)
 
 
+class ComplianceHoldRelease(Strict):
+    """AEGIS r4 R4-2: release a payment held by Compliance: by its refund (the F7r entry) or a current ALLOW."""
+    request_id: Id
+    basis: Literal["refund", "compliance_allow", "ofac_authorization", "ofac_rejected_return"]
+    entry_id: Optional[Id] = None
+    # AEGIS r5 C1: the SHA-256 of the OFAC authorization (license or written guidance) that allows releasing a
+    # sanctions hold; the document itself stays in Andre's evidence folder (references are never stored in clear)
+    ofac_authorization_sha256: Optional[Sha] = None
+    # AEGIS r6 N5: which OFAC document it is: a specific license or authorization, an unblocking report filed under
+    # 31 CFR 501.603(b)(3) for property blocked in error (OFAC FAQ 1196), or a Compliance Release (31 CFR 501.806)
+    # AEGIS r7: or a delisting notice (no license needed), or the filed 501.604 rejected-transaction report (with
+    # basis ofac_rejected_return: the payment was rejected and returned to the sender, not blocked)
+    ofac_document_kind: Optional[Literal["license", "unblocking_report", "compliance_release", "delisting",
+                                         "rejected_transaction_report"]] = None
+    # AEGIS r8: for ofac_rejected_return, the SHA-256 of OFAC's written guidance that the funds be rejected (document
+    # kind ofac_guidance), required besides the 501.604 report
+    ofac_guidance_sha256: Optional[Sha] = None
+
+
+class RefundCancel(Strict):
+    """AEGIS r11: Andre cancels an approved refund whose payment never moved (refused at execution), with a reason."""
+    request_id: Id
+    reason: _text(1000, True)
+
+
 class RefundRepay(Strict):
     """Andre pays a refund again after its payment was settled ``not_moved`` (AEGIS c0869c4 H-N1)."""
     request_id: Id
@@ -593,3 +624,22 @@ class ReconcileRequest(Strict):
 
 def texts(obj: Any) -> list[str]:
     return list(iter_strings(obj))
+
+
+def receipt_email(value: str) -> str:
+    # Deliberately narrow single ASCII mailbox; no display names, headers or recipient lists.
+    if len(value) > 254 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+", value):
+        raise ValueError("invalid billing mailbox")
+    if ".." in value or value.split("@")[0].endswith("."):
+        raise ValueError("invalid billing mailbox")
+    return value
+
+
+class BillingContact(Strict):
+    request_id: Id
+    email: Optional[Annotated[StrictStr, AfterValidator(receipt_email)]]
+
+
+class ReceiptDeliveryReview(Strict):
+    request_id: Id
+    evidence: Evidence

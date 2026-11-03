@@ -390,14 +390,14 @@ def test_n15_4_r4b_local_labels_both_directions(cc, text, want):
 
 
 def test_n15_4_r4b_italian_hashtag_label_passes_the_gate():
+    """ADR 0024: Italian targets are refused at activation (outside the service area); the hashtag rule of the
+    local-label check is kept and tested on the check itself."""
+    from intelligences import i09_disclosure
+    labels = seed_row("HR-06")["parameters"]["local_labels"]["IT"]
+    assert i09_disclosure.local_label_present("#ad #ADV", labels) is True
+    assert i09_disclosure.local_label_present("#ad (#ADV)", labels) is False
     h = ready()
-    h.activate_creator()
-    kit = seed_row("HR-06")["parameters"]["eu_kit_version"]
-    h.activate_brand("camp-it", targets=("US", "IT"), eu_kit_version_acknowledged=kit, msa_eu_clause=True)
-    j = pay(h, campaign="camp-it", disclosure={"in_video_label_text": "#ad #ADV"})
-    assert ("IT-AGCOM", "local_label") not in unmet_codes(j), j["unmet"]
-    j = pay(h, campaign="camp-it", disclosure={"in_video_label_text": "#ad (#ADV)"})
-    assert ("IT-AGCOM", "local_label") in unmet_codes(j)
+    assert h.rule("camp-it", "zbc_brand", brand_facts(targets=("US", "IT"))).json()["allowed"] is False
 
 
 # ---------------------------------------------------------------- N15-5 empty targets / platforms
