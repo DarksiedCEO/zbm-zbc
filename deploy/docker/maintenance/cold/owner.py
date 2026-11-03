@@ -233,6 +233,14 @@ class Owner:
     if permission['advance_sha256']!=body['advance_sha256']:raise Refused('advance intent changed')
     from metadata_retirement import retire_owner
     return retire_owner(self,permission)
+   if path=='/submit' and body.get('action')=='recovery-bootstrap-retire':
+    if set(body)!={'action','member','boot','run','proof_sha256'} or body['member']!=self.member or body['boot']!=self.boot or self.phase!='VERIFIED_CLOSED' or self.front.opened or self.child is None or self.child.poll()is not None or self.fenced or self.journal.recovered:raise Refused('closed live recovery retirement required')
+    if (self.worker and self.worker.is_alive()) or (self.repairs.worker and self.repairs.worker.is_alive()):raise Refused('recovery work still active')
+    from recovery_bootstrap import digest
+    proof=Client('coordinator','coordinator.railway.internal',27002,self.token).call('/status',{'kind':'recovery-bootstrap-permit','member':self.member,'boot':self.boot,'run':body['run']})
+    if digest(proof)!=body['proof_sha256']:raise Refused('bootstrap permit changed')
+    self.journal.retire_recovery(proof)
+    return {'member':self.member,'boot':self.boot,'proof_sha256':digest(proof),'state':'RECOVERY_BOOTSTRAP_RETAINED'}
    if path=='/relay-bind':
     if set(body)!={'member','boot','boots'} or body['boot']!=self.boot or self.phase!='CLOSED' or self.child is not None or self.journal.recovered:raise Refused('relay binding phase')
     self.relay.bind(body['boots']);return {'member':self.member,'boot':self.boot,'relay_bound':True}

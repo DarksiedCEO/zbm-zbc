@@ -448,11 +448,16 @@ def test_main_starts_the_scheduler_before_serving(monkeypatch):
     order: list = []
     h.app.state.settings = h.settings          # what _app_from_env sets on the deployed app
     monkeypatch.setattr(api, "app", h.app)
-    monkeypatch.setattr(api, "start_scheduler", lambda svc, settings: order.append(("start", svc, settings)))
+    monkeypatch.setattr(api, "start_scheduler", lambda svc, settings, *, startup_paused:
+                        order.append(("start", svc, settings, startup_paused)))
     monkeypatch.setattr(serve, "run", lambda app, host, port: order.append(("serve", app)))
-    api.main()
-    assert [x[0] for x in order] == ["start", "serve"]
-    assert order[0][1] is h.svc and order[0][2] is h.settings
+    for existing in (False, True):
+        order.clear()
+        h.app.state.startup_existing_store = existing  # deployed factory supplies this explicit profile
+        api.main()
+        assert [x[0] for x in order] == ["start", "serve"]
+        assert order[0][1] is h.svc and order[0][2] is h.settings
+        assert order[0][3] is existing
 
 
 # --- AEGIS r5 C1: the status says when a refusal is grounded in sanctions (Finance must not refund those) ---------------

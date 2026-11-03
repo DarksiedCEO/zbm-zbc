@@ -346,9 +346,12 @@ jobs:
         working-directory: .
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
           python3 devtools/hygiene_check.py run --suite python:cold-ledger-shutdown --kind pytest --cwd . \
-            --allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -p no:cacheprovider devtools/test_cold_ledger_shutdown.py
+            --allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -rfEs -o faulthandler_timeout=60 -p no:cacheprovider devtools/test_cold_ledger_shutdown.py 2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"
+          exit "$code"
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
@@ -919,7 +922,13 @@ jobs:
         run: |
           python -m pip install --require-hashes --no-deps --only-binary=:all: -r deploy/python/requirements.lock.txt
       - name: Cold backup restart and bounded archive regressions
-        run: python -B -m unittest discover -s devtools/cold_tests -p 'test_*.py' -v
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest discover -s devtools/cold_tests -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/cold-backup.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-backup.log" --code "$code" --suite "python:cold-backup"
+          exit "$code"
 
       - name: The LEDGER_CALLERS generator refuses bad tokens and pins each caller's grant (devtools/ledger_callers.py)
         shell: bash

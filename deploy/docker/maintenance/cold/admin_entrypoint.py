@@ -2,7 +2,7 @@
 import os,sys,signal,threading,time,re
 from pathlib import Path
 from datetime import datetime,timezone
-ROLES={'coordinator','observer','trigger','repair','recover'}
+ROLES={'coordinator','observer','trigger','repair','recover','recover-trigger'}
 REPAIRS={'inspect','retry-upload','resume-originals','resume-sealed','finish-cleanup','recover-catalog','finish-advance','finish-repaired-run','rearm-idle'}
 class Refused(ValueError):pass
 
@@ -13,16 +13,23 @@ def configuration(env,argv):
  if not re.fullmatch('[0-9a-f]{64}',token):raise Refused('dedicated coordination credential required')
  result={'role':role,'token':token}
  if role=='repair':result['command']=argv[1]
- if role=='coordinator':
+ if role in ('coordinator','recover'):
   pw=env.get('BACKUP_RESTIC_PASSWORD','');kid=env.get('BACKUP_B2_KEY_ID','');key=env.get('BACKUP_B2_APPLICATION_KEY','')
   if any(not 1<=len(v)<=4096 or any(ord(c)<33 or ord(c)>126 for c in v) for v in (pw,kid,key)) or len({token,pw,kid,key})!=4:raise Refused('distinct supervisor credentials required')
   result.update(password=pw,credentials={'key_id':kid,'key':key})
+  if role=='recover':
+   stripe=env.get('BACKUP_RECOVERY_STRIPE_KEY','');service=env.get('FIN_SERVICE_TOKEN','');caller=env.get('FIN_RAIL_GATEWAY_CALLER_TOKEN','')
+   if not re.fullmatch(r'sk_(test|live)_[A-Za-z0-9_]{1,256}',stripe) or not all(re.fullmatch('[0-9a-f]{64}',v) for v in (service,caller)) or len({token,pw,kid,key,stripe,service,caller})!=7:raise Refused('fixed distinct recovery inputs required')
+   result.update(stripe_key=stripe,gateway_auth={'service_token':service,'caller_token':caller})
  elif role=='observer':
   raw=env.get('BACKUP_FIRST_DUE_UTC_SECONDS','')
   if not raw.isdecimal() or not 0<=int(raw)<=253402214399:raise Refused('fixed first due required')
   result['first_due']=int(raw)
- elif any(env.get(k) for k in ('BACKUP_RESTIC_PASSWORD','BACKUP_B2_KEY_ID','BACKUP_B2_APPLICATION_KEY','BACKUP_RESEND_API_KEY')):
+ elif any(env.get(k) for k in ('BACKUP_RESTIC_PASSWORD','BACKUP_B2_KEY_ID','BACKUP_B2_APPLICATION_KEY','BACKUP_RESEND_API_KEY','BACKUP_RECOVERY_STRIPE_KEY','FIN_SERVICE_TOKEN','FIN_RAIL_GATEWAY_CALLER_TOKEN')):
   raise Refused('operator/trigger must not possess provider credentials')
+ if role=='recover-trigger':
+  from recovery_operator import request_from_text
+  result['request']=request_from_text(env.get('BACKUP_RECOVERY_REQUEST',''))
  return result
 
 def volume():
@@ -40,8 +47,15 @@ def main(env=None,argv=None):
  from owner_wire import Client
  if c['role']=='recover':
   if os.getuid()!=0:raise Refused('explicit supervisor root profile required')
-  from recovery_controller import main as recovery_main
-  return recovery_main(argv=[],expected_token=c['token'])
+  volume()
+  from recovery_service import run
+  return run(c)
+ if c['role']=='recover-trigger':
+  from recovery_operator import wait_result
+  from owner_wire import canonical
+  client=Client('coordinator','coordinator.railway.internal',27002,c['token'])
+  print(canonical(wait_result(client,c['request'])).decode(),flush=True)
+  return 0
  if c['role']=='repair':
   from repair_cli import operator_command
   from owner_wire import canonical

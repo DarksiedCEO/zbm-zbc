@@ -96,6 +96,7 @@ def execute(value,*,restore,coordinator_factory,provider_factory,deliveries,cloc
   app=business_checks(snapshot['invoice'],observation(co,'legal','acceptance',0),observation(co,'seo','audit',0),observation(co,'seo','reports',0),scope)
   for m in MEMBERS:co.command(m,'verify')
   co.update(phase='RECOVERY_RECONCILED_CLOSED',recovery={'selected_catalog':loc,'provider':proof,'applications':app,'mode':scope['mode'],'operator_cutoff_used':False})
+  co.finish_recovery_bootstrap()
   co.publish()
   return {'state':'APPLICATION_RECOVERED','selected_catalog':loc,'reconciliation':proof,'applications':app,'business_admission':'OPEN_'+scope['mode']}
  except BaseException:

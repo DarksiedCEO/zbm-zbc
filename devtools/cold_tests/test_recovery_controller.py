@@ -33,6 +33,7 @@ class SequenceTests(unittest.TestCase):
     def discover(self):order.append('discover')
     def command(self,m,a):order.append(a+':'+m)
     def update(self,**kw):order.append('durable-proof')
+    def finish_recovery_bootstrap(self):order.append('bootstrap-retained')
     def publish(self):order.append('publish')
    value={'schema':'fixed-application-recovery-v1','restore':{},'coordination_token':'a'*64,'stripe_key':'_'.join(('sk','test','disposable')),'scope':{k:k+'_test' for k in ('account','invoice','client','session','payment_intent','acceptance','tenant','audit')}};value['scope']['mode']='TEST'
    data={'state':'DATA_RESTORED_CLOSED','business_admission':'NOT_OPENED','selected_catalog':{'set_id':run},'data':{'members':{m:{'manifest_sha256':'a'*64} for m in MEMBERS}}}
@@ -44,7 +45,7 @@ class SequenceTests(unittest.TestCase):
      self.assertNotIn('publish',order);self.assertFalse(any(x.startswith('start:') for x in order))
     else:
      r=execute(value,restore=lambda _:data,coordinator_factory=lambda *a:Co(),provider_factory=lambda *a:None,deliveries=lambda _:[])
-     self.assertEqual(r['business_admission'],'OPEN_TEST');self.assertEqual(order[-2:],['durable-proof','publish']);self.assertEqual([x for x in order if x.startswith('start:')],['start:'+m for m in START])
+     self.assertEqual(r['business_admission'],'OPEN_TEST');self.assertEqual(order[-3:],['durable-proof','bootstrap-retained','publish']);self.assertEqual([x for x in order if x.startswith('start:')],['start:'+m for m in START])
  def test_live_profile_mismatch_refuses_before_restore(self):
   from recovery_controller import execute
   calls=[]

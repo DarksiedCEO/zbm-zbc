@@ -31,6 +31,10 @@ class Journal:
   except BaseException:raise
  def begin(self,run,op,action,*,resolved=None):
   if self.recovered:raise Refused('recovered run requires supported repair')
+  recovery=self.doc.get('last_recovery')
+  if recovery:
+   if run==recovery['proof']['run']:raise Refused('retired recovery run cannot restart')
+   if self.doc['run'] is None and self.doc.get('last_success') is None and run!=recovery['proof']['next_run']:raise Refused('fixed first maintenance run required')
   last=self.doc.get('last_retirement')
   if last and last['operation']==op:return False
   if self.doc.get('last_success',{}).get('run')==run:raise Refused('retired run cannot restart')
@@ -71,5 +75,22 @@ class Journal:
    if ops[operation]['action']!='retire' or ops[operation]['phase']!='PENDING':raise Refused('retirement intent')
    receipt={'member':new['member'],'boot':new['boot'],'run':run,'action':'retire','result':proof}
    new['last_retirement']={'operation':operation,'record':{'run':run,'action':'retire','phase':'DONE','receipt':receipt}}
+  self.persist(new);self.doc=new
+ def retire_recovery(self,proof):
+  import hashlib,re
+  fields={'schema','member','boot','run','next_run','operations_sha256','recovery_sha256'}
+  if type(proof)is not dict or set(proof)!=fields or proof['schema']!='recovery-bootstrap-v1':raise Refused('recovery retirement schema')
+  if self.recovered or self.doc.get('last_recovery') is not None:raise Refused('recovery retirement already used/uncertain')
+  if any(proof[k]!=self.doc[k] for k in ('member','boot','run')) or proof['next_run']==proof['run'] or not re.fullmatch('cold-[0-9a-f]{32}',str(proof['next_run'])) or not re.fullmatch('[0-9a-f]{64}',str(proof['recovery_sha256'])):raise Refused('recovery retirement identity')
+  ops=self.doc['operations'];run=proof['run'];m=proof['member']
+  expected={f'{run}:{m}:start:1':'start',f'{run}:{m}:verify:1':'verify',f'{run}:{m}:verify:2':'verify'}
+  if set(ops)!=set(expected) or hashlib.sha256(canonical(ops)).hexdigest()!=proof['operations_sha256']:raise Refused('recovery operation binding')
+  for op,action in expected.items():
+   v=ops[op];r=v.get('receipt',{})
+   if v.get('phase')!='DONE' or v.get('action')!=action or v.get('run')!=run or any(r.get(k)!=value for k,value in {'member':m,'boot':proof['boot'],'run':run,'action':action}.items()):raise Refused('unproved recovery operation')
+  original=copy.deepcopy(self.doc);new=copy.deepcopy(self.doc)
+  new.update(run=None,operations={},last_recovery={'proof':copy.deepcopy(proof),'original':original})
+  # Full original receipts remain durable; reserve a normal terminal receipt.
+  if len(canonical(new))+RECEIPT+512>CAP:raise Refused('recovery retention capacity')
   self.persist(new);self.doc=new
  def close(self):os.close(self.fd)

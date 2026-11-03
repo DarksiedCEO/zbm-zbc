@@ -6,7 +6,8 @@ from cold_front import Front
 from coordinator_repair import exclusive
 START=('ledger','legal','compliance','finance','seo');STOP=('seo','finance','compliance','legal','ledger')
 class Coordinator:
- def __init__(self,root,token,password,*,recover=False,transport_credentials=None,run_id=None):
+ def __init__(self,root,token,password,*,recover=False,transport_credentials=None,run_id=None,serve_control=True):
+  if type(serve_control)is not bool:raise Refused('fixed control host mode')
   if run_id is not None and (not isinstance(run_id,str) or not __import__('re').fullmatch('cold-[0-9a-f]{32}',run_id)):raise Refused('fixed run identity')
   self.control_lock=threading.RLock();self.normal_active=False;self.repair_worker=None
   self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.path=self.root/'run.json'
@@ -28,8 +29,10 @@ class Coordinator:
   self.catalog=Catalog(password,transport_credentials)
   from scheduled_completion import Completion
   self.completion=Completion(self)
-  self.catalog_server=Server(('0.0.0.0',27002),token,self.catalog_status)
-  self.catalog_thread=threading.Thread(target=self.catalog_server.serve_forever,daemon=True);self.catalog_thread.start()
+  self.catalog_server=None;self.catalog_thread=None
+  if serve_control:
+   self.catalog_server=Server(('0.0.0.0',27002),token,self.catalog_status)
+   self.catalog_thread=threading.Thread(target=self.catalog_server.serve_forever,daemon=True);self.catalog_thread.start()
   self.observer=Client('observer','observer.railway.internal',27003,token)
   self.counts={};self.front=Front({m:(m+'.railway.internal',27001) for m in MEMBERS})
  def save(self,value):
@@ -147,7 +150,13 @@ class Coordinator:
    return value
   if self.doc['phase']!='OPEN':raise Refused('schedule must precede cold effects')
   self.update(schedule=value);return value
+ def finish_recovery_bootstrap(self):
+  from recovery_bootstrap import advance
+  return advance(self)
  def catalog_status(self,path,body):
+  if path=='/status' and body.get('kind')=='recovery-bootstrap-permit':
+   from recovery_bootstrap import permit
+   return permit(self,body)
   if path in ('/repair','/repair-status') and body.get('command')=='rearm-idle':
    from coordinator_rearm import control
    return control(self,path,body)
