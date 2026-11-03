@@ -367,7 +367,10 @@ def cold_child_contract(root=None):
     step = re.search(r"(?m)^      - name: Native Ledger shutdown parent regression\n([\s\S]*?)(?=^      - |^  [^ ]|\Z)", ci)
     if step is None: return ["mandatory native parent CI step missing"]
     block = step.group(1)
-    required = ["--suite python:cold-ledger-shutdown --kind pytest", "--allow-ignored services/ledger-rust/target", "python3 -B -m pytest -q -p no:cacheprovider " + COLD_PARENT, "set -euo pipefail"]
+    required = ["--suite python:cold-ledger-shutdown --kind pytest", "--allow-ignored services/ledger-rust/target", "python3 -B -m pytest -q -p no:cacheprovider " + COLD_PARENT,
+                "set +e", '2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"', "code=${PIPESTATUS[0]}",
+                'python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"',
+                'exit "$code"']
     if any(x not in block for x in required) or re.search(r"(?m)^        (?:if|continue-on-error):", block) or "--counts off" in block or "|| true" in block:
         return ["native parent CI is not mandatory/counted"]
     return []

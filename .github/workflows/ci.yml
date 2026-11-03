@@ -348,7 +348,7 @@ jobs:
         run: |
           set +e
           python3 devtools/hygiene_check.py run --suite python:cold-ledger-shutdown --kind pytest --cwd . \
-            --allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -rfEs -o faulthandler_timeout=60 -p no:cacheprovider devtools/test_cold_ledger_shutdown.py 2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"
+            --allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -p no:cacheprovider devtools/test_cold_ledger_shutdown.py -rfEs -o faulthandler_timeout=60 2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"
           code=${PIPESTATUS[0]}
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"
           exit "$code"

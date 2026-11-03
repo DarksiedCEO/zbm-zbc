@@ -702,9 +702,12 @@ class ColdChildContract(unittest.TestCase):
         put(self.h.COLD_PARENT, "CHILD='cold_tests::held_blocking_child'\nARGS=['--ignored','--exact']\n" +
             "\n".join("def " + name + "(): pass" for name in sorted(self.h.COLD_METHODS)))
         put(".github/workflows/ci.yml", "      - name: Native Ledger shutdown parent regression\n"
-            "        run: |\n          set -euo pipefail\n"
+            "        run: |\n          set +e\n"
             "          python3 devtools/hygiene_check.py run --suite python:cold-ledger-shutdown --kind pytest "
-            "--allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -p no:cacheprovider " + self.h.COLD_PARENT + "\n")
+            "--allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -p no:cacheprovider " + self.h.COLD_PARENT + ' 2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"\n'
+            '          code=${PIPESTATUS[0]}\n'
+            '          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"\n'
+            '          exit "$code"\n')
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -738,6 +741,9 @@ class ColdChildContract(unittest.TestCase):
         original = path.read_text()
         for injection in ("        if: false\n", "        continue-on-error: true\n"):
             path.write_text(original.replace("        run:", injection + "        run:"))
+            self.assertTrue(self.h.cold_child_contract())
+        for required in ('set +e', 'code=${PIPESTATUS[0]}', 'exit "$code"', 'python3 devtools/ci_annotate.py'):
+            path.write_text(original.replace(required, '# removed required wiring'))
             self.assertTrue(self.h.cold_child_contract())
         for addition in (" --counts off", " || true"):
             path.write_text(original + addition)
