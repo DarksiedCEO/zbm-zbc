@@ -916,7 +916,8 @@ jobs:
             --suite "devtools:test_deploy_config"
           exit "$code"
       - name: Install the cold runtime pinned dependencies for offline tests
-        run: python -m pip install --require-hashes --no-deps --only-binary=:all: -r deploy/python/requirements.lock.txt
+        run: |
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r deploy/python/requirements.lock.txt
       - name: Cold backup restart and bounded archive regressions
         run: python -B -m unittest discover -s devtools/cold_tests -p 'test_*.py' -v
 
