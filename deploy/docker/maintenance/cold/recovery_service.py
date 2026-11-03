@@ -52,20 +52,23 @@ class Service:
  def is_open(self):
   with self.lock:return self.state=='OPEN' and not self.stopped and self.co is not None
  def dispatch(self,path,body):
+  # Never hold the service mutex across coordinator calls: an owner may need
+  # a permit callback while the coordinator is waiting for that same owner.
   with self.lock:
    if path=='/status' and body=={'kind':'recovery_status'}:return self.status()
-   if path=='/status' and body.get('kind')=='recovery-bootstrap-permit' and self.state=='RUNNING' and self.co is not None:
-    return self.co.catalog_status(path,body)
+   delegate=(path=='/status' and body.get('kind')=='recovery-bootstrap-permit' and self.state=='RUNNING' and self.co is not None)
    if path!='/submit' or body.get('kind')!='recover':
-    if self.state=='OPEN' and self.co is not None:return self.co.catalog_status(path,body)
-    raise Refused('fixed recovery control')
-   value=request(body);identity=hashlib.sha256(canonical(value)).hexdigest()
-   if self.identity is not None:
-    if identity!=self.identity:raise Refused('immutable recovery selection')
-    return self.status()
-   if self.state!='WAIT' or self.stopped:raise Refused('recovery restart unresolved')
-   immutable(self.root/'recovery-selection.json',value);self.value=value;self.identity=identity;self.state='RUNNING'
-   self.worker=threading.Thread(target=self.work,name='fixed-recovery-run',daemon=False);self.worker.start();return self.status()
+    if not delegate and not (self.state=='OPEN' and self.co is not None):raise Refused('fixed recovery control')
+    co=self.co
+   else:
+    value=request(body);identity=hashlib.sha256(canonical(value)).hexdigest()
+    if self.identity is not None:
+     if identity!=self.identity:raise Refused('immutable recovery selection')
+     return self.status()
+    if self.state!='WAIT' or self.stopped:raise Refused('recovery restart unresolved')
+    immutable(self.root/'recovery-selection.json',value);self.value=value;self.identity=identity;self.state='RUNNING'
+    self.worker=threading.Thread(target=self.work,name='fixed-recovery-run',daemon=False);self.worker.start();return self.status()
+  return co.catalog_status(path,body)
  def command_value(self):
   return {'schema':'fixed-application-recovery-v1','coordination_token':self.cfg['token'],'stripe_key':self.cfg['stripe_key'],'scope':self.value['scope'],'restore':{'schema':'fixed-b2-data-restore-v1','selection':self.value['selection'],'password':self.cfg['password'],'credentials':{'key_id':self.cfg['credentials']['key_id'],'application_key':self.cfg['credentials']['key']}}}
  def fail(self):
