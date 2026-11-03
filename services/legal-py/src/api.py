@@ -22,6 +22,9 @@ Legal returns no free-text answers: every response is records, dates, statuses, 
 
 from __future__ import annotations
 
+from startup_profile import existing_store_profile
+existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
+
 import asyncio
 import hashlib
 import hmac
@@ -834,8 +837,9 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
 
 
 def _app_from_env() -> FastAPI:
+    existing = existing_store_profile()
     settings = config_mod.load()
-    return create_app(build_service(settings), settings)
+    return create_app(build_service(settings, require_existing_seed=existing), settings)
 
 
 app = _app_from_env()

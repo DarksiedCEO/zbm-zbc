@@ -1,0 +1,46 @@
+# Cold backup: first-client rollout boundary
+
+This package is disabled by default. Merging code does not activate backups or authorize deployment. Activation requires a separately approved platform rehearsal, measured sizing/costs, actual alert delivery and supervised remote restore. Normal application Docker images remain non-root; the optional supervisor wrapper is explicit and must be built from the exact approved base image digest.
+
+## Fixed sequence
+
+Close ingress with503 and Retry-After. Stop the fixed application writers normally and acquire exclusive store locks. Capture and verify all five encrypted local repositories. Restart existing stores behind readiness checks, then reopen. Upload immutable sealed copies after reopening; verify each exact remote snapshot and the complete catalog before removing any local copy. Upload failure retains the copies, alerts, marks the backup failed, and leaves recovered business admission open.
+
+The five members are Ledger, Finance, Legal, Compliance and SEO. The fixed B2 bucket is zbm-zbc-backups-20261101 in us-west-004; member repositories and the catalog use restic/. A single existing scoped B2 key is used. No SSH credential, Railway login token or B2 master key is consumed by the backup runtime.
+
+## Roles and custody
+
+Each owner stays alive inside its own container and accesses its own single volume. Its fixed child runs uid/gid10001 with capabilities removed, a dedicated process group and a filtered environment. Existing application secrets are materialized by the existing entrypoint; backup credentials are never passed into application children. The coordinator runs the all-five sequence. The observer retains schedule completion, missed-run and bounded alert state on its own persistent volume. A Railway scheduled trigger submits only the current due identity; it does not export data and has no B2/Restic/Resend credentials.
+
+`BACKUP_LAUNCH_ENABLED` defaults to0. `BACKUP_RECOVERY_MODE` also defaults to0; only explicit1 selects fresh-volume member recovery before normal owner startup. A retained or nonempty original store is never overwritten by recovery. Explicit owner configuration includes `BACKUP_MEMBER`, `BACKUP_VOLUME=/volume`, dedicated `BACKUP_COORD_TOKEN`, `BACKUP_RESTIC_PASSWORD`, `BACKUP_B2_KEY_ID` and `BACKUP_B2_APPLICATION_KEY`. Applications retain their own distinct authentication settings. The coordinator has the same dedicated coordination token and scoped backup credentials. The observer has the coordination token, `BACKUP_FIRST_DUE_UTC_SECONDS`, explicit `BACKUP_ALERTS_ENABLED=1`, `BACKUP_ALERT_FROM` on zbestmedia.com and `BACKUP_RESEND_API_KEY`. The trigger receives only coordination authorization. Values must never appear in argv, chat or source control.
+
+andre@zbestmedia.com is the primary alert destination. hello@zbestmedia.com is a same-inbox copy, not an independent fallback. A provider-accepted message is not proof that a human received it; the supervised sitting must observe actual inbox delivery.
+
+## Finite incidents and recovery
+
+Four fixed incident archive slots retain the original evidence. They are never evicted automatically. When full, stop further maintenance that requires an archive and queue the existing full-capacity alert. Unknown ownership or an interrupted repair remains closed and requires supported exact-backup recovery; there is no generic reset, force-unlock or supplied healthy flag. An upload-only failure after successful reopen is different: keep business open and preserve its sealed copies.
+
+Supported operator commands inspect authenticated current state and bind the original incident. `rearm-idle` is limited to a completed, retired backup with an unchanged next due and at least one changed owner boot; it never adopts an old PID. Uncertain or unsupported rearm falls back to restore. `retry-upload`, `finish-cleanup`, `recover-catalog`, `finish-advance` and `finish-repaired-run` are limited to their exact retained evidence. A failed command is not permission to hand-edit journals.
+
+The existing maintenance image also supports an operator job on the same private network: `/opt/venv/bin/python -I -B /opt/zbm-maintenance/admin_launcher.py repair COMMAND`, where COMMAND is one of the exact supported commands above (or `inspect`, `resume-originals`, `resume-sealed`). It uses only the dedicated coordination token already supplied to that role and the fixed `coordinator.railway.internal:27002` destination. Provider credentials on this operator role are refused. It performs the command's own evidence checks and exits; it does not depend on SSH, a Railway access token, an arbitrary URL or a forced state edit. Running or configuring this job in production still requires the founder's approval. The direct localhost repair CLI is for a process already on the coordinator host, not a claim that a Mac can reach Railway private networking.
+
+
+The fixed data restore consumes an exact retained catalog locator from outside the failed store, scoped credentials through bounded stdin, and fresh empty isolated destinations. It never guesses latest, overwrites originals, or uses local sealed copies as a substitute for remote retrieval. DATA_RESTORED_CLOSED is not permission to reopen. Application integrity, acceptance identity, interrupted SEO recovery and authoritative post-cutoff payment/refund reconciliation must finish first. Missing provider redeliveries or incomplete evidence keeps admission closed. No webhook signatures are fabricated to replay historical events.
+
+## Explicit fresh-volume recovery entry
+
+The existing maintenance image exposes `admin_launcher.py recover` only when explicitly enabled with the dedicated coordination token and the approved root supervisor profile. Its first bounded stdin frame supplies the exact catalog and recovery scope; credentials are not command-line arguments. The command binds the stdin coordination credential to the configured one. Each application owner must be explicitly booted with `BACKUP_RECOVERY_MODE=1` and its own fresh empty volume. That owner retrieves only its own selected remote member using its existing scoped backup credentials. The coordinator compares all five catalog/manifest receipts before starting applications; no container mounts another service's volume.
+
+This is a recovery procedure, not an automatic rollout toggle. Original stores and incident evidence remain untouched. The command must stay alive to own the readiness barrier after successful verification; killing it closes the local admission path. Native owner and observer lifetimes remain separate. A missing catalog, incomplete member, unsupported payment-history interval or unavailable signed provider replay keeps admission closed. A synthetic local provider is not proof of live B2, Stripe or inbox operation.
+
+## Bounds and deferred proof
+
+The current profile is a measured first-client local envelope, not a general production quota or SLA. Source, repository, control-directory and incident limits fail closed; filesystem/free-space checks do not replace platform capacity proof. Mac limit adjustments do not authorize Railway changes. Preserve an exact last-good catalog and cold application keys outside the lost store. Restore must refuse insufficient capacity, missing keys or unavailable/corrupt remote data.
+
+A current-size run and a day-30-sized dataset are not thirty daily backups. The platform rehearsal must prove volume topology, signal delivery, sole ingress, fresh-owner restart, installed trigger/alerts, actual memory usage and complete removal of the rehearsal environment. Weekly founder Caps & Alerts checks plus Backblaze75%/100% email alerts remain the accepted spend-control check; there is no automated master-key polling. All caps stay0, Event Notifications stay disabled, and no card is added by this code.
+
+## First-client recovery envelope
+
+The recovery command requires an explicit TEST or LIVE profile consistent with the supplied provider key, authenticated account and native Finance configuration. Local validation uses synthetic providers only. It derives the reconciliation interval from the authenticated Checkout Session creation time, never from a caller's later backup-cutoff annotation. It refuses a session outside the bounded29-day provider-history envelope. This is not a universal multi-month payment recovery claim; the founder must review this operating restriction before launch, and a broader recovery method is required before relying on older sessions.
+
+Completed audit recovery requires hash-bound report receipts. Safely terminal interrupted work must be proved by native application state; a caller-supplied healthy flag, ambiguous running work, missing evidence or invented completed report cannot open admission. No automatic rebilling or new paid audit is part of repair.

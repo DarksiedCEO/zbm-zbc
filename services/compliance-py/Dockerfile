@@ -33,7 +33,7 @@ RUN python -m venv /opt/venv \
 COPY deploy/docker/zbm-entrypoint.sh /usr/local/bin/zbm-entrypoint
 RUN chmod 0755 /usr/local/bin/zbm-entrypoint
 
-# Dormant maintenance launch package; no backup engine or enabled credentials.
+# Dormant maintenance package; no enabled credentials or automatic activation.
 COPY deploy/docker/maintenance/launcher.py deploy/docker/maintenance/backup_config.py deploy/docker/maintenance/app_env_names.json /opt/zbm-maintenance/
 RUN chown -R 0:0 /opt/zbm-maintenance \
     && chmod 0755 /opt/zbm-maintenance \
@@ -43,6 +43,16 @@ RUN chown -R 0:0 /opt/zbm-maintenance \
     && /usr/bin/setpriv --help > /tmp/zbm-setpriv-help \
     && for flag in reuid regid clear-groups no-new-privs bounding-set inh-caps ambient-caps; do grep -q -- "--$flag" /tmp/zbm-setpriv-help || exit 1; done \
     && rm /tmp/zbm-setpriv-help
+# Explicit cold owner package; startup never downloads executables.
+ARG TARGETARCH
+COPY deploy/docker/maintenance/cold /opt/zbm-maintenance/cold
+COPY deploy/docker/maintenance/cold_config.py deploy/docker/maintenance/application-prerequisites.json deploy/docker/maintenance/binary-manifest.json /opt/zbm-maintenance/
+COPY deploy/docker/maintenance/vendor /opt/zbm-maintenance/bin
+RUN test "$TARGETARCH" = amd64 && test "$(uname -m)" = x86_64 \
+    && echo "20d4142678d0d95ec11a4759def1b73fd9190abc9ca19e4b62d067c0b387e639  /opt/zbm-maintenance/bin/restic" | sha256sum -c - \
+    && chown -R 0:0 /opt/zbm-maintenance \
+    && chmod -R go-w /opt/zbm-maintenance \
+    && chmod 0755 /opt/zbm-maintenance/bin/restic
 ENV BACKUP_LAUNCH_ENABLED=0
 COPY services/compliance-py/src /app/services/compliance-py/src
 COPY services/compliance-py/seed /app/services/compliance-py/seed

@@ -16,6 +16,9 @@ bearer and caller blocks are bizdev-py's (itself service-py's / security-py's / 
 
 from __future__ import annotations
 
+from startup_profile import existing_store_profile
+existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
+
 import asyncio
 import hashlib
 import hmac
@@ -604,7 +607,8 @@ def build(env: Optional[dict] = None, *, observe_existing_on_start: bool = False
 
 def main() -> None:
     import serve
-    app, svc = build()
+    existing = existing_store_profile()
+    app, svc = build(observe_existing_on_start=existing)
     serve.run(app, svc.settings.bind_addr, svc.settings.port)
 
 

@@ -21,6 +21,7 @@ the check.
 | `python:bizdev-py` | 358 | pytest collection | — |
 | `python:client-portal-py` | 222 | pytest collection | — |
 | `python:clipper-network-py` | 432 | pytest collection | — |
+| `python:cold-ledger-shutdown` | 3 | pytest collection | — |
 | `python:compliance-py` | 816 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 738 | pytest collection | — |
@@ -36,4 +37,4 @@ the check.
 | `python:seo-py` | 1383 | pytest collection | — |
 | `python:service-py` | 815 | pytest collection | — |
 | `python:verification-py` | 350 | pytest collection | — |
-| `rust:ledger-rust` | 159 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |
+| `rust:ledger-rust` | 160 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

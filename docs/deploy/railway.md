@@ -1934,3 +1934,10 @@ resume primitives; they are not connected to a backup trigger. SEO's observation
 without repairing or writing application state. No new HTTP permission or coordination bypass is added.
 Repository tests cover these primitives; production backup scheduling and safe global coordination remain separate
 unfinished work. Do not enable the launcher merely because image builds or application health checks succeed.
+
+
+### Dormant cold-backup application profile
+
+`ZBM_STARTUP_PROFILE` is an internal owner-supplied startup selector on Finance, Legal, Compliance and SEO. Unset or `normal` preserves normal startup. `existing-store` requires the original application seed/state and refuses missing seed data instead of silently recreating it; unsupported values refuse startup. Do not configure this manually on production services. The disabled cold owner sets it for its fixed child only after validating the reviewed volume and application package.
+
+The staged cold package is AMD64-only, uses a pinned Restic executable, and remains `BACKUP_LAUNCH_ENABLED=0`. It creates no Railway services or schedule. Activating supervisor images, routing all public ingress through the coordinator, adding volumes/variables and deploying remain separate approved rollout steps. Ordinary service Dockerfiles stay uid/gid10001; the optional supervisor wrapper is a separate explicit root profile.

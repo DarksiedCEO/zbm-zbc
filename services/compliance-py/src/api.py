@@ -21,6 +21,9 @@ Same discipline as services/onboarding-py and services/creative-py:
 
 from __future__ import annotations
 
+from startup_profile import existing_store_profile
+existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
+
 import asyncio
 import hashlib
 import hmac
@@ -652,9 +655,11 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
 
 
 def _app_from_env() -> FastAPI:
+    existing = existing_store_profile()
     settings = config_mod.load()
-    application = create_app(build_service(settings), settings)
+    application = create_app(build_service(settings, require_existing_seed=existing), settings)
     application.state.settings = settings
+    application.state.startup_existing_store = existing
     return application
 
 
@@ -685,7 +690,7 @@ def main() -> None:
     # ADR 0024: the operator sees, at every start, exactly which rules are expired and which gates they affect
     for line in readiness_mod.summary_lines(svc.readiness()):
         print(line, flush=True)
-    start_scheduler(svc, settings)
+    start_scheduler(svc, settings, startup_paused=app.state.startup_existing_store)
     host = os.environ.get("COMPLIANCE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("COMPLIANCE_PORT", "8380"))
     serve.run(app, host=host, port=port)

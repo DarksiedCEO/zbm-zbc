@@ -589,7 +589,9 @@ class CiAndSmoke(unittest.TestCase):
         smoke = SMOKE.read_text()
         for svc, (df, _pv, port, name, _v) in SERVICES.items():
             with self.subTest(service=svc):
-                self.assertIn(f"docker build -f {df} -t zbm-ci/{name}:ci .", ci)
+                cold = svc in {"ledger", "finance", "legal", "compliance", "seo"}
+                flags = " --platform linux/amd64 --build-arg TARGETARCH=amd64" if cold else ""
+                self.assertIn(f"docker build{flags} -f {df} -t zbm-ci/{name}:ci .", ci)
                 self.assertRegex(smoke, rf'"{re.escape(name)}": \({port}, ')
         self.assertIn("      - railway-images\n", ci.split("  required:", 1)[1])
 
@@ -610,8 +612,8 @@ class VariableScan(unittest.TestCase):
     def test_no_python_service_reads_a_variable_outside_its_prefixes_unseen(self):
         """Every upper-case name a Python service reads in an environment-read position is either under the
         service's scanned prefixes or listed here, so a new prefix cannot slip past this file unnoticed."""
-        outside_prefixes = {"detection-py": set(), "finance-py": set(), "legal-py": set(), "seo-py": set(),
-                            "compliance-py": set(), "client-portal-py": set()}
+        outside_prefixes = {"detection-py": set(), "finance-py": {"ZBM_STARTUP_PROFILE"}, "legal-py": {"ZBM_STARTUP_PROFILE"}, "seo-py": {"ZBM_STARTUP_PROFILE"},
+                            "compliance-py": {"ZBM_STARTUP_PROFILE"}, "client-portal-py": set()}
         for svc, prefixes in PY_SERVICES.items():
             found = set()
             for p in (REPO / "services" / svc / "src").rglob("*.py"):

@@ -685,5 +685,64 @@ class Static(unittest.TestCase):
         self.assertNotIn("services/c-py/src/zbm_c/launch_guard.py", out)
 
 
+class ColdChildContract(unittest.TestCase):
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cold_hygiene", HERE / "hygiene_check.py")
+        self.h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.h)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.h.REPO = self.root
+        def put(name, text):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        put("services/ledger-rust/src/bin/server.rs", "mod cold_tests { #[test] #[ignore] fn held_blocking_child() {} }")
+        put(self.h.COLD_PARENT, "CHILD='cold_tests::held_blocking_child'\nARGS=['--ignored','--exact']\n" +
+            "\n".join("def " + name + "(): pass" for name in sorted(self.h.COLD_METHODS)))
+        put(".github/workflows/ci.yml", "      - name: Native Ledger shutdown parent regression\n"
+            "        run: |\n          set -euo pipefail\n"
+            "          python3 devtools/hygiene_check.py run --suite python:cold-ledger-shutdown --kind pytest "
+            "--allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -p no:cacheprovider " + self.h.COLD_PARENT + "\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def output(self, name):
+        return f"test {name} ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored\n"
+
+    def test_exact_named_child_requires_mandatory_parent(self):
+        self.assertEqual(self.h.cold_child_contract(), [])
+        skip = self.h._skips_from_output("cargo", self.output(self.h.COLD_CHILD))[0]
+        self.assertTrue(self.h.orchestrated_ignore("rust:ledger-rust", skip))
+        self.assertFalse(self.h.orchestrated_ignore("rust:other", skip))
+        (self.root / self.h.COLD_PARENT).unlink()
+        self.assertFalse(self.h.orchestrated_ignore("rust:ledger-rust", skip))
+
+    def test_unrelated_aggregate_duplicate_ignores_are_not_exempt(self):
+        outputs = [self.output("unrelated"), "test result: ok. 0 passed; 0 failed; 1 ignored\n",
+                   self.output(self.h.COLD_CHILD) * 2]
+        for output in outputs:
+            skips = self.h._skips_from_output("cargo", output)
+            self.assertTrue(skips)
+            self.assertTrue(all(not self.h.orchestrated_ignore("rust:ledger-rust", x) for x in skips))
+
+    def test_missing_parent_method_refused(self):
+        path = self.root / self.h.COLD_PARENT
+        path.write_text(path.read_text().replace("test_timeout_unknown_and_queued_job", "not_a_test"))
+        self.assertTrue(self.h.cold_child_contract())
+
+    def test_optional_or_uncounted_ci_refused(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text()
+        for injection in ("        if: false\n", "        continue-on-error: true\n"):
+            path.write_text(original.replace("        run:", injection + "        run:"))
+            self.assertTrue(self.h.cold_child_contract())
+        for addition in (" --counts off", " || true"):
+            path.write_text(original + addition)
+            self.assertTrue(self.h.cold_child_contract())
+
+
 if __name__ == "__main__":
     unittest.main()
