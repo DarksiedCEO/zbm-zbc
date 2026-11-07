@@ -4,6 +4,7 @@ from pathlib import Path
 from owner_wire import Server,Client,canonical,decode,Refused,MEMBERS
 from cold_front import Front
 from coordinator_repair import exclusive
+from capacity_policy import configured,fingerprint
 START=('ledger','legal','compliance','finance','seo');STOP=('seo','finance','compliance','legal','ledger')
 class Coordinator:
  def __init__(self,root,token,password,*,recover=False,transport_credentials=None,run_id=None,serve_control=True):
@@ -47,6 +48,7 @@ class Coordinator:
   value=copy.deepcopy(self.doc);value.update(fields);self.save(value);self.doc=value
  def status(self,m,op=None):
   v=self.clients[m].call('/status',{'member':m,'boot':self.doc['boots'].get(m,'discover'),'operation':op})
+  if configured() and v.get('capacity_policy_sha256')!=fingerprint():raise Refused('owner capacity policy mismatch')
   if v.get('member')!=m or v.get('fenced')is not False:raise Refused('owner '+m+' uncertain: '+str(v.get('failure','unavailable'))[:80])
   if m in self.doc['boots'] and v.get('boot')!=self.doc['boots'][m]:raise Refused('owner boot changed')
   return v

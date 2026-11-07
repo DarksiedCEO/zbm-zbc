@@ -7,12 +7,25 @@ import fcntl,hashlib,json,os,re,stat
 from pathlib import Path
 from bounded_process import Budget,run_fixed
 from member_limits import limits
+from capacity_policy import spool_bytes,output_bytes
 class Refused(RuntimeError):pass
 MEMBERS=('ledger','finance','legal','compliance','seo')
 BINARY=Path('/opt/zbm-maintenance/bin/restic')
 BINARY_SHA='20d4142678d0d95ec11a4759def1b73fd9190abc9ca19e4b62d067c0b387e639'
 BASE='s3:https://s3.us-west-004.backblazeb2.com/zbm-zbc-backups-20261101/restic/sets/'
 MIB=1048576
+
+def operational_command(repo,args):
+ """Operational backups never access preservation or perform remote retention.
+
+ Local archive-slot retirement is separate. Any future remote retention policy
+ requires a separate reviewed boundary; this one refuses deletion everywhere.
+ """
+ prefix=BASE.removesuffix('sets/')
+ pattern=re.escape(prefix)+r'(?:sets/cold-[0-9a-f]{32}/(?:'+ '|'.join(MEMBERS)+r')|catalog/cold-[0-9a-f]{32})'
+ if not isinstance(repo,str) or re.fullmatch(pattern,repo) is None:raise Refused('OPERATIONAL_REPOSITORY_ONLY')
+ if not args or args[0] not in ('init','copy','snapshots','check','ls','dump','backup','restore'):raise Refused('REMOTE_RETENTION_FORBIDDEN')
+ if any(str(x).split('=',1)[0] in ('-r','--repo','--repository-file') or (str(x).startswith('-r') and not str(x).startswith('--') and len(str(x))>2) for x in args[1:]):raise Refused('REPOSITORY_OVERRIDE_FORBIDDEN')
 
 def canonical(v):return json.dumps(v,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
 def digest(v):return hashlib.sha256(canonical(v)).hexdigest()
@@ -75,7 +88,7 @@ def spool_guard(root):
    st=(Path(base)/name).lstat();count+=1
    if count>4096 or not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):raise Refused('SPOOL_ENTRY_BOUND')
    if stat.S_ISREG(st.st_mode):size+=st.st_size
-   if size>24*MIB:raise Refused('SPOOL_BYTE_BOUND')
+   if size>spool_bytes():raise Refused('SPOOL_BYTE_BOUND')
  fs=os.statvfs(root)
  if fs.f_bavail*fs.f_frsize<2*MIB or fs.f_favail<128:raise Refused('LOCAL_HEADROOM')
 
@@ -108,6 +121,7 @@ class Adapter:
    finally:os.close(d)
   except BaseException:raise Refused('STATE_UNCERTAIN') from None
  def command(self,*args):
+  operational_command(self.remote,args)
   spool_guard(self.root)
   out=run_fixed([str(BINARY),'--no-cache','-r',self.remote,*args],env=self.env,cwd=self.root,budget=self.budget,output_limit=self.profile['source'] if args and args[0]=='dump' else MIB)
   spool_guard(self.root)
@@ -140,7 +154,7 @@ class Adapter:
    scratch=self.root/'transfer-scratch';scratch.mkdir(mode=0o700,exist_ok=False)
    fs=os.statvfs(self.root)
    if fs.f_bavail*fs.f_frsize<2*MIB or fs.f_favail<128:raise Refused('LOCAL_HEADROOM')
-   self.budget=Budget.start(seconds=120,commands=40,output_bytes=8*MIB)
+   self.budget=Budget.start(seconds=120,commands=40,output_bytes=output_bytes(self.member))
    self.save('PENDING') # durable before any remote effect; restart never replays
    try:
     self.command('init')

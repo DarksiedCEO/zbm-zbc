@@ -2,6 +2,7 @@
 import fcntl,os,shutil,time
 from pathlib import Path
 import b2_adapter as b
+from capacity_policy import output_bytes
 CATBASE=b.BASE.replace('/restic/sets/','/restic/catalog/')
 class Catalog:
  def __init__(self,root,seals,receipts,*,key_id,key,password):
@@ -46,10 +47,11 @@ class Catalog:
   scratch=self.root/'transfer-scratch'
   if scratch.is_symlink():raise b.Refused('SCRATCH_PATH')
   scratch.mkdir(mode=0o700,exist_ok=True)
-  self.budget=b.Budget.start(seconds=120,commands=64,output_bytes=8*b.MIB)
+  self.budget=b.Budget.start(seconds=120,commands=64,output_bytes=output_bytes())
  def adapter(self,m):
   a=b.Adapter(self.root,self.seals[m],**self.credentials);a.budget=self.budget;return a
  def catcommand(self,*args,cwd=None):
+  b.operational_command(self.remote,args)
   a=self.adapter('ledger');a.remote=self.remote
   if cwd is None:return a.command(*args)
   b.spool_guard(self.root)

@@ -14,6 +14,11 @@ def configuration(env,argv):
  result={'role':role,'token':token}
  if role=='repair':result['command']=argv[1]
  if role in ('coordinator','recover'):
+  from capacity_policy import parse
+  policy=parse(env.get('BACKUP_CAPACITY_POLICY'))
+  if role=='recover':
+   from capacity_policy import require_application_recovery
+   require_application_recovery(policy)
   pw=env.get('BACKUP_RESTIC_PASSWORD','');kid=env.get('BACKUP_B2_KEY_ID','');key=env.get('BACKUP_B2_APPLICATION_KEY','')
   if any(not 1<=len(v)<=4096 or any(ord(c)<33 or ord(c)>126 for c in v) for v in (pw,kid,key)) or len({token,pw,kid,key})!=4:raise Refused('distinct supervisor credentials required')
   result.update(password=pw,credentials={'key_id':kid,'key':key})
@@ -44,6 +49,9 @@ def volume():
 def main(env=None,argv=None):
  env=dict(os.environ if env is None else env);argv=sys.argv[1:] if argv is None else argv
  c=configuration(env,argv)
+ if c['role'] in ('coordinator','recover'):
+  from capacity_policy import initialize
+  initialize(env,required=True)
  from owner_wire import Client
  if c['role']=='recover':
   if os.getuid()!=0:raise Refused('explicit supervisor root profile required')

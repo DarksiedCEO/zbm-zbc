@@ -3,6 +3,7 @@ import os,sys,json,secrets,time,threading,subprocess,signal,http.client,hashlib,
 from pathlib import Path
 from owner_wire import Client,Server,canonical,decode,Refused,MEMBERS,keycheck
 from owner_state import Journal
+from capacity_policy import capture_bytes,fingerprint
 from clean_receipt import python_receipt,ledger_receipt
 from cold_front import Front
 from cold_capture import source_inventory
@@ -30,8 +31,8 @@ class Owner:
   self.member=config['member']
   if self.member not in MEMBERS:raise Refused('member')
   self.boot=secrets.token_hex(16);self.mutex=threading.RLock();self.worker=None;self.child=None;self.guard=None;self.front=None;self.phase='CLOSED';self.seq=0;self.fenced=False
-  from volume_layout import Layout
-  self.layout=Layout('/volume',self.member);self.root=self.layout.control;self.source=self.layout.source
+  from volume_layout import Layout,member_root
+  self.layout=Layout(member_root(self.member,config['app_env']),self.member);self.root=self.layout.control;self.source=self.layout.source
   self.journal=Journal(self.root/'owner-state.json',self.member,self.boot)
   self.password=config['backup_password'];self.token=config['coord_token'];self.transport_credentials=dict(config['transport_credentials'])
   if not isinstance(self.password,str) or not 32<=len(self.password)<=128:raise Refused('backup credential shape')
@@ -207,7 +208,7 @@ class Owner:
    with self.front.cv:self.front.opened=False
   if self.guard is not None:self.guard_identity()
   resources={n:(Path('/sys/fs/cgroup')/n).read_text() for n in ('memory.current','memory.peak','memory.events','memory.swap.current','pids.current','pids.events') if (Path('/sys/fs/cgroup')/n).exists()}
-  return {'relay':{'mode':self.relay_mode,'active':self.relay.active,'unknown':self.relay.unknown,'counts':dict(self.relay.counts)},'backup_failure':getattr(self,'backup_failure',None),'last_success':self.journal.doc.get('last_success'),'failure':getattr(self,'failure',None),'resources':resources,'member':self.member,'boot':self.boot,'phase':self.phase,'run':self.journal.doc['run'],'child_pid':self.child.pid if self.child else None,'fenced':self.fenced or self.journal.recovered,'operations':{k:{kk:vv for kk,vv in v.items() if kk!='receipt' or k==operation} for k,v in self.visible_operations().items()}}
+  return {'capacity_policy_sha256':fingerprint(),'relay':{'mode':self.relay_mode,'active':self.relay.active,'unknown':self.relay.unknown,'counts':dict(self.relay.counts)},'backup_failure':getattr(self,'backup_failure',None),'last_success':self.journal.doc.get('last_success'),'failure':getattr(self,'failure',None),'resources':resources,'member':self.member,'boot':self.boot,'phase':self.phase,'run':self.journal.doc['run'],'child_pid':self.child.pid if self.child else None,'fenced':self.fenced or self.journal.recovered,'operations':{k:{kk:vv for kk,vv in v.items() if kk!='receipt' or k==operation} for k,v in self.visible_operations().items()}}
  def visible_operations(self):
   ops=dict(self.journal.doc['operations']);old=self.journal.doc.get('last_retirement')
   if old:ops[old['operation']]=old['record']
@@ -266,7 +267,7 @@ class Owner:
      from quota_capture import preflight
      preflight(self.layout.backup,{'member':self.member,'set_id':'cold-'+'0'*32,'files':inventory})
      entries=list(self.layout.backup.rglob('*'))
-     if any(p.is_symlink() for p in entries) or len(entries)>8192 or sum(p.stat().st_size for p in entries if p.is_file())>8*1048576:raise Refused('retained two-cycle backup envelope')
+     if any(p.is_symlink() for p in entries) or len(entries)>8192 or sum(p.stat().st_size for p in entries if p.is_file())>capture_bytes(self.member):raise Refused('retained two-cycle backup envelope')
      if fs.f_bavail*fs.f_frsize<4*1048576 or fs.f_favail<512:raise Refused('backup headroom')
      result=self.view(body.get('operation'));result['capacity']={'source_bytes':sum(x['bytes'] for x in inventory.values()),'source_files':len(inventory),'available_bytes':fs.f_bavail*fs.f_frsize,'available_inodes':fs.f_favail};return result
     result=self.view(body.get('operation'));result['quota_proof']=getattr(self,'quota_proof',None);return result

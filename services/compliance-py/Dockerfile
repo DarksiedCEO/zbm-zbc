@@ -57,6 +57,12 @@ ENV BACKUP_LAUNCH_ENABLED=0
 COPY services/compliance-py/src /app/services/compliance-py/src
 COPY services/compliance-py/seed /app/services/compliance-py/seed
 
+# Dormant one-shot pre-supervisor commissioning; default entrypoint is unchanged.
+COPY deploy/gate5/compliance_commission.py /app/deploy/gate5/compliance_commission.py
+RUN chown 0:0 /app/deploy/gate5/compliance_commission.py \
+    && chmod 0644 /app/deploy/gate5/compliance_commission.py \
+    && /opt/venv/bin/python -I -B -c 'from pathlib import Path; p=Path("/app/deploy/gate5/compliance_commission.py"); assert (p.resolve().parents[2]/"services/compliance-py/seed/compliance_obligations_seed.json").is_file(); compile(p.read_text(), str(p), "exec")'
+
 WORKDIR /app/services/compliance-py/src
 ENV COMPLIANCE_DATA_DIR=/data/compliance
 USER 10001:10001

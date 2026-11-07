@@ -930,6 +930,25 @@ jobs:
           python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-backup.log" --code "$code" --suite "python:cold-backup"
           exit "$code"
 
+      - name: Gate 5 offline wiring, custody, commissioning and report regressions
+        shell: bash
+        run: |
+          set +e
+          python -B -m unittest discover -s devtools/gate5_tests -p '*.py' -v 2>&1 | tee "$RUNNER_TEMP/gate5.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/gate5.log" --code "$code" --suite "python:gate5"
+          exit "$code"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+      - name: Gate 5 conservation and pinned SDK binding (no provider operations)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix .railway --ignore-scripts --no-audit --no-fund
+          node devtools/gate5_tests/project_assembly_test.mjs
+          node devtools/gate5_tests/binding_sdk_test.mjs "$GITHUB_WORKSPACE/.railway/node_modules/railway"
+
       - name: The LEDGER_CALLERS generator refuses bad tokens and pins each caller's grant (devtools/ledger_callers.py)
         shell: bash
         run: |

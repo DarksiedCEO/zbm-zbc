@@ -3,6 +3,7 @@ import os,fcntl,shutil
 from pathlib import Path
 import b2_adapter as b
 from b2_catalog import CATBASE
+from capacity_policy import output_bytes
 
 def preflight_catalog(seals,run):
  if not isinstance(seals,dict) or set(seals)!=set(b.MEMBERS):raise b.Refused('FIVE_SEALS_REQUIRED')
@@ -47,10 +48,10 @@ class Transfer:
  def verify_remote(self,upload):
   require_member(upload,self.seal['set_id'],self.seal['member'])
   if upload['seal_sha256']!=b.digest(self.seal) or upload['manifest_sha256']!=b.digest(self.seal['manifest']) or upload['source_snapshot']!=self.seal['snapshot']:raise b.Refused('OWN_UPLOAD_BINDING')
-  b.verify_binary();self.adapter.budget=b.Budget.start(seconds=90,commands=40,output_bytes=8*b.MIB);self.adapter.verify(upload['snapshot']);return upload
+  b.verify_binary();self.adapter.budget=b.Budget.start(seconds=90,commands=40,output_bytes=output_bytes(self.seal['member']));self.adapter.verify(upload['snapshot']);return upload
  def fresh(self,upload,proof):
   loc=require_proof(proof,self.seal,upload);b.verify_binary()
-  a=self.adapter;a.budget=b.Budget.start(seconds=90,commands=40,output_bytes=8*b.MIB);old=a.remote;a.remote=CATBASE+self.seal['set_id']
+  a=self.adapter;a.budget=b.Budget.start(seconds=90,commands=40,output_bytes=output_bytes(self.seal['member']));old=a.remote;a.remote=CATBASE+self.seal['set_id']
   try:
    a.command('check','--read-data')
    rows=[b.decode(x) for x in a.command('ls','--json',loc['snapshot']).splitlines()]

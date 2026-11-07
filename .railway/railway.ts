@@ -6,10 +6,10 @@
 // This is its replacement, applied by the Railway CLI (`railway config plan`, then `railway config apply`); a git
 // push alone does not apply it. The SDK version is pinned in .railway/package.json.
 //
-// Secrets: every secret is `preserve()` — declared here so a plan never deletes it, its value set once in the
-// Railway dashboard and kept there. A value used by two services is set on ONE service and referenced by the other
-// (`finance.env.FIN_SERVICE_TOKEN`), or interpolated with Railway's `${{service.VARIABLE}}` syntax inside a JSON map.
-// Never use ctx.randomString for a secret: it is a hash of the environment name and a label, not random.
+// Secrets and caller JSON maps are direct service-local copies, declared preserve().
+// Matching copies are provisioned securely outside IaC and can be sealed independently.
+// References are for non-secret URLs only; never interpolate secrets or caller maps.
+// Never use ctx.randomString for a secret: it is not a credential generator.
 import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
 import type { ServiceNode, VolumeConfig, VolumeMount } from "railway/iac";
 
@@ -42,19 +42,17 @@ const deploy = (healthcheckPath: string, withVolume: boolean) => ({
   ...(withVolume ? { requiredMountPath: "/data" } : {}),
 });
 
-// Daily backups of every volume (AEGIS L6). The SDK's field is `backupSchedules` on a service's volume attachment
-// (railway 3.13.1 .d.ts: `VolumeMount["backupSchedules"]`, `Array<"DAILY" | "WEEKLY" | "MONTHLY">`, also typed on
-// `ServiceNode.volumeAttachments[name]`). service() builds the attachment from `volumeMounts: { "/data": vol }` but
-// takes no schedule there, so it is set on the attachment it built; a service passed here without a volume
-// attachment fails the evaluation rather than silently having no backup.
-const DAILY_BACKUPS: VolumeMount["backupSchedules"] = ["DAILY"];
+// Founder decision: no Railway platform backup schedules or plan upgrade.
+// An explicit empty SDK schedule removes schedules; omission may preserve stale ones.
+// Applying even this correction requires a reviewed live plan and separate approval.
+const NO_PLATFORM_BACKUPS: VolumeMount["backupSchedules"] = [];
 
 // The live data volumes as deployed (railway config plan, 2026-10-27). Changing either is a destructive volume change.
 const VOLUME_AS_DEPLOYED: VolumeConfig = { region: "us-west2", sizeMB: 5000 };
-const withDailyBackups = <T extends ServiceNode>(svc: T): T => {
+const withoutPlatformBackups = <T extends ServiceNode>(svc: T): T => {
   const attachments = Object.values(svc.volumeAttachments ?? {});
   if (attachments.length === 0) throw new Error(`${svc.name}: no volume attachment to give a backup schedule`);
-  for (const a of attachments) a.backupSchedules = DAILY_BACKUPS;
+  for (const a of attachments) a.backupSchedules = NO_PLATFORM_BACKUPS;
   return svc;
 };
 
@@ -73,7 +71,7 @@ export default defineRailway(() => {
   const complianceData = volume("compliance-data", VOLUME_AS_DEPLOYED);
 
   // ------------------------------------------------------------------------------------------------ ledger (first)
-  const ledger = withDailyBackups(service("ledger", {
+  const ledger = withoutPlatformBackups(service("ledger", {
     source: source(),
     build: dockerfile("services/ledger-rust/Dockerfile", ["services/ledger-rust/**"]),
     deploy: deploy("/health", true),
@@ -88,7 +86,7 @@ export default defineRailway(() => {
   }));
 
   // ------------------------------------------------------------------------------------------------ legal
-  const legal = withDailyBackups(service("legal", {
+  const legal = withoutPlatformBackups(service("legal", {
     source: source(),
     build: dockerfile("services/legal-py/Dockerfile", ["services/legal-py/**", "deploy/python/**"]),
     deploy: deploy("/health", true),
@@ -104,19 +102,16 @@ export default defineRailway(() => {
       LEGAL_ANDRE_APPROVAL_TOKEN: preserve(),
       // `onboarding`: Andre's operator-held token until an onboarding service exists (contract terms, obligations;
       // never a client's acceptance: ADR 0028); `client_portal`: the client acceptance page, which reaches only
-      // Legal's two portal routes (its value is set once, on client-portal); `${{VARIABLE}}` is Railway's same-service
-      // reference
-      LEGAL_CALLER_TOKENS:
-        '{"finance_31": "${{finance.FIN_LEGAL_CALLER_TOKEN}}", "onboarding": "${{LEGAL_ONBOARDING_CALLER_TOKEN}}", "compliance_38": "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}", "client_portal": "${{client-portal.PORTAL_LEGAL_CALLER_TOKEN}}"}',
+      // Legal's two portal routes). Provision matching direct values in the caller map.
+      LEGAL_CALLER_TOKENS: preserve(),
       LEGAL_ONBOARDING_CALLER_TOKEN: preserve(),
-      // ADR 0028, AEGIS r2 N-M1: tags client acceptance link tokens; client-portal reads it (a reference) to refuse
+      // ADR 0028: client-portal holds a matching direct copy to refuse
       // junk links without asking Legal. Unset: Legal runs and issues no link (503)
       LEGAL_LINK_TAG_KEY: preserve(),
       // ADR 0024: Legal delivers counsel-memo register proposals to Compliance (caller legal_37). Compliance's service
-      // token is set once, on compliance; Legal is declared before it (compliance reads Legal's token as code), so it
-      // takes it through Railway's own reference syntax
+      // token is copied directly to Legal; no secret references are used.
       LEGAL_COMPLIANCE_URL: PRIVATE("compliance", 8380),
-      LEGAL_COMPLIANCE_TOKEN: "${{compliance.COMPLIANCE_SERVICE_TOKEN}}",
+      LEGAL_COMPLIANCE_TOKEN: preserve(),
       LEGAL_COMPLIANCE_CALLER_TOKEN: preserve(),
     },
   }));
@@ -126,8 +121,8 @@ export default defineRailway(() => {
   // domain; Finance, SEO, detection and Legal reach it at compliance.railway.internal:8380. Its own scheduler runs the
   // internal controls every 6 h and the Change Watcher daily (in process: no `scheduler` token exists anywhere).
   // Every gate stays closed until control C-11 (evidence integrity) has passed. Declared after legal (it reads Legal's
-  // service token) and before detection, finance and seo (they read its service token).
-  const compliance = withDailyBackups(service("compliance", {
+  // service configuration) and before detection, finance and seo.
+  const compliance = withoutPlatformBackups(service("compliance", {
     source: source(),
     build: dockerfile("services/compliance-py/Dockerfile", ["services/compliance-py/**", "deploy/python/**"]),
     deploy: deploy("/health", true),
@@ -143,12 +138,11 @@ export default defineRailway(() => {
       COMPLIANCE_ANDRE_APPROVAL_TOKEN: preserve(),
       // `onboarding`: Andre's operator-held token until an onboarding service exists (runs a client's activation,
       // POST /compliance/v1/rule); the others are each caller's own variable on its own service
-      COMPLIANCE_CALLER_TOKENS:
-        '{"onboarding": "${{COMPLIANCE_ONBOARDING_CALLER_TOKEN}}", "finance_31": "${{finance.FIN_COMPLIANCE_CALLER_TOKEN}}", "legal_37": "${{legal.LEGAL_COMPLIANCE_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_COMPLIANCE_CALLER_TOKEN}}", "revenue_recovery": "${{detection.DETECTION_COMPLIANCE_CALLER_TOKEN}}"}',
+      COMPLIANCE_CALLER_TOKENS: preserve(),
       COMPLIANCE_ONBOARDING_CALLER_TOKEN: preserve(),
       // Legal (37): a client's documents are current and accepted (HR-15)
       COMPLIANCE_LEGAL_URL: PRIVATE("legal", 8420),
-      COMPLIANCE_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
+      COMPLIANCE_LEGAL_TOKEN: preserve(),
       COMPLIANCE_LEGAL_CALLER_TOKEN: preserve(),
       COMPLIANCE_SCHEDULER_ENABLED: "1",
       COMPLIANCE_WATCHER_ENABLED: "1",
@@ -181,13 +175,13 @@ export default defineRailway(() => {
       // ADR 0024: every store sync and every snapshot handed to the scan path needs Compliance's current ALLOW for the
       // client. Both tokens are written to files by the entrypoint (--secret-file in the image).
       DETECTION_COMPLIANCE_URL: PRIVATE("compliance", 8380),
-      DETECTION_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      DETECTION_COMPLIANCE_TOKEN: preserve(),
       DETECTION_COMPLIANCE_CALLER_TOKEN: preserve(), // detection's `revenue_recovery` caller token at Compliance
     },
   });
 
   // ------------------------------------------------------------------------------------------------ finance
-  const finance = withDailyBackups(service("finance", {
+  const finance = withoutPlatformBackups(service("finance", {
     source: source(),
     build: dockerfile("services/finance-py/Dockerfile", ["services/finance-py/**", "deploy/python/**"]),
     deploy: deploy("/health", true),
@@ -202,17 +196,16 @@ export default defineRailway(() => {
       FIN_SERVICE_TOKEN: preserve(),
       FIN_ANDRE_APPROVAL_TOKEN: preserve(),
       // `onboarding`: Andre's operator-held token until an onboarding service exists (drafts invoices,
-      // POST /fin/v1/invoices); `${{VARIABLE}}` is Railway's same-service reference
-      FIN_CALLER_TOKENS:
-        '{"rail_gateway": "${{stripe-gateway.STRIPE_GATEWAY_CALLER_TOKEN}}", "seo_02": "${{seo.SEO_FINANCE_CALLER_TOKEN}}", "onboarding": "${{FIN_ONBOARDING_CALLER_TOKEN}}"}',
+      // POST /fin/v1/invoices). Preserve the separately provisioned direct-value caller map.
+      FIN_CALLER_TOKENS: preserve(),
       FIN_ONBOARDING_CALLER_TOKEN: preserve(),
       FIN_LEGAL_URL: PRIVATE("legal", 8420),
-      FIN_LEGAL_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
+      FIN_LEGAL_TOKEN: preserve(),
       FIN_LEGAL_CALLER_TOKEN: preserve(),
       // ADR 0024: invoice approval, billing readiness and Stripe pages need Compliance's current ALLOW for the client;
       // payouts stay blocked by their other gates
       FIN_COMPLIANCE_URL: PRIVATE("compliance", 8380),
-      FIN_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      FIN_COMPLIANCE_TOKEN: preserve(),
       FIN_COMPLIANCE_CALLER_TOKEN: preserve(),
       FIN_STRIPE_INCOMING: "1",
       FIN_STRIPE_LIVE: "0", // test mode first; "1" only together with live keys (docs/deploy/railway.md, step 9)
@@ -236,7 +229,7 @@ export default defineRailway(() => {
       ORCHESTRATOR_BIND_ADDR: "[::]",
       ORCHESTRATOR_SERVICE_TOKEN: preserve(),
       DETECTION_SERVICE_URL: PRIVATE("detection", 8000),
-      DETECTION_SERVICE_TOKEN: detection.env.ZBM_SERVICE_TOKEN,
+      DETECTION_SERVICE_TOKEN: preserve(),
       LEDGER_SERVICE_URL: PRIVATE("ledger", 8090),
       LEDGER_SERVICE_TOKEN: preserve(), // the orchestrator's own ledger caller token
       // Public edge (ADR 0023): the client address is the X-Real-IP Railway's edge sets; the limits below are operator
@@ -262,7 +255,7 @@ export default defineRailway(() => {
       STRIPE_GATEWAY_ALLOW_RAILWAY_PRIVATE_HTTP: "1",
       // the opt-in reaches only http://<this name>.railway.internal[:port] (AEGIS L1): the finance service above
       STRIPE_GATEWAY_FINANCE_PRIVATE_NAME: "finance",
-      STRIPE_GATEWAY_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
+      STRIPE_GATEWAY_FINANCE_TOKEN: preserve(),
       STRIPE_GATEWAY_CALLER_TOKEN: preserve(),
       // Public edge (ADR 0023): Stripe source-IP allowlist ON by default (compiled-in list); the override, the kill
       // switch and the rate limits are operator settings set by hand in an incident, declared so an apply cannot
@@ -276,7 +269,7 @@ export default defineRailway(() => {
   });
 
   // ------------------------------------------------------------------------------------------------ seo
-  const seo = withDailyBackups(service("seo", {
+  const seo = withoutPlatformBackups(service("seo", {
     source: source(),
     build: dockerfile("services/seo-py/Dockerfile", ["services/seo-py/**", "deploy/python/**"]),
     deploy: deploy("/health", true),
@@ -296,12 +289,12 @@ export default defineRailway(() => {
       // Unset or empty = no file, Search Console NOT_CONNECTED (runbook, Secrets table).
       SEO_GSC_SERVICE_ACCOUNT: preserve(),
       SEO_FINANCE_URL: PRIVATE("finance", 8410),
-      SEO_FINANCE_TOKEN: finance.env.FIN_SERVICE_TOKEN,
+      SEO_FINANCE_TOKEN: preserve(),
       SEO_FINANCE_CALLER_TOKEN: preserve(),
       // ADR 0024: a client tenant's paid run, every scheduled slot and every client report need Compliance's current
       // ALLOW for the client (no override)
       SEO_COMPLIANCE_URL: PRIVATE("compliance", 8380),
-      SEO_COMPLIANCE_TOKEN: compliance.env.COMPLIANCE_SERVICE_TOKEN,
+      SEO_COMPLIANCE_TOKEN: preserve(),
       SEO_COMPLIANCE_CALLER_TOKEN: preserve(),
       // Set by hand in the dashboard (runbook, Secrets table): declared so a later apply cannot delete them. Unset or
       // 0 keeps the engine NOT_CONNECTED / OFF, exactly as before (seo-py config, ADR 0017 W4).
@@ -324,9 +317,9 @@ export default defineRailway(() => {
   // ------------------------------------------------------------------------------------------------ client-portal
   // ADR 0028: the client acceptance page. Public: Andre generates its Railway domain once (runbook, "Client acceptance
   // page (ADR 0028)") and sets PORTAL_PUBLIC_ORIGIN to it; nothing else of this project gains a domain. Stateless: no
-  // volume, no ledger; it holds Legal's service token (a reference), its own client_portal caller token at Legal and
+  // volume, no ledger; it holds Legal's service token (a direct copy), its own client_portal caller token at Legal and
   // its evidence key (HMAC of the client's IP address and user agent), and reaches Legal only, over the private network.
-  // Declared after legal (it reads Legal's service token).
+  // Matching tokens are provisioned directly before rollout.
   const clientPortal = service("client-portal", {
     source: source(),
     build: dockerfile("services/client-portal-py/Dockerfile", ["services/client-portal-py/**", "deploy/python/**"]),
@@ -335,10 +328,10 @@ export default defineRailway(() => {
       PORT: "8480",
       PORTAL_BIND_ADDR: "::",
       PORTAL_LEGAL_URL: PRIVATE("legal", 8420),
-      PORTAL_LEGAL_SERVICE_TOKEN: legal.env.LEGAL_SERVICE_TOKEN,
+      PORTAL_LEGAL_SERVICE_TOKEN: preserve(),
       PORTAL_LEGAL_CALLER_TOKEN: preserve(), // Legal's client_portal caller token (read by legal's LEGAL_CALLER_TOKENS map)
       PORTAL_EVIDENCE_KEY: preserve(), // HMAC key: client IP and user agent, form signatures; set once, rotate on suspicion
-      PORTAL_LINK_TAG_KEY: legal.env.LEGAL_LINK_TAG_KEY, // AEGIS r2 N-M1: refuse a link Legal did not mint, locally
+      PORTAL_LINK_TAG_KEY: preserve(), // AEGIS r2 N-M1: refuse a link Legal did not mint, locally
       PORTAL_PUBLIC_ORIGIN: preserve(), // https://<this service's Railway domain>, set by hand after the domain exists
       PORTAL_TRUSTED_PROXY_HOPS: "1", // Railway's edge adds the client to X-Forwarded-For (UNVERIFIED, runbook)
     },

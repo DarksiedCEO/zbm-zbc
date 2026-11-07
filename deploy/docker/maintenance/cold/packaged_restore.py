@@ -1,5 +1,5 @@
 """Explicit selected-catalog data restore only. Never starts or opens applications."""
-import sys,json,re,datetime,stat
+import sys,json,re,datetime,stat,os
 from pathlib import Path
 import remote_restore,restore_transport
 import b2_adapter as b
@@ -49,6 +49,8 @@ def main(stream=None,out=None,argv=None):
  stream=sys.stdin.buffer if stream is None else stream;out=sys.stdout if out is None else out;argv=sys.argv[1:] if argv is None else argv
  try:
   if argv:raise b.Refused('no argv configuration')
+  from capacity_policy import initialize
+  initialize(os.environ,required=True)
   value=read(stream);result=execute(value);out.write(json.dumps(result,sort_keys=True,separators=(',',':'))+'\n');return 0
  except Exception:out.write('RESTORE_REFUSED\n');return 2
 if __name__=='__main__':raise SystemExit(main())

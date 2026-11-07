@@ -45,17 +45,21 @@ class RestoreBoot:
    self.worker=threading.Thread(target=work,name='fixed-member-restore',daemon=False);self.worker.start();return {'state':'PENDING','operation':identity}
 
 def run(cfg):
+ from capacity_policy import require_loaded_application_recovery
+ require_loaded_application_recovery()
  from member_restore import restore_member
  from owner import Owner
  from cold_config import prerequisites
- from volume_layout import Layout
+ from volume_layout import Layout,member_root
  cfg=dict(cfg)
  if cfg.pop('recovery',None)is not True:raise Refused('explicit recovery boot required')
- layout=Layout('/volume',cfg['member'])
+ root=member_root(cfg['member'],cfg['app_env']);layout=Layout(root,cfg['member'])
+ def restore_here(member,password,credential,locator):
+  return restore_member(member,password,credential,locator,volume_root=str(root))
  fd=os.open(Path('/run/recovery-boot.lock'),os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
  fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);os.write(fd,b'recovery boot: interrupted state requires fresh destination\n');os.fsync(fd)
  front=Front({cfg['member']:27000},bind='0.0.0.0',port=27001)
- boot=RestoreBoot(cfg,restore=restore_member,construct=Owner,prerequisites=prerequisites,front=front)
+ boot=RestoreBoot(cfg,restore=restore_here,construct=Owner,prerequisites=prerequisites,front=front)
  server=Server(('0.0.0.0',27002),cfg['coord_token'],boot.dispatch)
  def stop(*_):raise KeyboardInterrupt
  signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)

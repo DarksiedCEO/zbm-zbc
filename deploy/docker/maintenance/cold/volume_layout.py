@@ -2,6 +2,16 @@
 import os
 from pathlib import Path
 MEMBERS=('ledger','finance','legal','compliance','seo','coordinator')
+PREFIX={'ledger':'LEDGER','finance':'FIN','legal':'LEGAL','compliance':'COMPLIANCE','seo':'SEO'}
+def member_root(member,app_env):
+ """Only the deployed /data layout or legacy synthetic /volume layout."""
+ if member not in PREFIX or not isinstance(app_env,dict):raise ValueError('fixed member source')
+ key=PREFIX[member]+('_LOG_PATH' if member=='ledger' else '_DATA_DIR')
+ suffix='/'+member+('/ledger.jsonl' if member=='ledger' else '')
+ source=app_env.get(key,'/volume'+suffix) # legacy direct fixture configuration
+ for root in ('/data','/volume'):
+  if source==root+suffix:return Path(root)
+ raise ValueError('fixed member source')
 class Layout:
  def __init__(self,root,member):
   self.root=Path(root)

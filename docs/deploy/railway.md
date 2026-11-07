@@ -1,3 +1,12 @@
+> Gate 5 correction: do not apply this historical rollout procedure verbatim. Current IaC
+> explicitly disables Railway platform backup schedules (no Pro upgrade), preserves all
+> secrets and caller JSON maps as direct service-local values, and keeps existing `/data`
+> mounts, `us-west2`, and 5000 MB volumes. Provision matching copies securely; references
+> to sealed secrets are not part of this rollout. The older reference-map instructions
+> below are superseded. A fresh reviewed plan and explicit approval are required before
+> any apply. Backup coordinator/observer/trigger and supervisor activation remain separate
+> deployment preparation; this correction does not enable them or migrate data.
+
 # Deploying the first-revenue services on Railway
 
 Go-live plan, Days 1-2. This is the runbook for putting the services needed for first revenue on Railway, and the

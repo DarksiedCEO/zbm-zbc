@@ -4,6 +4,7 @@ from pathlib import Path
 import b2_adapter as b
 from b2_catalog import CATBASE
 from member_limits import limits
+from capacity_policy import output_bytes
 from bounded_process import Budget,run_fixed
 
 def validate_catalog(loc,cat):
@@ -43,7 +44,7 @@ def restore(password,token,locator,expected=None,*,_b2_credentials=None):
   if p.is_symlink() or not p.is_dir() or any(p.iterdir()):raise b.Refused('FRESH_TARGET')
  # Locator validation before any remote request.
  if type(locator)is not dict or not b.hexid(locator.get('snapshot')) or not isinstance(locator.get('set_id'),str) or not re.fullmatch('cold-[0-9a-f]{32}',locator['set_id']) or locator.get('repository')!=CATBASE+locator['set_id']:raise b.Refused('LOCATOR_BINDING')
- b.verify_binary();budget=Budget.start(seconds=120,commands=64,output_bytes=8*b.MIB)
+ b.verify_binary();budget=Budget.start(seconds=120,commands=64,output_bytes=output_bytes())
  env={'PATH':'/usr/bin:/bin','HOME':str(scratch),'TMPDIR':str(scratch),'RESTIC_PASSWORD':password,'AWS_ACCESS_KEY_ID':_b2_credentials['key_id'],'AWS_SECRET_ACCESS_KEY':_b2_credentials['application_key'],'AWS_DEFAULT_REGION':'us-west-004','RESTIC_RETRY_LOCK':'0s'}
  def command(member,*args):
   if member not in (*b.MEMBERS,'catalog') or args[0] not in ('check','ls','dump'):raise b.Refused('READ_ONLY_COMMAND')

@@ -17,7 +17,7 @@ class Config(unittest.TestCase):
   for raw in ('-1','tomorrow','999999999999999'):
    with self.assertRaises(Refused):configuration(dict(env,BACKUP_FIRST_DUE_UTC_SECONDS=raw),['observer'])
  def test_coordinator_credentials(self):
-  env={'BACKUP_LAUNCH_ENABLED':'1','BACKUP_COORD_TOKEN':'a'*64,'BACKUP_RESTIC_PASSWORD':'pw','BACKUP_B2_KEY_ID':'id','BACKUP_B2_APPLICATION_KEY':'key'}
+  env={'BACKUP_CAPACITY_POLICY':__import__('json').dumps({'version':1,'sources':{m:(2097152 if m in ('ledger','compliance') else 524288) for m in ('ledger','finance','legal','compliance','seo')}}),'BACKUP_LAUNCH_ENABLED':'1','BACKUP_COORD_TOKEN':'a'*64,'BACKUP_RESTIC_PASSWORD':'pw','BACKUP_B2_KEY_ID':'id','BACKUP_B2_APPLICATION_KEY':'key'}
   self.assertEqual(configuration(env,['coordinator'])['credentials']['key_id'],'id')
   with self.assertRaises(Refused):configuration(dict(env,BACKUP_RESTIC_PASSWORD='key'),['coordinator'])
  def test_repair_fixed_command_without_provider_credentials(self):
@@ -41,7 +41,7 @@ class Config(unittest.TestCase):
   self.assertNotIn('a'*64,out.getvalue())
   self.assertIn('RESOLVED',out.getvalue())
  def recovery_env(self):
-  return {'BACKUP_LAUNCH_ENABLED':'1','BACKUP_COORD_TOKEN':'a'*64,'BACKUP_RESTIC_PASSWORD':'pw','BACKUP_B2_KEY_ID':'id','BACKUP_B2_APPLICATION_KEY':'key','BACKUP_RECOVERY_STRIPE_KEY':'_'.join(('sk','test','disposable')),'FIN_SERVICE_TOKEN':'b'*64,'FIN_RAIL_GATEWAY_CALLER_TOKEN':'c'*64}
+  return {'BACKUP_CAPACITY_POLICY':__import__('json').dumps({'version':1,'sources':{m:(2097152 if m in ('ledger','compliance') else 524288) for m in ('ledger','finance','legal','compliance','seo')}}),'BACKUP_LAUNCH_ENABLED':'1','BACKUP_COORD_TOKEN':'a'*64,'BACKUP_RESTIC_PASSWORD':'pw','BACKUP_B2_KEY_ID':'id','BACKUP_B2_APPLICATION_KEY':'key','BACKUP_RECOVERY_STRIPE_KEY':'_'.join(('sk','test','disposable')),'FIN_SERVICE_TOKEN':'b'*64,'FIN_RAIL_GATEWAY_CALLER_TOKEN':'c'*64}
  def test_recover_requires_protected_existing_inputs(self):
   env=self.recovery_env();c=configuration(env,['recover'])
   self.assertEqual(c['gateway_auth'],{'service_token':'b'*64,'caller_token':'c'*64});self.assertEqual(c['stripe_key'],env['BACKUP_RECOVERY_STRIPE_KEY'])

@@ -9,6 +9,7 @@ import b2_adapter as b
 from b2_catalog import CATBASE
 from bounded_process import Budget,run_fixed
 from member_limits import limits
+from capacity_policy import output_bytes
 from remote_restore import validate_catalog,validate_manifest,tree
 from restore_transport import credentials
 
@@ -34,14 +35,15 @@ def _record(path,value):
  with os.fdopen(fd,'wb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
  _sync(path.parent)
 
-def restore_member(member,password,credential,locator):
+def restore_member(member,password,credential,locator,*,volume_root=None):
  """Return member-restore-v1 proof. No caller paths, executors, or health flags."""
  if type(member)is not str or member not in b.MEMBERS:raise b.Refused('MEMBER')
  _privileged();credentials(password,credential)
  # Fully validate locator shape before opening a repository; full catalog binds later.
  keys={'schema','set_id','repository','snapshot','catalog_sha256','members_sha256','seals_sha256'}
  if type(locator)is not dict or set(locator)!=keys or locator['schema']!='b2-catalog-locator-v1' or type(locator['set_id'])is not str or not re.fullmatch('cold-[0-9a-f]{32}',locator['set_id']) or locator['repository']!=CATBASE+locator['set_id'] or not all(b.hexid(locator[k]) for k in ('snapshot','catalog_sha256','members_sha256','seals_sha256')):raise b.Refused('LOCATOR_BINDING')
- locator=b.decode(b.canonical(locator));root=VOLUME;target=root/member;control=root/'control';scratch=control/'member-restore-scratch'
+ if volume_root is not None and volume_root not in ('/data','/volume'):raise b.Refused('FIXED_VOLUME')
+ locator=b.decode(b.canonical(locator));root=VOLUME if volume_root is None else Path(volume_root);target=root/member;control=root/'control';scratch=control/'member-restore-scratch'
  try:
   dev=_directory(root).st_dev
   if any(_directory(p).st_dev!=dev for p in (target,control)):raise b.Refused('VOLUME_DEVICE')
@@ -58,10 +60,11 @@ def restore_member(member,password,credential,locator):
   # No previous owner or recovery evidence may be adopted or overwritten.
   if set(p.name for p in control.iterdir())!={'owner-state.lock'}:raise b.Refused('FRESH_CONTROL')
   b.verify_binary();scratch.mkdir(mode=0o700);made_scratch=True
-  budget=Budget.start(seconds=120,commands=64,output_bytes=8*b.MIB)
+  budget=Budget.start(seconds=120,commands=64,output_bytes=output_bytes(member))
   env={'PATH':'/usr/bin:/bin','HOME':str(scratch),'TMPDIR':str(scratch),'RESTIC_PASSWORD':password,'AWS_ACCESS_KEY_ID':credential['key_id'],'AWS_SECRET_ACCESS_KEY':credential['application_key'],'AWS_DEFAULT_REGION':'us-west-004','RESTIC_RETRY_LOCK':'0s'}
   def command(which,*args):
    repo=locator['repository'] if which=='catalog' else b.BASE+locator['set_id']+'/'+member
+   b.operational_command(repo,args)
    cap=b.MIB if which=='catalog' else limits(member)['source']
    return run_fixed([str(b.BINARY),'--no-cache','--no-lock','-r',repo,*args],env=env,cwd=scratch,budget=budget,output_limit=cap)
   command('catalog','check','--read-data');tree(command('catalog','ls','--json',locator['snapshot']),{'/catalog.json'})

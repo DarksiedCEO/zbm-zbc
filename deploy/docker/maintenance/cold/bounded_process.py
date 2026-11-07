@@ -11,7 +11,7 @@ class Budget:
     failed: bool=False
     @classmethod
     def start(cls, seconds=120, commands=64, output_bytes=8*1024*1024):
-        if not (0<seconds<=120 and 0<commands<=64 and 0<output_bytes<=8*1024*1024):
+        if not (0<seconds<=120 and 0<commands<=64 and 0<output_bytes<=96*1024*1024):
             raise TransferRefused('INVALID_BUDGET')
         return cls(time.monotonic()+seconds,commands,output_bytes)
 

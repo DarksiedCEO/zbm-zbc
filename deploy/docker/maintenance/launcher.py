@@ -7,6 +7,8 @@ def main():
  if os.getuid()!=0:raise ValueError('root opt-in required')
  cfg=config(dict(os.environ),sys.argv[1:])
  sys.path.insert(0,'/opt/zbm-maintenance/cold')
+ from capacity_policy import initialize
+ initialize(dict(os.environ),required=True)
  if cfg['recovery']:
   from recovery_owner_boot import run
   return run(cfg)

@@ -28,6 +28,21 @@ class MemberRestore(unittest.TestCase):
   if args[-1]=='/manifest.json':return b.canonical(self.man)
   return self.raw
  def go(self,member='finance',locator=None):return m.restore_member(member,'synthetic-password',{'key_id':'synthetic-id','application_key':'synthetic-key'},locator or self.loc)
+ def test_data_root_restore_preserves_existing_target(self):
+  real_path=Path
+  def selected(value):return self.root if value=='/data' else real_path(value)
+  target=self.root/'finance/book.jsonl';target.write_bytes(b'preexisting')
+  with patch.object(m,'Path',side_effect=selected):
+   with self.assertRaisesRegex(b.Refused,'FRESH_TARGET'):m.restore_member('finance','synthetic-password',{'key_id':'synthetic-id','application_key':'synthetic-key'},self.loc,volume_root='/data')
+  self.assertEqual(target.read_bytes(),b'preexisting');self.assertFalse(self.calls)
+ def test_data_root_restores_to_selected_volume(self):
+  real_path=Path
+  with patch.object(m,'Path',side_effect=lambda value:self.root if value=='/data' else real_path(value)):
+   proof=m.restore_member('finance','synthetic-password',{'key_id':'synthetic-id','application_key':'synthetic-key'},self.loc,volume_root='/data')
+  self.assertEqual(proof['application_start'],'NOT_PERFORMED');self.assertEqual((self.root/'finance/book.jsonl').read_bytes(),self.raw)
+ def test_arbitrary_restore_root_rejected(self):
+  with self.assertRaisesRegex(b.Refused,'FIXED_VOLUME'):m.restore_member('finance','synthetic-password',{'key_id':'synthetic-id','application_key':'synthetic-key'},self.loc,volume_root='/other')
+  self.assertFalse(self.calls)
  def test_normal_verified_only_member_and_secret_custody(self):
   proof=self.go();self.assertEqual(proof['manifest_sha256'],b.digest(self.man));self.assertEqual((self.root/'finance/book.jsonl').read_bytes(),self.raw);self.assertEqual(proof['application_start'],'NOT_PERFORMED')
   self.assertFalse((self.root/'control/member-restore-scratch').exists())

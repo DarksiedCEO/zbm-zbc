@@ -1,0 +1,33 @@
+# Gate 5 operator provisioning — dormant, sitting approval required
+
+`provision_operator.py` defaults to HOLD without CLI access, generation, prompts or writes. Do not run its apply mode during preparation. It is not a deploy command and does not make the release ready.
+
+The only accepted target is the pinned `zbm-zbc / production` project/environment pair in `AUTHORIZED_TARGET`. Both names and IDs are checked before CLI access. Each service ID and name must then match Railway's identity readback. The protected old backend and all other environments refuse. Complete service IDs and variable-name inventories must come from the approved sitting; do not fabricate missing service identities or infer absence from a sealed variable omitted by the CLI.
+
+## Sitting prerequisites
+
+- Explicit approval for this exact script and its production variable changes, including the central URL cutover. Provisioning URLs is a real configuration change even with deployment skipped.
+- All target services exist, their identities are reconciled, and auto-deploy is confirmed off. Nobody else edits variables during the operation.
+- A current, complete name inventory for every service. It records existence, never values. Existing sealed values and whole caller maps must be available through the user's hidden prompt when CLI reads omit them. Only required credential-plan inputs are prompted when omitted or sealed; unrelated unchanged variables are never requested.
+- Exact CLI compatibility and credentials checked during the sitting. The local tests use fake transports; they do not certify live CLI behavior.
+- Approval for manual sealing afterwards. The script does not claim to set Sealed status.
+
+The five explicit confirmation flags are operator attestations, not programmatic proof of those prerequisites. No ready-to-run production binding is bundled.
+
+## Behavior and stopping rule
+
+All inventories and direct-copy/caller-map relationships are checked before writes. Existing matching values are retained. Newly absent logical roles use OpenSSL-generated values in memory; all matching destinations receive the same direct value. Only reviewed non-secret URLs may contain Railway references. Credentials are sent to `railway variable set` through standard input, with `--skip-deploys`; they are never command-line arguments. CLI output and errors are captured, not echoed. Secret inputs and generated values are not written to disk.
+
+The separately supplied state path stores **names and statuses only**. It is created exclusively with mode 0600, and file and parent directory are synced before writes. Each attempted change is marked UNKNOWN durably before sending it. Inventory readbacks occur before and after changes. This is not an atomic remote transaction: a simultaneous external edit or an uncertain CLI outcome can still leave partial changes.
+
+Any refusal or interruption stops the run. Never delete its state file, change its path, or rerun to bypass the stop. Reconcile the names-only record against authorized fresh remote evidence, preserve completed and uncertain changes, then obtain approval for any separately prepared continuation. Rollout remains HOLD even when the script reports COMPLETE_HOLD. Deploying, sealing and runtime health checks are separate sitting steps.
+
+## Offline evidence boundary
+
+The focused tests cover default dormancy, fixed target rejection before CLI access, missing confirmations, identity and inventory mismatches, sealed inputs, conflict refusal, stdin-only writes, interruption and duplicate-run refusal. Independent review and historical failed probes live outside the public source tree. Their CONDITIONAL verdict does not authorize execution or certify provider behavior.
+
+### Minimal hidden input scope
+
+Only names in `credential_plan.REQUIRED` are materialized or requested through hidden input. A manifest-present required value omitted/null in the CLI remains present/sealed, never absent or eligible for regeneration. Unrelated unchanged variables—including sealed omissions—are not prompted, copied or rewritten. Their names still participate in the complete manifest check and their raw CLI entries remain in every before/after drift snapshot. Hidden content absent from CLI cannot itself be compared; the complete current presence manifest and exclusive operator sitting remain external requirements.
+
+Before filtering, the complete backup-trigger name manifest rejects every non-RAILWAY name except BACKUP_COORD_TOKEN and the fixed nonsecret BACKUP_LAUNCH_ENABLED control, including sealed extras. If that control is present in the manifest, its raw CLI value must be exactly the visible string `0`; omitted, null or nonzero values refuse without prompting or changing it. This deliberately preserves the existing strict trigger isolation policy rather than hiding extra credentials from the planner. Exact project/environment restrictions, full preflight, UNKNOWN behavior and no automatic retry are unchanged.
