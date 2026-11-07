@@ -1,5 +1,5 @@
 """Synthetic empty-volume initialization, then exact installed owner; no deploy switching."""
-import json,os,sys,subprocess,signal,time,http.client,threading,hmac
+import json,os,sys,subprocess,signal,time,http.client,threading,hmac,socket
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -23,7 +23,7 @@ def main():
  print(json.dumps({'probe':'CAP_KILL','result':'PASS','member':m,'caps':caps}),flush=True)
  prefix={'ledger':'LEDGER','finance':'FIN','legal':'LEGAL','compliance':'COMPLIANCE','seo':'SEO'}[m]
  env.update(BACKUP_LAUNCH_ENABLED='0',PORT='27000');env[prefix+'_PORT']='27000'
- deadline=time.monotonic()+180
+ deadline=time.monotonic()+600
  dependencies={'ledger':(), 'legal':('ledger',), 'compliance':('ledger','legal'), 'finance':('ledger','legal','compliance'), 'seo':('ledger','finance','compliance')}
  while not all(health(x+'.railway.internal') for x in dependencies[m]):
   if time.monotonic()>=deadline:raise ValueError('seed dependency timeout')
@@ -42,7 +42,12 @@ def main():
     valid=member in MEMBERS and hmac.compare_digest(self.headers.get('Authorization',''), 'Bearer '+env['BACKUP_COORD_TOKEN'])
     if valid:ready_members.add(member)
     self.send_response(200 if valid and len(ready_members)==5 else 202 if valid else 403);self.end_headers()
-  server=ThreadingHTTPServer(('0.0.0.0',27003),Barrier)
+  class DualStackServer(ThreadingHTTPServer):
+   address_family=socket.AF_INET6
+   def server_bind(self):
+    self.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)
+    super().server_bind()
+  server=DualStackServer(('::',27003),Barrier)
   threading.Thread(target=server.serve_forever,daemon=True).start()
  p=subprocess.Popen(spec,env=env,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
  # Drain stderr continuously, retaining at most 16KiB. Never print its contents.
@@ -86,6 +91,7 @@ def main():
     try:
      c.request('GET','/'+m,headers={'Authorization':'Bearer '+env['BACKUP_COORD_TOKEN']})
      if c.getresponse().status==200:break
+    except OSError:pass
     finally:c.close()
    time.sleep(.5)
   # Ledger keeps the barrier reachable while every dependent observes release.
