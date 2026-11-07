@@ -25,8 +25,8 @@ export function plan(b, images) {
   baseline_sha256:conservation.baseline_sha256,image_manifest_sha256:digest(images),operations,
   untouched_services:b.services.filter(s=>!owners.includes(s.service.name)).map(s=>({id:s.service.id,name:s.service.name,sha256:digest(s)})),
   forbidden_operations:['update_volume','delete_volume','delete_service','accept_deploy','whole-project-apply'],
-  pid_decision:{status:'FOUNDER_DECISION_REQUIRED',proposal:'Accept platform-managed PID limit for first client; do not claim Docker PID caps are enforced on Railway.',alternative:'HOLD until a supported per-container PID cap is established.'},
-  remaining:['fresh baseline/date and rollback evidence at sitting','approved CPU/RAM and monthly cost','new roles and volumes provisioned with explicit approval; rebind their returned IDs','secure variable provisioning and routing phase','explicit cron/first-due approval and readback','portal publication and service approval after B2 proof','founder-approved PID policy'],
+  pid_decision:{status:'ACCEPTED_RAILWAY_MANAGED_FIRST_CLIENT',baseline:'Record current process count per service at sitting; no Mac-cap equivalence.',post_launch:'Explicit per-container PID cap'},
+  remaining:['fresh baseline/date and rollback evidence at sitting','approved CPU/RAM and monthly cost','new roles and volumes provisioned with explicit approval; rebind their returned IDs','secure variable provisioning and routing phase','explicit cron/first-due approval and readback','portal publication and service approval after B2 proof'],
   execution_rule:'Stage one approved service phase only, inspect staged diff, then separate founder approval before accept-deploy. Never pass this document itself to an API.'};
 }
 // Compare actual staged readback: fail on every unexpected config mutation,

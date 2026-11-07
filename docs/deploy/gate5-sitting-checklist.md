@@ -11,8 +11,9 @@ and unexpected failures; stop on a failed gate, with no automatic retry.
    closed if growth is unknown or projected usage reaches 50%.
 2. **Decisions (10–15 min).** Approve exact reviewed commit/CI, digest manifest,
    new-role/volume monthly cost, CPU/RAM, UTC nightly cron and first due.
-   PID decision remains open: accept platform-managed PID limits for client #1
-   without claiming the Mac cap applies, or HOLD for a supported explicit cap.
+   PID policy accepted: Railway-managed limits for client #1. Record each
+   service process count; explicit per-container caps are post-launch hardening.
+   Do not claim Mac caps apply on Railway.
    Approve the exact production delta and, separately, merge at rollout start.
 3. **Secrets / closed preparation (15–25 min).** Hidden input only: dedicated
    new coordination token; scoped B2 keyID/applicationKey and existing Restic
@@ -57,3 +58,24 @@ connect_service_source: its default scope includes every environment. Never appl
 this repository's partial SDK graph. Before committing any stage, compare the
 actual staged diff and settings to the baseline and approved fields; concurrent
 changes invalidate the plan. No provider atomic compare-and-swap is claimed.
+
+## Remaining-phase templates (offline, review required)
+
+```sh
+python3 -B deploy/gate5/phase_templates.py
+```
+
+This generates resource, disabled configuration, credential-custody, URL routing,
+activation, schedule and portal templates using the pinned f5fa44b images.
+It performs no provider calls and never accepts or emits credential values.
+Returned IDs fill named slots; secret values belong only in the future qualified
+in-memory writer. No template is itself safe to submit as an API payload.
+
+**Pre-sitting HOLDs:** approve CPU/RAM, new-volume size/region, monthly cost,
+UTC cron/first due; qualify the secure production variable writer and complete
+portal-specific settings/port preflight. These are not resolved by generating
+templates and must not become unplanned live engineering at the sitting.
+Only then freeze the filled non-secret plan for Claude review. Each stage must
+have exact readback and explicit commit approval; never commit unrelated staged
+changes. Existing schedules remain untouched until remote backup/restore PASS
+and separate removal approval. No additional platform run is authorized.
