@@ -1,0 +1,97 @@
+{
+  "schema": "gate5-open-decisions-v1",
+  "status": "HOLD",
+  "rule": "Every entry must be RESOLVED by Andre, with the resolution text, before the sitting runner passes step 'decisions'. An entry is never resolved by filling a placeholder.",
+  "decisions": [
+    {
+      "id": "D01-portal-before-writer",
+      "status": "OPEN",
+      "question": "The secure variable writer requires all 12 services, including client-portal, to exist. The portal service is planned last, after backup proof. Create an empty portal service (no source, no domain) in the new-resources phase, or split the writer into a non-portal run and a later portal run?",
+      "blocks": ["new-resources", "secret-provision"]
+    },
+    {
+      "id": "D02-url-cutover-owner",
+      "status": "OPEN",
+      "question": "URL cutover is written twice: provision_operator.py writes all 10 URL variables, and the routing phase template stages the same variables. Which mechanism owns the cutover? The other must be removed from the plan.",
+      "blocks": ["secret-provision", "routing"]
+    },
+    {
+      "id": "D03-owner-settings-scope",
+      "status": "OPEN",
+      "question": "apply_plan.mjs stages only draining/overlap/restart for the four existing owners and its readback refuses any other change. phase_templates.py also sets startCommand and resource limits for them. Which owner settings belong in the closed-configuration stage?",
+      "blocks": ["closed-configuration"]
+    },
+    {
+      "id": "D04-cli-writes-vs-staged-changes",
+      "status": "OPEN",
+      "question": "Does 'railway variable set --skip-deploys' apply immediately or join the environment's staged changes? If it joins them, committing one phase also commits the writer's variables. Needs a credential-free or non-production check approved by Andre.",
+      "blocks": ["secret-provision", "closed-configuration"]
+    },
+    {
+      "id": "D05-reference-readback",
+      "status": "OPEN",
+      "question": "Does 'railway variable list --json' (CLI 5.71.0) return reference variables raw or resolved? If resolved, the writer stops UNKNOWN after its first URL write. Needs an approved check before the sitting (Q3 in provision_operator_README.md).",
+      "blocks": ["secret-provision"]
+    },
+    {
+      "id": "D06-legacy-ledger-grant",
+      "status": "OPEN",
+      "question": "Compliance must be commissioned against the live legacy Ledger, which only reads LEDGER_CALLERS at start. How does the legacy Ledger pick up the new compliance-py grant (redeploy of its current deployment?), and is it confirmed that its current code accepts that grant format?",
+      "blocks": ["compliance-commission"]
+    },
+    {
+      "id": "D07-repo-sourced-services",
+      "status": "OPEN",
+      "question": "orchestrator, stripe-gateway and detection stay connected to GitHub main and need a redeploy for URL/credential changes to take effect. When, from which exact commit, and is auto-deploy off for them? Auto-deploy state is UNKNOWN in the baseline; the planned merge at rollout start could deploy them.",
+      "blocks": ["merge", "routing"]
+    },
+    {
+      "id": "D08-ingress-closed-meaning",
+      "status": "OPEN",
+      "question": "orchestrator and stripe-gateway each have one public service domain today (Stripe webhooks reach stripe-gateway). Does 'ingress closed' during rollout mean leaving those domains, or removing/blocking them? State the expected webhook behaviour.",
+      "blocks": ["closed-configuration"]
+    },
+    {
+      "id": "D09-restart-and-crash-alerts",
+      "status": "OPEN",
+      "question": "Accept restart policy NEVER (no automatic restart, outage until repaired) and approve the exact synthetic crash target, recovery steps and cost for the notification check? Observer is stateful; no auto-restart for it without replay evidence.",
+      "blocks": ["closed-configuration", "admission"]
+    },
+    {
+      "id": "D10-compliance-seed",
+      "status": "OPEN",
+      "question": "Approve the shipped Compliance seed proposal (sha256 bc6d371a...) after commissioning, or hold it?",
+      "blocks": ["owner-activation"]
+    },
+    {
+      "id": "D11-commission-mechanism",
+      "status": "OPEN",
+      "question": "How is compliance_commission.py run on Railway: one-shot start-command replacement on the new Compliance service, then restore of the normal entrypoint? This replacement is not yet proven.",
+      "blocks": ["compliance-commission"]
+    },
+    {
+      "id": "D12-sitting-date",
+      "status": "OPEN",
+      "question": "Sitting date. The first-due timestamp is derived from it (11:00 UTC the day after the America/Los_Angeles completion date) and must be in the future.",
+      "blocks": ["schedule-activation"]
+    },
+    {
+      "id": "D13-backup-schedule-observation",
+      "status": "OPEN",
+      "question": "The baseline does not expose backupSchedules for any of the four volumes (UNKNOWN). Which read at the sitting exposes them? If none does, proceed with UNKNOWN (never touched) or stop?",
+      "blocks": ["baseline"]
+    },
+    {
+      "id": "D14-audit-price",
+      "status": "OPEN",
+      "question": "Real audit price for SOW 4.1.",
+      "blocks": ["admission"]
+    },
+    {
+      "id": "D15-writer-railway-session",
+      "status": "OPEN",
+      "question": "The writer uses the founder's local Railway CLI login (HOME). Confirm that session is the credential for the sitting and that it is logged out afterwards.",
+      "blocks": ["secret-provision"]
+    }
+  ]
+}

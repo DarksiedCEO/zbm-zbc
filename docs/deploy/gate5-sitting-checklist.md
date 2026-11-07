@@ -143,3 +143,49 @@ The observer is stateful: `/volume/control/monitor.sqlite` and
 `/volume/control/outbox` persist schedule and delivery state. Restart-on-failure
 is a proposal only, requiring safe replay/recovery evidence and explicit policy
 approval. Keep the current template unchanged; no blanket stateless claim.
+
+## Frozen plan, open decisions and sitting runner (2026-11-07, offline)
+
+Still HOLD. Nothing below was executed against Railway.
+
+**Writer qualification.** `provision_operator.py` was qualified offline with synthetic
+transports (Q1–Q7, see `provision_operator_README.md`). Two defects were fixed:
+a forbidden name no longer triggers a hidden prompt, and hidden input needs two
+matching entries. Q3 (do CLI reads return references raw or resolved?) is OPEN
+and blocks the writer.
+
+**Freeze.** `freeze_plan.py` fills existing project/environment/service IDs from
+the private baseline into the phase templates, checks the four `/data` volumes
+(us-west2, 5000 MB), records schedules as `UNKNOWN_NOT_EMPTY`, auto-deploy and
+restart policy as `UNKNOWN`, and hashes every input. It writes only to a new
+0600 file under `~/.codex/private/` and prints names and status:
+
+```sh
+python3 -B deploy/gate5/freeze_plan.py /absolute/private/production-baseline.json /absolute/private/frozen-plan.json
+```
+
+Remaining slots after freezing: five new service IDs, three new volume IDs,
+first-due time, portal digest and portal domain.
+
+**Open decisions.** `deploy/gate5/open_decisions.json` lists 15 non-ID, non-secret
+decisions that must be RESOLVED by Andre before the sitting. They include
+conflicts found while freezing: the writer needs the portal service before it
+exists (D01); URL cutover is defined twice (D02); owner settings differ between
+`apply_plan.mjs` and the phase templates (D03); CLI write/staging semantics (D04,
+D05); how the legacy Ledger accepts the new Compliance grant (D06); repo-connected
+services and auto-deploy at merge (D07); meaning of closed ingress with two
+existing public domains (D08).
+
+**Runner.** `sitting_runner.py` turns every sitting step into a guarded step
+(22 steps, owner activation one per owner in start order). Dormant by default.
+Each step: typed approval on a terminal; durable UNKNOWN before any action;
+never begun twice; PASS only with verified evidence (names/status JSON; values
+that look like secrets are refused); FAIL writes STOP and prints the step's
+rollback. Steps whose `blocks` entry is still OPEN refuse to begin. Live actions
+stay operator actions under separate approval; the only Railway-touching path
+it can start is the reviewed writer. Run directory: a 0700 folder under
+`~/.codex/private/`.
+
+```sh
+python3 -B deploy/gate5/sitting_runner.py status --run /absolute/private/run-dir
+```

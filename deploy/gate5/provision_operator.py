@@ -7,6 +7,7 @@ Never remove it to retry: reconcile remote state and prepare a newly approved ru
 """
 import argparse
 import getpass
+import hmac
 import json
 import os
 from pathlib import Path
@@ -101,6 +102,8 @@ def execute(binding,state_path,read,write,prompt,generate):
             names=set(binding['services'][s]['names'])
             # Sealed omission is present according to the complete external manifest.
             need(all(n in names or n.startswith('RAILWAY_') for n in data))
+            # Forbidden names refuse by manifest name, before any hidden prompt.
+            need(not any((s,n) in c.FORBIDDEN for n in names))
             # Validate trigger isolation against the COMPLETE manifest before
             # filtering planner inputs; sealed extras must not disappear.
             if s=='backup-trigger':
@@ -162,10 +165,14 @@ class CLI:
     def version(self):need(re.search(r'\b5\.71\.0\b',self.call(['railway','--version'])) is not None)
 
 def hidden(label):
+    """Two matching hidden entries. Catches typos, not a consistently wrong source."""
     need(sys.stdin.isatty())
     with warnings.catch_warnings():
         warnings.simplefilter('error',getpass.GetPassWarning)
-        return getpass.getpass(label+' existing value (hidden): ')
+        first=getpass.getpass(label+' existing value (hidden): ')
+        second=getpass.getpass(label+' repeat (hidden): ')
+    need(hmac.compare_digest(first.encode(),second.encode()))
+    return first
 
 def openssl():
     try:r=subprocess.run(['openssl','rand','-hex','32'],capture_output=True,text=True,timeout=15,env={'PATH':os.environ.get('PATH','/usr/bin:/bin')})

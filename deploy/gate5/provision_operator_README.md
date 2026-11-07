@@ -31,3 +31,14 @@ The focused tests cover default dormancy, fixed target rejection before CLI acce
 Only names in `credential_plan.REQUIRED` are materialized or requested through hidden input. A manifest-present required value omitted/null in the CLI remains present/sealed, never absent or eligible for regeneration. Unrelated unchanged variables—including sealed omissions—are not prompted, copied or rewritten. Their names still participate in the complete manifest check and their raw CLI entries remain in every before/after drift snapshot. Hidden content absent from CLI cannot itself be compared; the complete current presence manifest and exclusive operator sitting remain external requirements.
 
 Before filtering, the complete backup-trigger name manifest rejects every non-RAILWAY name except BACKUP_COORD_TOKEN and the fixed nonsecret BACKUP_LAUNCH_ENABLED control, including sealed extras. If that control is present in the manifest, its raw CLI value must be exactly the visible string `0`; omitted, null or nonzero values refuse without prompting or changing it. This deliberately preserves the existing strict trigger isolation policy rather than hiding extra credentials from the planner. Exact project/environment restrictions, full preflight, UNKNOWN behavior and no automatic retry are unchanged.
+
+## Offline qualification (2026-11-07, synthetic transports only)
+
+`devtools/gate5_tests/test_provision_operator_qualification.py` adds Q1–Q7. No CLI, network, real binding or real credential was used.
+
+- **Q1 fixed:** a forbidden name in the manifest (for example a sealed Restic password on the observer) previously triggered a hidden prompt for that secret before refusing. It now refuses by name before any prompt.
+- **Q2 fixed, residual remains:** hidden input now requires two matching entries. That catches typos only. A consistently wrong value for a sealed non-Ledger source is still copied to every destination; there is no remote oracle for it. Ledger-registered roles do refuse a wrong value through their digest.
+- **Q3 OPEN (blocker):** it is not verified whether `railway variable list --json` returns reference variables raw (`${{...}}`) or resolved. If resolved, every run stops UNKNOWN after its first URL write, leaving earlier production writes in place. Resolve this before the sitting with an approved, credential-free or non-production check; do not discover it live.
+- **Q4–Q7 pass:** nothing printed to stdout/stderr by `execute`; state holds names and statuses only; one generated value reaches every direct destination; all reads and prompts precede the first write; a failed CLI write is checkpointed UNKNOWN, its error text is not echoed, the value goes only through stdin, and a rerun is refused.
+
+Two older refusal tests use a raising prompt that the writer's catch-all swallows, so their "no prompt" half is not falsifiable. Q1 records prompts instead.
