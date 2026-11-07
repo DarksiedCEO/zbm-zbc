@@ -30,7 +30,7 @@ def synthetic_environment():
   p=PREFIX[m];envs[m]={k:v for k,v in envs[m].items() if not k.startswith('COLD_')}
   envs[m][p+'_LOG_PATH' if m=='ledger' else p+'_DATA_DIR']='/data/'+m+('/ledger.jsonl' if m=='ledger' else '')
   envs[m].update(RAILWAY_RUN_UID='0',BACKUP_LAUNCH_ENABLED='1',BACKUP_MEMBER=m,BACKUP_VOLUME='/data',BACKUP_COORD_TOKEN=token,BACKUP_RESTIC_PASSWORD=pw,BACKUP_B2_KEY_ID='synthetic-only-id',BACKUP_B2_APPLICATION_KEY='synthetic-only-key',BACKUP_CAPACITY_POLICY=json.dumps({'version':1,'sources':{x:524288 for x in MEMBERS}}),PROBE_MEMBER=m,PROBE_ENTRYPOINT=json.dumps(ENTRYPOINT[m]),PORT='27001')
-  envs[m][p+'_PORT']='27001';envs[m][p+'_BIND_ADDR']='0.0.0.0'
+  envs[m][p+'_PORT']='27001';envs[m][p+'_BIND_ADDR']='[::]' if m=='ledger' else '::'
  envs['compliance'].update(COMPLIANCE_SCHEDULER_ENABLED='0',COMPLIANCE_WATCHER_ENABLED='0')
  envs['finance']={k:v for k,v in envs['finance'].items() if not k.startswith('FIN_STRIPE_')};envs['finance']['FIN_CARD_PREPAYMENTS']='0'
  envs['seo']['SEO_LOG_HASH_KEY']=secrets.token_hex(32)
