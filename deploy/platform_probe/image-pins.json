@@ -1,0 +1,8 @@
+{
+  "ledger": "ghcr.io/darksiedceo/zbm-gate5-ledger@sha256:f6454071a76576e817d4df1ce7fc6a5b2a96515f021cdd2d2070b91defcf0031",
+  "legal": "ghcr.io/darksiedceo/zbm-gate5-legal@sha256:84193951c1947d77e71f8151ca0e12b550d63330a0c42f4c4775bfd74a3ba942",
+  "compliance": "ghcr.io/darksiedceo/zbm-gate5-compliance@sha256:d41469d332f03205bce64cd2328a092fd39be60b947441d21ad776e7dfbab6a5",
+  "finance": "ghcr.io/darksiedceo/zbm-gate5-finance@sha256:c20ddfddb13f76e0dc2f2b00140c13099c898a5991664f59daa658b10712a5cd",
+  "seo": "ghcr.io/darksiedceo/zbm-gate5-seo@sha256:f67486c607ead4c1caebf367b2c925165f62d8c080d63d44973092a3f68a1734",
+  "admin": "ghcr.io/darksiedceo/zbm-gate5-admin@sha256:d488d49a80837bd2b21fdd182b1c86f04383445c1bcbf09a4034e048a4d491e9"
+}
