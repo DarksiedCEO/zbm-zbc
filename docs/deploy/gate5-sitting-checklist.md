@@ -71,8 +71,16 @@ It performs no provider calls and never accepts or emits credential values.
 Returned IDs fill named slots; secret values belong only in the future qualified
 in-memory writer. No template is itself safe to submit as an API payload.
 
-**Pre-sitting HOLDs:** approve CPU/RAM, new-volume size/region, monthly cost,
-UTC cron/first due; qualify the secure production variable writer and complete
+**Approved inputs:** `approved_decisions.json` records 256 MB Ledger, 512 MB
+Python services, 1 vCPU each; new 5 GB volumes in us-west2; $35/month for the
+whole workspace; 11:00 UTC nightly, starting the night after the sitting.
+These are decimal units; verify effective Railway byte limits before activation,
+without claiming equivalence to Docker MiB caps. The budget is not a hard
+provider cap. Verify the workspace forecast before spending. Derive the first
+due timestamp from the sitting completion date in America/Los_Angeles and
+require it to be in the future. Never silently start an overdue run.
+
+**Pre-sitting HOLDs:** qualify the secure production variable writer and complete
 portal-specific settings/port preflight. These are not resolved by generating
 templates and must not become unplanned live engineering at the sitting.
 Only then freeze the filled non-secret plan for Claude review. Each stage must

@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "production_applied": false,
+  "authority": "Andre's explicit resource, cost and schedule approval; production changes wait for the sitting",
+  "resources": {
+    "ledger": {"memoryGB": 0.256, "vCPUs": 1},
+    "python_services": {"memoryGB": 0.512, "vCPUs": 1}
+  },
+  "memory_units": "Decimal MB/GB as approved: 256 MB = 0.256 GB; 512 MB = 0.512 GB. Do not claim these equal the earlier Docker MiB caps. Verify Railway's effective byte limits before activation.",
+  "new_volumes": {"region": "us-west2", "sizeMB": 5000},
+  "workspace_monthly_budget_usd": 35,
+  "budget_policy": "Approval ceiling, not a provider-enforced cap. Check whole-workspace forecast before rollout; stop if projected cost exceeds approval. Do not change workspace spending controls implicitly.",
+  "schedule": {
+    "cron_utc": "0 11 * * *",
+    "timezone": "UTC",
+    "first_due_policy": "11:00 UTC on the calendar day after the sitting's America/Los_Angeles completion date",
+    "first_due_utc_seconds": null,
+    "cadence_seconds": 86400,
+    "grace_seconds": 900
+  },
+  "usage_remaining_percent": null,
+  "usage_reserve_percent": 20,
+  "usage_policy": "User supplied a blank percentage. Balance above reserve is unknown; do not infer it.",
+  "pid_policy": "Railway-managed for client #1; record per-service process counts at sitting"
+}

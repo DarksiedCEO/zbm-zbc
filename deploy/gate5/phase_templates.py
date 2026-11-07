@@ -8,6 +8,7 @@ ROOT = Path(__file__).parent
 def templates():
     topology = json.loads((ROOT / 'topology_plan.json').read_text())
     images = json.loads((ROOT / 'release_images.json').read_text())
+    decisions = json.loads((ROOT / 'approved_decisions.json').read_text())
     capacity = json.loads((ROOT / 'capacity_profile.json').read_text())['policy']
     def identity(role):
         return dict(projectId='<production-project-id>', environmentId='<production-environment-id>',
@@ -25,14 +26,13 @@ def templates():
             if contract['mount']:
                 resources.append(dict(tool='create_volume', arguments={**identity(role),
                     'name': role + '-data', 'mountPath': contract['mount'],
-                    'region': '<approved-region>', 'sizeMB': '<approved-new-volume-sizeMB>'},
+                    **decisions['new_volumes']},
                     result_slot=f'<volume-id:{role}>'))
         image = images['images'][role if role in images['images'] else 'admin']
         settings.append(dict(tool='connect_service_source', arguments={**identity(role), 'image': image['image']}))
         settings.append(dict(tool='update_service', arguments={**identity(role),
             'startCommand': contract['entrypoint'], 'drainingSeconds': 45, 'overlapSeconds': 0,
-            'restartPolicyType': 'NEVER', 'limits': {'memoryGB': '<approved-memoryGB:'+role+'>',
-            'vCPUs': '<approved-vCPUs:'+role+'>'}, **({'cronSchedule': None} if role == 'backup-trigger' else {})}))
+            'restartPolicyType': 'NEVER', 'limits': decisions['resources']['ledger' if role == 'ledger' else 'python_services'], **({'cronSchedule': None} if role == 'backup-trigger' else {})}))
         values = {'BACKUP_LAUNCH_ENABLED': '0'}
         if role in custody.OWNERS or role == 'coordinator':
             values['BACKUP_CAPACITY_POLICY'] = json.dumps(capacity, sort_keys=True, separators=(',', ':'))
@@ -53,10 +53,11 @@ def templates():
         ledger_map_destination=dotted(custody.LEDGER_MAP), ledger_map_key='sha256 of in-memory credential',
         single_inputs=sorted(map(dotted, custody.SINGLE)), forbidden=sorted(map(dotted, custody.FORBIDDEN)))
     return dict(schema='gate5-phase-templates-v1', status='HOLD', executable=False, provider_calls=0,
+        approved_decisions=decisions,
         image_commit='f5fa44b6ab9ae9841188b44ec87a1f89fc63c1c3',
         prerequisites=['Fresh baseline/date/rollback and no unrelated staged changes',
-          'Approve new resources, CPU/RAM, region, volume sizes and monthly cost before filling templates',
-          'Approve fixed UTC cron and future first-due timestamp; cadence 86400, grace 900',
+          'Verify effective resource byte limits and whole-workspace forecast within approved $35/month before rollout',
+          'Bind future first-due timestamp to night after sitting; approved cron 0 11 * * *, cadence 86400, grace 900',
           'Commission Compliance against still-live legacy Ledger before switching Ledger to owner',
           'Secure production variable writer qualified before sitting; never serialize secrets into this artifact'],
         phases=[
@@ -71,7 +72,7 @@ def templates():
                variables('observer', {'BACKUP_LAUNCH_ENABLED':'1','BACKUP_ALERTS_ENABLED':'1'})],
                gate='Authenticated control health and alert delivery; business stays behind readiness barrier'),
           dict(name='schedule-activation', operations=[variables('backup-trigger', {'BACKUP_LAUNCH_ENABLED':'1'}),
-               dict(tool='update_service', arguments={**identity('backup-trigger'), 'cronSchedule':'<approved-UTC-cron>'})],
+               dict(tool='update_service', arguments={**identity('backup-trigger'), 'cronSchedule':decisions['schedule']['cron_utc']})],
                gate='Explicit activation approval; read back cron, future first due, observer cadence; prove next run'),
           dict(name='backup-proof', operations=[], gate='All-five seal/verify, restart and traffic reopen; B2 remote-only restore/reconciliation. Never delete preservation. Platform schedules untouched until separate post-PASS approval'),
           dict(name='portal', operations=[dict(tool='create_service', arguments=dict(projectId='<production-project-id>',
