@@ -45,7 +45,7 @@ class Owner:
   if config['runtime_inputs']:raise Refused('packaged owner requires pre-materialized application secrets')
   self.scheduler_control=None
   self.phase='RECOVERY_REQUIRED' if self.journal.recovered else 'CLOSED'
-  self.front=Front({self.member:27000},bind='0.0.0.0',port=27001)
+  self.front=Front({self.member:27000},bind='::',port=27001)
   from owner_repair import OwnerRepairs
   self.repairs=OwnerRepairs(self)
   from owner_relay import install_dependency_relay
@@ -313,7 +313,7 @@ class Owner:
 def main():
  raw=sys.stdin.buffer.readline(65537)
  if len(raw)>65536:raise Refused('input bound')
- config=decode(raw);owner=Owner(config);server=Server(('0.0.0.0',27002),owner.token,owner.dispatch)
+ config=decode(raw);owner=Owner(config);server=Server(('::',27002),owner.token,owner.dispatch)
  def stop(*_):raise KeyboardInterrupt
  signal.signal(signal.SIGTERM,stop)
  try:server.serve_forever(poll_interval=.1)

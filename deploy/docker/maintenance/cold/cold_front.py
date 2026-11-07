@@ -1,7 +1,8 @@
 """Fixed loopback intake gate; no app ownership, backend effects, or retry."""
 import http.client,json,socket,threading,time
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
-class Server(ThreadingHTTPServer):
+from dual_stack import DualStackMixin
+class Server(DualStackMixin,ThreadingHTTPServer):
  daemon_threads=True
  block_on_close=False
  def __init__(self,*args):self.connections=threading.BoundedSemaphore(8);super().__init__(*args)

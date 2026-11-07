@@ -58,9 +58,9 @@ def run(cfg):
   return restore_member(member,password,credential,locator,volume_root=str(root))
  fd=os.open(Path('/run/recovery-boot.lock'),os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
  fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);os.write(fd,b'recovery boot: interrupted state requires fresh destination\n');os.fsync(fd)
- front=Front({cfg['member']:27000},bind='0.0.0.0',port=27001)
+ front=Front({cfg['member']:27000},bind='::',port=27001)
  boot=RestoreBoot(cfg,restore=restore_here,construct=Owner,prerequisites=prerequisites,front=front)
- server=Server(('0.0.0.0',27002),cfg['coord_token'],boot.dispatch)
+ server=Server(('::',27002),cfg['coord_token'],boot.dispatch)
  def stop(*_):raise KeyboardInterrupt
  signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
  try:server.serve_forever(poll_interval=.1)

@@ -16,7 +16,7 @@ def main():
  prerequisites(cfg)
  from owner import Owner
  from owner_wire import Server
- owner=Owner(cfg);server=Server(('0.0.0.0',27002),owner.token,owner.dispatch)
+ owner=Owner(cfg);server=Server(('::',27002),owner.token,owner.dispatch)
  def stop(*_):raise KeyboardInterrupt
  signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
  try:server.serve_forever(poll_interval=.1)

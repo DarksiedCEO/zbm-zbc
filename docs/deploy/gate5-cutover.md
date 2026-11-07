@@ -9,7 +9,13 @@ No command in this document is permission to deploy. The rollout is HOLD until t
 3. **Nightly schedule:** set the explicitly approved UTC cron, first-due timestamp and observer cadence; read them back from the exact production trigger/observer. Confirm the launch enablement and absence of unintended schedules. A local proposal or successful submission is not schedule readback or backup completion. Do not apply the partial SDK adapter to remove an unknown existing schedule.
 4. **First real B2 backup and restore:** complete the first Railway backup, verify all five remote snapshots and catalog, then restore from B2 alone into separately approved empty targets. Check application recovery, money reconciliation and acceptance replay; prove target deletion and report posted cost with billing lag. Stop/rollback on failure. No clients before this passes.
 
-The accepted November 7 throwaway run proved image pulls, `/data`, networking, native start/stop, encrypted local seal and restart into `READY_CLOSED`. It did not explicitly test forced kill/CAP_KILL, OS PID limits, schedules, traffic reopening or remote upload/restore. No more standalone platform runs are authorized. Dual-stack owner wrappers are post-launch hardening only after the environment-date gate passes.
+The accepted November 7 throwaway run proved image pulls, `/data`, networking, native start/stop, encrypted local seal and restart into `READY_CLOSED`. It did not explicitly test forced kill/CAP_KILL, OS PID limits, schedules, traffic reopening or remote upload/restore. No more standalone platform runs are authorized. Owner listeners on 27001/27002 now explicitly use dual-stack sockets; the founder-requested environment-date check remains a sitting hard stop.
+
+## Production image source and platform-backup removal
+
+Production uses **GHCR image sources pinned by immutable digest, built from the exact final reviewed release commit**, with scan evidence and OCI revision labels tied to that commit. Do not mix GitHub branch builds with these images, or reuse qualification tags as production references. The legacy `.railway/railway.ts` GitHub-source definitions are not the cutover source. Record the per-service digest manifest outside the source commit after builds to avoid a self-referential commit hash.
+
+Preserve all existing platform `backupSchedules` through deployment and the first real B2 backup **and B2-only restore**. Only after both pass at the sitting may the separately approved removal set `backupSchedules: []`; read back the result. The empty arrays in the partial SDK/legacy configuration are deferred removal proposals, never an initial-cutover apply payload. If B2 backup or restore fails, do not remove existing schedules. This does not authorize creating paid platform backups or upgrading plans.
 
 ## Fixed decisions
 

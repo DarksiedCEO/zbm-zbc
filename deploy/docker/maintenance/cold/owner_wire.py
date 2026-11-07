@@ -51,7 +51,8 @@ class Client:
    return value
   except (OSError,http.client.HTTPException,ValueError):raise Refused('control outcome unavailable') from None
   finally:c.close()
-class Server(ThreadingHTTPServer):
+from dual_stack import DualStackMixin
+class Server(DualStackMixin,ThreadingHTTPServer):
  daemon_threads=True;block_on_close=False
  def __init__(self,address,key,dispatch):
   keycheck(key);self.key=key;self.dispatch=dispatch;self.slots=threading.BoundedSemaphore(8)
