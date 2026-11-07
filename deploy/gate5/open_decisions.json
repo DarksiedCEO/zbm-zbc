@@ -125,8 +125,8 @@
       "blocks": [
         "schedule-activation"
       ],
-      "decided_by": "Andre, 2026-11-07",
-      "resolution": "Sunday 2026-11-08, morning (America/Los_Angeles). If completed that day, first due is 11:00 UTC on 2026-11-09; the runner re-derives and checks it at schedule-activation."
+      "decided_by": "Andre, 2026-11-07 15:26 PST",
+      "resolution": "Sitting today, Saturday 2026-11-07 (America/Los_Angeles), starting about 3:30 PM PST. If completed today, first due is 2026-11-08 11:00 UTC (3:00 AM PST); the runner re-checks it is in the future at schedule-activation. If completion slips past midnight Pacific, first due moves to 11:00 UTC the following day."
     },
     {
       "id": "D13-backup-schedule-observation",

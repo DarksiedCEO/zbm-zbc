@@ -223,7 +223,7 @@ immediately after (deletion is scheduled); re-check before the sitting.
 Claude review approved d24dcc2 and D02, D03, D06, D07, D11 (now RESOLVED).
 D11 condition: commissioning is proven only by the COMMISSIONED_CLOSED output,
 never by Railway deployment status; the runner refuses deployment status as
-evidence. D12: sitting Sunday 2026-11-08 morning, Pacific. D10 (seed) and D14
+evidence. D12 (updated 2026-11-07 15:26 PST): sitting today, 2026-11-07 Pacific; first due 2026-11-08 11:00 UTC if completed today. D10 (seed) and D14
 (audit price) are DEFERRED: they do not block starting the sitting, but still
 block owner activation and admission respectively until recorded RESOLVED.
 
