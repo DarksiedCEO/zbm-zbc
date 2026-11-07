@@ -60,7 +60,8 @@ STEPS = [
         'Read back: legacy Ledger and any touched orchestrator/stripe-gateway/detection still run their pre-sitting build (D07); zero staged changes remain'],
         'Do not discard: writes are durable. Reconcile names against writer-state.json; redeploy recorded rollback deployments if a build changed.', 'staged'),
     step('compliance-commission', 'operator', ['secret-commit'], ['Legacy Ledger runs its unchanged build with the committed compliance-py grant; redeploy its CURRENT deployment only if the commit did not restart it (D06)',
-        'Compliance: stage start command = the exact compliance_README one-shot command; deploy once (restart NEVER); capture COMMISSIONED_CLOSED output; stage start command back to none; commit without deploying (D11)'],
+        'Compliance: stage start command = the exact compliance_README one-shot command; deploy once (restart NEVER); capture COMMISSIONED_CLOSED output; stage start command back to none; commit without deploying (D11)',
+        'Evidence is the COMMISSIONED_CLOSED output line only; Railway deployment status is never proof'],
         'Stop Compliance; leave store untouched for inspection; legacy Ledger unchanged.', 'commission'),
     step('ledger-switch', 'operator', ['compliance-commission'], ['Review the still-staged Ledger owner change against frozen plan; separate approval; commit'],
         'Redeploy recorded legacy Ledger rollback deployment.', 'staged'),
@@ -121,7 +122,9 @@ def confirm(phrase):
 
 def open_blockers(name):
     decisions = json.loads(DECISIONS.read_text())['decisions']
-    return sorted(d['id'] for d in decisions if d['status'] != 'RESOLVED' and (name.split(':')[0] in d['blocks'] or name == 'decisions'))
+    # DEFERRED never blocks starting the sitting, only the steps it lists.
+    return sorted(d['id'] for d in decisions if d['status'] != 'RESOLVED' and (name.split(':')[0] in d['blocks']
+                  or (name == 'decisions' and d['status'] != 'DEFERRED')))
 
 def status(d):
     stop = (d / 'STOP').exists()
@@ -167,6 +170,7 @@ def verify(kind, ev, d, frozen):
         need(ev['unrelated_staged_changes'] == 0 and ev['readback_matches_frozen_plan'] is True, 'STAGED_MISMATCH')
         return 'staged/committed services: ' + ','.join(sorted(ev['staged_services']))
     if kind == 'commission':
+        need('deployment_status' not in ev, 'DEPLOYMENT_STATUS_IS_NOT_PROOF')
         need(ev.get('state') == 'COMMISSIONED_CLOSED' and ev.get('seed_sha256') == SEED_SHA256
              and ev.get('seed_approved') is False and ev.get('listener_started') is False
              and ev.get('scheduler_started') is False, 'COMMISSION_NOT_CLOSED')

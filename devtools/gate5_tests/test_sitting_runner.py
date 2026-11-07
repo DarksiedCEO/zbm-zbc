@@ -93,8 +93,24 @@ class Runner(unittest.TestCase):
                 self.call('begin', 'baseline', '--run', str(self.run), '--plan', str(self.plan))
         self.assertIsNone(sr.record(self.run, 'baseline'))
 
-    def test_live_decisions_still_block_writer(self):
-        self.assertTrue(sr.open_blockers('secret-provision'))
+    def test_deferred_blocks_only_its_steps(self):
+        f = Path(self.tmp.name) / 'decisions.json'
+        f.write_text(json.dumps({'decisions': [{'id': 'DX', 'status': 'DEFERRED', 'blocks': ['admission']}]}))
+        with patch.object(sr, 'DECISIONS', f):
+            self.assertEqual(sr.open_blockers('decisions'), [])
+            self.assertEqual(sr.open_blockers('admission'), ['DX'])
+
+    def test_live_decisions_state(self):
+        self.assertEqual(sr.open_blockers('decisions'), [])
+        self.assertEqual(sr.open_blockers('owner-activation:ledger'), ['D10-compliance-seed'])
+        self.assertEqual(sr.open_blockers('admission'), ['D14-audit-price'])
+        self.assertEqual(sr.open_blockers('secret-provision'), [])
+
+    def test_commission_refuses_deployment_status_as_proof(self):
+        ev = {'state': 'COMMISSIONED_CLOSED', 'seed_sha256': sr.SEED_SHA256, 'seed_approved': False,
+              'listener_started': False, 'scheduler_started': False, 'deployment_status': 'SUCCESS'}
+        with self.assertRaisesRegex(sr.Refused, 'NOT_PROOF'):
+            sr.verify('commission', ev, self.run, json.loads(self.plan.read_text()))
 
     def test_once_only_evidence_required_and_stop_on_fail(self):
         with patch.object(sr, 'open_blockers', lambda name: []):

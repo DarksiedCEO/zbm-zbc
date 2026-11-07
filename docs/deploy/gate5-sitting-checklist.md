@@ -217,3 +217,12 @@ changes. The writer therefore runs only with zero staged changes, followed by a
 separate `secret-commit` step whose staged diff must be exactly the writer's
 names. The throwaway project's deletion was accepted but it was still listed
 immediately after (deletion is scheduled); re-check before the sitting.
+
+### Review outcome (2026-11-07)
+
+Claude review approved d24dcc2 and D02, D03, D06, D07, D11 (now RESOLVED).
+D11 condition: commissioning is proven only by the COMMISSIONED_CLOSED output,
+never by Railway deployment status; the runner refuses deployment status as
+evidence. D12: sitting Sunday 2026-11-08 morning, Pacific. D10 (seed) and D14
+(audit price) are DEFERRED: they do not block starting the sitting, but still
+block owner activation and admission respectively until recorded RESOLVED.

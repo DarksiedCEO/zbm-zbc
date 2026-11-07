@@ -1,7 +1,7 @@
 {
   "schema": "gate5-open-decisions-v1",
   "status": "HOLD",
-  "rule": "Only RESOLVED passes the sitting runner. RECOMMENDED means an engineering answer awaiting Claude/Codex review; OPEN means undecided. An entry is never resolved by filling a placeholder.",
+  "rule": "RESOLVED passes. DEFERRED does not block the 'decisions' step but still blocks every step it lists until recorded RESOLVED. RECOMMENDED and OPEN block everything they list and the 'decisions' step. An entry is never resolved by filling a placeholder.",
   "decisions": [
     {
       "id": "D01-portal-before-writer",
@@ -16,23 +16,23 @@
     },
     {
       "id": "D02-url-cutover-owner",
-      "status": "RECOMMENDED",
+      "status": "RESOLVED",
       "question": "URL cutover is written twice: provision_operator.py writes all 10 URL variables, and the routing phase template stages the same variables. Which mechanism owns the cutover? The other must be removed from the plan.",
       "blocks": [
         "secret-provision",
         "routing"
       ],
-      "decided_by": "Claude Code, pending review",
+      "decided_by": "Claude Code recommendation; approved by Claude review 2026-11-07",
       "resolution": "The staged routing phase is the only URL writer. provision_operator.py no longer writes URLs, refuses any value containing a reference, and dropped --confirm-url-cutover-approved. This also removes the writer from D05 risk."
     },
     {
       "id": "D03-owner-settings-scope",
-      "status": "RECOMMENDED",
+      "status": "RESOLVED",
       "question": "apply_plan.mjs stages only draining/overlap/restart for the four existing owners and its readback refuses any other change. phase_templates.py also sets startCommand and resource limits for them. Which owner settings belong in the closed-configuration stage?",
       "blocks": [
         "closed-configuration"
       ],
-      "decided_by": "Claude Code, pending review",
+      "decided_by": "Claude Code recommendation; approved by Claude review 2026-11-07",
       "resolution": "Existing owners stage exactly the apply_plan.mjs fields (image source, draining 45, overlap 0, restart NEVER). No start-command override on any of the five owners: the image entrypoint applies (a bare zbm-entrypoint override would drop the Compliance entrypoint arguments). Baseline refuses an inherited owner start command. Owner limits move to a separate owner-limits phase after routing, because limit changes can hit running deployments. Admin-role start commands are now strings, not lists."
     },
     {
@@ -58,23 +58,23 @@
     },
     {
       "id": "D06-legacy-ledger-grant",
-      "status": "RECOMMENDED",
+      "status": "RESOLVED",
       "question": "Compliance must be commissioned against the live legacy Ledger, which only reads LEDGER_CALLERS at start. How does the legacy Ledger pick up the new compliance-py grant (redeploy of its current deployment?), and is it confirmed that its current code accepts that grant format?",
       "blocks": [
         "compliance-commission"
       ],
-      "decided_by": "Claude Code, pending review",
+      "decided_by": "Claude Code recommendation; approved by Claude review 2026-11-07",
       "resolution": "Ledger is NOT staged in closed-configuration; its owner change moves to ledger-switch after commissioning (staging PORT=27001 early would break the legacy Ledger at 8090). After the writer writes LEDGER_CALLERS, redeploy the legacy Ledger CURRENT deployment (no rebuild) and read back the same build. Format confirmed offline: legacy Ledger at deployed commit 569b029 reads a sha256-keyed {caller, departments, scope} map with free-form department strings, so the compliance-py/compliance grant is accepted. Whether CLI writes reach that redeploy depends on D04."
     },
     {
       "id": "D07-repo-sourced-services",
-      "status": "RECOMMENDED",
+      "status": "RESOLVED",
       "question": "orchestrator, stripe-gateway and detection stay connected to GitHub main and need a redeploy for URL/credential changes to take effect. When, from which exact commit, and is auto-deploy off for them? Auto-deploy state is UNKNOWN in the baseline; the planned merge at rollout start could deploy them.",
       "blocks": [
         "merge",
         "routing"
       ],
-      "decided_by": "Claude Code, pending review",
+      "decided_by": "Claude Code recommendation; approved by Claude review 2026-11-07",
       "resolution": "Re-check auto-deploy OFF for all 7 existing services at the baseline step (earlier notes say off; this baseline records UNKNOWN). orchestrator, stripe-gateway and detection take URL changes by redeploying their CURRENT deployment (build of 569b029), never a rebuild from main: orchestrator source changed since 569b029. With auto-deploy off, the merge deploys nothing."
     },
     {
@@ -100,29 +100,33 @@
     },
     {
       "id": "D10-compliance-seed",
-      "status": "OPEN",
+      "status": "DEFERRED",
       "question": "Approve the shipped Compliance seed proposal (sha256 bc6d371a...) after commissioning, or hold it?",
       "blocks": [
         "owner-activation"
-      ]
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Decide at the sitting after the commissioning summary. Still blocks owner-activation until recorded RESOLVED."
     },
     {
       "id": "D11-commission-mechanism",
-      "status": "RECOMMENDED",
+      "status": "RESOLVED",
       "question": "How is compliance_commission.py run on Railway: one-shot start-command replacement on the new Compliance service, then restore of the normal entrypoint? This replacement is not yet proven.",
       "blocks": [
         "compliance-commission"
       ],
-      "decided_by": "Claude Code, pending review",
-      "resolution": "On the new Compliance service (restart NEVER, BACKUP_LAUNCH_ENABLED=0, COMPLIANCE_DATA_DIR=/data/compliance; COMPLIANCE_PORT is derived from PORT by zbm-entrypoint): stage start command = the exact compliance_README one-shot command, deploy once, capture COMMISSIONED_CLOSED, then stage the start command back to none and commit without deploying. Unproven on Railway: how an exited one-shot is reported, and that the override replaces rather than wraps the image entrypoint."
+      "decided_by": "Claude Code recommendation; approved by Claude review 2026-11-07",
+      "resolution": "On the new Compliance service (restart NEVER, BACKUP_LAUNCH_ENABLED=0, COMPLIANCE_DATA_DIR=/data/compliance; COMPLIANCE_PORT is derived from PORT by zbm-entrypoint): stage start command = the exact compliance_README one-shot command, deploy once, capture COMMISSIONED_CLOSED, then stage the start command back to none and commit without deploying. Unproven on Railway: how an exited one-shot is reported, and that the override replaces rather than wraps the image entrypoint. Review condition: commissioning success is proven only by the COMMISSIONED_CLOSED output line, never by Railway deployment status."
     },
     {
       "id": "D12-sitting-date",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "Sitting date. The first-due timestamp is derived from it (11:00 UTC the day after the America/Los_Angeles completion date) and must be in the future.",
       "blocks": [
         "schedule-activation"
-      ]
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Sunday 2026-11-08, morning (America/Los_Angeles). If completed that day, first due is 11:00 UTC on 2026-11-09; the runner re-derives and checks it at schedule-activation."
     },
     {
       "id": "D13-backup-schedule-observation",
@@ -136,11 +140,13 @@
     },
     {
       "id": "D14-audit-price",
-      "status": "OPEN",
+      "status": "DEFERRED",
       "question": "Real audit price for SOW 4.1.",
       "blocks": [
         "admission"
-      ]
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Comes later. Still blocks admission until recorded RESOLVED."
     },
     {
       "id": "D15-writer-railway-session",
