@@ -85,10 +85,16 @@ class Runner(unittest.TestCase):
         os.chmod(self.run, 0o755)
         with self.assertRaises(sr.Refused): self.call('status', '--run', str(self.run))
 
-    def test_open_decisions_block_begin(self):
-        with self.assertRaisesRegex(sr.Refused, 'OPEN_DECISIONS:.*D13'):
-            self.call('begin', 'baseline', '--run', str(self.run), '--plan', str(self.plan))
+    def test_open_and_recommended_decisions_block_begin(self):
+        f = Path(self.tmp.name) / 'decisions.json'
+        for status in ('OPEN', 'RECOMMENDED'):
+            f.write_text(json.dumps({'decisions': [{'id': 'DX', 'status': status, 'blocks': ['baseline']}]}))
+            with patch.object(sr, 'DECISIONS', f), self.assertRaisesRegex(sr.Refused, 'OPEN_DECISIONS:DX'):
+                self.call('begin', 'baseline', '--run', str(self.run), '--plan', str(self.plan))
         self.assertIsNone(sr.record(self.run, 'baseline'))
+
+    def test_live_decisions_still_block_writer(self):
+        self.assertTrue(sr.open_blockers('secret-provision'))
 
     def test_once_only_evidence_required_and_stop_on_fail(self):
         with patch.object(sr, 'open_blockers', lambda name: []):
@@ -139,7 +145,7 @@ class Runner(unittest.TestCase):
                 self.call('begin', 'secret-provision', '--run', str(self.run), '--plan', str(self.plan), '--binding', str(binding))
         self.assertEqual(sr.record(self.run, 'secret-provision')['status'], 'UNKNOWN')  # rc 0 without state is not PASS
         args = seen[0]
-        self.assertIn('--apply', args); self.assertEqual(sum(a.startswith('--confirm-') for a in args), 5)
+        self.assertIn('--apply', args); self.assertEqual(sum(a.startswith('--confirm-') for a in args), 4)
         (self.run / 'writer-state.json').write_text(json.dumps({'status': 'COMPLETE_HOLD'}))
         self.call('close', 'secret-provision', '--run', str(self.run), '--plan', str(self.plan), '--result', 'PASS')
         self.assertEqual(sr.record(self.run, 'secret-provision')['status'], 'PASS')

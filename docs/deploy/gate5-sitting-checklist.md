@@ -189,3 +189,20 @@ it can start is the reviewed writer. Run directory: a 0700 folder under
 ```sh
 python3 -B deploy/gate5/sitting_runner.py status --run /absolute/private/run-dir
 ```
+
+### Decision update (2026-11-07)
+
+Founder decisions recorded as RESOLVED: D01 (empty portal service early),
+D08 (existing domains stay), D09 (NEVER; crash-test the backup trigger),
+D13 (schedules UNKNOWN, never touched), D15 (founder's local Railway login,
+logged out after). D10, D12 and D14 remain the founder's, OPEN.
+
+Engineering answers recorded as RECOMMENDED, which still block the runner
+until reviewed: D02 (routing phase alone writes URLs; the writer writes none),
+D03 (owners: apply_plan fields only, image entrypoint, limits in a new
+`owner-limits` phase), D06 (Ledger unstaged until after commissioning; legacy
+Ledger redeploys its current build to load the grant), D07 (auto-deploy re-read
+at baseline; repo-connected services redeploy their current build, never main),
+D11 (one-shot start-command override on Compliance, then cleared).
+
+D04 and D05 stay OPEN until one approved throwaway-project test with fake values.

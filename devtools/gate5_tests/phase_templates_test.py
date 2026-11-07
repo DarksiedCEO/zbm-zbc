@@ -27,7 +27,24 @@ assert all(v['region']=='us-west2' and v['sizeMB']==5000 for v in volumes)
 for op in closed['operations']:
     if op['tool']=='update_service':
         a=op['arguments']
-        assert a['limits']=={'memoryGB':0.256 if a['serviceId']=='<service-id:ledger>' else 0.512, 'vCPUs':1}
+        if 'limits' in a:assert a['limits']=={'memoryGB':0.512, 'vCPUs':1}
+# D03: existing owners stage only apply_plan fields; no owner start-command override; limits later.
+names=[x['name'] for x in p['phases']]
+owners={'<service-id:%s>'%r for r in ('ledger','legal','finance','seo')}
+for op in ops:
+    if op['tool']=='update_service' and op['arguments']['serviceId'] in owners|{'<service-id:compliance>'}:
+        assert 'startCommand' not in op['arguments']
+assert all(isinstance(o['arguments'].get('startCommand',''),str) for o in ops if o['tool']=='update_service')
+lim=next(x for x in p['phases'] if x['name']=='owner-limits')['operations']
+assert {o['arguments']['serviceId'] for o in lim}==owners and next(o for o in lim if o['arguments']['serviceId']=='<service-id:ledger>')['arguments']['limits']=={'memoryGB':0.256,'vCPUs':1}
+assert names.index('routing')<names.index('owner-limits')<names.index('owner-activation')
+# D06: Ledger absent from closed configuration; staged only after commissioning.
+assert not any(o['arguments'].get('serviceId')=='<service-id:ledger>' for o in closed['operations'])
+assert names.index('compliance-commission')<names.index('ledger-switch')<names.index('routing')
+# D01: empty portal service created with the other new resources, not in the portal phase.
+new=next(x for x in p['phases'] if x['name']=='new-empty-resources')['operations']
+assert any(o['tool']=='create_service' and o['arguments']['name']=='client-portal' for o in new)
+assert not any(o['tool']=='create_service' for o in portal_ops) if (portal_ops:=next(x for x in p['phases'] if x['name']=='portal')['operations']) else True
 assert p['approved_decisions']['workspace_monthly_budget_usd']==35
 assert p['approved_decisions']['usage_remaining_percent'] is None
 assert next(x for x in p['phases'] if x['name']=='schedule-activation')['operations'][-1]['arguments']['cronSchedule']=='0 11 * * *'

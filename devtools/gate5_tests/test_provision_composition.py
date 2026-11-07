@@ -85,11 +85,10 @@ class Composition(unittest.TestCase):
         for source, destinations in credentials.DIRECT.items():
             for role,name in destinations:
                 self.assertEqual(fake.data[role][name], fake.data[source[0]][source[1]])
-        for (role,name), value in credentials.URLS.items():
-            self.assertEqual(fake.data[role][name], value)
+        # D02: URL cutover belongs to the staged routing phase; the writer writes none.
         for role,name,value in fake.writes:
-            if '${{' in value:
-                self.assertEqual(credentials.URLS.get((role,name)), value)
+            self.assertNotIn('${{', value)
+            self.assertNotIn((role,name), credentials.URLS)
         self.assertIn('retained_custom', json.loads(fake.data['finance']['FIN_CALLER_TOKENS']))
         self.assertIn('retained_dashboard', json.loads(fake.data['seo']['SEO_CALLER_TOKENS']))
         self.assertNotIn('UNCHANGED_SEALED', fake.data['legal'])

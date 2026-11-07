@@ -39,6 +39,10 @@ def check_baseline(b):
     need(names == sorted(EXISTING), 'EXISTING_SERVICE_SET')
     need(all(s['stagedChanges'] == [] for s in b['services']), 'STAGED_CHANGES_PRESENT')
     need(all(v['stagedChangeCount'] == 0 for v in env['volumes']), 'STAGED_VOLUME_CHANGES')
+    for s in b['services']:
+        # D03: an inherited start command would survive the image switch; stop instead.
+        if s['service']['name'] in OWNERS:
+            need('startCommand' not in (s['config'].get('deploy') or {}), 'OWNER_START_COMMAND_PRESENT:' + s['service']['name'])
     vols = {v['mountedOn']['serviceName']: v for v in env['volumes']}
     need(sorted(vols) == sorted(OWNERS), 'VOLUME_OWNERS')
     for name, v in vols.items():

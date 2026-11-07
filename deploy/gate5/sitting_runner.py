@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 import freeze_plan, capacity_report
 
 PRIVATE_ROOT = Path.home() / '.codex' / 'private'
+DECISIONS = ROOT / 'open_decisions.json'
 OWNER_ORDER = ('ledger', 'legal', 'compliance', 'finance', 'seo')
 SECRETISH = re.compile(r'[0-9a-fA-F]{32,}|(sk|rk|pk|whsec|re)_[A-Za-z0-9_]{8,}|-----BEGIN|\$\{\{')
 # Public digests are allowed only as values of keys ending in sha256, or as sha256:<hex>.
@@ -37,7 +38,8 @@ def step(name, kind, needs, actions, rollback, evidence=None):
 
 STEPS = [
     step('baseline', 'operator', [], ['Read-only inventory of zbm-zbc/production: services, volumes, variable names, domains, staged changes, latest deployments, backup schedules',
-        'Confirm environment created after 2025-10-16 and rollback deployments still redeployable'],
+        'Confirm environment created after 2025-10-16 and rollback deployments still redeployable',
+        'Read back auto-deploy OFF for all 7 existing services (D07); no start command on the four owners (D03); schedules UNKNOWN stay untouched (D13)'],
         'None: read-only.', 'baseline'),
     step('capacity', 'local', ['baseline'], ['Run capacity_report on fresh all-five source sizes and measured one-client growth'],
         'None: read-only. Admission stays closed.', 'capacity'),
@@ -45,21 +47,25 @@ STEPS = [
         'None.', 'decisions'),
     step('merge', 'operator', ['decisions'], ['Approve exact reviewed head and CI; squash merge with auto-deploy confirmed off for every repo-connected service'],
         'Revert commit on main; repo-connected services must not auto-deploy.', 'attest'),
-    step('new-resources', 'operator', ['merge'], ['Staged create: compliance, coordinator, observer, backup-trigger services; compliance/coordinator/observer volumes (us-west2, 5000 MB)',
+    step('new-resources', 'operator', ['merge'], ['Staged create: compliance, coordinator, observer, backup-trigger and EMPTY client-portal services (D01: no source, domain or variables); compliance/coordinator/observer volumes (us-west2, 5000 MB)',
         'Review staged diff contains only these; separate approval; commit'],
         'Delete only the newly created empty services/volumes, after founder inspection. Never touch existing volumes.', 'new_ids'),
-    step('closed-configuration', 'operator', ['new-resources'], ['Stage per-role source/settings/disabled variables (BACKUP_LAUNCH_ENABLED=0); Ledger staged but NOT committed',
-        'Compare staged diff to frozen plan; separate approval; commit all except Ledger'],
+    step('closed-configuration', 'operator', ['new-resources'], ['Stage per-role source/settings/disabled variables (BACKUP_LAUNCH_ENABLED=0); Ledger is NOT staged (D06)',
+        'Compare staged diff to frozen plan; separate approval; commit'],
         'Discard staged changes; redeploy recorded rollback deployments for touched owners.', 'staged'),
     step('secret-provision', 'writer', ['closed-configuration'], ['provision_operator.py --apply with five confirmations; hidden input on this terminal only'],
         'Reconcile names-only state against fresh remote names; never rerun; prepare separately approved continuation.', 'writer_state'),
-    step('compliance-commission', 'operator', ['secret-provision'], ['Legacy Ledger running with compliance-py grant; one-shot commission on empty Compliance store; restore normal start command'],
+    step('compliance-commission', 'operator', ['secret-provision'], ['Redeploy the legacy Ledger CURRENT deployment (no rebuild) so it loads LEDGER_CALLERS with the compliance-py grant; read back the same build (D06)',
+        'Compliance: stage start command = the exact compliance_README one-shot command; deploy once (restart NEVER); capture COMMISSIONED_CLOSED output; stage start command back to none; commit without deploying (D11)'],
         'Stop Compliance; leave store untouched for inspection; legacy Ledger unchanged.', 'commission'),
     step('ledger-switch', 'operator', ['compliance-commission'], ['Review the still-staged Ledger owner change against frozen plan; separate approval; commit'],
         'Redeploy recorded legacy Ledger rollback deployment.', 'staged'),
-    step('routing', 'operator', ['ledger-switch'], ['Old-to-new URL diff for the routing owner chosen in D02; ingress per D08; stage, compare, approve, commit'],
+    step('routing', 'operator', ['ledger-switch'], ['Staged routing phase is the only URL writer (D02); existing public domains stay (D08); stage, compare, approve, commit',
+        'Redeploy CURRENT deployments of orchestrator, stripe-gateway, detection; never rebuild from main (D07)'],
         'Restore recorded URL names to their pre-sitting references; redeploy affected services.', 'staged'),
-    *[step('owner-activation:' + o, 'operator', ['routing'] if i == 0 else ['owner-activation:' + OWNER_ORDER[i - 1]],
+    step('owner-limits', 'operator', ['routing'], ['Stage approved limits on ledger, legal, finance, seo; read back effective byte limits; approve; commit'],
+        'Restore pre-sitting limit settings (recorded at baseline as UNKNOWN unless exposed).', 'staged'),
+    *[step('owner-activation:' + o, 'operator', ['owner-limits'] if i == 0 else ['owner-activation:' + OWNER_ORDER[i - 1]],
            [f'Set BACKUP_LAUNCH_ENABLED=1 on {o}; deploy; native health and control authentication pass before next owner'],
            f'Set BACKUP_LAUNCH_ENABLED=0 on {o}; redeploy; stop activation order.', 'staged') for i, o in enumerate(OWNER_ORDER)],
     step('control-activation', 'operator', ['owner-activation:seo'], ['Enable coordinator, then observer and alerts; authenticated control health; alert delivery receipt'],
@@ -110,7 +116,7 @@ def confirm(phrase):
     need(input(f'Type exactly "{phrase}" to continue: ') == phrase, 'NOT_APPROVED')
 
 def open_blockers(name):
-    decisions = json.loads((ROOT / 'open_decisions.json').read_text())['decisions']
+    decisions = json.loads(DECISIONS.read_text())['decisions']
     return sorted(d['id'] for d in decisions if d['status'] != 'RESOLVED' and (name.split(':')[0] in d['blocks'] or name == 'decisions'))
 
 def status(d):
@@ -147,7 +153,7 @@ def verify(kind, ev, d, frozen):
         return 'capacity below manual threshold for all five stores'
     if kind == 'new_ids':
         uuid = freeze_plan.UUID
-        need(set(ev) == {'services', 'volumes'} and set(ev['services']) == {'compliance', 'coordinator', 'observer', 'backup-trigger'}
+        need(set(ev) == {'services', 'volumes'} and set(ev['services']) == {'compliance', 'coordinator', 'observer', 'backup-trigger', 'client-portal'}
              and set(ev['volumes']) == {'compliance', 'coordinator', 'observer'}, 'NEW_ID_SCHEMA')
         ids = list(ev['services'].values()) + list(ev['volumes'].values())
         need(all(type(i) is str and uuid.match(i) for i in ids) and len(set(ids)) == len(ids), 'NEW_IDS_INVALID')
@@ -191,7 +197,7 @@ def begin(d, name, frozen_path, binding=None):
     if s['kind'] == 'writer':
         need(binding and str(Path(binding).resolve()).startswith(str(PRIVATE_ROOT.resolve()) + '/'), 'BINDING_MUST_BE_PRIVATE')
         args = [sys.executable, '-I', '-B', str(ROOT / 'provision_operator.py'), '--apply', '--binding', binding, '--state', str(d / 'writer-state.json'),
-                *['--confirm-' + f for f in ('exclusive-sitting', 'auto-deploy-off', 'manual-sealing', 'url-cutover-approved', 'presence-manifest-current')]]
+                *['--confirm-' + f for f in ('exclusive-sitting', 'auto-deploy-off', 'manual-sealing', 'presence-manifest-current')]]
         rc = subprocess.run(args, timeout=3600).returncode  # inherits this terminal for hidden prompts
         return close(d, name, 'PASS' if rc == 0 else 'FAIL', None, frozen_path, confirmed=True)
     print(json.dumps({'step': name, 'status': 'UNKNOWN', 'next': 'perform actions, then close with evidence'}))

@@ -125,10 +125,9 @@ def execute(binding,state_path,read,write,prompt,generate):
             value=generate();c.token(value,role);generated[role]=value;inventory[role]=c.Cell.supplied(value)
         planned=c.plan(inventory);need(not planned._generation)
         changes={k:materialize(v) for k,v in planned._deltas.items()};changes.update(generated)
-        for k,v in planned._urls.items():
-            if snapshots[k[0]].get(k[1])!=v:changes[k]=v
+        # D02: URL cutover belongs to the staged routing phase, never to this writer.
         changes={k:json.dumps(v,separators=(',',':')) if type(v) is dict else v for k,v in changes.items()}
-        need(all(type(v) is str and v and ('${{' not in v or c.URLS.get(k)==v) for k,v in changes.items()))
+        need(all(type(v) is str and v and '${{' not in v for k,v in changes.items()))
         # Full preflight completes before the first mutation; no bulk replacement.
         for s in snapshots:need(checked_read(binding,s,read)==snapshots[s])
         for (s,n),value in sorted(changes.items()):
@@ -182,12 +181,12 @@ def openssl():
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply',action='store_true');parser.add_argument('--binding');parser.add_argument('--state')
-    for flag in ('exclusive-sitting','auto-deploy-off','manual-sealing','url-cutover-approved','presence-manifest-current'):
+    for flag in ('exclusive-sitting','auto-deploy-off','manual-sealing','presence-manifest-current'):
         parser.add_argument('--confirm-'+flag,action='store_true')
     args=parser.parse_args(argv)
     if not args.apply:
         print('HOLD: no CLI access, generation, prompt or writes. Apply requires separately authorized operator sitting.');return 0
-    need(all(getattr(args,'confirm_'+f) for f in ('exclusive_sitting','auto_deploy_off','manual_sealing','url_cutover_approved','presence_manifest_current')))
+    need(all(getattr(args,'confirm_'+f) for f in ('exclusive_sitting','auto_deploy_off','manual_sealing','presence_manifest_current')))
     need(args.binding and args.state)
     resource.setrlimit(resource.RLIMIT_CORE,(0,0));os.umask(0o077)
     binding=decode(Path(args.binding).read_text());cli=CLI(binding);cli.version()

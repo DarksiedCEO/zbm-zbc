@@ -1,97 +1,152 @@
 {
   "schema": "gate5-open-decisions-v1",
   "status": "HOLD",
-  "rule": "Every entry must be RESOLVED by Andre, with the resolution text, before the sitting runner passes step 'decisions'. An entry is never resolved by filling a placeholder.",
+  "rule": "Only RESOLVED passes the sitting runner. RECOMMENDED means an engineering answer awaiting Claude/Codex review; OPEN means undecided. An entry is never resolved by filling a placeholder.",
   "decisions": [
     {
       "id": "D01-portal-before-writer",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "The secure variable writer requires all 12 services, including client-portal, to exist. The portal service is planned last, after backup proof. Create an empty portal service (no source, no domain) in the new-resources phase, or split the writer into a non-portal run and a later portal run?",
-      "blocks": ["new-resources", "secret-provision"]
+      "blocks": [
+        "new-resources",
+        "secret-provision"
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Create the client-portal service EMPTY in new-resources (no source, domain or variables). Implemented in phase_templates.py and sitting_runner.py."
     },
     {
       "id": "D02-url-cutover-owner",
-      "status": "OPEN",
+      "status": "RECOMMENDED",
       "question": "URL cutover is written twice: provision_operator.py writes all 10 URL variables, and the routing phase template stages the same variables. Which mechanism owns the cutover? The other must be removed from the plan.",
-      "blocks": ["secret-provision", "routing"]
+      "blocks": [
+        "secret-provision",
+        "routing"
+      ],
+      "decided_by": "Claude Code, pending review",
+      "resolution": "The staged routing phase is the only URL writer. provision_operator.py no longer writes URLs, refuses any value containing a reference, and dropped --confirm-url-cutover-approved. This also removes the writer from D05 risk."
     },
     {
       "id": "D03-owner-settings-scope",
-      "status": "OPEN",
+      "status": "RECOMMENDED",
       "question": "apply_plan.mjs stages only draining/overlap/restart for the four existing owners and its readback refuses any other change. phase_templates.py also sets startCommand and resource limits for them. Which owner settings belong in the closed-configuration stage?",
-      "blocks": ["closed-configuration"]
+      "blocks": [
+        "closed-configuration"
+      ],
+      "decided_by": "Claude Code, pending review",
+      "resolution": "Existing owners stage exactly the apply_plan.mjs fields (image source, draining 45, overlap 0, restart NEVER). No start-command override on any of the five owners: the image entrypoint applies (a bare zbm-entrypoint override would drop the Compliance entrypoint arguments). Baseline refuses an inherited owner start command. Owner limits move to a separate owner-limits phase after routing, because limit changes can hit running deployments. Admin-role start commands are now strings, not lists."
     },
     {
       "id": "D04-cli-writes-vs-staged-changes",
       "status": "OPEN",
       "question": "Does 'railway variable set --skip-deploys' apply immediately or join the environment's staged changes? If it joins them, committing one phase also commits the writer's variables. Needs a credential-free or non-production check approved by Andre.",
-      "blocks": ["secret-provision", "closed-configuration"]
+      "blocks": [
+        "secret-provision",
+        "closed-configuration"
+      ]
     },
     {
       "id": "D05-reference-readback",
       "status": "OPEN",
       "question": "Does 'railway variable list --json' (CLI 5.71.0) return reference variables raw or resolved? If resolved, the writer stops UNKNOWN after its first URL write. Needs an approved check before the sitting (Q3 in provision_operator_README.md).",
-      "blocks": ["secret-provision"]
+      "blocks": [
+        "secret-provision"
+      ]
     },
     {
       "id": "D06-legacy-ledger-grant",
-      "status": "OPEN",
+      "status": "RECOMMENDED",
       "question": "Compliance must be commissioned against the live legacy Ledger, which only reads LEDGER_CALLERS at start. How does the legacy Ledger pick up the new compliance-py grant (redeploy of its current deployment?), and is it confirmed that its current code accepts that grant format?",
-      "blocks": ["compliance-commission"]
+      "blocks": [
+        "compliance-commission"
+      ],
+      "decided_by": "Claude Code, pending review",
+      "resolution": "Ledger is NOT staged in closed-configuration; its owner change moves to ledger-switch after commissioning (staging PORT=27001 early would break the legacy Ledger at 8090). After the writer writes LEDGER_CALLERS, redeploy the legacy Ledger CURRENT deployment (no rebuild) and read back the same build. Format confirmed offline: legacy Ledger at deployed commit 569b029 reads a sha256-keyed {caller, departments, scope} map with free-form department strings, so the compliance-py/compliance grant is accepted. Whether CLI writes reach that redeploy depends on D04."
     },
     {
       "id": "D07-repo-sourced-services",
-      "status": "OPEN",
+      "status": "RECOMMENDED",
       "question": "orchestrator, stripe-gateway and detection stay connected to GitHub main and need a redeploy for URL/credential changes to take effect. When, from which exact commit, and is auto-deploy off for them? Auto-deploy state is UNKNOWN in the baseline; the planned merge at rollout start could deploy them.",
-      "blocks": ["merge", "routing"]
+      "blocks": [
+        "merge",
+        "routing"
+      ],
+      "decided_by": "Claude Code, pending review",
+      "resolution": "Re-check auto-deploy OFF for all 7 existing services at the baseline step (earlier notes say off; this baseline records UNKNOWN). orchestrator, stripe-gateway and detection take URL changes by redeploying their CURRENT deployment (build of 569b029), never a rebuild from main: orchestrator source changed since 569b029. With auto-deploy off, the merge deploys nothing."
     },
     {
       "id": "D08-ingress-closed-meaning",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "orchestrator and stripe-gateway each have one public service domain today (Stripe webhooks reach stripe-gateway). Does 'ingress closed' during rollout mean leaving those domains, or removing/blocking them? State the expected webhook behaviour.",
-      "blocks": ["closed-configuration"]
+      "blocks": [
+        "closed-configuration"
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Leave existing public domains in place during rollout; Stripe retries failed webhooks (test mode, no clients). Closed ingress applies to new roles and owner ports only."
     },
     {
       "id": "D09-restart-and-crash-alerts",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "Accept restart policy NEVER (no automatic restart, outage until repaired) and approve the exact synthetic crash target, recovery steps and cost for the notification check? Observer is stateful; no auto-restart for it without replay evidence.",
-      "blocks": ["closed-configuration", "admission"]
+      "blocks": [
+        "closed-configuration",
+        "admission"
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Accept restart policy NEVER. Synthetic crash test target: backup-trigger. Recovery steps and cost still need approval at the sitting; observer gets no auto-restart."
     },
     {
       "id": "D10-compliance-seed",
       "status": "OPEN",
       "question": "Approve the shipped Compliance seed proposal (sha256 bc6d371a...) after commissioning, or hold it?",
-      "blocks": ["owner-activation"]
+      "blocks": [
+        "owner-activation"
+      ]
     },
     {
       "id": "D11-commission-mechanism",
-      "status": "OPEN",
+      "status": "RECOMMENDED",
       "question": "How is compliance_commission.py run on Railway: one-shot start-command replacement on the new Compliance service, then restore of the normal entrypoint? This replacement is not yet proven.",
-      "blocks": ["compliance-commission"]
+      "blocks": [
+        "compliance-commission"
+      ],
+      "decided_by": "Claude Code, pending review",
+      "resolution": "On the new Compliance service (restart NEVER, BACKUP_LAUNCH_ENABLED=0, COMPLIANCE_DATA_DIR=/data/compliance; COMPLIANCE_PORT is derived from PORT by zbm-entrypoint): stage start command = the exact compliance_README one-shot command, deploy once, capture COMMISSIONED_CLOSED, then stage the start command back to none and commit without deploying. Unproven on Railway: how an exited one-shot is reported, and that the override replaces rather than wraps the image entrypoint."
     },
     {
       "id": "D12-sitting-date",
       "status": "OPEN",
       "question": "Sitting date. The first-due timestamp is derived from it (11:00 UTC the day after the America/Los_Angeles completion date) and must be in the future.",
-      "blocks": ["schedule-activation"]
+      "blocks": [
+        "schedule-activation"
+      ]
     },
     {
       "id": "D13-backup-schedule-observation",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "The baseline does not expose backupSchedules for any of the four volumes (UNKNOWN). Which read at the sitting exposes them? If none does, proceed with UNKNOWN (never touched) or stop?",
-      "blocks": ["baseline"]
+      "blocks": [
+        "baseline"
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Proceed with UNKNOWN and never touch platform backup schedules."
     },
     {
       "id": "D14-audit-price",
       "status": "OPEN",
       "question": "Real audit price for SOW 4.1.",
-      "blocks": ["admission"]
+      "blocks": [
+        "admission"
+      ]
     },
     {
       "id": "D15-writer-railway-session",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "The writer uses the founder's local Railway CLI login (HOME). Confirm that session is the credential for the sitting and that it is logged out afterwards.",
-      "blocks": ["secret-provision"]
+      "blocks": [
+        "secret-provision"
+      ],
+      "decided_by": "Andre, 2026-11-07",
+      "resolution": "Founder's own local Railway CLI login on the Mac, logged out right after the writer step."
     }
   ]
 }

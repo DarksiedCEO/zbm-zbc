@@ -53,17 +53,17 @@ class Qualification(unittest.TestCase):
   f=Fake();f.data['finance'].pop('LEDGER_SERVICE_TOKEN');f.prompt=lambda label:'e'*64
   self.assertEqual(run(f),('REFUSED',{'attempted_name':None,'completed_names':[],'status':'REFUSED_NO_WRITES'}))
 
- def test_q3_rendered_reference_readback_stops_unknown(self):
-  # If the CLI returns resolved references, the run stops UNKNOWN mid-way.
-  # This pins fail-closed behaviour; it is not a supported outcome.
+ def test_q3_writer_writes_no_references(self):
+  # D02: the writer writes no references, so a CLI that resolves them cannot stop it mid-run.
   f=Fake();original=f.write
   def rendered(s,n,v):
    original(s,n,v)
    if '${{' in v:f.data[s][n]=v.replace('${{','resolved-').replace('}}','')
   f.write=rendered
   result,state=run(f)
-  self.assertEqual((result,state['status']),('REFUSED','UNKNOWN'))
-  self.assertEqual(sum('${{' in v for *_,v in f.writes),1)
+  self.assertEqual((result,state['status']),('COMPLETE_HOLD','COMPLETE_HOLD'))
+  self.assertEqual(sum('${{' in v for *_,v in f.writes),0)
+  self.assertFalse(any((s,n) in c.URLS for s,n,_ in f.writes))
 
  def test_q4_no_values_in_output_or_state(self):
   f=Fake();buf=io.StringIO()
