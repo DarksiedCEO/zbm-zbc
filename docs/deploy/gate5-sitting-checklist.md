@@ -121,3 +121,25 @@ Local CLI compatibility observation: installed Railway 5.71.0 advertises
 selectors, matching `provision_operator.py`. This is credential-free local help,
 not proof of sealed-value readback or a production write. Those require the
 complete sitting inventory and guarded operator preflight; no write was made.
+
+## Railway crash-notification sitting check (5–10 minutes; not yet proven)
+
+Railway's [2025-11-21 notification announcement](https://railway.com/changelog/2025-11-21-notifications)
+lists crashed deployments and out-of-memory kills under Build & deployment
+failures, with Email & In-App delivery and project overrides. Founder confirms
+that delivery mode and the target project's effective override at the sitting;
+configuration alone is not a PASS.
+
+Before client admission, obtain approval for the exact synthetic crash target,
+recovery steps and any incremental cost. No new platform run or intentional
+production crash is authorized by this checklist. Record the healthy deployment
+ID, induced process exit and Railway's resulting deployment status, then confirm
+the matching service/environment email actually arrives in andre's inbox.
+A successful normal crash test does not certify OOM delivery or child-process
+failure while a supervisor remains alive. Record those separately as unproven.
+On missing email, stop admission and report; do not repeat automatically.
+
+The observer is stateful: `/volume/control/monitor.sqlite` and
+`/volume/control/outbox` persist schedule and delivery state. Restart-on-failure
+is a proposal only, requiring safe replay/recovery evidence and explicit policy
+approval. Keep the current template unchanged; no blanket stateless claim.
