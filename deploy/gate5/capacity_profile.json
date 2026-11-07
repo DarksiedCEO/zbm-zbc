@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "production_applied": false,
+  "approval": "Andre approved these source-byte caps for the rollout plan; production writes wait for sitting",
+  "policy": {
+    "sources": {
+      "compliance": 2097152,
+      "finance": 524288,
+      "ledger": 2097152,
+      "legal": 524288,
+      "seo": 524288
+    },
+    "version": 1
+  },
+  "capture_limits": {
+    "ledger": {
+      "source": 2097152,
+      "stage": 3145728,
+      "repository": 6291456,
+      "control_reserve": 1048576
+    },
+    "finance": {
+      "source": 524288,
+      "stage": 1572864,
+      "repository": 3145728,
+      "control_reserve": 1048576
+    },
+    "legal": {
+      "source": 524288,
+      "stage": 1572864,
+      "repository": 3145728,
+      "control_reserve": 1048576
+    },
+    "compliance": {
+      "source": 2097152,
+      "stage": 3145728,
+      "repository": 6291456,
+      "control_reserve": 1048576
+    },
+    "seo": {
+      "source": 524288,
+      "stage": 1572864,
+      "repository": 3145728,
+      "control_reserve": 1048576
+    }
+  },
+  "manual_warning_percent": 50,
+  "measurement_required": "Fresh per-store logical source-file bytes; excludes control and backup directories",
+  "growth_required": "Measured before/after bytes from one representative SEO audit, per store; unknown blocks client admission",
+  "container_resources": "UNAPPROVED: byte caps do not approve CPU, RAM, PID or spending"
+}

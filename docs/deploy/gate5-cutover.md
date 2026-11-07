@@ -57,3 +57,35 @@ Official Railway documentation checked during preparation:
 - [Private networking](https://docs.railway.com/networking/private-networking/how-it-works): environments created after October 16, 2025 have IPv4 and IPv6 DNS; legacy environments are IPv6-only. Check the actual target before relying on IPv4 listeners.
 
 No live account, billing or production refresh is performed by this document. No fixed total bill, unlimited growth, uptime or deployment success is promised.
+
+## Pinned rollout inputs and manual capacity check
+
+`deploy/gate5/release_images.json` pins the six published, scanned `f5fa44b`
+images. Coordinator, observer and backup-trigger share the admin digest. The
+portal is deliberately unresolved, not silently replaced with an unreviewed
+image. Subsequent operator-plan commits do not change these runtime images.
+`rollout_manifest.json` orders the required sitting checks; it is HOLD and is
+not an API payload. CPU/RAM/PID choices and new-resource costs are separate
+from the approved source-byte caps.
+
+Andre approved `capacity_profile.json`: Ledger/Compliance 2 MiB each and
+Finance/Legal/SEO 512 KiB each. Its staging/repository envelopes are derived
+from the existing runtime policy. No limit is applied by these files.
+At the sitting record logical source-file bytes for all five stores, excluding
+control/backup directories, and the measured before/after increase from one
+representative SEO audit client. Do not infer growth from today's empty stores.
+If a measurement is unavailable, record `null`; admission remains on HOLD.
+Run the operator capacity report using a private measurement file:
+
+```sh
+python3 -B deploy/gate5/capacity_report.py /absolute/private/capacity-measurement.json
+```
+
+Input has `measured_at` (timezone-qualified ISO timestamp) and `stores`, with
+all five names mapped to `source_bytes` and `one_client_growth_bytes`.
+The output shows bytes, cap, percent and estimated increment for every store.
+Measurements older than one hour refuse. Unknown growth, a current size at
+50%, or the next client reaching 50% returns HOLD (exit 2). This is a manual
+operator admission check, not an automatic runtime alarm. Run it before each
+new client and after each audit; qualify and approve a larger limit before
+allowing the threshold to be crossed. Never raise limits automatically.
