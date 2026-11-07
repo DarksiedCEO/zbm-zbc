@@ -37,20 +37,24 @@
     },
     {
       "id": "D04-cli-writes-vs-staged-changes",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "Does 'railway variable set --skip-deploys' apply immediately or join the environment's staged changes? If it joins them, committing one phase also commits the writer's variables. Needs a credential-free or non-production check approved by Andre.",
       "blocks": [
         "secret-provision",
         "closed-configuration"
-      ]
+      ],
+      "decided_by": "Andre, 2026-11-07 (worst case assumed); throwaway test",
+      "resolution": "Throwaway test: a CLI write is listed immediately; the staged-banner check was skipped. Plan assumes the worst case, that CLI writes join staged changes. Ordering: the writer runs only with zero staged changes environment-wide; its writes then get their own secret-commit step (staged diff must contain exactly the writer names, nothing else); every later phase starts from zero staged changes. The secret-commit deploy is what loads the compliance-py grant into the legacy Ledger (D06)."
     },
     {
       "id": "D05-reference-readback",
-      "status": "OPEN",
+      "status": "RESOLVED",
       "question": "Does 'railway variable list --json' (CLI 5.71.0) return reference variables raw or resolved? If resolved, the writer stops UNKNOWN after its first URL write. Needs an approved check before the sitting (Q3 in provision_operator_README.md).",
       "blocks": [
         "secret-provision"
-      ]
+      ],
+      "decided_by": "Throwaway test, 2026-11-07",
+      "resolution": "railway variable list --json returns references RESOLVED, not raw. The writer writes no references (D02), so it is unaffected. Routing readback must compare the raw staged diff, never CLI list output."
     },
     {
       "id": "D06-legacy-ledger-grant",

@@ -206,3 +206,14 @@ at baseline; repo-connected services redeploy their current build, never main),
 D11 (one-shot start-command override on Compliance, then cleared).
 
 D04 and D05 stay OPEN until one approved throwaway-project test with fake values.
+
+### D04/D05 throwaway result (2026-11-07)
+
+One approved test in a throwaway project with fake values. D05: `railway
+variable list --json` returns references resolved, not raw; routing must be
+checked against the raw staged diff. D04: a CLI write is listed immediately;
+the staged-banner check was skipped, so the plan assumes CLI writes join staged
+changes. The writer therefore runs only with zero staged changes, followed by a
+separate `secret-commit` step whose staged diff must be exactly the writer's
+names. The throwaway project's deletion was accepted but it was still listed
+immediately after (deletion is scheduled); re-check before the sitting.

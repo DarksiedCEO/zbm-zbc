@@ -41,6 +41,8 @@ assert names.index('routing')<names.index('owner-limits')<names.index('owner-act
 # D06: Ledger absent from closed configuration; staged only after commissioning.
 assert not any(o['arguments'].get('serviceId')=='<service-id:ledger>' for o in closed['operations'])
 assert names.index('compliance-commission')<names.index('ledger-switch')<names.index('routing')
+# D04 worst case: the writer's staged variables get their own commit before anything else.
+assert names.index('secret-custody')+1==names.index('secret-commit')==names.index('compliance-commission')-1
 # D01: empty portal service created with the other new resources, not in the portal phase.
 new=next(x for x in p['phases'] if x['name']=='new-empty-resources')['operations']
 assert any(o['tool']=='create_service' and o['arguments']['name']=='client-portal' for o in new)
