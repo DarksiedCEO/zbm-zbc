@@ -226,3 +226,14 @@ never by Railway deployment status; the runner refuses deployment status as
 evidence. D12: sitting Sunday 2026-11-08 morning, Pacific. D10 (seed) and D14
 (audit price) are DEFERRED: they do not block starting the sitting, but still
 block owner activation and admission respectively until recorded RESOLVED.
+
+### Writer binding and baseline source (2026-11-07)
+
+`writer_binding.py` builds the writer's binding offline from the step-1
+baseline, the new-resources ID evidence and a fresh names-only inventory of
+all 12 services taken just before the writer. Every ID is pinned to those
+inputs, any staged change refuses (D04), and the output is a new private 0600
+file. The inventory and the step-1 baseline must come from the Railway
+connector's describe output, as the original baseline did: CLI variable lists
+omit sealed names and return values. No CLI-to-baseline converter is provided;
+the connector must be connected, with founder approval, before the sitting.
