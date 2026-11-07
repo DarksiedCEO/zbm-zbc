@@ -36,7 +36,7 @@ export function buildSdkDefinitions(proposal, registryImages, existingVariableNa
     const volumeMounts={};
     if (row.volume) {
       if (!/^[0-9a-f-]{36}$/.test(row.volume.id) || !['/data','/volume'].includes(row.volume.mount)) refuse('VOLUME_BINDING_REQUIRED');
-      volumeMounts[row.volume.id]={mountPath:row.volume.mount,backupSchedules:[]};
+      volumeMounts[row.volume.id]={mountPath:row.volume.mount};
       deploy.requiredMountPath=row.volume.mount;
     }
     definitions.push(sdk.service(name,{source:sdk.image(image),deploy,env,volumeMounts}));
@@ -51,5 +51,5 @@ export function buildSdkDefinitions(proposal, registryImages, existingVariableNa
   const gateway=proposal.gateway_private_name_proposal;
   if (gateway.proposed_name!=='coordinator') refuse('GATEWAY_PRIVATE_NAME');
   (routing['stripe-gateway']??={})[gateway.variable_name]=gateway.proposed_name;
-  return {status:'HOLD',executable:false,partial_only:true,sdk_version:'3.13.1',definitions,identity_sidecar:identities,cutover_variable_fragments:routing,disabled_schedule_proposal:proposal.schedule_proposal,blockers:['SDK_PRUNES_NULL_CRON_EXISTING_SCHEDULE_REMOVAL_UNPROVEN','NOT_A_COMPLETE_PROJECT_DO_NOT_APPLY','EXISTING_IDENTITY_BINDINGS_REQUIRE_LIVE_PLAN_RECONCILIATION','PID_LIMIT_NOT_SUPPORTED_BY_SDK_DEPLOY_TYPE','NEW_ADMIN_VOLUMES_REQUIRE_SEPARATE_APPROVED_PROVISIONING','CRON_AND_BACKUP_ENABLE_REQUIRE_EXPLICIT_CUTOVER','PRODUCTION_APPROVAL_AND_EVIDENCE_NOT_ESTABLISHED']};
+  return {status:'HOLD',executable:false,partial_only:true,sdk_version:'3.13.1',definitions,identity_sidecar:identities,cutover_variable_fragments:routing,disabled_schedule_proposal:proposal.schedule_proposal,blockers:['EXISTING_BACKUP_SCHEDULES_REQUIRE_EXACT_PRESERVATION_BINDING','SDK_PRUNES_NULL_CRON_EXISTING_SCHEDULE_REMOVAL_UNPROVEN','NOT_A_COMPLETE_PROJECT_DO_NOT_APPLY','EXISTING_IDENTITY_BINDINGS_REQUIRE_LIVE_PLAN_RECONCILIATION','PID_LIMIT_NOT_SUPPORTED_BY_SDK_DEPLOY_TYPE','NEW_ADMIN_VOLUMES_REQUIRE_SEPARATE_APPROVED_PROVISIONING','CRON_AND_BACKUP_ENABLE_REQUIRE_EXPLICIT_CUTOVER','PRODUCTION_APPROVAL_AND_EVIDENCE_NOT_ESTABLISHED']};
 }

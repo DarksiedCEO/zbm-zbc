@@ -7,17 +7,131 @@
   "capacity_profile": "capacity_profile.json",
   "production_access": "sitting only, separately authorized",
   "apply_strategy": "targeted existing service IDs; preserve unmentioned resources/settings; never apply the partial SDK graph",
-  "new_roles": ["compliance", "coordinator", "observer", "backup-trigger", "client-portal"],
-  "owner_start_order": ["ledger", "legal", "compliance", "finance", "seo"],
-  "owner_stop_order": ["seo", "finance", "compliance", "legal", "ledger"],
+  "new_roles": [
+    "compliance",
+    "coordinator",
+    "observer",
+    "backup-trigger",
+    "client-portal"
+  ],
+  "owner_start_order": [
+    "ledger",
+    "legal",
+    "compliance",
+    "finance",
+    "seo"
+  ],
+  "owner_stop_order": [
+    "seo",
+    "finance",
+    "compliance",
+    "legal",
+    "ledger"
+  ],
   "phases": [
-    {"step": 1, "name": "fresh-baseline", "writes": false, "checks": ["exact project/environment/service/volume IDs", "environment created after 2025-10-16", "no staged changes", "rollback deployment/image/settings captured", "preservation repository verified", "fresh source sizes and measured one-client growth", "capacity report passes below projected 50%"]},
-    {"step": 2, "name": "approve-exact-delta", "writes": false, "checks": ["Claude approves exact wiring diff and CI", "pinned image manifest unchanged", "CPU/RAM and monthly cost approved", "PID policy resolved", "portal image source resolved", "UTC cron and first due approved", "exact new-resource identities and volume cost approved"]},
-    {"step": 3, "name": "closed-preparation", "writes": true, "checks": ["explicit sitting GO", "ingress closed", "trigger disabled", "existing volumes remain at /data with original IDs/size/region", "existing backupSchedules preserved", "Compliance commissioned once against legacy Ledger before supervisor switch", "dedicated coordination secret and direct matching copies", "URL references only; no secret references"]},
-    {"step": 4, "name": "controlled-rollout", "writes": true, "checks": ["digest-pinned owner deployment in owner_start_order", "native app health plus control authentication", "coordinator observer and trigger bound to admin digest", "external routes switched only after readiness", "no native-port bypass", "client admission remains closed"]},
-    {"step": 5, "name": "backup-and-restore", "writes": true, "checks": ["nightly UTC cron first due and observer cadence set and read back", "all five locally sealed and verified", "restart and actual traffic reopen proven, not READY_CLOSED alone", "remote B2 snapshots plus complete catalog verified", "B2-only restore into approved empty targets", "application balances acceptance and hashes pass", "temporary target deletion and usage evidence", "only now separately approve removing platform backupSchedules and read back"]},
-    {"step": 6, "name": "client-admission", "writes": true, "checks": ["LOCKED alert proven", "operator report procedure ready", "live Stripe configuration and SOW price approved", "fresh capacity report below 50% including projected client growth", "separate founder admission GO"]}
+    {
+      "step": 1,
+      "name": "fresh-baseline",
+      "writes": false,
+      "checks": [
+        "exact project/environment/service/volume IDs",
+        "environment created after 2025-10-16",
+        "no staged changes",
+        "rollback deployment/image/settings captured",
+        "preservation repository verified",
+        "fresh source sizes and measured one-client growth",
+        "capacity report passes below projected 50%"
+      ]
+    },
+    {
+      "step": 2,
+      "name": "approve-exact-delta",
+      "writes": false,
+      "checks": [
+        "Claude approves exact wiring diff and CI",
+        "pinned image manifest unchanged",
+        "CPU/RAM and monthly cost approved",
+        "PID policy resolved",
+        "UTC cron and first due approved",
+        "exact new-resource identities and volume cost approved"
+      ]
+    },
+    {
+      "step": 3,
+      "name": "closed-preparation",
+      "writes": true,
+      "checks": [
+        "explicit sitting GO",
+        "ingress closed",
+        "trigger disabled",
+        "existing volumes remain at /data with original IDs/size/region",
+        "existing backupSchedules preserved",
+        "Compliance commissioned once against legacy Ledger before supervisor switch",
+        "dedicated coordination secret and direct matching copies",
+        "URL references only; no secret references"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "controlled-rollout",
+      "writes": true,
+      "checks": [
+        "digest-pinned owner deployment in owner_start_order",
+        "native app health plus control authentication",
+        "coordinator observer and trigger bound to admin digest",
+        "external routes switched only after readiness",
+        "no native-port bypass",
+        "client admission remains closed"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "backup-and-restore",
+      "writes": true,
+      "checks": [
+        "nightly UTC cron first due and observer cadence set and read back",
+        "all five locally sealed and verified",
+        "restart and actual traffic reopen proven, not READY_CLOSED alone",
+        "remote B2 snapshots plus complete catalog verified",
+        "B2-only restore into approved empty targets",
+        "application balances acceptance and hashes pass",
+        "temporary target deletion and usage evidence",
+        "only now separately approve removing platform backupSchedules and read back"
+      ]
+    },
+    {
+      "step": "5b",
+      "name": "portal-pre-admission",
+      "writes": true,
+      "checks": [
+        "separate packages-only token session after backup proof; portal build approved, publication pending",
+        "if push denied stop; founder inspects and explicitly deletes leftover package before fresh push",
+        "registry digest matches scanned image; anonymous linux/amd64 pull and public visibility verified",
+        "explicit founder approval for new client-portal Railway service, public domain and incremental monthly cost",
+        "standalone portal without backup wrapper or volume; direct secret copies and URL references only",
+        "public health and contract acceptance flow verified before client admission",
+        "Docker logout and founder token revocation"
+      ]
+    },
+    {
+      "step": 6,
+      "name": "client-admission",
+      "writes": true,
+      "checks": [
+        "LOCKED alert proven",
+        "operator report procedure ready",
+        "live Stripe configuration and SOW price approved",
+        "fresh capacity report below 50% including projected client growth",
+        "separate founder admission GO"
+      ]
+    }
   ],
   "failure_policy": "Stop on first failed check; keep ingress closed and trigger disabled, retain evidence. Restore recorded image/settings only after state compatibility proof; otherwise B2-only restore into an approved empty target. Never overwrite a running or nonempty store.",
-  "unresolved": ["targeted provider apply payload and exact identity reconciliation", "CPU/RAM/PID production approval", "client-portal production image", "nightly UTC cron and first due", "new resource provisioning and cost approval"]
+  "unresolved": [
+    "targeted provider apply payload and exact identity reconciliation",
+    "CPU/RAM/PID production approval",
+    "client-portal production image",
+    "nightly UTC cron and first due",
+    "new resource provisioning and cost approval"
+  ]
 }

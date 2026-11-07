@@ -23,6 +23,15 @@ for(const node of out.definitions) {
  assert.equal(node.deploy.limitOverride.containers.memoryBytes,268435456);
 }
 assert.equal(out.definitions[0].deploy.startCommand,undefined);
+let mountsChecked=0;
+for (const node of out.definitions) {
+ for (const mount of Object.values(node.volumeMounts ?? {})) {
+  mountsChecked++;
+  assert.equal(Object.hasOwn(mount, "backupSchedules"), false);
+ }
+}
+assert.equal(mountsChecked,7);
+assert.ok(out.blockers.includes('EXISTING_BACKUP_SCHEDULES_REQUIRE_EXACT_PRESERVATION_BINDING'));
 assert.match(out.definitions[7].deploy.startCommand,/admin_launcher.py trigger$/);
 assert.equal(out.cutover_variable_fragments['client-portal'].PORTAL_LEGAL_URL,'http://coordinator.railway.internal:27001');
 assert.throws(()=>buildSdkDefinitions({...p,blockers:['RUNTIME_PRODUCTION_LIMITS_UNRESOLVED']},images,vars,sdk),/IMPLEMENTATION/);

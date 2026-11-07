@@ -15,7 +15,7 @@ The accepted November 7 throwaway run proved image pulls, `/data`, networking, n
 
 Production uses **GHCR image sources pinned by immutable digest, built from the exact final reviewed release commit**, with scan evidence and OCI revision labels tied to that commit. Do not mix GitHub branch builds with these images, or reuse qualification tags as production references. The legacy `.railway/railway.ts` GitHub-source definitions are not the cutover source. Record the per-service digest manifest outside the source commit after builds to avoid a self-referential commit hash.
 
-Preserve all existing platform `backupSchedules` through deployment and the first real B2 backup **and B2-only restore**. Only after both pass at the sitting may the separately approved removal set `backupSchedules: []`; read back the result. The empty arrays in the partial SDK/legacy configuration are deferred removal proposals, never an initial-cutover apply payload. If B2 backup or restore fails, do not remove existing schedules. This does not authorize creating paid platform backups or upgrading plans.
+Preserve all existing platform `backupSchedules` through deployment and the first real B2 backup **and B2-only restore**. Only after both pass at the sitting may the separately approved removal set `backupSchedules: []`; read back the result. The partial SDK adapter no longer emits schedule deletion; omission is not proven preservation, so exact preservation binding remains an apply blocker. Legacy empty arrays are never an initial-cutover apply payload. If B2 backup or restore fails, do not remove existing schedules. This does not authorize creating paid platform backups or upgrading plans.
 
 ## Fixed decisions
 
@@ -32,9 +32,9 @@ Preserve all existing platform `backupSchedules` through deployment and the firs
 2. Before switching Ledger to supervision, stop the existing application writers while leaving the existing Ledger available at its legacy private port 8090. Keep ingress closed and the trigger disabled. Provision the approved new Compliance volume and matching Compliance Ledger grant on that existing Ledger; validate the grant in the separately authorized commissioning sitting. Run the packaged one-shot Compliance commissioning command in explicit `legacy-pre-supervisor` phase against the newly empty `/data/compliance` store, then retain its clean close/existing-store reconstruction evidence. This seeds a proposal, not founder approval or client activation. Do not commission through supervised Ledger27001 or dependency27003. On failure retain the partial store and Ledger evidence; never wipe or retry. After successful commissioning, clean-stop Ledger before replacing its deployment. Provision the remaining approved control volumes/observer and bind existing owner volumes at `/data` without migration; supply matched credentials through the reviewed secure provisioner. See `deploy/gate5/compliance_README.md` for the exact dormant image command.
 3. Deploy closed owner supervisors, then start/check native applications Ledger → Legal → Compliance → Finance → SEO. Native application health and all-five readiness must be separately proven: coordinator `/health` alone is insufficient.
 4. Start coordinator against the five owners and observer. Verify authenticated control paths and dependency relays; reject private DNS/address-family mismatches. Route external departmental consumers through coordinator, not directly to owner/native ports.
-5. Deploy gateway, portal and any affected external consumers against the approved routes. Keep client admission closed; validate acceptance and payment-webhook refusal/replay handling without introducing a new charge.
+5. Deploy gateway and any affected existing external consumers against the approved routes. Keep client admission closed; validate acceptance and payment-webhook refusal/replay handling without introducing a new charge.
 6. Arm the approved UTC schedule and first-due timestamp; execute the initial cold backup and restore its B2 snapshots into explicitly approved isolated resources. Check application state, balances, acceptance and hashes; delete temporary resources and capture cost/absence evidence.
-7. Confirm alert delivery, operator report procedure, live billing configuration and SOW price. Open client admission only on a separate founder GO after every preceding gate passes.
+7. Complete the separately approved portal step below. Confirm alert delivery, operator report procedure, live billing configuration and SOW price. Open client admission only on a separate founder GO after every preceding gate passes.
 
 These are sequencing requirements, not evidence that the current IaC/provisioner can execute them. Missing initialization, routing, limits or image bindings remain implementation blockers.
 
@@ -89,3 +89,22 @@ Measurements older than one hour refuse. Unknown growth, a current size at
 operator admission check, not an automatic runtime alarm. Run it before each
 new client and after each audit; qualify and approve a larger limit before
 allowing the threshold to be crossed. Never raise limits automatically.
+
+## Portal sitting step — after backup proof, before client admission
+
+The saved production baseline contains no client-portal service. Claude approved
+its standalone build from f5fa44b; publication is pending. The six backup image
+pins remain unchanged. Do not publish or create a portal during preparation.
+
+1. Founder supplies one packages-only token through hidden Docker login. Push
+   the scanned standalone portal image. On denial stop: the earlier registry
+   denial is unexplained, not proof of a corrupt package. Only the founder may
+   inspect and explicitly delete the leftover package before a fresh push.
+2. Record the registry digest, match it to the scanned image, make the package
+   public with approval and verify anonymous linux/amd64 pull. Log Docker out
+   and have the founder revoke the token.
+3. Obtain explicit approval for the new Railway client-portal service, its
+   public web address and incremental monthly cost. Use no backup wrapper or
+   data volume; provision matching secrets directly and references only for URLs.
+4. Verify public health and the actual contract acceptance flow. Client
+   admission stays closed until this passes. No acceptance on a client's behalf.
