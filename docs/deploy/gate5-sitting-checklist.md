@@ -87,3 +87,37 @@ Only then freeze the filled non-secret plan for Claude review. Each stage must
 have exact readback and explicit commit approval; never commit unrelated staged
 changes. Existing schedules remain untouched until remote backup/restore PASS
 and separate removal approval. No additional platform run is authorized.
+
+## Source scope and crash policy clarification
+
+The Railway `connect_service_source` tool contract explicitly says that
+`staged: true` together with `environmentId` stages the source in **that one
+ environment**, with no build until `accept-deploy`. Every generated source
+operation supplies both fields. The prohibited form is live/default mode,
+which changes all environments. Do not strip either field. Verify the staged
+patch's environment and image before committing; having one environment is
+not a safety argument. This is tool-contract evidence, not a new live test.
+
+`NEVER` intentionally prevents the platform from automatically restarting a
+failed owner and bypassing the repair decision. It is NOT proof of complete
+crash alerting, nor founder acceptance of unattended downtime. The observer's
+`cold_alerts.py` maps missing trigger, missed completion, backup failure,
+archive full and recovery lock events to email. It does not monitor every
+service process continuously. `admin_entrypoint.py` runs that dispatcher in
+the observer process: an observer crash cannot send its own alert. The earlier
+LOCKED inbox PASS proves transport delivery only, not arbitrary crash detection.
+**HOLD before rollout:** settle outage/restart policy and independent notification
+coverage. Do not silently enable automatic restart or promise 2 AM alerts.
+
+Portal template now fixes port 8480, IPv6 bind, /health, origin from the returned
+public domain, Pacific display timezone and the existing one-proxy/x-real-ip
+contract. Domain creation precedes filling the origin; stage settings before
+first application deploy. Verify proxy behavior and acceptance at the sitting.
+Four portal secrets remain in the existing direct-copy credential manifest;
+no volume, secret references or backup wrapper are introduced.
+
+Local CLI compatibility observation: installed Railway 5.71.0 advertises
+`variable set KEY --stdin --skip-deploys` plus explicit project/environment/service
+selectors, matching `provision_operator.py`. This is credential-free local help,
+not proof of sealed-value readback or a production write. Those require the
+complete sitting inventory and guarded operator preflight; no write was made.

@@ -31,3 +31,11 @@ for op in closed['operations']:
 assert p['approved_decisions']['workspace_monthly_budget_usd']==35
 assert p['approved_decisions']['usage_remaining_percent'] is None
 assert next(x for x in p['phases'] if x['name']=='schedule-activation')['operations'][-1]['arguments']['cronSchedule']=='0 11 * * *'
+
+for op in ops:
+    if op['tool']=='connect_service_source':
+        assert op['arguments']['staged'] is True
+        assert op['arguments']['environmentId']=='<production-environment-id>'
+portal=next(x for x in p['phases'] if x['name']=='portal')
+assert portal['operations'][-1]['arguments']['targetPort']==8480
+assert any('observer cannot alert on its own failure' in x for x in p['prerequisites'])
