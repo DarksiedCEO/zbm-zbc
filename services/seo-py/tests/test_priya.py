@@ -98,7 +98,9 @@ def test_pii_suspect_queries_never_enter_the_ledger_only_their_counts():
 
 @pytest.mark.parametrize("q", ["123 main st springfield", "45 oak avenue apt 3", "1200 5th ave new york",
                                "9 n elm blvd.", "po box 1234", "springfield il 62701", "austin, tx 78701",
-                               "90210-1234", "plumber at 123 main st"])
+                               "90210-1234", "plumber at 123 main st", "42 Wallaby Way Sydney", "123 main road",
+                               "123 main st springfield il 62701 hours", "55 water st 12th floor", "boston ma 02108",
+                               "rr 2 box 15", "1 main st pmb 123", "x" * 600])
 def test_street_addresses_are_dropped_as_personal_data(q):
     led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
     assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"] == {"queries": 1, "clicks": 1,
@@ -109,7 +111,8 @@ def test_street_addresses_are_dropped_as_personal_data(q):
                                "#1 rug cleaner", "ac unit 12000 btu", "24 hour emergency plumber near dr",
                                "2 bedroom flat close to station", "10 best hiking trail", "2 lane road",
                                "cars under 30000 in 50000 miles", "or 50000 btu", "ohio 45000 jobs",
-                               "apt 12 carpet cleaning", "3 days in st louis"])
+                               "apt 12 carpet cleaning", "3 days in st louis", "ca 90210 zip code",
+                               "top 5 pizza places 5th ave", "2 rd round draft"])
 def test_ordinary_queries_with_numbers_are_kept(q):
     assert by_text(build(gsc([(q, 1, 30, 0.03, 4.0)])))[q]["origin"] == "observed"
 

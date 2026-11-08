@@ -139,10 +139,13 @@ LIMITS = [
     "evidence of demand.",
     "Personal names cannot be reliably detected in queries: a query naming a person can appear in the ledger as the "
     "engine reported it. Dropped as personal data: e-mails, phone-like digit runs, id- or token-like words, street "
-    "addresses (house number, street name and suffix, with a unit only right after one), PO boxes, ZIP+4 codes and "
-    "a final ZIP after a state; the dropped count is of distinct queries. The address rule needs address structure; "
-    "some addresses pass (e.g. '123 main road', 'portland or 97201'), and a non-address shaped like "
-    "'<number> <word> st' is dropped. Derived variants are never built from a query with a "
+    "addresses (house number, street name and suffix, a unit only after one), PO boxes, PMB numbers, rural routes, "
+    "ZIP+4, a state with a ZIP, and any query over 512 characters; the dropped count is of distinct queries. "
+    "Addresses the rule does NOT catch, which can appear in the ledger as the engine reported them: bare named "
+    "streets with no suffix ('1200 broadway'), landmark or building-name addresses, streets with more than three "
+    "name words or an unlisted suffix ('trail', 'pike'), and a state code that is also an English word with its ZIP "
+    "('portland or 97201'). The rule also drops some non-addresses shaped like '<number> <word> st' or "
+    "'<number> <word> court'. Derived variants are never built from a query with a "
     "capitalised word, nor from a frame adding a word outside a closed vocabulary.",
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",
 ]

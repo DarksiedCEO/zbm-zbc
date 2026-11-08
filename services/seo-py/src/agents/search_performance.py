@@ -45,10 +45,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.2"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.3"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.3 (review round 3): ordinary-word suffixes, text after a strong-suffix address, more state codes, unit
+#    words after a state + ZIP, PMB and rural routes; queries over MAX_QUERY_CHARS are pii_suspect
 # .3 (AEGIS gl-gsc certification lows): {other} counts distinct normalised pages; CamelCase segments are {slug};
 #    the digit-run separators widened and ISO dates not counted
 # .2 (AEGIS gl-gsc L1, L4): the slug rule and the low-count collapse for page templates; the PII digit rule counts one
@@ -135,52 +137,73 @@ def longest_digit_run(text: str) -> int:
     return best
 
 
-# Address rule (review round 2): an address needs address STRUCTURE, not just a number and a street-ish word, because
-# this classifier also splits Osei's audit queries and service businesses' ordinary queries carry numbers
-# ("24 hour emergency plumber near dr", "2 lane road", "ac unit 12000 btu", "ohio 45000 jobs"). Deliberate choices:
-#   - suffixes: abbreviations that are not English words, plus street / avenue / boulevard; road, lane, drive, way,
-#     court, place, trail, close, square... are left out (they are ordinary words), so "123 main road" is NOT caught;
-#   - the house number starts the query or follows a space, then 1-3 street-name tokens (none a stop or quantity word:
-#     "near", "in", "best", "hour", "bedroom"...), then the suffix, then only up to three city words, an optional
-#     state and an optional ZIP to the end of the query;
-#   - "apt / unit / suite / # N" counts only right after such a street address, never alone;
-#   - state + ZIP only with the ZIP at the end of the query and a state code that is not an English word: in, or, me,
-#     oh, ok, hi, id, la, ma, pa, de, co, al are excluded ("portland or 97201" is therefore NOT caught); full state
-#     names are kept;
-#   - PO boxes and ZIP+4 anywhere.
-# What still over-drops: a query shaped like "<number> <word> st|ave|blvd|rd|dr|ln|ct|pl ..." that is not an address.
-_STREET_SUFFIX = (r"street|avenue|boulevard|st|ave|av|rd|blvd|ln|dr|ct|pl|ter|cir|hwy|pkwy|trl|cres|aly|plz|rte|fwy|"
+# Address rule (review rounds 2 and 3): an address needs address STRUCTURE, because this classifier also splits
+# Osei's audit queries and service businesses' ordinary queries carry numbers ("24 hour emergency plumber near dr",
+# "2 lane road", "ac unit 12000 btu", "ohio 45000 jobs"). The parts:
+#   - a house number (at the start, or after a space not preceded by "top" / "best"), an optional direction, 1-3
+#     street-name tokens (none a stop or quantity word: "near", "in", "best", "hour", "bedroom", "lane", "way" ...),
+#     then a suffix;
+#   - STRONG suffixes (abbreviations that are not English words, and street / avenue / boulevard): anything may
+#     follow ("123 main st 2nd floor", "123 main st springfield il 62701 hours");
+#   - ORDINARY-WORD suffixes (road, lane, drive, court, way, terrace, place, loop): only up to three place words, an
+#     optional state, an optional ZIP and, after a ZIP, anything, to the end of the query ("12 kings road chelsea");
+#   - "apt / unit / suite / # N" only after such a street, never alone;
+#   - state + ZIP: a state name or a state code that is not one of the English words in, or, me, ok (so "portland or
+#     97201" is NOT caught), a 5-digit ZIP, and not followed by a unit word (btu, miles, jobs, sq, zip ...);
+#   - PO boxes, PMB numbers, rural routes ("rr 2 box 15", "hc 1 box 9") and ZIP+4 anywhere.
+# Known gaps (disclosed in ADR 0047 and ADR 0017 GSC-12): bare named streets with no suffix ("1200 broadway"), landmark
+# or building-name addresses, addresses with more than three street-name tokens or an unlisted suffix ("10 best
+# hiking trail" is kept on purpose), "portland or 97201". Known over-drops: a non-address shaped like
+# "<number> <word> st|ave|dr|ct|pl ..." or "<number> <word> court|place|way ..." at the end of a query
+# ("5 food court ideas").
+_STRONG_SUFFIX = (r"street|avenue|boulevard|st|ave|av|rd|blvd|ln|dr|ct|pl|ter|cir|hwy|pkwy|trl|cres|aly|plz|rte|fwy|"
                   r"expy|tpke")
+_ORDINARY_SUFFIX = r"road|lane|drive|court|way|terrace|place|loop"
+_STREET_SUFFIX = _STRONG_SUFFIX + "|" + _ORDINARY_SUFFIX
 _NOT_NAME = (r"a|an|the|of|for|in|on|at|to|and|or|my|your|with|near|by|from|best|top|cheap|cheapest|good|new|old|"
-             r"hour|hours|day|days|week|weeks|month|months|year|years|minute|minutes|bedroom|bedrooms|bed|beds|bath|"
-             r"baths|car|cars|star|stars|person|people|room|rooms|story|stories|way|ways|things|tips|step|steps|"
-             r"lane|lanes|door|doors|inch|inches|ft|foot|feet|mile|miles|unit|units|flat|apt|suite|ste")
-_STATE_CODES = (r"ak|az|ar|ca|ct|dc|fl|ga|il|ia|ks|ky|md|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|ri|sc|sd|tn|tx|ut|"
-                r"vt|va|wa|wv|wi|wy")
+             r"hour|hours|hr|hrs|day|days|week|weeks|month|months|year|years|minute|minutes|bedroom|bedrooms|bed|"
+             r"beds|bath|baths|car|cars|star|stars|person|people|room|rooms|story|stories|way|ways|things|tips|step|"
+             r"steps|lane|lanes|door|doors|inch|inches|ft|foot|feet|mile|miles|unit|units|flat|apt|suite|ste|places|"
+             r"minute|easy|simple|quick|great|ton|amp|gallon|season|stroke|percent|sq|ct|pl|ln|rd|dr|st")
+_STATE_CODES = (r"al|ak|az|ar|ca|co|ct|de|dc|fl|ga|hi|id|il|ia|ks|ky|la|ma|md|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|"
+                r"nd|oh|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy")          # in, or, me, ok left out: English words
 _STATE_NAMES = (r"alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|"
                 r"idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|"
                 r"minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|"
                 r"north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|"
                 r"south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming")
 _STATE = r"(?:" + _STATE_CODES + "|" + _STATE_NAMES + r")"
-_ZIP = r"\d{5}(?:\s*[-‐-―−]\s*\d{4})?"
+_DASH = r"[-‐-―−]"
+_ZIP = r"\d{5}(?:\s*" + _DASH + r"\s*\d{4})?"
+_UNIT_WORDS = (r"btu|btus|miles|mile|mi|km|kms|dollars|dollar|usd|jobs|job|sq|sqft|ft|feet|watts|watt|lumens|rpm|"
+               r"lbs|lb|pounds|people|units|gallons|gal|views|followers|zip|code|codes|population|calories|psi|cfm")
 _NAME_TOKEN = r"(?!(?:" + _NOT_NAME + r")(?![\w'.-]))(?:[a-z][a-z'.-]*|\d{1,4}(?:st|nd|rd|th))"
+_DIRECTION = r"(?:n|s|e|w|ne|nw|se|sw|north|south|east|west)\.?"
+_STREET_HEAD = (r"(?:^|(?<!\btop)(?<!\bbest)\s)\d{1,6}[a-z]?\s+(?:" + _DIRECTION + r"\s+)?(?:" + _NAME_TOKEN
+                + r"\s+){1,3}")
 _ADDRESS = (
-    # 123 main st springfield | 45 oak avenue apt 3 | 1200 5th ave new york | 9 n elm blvd. | 10 elm st, austin tx 78701
-    re.compile(r"(?:^|\s)\d{1,6}[a-z]?\s+(?:(?:n|s|e|w|ne|nw|se|sw|north|south|east|west)\.?\s+)?"
-               r"(?:" + _NAME_TOKEN + r"\s+){1,3}(?:" + _STREET_SUFFIX + r")\.?"
+    # strong suffix, anything after: 123 main st springfield il 62701 hours | 55 water st 12th floor | 9 n elm blvd.
+    re.compile(_STREET_HEAD + r"(?:" + _STRONG_SUFFIX + r")\.?(?=[\s,#]|$)"),
+    # ordinary-word suffix, then only place words / state / ZIP to the end (or anything after a ZIP)
+    re.compile(_STREET_HEAD + r"(?:" + _ORDINARY_SUFFIX + r")(?:\s+" + _DIRECTION + r")?"
                r"(?:\s*,?\s*(?:apt|apartment|suite|ste|unit|#)\.?\s*#?\s*\d+[a-z]?)?"
-               r"(?:\s*,?\s*[a-z]+){0,3}(?:\s*,?\s*" + _STATE + r")?(?:\s*,?\s*" + _ZIP + r")?\s*$"),
+               r"(?:\s*,?\s*[a-z]+){0,3}(?:\s*,?\s*" + _STATE + r")?(?:\s*,?\s*" + _ZIP + r"(?!\d)(?:\s.*)?)?\s*$"),
     re.compile(r"(?<!\w)p\.?\s*o\.?\s*box\s*#?\s*\d+"),                                         # po box 1234
-    re.compile(r"(?<!\d)\d{5}\s*[-‐-―−]\s*\d{4}(?!\d)"),                        # zip+4: 90210-1234
-    re.compile(r"(?:^|[\s,])" + _STATE + r"\.?\s*,?\s*\d{5}\s*$"),                              # springfield il 62701
+    re.compile(r"(?<!\w)pmb\s*#?\s*\d+"),                                                       # pmb 123
+    re.compile(r"(?<!\w)(?:rr|hc|rural route)\s*#?\s*\d+\s*,?\s*box\s*#?\s*\d+"),               # rr 2 box 15
+    re.compile(r"(?<!\d)\d{5}\s*" + _DASH + r"\s*\d{4}(?!\d)"),                                  # zip+4: 90210-1234
+    re.compile(r"(?:^|[\s,])" + _STATE + r"\.?\s*,?\s*\d{5}(?!\d)(?!\s*(?:" + _UNIT_WORDS + r")(?!\w))"),  # boise id 83702
 )
+MAX_QUERY_CHARS = 512        # longer text is not classified (it is pii_suspect): bounds the regex work per query
 
 
 def looks_like_address(folded: str) -> bool:
     """A postal address or part of one, on the lookalike-folded text (rules and their deliberate gaps above). Personal
-    names are NOT detected."""
-    return any(p.search(folded.strip()) for p in _ADDRESS)
+    names are NOT detected. Text over ``MAX_QUERY_CHARS`` counts as one (it is not examined)."""
+    t = folded.strip()
+    if len(t) > MAX_QUERY_CHARS:
+        return True
+    return any(p.search(t) for p in _ADDRESS)
 
 
 def _word_identifies(w: str) -> bool:
@@ -195,6 +218,8 @@ def _word_identifies(w: str) -> bool:
 def classify_query(q: str, brands: list) -> str:
     """One query -> one class from ``QUERY_CLASSES``; the text is not kept. PII first (judged on the lookalike fold,
     after invisible characters are removed, like the log templater)."""
+    if len(q or "") > MAX_QUERY_CHARS:          # too long to classify cheaply: dropped as personal data, counted
+        return "pii_suspect"
     t = lookalikes.strip_invisible(unicodedata.normalize("NFKC", q or ""))
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()

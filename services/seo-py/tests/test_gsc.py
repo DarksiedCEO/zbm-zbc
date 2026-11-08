@@ -782,28 +782,73 @@ def test_drift_rules_for_search_performance():
     assert c({}, {}) is None
 
 
-# Osei's query classes use the same address rule (search_performance 2026-11-08.2): ordinary service queries with
-# numbers are KEPT in their class; address-shaped ones are pii_suspect. Known gap, by choice: "portland or 97201"
-# (state codes that are English words are not used) and "123 main road" (road is an ordinary word) are not caught.
-ADDRESS_TABLE = [(q, "KEEP") for q in (
+# Osei's query classes use the same address rule (search_performance 2026-11-08.3). The table is the round-3
+# reviewer's probe set: ordinary service queries with numbers are KEPT in their class, address forms are
+# pii_suspect, and the GAP rows are known misses, disclosed in ADR 0047 and ADR 0017 GSC-12 (an English-word state
+# code; a bare named street with no suffix). A GAP row that starts being caught is fine; the test then says so.
+ADDRESS_KEEP = (
     "#1 rug cleaner", "ac unit 12000 btu", "24 hour emergency plumber near dr", "2 bedroom flat close to station",
     "10 best hiking trail", "2 lane road", "cars under 30000 in 50000 miles", "or 50000 btu", "ohio 45000 jobs",
-    "portland or 97201", "123 main road")] + [(q, "DROP") for q in (
-    "123 main st springfield", "45 oak avenue apt 3", "po box 1234", "springfield il 62701", "90210-1234")]
+    "rug cleaner near me", "4 way stop", "top 10 rug cleaners", "rug cleaner 90210", "apt 12 carpet cleaning",
+    "3days in st louis", "3 days in st louis", "10 things to do in st louis", "plumber 24 7", "best hvac 2024",
+    "2 car garage door repair", "1 hour heating and air", "3 tab shingle roof cost", "5 star plumbing",
+    "100 amp panel upgrade cost", "2x4 lumber price", "40 gallon water heater", "50 gallon water heater installed",
+    "3 ton ac unit price", "dentist open saturday", "emergency dentist 24 hours", "1st street dental",
+    "roof repair 2 story house", "5th avenue salon", "2 stroke oil", "24 hr locksmith", "7 eleven near me",
+    "car wash on main st", "pizza delivery 77002", "dentist 10001", "window tint 35 percent",
+    "1 bedroom apartment for rent", "15 minute oil change", "6 inch gutters", "3 season room cost", "20 amp outlet",
+    "200 sq ft deck cost", "4 dr sedan", "2 ct diamond ring", "10 ft christmas tree", "12 pl tile saw",
+    "3 st patricks day ideas", "5 dr hook songs", "2 rd round draft", "9 ln of code", "plumber in springfield il",
+    "best roofer in austin tx", "hvac tulsa ok", "texas 2024 tax", "ca 90210 zip code", "10 best st louis bbq",
+    "top 5 pizza places 5th ave", "route 66 diner", "i 95 traffic", "highway 101 closure", "1040 form",
+    "covid 19 test near me", "suite 200 dental", "flat 4b rug", "interstate 10 accident", "area code 512",
+    "zip code 78701", "call 911")
+ADDRESS_DROP = (
+    "123 main st springfield", "45 oak avenue apt 3", "po box 1234", "springfield il 62701", "90210-1234",
+    "123 main road", "42 wallaby way sydney", "123 main rd", "123 oak blvd", "500 sunset blvd los angeles ca 90028",
+    "77 maple lane", "12 elm ln", "1600 pennsylvania avenue nw washington dc", "1600 pennsylvania ave nw",
+    "350 5th ave new york ny 10118", "100 n main st", "100 main st n", "2200 sw 1st ave portland",
+    "123 main st suite 400", "123 main st #4", "123 main st apt 2b", "123 main st, austin, tx 78701",
+    "123 main street", "9 n elm blvd.", "123 main st springfield il 62701 hours", "plumber at 123 main st",
+    "rug cleaning 123 main st austin tx", "123 main st 2nd floor", "123 main st springfield il", "456 oak dr",
+    "456 oak drive", "10 downing st london", "742 evergreen terrace", "742 evergreen ter",
+    "1 infinite loop cupertino", "4059 mt lee dr hollywood", "233 s wacker dr chicago il 60606",
+    "123 main st near me", "123 e 45th st new york ny", "po box 77 austin tx", "boise id 83702", "honolulu hi 96813",
+    "columbus oh 43215", "austin tx 78701", "boston ma 02108", "12 kings road chelsea", "15 high street",
+    "8 oak court", "3 park place", "1 apple park way", "22 baker st apt 3 dentist", "123 main st unit 5",
+    "123 main st ste 100", "123 main st, apt 4, springfield, il 62701", "123 main st springfield missouri",
+    "55 water st 12th floor", "1 main st pmb 123", "po box 1234 springfield il 62701", "rr 2 box 15", "hc 1 box 9",
+    "123 main st springfield oregon 97477 phone")
+ADDRESS_GAP = (
+    "portland or 97201", "1200 broadway", "1200 broadway new york")
+ADDRESS_TABLE = [(q, "KEEP") for q in ADDRESS_KEEP] + [(q, "DROP") for q in ADDRESS_DROP]
 
 
 @pytest.mark.parametrize("q,want", ADDRESS_TABLE)
 def test_osei_address_rule_keeps_service_queries_and_drops_addresses(q, want):
     assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
-    assert sp.looks_like_address(q) == (want == "DROP")
+
+
+@pytest.mark.parametrize("q", ADDRESS_GAP)
+def test_osei_address_rule_known_gaps_are_the_disclosed_ones(q):
+    assert sp.classify_query(q, ["acme"]) != "pii_suspect", f"{q!r} is now caught: drop it from the disclosed gaps"
 
 
 def test_osei_query_classes_count_addresses_as_pii_and_keep_the_rest():
     from collections import Counter
     got = Counter(sp.classify_query(q, ["acme"]) for q, _ in ADDRESS_TABLE)
-    assert got["pii_suspect"] == 5 and sum(got.values()) == len(ADDRESS_TABLE)
+    assert got["pii_suspect"] == len(ADDRESS_DROP) and sum(got.values()) == len(ADDRESS_TABLE)
     assert sp.classify_query("24 hour emergency plumber near dr", ["acme"]) == "other"
     assert sp.classify_query("ac unit 12000 btu", ["acme"]) == "other"
+
+
+def test_overlong_queries_are_not_examined_and_count_as_personal_data():
+    cap = sp.MAX_QUERY_CHARS
+    ok = ("rug " * cap)[:cap]
+    assert len(ok) == cap and sp.classify_query(ok, ["acme"]) != "pii_suspect"
+    assert sp.classify_query(ok + "s", ["acme"]) == "pii_suspect"
+    assert sp.classify_query(" " * 50_000 + "1", ["acme"]) == "pii_suspect"     # the reviewer's slow input, now capped
+    assert sp.looks_like_address("a " * 300) is True
 
 
 def test_query_classifier_pii_first_and_closed():
