@@ -115,17 +115,21 @@ def run(ctx) -> dict:
         outcome, reason = "PARTIAL", ("LLMS_TXT_UNREAD" if sitemaps_known else "SITEMAP_UNREAD")
     else:
         outcome, reason = "FAILED", "SITEMAP_UNREAD"
-    if outcome != "OK":
-        # round-5 review: a real site failure in this area outranks our own capacity limit; SERVICE_BUSY is the
-        # reason only when being busy is the sole cause
+    if outcome != "OK" and facts.get("service_busy"):
+        # round-5/6 review: only when our own capacity limit touched this run. A real site failure in this area
+        # outranks it; SERVICE_BUSY is the reason only when being busy is the sole cause. Without busy, the reason
+        # above stands unchanged. A sitemap that was fetched but set aside (quarantined, undecompressible) is a real
+        # site failure when no sitemap could be read.
         llms = facts.get("llms_txt", {})
-        sitemap_real = facts.get("sitemap_fetch_failures", 0) - facts.get("sitemaps_busy", 0) > 0
+        sitemap_real = facts.get("sitemap_fetch_failures", 0) - facts.get("sitemaps_busy", 0) > 0 or (
+            facts.get("sitemaps_read", 0) == 0 and any(f["code"] in ("SITEMAP_QUARANTINED", "SITEMAP_DECOMPRESS_FAILED")
+                                                       for f in findings))
         llms_real = llms.get("state") == "unreadable" and llms.get("fetch_state") != "RESOURCE_LIMIT"
         if sitemap_real:
             reason = "SITEMAP_UNREAD"
         elif llms_real:
             reason = "LLMS_TXT_UNREAD"
-        elif facts.get("service_busy"):
+        else:
             reason = "SERVICE_BUSY"
     if deadline and outcome != "OK":
         reason = DEADLINE_REASON

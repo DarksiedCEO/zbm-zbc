@@ -986,3 +986,85 @@ def test_llms_real_failure_outranks_service_busy_on_a_sitemap(srv, monkeypatch):
     env = delia.run(ctx)
     assert env["outcome"] == "FAILED"
     assert env["reason"] == "LLMS_TXT_UNREAD" and env["facts"]["sitemaps_busy"] == 1
+
+
+
+# ================================================================ round-6 review of 0499b6b
+
+_DOCTYPE_SITEMAP = "<?xml version='1.0'?><!DOCTYPE x [<!ENTITY a 'b'>]><urlset/>"
+
+
+def _delia_after(srv, robots, monkeypatch=None, gate=None):
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    if gate is not None:
+        monkeypatch.setattr(fetch_mod, "_DNS_GATE", gate)
+    return delia.run(ctx)
+
+
+@pytest.mark.local_http
+def test_without_busy_the_reason_is_exactly_what_it_was_before(srv):
+    """M1 regression: a quarantined sitemap and llms.txt answering 403, nothing busy: FAILED / SITEMAP_UNREAD, as
+    before the busy precedence existed (the precedence only applies when our capacity limit touched the run)."""
+    install_site(srv, robots="User-agent: *\nAllow: /\n", llms=None)
+    srv.text("site.test", "/sitemap.xml", _DOCTYPE_SITEMAP, ctype="application/xml")
+    srv.text("site.test", "/llms.txt", "no", status=403)
+    env = _delia_after(srv, None)
+    assert env["outcome"] == "FAILED" and env["reason"] == "SITEMAP_UNREAD"
+    assert "service_busy" not in env["facts"] and "sitemaps_busy" not in env["facts"]
+    assert "SITEMAP_QUARANTINED" in {f["code"] for f in env["findings"]}
+
+
+@pytest.mark.local_http
+def test_a_quarantined_sitemap_with_llms_busy_is_the_sites_failure(srv, monkeypatch):
+    """L1: the sitemap was fetched and set aside (a real site problem, a high finding); llms.txt then found us busy:
+    SITEMAP_UNREAD, never SERVICE_BUSY ("says nothing about your site")."""
+    install_site(srv, robots="User-agent: *\nAllow: /\n")
+    srv.text("site.test", "/sitemap.xml", _DOCTYPE_SITEMAP, ctype="application/xml")
+    env = _delia_after(srv, None, monkeypatch, _FakeGate(allow=1))       # sitemap gets a slot, llms.txt is busy
+    assert env["facts"]["service_busy"] and env["reason"] == "SITEMAP_UNREAD"
+    assert "SITEMAP_QUARANTINED" in {f["code"] for f in env["findings"]}
+
+
+@pytest.mark.local_http
+def test_an_undecompressible_sitemap_with_llms_busy_is_the_sites_failure(srv, monkeypatch):
+    install_site(srv, robots="User-agent: *\nAllow: /\nSitemap: http://site.test/s.xml.gz\n")
+    srv.text("site.test", "/s.xml.gz", "not gzip", ctype="application/gzip")
+    env = _delia_after(srv, None, monkeypatch, _FakeGate(allow=1))
+    assert env["facts"]["service_busy"] and env["reason"] == "SITEMAP_UNREAD"
+
+
+@pytest.mark.local_http
+def test_a_missing_sitemap_with_llms_busy_is_service_busy(srv, monkeypatch):
+    """A 404 sitemap was observed (missing is an observation, not a failure); llms.txt found us busy: the only cause
+    is our capacity, so the area is PARTIAL with SERVICE_BUSY."""
+    install_site(srv, robots="User-agent: *\nAllow: /\n")
+    srv.text("site.test", "/sitemap.xml", "nope", status=404)
+    env = _delia_after(srv, None, monkeypatch, _FakeGate(allow=1))
+    assert env["outcome"] == "PARTIAL" and env["reason"] == "SERVICE_BUSY"
+    assert "SITEMAP_MISSING" in {f["code"] for f in env["findings"]}
+
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("case", ["quarantine_llms403", "missing_llms403", "403_llms_absent", "unreadable_both"])
+def test_non_busy_outcomes_match_the_pre_change_rule(srv, case):
+    """Byte-identity of the non-busy path: outcome and reason equal the rule as it stood at 0ccc36b (before any
+    busy precedence), recomputed here from the same facts."""
+    install_site(srv, robots="User-agent: *\nAllow: /\n", llms=None)
+    sm = {"quarantine_llms403": (_DOCTYPE_SITEMAP, 200), "missing_llms403": ("x", 404), "403_llms_absent": ("x", 403),
+          "unreadable_both": ("x", 503)}[case]
+    srv.text("site.test", "/sitemap.xml", sm[0], status=sm[1], ctype="application/xml")
+    srv.text("site.test", "/llms.txt", "no", status={"403_llms_absent": 404}.get(case, 403 if case != "unreadable_both"
+                                                                                  else 503))
+    env = _delia_after(srv, None)
+    f = env["facts"]
+    observed = f.get("sitemaps_read", 0) > 0 or f.get("sitemaps_missing", 0) > 0
+    known = observed and not f.get("sitemap_fetch_failures")
+    llms_known = f.get("llms_txt", {}).get("state") in ("present", "absent")
+    if known and llms_known:
+        want = ("OK", None)
+    elif observed or llms_known:
+        want = ("PARTIAL", "LLMS_TXT_UNREAD" if known else "SITEMAP_UNREAD")
+    else:
+        want = ("FAILED", "SITEMAP_UNREAD")
+    assert (env["outcome"], env["reason"]) == want
