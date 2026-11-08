@@ -19,6 +19,7 @@ from pathlib import Path
 
 import chaos
 import corpus
+import grammar
 import invariants
 
 HERE = Path(__file__).resolve().parent
@@ -62,6 +63,15 @@ def load_library(dept: str) -> dict:
         for t in sc.get("transforms", []):
             if t not in chaos.TRANSFORMS:
                 raise LibraryError(f"{path.name}/{sc['id']}: unknown transform {t}")
+        gen = sc.get("generator")
+        if gen is not None:
+            if gen.get("name") not in grammar.GENERATORS:
+                raise LibraryError(f"{path.name}/{sc['id']}: unknown generator {gen.get('name')}")
+            if not sc.get("input_field") or sc.get("seeds") or not isinstance(gen.get("count"), int):
+                raise LibraryError(f"{path.name}/{sc['id']}: a generated scenario has an input_field and a count, and "
+                                   "no seeds (its terminals are the generator's atoms)")
+    if lib["library"] != dept:
+        raise LibraryError(f"{path.name}: library {lib['library']!r} must be the file's name")
     return lib
 
 
@@ -75,6 +85,25 @@ def load_replay(dept: str) -> dict:
 def save_replay(dept: str, doc: dict) -> None:
     REPLAY.mkdir(exist_ok=True)
     (REPLAY / f"{dept}.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def library_id(lib: dict) -> str:
+    """The name a library's cases and replay library are filed under (the scenario file's name). One service may have
+    several libraries (seo-py and seo-py-callum share seo-py's worker and harness)."""
+    return lib["library"]
+
+
+def scenario_atoms(lib: dict, sc: dict) -> dict:
+    """A generated scenario's terminals: named corpora extracted by AST from the service's pinned tests and source,
+    exactly as seed phrases are (a reference that no longer resolves is an ERROR)."""
+    service_dir = REPO / "services" / lib["service"]
+    out: dict = {}
+    for name, refs in sorted((sc["generator"].get("atoms") or {}).items()):
+        vals: list = []
+        for ref in refs:
+            vals += corpus.extract(ref["extract"], service_dir) if "extract" in ref else list(ref["literal"])
+        out[name] = list(dict.fromkeys(vals))
+    return out
 
 
 def scenario_seeds(lib: dict, sc: dict) -> list[str]:
@@ -114,11 +143,29 @@ def _case(lib: dict, sc: dict, case_id: str, value, chain: list[str], params: di
             "invariants": _case_invariants(sc, [c.split("=")[0] for c in chain])}
 
 
-def generate(lib: dict, seed: int, variants: int | None = None) -> list[dict]:
+def generate(lib: dict, seed: int, variants: int | None = None, generated: int | None = None) -> list[dict]:
     """Every case of a library for a global seed: per seed phrase the unmutated base case, then ``variants`` chaos
-    variants (library default ``variants_per_seed``; a scenario may set its own). Identical inputs are one case."""
+    variants (library default ``variants_per_seed``; a scenario may set its own). Identical inputs are one case.
+
+    A GENERATED scenario (``generator``: a grammar from grammar.py, its ``count`` and its ``atoms``) has no seed
+    phrases: case i is ``grammar.generate(name, case_rng(seed, scenario, i, 0), atoms)``, a pure function of the
+    global seed, so every global seed invents other cases (``generated`` overrides the count, for exploration)."""
     cases: list[dict] = []
+    lid = library_id(lib)
     for sc in lib["scenarios"]:
+        if sc.get("generator"):
+            atoms = scenario_atoms(lib, sc)
+            gname = sc["generator"]["name"]
+            seen_g: set[str] = set()
+            for i in range(generated if generated is not None else sc["generator"]["count"]):
+                value = grammar.generate(gname, chaos.case_rng(seed, sc["id"], i, 0), atoms)
+                if value in seen_g:
+                    continue
+                seen_g.add(value)
+                c = _case(lib, sc, f"{lid}/{sc['id']}#{i:03d}.0@{seed}", value, [f"generator={gname}"], {}, None)
+                c["generated"] = True
+                cases.append(c)
+            continue
         seeds = scenario_seeds(lib, sc) if sc.get("seeds") else [None]
         n_var = variants if variants is not None else sc.get("variants_per_seed", lib.get("variants_per_seed", 2))
         seen: set[str] = set()
@@ -143,8 +190,7 @@ def generate(lib: dict, seed: int, variants: int | None = None) -> list[dict]:
                 if key in seen:
                     continue
                 seen.add(key)
-                cases.append(_case(lib, sc, f"{lib['service']}/{sc['id']}#{i:03d}.{k}@{seed}", value, chain, params,
-                                   s))
+                cases.append(_case(lib, sc, f"{lid}/{sc['id']}#{i:03d}.{k}@{seed}", value, chain, params, s))
     return cases
 
 
@@ -152,7 +198,7 @@ def replay_cases(lib: dict) -> list[dict]:
     """The replay library: every case ever promoted, materialised (input as it was sent), run on every run."""
     scs = {sc["id"]: sc for sc in lib["scenarios"]}
     out = []
-    for rc in load_replay(lib["service"])["cases"]:
+    for rc in load_replay(library_id(lib))["cases"]:
         sc = scs.get(rc["scenario"])
         if sc is None:
             raise LibraryError(f"replay case {rc['replay_id']}: scenario {rc['scenario']} no longer exists")
@@ -214,18 +260,19 @@ def judge(case: dict, obs: dict) -> dict:
         outcome = PASS if all(c["held"] for c in checks if c["severity"] == "MUST") else FAIL
     return {"case_id": case["case_id"], "scenario": case["scenario"], "persona": case["persona"],
             "chain": case["chain"], "seed_value": case.get("seed_value"), "input": case["input"],
-            "known_failure": case.get("known_failure"), "outcome": outcome, "checks": checks,
+            "known_failure": case.get("known_failure"), "generated": bool(case.get("generated")),
+            "outcome": outcome, "checks": checks,
             "error": obs.get("error"), "elapsed_ms": obs.get("elapsed_ms", 0.0), "observation": {
                 "steps": [{"action": s["action"], "status": s["status"]} for s in obs.get("steps", [])],
                 "state": obs.get("state", {})}}
 
 
 def run_department(dept: str, seed: int, variants: int | None, python: str,
-                   only: list[str] | None = None) -> list[dict]:
+                   only: list[str] | None = None, generated: int | None = None) -> list[dict]:
     lib = load_library(dept)
     try:
         replays = replay_cases(lib)
-        seeded = generate(lib, seed, variants)
+        seeded = generate(lib, seed, variants, generated)
     except (corpus.CorpusError, LibraryError, KeyError, ValueError) as e:
         return [{"case_id": f"{dept}/<library>", "scenario": "<library>", "persona": "", "chain": [],
                  "seed_value": None, "input": {}, "known_failure": None, "outcome": ERROR, "checks": [],
@@ -241,9 +288,10 @@ def run_department(dept: str, seed: int, variants: int | None, python: str,
     return [judge(c, results[c["case_id"]]) for c in cases]
 
 
-def run(depts: list[str], seed: int, variants: int | None, python: str, jobs: int) -> dict[str, list[dict]]:
+def run(depts: list[str], seed: int, variants: int | None, python: str, jobs: int,
+        generated: int | None = None) -> dict[str, list[dict]]:
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
-        futs = {d: ex.submit(run_department, d, seed, variants, python) for d in depts}
+        futs = {d: ex.submit(run_department, d, seed, variants, python, None, generated) for d in depts}
         return {d: futs[d].result() for d in depts}
 
 
@@ -348,11 +396,17 @@ def deterministic_view(rep: dict) -> dict:
     return {k: v for k, v in rep.items() if k != "timing"}
 
 
-def promote(results: dict[str, list[dict]], today: str) -> dict[str, list[str]]:
+def promote(results: dict[str, list[dict]], today: str, generated_only: bool = False,
+            write: bool = True) -> dict[str, list]:
     """Append every new MUST failure to its department's replay library (append-only: nothing is ever removed or
     rewritten here). The new entries carry ``known_failure: null`` and so still block the gate until a person files
-    a finding in findings.md and writes its id into the entry."""
-    added: dict[str, list[str]] = {}
+    a finding in findings.md and writes its id into the entry.
+
+    ``generated_only``: only the failures of generated cases (run.py does this on EVERY run: a case the war room
+    invented is saved the moment it fails, so it is never lost when the seed moves on). ``write=False`` returns the
+    entries without touching the checkout (CI: the checkout must stay clean, ADR 0018 hygiene; run.py writes them
+    to the report directory instead). Returns {dept: [replay ids]} when written, {dept: [entries]} otherwise."""
+    added: dict[str, list] = {}
     for dept, verdicts in results.items():
         doc = load_replay(dept)
         have = {json.dumps([c["scenario"], c["input"]], sort_keys=True, ensure_ascii=False) for c in doc["cases"]}
@@ -361,15 +415,17 @@ def promote(results: dict[str, list[dict]], today: str) -> dict[str, list[str]]:
             key = json.dumps([v["scenario"], v["input"]], sort_keys=True, ensure_ascii=False)
             if v["outcome"] != FAIL or v["known_failure"] or key in have or "/<library>" in v["case_id"]:
                 continue
+            if generated_only and not v.get("generated"):
+                continue
             n += 1
             rid = f"{dept}/R{n:04d}"
-            doc["cases"].append({"replay_id": rid, "scenario": v["scenario"], "origin": v["case_id"],
-                                 "chain": v["chain"], "seed_value": v["seed_value"], "input": v["input"],
-                                 "added": today, "known_failure": None,
-                                 "failed": [f for f in _brief(v)["failed"]]})
+            entry = {"replay_id": rid, "scenario": v["scenario"], "origin": v["case_id"], "chain": v["chain"],
+                     "seed_value": v["seed_value"], "input": v["input"], "added": today, "known_failure": None,
+                     "failed": [f for f in _brief(v)["failed"]]}
+            doc["cases"].append(entry)
             have.add(key)
-            added.setdefault(dept, []).append(rid)
-        if dept in added:
+            added.setdefault(dept, []).append(rid if write else entry)
+        if dept in added and write:
             save_replay(dept, doc)
     return added
 
