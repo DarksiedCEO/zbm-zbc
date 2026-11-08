@@ -617,8 +617,11 @@ def mnc_priority(per: dict, ps: dict, run_id: str, domain: str, generated_at: st
 # ---------------------------------------------------------------------------------------------- the envelope
 
 def run(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard: Callable, budget, resolver: Resolver,
-        run_id: str, clock) -> dict:
-    """Callum's citation-source run: collect every engine of the prompt set, classify, return the envelope."""
+        run_id: str, clock, observer: Optional[Callable] = None) -> dict:
+    """Callum's citation-source run: collect every engine of the prompt set, classify, return the envelope.
+    ``observer`` (ADR 0048, Idris): called once with the same collected answers (text in memory only), the resolver
+    and the run's times, after classification; it must not raise (agents/idris.py ``Observer`` keeps its own error)
+    and changes nothing here."""
     method = (f"Each prompt of prompt set {{ps}} v{{ver}} asked {n} times per engine through the multi-engine adapter; "
               "every URL the engine attributed to an answer is classified STRENGTH_URL / CANONICAL_TO_CLIENT / "
               "OPPORTUNITY_URL / LOOKALIKE_URL / INCONCLUSIVE, and every answer that names a brand term without a "
@@ -641,8 +644,10 @@ def run(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard: C
     try:
         for eng in prompt_set["engines"]:
             collected[eng] = collect(eng, engines.get(eng), prompt_set, n, guard, budget)
-        result = classify({e: r for e, r in collected.items() if r["outcome"] != NOT_CONNECTED}, prompt_set, domain,
-                          resolver, run_id, observed_at, refresh_due)
+        usable = {e: r for e, r in collected.items() if r["outcome"] != NOT_CONNECTED}
+        result = classify(usable, prompt_set, domain, resolver, run_id, observed_at, refresh_due)
+        if observer is not None:
+            observer(usable, resolver, observed_at, refresh_due)
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=methodology, limitations=LIMITS, reason=k.code,
                         facts={"engines": {e: {"outcome": r["outcome"]} for e, r in collected.items()}})

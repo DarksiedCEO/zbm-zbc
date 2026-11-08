@@ -113,8 +113,11 @@ class CitationsMixin:
                 guard(agent="callum")
                 resolver = callum.Resolver(self.ports.fetcher, guard, self.settings.callum_resolve_urls,
                                            self.settings.callum_resolve_max)
+                with self.lock:                          # ADR 0048: Idris reads the same answers (no extra call)
+                    observer = self.idris_observer(tid, domain, ps, cid)
                 env = callum.run(self.ports.engines, ps, domain, self.settings.probe_samples, guard,
-                                 self.engine_budget(tid, cid, ps, subject="citation_run"), resolver, cid, self.clock)
+                                 self.engine_budget(tid, cid, ps, subject="citation_run"), resolver, cid, self.clock,
+                                 observer=observer)
             except Killed as k:
                 return self._interrupt_citation_run(tid, cid, k.code)
             except Exception as exc:  # noqa: BLE001 - a run that crashes is closed now, never left running
@@ -138,6 +141,7 @@ class CitationsMixin:
                                                "outcome": env["outcome"], "rows": len(facts.get("rows") or []),
                                                "mentioned_not_cited": totals.get("mnc"),
                                                "strength_answers": totals.get("strength")}, ("result", cid)))
+                self.record_observations(tid, cid, observer)
                 return self.citation_run_view(tid, cid)
         finally:
             with self.lock:

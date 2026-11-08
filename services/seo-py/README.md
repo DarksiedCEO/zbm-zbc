@@ -17,6 +17,12 @@ sources (Search Console, Bing Webmaster Tools, logs, analytics, CRM), Zero-Day, 
 clientfix are `NOT_CONNECTED` ports: they answer `NOT_CONNECTED`, never invented data, and setting any of their
 switches refuses start. This service never charges anyone and never calls Stripe.
 
+**Idris (competitor visibility, ADR 0048):** the client's AI share of voice against up to 20 tracked competitors
+(presence, mention share and citation share per brand × engine × prompt, Wilson intervals, UNKNOWN never 0%) and
+emerging competitors from a deterministic extractor (flagged, folded in, dismissible). Idris asks no engine: it reads
+the answers of Callum's citation runs while they are in memory and reuses a recent run (`max_age_minutes`, ≤ 60)
+before asking for a fresh one; no new setting, key or budget.
+
 **Wave 2 (decision-free parts):** first-party log ingests (crawler access, verified / spoofed / claimed bots,
 keyed-hash IPs only), search-truth drift between audits, scheduled re-audits with drift reports, and the department
 manager (queues, scorecards, lifecycle). The bot-verification port is NOT_CONNECTED unless `SEO_BOT_VERIFY_DNS=1`;

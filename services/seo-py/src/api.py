@@ -519,6 +519,36 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/2 contract Roman and Adaeze read."""
         return svc.mnc_priority_view(scope[1], _id(cid))
 
+    # ------------------------------------------------------------------ Idris's competitor visibility (ADR 0048)
+
+    @app.post(P + "/tenants/{tid}/competitor-sets", dependencies=auth, status_code=201)
+    def create_competitor_set(req: dict = Depends(body(m.CompetitorSetCreate)),
+                              scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.create_competitor_set(scope[0], scope[1], req)
+
+    @app.get(P + "/tenants/{tid}/competitor-set", dependencies=auth)
+    def competitor_set(scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
+        return svc.competitor_set_view(scope[1])
+
+    @app.post(P + "/tenants/{tid}/competitor-set/dismissals", dependencies=auth, status_code=201)
+    def dismiss_candidate(req: dict = Depends(body(m.EmergingDismiss)),
+                          scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub"))) -> dict:
+        """The owner (dashboard) or the tenant itself (hub, its own tenant only) dismisses an emerging candidate."""
+        return svc.dismiss_candidate(scope[0], scope[1], req)
+
+    @app.post(P + "/tenants/{tid}/competitor-visibility-runs", dependencies=auth, status_code=201)
+    def request_visibility_run(request: Request, req: dict = Depends(body(m.VisibilityRunCreate)),
+                               scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.request_visibility_run(scope[0], scope[1], req, andre=andre_if_presented(request))
+
+    @app.get(P + "/tenants/{tid}/competitor-visibility-runs", dependencies=auth)
+    def visibility_runs(scope: tuple = Depends(scoped(*CITATION_READERS))) -> list:
+        return svc.visibility_runs_view(scope[1])
+
+    @app.get(P + "/tenants/{tid}/competitor-visibility-runs/{vid}", dependencies=auth)
+    def visibility_run(vid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
+        return svc.visibility_run_view(scope[1], _id(vid))
+
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)
 
     LOG_CALLERS = ("dashboard", "seo_agent", "hub")
