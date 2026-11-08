@@ -47,7 +47,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError
 
 from answer_adapter import (MAX_ANSWER_CHARS, MAX_SOURCES, SYSTEM_PROMPT, ApiKey, EngineError, HttpAnswerEngine,
-                            dedupe, drift_names, strict_json)
+                            dedupe, drift_names, join_text, strict_json)
 from finance_client import _DnsGate, _Resolver, _system_resolve
 from ports import ProviderAnswer
 
@@ -149,12 +149,17 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
         obj = strict_json(body)
         r = _Response.model_validate(obj)
         types, texts, results = [], [], []
+        groups: list = [[]]                       # runs of adjacent text blocks (WR-F011: never glued across a tool)
         for raw in r.content:
             t = _Block.model_validate(raw).type
             types.append(t)
             if t == "text":
                 texts.append(_Text.model_validate(raw))
-            elif t == "web_search_tool_result":
+                groups[-1].append(texts[-1].text)
+            else:
+                if groups[-1]:
+                    groups.append([])
+            if t == "web_search_tool_result":
                 results.append(_ToolResult.model_validate(raw))
         searches = None
         if r.usage is not None and r.usage.server_tool_use is not None:
@@ -180,7 +185,7 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
     errors = [x.content.error_code for x in results if isinstance(x.content, _ToolError)]
     if "too_many_requests" in errors:
         raise EngineError("ENGINE_RATE_LIMITED", "SEARCH_RATE_LIMITED")
-    text = "".join(b.text for b in texts)
+    text = join_text(groups)
     if not text.strip():
         raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT")
     if len(text) > MAX_ANSWER_CHARS:

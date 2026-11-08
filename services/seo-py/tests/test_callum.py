@@ -6,6 +6,7 @@ in-process fixture server. No elapsed-time assertion."""
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 
@@ -1103,3 +1104,129 @@ def test_underscore_emphasis_is_a_boundary_but_identifiers_stay_whole():
     assert bm.mentioned("*Acme* and **Acme**", ["Acme"])
     assert not bm.mentioned("call foo_acme_bar()", ["Acme"]) and not bm.mentioned("acme_corp", ["Acme"])
     assert not bm.mentioned("my_acme", ["Acme"]) and not bm.mentioned("Acmes", ["Acme"])
+
+
+# ---------------------------------------------------------------------------------------------- war room WR-F011..14
+
+def test_wr_f011_block_boundaries_are_line_starts_in_every_adapter():
+    # Anthropic: the pre-search text block and the answer block are separated by the tool blocks
+    b = te.fixture("anthropic")
+    b["content"][3]["text"] = "Zoom in on the map to see it."
+    b["content"] = b["content"][:4]
+    a = te.MODS["anthropic"].parse_response(json.dumps(b).encode())
+    assert a.text == "I'll search for revenue recovery agencies.\n\nZoom in on the map to see it."
+    assert callum.brand_mention.mention(a.text, ["Zoom"])["confidence"] == "LOW"
+    # adjacent blocks of one paragraph are concatenated; a sentence end never touches the next block
+    assert aa.join_text([["Acme recovers", " revenue."]]) == "Acme recovers revenue."
+    assert aa.join_text([["agencies.", "Zoom in"]]) == "agencies. Zoom in"
+    assert aa.join_text([["agencies.", "- [x] Zoom"], ["Then"]]) == "agencies. - [x] Zoom\n\nThen"
+    assert aa.join_text([["one"]]) == "one" and aa.join_text([["x "]]) == "x "
+    # OpenAI: two message items; Google: two parts; Perplexity Agent API: two message items
+    o = te.fixture("openai")
+    msg = copy.deepcopy(o["output"][1])
+    msg["content"][0]["text"], msg["content"][0]["annotations"] = "Zoom in on the map.", []
+    o["output"][1]["content"][0]["text"] = "Searching agencies."
+    o["output"].append(msg)
+    oa_text = te.MODS["openai"].parse_response(json.dumps(o).encode()).text
+    assert "agencies.\n\nZoom in" in oa_text
+    g = te.fixture("google")
+    g["candidates"][0]["content"]["parts"] = [{"text": "Agencies."}, {"text": "Zoom in on the map."}]
+    assert te.MODS["google"].parse_response(json.dumps(g).encode()).text == "Agencies. Zoom in on the map."
+    for text in (oa_text, "Agencies. Zoom in on the map."):
+        assert callum.brand_mention.mention(text, ["Zoom"])["confidence"] == "LOW"
+
+
+def _synthetic_jwt() -> str:
+    """A JWT-SHAPED string built at run time (no token literal in the source): three base64url parts."""
+    import base64
+    part = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")  # noqa: E731
+    return ".".join(part(x) for x in (b'{"alg":"none","typ":"JWT"}', b'{"sub":"synthetic-test"}', b"not-a-signature"))
+
+
+def test_wr_f012_a_secret_in_the_answer_text_is_redacted_from_every_excerpt():
+    key = te.KEYS["openai"]
+    for secret in (key, "sk-proj-" + "Ab3dE5gH7jK9mN1pQ3sT5vX7", "AKIA" + "ABCDEFGHIJKLMNOP",
+                   _synthetic_jwt()):
+        text = f"Z Best Media is listed. Authorization: Bearer {secret} and more."
+        r = classify(collected(*[(0, answer(text=text, cites=["https://competitor.test/a"]))] * 3))
+        dumped = json.dumps(r)
+        assert secret not in dumped and secret[:12] not in dumped, secret
+        ev = [x["evidence"] for x in r["rows"] if x.get("evidence")]
+        assert ev and all(e.get("secret_redacted") for e in ev) and "[redacted]" in ev[0]["excerpt"]["text"]
+    assert callum.secret_guard.redact("Z Best Media helps with revenue-recovery-agency-2026 work.")[1] == 0
+
+
+def test_wr_f013_a_secret_in_a_cited_url_is_redacted_and_never_fetched():
+    key = te.KEYS["openai"]
+    url = f"https://site.test/{key}/page?token={key}"
+    res = resolver({}, enabled=True)
+    r = classify(collected((0, answer(cites=[url]))), res)
+    dumped = json.dumps(r)
+    assert key not in dumped and res.fetcher.fetched == []                        # never fetched
+    row = r["rows"][0]
+    assert row["url"] == "https://site.test/{secret}/page" and "SECRET_REDACTED" in row["flags"]
+    assert row["chain"]["cited"]["withheld"] == "SECRET_REDACTED" and row["evidence"]["url"] == row["url"]
+    assert row["class"] == "INCONCLUSIVE" and row["reason"] == "CITED_URL_NOT_FETCHED"   # resolution on: unknown
+    off_row = classify(collected((0, answer(cites=[url]))))["rows"][0]                  # resolution off: by host
+    assert off_row["class"] == "STRENGTH_URL" and off_row["url"] == "https://site.test/{secret}/page"
+    assert callum.stored_url("https://github.com/o/r/blob/main/README.md")["withheld"] is None
+
+
+@pytest.mark.parametrize("location", ["https://аcme.com/go", "https://a‍cme.com/go"])
+def test_wr_f014_a_client_url_redirecting_to_an_unfollowable_lookalike_is_never_a_strength(location):
+    # the REAL fetcher (primitives/fetch.py) on a mock transport: the refused redirect is recorded, its target host
+    # checked with the lookalike fold (raw Unicode included)
+    from primitives import fetch as fetch_mod
+
+    class Body(httpx.SyncByteStream):                  # streamed, as a real server's (the fetcher reads raw)
+        def __init__(self, b):
+            self.b = b
+
+        def __iter__(self):
+            yield self.b
+
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(200, headers={"content-type": "text/plain"}, stream=Body(b"User-agent: *\nAllow: /\n"))
+        if req.headers["host"] == "acme.com":
+            return httpx.Response(301, headers=[(b"location", location.encode())], stream=Body(b""))
+        return httpx.Response(200, headers={"content-type": "text/html"}, stream=Body(b"<html></html>"))
+    fe = fetch_mod.Fetcher(resolver=lambda host, port: ["93.184.216.34"], transport=httpx.MockTransport(handler))
+    fr = fe.fetch("https://acme.com/x", honor_robots=False)
+    res = callum.Resolver(fe, lambda **k: None, True, 5)
+    out = res.resolve("https://acme.com/x")
+    assert out["state"] in ("FAILED", "RESOLVED"), out
+    cl = callum.classify_citation("https://acme.com/x", "acme.com", [], out)
+    assert cl["class"] == "LOOKALIKE_URL", (fr, out, cl)
+    if out["state"] == "FAILED":
+        assert "LOOKALIKE_HOP" in cl["flags"] and fr.summary() == fe.fetch("https://acme.com/x",
+                                                                          honor_robots=False).summary()
+
+
+def test_wr_f014_a_refused_redirect_with_no_readable_target_is_inconclusive_never_strength():
+    u = "https://acme.com/x"
+    refused = FetchResult(url=u, state="REFUSED_URL", final_url=u, detail="the redirect target is not a valid URL")
+    cl = callum.classify_citation(u, "acme.com", [], callum.Resolver(ScriptedFetcher({u: refused}), lambda **k: None,
+                                                                      True, 5).resolve(u))
+    assert cl["class"] == "INCONCLUSIVE" and cl["reason"] == "REDIRECT_NOT_RESOLVED"
+    off_site = FetchResult(url=u, state="DNS_FAILED", final_url="https://parked.test/",
+                           redirects=[{"url": u, "status": 301}])
+    cl2 = callum.classify_citation(u, "acme.com", [], callum.Resolver(ScriptedFetcher({u: off_site}),
+                                                                       lambda **k: None, True, 5).resolve(u))
+    assert cl2["class"] == "INCONCLUSIVE" and "REDIRECTED_OFF_CLIENT" in cl2["flags"]
+    timeout = FetchResult(url=u, state="TIMEOUT", final_url=u)                     # no redirect seen: by host
+    assert callum.classify_citation(u, "acme.com", [], callum.Resolver(ScriptedFetcher({u: timeout}),
+                                                                        lambda **k: None, True, 5).resolve(u)
+                                    )["class"] == "STRENGTH_URL"
+
+
+def test_wr_f014_a_client_chain_refused_after_hops_or_ending_on_an_error_page_is_never_a_strength():
+    u = "https://acme.com/x"
+    later = FetchResult(url=u, state="REFUSED_URL", final_url="https://blog.acme.com/y",
+                        redirects=[{"url": u, "status": 301}], detail="the target or redirect target is not a valid URL")
+    res = callum.Resolver(ScriptedFetcher({u: later}), lambda **k: None, True, 5).resolve(u)
+    assert callum.classify_citation(u, "acme.com", [], res)["reason"] == "REDIRECT_NOT_RESOLVED"
+    err = FetchResult(url=u, state="OK", final_url=u, status=404, content_type="text/html", body=b"<html></html>")
+    res2 = callum.Resolver(ScriptedFetcher({u: err}), lambda **k: None, True, 5).resolve(u)
+    cl = callum.classify_citation(u, "acme.com", [], res2)
+    assert cl["class"] == "INCONCLUSIVE" and cl["reason"] == "LANDING_PAGE_ERROR"

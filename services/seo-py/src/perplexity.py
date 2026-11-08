@@ -61,7 +61,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, Stric
 from answer_adapter import (CODES, MAX_ANSWER_CHARS, MAX_RESPONSE_BYTES, MAX_RETRY_AFTER_S, MAX_SOURCES,  # noqa: F401
                             MAX_UNMODELLED_KEYS, PROTOCOL_ERROR_STOP_AFTER, READ_SLICE_S, STOP_CODES, SYSTEM_PROMPT,
                             ApiKey, EngineError, HttpAnswerEngine, _GuardedDeadlineBackend, _Killed, _Retry,
-                            _retry_after, _Stream, money)
+                            _retry_after, _Stream, join_text, money)
 from answer_adapter import no_duplicates as _no_duplicates
 from finance_client import _DnsGate, _Resolver, _system_resolve
 from ports import ProviderAnswer
@@ -368,7 +368,7 @@ def parse_agent_response(body: bytes, allowed_models: tuple = MODELS) -> Provide
     if r.model not in allowed_models:
         raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED", cost)
     parts = [p for m in messages for p in m.content]
-    text = "".join(p.text for p in parts)
+    text = join_text([[p.text for p in m.content] for m in messages])     # WR-F011: one group per message item
     if not text.strip():
         raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT", cost)
     if len(text) > MAX_ANSWER_CHARS:

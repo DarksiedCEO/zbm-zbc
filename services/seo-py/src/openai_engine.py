@@ -40,7 +40,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError
 
 from answer_adapter import (MAX_ANSWER_CHARS, MAX_SOURCES, SYSTEM_PROMPT, ApiKey, EngineError, HttpAnswerEngine,
-                            dedupe, drift_names, strict_json)
+                            dedupe, drift_names, join_text, strict_json)
 from finance_client import _DnsGate, _Resolver, _system_resolve
 from ports import ProviderAnswer
 
@@ -182,7 +182,8 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
     if version is None:
         raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED")
     parts = [p for m in messages for p in m.content]
-    text = "".join(p.text for p in parts if p.type == "output_text" and p.text)
+    # WR-F011: each message item is its own group (anything between them is another output item)
+    text = join_text([[p.text for p in m.content if p.type == "output_text" and p.text] for m in messages])
     refused = any(p.type == "refusal" and p.refusal for p in parts)
     usage = None if r.usage is None else {"input_tokens": r.usage.input_tokens, "output_tokens": r.usage.output_tokens,
                                           "total_tokens": r.usage.total_tokens, "total_cost_usd": None,
