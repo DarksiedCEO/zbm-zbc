@@ -164,6 +164,16 @@ MULTI_TURN_DOCS = {"url": "https://ai.google.dev/api/generate-content", "read": 
                    "unverified": "whether thought signatures must be returned, and in which parts"}
 
 
+# review round 3: a model turn may carry back only text and thought parts (with their thoughtSignature); never a
+# functionCall, functionResponse, executableCode, inlineData or any other part kind
+ALLOWED_PART_KEYS = frozenset({"text", "thought", "thoughtSignature"})
+
+
+def allowed_part(part) -> bool:
+    return isinstance(part, dict) and bool(part) and set(part) <= ALLOWED_PART_KEYS and \
+        (isinstance(part.get("text"), str) or part.get("thought") is True)
+
+
 def request_body_turns(model: str, history: list, prompt: str) -> bytes:
     """``request_body`` with the earlier turns (assistant = role ``model``, its parts as received) before the new
     user content."""
@@ -285,6 +295,9 @@ class GoogleEngine(HttpAnswerEngine):
 
     def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
         return request_body_turns(model, history, prompt)
+
+    def _allowed_block(self, block: dict) -> bool:
+        return allowed_part(block)
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         return parse_response(raw, (model,))

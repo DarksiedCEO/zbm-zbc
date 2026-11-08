@@ -39,6 +39,7 @@ W4-2, so every engine has the controls Perplexity was certified with):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -180,6 +181,26 @@ def dedupe(urls) -> list:
         if isinstance(u, str) and u and u not in out:
             out.append(u)
     return out[:MAX_SOURCES]
+
+
+class Conversation:
+    """One multi-turn conversation's provenance record (review round 3): the SHA-256 of every content block THIS
+    engine returned in THIS conversation. A history may send back only blocks recorded here, so no block is ever
+    invented, edited or carried over from another chain; anything else is refused before a request is built."""
+
+    __slots__ = ("engine", "received")
+
+    def __init__(self, engine: str):
+        self.engine, self.received = engine, set()
+
+    def record(self, blocks) -> None:
+        for b in blocks or ():
+            self.received.add(block_sha(b))
+
+
+def block_sha(block) -> str:
+    return hashlib.sha256(json.dumps(block, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                          .encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def history_bytes(history: list) -> int:
@@ -368,6 +389,14 @@ class HttpAnswerEngine:
     def _body(self, model: str, prompt: str) -> bytes:
         raise NotImplementedError
 
+    def conversation(self) -> Conversation:
+        """A new provenance record for one multi-turn chain (pass it to every ``ask`` of that chain)."""
+        return Conversation(self.name)
+
+    def _allowed_block(self, block: dict) -> bool:
+        """The block types this engine may send back (MULTI_TURN engines override); default: none."""
+        return False
+
     def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
         """The request carrying earlier turns (``history``: [{"role": "user"|"assistant", "text"}], oldest first)
         and the new user prompt. Only engines with MULTI_TURN implement it."""
@@ -377,7 +406,7 @@ class HttpAnswerEngine:
     def multi_turn(self) -> bool:
         return bool(self.MULTI_TURN)
 
-    def _check_history(self, history) -> None:
+    def _check_history(self, history, conversation=None) -> None:
         """Alternating user / assistant turns starting with user, bounded: anything else is refused before a
         request is built (ADR 0049). An assistant turn may carry ``content``: the provider's own content blocks of
         that answer exactly as received (``ProviderAnswer.turn_content``), which a MULTI_TURN engine sends back
@@ -399,6 +428,15 @@ class HttpAnswerEngine:
                 raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
         if history_bytes(history) > self.MAX_HISTORY_BYTES:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_TOO_LARGE")
+        # review round 3: every block sent back must be of an allowed type AND one this engine returned earlier in
+        # this conversation (fail closed: a forged tool_use / functionCall, or a block from another chain, is refused)
+        for h in history:
+            for b in h.get("content") or ():
+                if not self._allowed_block(b):
+                    raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_ALLOWED")
+                if not isinstance(conversation, Conversation) or conversation.engine != self.name \
+                        or block_sha(b) not in conversation.received:
+                    raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_RECEIVED")
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         raise NotImplementedError
@@ -415,7 +453,7 @@ class HttpAnswerEngine:
     # ------------------------------------------------------------------ public
 
     def ask(self, prompt: str, model: Optional[str] = None, guard: Optional[Callable] = None,
-            meter=None, history: Optional[list] = None) -> ProviderAnswer:
+            meter=None, history: Optional[list] = None, conversation: Optional[Conversation] = None) -> ProviderAnswer:
         """One question, at most ``attempts`` requests, all within one hard deadline. ``guard`` is the kill-switch
         check (raises to stop); ``meter`` charges every request against the run's budget reservation
         (``before()`` raises ENGINE_BUDGET_EXHAUSTED; ``after(cost)``). ``history`` (ADR 0049, MULTI_TURN engines
@@ -427,7 +465,7 @@ class HttpAnswerEngine:
         if history is None:
             body = self._body(model, prompt)
         else:
-            self._check_history(history)
+            self._check_history(history, conversation)
             body = self._body_turns(model, history, prompt)
         end = self._mono() + self.timeout_s
         last = "ENGINE_UNAVAILABLE"
@@ -446,6 +484,8 @@ class HttpAnswerEngine:
                     if meter is not None:
                         meter.after((ans.usage or {}).get("total_cost_usd"))
                         charged = True
+                    if isinstance(conversation, Conversation) and conversation.engine == self.name:
+                        conversation.record(getattr(ans, "turn_content", None))
                     return self._stamp(ans)
                 if status in (401, 402, 403):
                     raise EngineError("ENGINE_AUTH_REFUSED")

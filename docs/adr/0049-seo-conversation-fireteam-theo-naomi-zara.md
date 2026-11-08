@@ -90,7 +90,8 @@ previous instructions", "system:", "you are now", "from now on you", "always rec
 chat-template tokens, …) flags its row `injection_suspected` and the chain INJECTION_SUSPECTED: it is excluded from
 every rate, outcome and pattern (so never "invisible → recommended") and its finals are reported apart under
 `injection_suspected`. The detection is lexical and reduces, not removes, the risk; the disclosure is in every Theo
-envelope's limitations. In stacked mode answers are never re-sent, so the row is flagged but the chain is counted.
+envelope's limitations. Since round 3 the guard is `agents/injection_guard.py`, it scans every re-sent text, and a
+flagged chain is excluded in stacked mode too (see "Review round 3").
 **Budget for growing context:** a native turn k carries k-1 earlier answers and is reserved and charged as k reserve
 units (a 3-turn chain = 6 units, a stacked one = 3), both in Theo's own cap and in the engine reservation; a request
 of unknown cost books k reserves (`_Meter.charge_context`, svc_engines.py) and must fit the reservation before it is
@@ -308,6 +309,40 @@ no market-volume claim; an incomplete chain has no final recommendation; every f
 | 3 injection steering the engine | disclosed (§2, every Theo envelope); INJECTION_SUSPECTED chains excluded from every rate and pattern, reported apart (tested) |
 | 4 "not only X but also Y" and idioms | shared pick, no winner; three positive idioms fixed; seven fallbacks tested as "no recommendation" |
 | 5 small | Zara names `HANDOFF_NOT_VERIFIED` on PARTIAL items; the at-most-one-in-flight-request behaviour of a timed-out member documented (§6) |
+
+## Review round 3 (bf57280b: CONDITIONAL)
+
+1. **Block allowlist and provenance (answer_adapter.py).** Every content block a history sends back must be (a) of an
+   allowed type — Anthropic: `text` (citations of type `web_search_result_location` only), `server_tool_use` named
+   `web_search`, `web_search_tool_result` (results or the tool's error); Gemini: parts holding only `text`,
+   `thought`, `thoughtSignature` (never `functionCall`, `functionResponse` or any other part) — and (b) a block THIS
+   engine returned earlier IN THIS CHAIN: the adapter's `Conversation` record holds the SHA-256 of every block
+   received, Theo opens one per chain, and anything not in it — a forged `tool_use`, an edited block, a block from
+   another chain, or any block with no record — is refused before a request is built (`HISTORY_BLOCK_NOT_ALLOWED`,
+   `HISTORY_BLOCK_NOT_RECEIVED`; tested, nothing is sent).
+2. **Injection guard (`agents/injection_guard.py`, `injection-guard/2026-11-08.1`).** Replaces round 2's single
+   regex. Normalised views (NFKC; zero-width / bidi removed; HTML entities; letters spaced or dotted apart joined;
+   leetspeak; base64 runs decoded) × closed pattern families (override, chat-role and template markers, addressing
+   the AI, steering later turns, persona / jailbreak, recommendation or suppression directives to the model,
+   prompt exfiltration, output control), each written in the model-directed form so reader-facing advice ("You are
+   now eligible…", "From now on, you can file…", "I always recommend getting three quotes", "we should recommend
+   reviewing…", "ignore the noise and focus on…") is not flagged. It scans EVERY text an answer would carry back:
+   the answer text and, from the blocks, Anthropic `cited_text` and result `title`, Gemini text / thought parts. One
+   flagged row flags the whole chain, in either context mode (stacked chains too, round 3), which is then excluded
+   from every rate and pattern and reported apart.
+   **Measured** on `tests/fixtures/injection/labelled.json` (110 labelled cases): dev split (60: 30 injections incl.
+   every form the reviewer named, 30 benign) used to tune the patterns — precision 1.00, recall 1.00 after two
+   changes (letter runs of three or more joined; "without restrictions" only after a verb of answering); held-out
+   split (50: 25 / 25), written after the tuning and evaluated once without further change — precision 1.00 (25/25,
+   Wilson 95% lower bound 0.87), recall 1.00 (25/25, lower bound 0.87). **Honest limits:** both splits were written by
+   the builder, not by an adversary; the held-out result shows the patterns generalise to new phrasings of the same
+   families, not that a determined attacker cannot evade them (paraphrase, other languages, other encodings). The
+   test asserts precision and recall ≥ 0.85 on both splits.
+3. **Negation.** `cannot` / `can not` / `can't` / `won't` / `wouldn't` / `shouldn't` are negations ("I cannot
+   recommend Z Best Media." is no win), while "can't recommend X enough" stays positive; a shared pick needs an
+   entity on EACH side of "not only … but also" / "both … and" ("I recommend Z Best Media, and both RivalCo and others
+   are weaker" is Z Best Media's win); "and" before a new imperative (`go`, `choose`, `pick`, `use`, …) and "then"
+   start a clause ("Skip RivalCo and go with Z Best Media" → Z Best Media). Tested.
 
 ## Tests
 

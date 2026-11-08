@@ -157,6 +157,29 @@ MULTI_TURN_DOCS = {"url": "https://platform.claude.com/docs/en/build-with-claude
                    "shape": "messages: [{role: user, content}, {role: assistant, content: <blocks as received>}, ...]"}
 
 
+# review round 3: the only blocks an assistant turn may carry back — what this adapter's own requests can produce (text
+# with web-search citations, the server tool call and its result); never tool_use, tool_result, thinking or anything
+# else. Provenance (the block was received in this conversation) is checked by answer_adapter.
+ALLOWED_BLOCKS = frozenset({"text", "server_tool_use", "web_search_tool_result"})
+ALLOWED_CITATIONS = frozenset({"web_search_result_location"})
+
+
+def allowed_block(block) -> bool:
+    if not isinstance(block, dict) or block.get("type") not in ALLOWED_BLOCKS:
+        return False
+    if block["type"] == "server_tool_use":
+        return block.get("name") == "web_search"
+    if block["type"] == "text":
+        cites = block.get("citations") or []
+        return isinstance(cites, list) and all(isinstance(c, dict) and c.get("type") in ALLOWED_CITATIONS
+                                               for c in cites)
+    content = block.get("content")                     # web_search_tool_result: results, or the tool's error
+    if isinstance(content, dict):
+        return content.get("type") == "web_search_tool_result_error"
+    return isinstance(content, list) and all(isinstance(r, dict) and r.get("type") == "web_search_result"
+                                             for r in content)
+
+
 def request_body_turns(model: str, history: list, prompt: str, max_uses: int = 3) -> bytes:
     """``request_body`` with the earlier turns before the new user message. An assistant turn carries its content
     blocks exactly as received (``content``); only a turn without them (none from this adapter) is sent as text."""
@@ -280,6 +303,9 @@ class AnthropicEngine(HttpAnswerEngine):
 
     def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
         return request_body_turns(model, history, prompt, self.max_searches)
+
+    def _allowed_block(self, block: dict) -> bool:
+        return allowed_block(block)
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         return parse_response(raw, (model,))

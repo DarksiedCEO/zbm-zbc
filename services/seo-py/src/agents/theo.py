@@ -31,10 +31,13 @@ Two context modes, chosen per engine and named in every output (review round 1, 
                          its pattern says so (``INVISIBLE_AT_OPENING_RECOMMENDED_STACKED``).
 Injection (review round 2): in native mode an earlier answer is re-sent, so text injected into it may steer the
 engine's later answers, the classified final one included; Theo's plan and logic cannot be altered by it. A chain
-whose re-sent answer matches ``_INJECTION`` (instruction-like text aimed at the model) is INJECTION_SUSPECTED: kept
-out of every rate and pattern, its finals reported apart. An earlier answer goes back as the provider's content blocks
-exactly as received (Anthropic: server_tool_use / web_search_tool_result / cited text blocks; Gemini: the parts,
-PROVISIONAL), never truncated: a history over the adapter's cap ends the chain INCOMPLETE (``HISTORY_TOO_LARGE``).
+with any answer that agents/injection_guard.py flags (instruction-like text aimed at the model, in any text the answer
+would carry back) is INJECTION_SUSPECTED, in either mode: kept out of every rate and pattern, its finals reported
+apart. Every content block sent back must be an allowed type that this engine returned earlier in this chain (the
+adapter's ``Conversation`` provenance record; anything else is refused). An earlier answer goes back as the
+provider's content blocks exactly as received (Anthropic: server_tool_use / web_search_tool_result / cited text
+blocks; Gemini: the parts, PROVISIONAL), never truncated: a history over the adapter's cap ends the chain
+INCOMPLETE (``HISTORY_TOO_LARGE``).
 Budget: a native turn k carries k-1 earlier answers, so it is reserved and charged as k reserve units (a stacked turn
 as 1); a whole chain is reserved before its first turn, so a cap never cuts a chain in half.
 
@@ -62,7 +65,7 @@ import hashlib
 import re
 from typing import Callable, Optional
 
-from agents import brand_mention, domain_match, priya_handoff, split_url
+from agents import brand_mention, domain_match, injection_guard, priya_handoff, split_url
 from agents.callum import excerpt
 from agents.probes import MIN_USABLE, REDIRECTOR_HOSTS, _switch_code, extract_citations, wilson
 from agents.prompt_guard import personal_data
@@ -84,16 +87,9 @@ MAX_ROWS = 2000
 # review round 2: an earlier answer goes back as the provider's content blocks exactly as received, never cut; a
 # history over the adapter's MAX_HISTORY_BYTES makes the chain INCOMPLETE (HISTORY_TOO_LARGE) before any request
 HISTORY_BYTES_DEFAULT = 256 * 1024
-# instruction-like text aimed at the model inside an answer (review round 2): in native mode that answer is re-sent to
-# the engine and may steer its later answers, the final one included; such a chain is INJECTION_SUSPECTED and kept out
-# of every pattern (reported apart). Lexical, a closed list: it reduces, not removes, the risk.
-_INJECTION = re.compile(
-    r"(\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+)?(?:previous|prior|above|earlier|"
-    r"system)\s+(?:instructions?|prompts?|messages?|rules)|\bsystem\s*(?:prompt|message|override)\s*:|"
-    r"^\s*(?:system|assistant|developer)\s*:|\byou are now\b|\bfrom now on,?\s+(?:you|always|only|never)\b|"
-    r"\bnew instructions?\s*:|\b(?:you )?(?:must|should) (?:always |only )?recommend\b|\balways recommend\b|"
-    r"\bin (?:all|every|any) (?:future|later|subsequent|following) (?:answers?|responses?|turns?)\b|"
-    r"<\|im_(?:start|end)\|>|\[/?inst\]|\bdo not (?:mention|recommend) (?:any|other)\b)", re.IGNORECASE | re.MULTILINE)
+# instruction-like text aimed at the model (review rounds 2-3): agents/injection_guard.py scans EVERY text an answer
+# would carry back (answer text, cited_text, result titles, Gemini parts); a flagged row flags its whole chain, which is
+# INJECTION_SUSPECTED and kept out of every rate and pattern (reported apart)
 PRIYA_FOLLOWUP_MIN_SHARED = 2
 FOLLOWUPS = {"compare": "What are the main options to compare for this, and how do they differ?",
              "decide": "Which one would you recommend, and why?"}
@@ -110,13 +106,17 @@ STRENGTHS = ("STRONG", "WEAK", "NONE")
 CUES = re.compile(r"\b(recommend|recommended|recommendation|best choice|best option|top pick|go with|i would choose|"
                   r"i'd choose|my pick|the winner)\b", re.IGNORECASE)
 # negation / contrast before an entity, within its clause; and after it ("Acme is not recommended")
-_NEG_BEFORE = re.compile(r"(\bnot\b(?!\s+only\b)|n['\u2019]t\b|\bnever\b|\bavoid\w*|\binstead of\b|\brather than\b|"
+_NEG_BEFORE = re.compile(r"(\bnot\b(?!\s+only\b)|n['\u2019]t\b|\bcannot\b|\bnever\b|\bavoid\w*|\binstead of\b|"
+                         r"\brather than\b|"
                          r"\bover\b|\bunlike\b|"
                          r"\bstay away from\b|\bskip\b|\bno longer\b|\b\w+er than\b|\b(?:more|less) \w+ than\b|"
                          r"\bsuperior to\b|\bexcept\b)", re.IGNORECASE)
 _NEG_AFTER = re.compile(r"^[^.;:!?]{0,30}?\b(is not|isn't|are not|aren't|was not|wasn't|would not|wouldn't|"
                         r"should not|shouldn't|not recommended|falls short|is worse)\b", re.IGNORECASE)
-_CLAUSE = re.compile(r"[.!?\n;,:()—]|\s-\s|\bbut\b|\bhowever\b|\bwhereas\b|\bwhile\b", re.IGNORECASE)
+# round 3: "and" followed by a new imperative ("skip X and go with Y") and "then" also start a clause
+_CLAUSE = re.compile(r"[.!?\n;,:()—]|\s-\s|\bbut\b|\bhowever\b|\bwhereas\b|\bwhile\b|\bthen\b|"
+                     r"\band\s+(?=(?:go|choose|pick|use|try|opt|stick|select|hire|consider|switch|call)\b)",
+                     re.IGNORECASE)
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
 _CONTENT = re.compile(r"[^\W\d_]{3,}")
 _STOP = frozenset({"the", "and", "for", "with", "what", "which", "who", "how", "why", "when", "where", "does", "are",
@@ -128,8 +128,9 @@ LIMITS = [
     "questions re-sent in one request). A stacked chain approximates a conversation.",
     "In native multi-turn, text injected into an engine's answer is re-sent to that engine and may steer its later "
     "answers, the classified final one included. Theo's plan and logic cannot be altered by it (the user turns are "
-    "fixed before turn one), but the engine can. A chain whose re-sent answer holds instruction-like text is "
-    "INJECTION_SUSPECTED and excluded from every rate and pattern (reported apart); the detection is lexical.",
+    "fixed before turn one), but the engine can. A chain with any answer flagged by the injection guard (answer "
+    "text, cited text, result titles, Gemini parts) is INJECTION_SUSPECTED and excluded from every rate and pattern "
+    "(reported apart); the guard is lexical, measured on an author-written fixture set (ADR 0049).",
     "Follow-ups are fixed templates plus at most one of Priya's emerging queries; real users ask other follow-ups. "
     "No LLM-generated follow-up exists (not built).",
     "The final answer is read lexically (a cue word, the first entity named and not negated or contrasted away in "
@@ -226,7 +227,21 @@ _POSITIVE_BEFORE = re.compile(r"(?:\b(?:not|never)|n['\u2019]t)\s+hesitate\s+to\
 _CANT_RECOMMEND = re.compile(r"(?:\bcannot|\bcan\s+not|\bcan['\u2019]t|\bcouldn['\u2019]t)\s+recommend\s*$",
                              re.IGNORECASE)
 _ENOUGH = re.compile(r"^\s*(?:highly\s+|strongly\s+)?enough\b", re.IGNORECASE)
-_TOGETHER = re.compile(r"\bnot only\b.+\bbut (?:also|as well)\b|\bboth\b.+\band\b", re.IGNORECASE)
+# round 3: a shared pick only when the construction itself holds an entity on EACH side ("not only X but also Y",
+# "both X and Y"); "I recommend X, and both Y and others are weaker" is X's win
+_TOGETHER = re.compile(r"\bnot only\b(.{0,80}?)\bbut (?:also|as well)\b(.{0,80})|\bboth\b(.{0,60}?)\band\b(.{0,60})",
+                       re.IGNORECASE)
+
+
+def _together(t: str, start: int, end: int, inside: list) -> list:
+    """The distinct entities a shared-pick construction in t[start:end] names on both sides ([] when none)."""
+    for m in _TOGETHER.finditer(t, start, end):
+        g = (1, 2) if m.group(1) is not None else (3, 4)
+        left = {(e[1], e[2]) for e in inside if m.start(g[0]) <= e[0] < m.end(g[0])}
+        right = {(e[1], e[2]) for e in inside if m.start(g[1]) <= e[0] < m.end(g[1])}
+        if left and right and left | right != left:
+            return sorted(left | right, key=lambda x: (x[0], x[1] or ""))
+    return []
 
 
 def negated(t: str, start: int, end: int) -> bool:
@@ -282,11 +297,12 @@ def recommendation(a: ProviderAnswer, ctx: dict) -> dict:
         if not CUES.search(sm.group(0)):
             continue
         inside = [e for e in live if sm.start() <= e[0] < sm.end()]
-        if len({(e[1], e[2]) for e in inside}) > 1 and _TOGETHER.search(sm.group(0)):
+        shared = _together(t, sm.start(), sm.end(), inside)
+        if shared:
             # "not only X but also Y", "both X and Y": several picks, no single decisive one (review round 2)
             return {"winner": "none", "name": None, "basis": "recommended_together", "counts": False,
-                    "confidence": "LOW", "together": sorted({e[1] if e[1] == "client" else f"competitor:{e[2]}"
-                                                             for e in inside}),
+                    "confidence": "LOW", "together": sorted(k if k == "client" else f"competitor:{n}"
+                                                            for k, n in shared),
                     "wording": "several recommended together in the final answer (no single pick)"}
         if inside:
             e = inside[0]
@@ -466,6 +482,8 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
     history: list = []
     answers_seen: set = set()
     injected = False
+    # round 3: the adapter's provenance record for this chain (only blocks it returned here may be sent back)
+    conv = port.conversation() if mode == NATIVE and callable(getattr(port, "conversation", None)) else None
     status, reason, final = "COMPLETE", None, None
     takes_guard = bool(getattr(port, "accepts_guard", False))
     for k, turn in enumerate(turns):
@@ -481,7 +499,8 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
         try:
             if mode == NATIVE:
                 m = meter if meter is None or k == 0 else _ContextMeter(meter, k + 1)
-                a = port.ask(turn["_text"], guard=guard, meter=m, history=list(history) if history else None)
+                a = port.ask(turn["_text"], guard=guard, meter=m, history=list(history) if history else None,
+                             conversation=conv)
             else:
                 prompt = render(turns, k)
                 a = port.ask(prompt, guard=guard, meter=meter) if takes_guard else port.ask(prompt)
@@ -526,8 +545,8 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
         obs.pop("_on_client")
         ex = excerpt(a.text, ctx["terms"]) if t["source"] == "prompt_set" else \
             {"basis": None, "excerpt": None, "withheld": "PRIYA_QUERY_CONTEXT"}
-        sus = bool(_INJECTION.search(a.text)) and k + 1 < len(turns)   # a prior answer, re-sent in native mode
-        injected = injected or (sus and mode == NATIVE)
+        sus = any(injection_guard.suspected(x) for x in injection_guard.resent_texts(a))
+        injected = injected or sus                       # one flagged row flags the whole chain (round 3)
         rows.append({**row, **meta, "status": "ANSWER", **obs, "evidence": ex,
                      **({"injection_suspected": True} if sus else {})})
         done.append({"turn": k + 1, "kind": turn["kind"], "status": "ANSWER", "client": obs["client"],
