@@ -331,9 +331,9 @@ _R = {
                          "internet, then re-run the audit.", (("fetch_state", "token"),)),
     "PAGE_ACCESS_REFUSED": ("Our audit crawler was refused (inconclusive)", "Nothing is known to be wrong for "
                             "visitors. The site refused or rate-limited our audit crawler (ZBM-SEO-Audit), so this "
-                            "page could not be checked. Whether Google, Bing or AI crawlers are refused too cannot be seen "
-                            "from here: check your bot protection or firewall allows verified search and AI crawlers, "
-                            "and allow ZBM-SEO-Audit if you want this page audited.",
+                            "page could not be checked. Whether Google, Bing or AI crawlers are refused too cannot be "
+                            "seen from here: check your bot protection or firewall allows verified search and AI "
+                            "crawlers, and allow ZBM-SEO-Audit if you want this page audited.",
                             (("status", "num"), ("browser_served", "bool"))),
     "PAGE_HTTP_ERROR_OTHER": ("Page answered our request with an unusual status", "Check that the page loads "
                               "normally; it answered our request with the status below.", (("status", "num"),)),
@@ -945,12 +945,24 @@ def _inconclusive(key: str, env: Optional[dict], report: dict) -> list:
     if key != "crawlability" or not isinstance(env, dict):
         return out
     facts = env.get("facts") if isinstance(env.get("facts"), dict) else {}
+    cut = facts.get("deadline_cut") if isinstance(facts.get("deadline_cut"), dict) else {}
+    cut = {k: v for k, v in cut.items() if type(v) is int and v > 0}
+    if cut:
+        parts = [f"{cut[k]} {label}" for k, label in (
+            ("comparisons", "comparison(s) of what our crawler and a browser were served"),
+            ("canonical_checks", "canonical link check(s)"),
+            ("discovery", "page(s) found by following links")) if k in cut]
+        out.append("Cut short by the audit time limit: " + "; ".join(parts) + " were not done. Not reported as "
+                   "findings; a later audit (or a longer time limit) can complete them.")
     canon = facts.get("canonical_checks_inconclusive")
-    if isinstance(canon, list) and canon:
+    canon = [c for c in canon if isinstance(c, dict) and c.get("fetch_state") != "DEADLINE"] \
+        if isinstance(canon, list) else []
+    if canon:
         out.append(f"{len(canon)} canonical link target(s) could not be checked: our own request for the target got no "
                    "usable answer, so whether the target loads is inconclusive. Not reported as a finding.")
     pages = report.get("pages") if isinstance(report.get("pages"), dict) else {}
     diffs = sum(1 for p in pages.values() if isinstance(p, dict) and p.get("access_diff") == "INCONCLUSIVE")
+    diffs = max(0, diffs - cut.get("comparisons", 0))
     if diffs:
         out.append(f"{diffs} comparison(s) of what our crawler and a browser were served were inconclusive (the page "
                    "changed between requests, a request failed, or bot protection answered the browser request). "

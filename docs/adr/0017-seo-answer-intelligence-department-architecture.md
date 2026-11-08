@@ -1367,12 +1367,20 @@ CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch 
      fetcher's hard per-request bound, twice `SEO_FETCH_TIMEOUT_SECONDS`, at most a quarter of the deadline); discovery
      keeps room for Delia's requests; an area the deadline cut short is PARTIAL (or FAILED when nothing was observed)
      with reason `AUDIT_DEADLINE`; a comparison or canonical check it cut short is inconclusive. `SEO_CRAWL_DELAY_MS`
-     is 0..3000 and a robots.txt Crawl-delay is honoured up to 3 s (above: no discovery), so the default audit (about
-     50 requests at 1 s) fits the deadline. The audit route is synchronous: callers must allow at least the deadline
+     is 0..3000 and a robots.txt Crawl-delay is honoured up to 3 s (above: no discovery). The default audit (about
+     50 requests at 1 s) fits the deadline only on a site that answers quickly; see the next item for slow sites. The audit route is synchronous: callers must allow at least the deadline
      (the dashboard's `ORCHESTRATOR_TIMEOUT_MS` default of 10 s does not; follow-up). The answer-engine and Search
      Console steps are not site requests and are bounded by their own budgets, not this deadline. The renderer is
      `seo-client-report/6` (`/7` with the homepage observation): the output changed after /4 and /5, which were never
      recorded in production and now answer `REPORT_CHANGED` on replay.
+   - **Re-review of 9d0d2b4, closed.** The reserve before the deadline is one whole worst-case fetch, twice
+     `SEO_FETCH_TIMEOUT_SECONDS` (nested robots.txt fetches share it), and the service refuses to start when that is
+     more than half of `SEO_AUDIT_DEADLINE_SECONDS` (the error names both). Work the deadline cut is recorded per kind in
+     Selene's `deadline_cut` facts (comparisons, canonical checks, discovered pages): comparisons or canonical checks
+     cut make the crawlability area PARTIAL with `AUDIT_DEADLINE`, discovered pages cut leave it OK (optional scope),
+     and the report names each cut as "Cut short by the audit time limit". Discovery reserves Delia's 12 requests at
+     the larger of the politeness wait and the slowest response seen so far, plus one worst-case fetch, so on a slow
+     site fewer pages are discovered instead of Delia being cut; if still short, Delia is PARTIAL `AUDIT_DEADLINE`.
 
 ## Unlock list
 

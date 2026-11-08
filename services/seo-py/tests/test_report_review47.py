@@ -413,7 +413,9 @@ def test_no_request_starts_that_could_end_after_the_deadline(srv):
     d_env = delia.run(ctx)
     assert ctx.deadline_hit and ctx.requests == len(srv.seen)
     assert ctx.last_request + ctx.fetch_reserve_s <= ctx.deadline       # the last request could still finish in time
-    assert s_env["outcome"] == "OK" and s_env["facts"]["discovery_stopped"] in ("time_budget", "deadline")
+    # discovery is optional scope: Selene stays OK, and the cut is recorded and named in the client report
+    assert s_env["outcome"] == "OK" and s_env["facts"]["discovery_stopped"] == "time_budget"
+    assert s_env["facts"]["deadline_cut"] == {"discovery": 9}
     assert d_env["outcome"] == "PARTIAL" and d_env["reason"] == "AUDIT_DEADLINE" and d_env["facts"]["deadline_reached"]
     assert d_env["facts"]["sitemaps_read"] == 1 and "llms_txt" not in d_env["facts"]
 
@@ -461,7 +463,8 @@ def test_deadline_reason_reads_plainly_in_the_report(fmt):
 
 def test_deadline_setting_bounds_and_service_wiring(tmp_path):
     assert config.load(base_env()).audit_deadline_s == 90
-    assert config.load(base_env(SEO_AUDIT_DEADLINE_SECONDS="30")).audit_deadline_s == 30
+    assert config.load(base_env(SEO_AUDIT_DEADLINE_SECONDS="30",
+                                SEO_FETCH_TIMEOUT_SECONDS="7")).audit_deadline_s == 30
     assert config.load(base_env(SEO_AUDIT_DEADLINE_SECONDS="600")).audit_deadline_s == 600
     for bad in ("29", "601", "0", "x"):
         with pytest.raises(RuntimeError):
@@ -482,4 +485,147 @@ def test_the_service_passes_one_deadline_and_a_bounded_reserve(tmp_path, srv, mo
     h = Harness(tmp_path, ports=_ports(srv), SEO_AUDIT_DEADLINE_SECONDS="40", SEO_FETCH_TIMEOUT_SECONDS="10")
     h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": ["site.test"]}, andre=True))
     h.ok(h.post("/tenants/zbm/audits", {"request_id": rid(), "domain": "site.test", "scheme": "http"}), 201)
-    assert 35 < seen["deadline"] - seen["now"] <= 40 and seen["reserve"] == 10 and seen["delay"] == 0
+    assert 35 < seen["deadline"] - seen["now"] <= 40 and seen["reserve"] == 20 and seen["delay"] == 0
+
+
+# ================================================================ re-review of 9d0d2b4
+
+# ---------------------------------------------------------------- 1. a whole worst-case fetch before the deadline
+
+@pytest.mark.parametrize("timeout,deadline", [("15", "90"), ("22", "90"), ("7", "30"), ("60", "240"), ("10", "90")])
+def test_timeout_and_deadline_pairs_that_keep_the_promise_start(timeout, deadline):
+    s = config.load(base_env(SEO_FETCH_TIMEOUT_SECONDS=timeout, SEO_AUDIT_DEADLINE_SECONDS=deadline))
+    assert 2 * s.fetch_timeout_s <= s.audit_deadline_s / 2
+
+
+@pytest.mark.parametrize("timeout,deadline", [("10", "30"), ("8", "30"), ("23", "90"), ("60", "239"), ("30", "90")])
+def test_a_pair_that_could_break_the_deadline_refuses_start_naming_both(timeout, deadline):
+    with pytest.raises(RuntimeError) as exc:
+        config.load(base_env(SEO_FETCH_TIMEOUT_SECONDS=timeout, SEO_AUDIT_DEADLINE_SECONDS=deadline))
+    msg = str(exc.value)
+    assert "SEO_FETCH_TIMEOUT_SECONDS" in msg and "SEO_AUDIT_DEADLINE_SECONDS" in msg
+    assert f"({timeout})" in msg and f"({deadline})" in msg
+
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("timeout,deadline", [("15", "90"), ("7", "30")])
+def test_the_service_reserves_one_full_worst_case_fetch(tmp_path, srv, monkeypatch, timeout, deadline):
+    seen = {}
+    real = selene.run
+
+    def spy(ctx):
+        seen["reserve"] = ctx.fetch_reserve_s
+        return real(ctx)
+    monkeypatch.setattr(selene, "run", spy)
+    install_site(srv)
+    h = Harness(tmp_path, ports=_ports(srv), SEO_AUDIT_DEADLINE_SECONDS=deadline, SEO_FETCH_TIMEOUT_SECONDS=timeout)
+    h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": ["site.test"]}, andre=True))
+    h.ok(h.post("/tenants/zbm/audits", {"request_id": rid(), "domain": "site.test", "scheme": "http"}), 201)
+    assert seen["reserve"] == 2 * int(timeout)                      # the fetcher's own hard bound, not a fraction
+
+
+class _SlowClock(_Clock):
+    """Every request takes ``latency`` seconds of (fake) time."""
+
+    def __init__(self, latency):
+        super().__init__()
+        self.latency = latency
+
+
+@pytest.mark.local_http
+def test_with_slow_responses_no_request_ends_after_the_deadline(srv):
+    install_site(srv)
+    srv.html("site.test", "/", _links(*[f"/p{i}" for i in range(9)]))
+    c = _SlowClock(4.0)
+    ctx = _ctx(srv, max_pages=10)
+    ctx.crawl_delay_s, ctx.sleep, ctx.monotonic = 1.0, c.sleep, c.monotonic
+    ctx.deadline, ctx.fetch_reserve_s = 60.0, 4.0                  # a fetch here takes at most its reserve
+    real = ctx.fetcher.fetch, ctx.fetcher.robots
+
+    def slow(fn):
+        def run(*a, **kw):
+            out = fn(*a, **kw)
+            c.t += c.latency
+            assert c.t <= ctx.deadline + 1e-9                       # every request ended in time
+            return out
+        return run
+    ctx.fetcher.fetch, ctx.fetcher.robots = slow(real[0]), slow(real[1])
+    selene.run(ctx)
+    delia.run(ctx)
+    assert c.t <= ctx.deadline
+
+
+# ---------------------------------------------------------------- 2. optional work cut short names the time limit
+
+@pytest.mark.local_http
+def test_a_comparison_cut_by_the_deadline_makes_the_area_partial_with_the_reason(srv):
+    install_site(srv)
+    ctx, _ = _deadline_ctx(srv, deadline=1.5, reserve=0.0, max_pages=0)       # robots, page, then no room
+    env, pages = selene.run(ctx)
+    assert env["outcome"] == "PARTIAL" and env["reason"] == "AUDIT_DEADLINE"
+    assert env["facts"]["deadline_cut"] == {"comparisons": 1}
+    assert pages["/"]["access_diff"]["reason"] == "AUDIT_DEADLINE"
+
+
+@pytest.mark.local_http
+def test_a_canonical_check_cut_by_the_deadline_is_recorded_as_such(srv):
+    install_site(srv)
+    srv.html("site.test", "/", home_html(canonical="http://site.test/preferred"))
+    ctx, _ = _deadline_ctx(srv, deadline=1.5, reserve=0.0, max_pages=0)
+    env, _ = selene.run(ctx)
+    assert env["facts"]["deadline_cut"] == {"canonical_checks": 1, "comparisons": 1}
+    assert env["outcome"] == "PARTIAL" and env["reason"] == "AUDIT_DEADLINE"
+
+
+@pytest.mark.parametrize("fmt", ["markdown", "html"])
+def test_the_report_names_the_time_limit_for_cut_work(fmt):
+    v = _with_selene_findings()
+    sel = next(e for e in v["report"]["agents"] if e["agent"] == "selene")
+    sel["facts"] = {"deadline_cut": {"comparisons": 2, "canonical_checks": 1, "discovery": 4},
+                    "canonical_checks_inconclusive": [{"path": "/", "fetch_state": "DEADLINE"},
+                                                      {"path": "/a", "fetch_state": "TIMEOUT"}]}
+    v["report"]["pages"] = {"/": {"access_diff": "INCONCLUSIVE"}, "/a": {"access_diff": "INCONCLUSIVE"},
+                            "/b": {"access_diff": "INCONCLUSIVE"}}
+    t = cr.render(v, "acme", fmt)[0].decode()
+    assert ("Cut short by the audit time limit: 2 comparison(s) of what our crawler and a browser were served; "
+            "1 canonical link check(s); 4 page(s) found by following links were not done.") in t
+    assert "1 canonical link target(s) could not be checked" in t          # the TIMEOUT one, not the deadline one
+    assert "1 comparison(s) of what our crawler and a browser were served were inconclusive" in t
+
+
+def test_nothing_cut_means_no_time_limit_line():
+    m = cr.build(fx.fresh("full"), "acme")
+    assert not any("time limit" in x for s in m["sections"] for x in s["inconclusive"])
+
+
+# ---------------------------------------------------------------- 3. Delia's reserve counts real response time
+
+@pytest.mark.local_http
+def test_slow_responses_shrink_discovery_so_delias_requests_keep_their_room(srv):
+    install_site(srv)
+    srv.html("site.test", "/", _links(*[f"/p{i}" for i in range(9)]))
+    for i in range(9):
+        srv.html("site.test", f"/p{i}", home_html(title=f"P{i}", canonical=f"http://site.test/p{i}"))
+
+    def run(latency):
+        c = _SlowClock(latency)
+        ctx = _ctx(srv, max_pages=10)
+        ctx.crawl_delay_s, ctx.sleep, ctx.monotonic = 1.0, c.sleep, c.monotonic
+        ctx.deadline, ctx.fetch_reserve_s = 90.0, 20.0
+        f0, r0 = ctx.fetcher.fetch, ctx.fetcher.robots
+
+        def slow(fn):
+            def go(*a, **kw):
+                out = fn(*a, **kw)
+                c.t += latency
+                return out
+            return go
+        ctx.fetcher.fetch, ctx.fetcher.robots = slow(f0), slow(r0)
+        s_env, _ = selene.run(ctx)
+        return s_env, delia.run(ctx), ctx
+    fast_s, fast_d, fast = run(0.1)
+    slow_s, slow_d, slow = run(3.0)
+    # (the wrapped robots() fetch goes through the wrapped fetch(), so it is measured at twice the latency)
+    assert fast.per_request_estimate() == 1.0 and slow.per_request_estimate() >= 3.0
+    assert len(fast_s["facts"]["pages_discovered"]) > len(slow_s["facts"]["pages_discovered"])
+    assert fast_d["outcome"] == "OK" and slow_d["outcome"] == "OK"     # Delia finished in both

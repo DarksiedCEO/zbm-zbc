@@ -80,6 +80,7 @@ class RunContext:
     deadline: Optional[float] = None
     fetch_reserve_s: float = 0.0
     deadline_hit: bool = False
+    max_latency: float = 0.0                # the slowest request of this audit so far (seconds, measured)
     robots_cache: dict = field(default_factory=dict)
     robots: Optional[dict] = None          # filled by Selene, read by Delia and Roman
 
@@ -97,6 +98,14 @@ class RunContext:
         rb = self.robots or {}
         parsed = rb.get("parsed")
         return parsed.crawl_delay(token) if parsed is not None else None
+
+    def per_request_estimate(self) -> float:
+        """What one more request is expected to take: the politeness wait or the slowest response seen, whichever is
+        longer (re-review of PR 47, item 3: a reserve in crawl-delay seconds alone ignores slow responses)."""
+        return max(self.crawl_delay(), self.max_latency)
+
+    def observe(self, started: float) -> None:
+        self.max_latency = max(self.max_latency, max(0.0, self.monotonic() - started))
 
     def polite(self) -> None:
         """Called before every request to the site: waits until ``crawl_delay()`` has passed since the last one.

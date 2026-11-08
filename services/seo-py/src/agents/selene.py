@@ -69,7 +69,9 @@ def run(ctx) -> tuple[dict, dict]:
     try:
         ctx.guard(capability="fetch", provider="web")
         ctx.polite()
+        t0 = ctx.monotonic()
         rb = ctx.fetcher.robots(ctx.origin, guard=ctx.guard)
+        ctx.observe(t0)
         ctx.robots = rb
         ctx.robots_cache[_origin_key(ctx.origin)] = rb
         ctx.osei.observed("robots", ctx.origin + "/robots.txt", rb["status_class"])
@@ -96,11 +98,14 @@ def run(ctx) -> tuple[dict, dict]:
             facts["discovery_stopped"] = "crawl_delay_above_cap"
             discovered = []
         if ctx.deadline_hit:
+            _cut(facts, "discovery", len(discovered))
             discovered = []
         read = []
         started = ctx.monotonic()
         # discovered pages leave room before the audit deadline for Delia's sitemap and llms.txt requests
-        horizon = (ctx.deadline - DELIA_RESERVE_REQUESTS * ctx.crawl_delay() - ctx.fetch_reserve_s
+        # re-review item 3: the reserve is counted in expected request time (the politeness wait or the slowest
+        # response seen so far), plus one worst-case fetch, so Delia's requests keep their room on a slow site
+        horizon = (ctx.deadline - DELIA_RESERVE_REQUESTS * ctx.per_request_estimate() - ctx.fetch_reserve_s
                    if ctx.deadline is not None else started + DISCOVERY_TIME_BUDGET_S)
         budget = REQUESTS_PER_PAGE * max(ctx.max_pages, len(ctx.paths)) + CANONICAL_CHECK_MAX + 2
         for path in discovered:
@@ -109,9 +114,10 @@ def run(ctx) -> tuple[dict, dict]:
             if ctx.requests + REQUESTS_PER_PAGE > budget:
                 facts["discovery_stopped"] = "request_budget"
                 break
-            if ctx.monotonic() + REQUESTS_PER_PAGE * ctx.crawl_delay() > min(horizon,
-                                                                             started + DISCOVERY_TIME_BUDGET_S):
+            if ctx.monotonic() + REQUESTS_PER_PAGE * ctx.per_request_estimate() > min(
+                    horizon, started + DISCOVERY_TIME_BUDGET_S):
                 facts["discovery_stopped"] = "time_budget"
+                _cut(facts, "discovery", len(discovered) - len(read))
                 break
             read.append(path)
             try:
@@ -120,6 +126,7 @@ def run(ctx) -> tuple[dict, dict]:
                 facts["deadline_reached"] = True
                 facts["discovery_stopped"] = "deadline"
                 read.pop()
+                _cut(facts, "discovery", len(discovered) - len(read))
                 break
         facts["pages_discovered"] = read
         facts["requests"] = ctx.requests
@@ -139,6 +146,12 @@ def run(ctx) -> tuple[dict, dict]:
         return envelope(AGENT, TASK, "PARTIAL" if fetched else "FAILED", findings,
                         methodology=METHODOLOGY.format(v=bots.VERSION), limitations=LIMITS,
                         not_connected=not_connected, facts=facts, reason=DEADLINE_REASON), pages
+    cut = facts.get("deadline_cut") or {}
+    if fetched and (cut.get("comparisons") or cut.get("canonical_checks")) \
+            and not (facts.get("deadline_reached") and any(p not in pages for p in ctx.paths)):
+        facts["render_states"] = {p: v["render"]["state"] for p, v in pages.items()}
+        return envelope(AGENT, TASK, "PARTIAL", findings, methodology=METHODOLOGY.format(v=bots.VERSION),
+                        limitations=LIMITS, not_connected=not_connected, facts=facts, reason=DEADLINE_REASON), pages
     if fetched == 0:
         outcome = "BLOCKED" if all(p["fetch"].state == "BLOCKED_BY_ROBOTS" or p.get("refused")
                                    for p in pages.values()) else "FAILED"
@@ -261,7 +274,9 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
         try:
             human = _fetch(ctx, url, ua="human")
         except DeadlineReached:
-            pages[path]["access_diff"] = {"state": "INCONCLUSIVE", "signals": [], "why": "audit time limit reached"}
+            pages[path]["access_diff"] = {"state": "INCONCLUSIVE", "signals": [], "why": "audit time limit reached",
+                                          "reason": DEADLINE_REASON}
+            _cut(facts, "comparisons")
             return findings
         hx = _extract_of(human, url)
         ad = diff_mod.access_diff(f, human, extract, hx)
@@ -274,6 +289,7 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
                 again = _fetch(ctx, url)
             except DeadlineReached:
                 again = None
+                _cut(facts, "comparisons")
             repeat = diff_mod.access_diff(f, again, extract, _extract_of(again, url)) \
                 if again is not None and again.ok else None
             ad = diff_mod.confirm(ad, repeat)
@@ -291,11 +307,21 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
     return findings
 
 
+def _cut(facts: dict, what: str, n: int = 1) -> None:
+    """Work the audit time limit (or the discovery time budget that protects it) left undone, by kind:
+    ``discovery`` (linked pages not read), ``comparisons`` (crawler / browser comparisons), ``canonical_checks``."""
+    if n > 0:
+        c = facts.setdefault("deadline_cut", {})
+        c[what] = c.get(what, 0) + n
+
+
 def _fetch(ctx, url: str, **kw):
     """Every Selene request after robots.txt: politeness wait first, then the one fetcher (SSRF guard, robots.txt for
     our crawler, byte / time / redirect budgets)."""
     ctx.polite()
+    t0 = ctx.monotonic()
     f = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard, **kw)
+    ctx.observe(t0)
     if f.state == "KILLED":
         raise Killed(f.detail or "KILLED")
     return f
@@ -437,6 +463,8 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
                 cf = _fetch(ctx, c)
             except DeadlineReached:
                 cf = fetch_mod.FetchResult(url=c, state="DEADLINE")
+                if facts is not None:
+                    _cut(facts, "canonical_checks")
             if not cf.ok:
                 # Gate 4: our own request for the canonical target failed (timeout, refused, robots.txt for our
                 # crawler). That says nothing about what the target answers: inconclusive, recorded as a fact, never
