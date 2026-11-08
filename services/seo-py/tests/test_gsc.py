@@ -899,6 +899,7 @@ ROUND4_DROP = (
 WORD_KEEP = ("2.5 ton heat pump", "tires 225/65r17", "2012 ford f150 3.5 ecoboost", "carrier 24acc636a003 manual",
              "trane xr14 4 ton", "oil change 5w-30", "transmission repair 4l60e", "battery group 24f", "u.s flag",
              "16 seer ac unit price", "goodman gsx140361 specs")
+# the UUID below is a sample value, built from parts
 WORD_DROP = ("a1b2c3d4e5f6g7", "token abcd1234efgh5678", "-".join(("f47ac10b", "58cc", "4372", "a567", "0e02b2c3d479")),
              "deadbeefdeadbeef00", "abcdefgh.ijklmnop.qrstuvwx", "x" * 41, "jane_cv.pdf", "q9w8e7r6t5", "order 1234567",
              "acct ab12345678")
@@ -907,6 +908,24 @@ WORD_DROP = ("a1b2c3d4e5f6g7", "token abcd1234efgh5678", "-".join(("f47ac10b", "
 @pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND4_KEEP + WORD_KEEP]
                          + [(q, "DROP") for q in ROUND4_DROP + WORD_DROP])
 def test_osei_round4_keep_drop_table(q, want):
+    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
+
+
+# Round-5 regressions: ordinals and storage units are not UK inward codes, French place / route need an article,
+# old / new / good alone as a street name only at the end, and base64 / AWS-style secrets holding "/" drop again.
+# The secret-shaped values are built from parts so that no scanner sees a literal.
+ROUND5_KEEP = ("ps5 2tb ssd upgrade", "ipad pro m4 1tb", "bmw x5 3rd row", "audi q7 3rd row seating",
+               "galaxy s9 2nd hand", "m3 2nd gen", "6 place setting dinnerware", "bus 12 route map", "5 route options",
+               "3 new dr pepper flavors", "2 old court cases", "10 good place to eat", "5 good drive thru",
+               "tires 225/65r17", "example.com/blog/how-to-clean-rugs", "acme.com/services/rug-cleaning tips",
+               "5/8 inch plywood", "24/7 plumber", "1/2 hp sump pump")
+ROUND5_DROP = ("sw1a 1aa", "14 high st oxford ox1 4ag", "m1 1ae manchester", "12 new street", "6 place de la concorde",
+               "12 chemin du lac", "12 avenue des champs", "/".join(("wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY")),
+               "/".join(("dGhpcy9pcy9h", "c2VjcmV0IGtleQ==")), "+".join(("YWJj/ZGVm", "Z2hp")))
+
+
+@pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND5_KEEP] + [(q, "DROP") for q in ROUND5_DROP])
+def test_osei_round5_keep_drop_table(q, want):
     assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
 
 

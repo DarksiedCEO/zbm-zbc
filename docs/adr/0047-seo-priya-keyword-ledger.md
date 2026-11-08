@@ -145,15 +145,20 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.4`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.5`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
   letters-and-digits word of 16+ characters or of 8+ characters switching between letters and digits at least 60% of
-  the time (`a1b2c3d4e5f6g7`), a file name (`jane_cv.pdf`); 7+ digits in one run stay the digit-run rule's;
+  the time (`a1b2c3d4e5f6g7`), a file name (`jane_cv.pdf`), and (round 5) a base64- or AWS-secret-like word holding
+  `/`, `+` or `=` (20+ such characters with a digit, `+` or `=`, or 12+ with two of them; a path of plain words and a
+  short tire size are not); 7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
-  `lane`, `way`; `old`, `new`, `good` are allowed since round 4: `17 old mill road`, `12 new street`), then a suffix. After a **strong** suffix (abbreviations that are not English words — `st`, `ave`,
+  `lane`, `way`), then a suffix. `old`, `new`, `good` may start a street name (`17 old mill road`, `40 good hope
+  rd`); as the whole name (`12 new street`) the suffix must end the query or be followed only by a unit, a state and
+  a ZIP, so `3 new dr pepper flavors`, `2 old court cases`, `10 good place to eat` are kept (round 5) and `12 new
+  street london` is missed. After a **strong** suffix (abbreviations that are not English words — `st`, `ave`,
   `blvd`, `rd`, `dr`, `ln`, `ct`, `pl`, `ter`, `cir`, `hwy`, `pkwy`, … — and `street`, `avenue`, `boulevard`) anything
   may follow (`123 main st 2nd floor`, `123 main st springfield il 62701 hours`); after an **ordinary-word** suffix
   (`road`, `lane`, `drive`, `court`, `way`, `terrace`, `place`, `loop`, `plaza`) only up to three place words, a state and a
@@ -162,9 +167,12 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
 - a state name or code with a 5-digit ZIP not followed by a unit word (`btu`, `miles`, `jobs`, `sq`, `zip`, …); the
   codes `in`, `or`, `me`, `ok` are left out because they are English words;
 - PO boxes, PMB numbers, rural routes (`rr 2 box 15`, `hc 1 box 9`) and ZIP+4, anywhere;
-- outside the US (round 4): UK postcodes (`sw1a 1aa`, `ox1 4ag`), Canadian postal codes (`m5v 3l9`), and French /
-  Quebec leading forms (`350 rue sherbrooke`, `12 chemin du lac`; also `boulevard`, `avenue`, `place`, `quai`,
-  `impasse`, `allée` after a number). Other countries' formats are not covered: the rule is US-centric;
+- outside the US (rounds 4 and 5): UK postcodes — one of the ~120 real postcode areas, the district, a **space**,
+  and an inward part (a digit and two letters, never c i k m o v, and not an ordinal or size unit: `x5 3rd`, `m4 1tb`,
+  `s9 2nd` are kept) (`sw1a 1aa`, `ox1 4ag`); Canadian postal codes (`m5v 3l9`); French / Quebec leading forms
+  (`350 rue sherbrooke`, `12 chemin du lac`, `quai`, `impasse`, `allée`; `place`, `route`, `avenue`, `boulevard` only
+  with `de` / `du` / `des` / `d'`: `6 place de la concorde` drops, `6 place setting dinnerware` is kept). Other
+  countries' formats are not covered: the rule is US-centric;
 - any query over 512 characters (`search_performance.MAX_QUERY_CHARS`): not examined, counted as personal data
   (this also bounds the regex work per query).
 
@@ -172,13 +180,15 @@ Checked on the raw and the normalised text (fullwidth digits, lookalikes). A dro
 only `pii_suspect_dropped` {queries, clicks, impressions}, where `queries` counts **distinct** normalised queries (a
 query in both sources, or on many Bing dates, is one). The round-3 and round-4 reviewers' probe sets are regression
 tables in `tests/test_gsc.py` (Osei) with subsets in `tests/test_priya.py`: round 3, 0 of 72 ordinary queries
-dropped and 61 of 64 addresses dropped; round 4, 0 of 95 ordinary queries dropped and 49 of 50 addresses dropped.
+dropped and 61 of 64 addresses dropped; round 4, 0 of 95 ordinary queries dropped and 49 of 50 addresses dropped;
+round 5's regression table (19 ordinary queries kept, 10 addresses and secrets dropped) passes.
 **Known gaps, disclosed** — an address of these kinds is NOT caught and goes into the returned ledger as the engine
 reported it: bare named streets with no suffix (`1200 broadway`, `123 n main`); landmark or building-name
 addresses; streets with more than three name words or an unlisted suffix (`trail`, `pike`, `row`, …); a state code
 that is also an English word with its ZIP (`portland or 97201`); postal formats of countries other than the US, UK,
 Canada and the French leading forms above (and UK / Canadian street addresses without a postcode are caught only
-when they use a listed suffix). **Known over-drops:** a non-address shaped like `<number> <word> st|ave|dr|ct|pl…`, or `<number> <word>
+when they use a listed suffix); a UK postcode written without its space (`sw1a1aa`), a real UK postcode whose inward
+part looks like an ordinal or unit (`… 2nd`, `… 1tb`), `12 new street` followed by a city. **Known over-drops:** a non-address shaped like `<number> <word> st|ave|dr|ct|pl…`, or `<number> <word>
 court|place|way…` at the end of a query (`5 food court ideas`). A bare ZIP (`plumber 90210`) is kept. Derived variants are checked the same way, and a frame is built only from a query that has no capitalised
 word as the engine reported it, and only when every word it adds around the head is in a closed vocabulary
 (`priya.FRAME_VOCAB`: stop, question, constraint and commercial words and a short list of generic verbs); a head

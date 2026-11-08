@@ -45,12 +45,12 @@ regexes = [
   '''^west-1234-56789$''',
 ]
 
-# Test-only value: the RFC 4122 example UUID used as a "drops as an id" case in seo-py's query-classifier table
+# Test-only value: a widely used sample UUID (not the RFC 4122 example; the label was corrected in review round 5) used as a "drops as an id" case in seo-py's query-classifier table
 # (services/seo-py/tests/test_gsc.py, first committed in 7388c7f), flagged as generic-api-key. It is a published
-# example, never a secret; the test now builds it from parts, so it exists as one literal only in history.
+# sample value, never a secret; the test now builds it from parts, so it exists as one literal only in history.
 # Exact string, matched against the detected secret.
 [[allowlists]]
-description = "RFC 4122 example UUID from seo-py's query-classifier test (tests/test_gsc.py in 7388c7f; built from parts since). Exact string, matched against the detected secret."
+description = "Sample UUID (not a secret) from seo-py's query-classifier test (tests/test_gsc.py in 7388c7f; built from parts since). Exact string, matched against the detected secret."
 regexTarget = "secret"
 regexes = [
   '''^f47ac10b-58cc-4372-a567-0e02b2c3d479$''',

@@ -45,10 +45,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.4"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.5"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.5 (review round 5): UK postcodes need a real area and a non-ordinal, non-unit inward part; French place /
+#    route need an article; old / new / good alone as a street name only at the end; base64 / AWS-like words with "/"
 # 2026-11-08.4 (review round 4): old / new / good allowed as street names; plaza; UK and Canadian postcodes; French
 #    leading forms; the id / token word rule narrowed (model numbers, tire sizes, decimals, years are not identifiers)
 # 2026-11-08.3 (review round 3): ordinary-word suffixes, text after a strong-suffix address, more state codes, unit
@@ -153,7 +155,11 @@ def longest_digit_run(text: str) -> int:
 #   - state + ZIP: a state name or a state code that is not one of the English words in, or, me, ok (so "portland or
 #     97201" is NOT caught), a 5-digit ZIP, and not followed by a unit word (btu, miles, jobs, sq, zip ...);
 #   - PO boxes, PMB numbers, rural routes ("rr 2 box 15", "hc 1 box 9") and ZIP+4 anywhere.
-#   - outside the US: UK postcodes, Canadian postal codes, French / Quebec leading forms ("350 rue sherbrooke").
+#   - outside the US: UK postcodes (a real postcode area, a space, an inward part that is not an ordinal or a size
+#     unit), Canadian postal codes, French / Quebec leading forms ("350 rue sherbrooke"; place / route / avenue /
+#     boulevard only with a French article);
+#   - "old" / "new" / "good" may start a street name ("17 old mill road"); alone as the name ("12 new street") the
+#     suffix must end the query or be followed only by a unit, state and ZIP.
 # Known gaps (disclosed in ADR 0047 and ADR 0017 GSC-12): the rule is US-centric (other countries' formats are not
 # covered); bare named streets with no suffix ("1200 broadway", "123 n main"), landmark
 # or building-name addresses, addresses with more than three street-name tokens or an unlisted suffix ("10 best
@@ -168,7 +174,8 @@ _NOT_NAME = (r"a|an|the|of|for|in|on|at|to|and|or|my|your|with|near|by|from|best
              r"hour|hours|hr|hrs|day|days|week|weeks|month|months|year|years|minute|minutes|bedroom|bedrooms|bed|"
              r"beds|bath|baths|car|cars|star|stars|person|people|room|rooms|story|stories|way|ways|things|tips|step|"
              r"steps|lane|lanes|door|doors|inch|inches|ft|foot|feet|mile|miles|unit|units|flat|apt|suite|ste|places|"
-             r"minute|easy|simple|quick|great|ton|amp|gallon|season|stroke|percent|sq|ct|pl|ln|rd|dr|st")
+             r"minute|easy|simple|quick|great|ton|amp|gallon|season|stroke|percent|sq|ct|pl|ln|rd|dr|st|old|new|good")
+_ADJ = r"(?:old|new|good)"        # a street name may START with one of these, but never be only one (see below)
 _STATE_CODES = (r"al|ak|az|ar|ca|co|ct|de|dc|fl|ga|hi|id|il|ia|ks|ky|la|ma|md|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|"
                 r"nd|oh|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy")          # in, or, me, ok left out: English words
 _STATE_NAMES = (r"alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|"
@@ -183,26 +190,40 @@ _UNIT_WORDS = (r"btu|btus|miles|mile|mi|km|kms|dollars|dollar|usd|jobs|job|sq|sq
                r"lbs|lb|pounds|people|units|gallons|gal|views|followers|zip|code|codes|population|calories|psi|cfm")
 _NAME_TOKEN = r"(?!(?:" + _NOT_NAME + r")(?![\w'.-]))(?:[a-z][a-z'.-]*|\d{1,4}(?:st|nd|rd|th))"
 _DIRECTION = r"(?:n|s|e|w|ne|nw|se|sw|north|south|east|west)\.?"
-_STREET_HEAD = (r"(?:^|(?<!\btop)(?<!\bbest)\s)\d{1,6}[a-z]?\s+(?:" + _DIRECTION + r"\s+)?(?:" + _NAME_TOKEN
-                + r"\s+){1,3}")
+_NUMBER_HEAD = r"(?:^|(?<!\btop)(?<!\bbest)\s)\d{1,6}[a-z]?\s+(?:" + _DIRECTION + r"\s+)?"
+_STREET_HEAD = _NUMBER_HEAD + r"(?:" + _ADJ + r"\s+)?(?:" + _NAME_TOKEN + r"\s+){1,3}"     # 17 old mill road
+_UNIT = r"(?:\s*,?\s*(?:apt|apartment|suite|ste|unit|#)\.?\s*#?\s*\d+[a-z]?)"
+_UK_AREAS = (r"ab|al|ba|bb|bd|bh|bl|bn|br|bs|bt|b|ca|cb|cf|ch|cm|co|cr|ct|cv|cw|da|dd|de|dg|dh|dl|dn|dt|dy|ec|eh|en|"
+             r"ex|e|fk|fy|gl|gu|gy|g|ha|hd|hg|hp|hr|hs|hu|hx|ig|im|ip|iv|je|ka|kt|kw|ky|la|ld|le|ll|ln|ls|lu|l|me|mk|"
+             r"ml|m|ne|ng|nn|np|nr|nw|n|ol|ox|pa|pe|ph|pl|po|pr|rg|rh|rm|sa|se|sg|sk|sl|sm|sn|so|sp|sr|ss|st|sw|sy|s|"
+             r"ta|td|tf|tn|tq|tr|ts|tw|ub|wa|wc|wd|wf|wn|wr|ws|wv|w|yo|ze")
+# an inward part that is really an ordinal or a size unit: "x5 3rd row", "m4 1tb", "s9 2nd hand"
+_UK_NOT_INWARD = r"(?:st|nd|rd|th|tb|gb|kb|pb|hp|lb|ft|hz|dr|bd)"
 _ADDRESS = (
     # strong suffix, anything after: 123 main st springfield il 62701 hours | 55 water st 12th floor | 9 n elm blvd.
     re.compile(_STREET_HEAD + r"(?:" + _STRONG_SUFFIX + r")\.?(?=[\s,#]|$)"),
     # ordinary-word suffix, then only place words / state / ZIP to the end (or anything after a ZIP)
-    re.compile(_STREET_HEAD + r"(?:" + _ORDINARY_SUFFIX + r")(?:\s+" + _DIRECTION + r")?"
-               r"(?:\s*,?\s*(?:apt|apartment|suite|ste|unit|#)\.?\s*#?\s*\d+[a-z]?)?"
+    # only "old" / "new" / "good" as the name ("12 new street"): the suffix must end the query, or be followed only by
+    # a unit, a state and a ZIP ("3 new dr pepper flavors", "2 old court cases", "10 good place to eat" are kept)
+    re.compile(_NUMBER_HEAD + _ADJ + r"\s+(?:" + _STREET_SUFFIX + r")\.?(?:\s+" + _DIRECTION + r")?" + _UNIT
+               + r"?(?:\s*,?\s*" + _STATE + r")?(?:\s*,?\s*" + _ZIP + r")?\s*$"),
+    re.compile(_STREET_HEAD + r"(?:" + _ORDINARY_SUFFIX + r")(?:\s+" + _DIRECTION + r")?" + _UNIT + r"?"
                r"(?:\s*,?\s*[a-z]+){0,3}(?:\s*,?\s*" + _STATE + r")?(?:\s*,?\s*" + _ZIP + r"(?!\d)(?:\s.*)?)?\s*$"),
     re.compile(r"(?<!\w)p\.?\s*o\.?\s*box\s*#?\s*\d+"),                                         # po box 1234
     re.compile(r"(?<!\w)pmb\s*#?\s*\d+"),                                                       # pmb 123
     re.compile(r"(?<!\w)(?:rr|hc|rural route)\s*#?\s*\d+\s*,?\s*box\s*#?\s*\d+"),               # rr 2 box 15
     re.compile(r"(?<!\d)\d{5}\s*" + _DASH + r"\s*\d{4}(?!\d)"),                                  # zip+4: 90210-1234
-    # UK postcode (outward + inward; the inward letters exclude c i k m o v): sw1a 1aa, ox1 4ag, m1 1ae
-    re.compile(r"(?<![a-z0-9])[a-z]{1,2}\d[a-z0-9]?\s*\d[abd-hjlnp-uw-z]{2}(?![a-z0-9])"),
+    # UK postcode: a real postcode area (the ~120 areas), the district, a space, the inward part (a digit and two
+    # letters, never c i k m o v, and not an ordinal or size unit): sw1a 1aa, ox1 4ag, m1 1ae
+    re.compile(r"(?<![a-z0-9])(?:" + _UK_AREAS + r")\d[a-z0-9]?\s+\d(?!" + _UK_NOT_INWARD
+               + r"(?![a-z0-9]))[abd-hjlnp-uw-z]{2}(?![a-z0-9])"),
     # Canadian postal code (letters exclude d f i o q u; w z not first): m5v 3l9, m5h 2n2
     re.compile(r"(?<![a-z0-9])[abceghj-nprstvxy]\d[abceghj-nprstv-z]\s?\d[abceghj-nprstv-z]\d(?![a-z0-9])"),
     # French / Quebec leading forms: 350 rue sherbrooke, 12 chemin du lac, 4 bis rue de la paix
-    re.compile(r"(?:^|(?<!\btop)(?<!\bbest)\s)\d{1,5}(?:\s*(?:bis|ter))?\s*,?\s+(?:rue|chemin|impasse|allee|all\u00e9e|"
-               r"boulevard|bd|avenue|av|place|quai|route)\s+(?:de\s+la\s+|du\s+|des\s+|de\s+|d'|l')?[a-z][a-z'.-]+"),
+    re.compile(r"(?:^|(?<!\btop)(?<!\bbest)\s)\d{1,5}(?:\s*(?:bis|ter))?\s*,?\s+(?:"
+               r"(?:rue|chemin|impasse|allee|all\u00e9e|quai)\s+(?:de\s+la\s+|du\s+|des\s+|de\s+|d'|l')?"
+               # place / route / avenue / boulevard only with a French article: "6 place setting", "5 route options"
+               r"|(?:place|route|avenue|av|boulevard|bd)\s+(?:de\s+la\s+|du\s+|des\s+|de\s+|d'))[a-z][a-z'.-]+"),
     re.compile(r"(?:^|[\s,])" + _STATE + r"\.?\s*,?\s*\d{5}(?!\d)(?!\s*(?:" + _UNIT_WORDS + r")(?!\w))"),  # boise id 83702
 )
 MAX_QUERY_CHARS = 512        # longer text is not classified (it is pii_suspect): bounds the regex work per query
@@ -218,6 +239,21 @@ def looks_like_address(folded: str) -> bool:
 
 
 _JWT = re.compile(r"[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}")
+_SLASH_TOKEN = re.compile(r"[a-z0-9_\-=+.~/]{12,}")
+_PLAIN_SEGMENT = re.compile(r"[a-z]+(?:[-.][a-z]+)*")
+
+
+def _slash_secret(w: str) -> bool:
+    """A base64 / AWS-secret-like word holding "/", "+" or "=" (review round 5): 20+ such characters with a digit, a
+    "+" or an "=" (``wjalr.../k7mdeng/...``, ``dghpcy9pcy9h/c2vjcmv0ignszxk=``), or 12+ with two of "/", "+", "="
+    (``ywjj/zgvm+z2hp``). A path of plain words (``example.com/blog/how-to-clean``) and a short tire size
+    (``225/65r17``) are not."""
+    if not _SLASH_TOKEN.fullmatch(w) or not any(c in w for c in "/+="):
+        return False
+    if all(_PLAIN_SEGMENT.fullmatch(seg) for seg in w.split("/") if seg):
+        return False
+    marks = sum(1 for c in "/+=" if c in w)
+    return (len(w) >= 20 and (any(c.isdigit() for c in w) or "+" in w or "=" in w)) or marks >= 2
 _ALNUM_TOKEN = re.compile(r"[a-z0-9_\-=+~]+")
 
 
@@ -238,7 +274,8 @@ def _word_identifies(w: str) -> bool:
     kind = logs_mod._kind(w)
     if kind == "{email}" or kind == "{uuid}":
         return True
-    if logs_mod._HEX.fullmatch(w) or _JWT.search(w) or len(w) > 40 or logs_mod._TOKENISH.fullmatch(w):
+    if logs_mod._HEX.fullmatch(w) or _JWT.search(w) or len(w) > 40 or logs_mod._TOKENISH.fullmatch(w) \
+            or _slash_secret(w):
         return True
     m = logs_mod._FILE.fullmatch(w)
     if m and m.group(2).isalpha() and len(m.group(2)) >= 2 and any(c.isalpha() for c in m.group(1)) \
