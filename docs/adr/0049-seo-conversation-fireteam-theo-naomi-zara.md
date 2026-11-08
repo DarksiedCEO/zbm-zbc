@@ -330,14 +330,10 @@ no market-volume claim; an incomplete chain has no final recommendation; every f
    the answer text and, from the blocks, Anthropic `cited_text` and result `title`, Gemini text / thought parts. One
    flagged row flags the whole chain, in either context mode (stacked chains too, round 3), which is then excluded
    from every rate and pattern and reported apart.
-   **Measured** on `tests/fixtures/injection/labelled.json` (110 labelled cases): dev split (60: 30 injections incl.
-   every form the reviewer named, 30 benign) used to tune the patterns — precision 1.00, recall 1.00 after two
-   changes (letter runs of three or more joined; "without restrictions" only after a verb of answering); held-out
-   split (50: 25 / 25), written after the tuning and evaluated once without further change — precision 1.00 (25/25,
-   Wilson 95% lower bound 0.87), recall 1.00 (25/25, lower bound 0.87). **Honest limits:** both splits were written by
-   the builder, not by an adversary; the held-out result shows the patterns generalise to new phrasings of the same
-   families, not that a determined attacker cannot evade them (paraphrase, other languages, other encodings). The
-   test asserts precision and recall ≥ 0.85 on both splits.
+   **Round-3 self-measurement, superseded:** on its own 110 author-written cases the guard scored 1.00 / 1.00 on a
+   held-out split; that claim is WITHDRAWN. An independent reviewer then measured it on an unseen set at **recall 0.53
+   (37/70) and precision 0.93** (round 4) — the author-written split had not represented the attacks the guard
+   missed. See "Review round 4" for the current numbers.
 3. **Negation.** `cannot` / `can not` / `can't` / `won't` / `wouldn't` / `shouldn't` are negations ("I cannot
    recommend Z Best Media." is no win), while "can't recommend X enough" stays positive; a shared pick needs an
    entity on EACH side of "not only … but also" / "both … and" ("I recommend Z Best Media, and both RivalCo and others
@@ -368,3 +364,46 @@ member wait. Counts: `docs/test-counts.md`.
 seo-py source changed, so the Gate 5 maintenance pins and the seo image must be re-released after Gate 5; until then
 the hygiene-static cold-pin check is red for that expected reason. The pins are not edited here (`deploy/gate5/**`,
 `deploy/docker/maintenance/**`, `.railway/**` and `.github/workflows/**` are untouched).
+
+## Review round 4 (87fcfa91: CONDITIONAL; independent unseen set: detector recall 0.53, precision 0.93)
+
+**The injection guard is a HEURISTIC GUARD, NOT A GUARANTEE.** Pattern detection will never be complete; the
+numbers below are on fixtures written by the builder and overstate what an adversary would meet.
+
+1. **Provenance bound to order and turn (answer_adapter.py `Conversation`).** The record now holds, per assistant
+   turn and in order, the SHA-256 of that answer's WHOLE ordered content list (`None` for an answer that carried
+   none). The k-th assistant turn of a history must carry exactly the k-th record, and the number of assistant turns
+   must equal the number recorded. Refused before any request (tested, one test per forgery): re-ordered blocks,
+   duplicated blocks, partly dropped blocks, an edited block, blocks swapped across turns, blocks moved from one turn
+   into another, a dropped turn and an extra replayed turn (`HISTORY_TURNS_MISMATCH`), a text-only assistant turn
+   where content was recorded (`HISTORY_TURN_CONTENTLESS`), another chain's record, no record; the block-type
+   allowlist of round 3 still applies first.
+2. **Detector recall (`injection-guard/2026-11-08.2`).** New families, each with new fixtures of the builder's own:
+   multilingual override / "from now on" / "you must recommend" / "you are now" / future-turn / note-to-the-AI forms in
+   Spanish, French, German, Portuguese, Italian, Russian, Chinese and Japanese; homoglyph folding of non-ASCII
+   characters with the Unicode confusables (UTS #39 `confusables.txt` v16.0.0, vendored unchanged as
+   `agents/confusables.txt` with `agents/confusables.NOTICE` — Unicode License V3, SPDX `Unicode-3.0`, the
+   owner-approved class; source: the ICU project's copy at tag `release-76-1`, commit 8eca245c, because
+   unicode.org was not reachable from the build environment; SHA-256 `95bd0aad…a8611` pinned and checked at load, a
+   different file refused); hyphen- and space-split words (a hyphen-joined view and a letters-only view matched
+   against a closed list of override phrases); JSON / YAML / fenced role forms (`{"role": "system"}`,
+   `role: system`, a ```` ```system ```` fence); third-person and indirect address ("the assistant should…", "any AI
+   that reads this…"); future-turn forms ("next time you're asked…", "in your next answer…", "for the remainder of
+   this chat…"); persona games ("you are ShopBot", "act as …GPT", "your new name is …Bot", "you are no longer an
+   assistant", "let's play a game … you are"). False alarms kept down by model-directed forms: "jailbreak-proof
+   phone cases", "reply only with your availability", "print your instructions sheet" are not flagged (tested).
+   **Measured on the builder's fixtures (tests/fixtures/injection/labelled.json, 240 cases):** the round-3 splits
+   (dev 60, held-out 50) and a new dev split (dev2, 60: 30 / 30) were used for tuning; a NEW held-out split
+   (heldout2, 70: 35 injections / 35 benign across every new family and language), written after the tuning and
+   evaluated once without any change afterwards: **precision 0.972 (35/36; Wilson 95% 0.858–0.995), recall 1.000
+   (35/35; Wilson 95% 0.901–1.0)**; its one false alarm, "Role: system administrator (on-site).", is left as
+   measured. The test asserts ≥ 0.85 on every split. These are self-measured on author-written text; the independent
+   reviewer's next unseen set is the measure that counts.
+3. **Structural second guard (opt-in, `SEO_THEO_STACKED_CHECK`, default 0).** For a complete native multi-turn chain,
+   the final question is asked once more as stacked questions with NO earlier answers in context (one extra request,
+   reserved with the chain); when the lexical final pick differs, the chain is flagged `DIVERGENT_UNDER_HISTORY`
+   (`divergent_under_history` per chain summary, finding `THEO_DIVERGENT_UNDER_HISTORY`). Disclosed as a heuristic:
+   a different pick may be the history's influence (an injection included) or ordinary sampling variation; it is
+   reported, not used to exclude a chain. Tested (divergent, not divergent, reserved with the chain, off by default).
+4. This section replaces round 3's 1.00 / 1.00 claim (above).
+

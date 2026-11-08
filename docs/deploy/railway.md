@@ -709,6 +709,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | no | no | `0.05` | reserved per request before it is sent (0.001..5) |
 | `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | no | no | `Z Best Media`, `#1f4e79` | white label of the client report (preparer name, `#RRGGBB` accent); a bad value refuses start |
 | `SEO_THEO_RUN_MAX_CALLS` | no | no | `0` | ADR 0049: calls one conversation-fireteam run (Theo) may reserve across every engine; **0 = OFF, nothing is asked** |
+| `SEO_THEO_STACKED_CHECK` | no | no | `0` | ADR 0049: `1` re-asks each native chain's final question without history (one extra reserved request) and flags DIVERGENT_UNDER_HISTORY |
 | `SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS` | no | no | `600` | ADR 0049: overall wait for the fireteam's members (1..3600); past it a member is TIMED_OUT |
 | `SEO_THEO_LLM_FOLLOWUPS` | no | — | unset | ADR 0049: LLM-generated follow-ups for Theo are not built: setting it refuses to start |
 | `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`, `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL` | no | — | unset | not built (`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`: renamed): setting any refuses to start |

@@ -461,7 +461,8 @@ def _unknown() -> dict:
 def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> dict:
     port, mode = s["port"], s["mode"]
     attempts = int(getattr(port, "attempts", 1) or 1)
-    need = units(turns, mode) * attempts
+    check = mode == NATIVE and bool(ctx.get("stacked_check"))
+    need = (units(turns, mode) + (1 if check else 0)) * attempts        # the structural check's one extra request
     meter = None
     why = cap.take(need)
     if why is not None:
@@ -573,8 +574,29 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
                          **({"content": blocks} if isinstance(blocks, list) and blocks else {})}]
     if status != "COMPLETE":
         final = _unknown()
+    divergent = None
+    if check and status == "COMPLETE":
+        divergent = _stacked_check(port, turns, guard, meter, ctx, final)
     return {"sample": si, "status": status, "reason": reason, "turns": done, "final": final,
-            "injection_suspected": injected}
+            "injection_suspected": injected, "divergent_under_history": divergent}
+
+
+def _stacked_check(port, turns, guard, meter, ctx, final) -> Optional[bool]:
+    """Round 4, the structural second guard (opt-in, SEO_THEO_STACKED_CHECK): the final question asked once more as
+    stacked questions, with NO earlier answers in context. True when the lexical final recommendation differs from the
+    native chain's (DIVERGENT_UNDER_HISTORY: the history, an injected one included, may have moved the answer); None
+    when the check could not be made. A heuristic: engines vary between samples anyway."""
+    try:
+        guard(capability="ai_probe", provider=getattr(port, "name", None))
+        a = port.ask(render(turns, len(turns) - 1), guard=guard, meter=meter)
+    except Killed:
+        raise
+    except Exception:  # noqa: BLE001 - a failed check is no finding, never a failed chain
+        return None
+    if not isinstance(a, ProviderAnswer) or a.status != "ANSWER" or not isinstance(a.text, str):
+        return None
+    alt = recommendation(a, ctx)
+    return (alt["winner"], alt["name"], alt["counts"]) != (final["winner"], final["name"], final["counts"])
 
 
 # ---------------------------------------------------------------------------------------------- summaries
@@ -666,6 +688,12 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
     strength = "STRONG" if nc >= MIN_USABLE and outcome in ("RECOMMENDED", "NOT_RECOMMENDED") else \
         "WEAK" if nc else "NONE"
     return {"topic_key": t["topic_key"], "engine": e, "context_mode": mode, "native_status": native_status,
+            "divergent_under_history": {"checked": sum(1 for c in samples if c.get("divergent_under_history")
+                                                       is not None),
+                                        "divergent": sum(1 for c in samples if c.get("divergent_under_history")),
+                                        "note": "heuristic: the final question re-asked without the earlier answers "
+                                                "(opt-in SEO_THEO_STACKED_CHECK); a different pick may be the "
+                                                "history's influence, or ordinary sampling variation"},
             "injection_suspected": {"chains": len(injected), "final_recommended": inj_final,
                                     "note": "an answer held instruction-like text and was re-sent to the engine; "
                                             "these chains are excluded from every rate and pattern"},
@@ -766,6 +794,9 @@ def _findings(res: dict) -> list:
         if c["loop_stopped"]:
             out.append(finding("THEO_CHAIN_LOOP_STOPPED", "low", "measured", "WATCH", capability="P4",
                                detail={**d, "loop_stopped": c["loop_stopped"]}))
+        if c["divergent_under_history"]["divergent"]:
+            out.append(finding("THEO_DIVERGENT_UNDER_HISTORY", "low", "measured", "WATCH", capability="P4",
+                               detail={**d, **{k: c["divergent_under_history"][k] for k in ("checked", "divergent")}}))
     for e, v in sorted(res["engines"].items()):
         if v["outcome"] in ("BLOCKED", "FAILED") or (v["outcome"] == "PARTIAL" and v["reason"]):
             out.append(finding("ENGINE_RUN_STOPPED", "low", "measured", "WATCH", capability="P4",

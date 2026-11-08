@@ -205,6 +205,7 @@ class ConversationsMixin:
                verification: dict) -> dict:
         ctx = {"domain": domain, "terms": ps["brand_terms"], "rules": ps.get("brand_term_rules"),
                "competitor_terms": competitor_terms, "competitor_domains": list(ps.get("competitor_domains") or [])}
+        ctx["stacked_check"] = bool(self.settings.theo_stacked_check)
         engines = self.ports.engines
         n = self.settings.probe_samples
         budget = self.engine_budget(tid, vid, ps, subject="conversation_run")

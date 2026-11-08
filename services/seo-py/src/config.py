@@ -176,6 +176,8 @@ class Settings:
     callum_resolve_max: int = 40
     # ADR 0049: the calls ONE conversation-fireteam run may reserve across every engine (Theo); 0 = OFF, nothing asked
     theo_run_max_calls: int = 0
+    # ADR 0049 review round 4: the structural second guard (re-ask the final question without history); OFF
+    theo_stacked_check: bool = False
     # ADR 0049 review round 1 LOW 7: the overall wait for the fireteam's members; past it a member is TIMED_OUT
     fireteam_member_timeout_s: int = 600
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
@@ -637,6 +639,7 @@ def load(env: Optional[dict] = None) -> Settings:
     _perplexity(env, s)
     _answer_engines(env, s)
     s.theo_run_max_calls = _int(env, "SEO_THEO_RUN_MAX_CALLS", 0, 0, 2000)
+    s.theo_stacked_check = _flag(env, "SEO_THEO_STACKED_CHECK")
     s.fireteam_member_timeout_s = _int(env, "SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS", 600, 1, 3600)
     s.report_branding = _branding(env)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()

@@ -184,18 +184,38 @@ def dedupe(urls) -> list:
 
 
 class Conversation:
-    """One multi-turn conversation's provenance record (review round 3): the SHA-256 of every content block THIS
-    engine returned in THIS conversation. A history may send back only blocks recorded here, so no block is ever
-    invented, edited or carried over from another chain; anything else is refused before a request is built."""
+    """One multi-turn conversation's provenance record (review rounds 3-4): for every answer THIS engine returned in
+    THIS conversation, in order, the SHA-256 of its whole ordered content list (``None`` for an answer that carried no
+    content). The k-th assistant turn of a history must carry exactly the k-th recorded list: re-ordered, duplicated,
+    partly dropped, edited or cross-turn swapped blocks, blocks from another chain, a dropped or extra assistant turn,
+    and text-only (contentless) assistant turns where content was recorded are all refused before a request is
+    built."""
 
-    __slots__ = ("engine", "received")
+    __slots__ = ("engine", "turns")
 
     def __init__(self, engine: str):
-        self.engine, self.received = engine, set()
+        self.engine, self.turns = engine, []
 
     def record(self, blocks) -> None:
-        for b in blocks or ():
-            self.received.add(block_sha(b))
+        self.turns.append(block_sha(list(blocks)) if isinstance(blocks, list) and blocks else None)
+
+    def check(self, history: list) -> Optional[str]:
+        """None when every assistant turn of ``history`` is the recorded one at its index; else the refusal."""
+        assistants = [h for h in history if h.get("role") == "assistant"]
+        if len(assistants) != len(self.turns):           # every recorded turn, none dropped, none added
+            return "HISTORY_TURNS_MISMATCH"
+        for k, h in enumerate(assistants):
+            want = self.turns[k]
+            got = h.get("content")
+            if want is None:
+                if got is not None:
+                    return "HISTORY_BLOCK_NOT_RECEIVED"
+                continue
+            if got is None:
+                return "HISTORY_TURN_CONTENTLESS"
+            if block_sha(list(got)) != want:
+                return "HISTORY_BLOCK_NOT_RECEIVED"
+        return None
 
 
 def block_sha(block) -> str:
@@ -428,15 +448,20 @@ class HttpAnswerEngine:
                 raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
         if history_bytes(history) > self.MAX_HISTORY_BYTES:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_TOO_LARGE")
-        # review round 3: every block sent back must be of an allowed type AND one this engine returned earlier in
-        # this conversation (fail closed: a forged tool_use / functionCall, or a block from another chain, is refused)
+        # review rounds 3-4: every block sent back must be of an allowed type, and every assistant turn must be,
+        # in order and whole, the content this engine returned at that turn of this conversation (fail closed)
         for h in history:
             for b in h.get("content") or ():
                 if not self._allowed_block(b):
                     raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_ALLOWED")
-                if not isinstance(conversation, Conversation) or conversation.engine != self.name \
-                        or block_sha(b) not in conversation.received:
-                    raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_RECEIVED")
+        has_content = any("content" in h for h in history)
+        if not isinstance(conversation, Conversation) or conversation.engine != self.name:
+            if has_content:
+                raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_RECEIVED")
+            return
+        why = conversation.check(history)
+        if why is not None:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", why)
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         raise NotImplementedError

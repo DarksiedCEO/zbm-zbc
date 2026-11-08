@@ -4,8 +4,9 @@ The injection guard for Theo's native multi-turn chains (ADR 0049, review round 
 In native multi-turn an engine's earlier answer is re-sent to it, so instruction-like text inside that answer — put
 there by a page the engine read — may steer the engine's later answers. ``suspected(text)`` says whether a text holds
 an instruction aimed at the MODEL (not advice aimed at a reader). It is lexical: closed pattern families over several
-normalised views of the text. It reduces, never removes, the risk; its measured precision and recall on a labelled
-fixture set (tests/fixtures/injection/labelled.json, dev and held-out splits) are reported in ADR 0049.
+normalised views of the text. It is a HEURISTIC GUARD, NOT A GUARANTEE: it reduces, never removes, the risk (an
+independent reviewer measured recall 0.53 / precision 0.93 on an unseen set before round 4); its measured precision and
+recall on its own labelled fixture set (tests/fixtures/injection/labelled.json) are reported in ADR 0049.
 
 Views (so simple obfuscation does not hide an instruction): NFKC, zero-width and bidi characters removed, HTML
 entities unescaped, lower case; a "squeezed" view joining letters spaced or dotted apart (``i g n o r e``,
@@ -29,11 +30,19 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import html
 import re
 import unicodedata
+from functools import lru_cache
+from pathlib import Path
 
-VERSION = "injection-guard/2026-11-08.1"
+VERSION = "injection-guard/2026-11-08.2"
+# .2 (review round 4): multilingual families (es, fr, de, pt, it, zh, ja, ru), homoglyph folding with the Unicode
+#    confusables (UTS #39, vendored: confusables.txt + confusables.NOTICE), hyphen- and space-split words,
+#    JSON / YAML / fenced role forms, third-person and future-turn forms, persona games
+CONFUSABLES = Path(__file__).with_name("confusables.txt")
+CONFUSABLES_SHA256 = "95bd0aad6dced5ebc63436f459c06ab21a8d107cd842fb57f5c3a1e91bca8611"   # UTS #39 v16.0.0
 _ZERO_WIDTH = re.compile("[​-‏‪-‮⁠-⁤﻿­]")
 _SPACED = re.compile(r"\b(?:[a-z][ .\-_*]){2,}[a-z]\b")
 _B64 = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
@@ -83,7 +92,8 @@ PATTERNS = [
     r"\bpretend\s+(?:to\s+be|you\s+are|that\s+you\s+are|you're)\b",
     r"\b(?:act|behave|respond)\s+as\s+(?:if\s+you\s+(?:are|were)|an?\s+(?:unrestricted|uncensored|evil|different)|dan)\b",
     r"\b(?:role-?play|roleplay)\s+as\b",
-    r"\bjail-?break(?:ing|ed)?\b",
+    r"\bjail-?break(?:ing|ed)?\s+(?:mode|prompt|enabled|activated|on)\b|\b(?:this\s+is\s+a|enter|enable|activate|"
+    r"begin)\s+(?:the\s+)?jail-?break\b",
     r"\b(?:developer|dan|god)\s+mode\b",
     r"\bdo\s+anything\s+now\b",
     r"\b(?:answer|respond|reply|operate|act|behave|speak|talk)\s+without\s+(?:any\s+)?(?:restrictions|filters|"
@@ -100,12 +110,123 @@ PATTERNS = [
     r"(?:other|competitors?|alternatives?|rivals?|this instruction|these instructions)\b",
     r"\b(?:recommend|promote|endorse)\s+[a-z0-9][\w.\-]*(?:\s+[a-z0-9][\w.\-]*)?\s+(?:in|for)\s+(?:all|every|each)\s+"
     r"(?:answers?|responses?|replies)\b",
+    # JSON / YAML / fenced role forms (round 4)
+    r"[\"']role[\"']\s*:\s*[\"'](?:system|developer|assistant)[\"']",
+    r"(?m)^\s*-?\s*role\s*:\s*[\"']?(?:system|developer)\b",
+    r"```\s*(?:system|instructions?|prompt|sys)\b",
+    # third-person / indirect address of the model (round 4)
+    rf"\b(?:the|any|every|all|each)\s+(?:{_AI})s?\s+(?:that|which|who)?\s*(?:reads?|reading|sees?|seeing|processes|"
+    rf"summari[sz]es|finds?|crawls?)?\s*(?:this|these|it)?\s*(?:page|text|content|message|document|note)?\s*,?\s*"
+    rf"(?:should|must|shall|will|needs?\s+to|has\s+to|is\s+(?:required|instructed|expected)\s+to)\s+"
+    rf"(?:always\s+|now\s+|only\s+)?(?:recommend|say|answer|respond|reply|mention|tell|state|rank|promote|praise|cite|"
+    rf"describe|ignore|disregard|prefer|favou?r|list|include)\b",
+    rf"\b(?:any|every|all)\s+{_AI}s?\s+(?:that|which|who)\s+(?:reads?|sees?|processes|summari[sz]es)\s+this\b",
+    # future-turn forms (round 4)
+    r"\bnext\s+time\s+(?:you(?:'re|\s+are)?|someone|a user|the user|anyone)\s+(?:is\s+|are\s+)?(?:asked|asks|ask)\b",
+    r"\bin\s+your\s+(?:next|following|later|subsequent|future)\s+(?:answers?|replies|reply|responses?|messages?|turns?)\b",
+    r"\bfor\s+the\s+remainder\s+of\s+(?:this|the|our)\s+(?:chat|conversation|session|thread)\b",
+    r"\bin\s+(?:the\s+)?(?:later|next|following|subsequent|upcoming)\s+(?:turns?|answers?|replies|responses?)\b",
+    # persona games (round 4)
+    r"\byou\s+are\s+(?:now\s+)?(?:called\s+|named\s+)?(?!robot\b)[a-z][\w\-]*(?:bot|gpt)\b",
+    r"\b(?:act|behave|respond|reply|answer)\s+(?:as|like)\s+(?:an?\s+|the\s+)?[a-z][\w\-]*gpt\b",
+    r"\byour\s+(?:new\s+)?name\s+is\s+(?:now\s+)?[a-z][\w\-]*(?:bot|gpt)\b",
+    r"\byou\s+are\s+no\s+longer\s+(?:an?\s+)?(?:ai|assistant|chatbot|language model|claude|gemini|chatgpt)\b",
+    r"\b(?:let's|lets)\s+play\s+a\s+game\b[^.]{0,80}\byou\s+(?:are|will be|play)\b",
     # exfiltration and output control
     r"\b(?:reveal|print|show|repeat|output|leak|disclose)\s+(?:me\s+)?(?:your|the)\s+(?:system\s+|hidden\s+|initial\s+)?"
-    r"(?:prompt|instructions)\b",
-    r"\b(?:respond|reply|answer|output)\s+(?:only\s+with|with\s+only|with\s+exactly|exactly\s+with)\b",
+    r"(?:prompt|instructions)\b(?!\s+(?:sheet|manual|booklet|page|form|document|card|pdf|list|packet|leaflet))",
+    r"\b(?:respond|reply|answer|output)\s+(?:only\s+with|with\s+only|with\s+exactly|exactly\s+with)\s*"
+    r"(?:[:'\"\u201c]|the\s+(?:word|words|phrase|text|following|sentence)\b)",
 ]
-_RX = [re.compile(p, re.IGNORECASE) for p in PATTERNS]
+# multilingual families (round 4): override, "from now on", "you must recommend", "you are now", future turns
+ML_PATTERNS = [
+    # es
+    r"\bignora(?:r|d)?\s+(?:todas\s+)?(?:las\s+)?(?:instrucciones|indicaciones|órdenes|reglas)\s+"
+    r"(?:anteriores|previas|de arriba)",
+    r"\bolvida(?:r)?\s+(?:todo\s+lo\s+anterior|todas\s+las\s+instrucciones|las\s+instrucciones\s+anteriores)",
+    r"\ba\s+partir\s+de\s+ahora,?\s+(?:siempre|solo|sólo|debes|tienes que|vas a)\b",
+    r"\b(?:debes|tienes que)\s+(?:siempre\s+)?recomendar\b",
+    r"\b(?:ahora\s+eres|eres\s+ahora)\b",
+    r"\ben\s+(?:tus|tu)\s+(?:próximas?|siguientes?)\s+respuestas?\b",
+    r"\bnota\s+para\s+(?:el|la)\s+(?:ia|asistente|modelo)\b",
+    # fr
+    r"\bignor(?:e|ez|er)\s+(?:toutes\s+)?les\s+(?:instructions|consignes|règles)\s+(?:précédentes|antérieures|ci-dessus)",
+    r"\boubli(?:e|ez|er)\s+(?:tout\s+ce\s+qui\s+précède|toutes\s+les\s+(?:instructions|consignes)|les\s+consignes)",
+    r"\bà\s+partir\s+de\s+maintenant,?\s+(?:tu|vous)\s+(?:dois|devez|vas|allez)\b",
+    r"\b(?:tu\s+dois|vous\s+devez)\s+(?:toujours\s+)?recommander\b",
+    r"\b(?:tu\s+es|vous\s+êtes)\s+maintenant\b",
+    r"\bnote\s+(?:à|pour)\s+l['’](?:ia|assistant)\b",
+    r"\bdans\s+(?:tes|vos)\s+prochaines?\s+réponses?\b",
+    # de
+    r"\bignorier(?:e|en|t)?\s+(?:alle\s+)?(?:vorherigen|bisherigen|obigen|früheren|vorigen)\s+(?:anweisungen|instruktionen|"
+    r"befehle|regeln)",
+    r"\bvergiss\s+(?:alles\s+(?:bisherige|vorherige|oben)|alle\s+(?:vorherigen\s+)?anweisungen)",
+    r"\bab\s+(?:jetzt|sofort)\s+(?:musst|sollst|wirst)\s+du\b",
+    r"\bdu\s+(?:musst|sollst)\s+(?:immer\s+)?[^.]{0,40}\bempfehlen\b",
+    r"\bdu\s+bist\s+(?:jetzt|nun|ab sofort)\b",
+    r"\bhinweis\s+(?:an|für)\s+(?:die|den)\s+(?:ki|assistenten)\b",
+    r"\bin\s+deinen\s+(?:nächsten|folgenden)\s+antworten\b",
+    # pt
+    r"\bignor(?:e|a|ar)\s+(?:todas\s+)?as\s+instruções\s+(?:anteriores|prévias|acima)",
+    r"\besqueç(?:a|er)\s+(?:tudo\s+(?:o\s+que\s+foi\s+dito\s+)?(?:acima|antes)|todas\s+as\s+instruções)",
+    r"\ba\s+partir\s+de\s+agora,?\s+(?:você|voce|tu)\s+(?:deve|vai|precisa)\b",
+    r"\b(?:você|voce)\s+(?:deve|precisa)\s+(?:sempre\s+)?recomendar\b",
+    r"\b(?:você|voce)\s+agora\s+é\b",
+    r"\bnas\s+suas\s+próximas\s+respostas\b",
+    # it
+    r"\bignora\s+(?:tutte\s+)?le\s+istruzioni\s+precedenti",
+    r"\bda\s+ora\s+in\s+poi,?\s+(?:devi|dovrai)\b",
+    # ru
+    r"(?:игнорируй|проигнорируй|забудь)\s+(?:все\s+)?(?:предыдущие|прежние|прошлые)?\s*(?:инструкции|указания|правила)",
+    r"\bс\s+этого\s+момента\s+ты\b",
+    r"\bты\s+(?:теперь|должен\s+рекомендовать)\b",
+    # zh / ja (no word boundaries)
+    r"(?:忽略|忽视|无视|不要理会)(?:之前|以前|上面|先前|前面|所有|上述)(?:的)?(?:所有)?(?:的)?(?:指令|指示|说明|提示|规则)",
+    r"忘(?:记|掉)(?:之前|以上|上面|所有)(?:的)?(?:内容|指令|指示)?",
+    r"从现在(?:开始|起)[，,]?\s*(?:你|请)",
+    r"你(?:现在)?(?:必须|应该|一定要)(?:始终|总是)?推荐",
+    r"你现在是",
+    r"系统(?:提示|指令)[:：]",
+    r"在(?:你)?(?:接下来|之后|以后)的(?:回答|回复)中",
+    r"(?:以前|前|上記)の(?:指示|命令)を(?:無視|忘れ)",
+    r"これから(?:は)?(?:常に|必ず)",
+]
+# letters-only phrases matched on a view with every non-letter removed (catches hyphen / space / dot splitting)
+SQUASHED = ["ignoreallpreviousinstructions", "ignorepreviousinstructions", "ignoreallpriorinstructions",
+            "ignorepriorinstructions", "disregardallpreviousinstructions", "disregardpreviousinstructions",
+            "disregardpriorinstructions", "forgetallpreviousinstructions", "forgeteverythingabove",
+            "ignoreyourpreviousinstructions", "ignoreyourinstructions", "ignoreyourearlieranswer",
+            "ignorethesystemprompt", "revealyoursystemprompt", "youarenowdan", "developermodeenabled"]
+_RX = [re.compile(p, re.IGNORECASE) for p in PATTERNS + ML_PATTERNS]
+_NONLETTER = re.compile(r"[^a-z]+")
+_HYPHEN_SPLIT = re.compile(r"(?<=[a-z])[\-\u2010\u2011\u00b7]+\s*(?=[a-z])")
+
+
+@lru_cache(maxsize=1)
+def _confusables() -> dict:
+    """Non-ASCII character -> its ASCII skeleton (UTS #39 confusables, MA table), single code points only. The file is
+    pinned by SHA-256; another file is refused (fail closed)."""
+    raw = CONFUSABLES.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != CONFUSABLES_SHA256:
+        raise RuntimeError("agents/confusables.txt is not the pinned UTS #39 v16.0.0 file")
+    out = {}
+    for line in raw.decode("utf-8-sig").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split(";")]
+        if len(parts) < 2 or " " in parts[0]:
+            continue
+        src = chr(int(parts[0], 16))
+        dst = "".join(chr(int(c, 16)) for c in parts[1].split())
+        if not src.isascii() and dst.isascii():
+            out[src] = dst
+    return out
+
+
+def fold(text: str) -> str:
+    m = _confusables()
+    return "".join(m.get(ch, ch) for ch in text)
 
 
 def _b64_texts(text: str) -> list:
@@ -125,8 +246,9 @@ def views(text: str) -> list:
     t = unicodedata.normalize("NFKC", text or "")
     t = html.unescape(_ZERO_WIDTH.sub("", t)).replace("’", "'")
     low = t.lower()
-    squeezed = _SPACED.sub(lambda m: re.sub(r"[ .\-_*]", "", m.group(0)), low)
-    out = [low, squeezed, squeezed.translate(_LEET)]
+    folded = fold(t).lower()
+    squeezed = _SPACED.sub(lambda m: re.sub(r"[ .\-_*]", "", m.group(0)), folded)
+    out = [low, folded, squeezed, squeezed.translate(_LEET), _HYPHEN_SPLIT.sub("", folded)]
     for dec in _b64_texts(t):
         out.append(unicodedata.normalize("NFKC", dec).lower())
     return out
@@ -135,7 +257,13 @@ def views(text: str) -> list:
 def suspected(text: str) -> bool:
     if not text:
         return False
-    return any(rx.search(v) for v in views(text[:100_000]) for rx in _RX)
+    vs = views(text[:100_000])
+    if any(rx.search(v) for v in vs for rx in _RX):
+        return True
+    squashed = [_NONLETTER.sub("", v) for v in vs[1:4]]
+    # a homoglyph-folded capital I can come out as "l": compare with l and i made one letter
+    squashed += [sq.replace("l", "i") for sq in squashed]
+    return any(p in sq or p.replace("l", "i") in sq for sq in squashed for p in SQUASHED)
 
 
 def resent_texts(answer) -> list:

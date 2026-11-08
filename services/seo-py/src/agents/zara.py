@@ -60,7 +60,8 @@ LIMITS = [
     "reason to hold back a priority, not proof that either is wrong.",
 ]
 
-_CHAIN_KEYS = {"topic_key", "engine", "context_mode", "native_status", "injection_suspected", "chains", "complete",
+_CHAIN_KEYS = {"topic_key", "engine", "context_mode", "native_status", "injection_suspected",
+               "divergent_under_history", "chains", "complete",
                "loop_stopped", "not_complete",
                "turns_planned", "plan_flags", "by_turn", "final_recommendation", "client_recommended",
                "client_outcome", "unstable", "pattern", "strength"}
@@ -327,7 +328,8 @@ class Crosscheck:
 
 
 def _chain_view(c: dict) -> dict:
-    return {k: c[k] for k in ("engine", "context_mode", "native_status", "injection_suspected", "chains", "complete",
+    return {k: c[k] for k in ("engine", "context_mode", "native_status", "injection_suspected",
+                              "divergent_under_history", "chains", "complete",
                               "pattern", "strength", "unstable",
                               "client_outcome", "client_recommended", "final_recommendation")}
 
