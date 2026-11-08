@@ -119,6 +119,35 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
    other not-checked states stated plainly; "no field data" explained as neither fast nor slow; evidence labelled
    "OBSERVED by Google", not by the audit's own requests.
 
+## Review of 37c5bdb (CONDITIONAL), fixes
+
+- **M1 — the other origin form.** "No data" used to read as "too few visits", which is wrong when the site lives on
+  the other form of the address. (a) Wording: "Google has no field data for this exact origin." (reason text, the
+  limits, the report rows "no field data for this exact address" and the note under the table). (b) When only one of
+  the bare and `www.` forms of the audited domain is registered, Lena also asks the other form's **https** origin (its
+  twin; a domain and its `www.` twin belong to one tenant, ADR 0017 decision 7): +3 record calls; history only where
+  that origin has current data; the twin is its own target (`role: "twin"`), shown on its own labelled rows and
+  **never merged** with the audited origin. The URL queries use the audited origin's host, or the twin's when only
+  the twin has field data (`section.url_origin`). Both forms registered: no twin (each is audited on its own).
+- **M2 — budgets and pacing.** `SEO_CRUX_TENANT_CALLS_PER_DAY` (0..20,000, default 0 = OFF, fail-closed bounds): a
+  run reserves min(per run, global day left, tenant day left). Client-side pacing in `crux_client._Pacer`: a token
+  bucket of 10 refilled at 90 a minute, process-wide, so any 60-second window holds at most 100 requests (retries
+  included), under Google's 150; a wait that would pass the deadline stops the read `CRUX_RATE_LIMITED`
+  `client_pacing` without sending. Tested structurally on the injected clock (sliding-window counts), no wall clock.
+  **Recommended go-live values:** per run 6 + 6 × paths, at most 60 (the twin adds up to 3 record calls); per day
+  about 2,000; per tenant per day about 200.
+- **L2 — extra fields.** Every documented required field is still validated strictly; unknown extra fields are
+  accepted and ignored (never read, never passed on), at most 16 per object (more: that object is malformed), and
+  counted in `extra_fields_ignored` per answer and in the section's counts. **Go-live canary:** the first hand-run
+  call must return HTTP 200 with `extra_fields_ignored` 0 (or the new fields read on Google's page) before any
+  budget is raised above 0.
+- **L3 — chained exceptions.** Every error this adapter raises is detached (`__cause__` and `__context__` cleared,
+  context suppressed, raised outside the `except` block), so no httpx request — and so no key header — rides along
+  on an exception (tested with a transport that raises an exception holding the request).
+- **L1 kept:** header auth (`X-Goog-Api-Key`) is unverified against the live endpoint. **The first hand-run call
+  must return HTTP 200 before any budget is set above 0.**
+- Name stays "Lena" pending the owner; poor scores stay data only (no findings).
+
 ## Facts relied on (read Nov 8 2026)
 
 | Fact | Source |
@@ -149,6 +178,7 @@ of the key is accepted by this endpoint.
   findings; Lena has none).
 - No `effectiveConnectionType` or other CrUX dimensions; no LCP sub-parts, navigation types, RTT or ad metrics.
 - No CrUX BigQuery dataset; no other field-data provider.
+- No `http://` twin: the twin is asked on https only.
 - No retention rule beyond the report's: the data is public aggregates, kept with the audit like the rest of it.
 - No scheduled CrUX refresh of its own: Lena runs inside audits (scheduled re-audits included, under the same caps).
 
@@ -171,5 +201,4 @@ of the key is accepted by this endpoint.
    after go-live needs a mapping note, before go-live it is free).
 2. Should a POOR / NEEDS_IMPROVEMENT p75 become a finding (decision WATCH or ACT, data class `measured` with a
    third-party source label), or stay data only as built?
-3. Budgets for go-live (per run, per day) and whether a per-tenant daily cap is wanted on top of the global one.
-4. Whether to query both the apex and the `www.` origin when only one is registered.
+3. Budgets for go-live: the review recommends per run 6 + 6 × paths (≤ 60), per day ~2,000, per tenant per day ~200.

@@ -43,8 +43,8 @@ def err(fn) -> cx.CruxError:
     return e.value
 
 
-def run(fake, urls=(U,), periods=25, **kw):
-    return lena.run(rd(fake, **kw), O, list(urls), periods, "2026-10-09", "2026-10-09T18:00:00Z")
+def run(fake, paths=("/pricing",), periods=25, twin=None, **kw):
+    return lena.run(rd(fake, **kw), O, list(paths), periods, "2026-10-09", "2026-10-09T18:00:00Z", twin=twin)
 
 
 # ====================================================================== the request
@@ -81,7 +81,7 @@ def test_googles_404_is_insufficient_field_data_never_fast_or_slow():
     fake.missing.add(("origin", O))
     r = rd(fake).record("origin", O, "PHONE")
     assert r == {"state": "INSUFFICIENT_FIELD_DATA", "kind": "origin", "target": O, "form_factor": "PHONE"}
-    sec = run(fake, urls=())
+    sec = run(fake, paths=())
     shaped = sec["targets"][0]["form_factors"]["PHONE"]["current"]
     assert shaped["state"] == "INSUFFICIENT_FIELD_DATA" and "metrics" not in shaped and "rating" not in json.dumps(shaped)
     assert lena.outcome(sec) == ("INSUFFICIENT_EVIDENCE", "CRUX_INSUFFICIENT_FIELD_DATA")
@@ -100,7 +100,7 @@ def test_partial_metrics_and_the_core_web_vitals_assessment():
                                                                         drop=("interaction_to_next_paint",)))
     fake.answers[("record", "origin", O, "DESKTOP")] = (200, record_answer(
         "origin", O, "DESKTOP", p75={"largest_contentful_paint": 4100}, drop=("interaction_to_next_paint",)))
-    sec = run(fake, urls=())
+    sec = run(fake, paths=())
     ph = sec["targets"][0]["form_factors"]["PHONE"]["current"]
     assert ph["metrics"]["INP"] == {"state": "ABSENT"}
     assert ph["core_web_vitals"]["assessment"] == "INSUFFICIENT_FIELD_DATA" and ph["core_web_vitals"]["missing"] == ["INP"]
@@ -160,7 +160,6 @@ BAD_METRICS = [
     _bad_metric(LCP, p75="2100"),                                   # a string where a number is documented
     _bad_metric(LCP, p75=float("inf")),
     _bad_metric(LCP, p75=10 ** 400),
-    _bad_metric(LCP, extra=1),
     {"cumulative_layout_shift": {"percentiles": {"p75": 0.05}}},    # CLS is a string in CrUX
     {"cumulative_layout_shift": {"percentiles": {"p75": "1e3"}}},
     {LCP: {"histogram": []}},                                       # no percentiles
@@ -182,7 +181,9 @@ BAD_RECORDS = [
     b"not json", {"record": {}}, {"recordz": {}}, {"record": {"key": {}, "metrics": {}}},
     lambda a: a["record"]["key"].update(origin="https://evil.test"),
     lambda a: a["record"]["key"].update(formFactor="DESKTOP"),
-    lambda a: a.update(extra=1),
+    lambda a: a.update({f"x{i}": 1 for i in range(17)}),                       # past the extra-field bound
+    lambda a: a["record"]["key"].update(url=U),                                  # both key kinds: ambiguous
+    lambda a: a["record"].pop("metrics"),
     lambda a: a["record"].update(collectionPeriod={"firstDate": {"year": 2026, "month": 13, "day": 1},
                                                    "lastDate": {"year": 2026, "month": 10, "day": 7}}),
     lambda a: a["record"]["collectionPeriod"].update(firstDate={"year": 2026, "month": 10, "day": 9}),
@@ -333,7 +334,7 @@ def test_kill_switch_inside_a_read_stops_it():
         calls["n"] += 1
         if len(fake.requests) >= 2:
             raise Killed("KILLED_PROVIDER")
-    sec = lena.run(client(fake).open_read(guard), O, [U], 25, "2026-10-09", "2026-10-09T18:00:00Z")
+    sec = lena.run(client(fake).open_read(guard), O, ["/pricing"], 25, "2026-10-09", "2026-10-09T18:00:00Z")
     assert len(fake.requests) == 2 and sec["stopped"]["code"] == "CRUX_KILLED"
     assert lena.outcome(sec) == ("KILLED", "CRUX_KILLED")
 
@@ -454,9 +455,149 @@ def test_stale_collection_period_is_flagged():
     fake = FakeCrux()
     fake.answers[("record", "origin", O, "PHONE")] = (200, record_answer(
         "origin", O, "PHONE", period=((2026, 8, 1), (2026, 8, 28))))
-    cur = run(fake, urls=())["targets"][0]["form_factors"]["PHONE"]["current"]
+    cur = run(fake, paths=())["targets"][0]["form_factors"]["PHONE"]["current"]
     assert cur["freshness_days"] == 42 and cur["stale"] is True
 
 
 def test_not_found_constant_is_googles_documented_body():
     assert cx.is_not_found(json.dumps(NOT_FOUND).encode())
+
+
+# ====================================================================== review fixes (M1 twins, M2 pacing, L2, L3)
+
+W = "https://www.acme.test"
+
+
+def test_the_twin_origin_is_asked_and_reported_separately_never_merged():
+    fake = FakeCrux()
+    fake.missing |= {("origin", O), ("url", U)}                        # the site lives on www.
+    sec = run(fake, twin=W)
+    origin, twin, url = sec["targets"]
+    assert (origin["role"], origin["target"], origin["has_field_data"]) == ("audited", O, False)
+    assert (twin["role"], twin["target"], twin["has_field_data"]) == ("twin", W, True)
+    assert all(v["current"]["state"] == "INSUFFICIENT_FIELD_DATA" for v in origin["form_factors"].values())
+    assert all(v["history"]["state"] == "NOT_QUERIED" for v in origin["form_factors"].values())   # history: twin only
+    assert all(v["current"]["state"] == "OK" for v in twin["form_factors"].values())
+    assert sec["url_origin"] == W and url["target"] == W + "/pricing" and url["origin"] == W
+    keys = fake.keys()
+    assert [k for k in keys if k[0] == "record" and k[1] == "origin"] == \
+        [("record", "origin", O, ff) for ff in cx.FORM_FACTORS] + [("record", "origin", W, ff) for ff in cx.FORM_FACTORS]
+    assert not any(k[0] == "history" and k[2] == O for k in keys)
+    assert all(k[2].startswith(W) for k in keys if k[1] == "url")
+    assert lena.outcome(sec) == ("OK", None)
+    assert len(fake.requests) == 6 + 3 + 6                             # +3 records for the twin, history for it only
+
+
+def test_both_origins_with_data_keep_the_urls_on_the_audited_host():
+    fake = FakeCrux()
+    sec = run(fake, twin=W)
+    assert sec["url_origin"] == O and [t["target"] for t in sec["targets"]] == [O, W, U]
+    assert sec["targets"][0]["form_factors"]["PHONE"]["current"] is not sec["targets"][1]["form_factors"]["PHONE"]["current"]
+
+
+def test_neither_origin_has_data():
+    fake = FakeCrux()
+    fake.missing |= {("origin", O), ("origin", W)}
+    sec = run(fake, twin=W)
+    assert len(fake.requests) == 6 and sec["url_origin"] == O
+    assert lena.outcome(sec) == ("INSUFFICIENT_EVIDENCE", "CRUX_INSUFFICIENT_FIELD_DATA")
+
+
+def test_lena_twin_of():
+    assert lena.twin_of("acme.test") == "www.acme.test" and lena.twin_of("www.acme.test") == "acme.test"
+
+
+def test_unknown_extra_fields_are_ignored_counted_and_bounded():
+    a = record_answer("origin", O, "PHONE")
+    a["newTopLevel"] = {"x": 1}
+    a["record"]["key"]["effectiveConnectionType"] = "4G"
+    a["record"]["metrics"][LCP]["percentiles"]["p90"] = 3000
+    a["record"]["metrics"][LCP]["newField"] = True
+    a["record"]["metrics"][LCP]["histogram"][0]["label"] = "good"
+    fake = FakeCrux()
+    fake.script = [(200, a)]
+    r = rd(fake).record("origin", O, "PHONE")
+    assert r["metrics"][LCP]["state"] == "OK" and r["metrics"][LCP]["p75"] == 2100.0
+    assert r["extra_fields_ignored"] == 5 and "newTopLevel" not in json.dumps(r) and "p90" not in json.dumps(r)
+    over = record_answer("origin", O, "PHONE")
+    over["record"]["metrics"][LCP].update({f"f{i}": 1 for i in range(cx.MAX_EXTRA_FIELDS + 1)})
+    fake.script = [(200, over)]
+    assert rd(fake).record("origin", O, "PHONE")["metrics"][LCP] == {"state": "MALFORMED"}
+    h = history_answer("origin", O, "PHONE")
+    h["record"]["metrics"][LCP]["percentilesTimeseries"]["p90s"] = [1] * 25
+    fake.script = [(200, h)]
+    hh = rd(fake).history("origin", O, "PHONE", 25)
+    assert hh["metrics"][LCP]["state"] == "OK" and hh["extra_fields_ignored"] == 1
+    sec = run(FakeCrux(), paths=())
+    assert sec["counts"]["extra_fields_ignored"] == 0                 # the go-live canary expects 0
+
+
+def _window_max(times: list, span: float = 60.0) -> int:
+    best, j = 0, 0
+    for i, t in enumerate(times):
+        while times[j] <= t - span:
+            j += 1
+        best = max(best, i - j + 1)
+    return best
+
+
+def test_pacer_never_allows_more_than_100_in_any_minute():
+    clock = Clock()
+    p = cx._Pacer(clock.mono)
+    times = []
+    for _ in range(400):
+        w = p.take()
+        if w > 0:
+            clock.sleep(w)
+        times.append(clock.t)
+    assert cx.PACE_MAX_PER_MINUTE == 100 and _window_max(times) <= 100
+    assert times[:10] == [times[0]] * 10                               # the burst goes at once
+    assert _window_max(times) >= 95                                    # and the pace is not needlessly slow
+
+
+def test_client_requests_are_paced_across_reads():
+    fake = FakeCrux()
+    stamps = []
+    fake.on_request = lambda fk, req: stamps.append(fk.clock.t)
+    c = client(fake, max_calls=120, deadline_s=300)
+    for _ in range(3):                                                  # three runs back to back share one bucket
+        lena.run(c.open_read(ok_guard), O, ["/a", "/b", "/c", "/d", "/e"], 25, "2026-10-09", "x", twin=W)
+    assert len(stamps) > 100 and _window_max(stamps) <= 100
+    assert all(s > 0 for s in fake.clock.sleeps)
+
+
+def test_pacing_that_would_pass_the_deadline_stops_without_sending():
+    fake = FakeCrux()
+    c = client(fake, max_calls=120, deadline_s=5)
+    for _ in range(cx.PACE_BURST + 10):                                 # 10 already queued: ~7 s to wait
+        c._pacer.take()
+    e = err(lambda: c.open_read(ok_guard).record("origin", O, "PHONE"))
+    assert (e.code, e.detail) == ("CRUX_RATE_LIMITED", "client_pacing") and fake.requests == []
+
+
+def _chain(e):
+    out, seen = [], set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        out.append(e)
+        e = e.__cause__ or e.__context__
+    return out
+
+
+@pytest.mark.parametrize("boom", ["timeout", "other"])
+def test_wrapped_errors_carry_no_request_and_no_key(boom):
+    fake = FakeCrux()
+
+    def handler(request):
+        if boom == "timeout":
+            raise httpx.ReadTimeout("slow", request=request)
+        raise RuntimeError(request)                                     # an exception holding the request object
+    c = cx.CruxClient(cx.ApiKey(TEST_KEY), transport=httpx.MockTransport(handler), monotonic=fake.clock.mono,
+                      sleep=fake.clock.sleep, max_calls=10)
+    e = err(lambda: c.open_read(ok_guard).record("origin", O, "PHONE"))
+    chain = _chain(e)
+    assert chain == [e] and e.__cause__ is None and e.__context__ is None and e.__suppress_context__
+    assert TEST_KEY not in repr(e.__dict__) and not any(isinstance(v, httpx.Request) for v in vars(e).values())
+    fake.script = [(200, b"not json")]
+    je = err(lambda: rd(fake).record("origin", O, "PHONE"))
+    assert je.__context__ is None and je.__cause__ is None

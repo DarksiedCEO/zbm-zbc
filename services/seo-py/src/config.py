@@ -174,6 +174,7 @@ class Settings:
     crux_key: Optional[object] = field(default=None, repr=False)  # crux_client.ApiKey (masked repr)
     crux_calls_per_run: int = 0
     crux_calls_per_day: int = 0
+    crux_tenant_calls_per_day: int = 0
     crux_timeout_s: int = 10
     crux_deadline_s: int = 60
     crux_history_periods: int = 25
@@ -452,6 +453,7 @@ def _crux(env, s: "Settings") -> None:
     s.crux_enabled = _flag(env, "SEO_CRUX_ENABLED")
     s.crux_calls_per_run = _int(env, "SEO_CRUX_CALLS_PER_RUN", 0, 0, 120)
     s.crux_calls_per_day = _int(env, "SEO_CRUX_CALLS_PER_DAY", 0, 0, 20_000)
+    s.crux_tenant_calls_per_day = _int(env, "SEO_CRUX_TENANT_CALLS_PER_DAY", 0, 0, 20_000)
     s.crux_timeout_s = _int(env, "SEO_CRUX_TIMEOUT_SECONDS", 10, 1, 60)
     s.crux_deadline_s = _int(env, "SEO_CRUX_DEADLINE_SECONDS", 60, 5, 300)
     s.crux_history_periods = _int(env, "SEO_CRUX_HISTORY_PERIODS", 25, 1, 40)

@@ -170,8 +170,8 @@ REASON_TEXT = {
                            "used.",
     "CRUX_BUDGET_EXHAUSTED": "The Chrome UX Report call allowance did not allow (more) queries.",
     "CRUX_KILLED": "The Chrome UX Report read was stopped by a safety switch.",
-    "CRUX_INSUFFICIENT_FIELD_DATA": "Google has too little real-user data for this site to report on it. That says "
-                                    "nothing about speed in either direction.",
+    "CRUX_INSUFFICIENT_FIELD_DATA": "Google has no field data for this exact origin. That says nothing about speed "
+                                    "in either direction.",
     "NO_PROMPT_SET": "No set of market questions was chosen for this audit, so no answer engine was asked anything.",
     "ENGINE_BUDGET_EXHAUSTED": "The answer-engine budget did not allow (more) questions.",
     "ENGINE_AUTH_REFUSED": "The answer engine refused this service's key.",

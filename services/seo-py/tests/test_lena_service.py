@@ -18,10 +18,11 @@ import config as config_mod
 from ports import Ports, field_data_from_settings
 
 
-def crux_harness(tmp_path, fake: FakeCrux, calls_per_run="40", calls_per_day="200", data_dir=None, **env):
+def crux_harness(tmp_path, fake: FakeCrux, calls_per_run="40", calls_per_day="200", data_dir=None,
+                 tenant_per_day="200", **env):
     keyfile = write_key_file(tmp_path / "crux.key")
     full = {"SEO_CRUX_ENABLED": "1", "SEO_CRUX_API_KEY_FILE": keyfile, "SEO_CRUX_CALLS_PER_RUN": calls_per_run,
-            "SEO_CRUX_CALLS_PER_DAY": calls_per_day, **env}
+            "SEO_CRUX_CALLS_PER_DAY": calls_per_day, "SEO_CRUX_TENANT_CALLS_PER_DAY": tenant_per_day, **env}
     settings = config_mod.load(base_env(**full))
     ports = Ports.default(settings)
     ports.fetcher = None                                       # no crawling here: Lena's section only
@@ -46,7 +47,7 @@ def section(view):
 
 def test_not_connected_by_default_with_no_outbound_call(h):
     h.ports.fetcher = None
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     view = audit(h, "acme", "acme.test")
     e = section(view)
     assert (e["outcome"], e["reason"], e["facts"]["calls"], e["findings"]) == ("NOT_CONNECTED", "CRUX_NOT_CONNECTED",
@@ -57,6 +58,8 @@ def test_not_connected_by_default_with_no_outbound_call(h):
     st = h.ok(h.get("/status"))
     assert st["page_experience"]["state"] == "NOT_CONNECTED" and st["page_experience"]["enabled"] is False
     assert st["page_experience"]["calls_per_run"] == 0 and st["page_experience"]["calls_per_day"] == 0
+    assert st["page_experience"]["tenant_calls_per_day"] == 0
+    assert st["page_experience"]["pacing"]["queries_per_minute_max"] == 100
     assert st["ports"]["field_data"] == "NOT_CONNECTED" and st["kill_switches"]["providers"]["crux"] is False
     assert not h.ledger.of_type("crux_read_started")
     pe = h.ok(h.get(f"/tenants/acme/audits/{view['audit_id']}/page-experience"))
@@ -76,6 +79,7 @@ def test_enabled_without_a_key_file_refuses_start(tmp_path):
     with pytest.raises(RuntimeError):
         config_mod.load(base_env(SEO_CRUX_ENABLED="yes"))
     for name, bad in (("SEO_CRUX_CALLS_PER_RUN", "121"), ("SEO_CRUX_HISTORY_PERIODS", "41"),
+                      ("SEO_CRUX_TENANT_CALLS_PER_DAY", "20001"), ("SEO_CRUX_TENANT_CALLS_PER_DAY", "-1"),
                       ("SEO_CRUX_DEADLINE_SECONDS", "1")):
         with pytest.raises(RuntimeError, match=name):
             config_mod.load(base_env(**{name: bad}))
@@ -100,7 +104,7 @@ def test_full_read_is_record_first_and_lives_outside_the_overall_outcome(tmp_pat
         seen.append(len(h.ledger.of_type("crux_read_started")))
     fake.on_request = on
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     view = audit(h, "acme", "acme.test", paths=("/", "/pricing"))
     e = section(view)
     assert view["status"] == "completed" and (e["outcome"], e["reason"]) == ("OK", None) and e["findings"] == []
@@ -124,7 +128,7 @@ def test_origin_without_field_data_is_insufficient_not_fast_or_slow(tmp_path):
     fake = FakeCrux()
     fake.missing |= {("origin", "https://acme.test"), ("url", "https://acme.test/")}
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     view = audit(h, "acme", "acme.test")
     e = section(view)
     assert (e["outcome"], e["reason"]) == ("INSUFFICIENT_EVIDENCE", "CRUX_INSUFFICIENT_FIELD_DATA")
@@ -134,16 +138,16 @@ def test_origin_without_field_data_is_insufficient_not_fast_or_slow(tmp_path):
 
 def test_budgets_default_off_and_the_daily_cap_spans_audits(tmp_path):
     fake = FakeCrux()
-    h = crux_harness(tmp_path, fake, calls_per_run="0", calls_per_day="0")
-    h.tenant("acme", "own", ("acme.test",))
+    h = crux_harness(tmp_path, fake, calls_per_run="0", calls_per_day="0", tenant_per_day="0")
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     e = section(audit(h, "acme", "acme.test"))
     assert (e["outcome"], e["reason"]) == ("BLOCKED", "CRUX_BUDGET_EXHAUSTED") and fake.requests == []
     d = tmp_path / "daily"
     d.mkdir()
     fake = FakeCrux()
     h = crux_harness(d, fake, calls_per_run="12", calls_per_day="20")
-    h.tenant("acme", "own", ("acme.test",))
-    h.tenant("beta", "own", ("beta.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
+    h.tenant("beta", "own", ("beta.test", "www.beta.test"))
     first = section(audit(h, "acme", "acme.test"))
     assert first["outcome"] == "OK" and len(fake.requests) == 12
     second = section(audit(h, "beta", "beta.test"))                  # 8 left today, across tenants
@@ -157,7 +161,7 @@ def test_budgets_default_off_and_the_daily_cap_spans_audits(tmp_path):
 def test_the_daily_budget_survives_a_restart(tmp_path):
     fake = FakeCrux()
     h = crux_harness(tmp_path, fake, calls_per_run="12", calls_per_day="12", data_dir=str(tmp_path / "data"))
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     assert section(audit(h, "acme", "acme.test"))["outcome"] == "OK" and len(fake.requests) == 12
     h2 = h.restart(**h.crux_env)
     assert h2.ok(h2.get("/status"))["page_experience"]["calls_used_last_24h"] == 12
@@ -168,7 +172,7 @@ def test_the_daily_budget_survives_a_restart(tmp_path):
 def test_kill_switch_crux_before_and_during_a_read(tmp_path):
     fake = FakeCrux()
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     h.ok(h.switch("provider:crux"))
     e = section(audit(h, "acme", "acme.test"))
     assert (e["outcome"], e["reason"], e["facts"]["switch"]) == ("KILLED", "CRUX_KILLED", "KILLED_PROVIDER")
@@ -187,14 +191,14 @@ def test_kill_switch_crux_before_and_during_a_read(tmp_path):
     d = tmp_path / "env"
     d.mkdir()
     h2 = crux_harness(d, FakeCrux(), SEO_KILLED_PROVIDERS="crux")
-    h2.tenant("acme", "own", ("acme.test",))
+    h2.tenant("acme", "own", ("acme.test", "www.acme.test"))
     assert section(audit(h2, "acme", "acme.test"))["reason"] == "CRUX_KILLED"
 
 
 def test_no_record_no_request(tmp_path):
     fake = FakeCrux()
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     orig = h.svc._commit
 
     def failing(kind, *a, **k):
@@ -218,7 +222,7 @@ def test_errors_reach_the_report_as_outcomes_not_500s(tmp_path):
         d = tmp_path / reason
         d.mkdir()
         h = crux_harness(d, fake)
-        h.tenant("acme", "own", ("acme.test",))
+        h.tenant("acme", "own", ("acme.test", "www.acme.test"))
         view = audit(h, "acme", "acme.test")
         e = section(view)
         assert (view["status"], e["outcome"], e["reason"]) == ("completed", outcome, reason)
@@ -228,7 +232,7 @@ def test_errors_reach_the_report_as_outcomes_not_500s(tmp_path):
 def test_an_unexpected_exception_fails_the_section_not_the_audit(tmp_path, monkeypatch):
     fake = FakeCrux()
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     from agents import lena
 
     def boom(*a, **k):
@@ -247,7 +251,7 @@ def test_the_key_is_never_logged_recorded_or_shown(tmp_path, caplog):
         400, {"error": {"code": 400, "message": "API key not valid: " + TEST_KEY, "status": "INVALID_ARGUMENT",
                         "details": [{"reason": "API_KEY_INVALID"}]}})
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     view = audit(h, "acme", "acme.test")
     assert section(view)["reason"] == "CRUX_AUTH_REFUSED"
     assert all(TEST_KEY not in str(r.url) for r in fake.requests)
@@ -263,8 +267,8 @@ def test_the_key_is_never_logged_recorded_or_shown(tmp_path, caplog):
 def test_tenant_isolation_on_the_page_experience_route(tmp_path):
     fake = FakeCrux()
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
-    h.tenant("beta", "own", ("beta.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
+    h.tenant("beta", "own", ("beta.test", "www.beta.test"))
     aid = audit(h, "acme", "acme.test")["audit_id"]
     assert all(json.loads(r.content).get("origin", "https://acme.test").startswith("https://acme.test")
                for r in fake.requests)
@@ -277,7 +281,7 @@ def test_tenant_isolation_on_the_page_experience_route(tmp_path):
 def test_a_restricted_lena_does_not_run(tmp_path):
     fake = FakeCrux()
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     h.ok(h.post("/agents/lena/lifecycle", {"request_id": rid(), "expected_state": "active", "to": "restricted",
                                            "reason": "QUALITY_REVIEW"}, caller="dashboard", andre=True))
     view = audit(h, "acme", "acme.test")
@@ -294,15 +298,15 @@ def test_client_report_shows_the_area_with_values_and_omits_it_for_older_audits(
     fake = FakeCrux()
     fake.missing.add(("url", "https://acme.test/pricing"))
     h = crux_harness(tmp_path, fake)
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     view = audit(h, "acme", "acme.test", paths=("/", "/pricing"))
     model = client_report.build(view, "acme")
     area = next(s for s in model["sections"] if s["key"] == "page_experience")
     assert area["status"]["label"] == "CHECKED" and area["groups"] == []
     rows = area["field"]["rows"]
-    assert rows[0]["target"] == "whole site (origin)" and rows[0]["values"][0] == "2,100 ms (good)"
+    assert rows[0]["target"] == "whole site, acme.test (audited origin)" and rows[0]["values"][0] == "2,100 ms (good)"
     assert rows[0]["values"][2] == "0.05 (good)" and rows[0]["cwv"] == "passed"
-    assert any(r["target"] == "/pricing" and r["cwv"] == "no field data (too few visits)" for r in rows)
+    assert any(r["target"] == "/pricing" and r["cwv"] == "no field data for this exact address" for r in rows)
     md = client_report.render_markdown(model)
     html = client_report.render_html(model)
     for doc in (md, html):
@@ -317,10 +321,60 @@ def test_client_report_shows_the_area_with_values_and_omits_it_for_older_audits(
 
 def test_client_report_says_not_connected_plainly(h):
     h.ports.fetcher = None
-    h.tenant("acme", "own", ("acme.test",))
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
     model = client_report.build(audit(h, "acme", "acme.test"), "acme")
     area = next(s for s in model["sections"] if s["key"] == "page_experience")
     assert area["status"]["label"] == "NOT CONNECTED" and area["field"] is None
     assert "Chrome UX Report (real-user page experience)." in model["not_connected"]
     assert "The Chrome UX Report is not connected" in client_report.render_markdown(model)
     assert os.environ.get("SEO_CRUX_ENABLED") is None
+
+
+# ====================================================================== review fixes: twins, per-tenant cap, wording
+
+def test_only_one_form_registered_asks_the_twin_and_uses_its_host_for_urls(tmp_path):
+    fake = FakeCrux()
+    fake.missing |= {("origin", "https://acme.test"), ("url", "https://acme.test/")}
+    h = crux_harness(tmp_path, fake)
+    h.tenant("acme", "own", ("acme.test",))                         # www.acme.test not registered
+    view = audit(h, "acme", "acme.test")
+    sec = view["report"]["page_experience"]["section"]
+    assert sec["twin"] == "https://www.acme.test" and sec["url_origin"] == "https://www.acme.test"
+    assert [(t["kind"], t["role"], t["target"]) for t in sec["targets"]] == [
+        ("origin", "audited", "https://acme.test"), ("origin", "twin", "https://www.acme.test"),
+        ("url", "twin", "https://www.acme.test/")]
+    assert len(fake.requests) == 6 + 3 + 6 and section(view)["outcome"] == "OK"
+    model = client_report.build(view, "acme")
+    area = next(s for s in model["sections"] if s["key"] == "page_experience")
+    labels = {r["target"]: r for r in area["field"]["rows"]}
+    assert labels["whole site, acme.test (audited origin)"]["cwv"] == "no field data for this exact address"
+    assert labels["whole site, www.acme.test (other form, not registered; shown separately)"]["cwv"] == "passed"
+    assert "/ on www.acme.test" in labels
+    assert "never combined" in client_report.render_markdown(model)
+
+
+def test_both_forms_registered_asks_only_the_audited_origin(tmp_path):
+    fake = FakeCrux()
+    h = crux_harness(tmp_path, fake)
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
+    sec = audit(h, "acme", "acme.test")["report"]["page_experience"]["section"]
+    assert sec["twin"] is None and all(not k[2].startswith("https://www.") for k in fake.keys())
+
+
+def test_per_tenant_daily_cap(tmp_path):
+    fake = FakeCrux()
+    h = crux_harness(tmp_path, fake, calls_per_run="12", calls_per_day="200", tenant_per_day="12")
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
+    h.tenant("beta", "own", ("beta.test", "www.beta.test"))
+    assert section(audit(h, "acme", "acme.test"))["outcome"] == "OK" and len(fake.requests) == 12
+    e = section(audit(h, "acme", "acme.test"))
+    assert (e["outcome"], e["reason"]) == ("BLOCKED", "CRUX_BUDGET_EXHAUSTED") and len(fake.requests) == 12
+    assert e["facts"]["tenant_calls_left_today"] == 0
+    assert section(audit(h, "beta", "beta.test"))["outcome"] == "OK" and len(fake.requests) == 24
+
+
+def test_no_data_wording_names_the_exact_origin():
+    assert client_report.REASON_TEXT["CRUX_INSUFFICIENT_FIELD_DATA"].startswith(
+        "Google has no field data for this exact origin.")
+    from agents import lena
+    assert not any("too few visits" in x for x in lena.LIMITS)

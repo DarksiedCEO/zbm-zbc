@@ -46,8 +46,12 @@ Rules here (the Search Console connector's, gsc_client.py):
   - one hard deadline per read over DNS, connect, TLS, every socket read and write (finance_client._DeadlineBackend)
     and the body loop; the run's kill-switch guard before every request and every socket operation;
   - retries only on connect errors, timeouts, 429 and 500/502/503/504, bounded by ``attempts`` and the deadline;
-    a call cap per read (``max_calls``, retries included);
-  - strict parsing: an answer that is not the documented shape is CRUX_PROTOCOL_ERROR, never data; one malformed
+    a call cap per read (``max_calls``, retries included); client-side pacing to at most PACE_MAX_PER_MINUTE (100)
+    requests a minute across the process (a token bucket), under Google's 150 per project;
+  - strict parsing of every documented REQUIRED field: an answer without them, or with them malformed, is
+    CRUX_PROTOCOL_ERROR, never data; unknown extra fields are accepted and ignored (at most MAX_EXTRA_FIELDS per
+    object) and counted (``extra_fields_ignored``) — the go-live canary call must show 0, or the new fields are read
+    on Google's page before any budget is raised; one malformed
     metric is marked MALFORMED and dropped, the metrics around it are kept;
   - the API key lives in ``ApiKey`` (masked repr, never pickled or copied) and leaves it only as the header value.
 
@@ -104,6 +108,10 @@ AUTH_REASONS = frozenset({"API_KEY_INVALID", "SERVICE_DISABLED", "API_KEY_SERVIC
                           "API_KEY_HTTP_REFERRER_BLOCKED", "API_KEY_IP_ADDRESS_BLOCKED",
                           "API_KEY_ANDROID_APP_BLOCKED", "API_KEY_IOS_APP_BLOCKED", "CONSUMER_SUSPENDED"})
 RATE_REASONS = frozenset({"RATE_LIMIT_EXCEEDED", "RESOURCE_EXHAUSTED"})
+# Fields Google may add later: an object with unknown fields is accepted and they are ignored (never read, never
+# passed on), at most MAX_EXTRA_FIELDS per object, while every documented required field is strictly validated. The
+# count is returned with each answer (``extra_fields_ignored``) so the go-live canary call shows any drift at once.
+MAX_EXTRA_FIELDS = 16
 DENSITY_TOLERANCE = 0.011              # densities are rounded (history: 4 decimals); a histogram sums to 1 within this
 
 CODES = ("CRUX_NOT_CONNECTED", "CRUX_AUTH_REFUSED", "CRUX_RATE_LIMITED", "CRUX_UNAVAILABLE", "CRUX_PROTOCOL_ERROR",
@@ -196,8 +204,25 @@ def _value(metric: str, v):
     return float(v)
 
 
-def _date(d) -> str | None:
-    if not isinstance(d, dict) or set(d) != {"year", "month", "day"}:
+def _fits(d, required: frozenset | set, optional: frozenset | set = frozenset(), ig: list | None = None) -> bool:
+    """``d`` is an object holding every ``required`` field; fields neither required nor ``optional`` are ignored, at
+    most MAX_EXTRA_FIELDS of them (counted into ``ig[0]``)."""
+    if not isinstance(d, dict) or not set(required) <= set(d):
+        return False
+    extra = len(set(d) - set(required) - set(optional))
+    if extra > MAX_EXTRA_FIELDS:
+        return False
+    if ig is not None:
+        ig[0] += extra
+    return True
+
+
+_YMD = frozenset({"year", "month", "day"})
+_FL = frozenset({"firstDate", "lastDate"})
+
+
+def _date(d, ig: list | None = None) -> str | None:
+    if not _fits(d, _YMD, ig=ig):
         return None
     y, m, dd = d["year"], d["month"], d["day"]
     if not all(isinstance(x, int) and not isinstance(x, bool) for x in (y, m, dd)):
@@ -209,16 +234,16 @@ def _date(d) -> str | None:
     return out.isoformat() if 2015 <= out.year <= 2100 else None
 
 
-def _period(p) -> dict | None:
-    if not isinstance(p, dict) or set(p) != {"firstDate", "lastDate"}:
+def _period(p, ig: list | None = None) -> dict | None:
+    if not _fits(p, _FL, ig=ig):
         return None
-    f, last = _date(p["firstDate"]), _date(p["lastDate"])
+    f, last = _date(p["firstDate"], ig), _date(p["lastDate"], ig)
     if f is None or last is None or f > last:
         return None
     return {"first": f, "last": last}
 
 
-def _bins(metric: str, raw, key: str, n: int | None = None) -> list | None:
+def _bins(metric: str, raw, key: str, n: int | None = None, ig: list | None = None) -> list | None:
     """A histogram (record: ``density``; history: ``densities`` of length ``n``) -> [{start, end, density(ies)}], or
     None when malformed: 1..MAX_BINS bins, the first starting at 0, contiguous, ascending, only the last open-ended,
     densities in [0, 1] (history: or "NaN" for a period without data)."""
@@ -227,7 +252,7 @@ def _bins(metric: str, raw, key: str, n: int | None = None) -> list | None:
     out, prev_end = [], 0.0
     for i, b in enumerate(raw):
         last = i == len(raw) - 1
-        if not isinstance(b, dict) or not {"start", key} <= set(b) or not set(b) <= {"start", "end", key}:
+        if not _fits(b, {"start", key}, {"end"}, ig):
             return None
         start = _value(metric, b["start"])
         end = _value(metric, b["end"]) if "end" in b else None
@@ -290,19 +315,22 @@ def _google_reason(raw: bytes) -> tuple[str | None, str | None]:
     return status, reason
 
 
-def _check_key(rec: dict, kind: str, target: str, form_factor: str, norm: dict | None) -> str | None:
+def _check_key(rec: dict, kind: str, target: str, form_factor: str, norm: dict | None,
+               ig: list | None = None) -> str | None:
     """The record's key must be the one asked for. A URL may come back normalised (``urlNormalizationDetails``):
     accepted only when the original is what was asked and the normalised URL is on the same origin. Returns the URL
     Google reports for (None for an origin)."""
     k = rec.get("key")
-    if not isinstance(k, dict) or not set(k) <= {"formFactor", "origin", "url"} or k.get("formFactor") != form_factor:
+    other = "url" if kind == "origin" else "origin"
+    # the key's own fields are strict (the one asked for, never both); fields Google adds beside them are ignored
+    if not _fits(k, {"formFactor", kind}, ig=ig) or other in k or k.get("formFactor") != form_factor:
         raise CruxError("CRUX_PROTOCOL_ERROR", "record_key")
     if kind == "origin":
-        if set(k) != {"formFactor", "origin"} or k["origin"] != target:
+        if k["origin"] != target:
             raise CruxError("CRUX_PROTOCOL_ERROR", "record_key")
         return None
     got = k.get("url")
-    if set(k) != {"formFactor", "url"} or not isinstance(got, str) or len(got) > 2048:
+    if not isinstance(got, str) or len(got) > 2048:
         raise CruxError("CRUX_PROTOCOL_ERROR", "record_key")
     if got == target:
         return got
@@ -321,14 +349,14 @@ def parse_record(obj, kind: str, target: str, form_factor: str) -> dict:
     """queryRecord's 200 answer -> ``{"state": "OK", "kind", "target", "reported_url", "form_factor",
     "collection_period": {"first", "last"}, "metrics": {name: {"state": "OK", "p75", "histogram"} | {"state":
     "MALFORMED"|"ABSENT"}}}``. Record-level shape errors are CRUX_PROTOCOL_ERROR; a malformed metric is MALFORMED."""
-    if not isinstance(obj, dict) or not {"record"} <= set(obj) or not set(obj) <= {"record", "urlNormalizationDetails"}:
+    ig = [0]
+    if not _fits(obj, {"record"}, {"urlNormalizationDetails"}, ig):
         raise CruxError("CRUX_PROTOCOL_ERROR", "answer_shape")
     rec = obj["record"]
-    if not isinstance(rec, dict) or not {"key", "metrics"} <= set(rec) \
-            or not set(rec) <= {"key", "metrics", "collectionPeriod"}:
+    if not _fits(rec, {"key", "metrics", "collectionPeriod"}, ig=ig):
         raise CruxError("CRUX_PROTOCOL_ERROR", "record_shape")
-    reported = _check_key(rec, kind, target, form_factor, obj.get("urlNormalizationDetails"))
-    period = _period(rec.get("collectionPeriod"))
+    reported = _check_key(rec, kind, target, form_factor, obj.get("urlNormalizationDetails"), ig)
+    period = _period(rec.get("collectionPeriod"), ig)
     if period is None:
         raise CruxError("CRUX_PROTOCOL_ERROR", "collection_period")
     ms = rec["metrics"]
@@ -339,24 +367,24 @@ def parse_record(obj, kind: str, target: str, form_factor: str) -> dict:
         if name not in ms:
             metrics[name] = {"state": "ABSENT"}
             continue
-        metrics[name] = _record_metric(name, ms[name])
+        metrics[name] = _record_metric(name, ms[name], ig)
     return {"state": "OK", "kind": kind, "target": target, "reported_url": reported, "form_factor": form_factor,
-            "collection_period": period, "metrics": metrics}
+            "collection_period": period, "metrics": metrics, "extra_fields_ignored": ig[0]}
 
 
-def _record_metric(name: str, m) -> dict:
+def _record_metric(name: str, m, ig: list | None = None) -> dict:
     bad = {"state": "MALFORMED"}
-    if not isinstance(m, dict) or not set(m) <= {"histogram", "percentiles"} or "percentiles" not in m:
+    if not _fits(m, {"percentiles"}, {"histogram"}, ig):
         return bad
     pc = m["percentiles"]
-    if not isinstance(pc, dict) or set(pc) != {"p75"}:
+    if not _fits(pc, {"p75"}, ig=ig):
         return bad
     p75 = _value(name, pc["p75"])
     if p75 is None:
         return bad
     hist = None
     if "histogram" in m:
-        hist = _bins(name, m["histogram"], "density")
+        hist = _bins(name, m["histogram"], "density", ig=ig)
         if hist is None or not _density_sum_ok([b["density"] for b in hist]):
             return bad
     return {"state": "OK", "p75": p75, "histogram": hist}
@@ -366,17 +394,17 @@ def parse_history(obj, kind: str, target: str, form_factor: str, periods: int) -
     """queryHistoryRecord's 200 answer -> ``{"state": "OK", ..., "collection_periods": [{"first", "last"}],
     "metrics": {name: {"state": "OK", "p75s": [float|None], "histogram": [{start, end, densities}] | None} | ...}}``.
     Periods must be ascending and at most the number asked for; every series has one value per period."""
-    if not isinstance(obj, dict) or not {"record"} <= set(obj) or not set(obj) <= {"record", "urlNormalizationDetails"}:
+    ig = [0]
+    if not _fits(obj, {"record"}, {"urlNormalizationDetails"}, ig):
         raise CruxError("CRUX_PROTOCOL_ERROR", "answer_shape")
     rec = obj["record"]
-    if not isinstance(rec, dict) or not {"key", "metrics", "collectionPeriods"} <= set(rec) \
-            or not set(rec) <= {"key", "metrics", "collectionPeriods"}:
+    if not _fits(rec, {"key", "metrics", "collectionPeriods"}, ig=ig):
         raise CruxError("CRUX_PROTOCOL_ERROR", "record_shape")
-    reported = _check_key(rec, kind, target, form_factor, obj.get("urlNormalizationDetails"))
+    reported = _check_key(rec, kind, target, form_factor, obj.get("urlNormalizationDetails"), ig)
     cps = rec["collectionPeriods"]
     if not isinstance(cps, list) or not 1 <= len(cps) <= periods:
         raise CruxError("CRUX_PROTOCOL_ERROR", "collection_periods")
-    plist = [_period(p) for p in cps]
+    plist = [_period(p, ig) for p in cps]
     if any(p is None for p in plist) or any(a["last"] >= b["last"] for a, b in zip(plist, plist[1:])):
         raise CruxError("CRUX_PROTOCOL_ERROR", "collection_periods")
     n = len(plist)
@@ -385,18 +413,17 @@ def parse_history(obj, kind: str, target: str, form_factor: str, periods: int) -
         raise CruxError("CRUX_PROTOCOL_ERROR", "metrics_shape")
     metrics = {}
     for name in METRICS:
-        metrics[name] = {"state": "ABSENT"} if name not in ms else _history_metric(name, ms[name], n)
+        metrics[name] = {"state": "ABSENT"} if name not in ms else _history_metric(name, ms[name], n, ig)
     return {"state": "OK", "kind": kind, "target": target, "reported_url": reported, "form_factor": form_factor,
-            "collection_periods": plist, "metrics": metrics}
+            "collection_periods": plist, "metrics": metrics, "extra_fields_ignored": ig[0]}
 
 
-def _history_metric(name: str, m, n: int) -> dict:
+def _history_metric(name: str, m, n: int, ig: list | None = None) -> dict:
     bad = {"state": "MALFORMED"}
-    if not isinstance(m, dict) or not set(m) <= {"histogramTimeseries", "percentilesTimeseries"} \
-            or "percentilesTimeseries" not in m:
+    if not _fits(m, {"percentilesTimeseries"}, {"histogramTimeseries"}, ig):
         return bad
     pt = m["percentilesTimeseries"]
-    if not isinstance(pt, dict) or set(pt) != {"p75s"} or not isinstance(pt["p75s"], list) or len(pt["p75s"]) != n:
+    if not _fits(pt, {"p75s"}, ig=ig) or not isinstance(pt["p75s"], list) or len(pt["p75s"]) != n:
         return bad
     p75s = []
     for v in pt["p75s"]:
@@ -409,7 +436,7 @@ def _history_metric(name: str, m, n: int) -> dict:
         p75s.append(x)
     hist = None
     if "histogramTimeseries" in m:
-        hist = _bins(name, m["histogramTimeseries"], "densities", n)
+        hist = _bins(name, m["histogramTimeseries"], "densities", n, ig)
         if hist is None:
             return bad
         for i in range(n):
@@ -429,7 +456,9 @@ def check_url(url: str) -> httpx.URL:
     try:
         u = httpx.URL(url)
     except Exception:  # noqa: BLE001
-        raise CruxError("CRUX_PROTOCOL_ERROR", "url") from None
+        u = None
+    if u is None:
+        raise _detached(CruxError("CRUX_PROTOCOL_ERROR", "url"))
     if u.scheme != "https" or u.host not in ALLOWED_HOSTS or u.port not in (None, 443) or u.userinfo or u.fragment \
             or u.query or str(u) not in (RECORD_URL, HISTORY_URL):
         raise CruxError("CRUX_PROTOCOL_ERROR", "host_not_allowed")
@@ -454,6 +483,38 @@ class _GuardedBackend(httpcore.NetworkBackend):
 
 
 _CRUX_DNS_GATE = _DnsGate(2)
+
+# Client-side pacing (review M2), under Google's 150 queries per minute per project: a token bucket of PACE_BURST
+# tokens refilled at PACE_REFILL_PER_MINUTE, so any 60-second window holds at most PACE_BURST + PACE_REFILL_PER_MINUTE
+# = PACE_MAX_PER_MINUTE requests (retries included), across every read of the process.
+PACE_BURST = 10
+PACE_REFILL_PER_MINUTE = 90
+PACE_MAX_PER_MINUTE = PACE_BURST + PACE_REFILL_PER_MINUTE
+
+
+class _Pacer:
+    """The token bucket. ``take`` reserves one token and answers how long to wait for it (0 when one is there); a
+    reservation that will not be used is given back with ``refund``. Thread-safe; time is the injected monotonic
+    clock."""
+
+    def __init__(self, monotonic: Callable[[], float], burst: int = PACE_BURST,
+                 refill_per_minute: int = PACE_REFILL_PER_MINUTE):
+        import threading
+        self._mono, self.burst, self.rate = monotonic, float(burst), refill_per_minute / 60.0
+        self._tokens, self._t = float(burst), monotonic()
+        self._lock = threading.Lock()
+
+    def take(self) -> float:
+        with self._lock:
+            now = self._mono()
+            self._tokens = min(self.burst, self._tokens + (now - self._t) * self.rate)
+            self._t = now
+            self._tokens -= 1.0
+            return 0.0 if self._tokens >= 0 else -self._tokens / self.rate
+
+    def refund(self) -> None:
+        with self._lock:
+            self._tokens = min(self.burst, self._tokens + 1.0)
 
 
 class _Retry(Exception):
@@ -484,6 +545,7 @@ class CruxClient:
         self._inner_backend = network_backend        # tests only: the socket layer under the deadline backend
         self._mono, self._sleep = monotonic, sleep
         self._resolver = _GlobalResolver(_Resolver(resolve, dns_gate if dns_gate is not None else _CRUX_DNS_GATE))
+        self._pacer = _Pacer(monotonic)
         self.requests_made = 0
 
     def __repr__(self) -> str:
@@ -503,9 +565,10 @@ class _Read:
     def _guard(self) -> None:
         try:
             self._guard_fn()
+            return
         except Killed as k:
-            raise CruxError("CRUX_KILLED", k.code if re.fullmatch(r"[A-Z_]{1,40}", k.code or "") else "killed") \
-                from None
+            code = k.code if re.fullmatch(r"[A-Z_]{1,40}", k.code or "") else "killed"
+        raise _detached(CruxError("CRUX_KILLED", code))
 
     def left(self) -> float:
         return self.end - self.c._mono()
@@ -543,6 +606,13 @@ class _Read:
                 break
             if self.requests >= self.max_calls:
                 raise CruxError("CRUX_BUDGET_EXHAUSTED", "calls_per_run")
+            wait = self.c._pacer.take()
+            if wait > 0:
+                if self.c._mono() + wait >= self.end:
+                    self.c._pacer.refund()
+                    raise CruxError("CRUX_RATE_LIMITED", "client_pacing")
+                self._guard()
+                self.c._sleep(wait)
             self._guard()
             self.requests += 1
             self.c.requests_made += 1
@@ -567,8 +637,8 @@ class _Read:
                 self.c._sleep(pause)
                 self._guard()
         if last is None:
-            raise CruxError("CRUX_UNAVAILABLE", "deadline")
-        raise CruxError(last.code, last.detail)
+            raise _detached(CruxError("CRUX_UNAVAILABLE", "deadline"))
+        raise _detached(CruxError(last.code, last.detail))
 
     @staticmethod
     def _classify(status: int, raw: bytes, hdrs: dict) -> None:
@@ -623,12 +693,15 @@ class _Read:
                     chunks.append(chunk)
                 keep = {k: resp.headers.get(k) for k in ("retry-after",) if resp.headers.get(k) is not None}
                 return resp.status_code, b"".join(chunks), keep
-        except (CruxError, _Retry):
-            raise
+        except (CruxError, _Retry) as ours:
+            failure: Exception = ours
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
-            raise _Retry("CRUX_UNAVAILABLE", "network") from None
+            failure = _Retry("CRUX_UNAVAILABLE", "network")
         except Exception:  # noqa: BLE001 - anything else is a malformed exchange, never a 500 and never a message
-            raise CruxError("CRUX_PROTOCOL_ERROR", "exchange") from None
+            failure = CruxError("CRUX_PROTOCOL_ERROR", "exchange")
+        # raised OUTSIDE the except blocks, detached: an httpx exception carries the request (and so the key header);
+        # it must never ride along as __context__ / __cause__ into a log, a traceback print or a caller (review L3)
+        raise _detached(failure)
 
 
 def _retry_after(v: str | None) -> float | None:
@@ -637,8 +710,18 @@ def _retry_after(v: str | None) -> float | None:
     return float(min(int(v.strip()), 60))
 
 
+def _detached(exc: Exception) -> Exception:
+    """``exc`` with no chained exception: nothing from the failed exchange (an httpx request with its headers, a
+    response, Google's text) stays reachable from what this module raises."""
+    exc.__cause__ = None
+    exc.__context__ = None
+    exc.__suppress_context__ = True
+    return exc
+
+
 def _json(body: bytes):
     try:
         return json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):
-        raise CruxError("CRUX_PROTOCOL_ERROR", "json") from None
+        pass
+    raise _detached(CruxError("CRUX_PROTOCOL_ERROR", "json"))

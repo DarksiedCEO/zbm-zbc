@@ -10,8 +10,10 @@ Rules:
     a request body beyond the audit's, or Google's answer chooses what is asked;
   - kill switch ``provider:crux`` (plus global, write, the tenant's and ``capability:audit``, as for every run step),
     checked before the read starts, before every request and on every socket operation (CRUX_KILLED);
-  - budgets, both 0 (OFF) by default: at most SEO_CRUX_CALLS_PER_RUN HTTP calls per audit (retries included) and at
-    most SEO_CRUX_CALLS_PER_DAY calls in any 24 hours across all tenants (Google's quota is per project). A run
+  - budgets, all 0 (OFF) by default: at most SEO_CRUX_CALLS_PER_RUN HTTP calls per audit (retries included), at
+    most SEO_CRUX_CALLS_PER_DAY calls in any 24 hours across all tenants (Google's quota is per project) and at most
+    SEO_CRUX_TENANT_CALLS_PER_DAY per tenant in any 24 hours; the client paces itself to at most 100 queries a
+    minute (crux_client token bucket) under Google's 150. A run
     reserves its allowance record-first; a completed run is charged what it actually sent, an interrupted one its
     whole reservation (CRUX_BUDGET_EXHAUSTED when nothing is left);
   - record-first: ``crux_read_started`` (tenant, audit, origin hash, calls reserved) is on the ledger and the log
@@ -40,12 +42,13 @@ AGENT, TASK = lena.AGENT, lena.TASK
 class CruxMixin:
     # ------------------------------------------------------------------ budget
 
-    def _crux_calls_used(self) -> int:
-        """Calls charged in the last 24 hours: a completed audit's actual calls, otherwise the reservation."""
+    def _crux_calls_used(self, tid: str | None = None) -> int:
+        """Calls charged in the last 24 hours (all tenants, or ``tid``'s): a completed audit's actual calls, otherwise
+        the reservation."""
         since = self.now() - timedelta(days=1)
         used = 0
         for r in self._crux_reads():
-            if parse_iso(r["at"]) <= since:
+            if parse_iso(r["at"]) <= since or (tid is not None and r.get("tenant_id") != tid):
                 continue
             a = self.audits.get(r["audit_id"]) or {}
             block = ((a.get("report") or {}).get("page_experience") or {}) if a.get("status") == "completed" else {}
@@ -58,7 +61,7 @@ class CruxMixin:
 
     def _a_crux_read_started(self, d, at):
         reads = self._crux_reads()
-        reads.append({"at": at, "audit_id": d["audit_id"], "reserved": d["calls_reserved"]})
+        reads.append({"at": at, "audit_id": d["audit_id"], "tenant_id": d["tenant_id"], "reserved": d["calls_reserved"]})
         # only the last day matters; a reservation is at least one call, so a day holds at most the daily cap's
         # (20,000) worth: bounded memory without ever dropping a reservation still inside the window
         del reads[:-20_000]
@@ -78,6 +81,9 @@ class CruxMixin:
                 "key_in": f"header {cx.KEY_HEADER} (never the URL)", "kill_switch": "provider:crux",
                 "killed": bool(self.switches["provider"].get("crux") or "crux" in s.killed_providers),
                 "calls_per_run": s.crux_calls_per_run, "calls_per_day": s.crux_calls_per_day,
+                "tenant_calls_per_day": s.crux_tenant_calls_per_day,
+                "pacing": {"queries_per_minute_max": cx.PACE_MAX_PER_MINUTE, "burst": cx.PACE_BURST,
+                           "refill_per_minute": cx.PACE_REFILL_PER_MINUTE},
                 "calls_used_last_24h": used, "deadline_seconds": s.crux_deadline_s,
                 "timeout_seconds": s.crux_timeout_s, "history_periods": s.crux_history_periods,
                 "thresholds_version": lena.THRESHOLDS_VERSION,
@@ -98,8 +104,13 @@ class CruxMixin:
             return env("NOT_CONNECTED", "CRUX_NOT_CONNECTED", {"state": "NOT_CONNECTED"},
                        nc={"field_data:crux"})
         origin = f"{body['scheme']}://{body['domain']}"
-        urls = [origin + p for p in body["paths"]]
-        if not cx.ORIGIN.fullmatch(origin):
+        with self.lock:
+            registered = set(self.tenants[tid]["domains"])
+        # review M1: the other form (bare / www.) of the audited domain, when the tenant has not registered it (a
+        # domain and its www. twin belong to one tenant, ADR 0017 decision 7, so the twin is the tenant's to ask about)
+        other = lena.twin_of(body["domain"])
+        twin = None if other in registered else f"https://{other}"
+        if not cx.ORIGIN.fullmatch(origin) or (twin is not None and not cx.ORIGIN.fullmatch(twin)):
             return env("FAILED", "CRUX_PROTOCOL_ERROR", {"state": "ORIGIN_INVALID"})
         try:
             guard(provider="crux")
@@ -108,11 +119,14 @@ class CruxMixin:
         s = self.settings
         with self.lock:
             left = s.crux_calls_per_day - self._crux_calls_used()
-            reserve = max(0, min(s.crux_calls_per_run, left))
+            tenant_left = s.crux_tenant_calls_per_day - self._crux_calls_used(tid)
+            reserve = max(0, min(s.crux_calls_per_run, left, tenant_left))
             if reserve < 1:
                 return env("BLOCKED", "CRUX_BUDGET_EXHAUSTED",
                            {"state": "BUDGET_EXHAUSTED", "calls_per_run": s.crux_calls_per_run,
-                            "calls_per_day": s.crux_calls_per_day, "calls_left_today": max(0, left)})
+                            "calls_per_day": s.crux_calls_per_day, "calls_left_today": max(0, left),
+                            "tenant_calls_per_day": s.crux_tenant_calls_per_day,
+                            "tenant_calls_left_today": max(0, tenant_left)})
             data = {"tenant_id": tid, "audit_id": aid, "origin": origin, "calls_reserved": reserve}
             try:
                 self._commit("crux_read_started", data, "seo",
@@ -125,7 +139,7 @@ class CruxMixin:
             today, now = self.now().date().isoformat(), iso(self.now())
         rd = port.open_read(lambda: guard(provider="crux"), max_calls=reserve)
         try:
-            section = lena.run(rd, origin, urls, s.crux_history_periods, today, now)
+            section = lena.run(rd, origin, list(body["paths"]), s.crux_history_periods, today, now, twin=twin)
         except Exception as exc:  # noqa: BLE001 - whatever Google sent, the section fails, not the audit
             log.error("page_experience read failed: %s", type(exc).__name__)
             return env("FAILED", "CRUX_PROTOCOL_ERROR", {"state": "CRUX_PROTOCOL_ERROR", "detail": "unexpected_answer",

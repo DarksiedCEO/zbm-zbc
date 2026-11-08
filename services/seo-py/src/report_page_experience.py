@@ -17,8 +17,11 @@ _RATING = {"GOOD": "good", "NEEDS_IMPROVEMENT": "needs improvement", "POOR": "po
 _CWV = {"PASSED": "passed", "FAILED": "not passed", "INSUFFICIENT_FIELD_DATA": "not enough field data"}
 _TREND = {"IMPROVING": "improving", "WORSENING": "worsening", "NO_CLEAR_CHANGE": "no clear change",
           "INSUFFICIENT_HISTORY": "not enough history"}
-_ENTRY = {"INSUFFICIENT_FIELD_DATA": "no field data (too few visits)", "NOT_QUERIED": "not asked",
+_ENTRY = {"INSUFFICIENT_FIELD_DATA": "no field data for this exact address", "NOT_QUERIED": "not asked",
           "FAILED": "not read"}
+NO_DATA_NOTE = ("No field data means Google has no field data for that exact origin or URL (too few samples, or the "
+                "site is served on the other form of the address, with or without www.); it is not a fast or a slow "
+                "result. Both forms are shown separately when only one is registered; they are never combined.")
 FIELD_EVIDENCE = ("OBSERVED by Google (Chrome UX Report field data from real Chrome users), not by this audit's own "
                   "requests; each value is the 75th percentile over the collection period shown")
 
@@ -61,22 +64,29 @@ def field_freshness(sec: Any) -> str:
 def field_block(env: Optional[dict], block: Optional[dict], ctx: _Ctx) -> Optional[dict]:
     """Lena's CrUX section as rows of closed-vocabulary strings: per target and device, the p75 of each metric with
     its rating, the Core Web Vitals assessment and the collection period; and the trend of LCP / INP / CLS. Targets
-    are only the audited origin and the audited paths (anything else in the section is not shown)."""
+    are only the audited origin, its bare / www. twin (https) and the audited paths on either (anything else in the
+    section is not shown). The two origin forms are separate rows, labelled, never merged."""
     if env is None or env.get("outcome") not in ("OK", "PARTIAL") or not isinstance(block, dict):
         return None
     sec = block.get("section")
     if not isinstance(sec, dict) or not isinstance(sec.get("targets"), list):
         return None
     origin = f"{ctx.scheme}://{ctx.domain}"
+    twin_host = ctx.domain[4:] if ctx.domain.startswith("www.") else "www." + ctx.domain
+    twin = f"https://{twin_host}"
     rows, trends = [], []
-    for t in sec["targets"][:1 + len(ctx.paths)]:
+    for t in sec["targets"][:2 + len(ctx.paths)]:
         if not isinstance(t, dict) or not isinstance(t.get("form_factors"), dict):
             continue
-        if t.get("kind") == "origin" and t.get("target") == origin:
-            label = "whole site (origin)"
-        elif t.get("kind") == "url" and isinstance(t.get("target"), str) and t["target"].startswith(origin) \
-                and t["target"][len(origin):] in ctx.paths:
-            label = ctx.path(t["target"][len(origin):])
+        tgt = t.get("target") if isinstance(t.get("target"), str) else ""
+        if t.get("kind") == "origin" and tgt == origin:
+            label = f"whole site, {ctx.domain} (audited origin)"
+        elif t.get("kind") == "origin" and tgt == twin:
+            label = f"whole site, {twin_host} (other form, not registered; shown separately)"
+        elif t.get("kind") == "url" and tgt.startswith(origin) and tgt[len(origin):] in ctx.paths:
+            label = ctx.path(tgt[len(origin):])
+        elif t.get("kind") == "url" and tgt.startswith(twin) and tgt[len(twin):] in ctx.paths:
+            label = f"{ctx.path(tgt[len(twin):])} on {twin_host}"
         else:
             continue
         for ff, dev in FIELD_DEVICES:
@@ -110,7 +120,7 @@ def field_block(env: Optional[dict], block: Optional[dict], ctx: _Ctx) -> Option
 
 def md_field(b: dict) -> list:
     def tgt(x):
-        return md_code(x) if x.startswith("/") else md(x)
+        return md_code(x) if x.startswith("/") and " " not in x else md(x)
     L = [f"Evidence: {md(FIELD_EVIDENCE)}. Ratings use web.dev's thresholds (version "
          f"{md_code(b['thresholds_version'])}): good at or below the good limit, poor above the poor limit.", "",
          "| Page | Device | " + " | ".join(FIELD_SHORT) + " | Core Web Vitals | Collection period |",
@@ -120,7 +130,7 @@ def md_field(b: dict) -> list:
         period = r["period"] + (" (stale)" if r["stale"] else "")
         L.append(f"| {tgt(r['target'])} | {md(r['device'])} | " + " | ".join(md(v) for v in vals)
                  + f" | {md(r['cwv'])} | {md(period)} |")
-    L += ["", "No field data means Google has too few real-user visits to report; it is not a fast or a slow result.",
+    L += ["", f"{md(NO_DATA_NOTE)}",
           ""]
     if b["trends"]:
         L += ["**Trend over the weekly history** (descriptive; the periods overlap; no forecast):", "",
@@ -142,8 +152,7 @@ def h_field(b: dict) -> list:
         o.append(f"<tr><td>{h(r['target'])}</td><td>{h(r['device'])}</td>"
                  + "".join(f"<td>{h(v)}</td>" for v in vals) + f"<td>{h(r['cwv'])}</td><td>{h(period)}</td></tr>")
     o += ["</tbody></table>",
-          "<p>No field data means Google has too few real-user visits to report; it is not a fast or a slow "
-          "result.</p>"]
+          f"<p>{h(NO_DATA_NOTE)}</p>"]
     if b["trends"]:
         o += ["<h3>Trend over the weekly history (descriptive; the periods overlap; no forecast)</h3>",
               "<table><thead><tr><th>Page</th><th>Device</th><th>LCP</th><th>INP</th><th>CLS</th><th>Periods</th>"

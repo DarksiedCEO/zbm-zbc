@@ -58,18 +58,23 @@ TREND_METHOD = ("descriptive only: the median p75 of the earliest 6 weekly colle
                 "not independent samples; no significance test is made and nothing is forecast")
 METHOD = ("Google's Chrome UX Report API (records:queryRecord) and CrUX History API (records:queryHistoryRecord), "
           "read-only with an API key, for the audited origin and each audited URL, per form factor (PHONE, DESKTOP, "
-          "TABLET), asking only for LCP, INP, CLS, FCP and TTFB. Each 75th percentile is rated against web.dev's "
-          "thresholds (good: at or below the good limit; poor: above the poor limit). The Core Web Vitals "
-          "assessment passes only when LCP, INP and CLS are all present and all good; it fails when any present one "
-          "is not good; otherwise there is not enough field data. Queries are made in priority order (origin, then "
-          "URLs; current data, then history) until the run's call cap.")
+          "TABLET), asking only for LCP, INP, CLS, FCP and TTFB. When only one of the bare and www. forms of the "
+          "domain is registered, the other form's https origin (its twin) is asked too and shown beside it, labelled, "
+          "never merged; the URL queries use the audited origin's host, or the twin's when only the twin has field "
+          "data. Each 75th percentile is rated against web.dev's thresholds (good: at or below the good limit; poor: "
+          "above the poor limit). The Core Web Vitals assessment passes only when LCP, INP and CLS are all present "
+          "and all good; it fails when any present one is not good; otherwise there is not enough field data. "
+          "Queries are made in priority order (origins' current data, origins' history, then URLs' current data and "
+          "history) until the run's call cap.")
 LIMITS = [
     "CrUX is field data: real Chrome users who opted in, over a rolling 28-day window, about two days behind. It is "
     "not a lab test, does not cover other browsers, and cannot say why a page is slow.",
-    "An origin or URL with too few visits has no CrUX data at all (Google answers 'not found'); that is reported as "
-    "insufficient field data and says nothing about speed in either direction.",
-    "CrUX keys are exact: https://example.com and https://www.example.com are different origins, and a URL may be "
-    "reported under Google's normalised form.",
+    "When Google has no field data for an exact origin or URL (it answers 'not found': too few samples, or the site "
+    "is served on another form of the address, such as with or without www.), that is reported as no field data "
+    "for that exact origin or URL and says nothing about speed in either direction.",
+    "CrUX keys are exact: https://example.com and https://www.example.com are different origins (both are asked "
+    "when only one is registered, and reported separately), and a URL may be reported under Google's normalised "
+    "form.",
     "TTFB is labelled experimental by CrUX and web.dev calls its threshold a rough guide; FCP and TTFB are not Core "
     "Web Vitals. First Input Delay is retired (CrUX stopped serving it in September 2024) and is never asked for.",
     "The trend is descriptive (see the method); it is not a forecast and not a test of significance.",
@@ -145,6 +150,7 @@ def shape_record(r: dict, today: str, retrieved_at: str) -> dict:
                           "rating": rate(name, m["p75"]), "distribution": m["histogram"], "provenance": prov}
     fresh = _days_between(period["last"], today)
     return {"state": "OK", "reported_url": r.get("reported_url"), "collection_period": period,
+            "extra_fields_ignored": r.get("extra_fields_ignored", 0),
             "freshness_days": fresh, "stale": fresh > STALE_DAYS["record"], "metrics": metrics,
             "core_web_vitals": assess(metrics), "provenance": prov}
 
@@ -165,15 +171,23 @@ def shape_history(r: dict, today: str, retrieved_at: str) -> dict:
                           "trend": trend(name, m["p75s"]), "provenance": prov}
     fresh = _days_between(span["last"], today)
     return {"state": "OK", "reported_url": r.get("reported_url"), "periods": len(periods),
+            "extra_fields_ignored": r.get("extra_fields_ignored", 0),
             "collection_periods": periods, "freshness_days": fresh, "stale": fresh > STALE_DAYS["history"],
             "metrics": metrics, "provenance": prov}
 
 
-def plan(origin: str, urls: list) -> list:
-    """Every query Lena would make, in priority order: origin current data, origin history, then each URL's current
-    data, then each URL's history; phone first."""
-    q = [("record", "origin", origin, ff) for ff in cx.FORM_FACTORS]
-    q += [("history", "origin", origin, ff) for ff in cx.FORM_FACTORS]
+def twin_of(domain: str) -> str:
+    """The other form of a domain: ``www.example.com`` <-> ``example.com``."""
+    return domain[4:] if domain.startswith("www.") else "www." + domain
+
+
+def plan(origin: str, urls: list, twin: str | None = None) -> list:
+    """Every query Lena may make, in priority order: the origins' current data (audited, then its twin), the
+    origins' history, then each URL's current data, then each URL's history; phone first. (Which origin the URLs
+    use is decided during the run; ``urls`` here are on the audited origin.)"""
+    origins = [origin] + ([twin] if twin else [])
+    q = [("record", "origin", o, ff) for o in origins for ff in cx.FORM_FACTORS]
+    q += [("history", "origin", o, ff) for o in origins for ff in cx.FORM_FACTORS]
     for u in urls:
         q += [("record", "url", u, ff) for ff in cx.FORM_FACTORS]
     for u in urls:
@@ -181,26 +195,29 @@ def plan(origin: str, urls: list) -> list:
     return q
 
 
-def run(read, origin: str, urls: list, periods: int, today: str, retrieved_at: str) -> dict:
-    """Make the planned queries through ``read`` (a provider read session) and shape the section. Never raises a
-    CruxError: a query that failed is recorded with its code; a stopping code ends the run and the queries not sent
-    are listed as NOT_QUERIED with that code."""
+def run(read, origin: str, paths: list, periods: int, today: str, retrieved_at: str,
+        twin: str | None = None) -> dict:
+    """Make the queries through ``read`` (a provider read session) and shape the section. Never raises a CruxError:
+    a query that failed is recorded with its code; a stopping code ends the run and the queries not sent are listed
+    as NOT_QUERIED with that code. ``twin`` (an https origin) is the other form of the audited domain, asked only
+    when the tenant has not registered it; it is reported as its own target, never merged with the audited one."""
     results: dict = {}                       # (method, kind, target, ff) -> entry
-    stopped = None
-    for method, kind, target, ff in plan(origin, urls):
+    state = {"stopped": None}
+
+    def ask(method: str, kind: str, target: str, ff: str, url_origin: str | None = None) -> None:
         k = (method, kind, target, ff)
-        if stopped is not None:
-            results[k] = {"state": "NOT_QUERIED", "reason": stopped["code"]}
-            continue
+        if state["stopped"] is not None:
+            results[k] = {"state": "NOT_QUERIED", "reason": state["stopped"]["code"]}
+            return
         cur = results.get(("record", kind, target, ff))
         if method == "history" and cur is not None and cur["state"] == "INSUFFICIENT_FIELD_DATA":
             results[k] = {"state": "NOT_QUERIED", "reason": "NO_CURRENT_FIELD_DATA"}
-            continue
+            return
         if kind == "url":
-            o = results.get(("record", "origin", origin, ff))
+            o = results.get(("record", "origin", url_origin, ff))
             if o is not None and o["state"] == "INSUFFICIENT_FIELD_DATA":
                 results[k] = {"state": "NOT_QUERIED", "reason": "ORIGIN_HAS_NO_FIELD_DATA"}
-                continue
+                return
         try:
             if method == "record":
                 results[k] = shape_record(read.record(kind, target, ff), today, retrieved_at)
@@ -209,28 +226,58 @@ def run(read, origin: str, urls: list, periods: int, today: str, retrieved_at: s
         except cx.CruxError as e:
             results[k] = {"state": "FAILED", "reason": e.code, "detail": e.detail}
             if e.code in cx.STOPPING:
-                stopped = {"code": e.code, "detail": e.detail}
+                state["stopped"] = {"code": e.code, "detail": e.detail}
+
+    origins = [("audited", origin)] + ([("twin", twin)] if twin else [])
+    for _role, o in origins:
+        for ff in cx.FORM_FACTORS:
+            ask("record", "origin", o, ff)
+    for _role, o in origins:
+        for ff in cx.FORM_FACTORS:
+            ask("history", "origin", o, ff)
+
+    def has_data(o: str) -> bool:
+        return any(results[("record", "origin", o, ff)]["state"] == "OK" for ff in cx.FORM_FACTORS)
+    url_origin = twin if twin and not has_data(origin) and has_data(twin) else origin
+    urls = [url_origin + p for p in paths]
+    for u in urls:
+        for ff in cx.FORM_FACTORS:
+            ask("record", "url", u, ff, url_origin)
+    for u in urls:
+        for ff in cx.FORM_FACTORS:
+            ask("history", "url", u, ff, url_origin)
     targets = []
-    for kind, target in [("origin", origin)] + [("url", u) for u in urls]:
-        targets.append({"kind": kind, "target": target, "form_factors": {
-            ff: {"current": results[("record", kind, target, ff)], "history": results[("history", kind, target, ff)]}
-            for ff in cx.FORM_FACTORS}})
+    for role, o in origins:
+        targets.append({"kind": "origin", "role": role, "target": o, "has_field_data": has_data(o),
+                        "form_factors": {ff: {"current": results[("record", "origin", o, ff)],
+                                              "history": results[("history", "origin", o, ff)]}
+                                         for ff in cx.FORM_FACTORS}})
+    for p, u in zip(paths, urls):
+        targets.append({"kind": "url", "role": "audited" if url_origin == origin else "twin", "target": u,
+                        "path": p, "origin": url_origin,
+                        "form_factors": {ff: {"current": results[("record", "url", u, ff)],
+                                              "history": results[("history", "url", u, ff)]}
+                                         for ff in cx.FORM_FACTORS}})
     return {"source": cx.SOURCE, "provider": cx.PROVIDER, "api_version": cx.API_VERSION, "docs": dict(cx.DOCS),
             "thresholds_version": THRESHOLDS_VERSION,
             "thresholds": {cx.METRICS[m]: dict(t) for m, t in THRESHOLDS.items()},
             "metrics_requested": list(cx.METRICS), "not_requested": dict(NOT_REQUESTED),
             "history_periods_requested": periods, "retrieved_at": retrieved_at, "origin": origin,
-            "targets": targets, "calls": getattr(read, "requests", 0), "stopped": stopped,
+            "twin": twin, "url_origin": url_origin,
+            "twin_rule": "the other form (bare / www.) of the audited domain, https, asked only when the tenant has not "
+                         "registered it; reported as its own target and never merged with the audited origin",
+            "targets": targets, "calls": getattr(read, "requests", 0), "stopped": state["stopped"],
             "counts": counts(results)}
 
 
 def counts(results: dict) -> dict:
     c = {"queries": len(results), "with_data": 0, "insufficient_field_data": 0, "failed": 0, "not_queried": 0,
-         "malformed_metrics": 0}
+         "malformed_metrics": 0, "extra_fields_ignored": 0}
     for v in results.values():
         st = v["state"]
         if st == "OK":
             c["with_data"] += 1
+            c["extra_fields_ignored"] += v.get("extra_fields_ignored", 0)
             c["malformed_metrics"] += sum(1 for m in v["metrics"].values() if m["state"] == "MALFORMED")
         elif st == "INSUFFICIENT_FIELD_DATA":
             c["insufficient_field_data"] += 1
