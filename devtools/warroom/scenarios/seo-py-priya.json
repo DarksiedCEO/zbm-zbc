@@ -1,0 +1,2236 @@
+{
+ "library": "seo-py-priya",
+ "version": 1,
+ "department": "Search & Answer Intelligence (department 2): Priya's keyword ledger (Search Console and Bing Webmaster Tools, first-party only)",
+ "service": "seo-py",
+ "driver": "seo_py_priya.py",
+ "basis": "ADR 0047 (one task; first-party data only; ESTABLISHED / EMERGING tiers with each source's numbers apart; no market volume, no difficulty, no model; PII-suspect queries dropped and only counted; the ledger handed out once and never stored, query text never persisted; record-first; its own Search Console read budget kept apart from audits'; kill switches; client tenants need Andre, Finance and Compliance; a failed source never fails the run and nothing unread is reported as zero) and ADR 0017 GSC-6. The war room's own oracle judges personal data (NFKC, digit folding, the shared lookalike fold) and volume (conservation against what the fakes served) independently of search_performance.classify_query.",
+ "variants_per_seed": 1,
+ "scenarios": [
+  {
+   "id": "hostile-query-texts",
+   "persona": "a Search Console property whose query rows are spelled every odd way: unicode lookalikes, invisible and combining characters, full-width, RTL, CJK, emoji, huge, near-duplicates and duplicate spellings",
+   "basis": "ADR 0047 (normalised merge per query, near-duplicate groups, Unicode kept, no query text stored; PII-suspect queries dropped) and the suite's own clean-query tables",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_priya.py",
+      "test": "test_ordinary_queries_with_numbers_are_kept",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_query_privacy_r10.py",
+      "module": "MIXED_CASE_KEEP"
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_query_privacy_r9.py",
+      "module": "ROUND9_KEEP"
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_query_privacy_r8.py",
+      "module": "KEEP_NON_URL"
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_priya.py",
+      "module": "SITE",
+      "field": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_priya_service.py",
+      "module": "QUERIES",
+      "field": 0
+     }
+    }
+   ],
+   "input_field": "query",
+   "params": {
+    "placement": [
+     "with_site",
+     "alone",
+     "duplicate_spelling",
+     "near_duplicate",
+     "emoji",
+     "rtl",
+     "cjk",
+     "huge"
+    ],
+    "sources": [
+     "gsc",
+     "gsc,bing"
+    ]
+   },
+   "fixed_input": {
+    "placement": "with_site",
+    "sources": "gsc"
+   },
+   "steps": [
+    {
+     "action": "ledger_run",
+     "args": {
+      "query": "$query",
+      "placement": "$placement",
+      "sources": "$sources"
+     }
+    }
+   ],
+   "transforms": [
+    "homoglyph",
+    "homoglyph_wide",
+    "zero_width",
+    "fullwidth",
+    "case_flip",
+    "diacritic_toggle",
+    "letter_spacing",
+    "soft_hyphen",
+    "mixed_language",
+    "whitespace_runs",
+    "leetspeak",
+    "punct_variants",
+    "letter_punct"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "the_case_was_measured",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "measured",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "personal-data-and-secrets-in-queries",
+   "persona": "query rows carrying personal data and secrets: every case of the suite's attack corpus (tests/attack_corpus.py, generated, never hand-written) and drop tables, alone or inside ordinary queries, in Search Console and Bing",
+   "basis": "ADR 0047 / ADR 0017 GSC-6 (a PII-suspect query never enters the ledger, its key or any record; only counts) and the review round 8-10 attack corpus",
+   "seeds": [
+    {
+     "literal": [
+      "attack_corpus",
+      "round10_drop",
+      "round9_drop",
+      "round8_attacks",
+      "round8_smuggles",
+      "attack_corpus_gaps",
+      "attack_corpus_composed"
+     ],
+     "basis": "the names of the in-repo generators and drop tables the driver runs inside the service (tests/attack_corpus.py cases() / gaps() / composed_cases(), test_query_privacy_r8/r9/r10.py)"
+    }
+   ],
+   "input_field": "corpus",
+   "params": {
+    "wrap_as": [
+     "alone",
+     "prefix",
+     "suffix",
+     "both",
+     "emoji",
+     "rtl",
+     "cjk",
+     "upper",
+     "tab",
+     "dup_spelling"
+    ],
+    "sources": [
+     "gsc",
+     "gsc,bing"
+    ]
+   },
+   "fixed_input": {
+    "wrap_as": "alone",
+    "sources": "gsc"
+   },
+   "variants_per_seed": 5,
+   "steps": [
+    {
+     "action": "pii_queries",
+     "args": {
+      "corpus": "$corpus",
+      "wrap_as": "$wrap_as",
+      "sources": "$sources"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "the_case_was_measured",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "measured",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "live-secrets-as-queries-and-in-errors",
+   "persona": "the harness's own live secrets (the access token Google just issued, the Bing key, the service token, a private-key line) served as query rows, or echoed in Google's / Bing's error bodies",
+   "basis": "ADR 0047 / gsc_client and bing_webmaster docstrings (no key, token or answer text ever logged, returned or recorded)",
+   "seeds": [
+    {
+     "literal": [
+      "as_queries",
+      "google_error_echo",
+      "token_error_echo",
+      "bing_error_echo"
+     ],
+     "basis": "the driver's secret shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "secret_queries",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "a_live_secret_served_as_a_query_is_never_a_row",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secret_rows_dropped"
+     }
+    }
+   ]
+  },
+  {
+   "id": "sampling-anonymised-totals-and-row-caps",
+   "persona": "a property whose totals disagree with its rows: anonymised remainders, rows above the totals, zero totals, only anonymised demand, row and page caps, zero-impression rows, an exact page boundary",
+   "basis": "ADR 0047 (ANONYMISED_REMAINDER, GSC_ROWS_TRUNCATED, EMPTY_MEASURED is a measurement and not 'no demand', unattributed never negative)",
+   "seeds": [
+    {
+     "literal": [
+      "anonymised_remainder",
+      "rows_exceed_totals",
+      "zero_totals_zero_rows",
+      "only_anonymised",
+      "row_cap_truncation",
+      "max_rows_truncation",
+      "zero_impression_rows",
+      "exact_page_boundary"
+     ],
+     "basis": "the driver's sampling shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "sampling",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "the_case_was_measured",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "measured",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "search-console-storms",
+   "persona": "Google under stress: 429 with and without Retry-After, 5xx, quota 403, timeouts, refused connections, trickled and endless bodies, malformed / truncated / mistyped JSON, repeated pages, partial pages, a token or key echoed in an error body",
+   "basis": "ADR 0047 (a source that fails never fails the run; nothing unread reported as zero) and gsc_client (bounded retries, one deadline and one request budget per read)",
+   "seeds": [
+    {
+     "literal": [
+      "429",
+      "429ra5",
+      "429ra60",
+      "500",
+      "502,ok",
+      "503,503,ok",
+      "504",
+      "403quota",
+      "401",
+      "timeout",
+      "timeout,ok",
+      "connect",
+      "drip",
+      "endless",
+      "not_json",
+      "truncated",
+      "html",
+      "nan",
+      "dup_key",
+      "wrong_agg",
+      "rows_not_list",
+      "keys_arity",
+      "negative",
+      "huge_int",
+      "clicks_gt_impr",
+      "extra_fields",
+      "ok,ok,ok,partial",
+      "ok,ok,ok,repeat_page",
+      "ok,ok,empty_obj",
+      "key_echo",
+      "huge_body",
+      "gzip",
+      "bom",
+      "ok,ok,date_out_of_window",
+      "ok,ok,ok,429,503,ok",
+      "ok,ok,ok,timeout,timeout,timeout"
+     ],
+     "basis": "storm scripts over the driver's steps (API_STEPS): one step per Search Console API request, the last repeats"
+    }
+   ],
+   "input_field": "script",
+   "params": {
+    "sources": [
+     "gsc",
+     "gsc,bing"
+    ],
+    "token": [
+     "ok",
+     "tok500",
+     "tok400",
+     "tok_not_json",
+     "tok_echo",
+     "tok_timeout",
+     "tok_429"
+    ]
+   },
+   "fixed_input": {
+    "sources": "gsc",
+    "token": "ok"
+   },
+   "variants_per_seed": 1,
+   "steps": [
+    {
+     "action": "gsc_storm",
+     "args": {
+      "script": "$script",
+      "sources": "$sources",
+      "token": "$token"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bing-failures",
+   "persona": "Bing Webmaster Tools failing every documented and undocumented way while Search Console answers",
+   "basis": "ADR 0047 / bing_webmaster (400 ErrorCode bodies, InvalidApiKey, retries, the key in the URL never logged, returned or recorded; a Bing failure is PARTIAL)",
+   "seeds": [
+    {
+     "literal": [
+      "429",
+      "500,500,500",
+      "502,ok",
+      "503",
+      "504",
+      "400key",
+      "400echo",
+      "400shape",
+      "401",
+      "403",
+      "not_json",
+      "huge",
+      "timeout",
+      "timeout,timeout,ok",
+      "connect",
+      "bad_date",
+      "negative",
+      "clicks_gt_impr",
+      "rows_not_list",
+      "nan",
+      "many_fields",
+      "html"
+     ],
+     "basis": "storm scripts over the driver's Bing steps (BING_STEPS)"
+    }
+   ],
+   "input_field": "script",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "bing_storm",
+     "args": {
+      "script": "$script"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ledger-budget-and-caps",
+   "persona": "the keyword ledger's own daily read cap (separate from audits'), exhausted and mixed with audits; the per-read request cap under a storm",
+   "basis": "ADR 0047 (SEO_GSC_LEDGER_READS_PER_DAY 1..12, kept apart from SEO_GSC_READS_PER_DAY so a ledger run can never starve an audit; an exhausted run asks Google nothing) and config SEO_GSC_MAX_REQUESTS",
+   "seeds": [
+    {
+     "literal": [
+      "ledger_cap=1,runs=2",
+      "ledger_cap=2,runs=4",
+      "ledger_cap=12,runs=13",
+      "ledger_cap=1,runs=3,audit_cap=1,audits=2",
+      "ledger_cap=2,runs=2,audit_cap=1,audits=1",
+      "audit_cap=1,audits=2,order=audits_first,runs=2",
+      "runs=3",
+      "max_requests=6,storm=429",
+      "max_requests=6,storm=ok+ok+ok+503",
+      "max_requests=7,storm=timeout",
+      "max_requests=8,storm=401"
+     ],
+     "basis": "cap settings named in ADR 0047 and config.py, around the default of 2 reads a day"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "budget",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "audits_never_starved_by_ledger_reads",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audit_starved_by_ledger"
+     }
+    }
+   ]
+  },
+  {
+   "id": "concurrent-ledger-runs",
+   "persona": "a second request arriving while a run's first Search Console query request is in flight: the same tenant, the same request replayed, another tenant",
+   "basis": "ADR 0047 (one running ledger run per tenant: KEYWORD_RUN_RUNNING; a replay answers the recorded run; tenants never share data)",
+   "seeds": [
+    {
+     "literal": [
+      "same_tenant_new_request",
+      "same_tenant_with_bing",
+      "same_request_replayed",
+      "other_tenant_runs"
+     ],
+     "basis": "the driver's concurrency shapes"
+    }
+   ],
+   "input_field": "second",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "concurrent",
+     "args": {
+      "second": "$second"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "second_request_answered_as_documented",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "second_ok",
+      "value": true
+     }
+    },
+    {
+     "id": "one_read_for_the_tenant",
+     "severity": "MUST",
+     "check": "state_le",
+     "args": {
+      "key": "acme_reads",
+      "limit": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "cross-tenant-ledger-requests",
+   "persona": "another tenant and the hub reaching for acme's ledger runs, property, Bing site or request ids",
+   "basis": "ADR 0047 (only the property Andre bound to the tenant; a request cannot name a property; Bing only for the tenant's own domain; the hub cannot run it) and ADR 0017 tenant isolation",
+   "seeds": [
+    {
+     "literal": [
+      "hub_runs_for_acme",
+      "hub_lists_acme_with_globex_token",
+      "hub_lists_acme",
+      "globex_lists_its_runs",
+      "compliance_lists_globex",
+      "globex_runs_own_property",
+      "unbound_other_tenant_runs",
+      "globex_names_acme_property",
+      "globex_bing_on_acme_domain",
+      "globex_reuses_acme_request_id",
+      "path_traversal",
+      "tenant_case_variant",
+      "svc_view_under_other_tenant"
+     ],
+     "basis": "the driver's probes"
+    }
+   ],
+   "input_field": "probe",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "cross_tenant",
+     "args": {
+      "probe": "$probe"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "probe_refused",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_refused",
+      "value": true
+     }
+    },
+    {
+     "id": "nothing_of_acme_echoed",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "foreign_echoed"
+     }
+    },
+    {
+     "id": "acme_property_never_read_for_another",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "acme_property_read_for_other"
+     }
+    },
+    {
+     "id": "globex_sees_no_acme_run",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "globex_sees_no_acme_run",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "replays-and-idempotency",
+   "persona": "the same keyword-ledger request sent again: twice, five times, with another body, after a restart (a request id is per caller by design: another caller is another request)",
+   "basis": "ADR 0047 (a replay answers the recorded summary with ledger: null and reads nothing; the same id with another body is REQUEST_ID_REUSED)",
+   "seeds": [
+    {
+     "literal": [
+      "same_request_twice",
+      "same_request_five_times",
+      "same_id_other_body",
+      "same_request_after_restart"
+     ],
+     "basis": "the driver's replay shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "idempotency",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "replay_idempotent",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "idempotent_ok",
+      "value": true
+     }
+    },
+    {
+     "id": "replay_reads_nothing",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "replay_requests_added",
+      "value": 0
+     }
+    },
+    {
+     "id": "one_run_started",
+     "severity": "MUST",
+     "check": "state_le",
+     "args": {
+      "key": "runs_started",
+      "limit": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "kill-switches-and-lifecycle",
+   "persona": "every switch that covers Priya engaged before a run or while its first query request is in flight; Priya restricted by the department manager",
+   "basis": "ADR 0047 (global, write, the tenant's, capability:keywords, provider:gsc / provider:bing, the lifecycle; a switch mid-read interrupts the run and discards the ledger)",
+   "seeds": [
+    {
+     "literal": [
+      "capability:keywords",
+      "tenant:acme",
+      "global",
+      "write",
+      "provider:gsc",
+      "provider:bing",
+      "lifecycle:restricted"
+     ],
+     "basis": "the switches svc_keywords.py checks"
+    }
+   ],
+   "input_field": "switch",
+   "params": {
+    "when": [
+     "mid_read"
+    ]
+   },
+   "fixed_input": {
+    "when": "before"
+   },
+   "variants_per_seed": 1,
+   "steps": [
+    {
+     "action": "kill",
+     "args": {
+      "switch": "$switch",
+      "when": "$when"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "switch_honoured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "enterprise-scale-within-caps",
+   "persona": "an enterprise property: thousands of query rows over many pages, past the row cap, with Bing measuring thousands more",
+   "basis": "ADR 0047 (ROWS_CAP 1000 rows, the rest counted; GSC page / row / request caps) at enterprise scale",
+   "seeds": [
+    {
+     "literal": [
+      "5k_one_page",
+      "10k_pages_of_2000",
+      "25k_rows_cap_8k",
+      "6k_with_bing_3k"
+     ],
+     "basis": "the driver's scale shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "scale",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    },
+    {
+     "id": "the_case_was_measured",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "measured",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-hostile-properties",
+   "persona": "INVENTED by the war room: whole hostile properties from a grammar (grammar.priya_query_set): odd spellings, odd counts, disagreeing totals, personal-data references into the attack corpus, caps, Bing",
+   "basis": "every MUST above, on inputs nobody listed; terminals from the suite's own clean-query tables",
+   "generator": {
+    "name": "priya_query_set",
+    "count": 40,
+    "atoms": {
+     "keep": [
+      {
+       "extract": {
+        "file": "tests/test_priya.py",
+        "test": "test_ordinary_queries_with_numbers_are_kept",
+        "parametrize": true
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_query_privacy_r10.py",
+        "module": "MIXED_CASE_KEEP"
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_query_privacy_r9.py",
+        "module": "ROUND9_KEEP"
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_query_privacy_r8.py",
+        "module": "KEEP_NON_URL"
+       }
+      }
+     ],
+     "site": [
+      {
+       "extract": {
+        "file": "tests/test_priya.py",
+        "module": "SITE",
+        "field": 0
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_priya_service.py",
+        "module": "QUERIES",
+        "field": 0
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_queries",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-storms",
+   "persona": "INVENTED by the war room: storm scripts over Search Console's token and API requests and Bing's, with per-read caps and repeated runs (grammar.priya_storm)",
+   "basis": "every MUST above, on storms nobody listed",
+   "generator": {
+    "name": "priya_storm",
+    "count": 40,
+    "atoms": {
+     "keep": [
+      {
+       "extract": {
+        "file": "tests/test_priya.py",
+        "test": "test_ordinary_queries_with_numbers_are_kept",
+        "parametrize": true
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_storm",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_any_response_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "no_personal_data_in_ledger_keys_responses_records_or_logs",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_leaked"
+     }
+    },
+    {
+     "id": "query_text_never_persisted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "query_text_persisted"
+     }
+    },
+    {
+     "id": "never_invented_volume_or_difficulty",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "invented_volume"
+     }
+    },
+    {
+     "id": "unknown_never_zero",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "status_says_what_was_measured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "status_dishonest"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "a_source_failure_never_fails_the_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "runs_not_answered"
+     }
+    },
+    {
+     "id": "disclosed_gap_personal_data_dropped_anyway",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_known_gap_leaked"
+     }
+    },
+    {
+     "id": "no_secret_in_third_party_logs_at_info",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_in_third_party_logs"
+     }
+    },
+    {
+     "id": "inconclusive_opportunity_shows_no_zero",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "opportunity_inconclusive_shows_zero"
+     }
+    }
+   ]
+  }
+ ]
+}

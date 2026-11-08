@@ -165,6 +165,42 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   (seed 2), `seo-py/R0012`, `seo-py/R0014`, `seo-py/R0015` (seed 3).
 - Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; commit `be9093c` on branch `seo-dept-02-wave1`): Delia reads every crawled URL through `agents.split_url` / `host_of`, which answer None for a URL `urlsplit` cannot read. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
 
+## WR-F020 — seo-py: a base64-encoded e-mail split into chunks is kept when it sits inside an ordinary query
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/agents/search_performance.py` `classify_query` (the base64 rule), as Priya calls it (`agents/priya.py` `build` / `slot`).
+- What happens: the suite's own drop-table entries `ROUND9_DROP` (the standard-base64 e-mail `jane.doe@example.com` split in three chunks) and `ROUND10_DROP` (the URL-safe base64 e-mail split in four chunks) are dropped alone, as pinned. But they are KEPT as observed ledger rows (`query.text`, `key`, the hand-off) when the query also carries ordinary words or symbols: `rug cleaner <chunks>`, `<chunks> rug cleaner`, `rug cleaner <chunks> rug cleaner`, `東京 <chunks>`, an emoji on each side, RLM marks with Arabic text. Each such row is in the response (ledger handed out once). Query text is still not persisted: the stored records and logs stayed clean. On f9cd4fe4 (review round 11) the `prefix` form of the round 9 entry is now caught (WR-F022). The rest are still kept on 60525ea7 (round 15).
+- Minimal repro: a ledger run whose Search Console query rows include `rug cleaner ` followed by the `ROUND9_DROP` base64 chunks: the row is an EMERGING observed row with that text. `python3 devtools/warroom/run.py --replay seo-py-priya/R0001` (or R0004 for `東京 `, R0018 for emoji).
+- Why it is a MUST failure: ADR 0047 / ADR 0017 GSC-6 (a PII-suspect query never enters the ledger, its key or any output; only counts).
+- Replay: `seo-py-priya/R0001`, `seo-py-priya/R0003`, `seo-py-priya/R0004`, `seo-py-priya/R0005`, `seo-py-priya/R0007`, `seo-py-priya/R0010`, `seo-py-priya/R0011`, `seo-py-priya/R0012`, `seo-py-priya/R0018`, `seo-py-priya/R0019`.
+- Status: OPEN (for the Priya builder; not fixed in the war-room PR).
+
+## WR-F021 — seo-py: composed spellings of the phone- and SSN-shaped test values are kept inside an ordinary query
+
+- Department: Search & Answer Intelligence (2), `search_performance.classify_query` (digit-run rules), as Priya calls it.
+- What happens: on 60525ea7 (review round 15; the same on round 13) every `attack_corpus.composed_cases()` spelling (18,826 of them) is dropped alone, as round 12 pins. But 46 of them are KEPT as ledger rows (`query.text`, `key`) when ordinary words sit around them (prefix, suffix, both sides, a tab) or an emoji sits on each side: 24 spellings of `phone_555` and 22 of `ssn_shape`. Most are `filler_tokens` combined with a separator between every character (space, NBSP, figure space, narrow NBSP, NUL, private use, U+001F); one is `sep_figure_space_each+interleave_char` (`1x\u2007x2x\u2007x3...`). The leaks are in the response only. The stored records and logs stayed clean.
+- Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-priya/R0016` (emoji on each side) and `seo-py-priya/R0017` (` rug cleaner` after the value).
+- Why it is a MUST failure: as WR-F020.
+- Replay: `seo-py-priya/R0016`, `seo-py-priya/R0017`.
+- Status: OPEN.
+
+## WR-F022 — seo-py: the round 9 base64 e-mail with ordinary words before it was kept (prefix form of WR-F020)
+
+- Found on 3b5fc2db: `rug cleaner <ROUND9_DROP base64 chunks>` was a ledger row.
+- Status: FIXED (Priya review round 11, f9cd4fe4: the base64 rule now catches it). The replay case passes and stays as a regression case.
+- Replay: `seo-py-priya/R0002`.
+
+## WR-F023 — war room (not seo-py): the fake Google's timeout always advanced 11 fake seconds
+
+- What happened: the seo-py-priya driver's `timeout` / `tok_timeout` steps moved the fake clock 11 seconds whatever `SEO_GSC_TIMEOUT_SECONDS` was. Generated storms with a 2-second timeout and a 5- or 15-second deadline therefore "took" longer than the structural bound (deadline + one timeout). A real client times out at its own timeout. This was the war room's bug, not Priya's.
+- Status: FIXED (in this PR: the fake waits the harness's own timeout). The replay cases pass and stay as regression cases.
+- Replay: `seo-py-priya/R0006`, `seo-py-priya/R0008`, `seo-py-priya/R0009`.
+
+## WR-F024 — war room (not seo-py): the residual class that round 11 discloses was judged as a MUST failure
+
+- What happened: `attack_corpus.composed_cases()` (review round 11) includes a disclosed residual class. That class is a filler letter or token inside spelled-out number words, pinned by `tests/test_query_privacy_r11.py` `_pinned_composed` and disclosed in ADR 0047. The driver judged it as MUST.
+- Status: FIXED. In this PR the driver reads the suite's own pin, when there is one, and scores those spellings SHOULD (`disclosed_gap_personal_data_dropped_anyway`), like `attack_corpus.gaps()`. Review round 12 (f759ebaa) then removed the pin: every composed pair is now dropped alone. The replay cases pass and stay.
+- Replay: `seo-py-priya/R0013`, `seo-py-priya/R0014`, `seo-py-priya/R0015`.
+
 ## AEGIS round 2 (review of the WR-F006 / WR-F007 fixes)
 
 - **N-H1 (High) — service-py: the WR-F006 fold made long non-Latin messages slow under the service lock.** A

@@ -26,6 +26,9 @@ python3 devtools/warroom/run.py --replay service-py/R0001
 
 # what would run
 python3 devtools/warroom/run.py --list --seed 1
+
+# explore: invent more cases (generated scenarios only; any that fails is saved to the replay library by itself)
+python3 devtools/warroom/run.py --department seo-py-priya --seed 9 --generated 400
 ```
 
 `--python` names the interpreter that has the services' pinned requirements (default: the one running `run.py`).
@@ -36,14 +39,15 @@ process each; the outcome does not depend on it).
 
 | Part | File | What it does |
 |---|---|---|
-| Scenario libraries | `scenarios/<service>.json` | Versioned data. Per scenario: a persona, seed phrases (extracted by AST from the service's pinned tests or source, never retyped), ordered steps, the chaos transforms allowed, invariants with severities |
+| Scenario libraries | `scenarios/<library>.json` | Versioned data. Per scenario: a persona, seed phrases (extracted by AST from the service's pinned tests or source, never retyped), ordered steps, the chaos transforms allowed, invariants with severities. One service may have several libraries (`seo-py` and `seo-py-priya` both run on seo-py's worker); cases and the replay library are filed under the library's name |
+| Generative layer | `grammar.py` | Grammars that INVENT cases (cited URLs, markdown / multilingual answers, redirect chains, engine-response mutations; whole hostile Search Console properties and storm scripts for Priya). Terminals ("atoms") are corpora extracted by AST like seeds; case i of a generated scenario is a pure function of (global seed, scenario, i) |
 | Seed extraction | `corpus.py` | Reads a named tuple, the n-th `for` loop over a literal, a `parametrize` table or a module constant; a reference that no longer resolves is an ERROR, never an empty scenario |
 | Chaos | `chaos.py` | Seeded, reproducible transforms (below); each case records its transform chain |
 | Engine | `engine.py` | Seeds x variants -> cases; one worker per service; invariants; per-department gate; JSON / markdown report; promotion |
 | Worker | `worker.py` | Runs inside one service's directory: seals the network, clears the service's env, builds a fresh harness per case, runs the steps, reads the resulting state back |
 | Drivers | `drivers/<service>.py` | The steps (actions) and state read-back for one service, on that service's own `tests/helpers.py` harness (onboarding-py: `tests/conftest.py`) |
 | Invariants | `invariants.py` | Pure predicates over what a case saw (responses and state) |
-| Replay library | `replay/<service>.json` | Every failure ever promoted, materialised (the exact input sent); runs on every run |
+| Replay library | `replay/<library>.json` | Every failure ever promoted, materialised (the exact input sent); runs on every run. A failing GENERATED case is appended on every run by itself (on CI it is written to `--out` as `replay-additions.json` instead: the checkout stays clean) |
 | Findings | `findings.md` | The triaged MUST failures, with their replay ids |
 | LLM personas | `personas.py` | A port that answers `NOT_CONNECTED`. Nothing is generated or faked |
 
@@ -96,6 +100,17 @@ Character-level transforms leave HTML tags and entities alone (a person's words 
 client wrote). A scenario may name a transform whose effect lies outside what the department's documents promise in
 `downgrade`: under that transform the named MUST invariants are scored as SHOULD (the library says why in
 `downgrade_basis`). The war room checks the documented, AEGIS-certified guarantees; it does not invent policy.
+
+## Generated scenarios (the war room invents cases)
+
+A scenario with a `generator` (`{"name": <grammar>, "count": N, "atoms": {name: [corpus references]}}`) has no seed
+phrases: its terminals are the atoms, extracted by AST from the service's pinned tests exactly like seeds (a moved test
+is an ERROR), and case i is `grammar.generate(name, case_rng(seed, scenario, i, 0), atoms)`. Every global seed invents
+other cases; `--generated N` invents more of them (exploration, not CI). The grammar only builds inputs: what the right
+answer is stays the driver's independent oracle's and the invariants' call. A generated case that fails is materialised
+into the replay library on that run, with `known_failure: null` (it blocks the gate until a person triages it, as any
+promoted case), so a case the war room invented is never lost when the seed moves on. On CI the checkout is never
+written (the hygiene check): the entries go to `replay-additions.json` in `--out`, and the gate fails on them anyway.
 
 ## When a case fails
 
