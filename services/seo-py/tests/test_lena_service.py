@@ -387,3 +387,26 @@ def test_a_non_registrable_subdomain_gets_no_twin(tmp_path):
     sec = audit(h, "acme", "shop.acme.test")["report"]["page_experience"]["section"]
     assert sec["twin"] is None and not any("www." in k[2] for k in fake.keys())
     assert len([k for k in fake.keys() if k[1] == "origin" and k[0] == "record"]) == 3
+
+
+
+def test_lena_runs_one_at_a_time_and_a_run_that_cannot_start_is_blocked_unrecorded(tmp_path, monkeypatch):
+    import svc_crux
+
+    class Busy:
+        def acquire(self, timeout=None):
+            assert timeout == 60.0                          # waits at most its own deadline
+            return False
+
+        def release(self):
+            raise AssertionError("never acquired")
+    fake = FakeCrux()
+    h = crux_harness(tmp_path, fake)
+    h.tenant("acme", "own", ("acme.test", "www.acme.test"))
+    monkeypatch.setattr(svc_crux, "_RUN_LOCK", Busy())
+    e = section(audit(h, "acme", "acme.test"))
+    assert (e["outcome"], e["reason"], e["facts"]["state"]) == ("BLOCKED", "CRUX_DEADLINE", "BUSY")
+    assert fake.requests == [] and not h.ledger.of_type("crux_read_started")
+    monkeypatch.undo()
+    assert section(audit(h, "acme", "acme.test"))["outcome"] == "OK" and svc_crux._RUN_LOCK.acquire(blocking=False)
+    svc_crux._RUN_LOCK.release()                             # released after every run

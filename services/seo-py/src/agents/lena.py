@@ -206,7 +206,11 @@ RETRIED_QUERIES_TOLERATED = 5                    # K: how many queries of one ru
 # Deadline sizing (round-4 review): the worst case one run at the recommended cap may need, on these assumptions —
 # every successful call takes ASSUMED_LATENCY_S; each of the R x K tolerated failures takes the whole per-attempt
 # timeout and is followed by the longest wait a run honours (backoff or Retry-After, capped at RETRY_AFTER_MAX_S);
-# pacing time is spent on top. Conservative: latency and pacing are added, not overlapped.
+# pacing time is spent on top. Conservative: latency and pacing are added, not overlapped. Further assumptions (round
+# 5): the run has the pacer to itself (svc_crux serialises Lena reads per process, so it does); the 10 s timeout is
+# httpx's per-operation timeout (connect, each read, each write), so one slow attempt can take longer than 10 s in
+# total — the run's hard deadline still bounds it; whatever overruns the deadline ends as labelled NOT_QUERIED
+# CRUX_DEADLINE (or FAILED with attempts_sent for a query already started), never silently.
 ASSUMED_LATENCY_S = 1.0
 ATTEMPT_TIMEOUT_S = 10.0                         # SEO_CRUX_TIMEOUT_SECONDS default
 

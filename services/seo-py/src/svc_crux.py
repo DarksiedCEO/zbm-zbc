@@ -25,6 +25,7 @@ Rules:
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import timedelta
 
 import crux_client as cx
@@ -36,6 +37,7 @@ from primitives import Killed
 from reasons import R
 
 log = logging.getLogger("seo.crux")
+_RUN_LOCK = threading.Lock()                          # Lena reads are serialised per process (pacer sizing)
 AGENT, TASK = lena.AGENT, lena.TASK
 
 
@@ -116,6 +118,16 @@ class CruxMixin:
             guard(provider="crux")
         except Killed as k:
             return env("KILLED", "CRUX_KILLED", {"state": "KILLED", "switch": k.code})
+        # one Lena read at a time per process (round-5 review): the deadline sizing assumes a run has the pacer to
+        # itself. A run that cannot start within its own deadline is BLOCKED CRUX_DEADLINE: no record, no request.
+        if not _RUN_LOCK.acquire(timeout=float(self.settings.crux_deadline_s)):
+            return env("BLOCKED", "CRUX_DEADLINE", {"state": "BUSY"})
+        try:
+            return self._crux_read(aid, tid, guard, box, body, port, origin, twin, env)
+        finally:
+            _RUN_LOCK.release()
+
+    def _crux_read(self, aid, tid, guard, box, body, port, origin, twin, env) -> dict:
         s = self.settings
         with self.lock:
             left = s.crux_calls_per_day - self._crux_calls_used()

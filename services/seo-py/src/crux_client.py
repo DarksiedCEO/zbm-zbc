@@ -540,6 +540,7 @@ class CruxClient:
                  backoff_s: tuple = (1.0, 3.0), max_calls: int = 0,
                  transport: httpx.BaseTransport | None = None, network_backend=None,
                  monotonic: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
+                 wall: Callable[[], float] = time.time,
                  resolve: Callable[[str, int], list] = _system_resolve, dns_gate: _DnsGate | None = None):
         if not isinstance(key, ApiKey):
             raise TypeError("CruxClient needs an ApiKey")
@@ -550,7 +551,7 @@ class CruxClient:
         self.attempts, self.backoff_s, self.max_calls = attempts, tuple(backoff_s), max_calls
         self._transport = transport                  # tests only: replaces the deadline-bound production transport
         self._inner_backend = network_backend        # tests only: the socket layer under the deadline backend
-        self._mono, self._sleep = monotonic, sleep
+        self._mono, self._sleep, self._wall = monotonic, sleep, wall
         self._resolver = _GlobalResolver(_Resolver(resolve, dns_gate if dns_gate is not None else _CRUX_DNS_GATE))
         self._pacer = _Pacer(monotonic)
         self.requests_made = 0
@@ -633,13 +634,14 @@ class _Read:
                     if is_not_found(raw):
                         return status, raw
                     raise CruxError("CRUX_PROTOCOL_ERROR", "http_404")
-                self._classify(status, raw, hdrs)
+                self._classify(status, raw, hdrs, self.c._wall)
             except _Retry as r:
                 last = r
             if last is not None and last.retry_after is not None and last.retry_after > RETRY_AFTER_MAX_S:
-                # Google asks for a longer wait than a run may spend (round-4 review): stop; this query failed,
-                # the run's remaining queries are not sent (NOT_QUERIED CRUX_RATE_LIMITED)
-                raise _detached(CruxError("CRUX_RATE_LIMITED", "retry_after_over_cap"))
+                # Google asks for a longer wait than a run may spend (round 4), or a Retry-After that cannot be read
+                # (round 5: treated as over the cap): stop without waiting; this query failed and the run's remaining
+                # queries are not sent. Labelled by the status: 429 CRUX_RATE_LIMITED, 5xx CRUX_UNAVAILABLE
+                raise _detached(CruxError(last.code, "retry_after_over_cap"))
             if attempt + 1 < self.c.attempts:
                 pause = self.c.backoff_s[min(attempt, len(self.c.backoff_s) - 1)] if self.c.backoff_s else 0.0
                 if last is not None and last.retry_after is not None:
@@ -658,8 +660,8 @@ class _Read:
         raise _detached(CruxError(last.code, last.detail))
 
     @staticmethod
-    def _classify(status: int, raw: bytes, hdrs: dict) -> None:
-        ra = _retry_after(hdrs.get("retry-after"))
+    def _classify(status: int, raw: bytes, hdrs: dict, wall: Callable[[], float] = time.time) -> None:
+        ra = _retry_after(hdrs.get("retry-after"), wall)
         gstatus, reason = _google_reason(raw)
         if status == 429:
             raise _Retry("CRUX_RATE_LIMITED", "http_429", ra)
@@ -729,10 +731,25 @@ class _Read:
             return CruxError("CRUX_PROTOCOL_ERROR", "exchange")
 
 
-def _retry_after(v: str | None) -> float | None:
-    if v is None or not re.fullmatch(r"[0-9]{1,4}", v.strip()):
+def _retry_after(v: str | None, wall: Callable[[], float] = time.time) -> float | None:
+    """Retry-After (RFC 9110 10.2.3) in seconds: delay-seconds, or an HTTP-date (``email.utils``) measured against the
+    injected wall clock (a date in the past is 0). None when absent; ``math.inf`` when present but unreadable, which
+    the caller treats as over RETRY_AFTER_MAX_S (stop, labelled; round 5)."""
+    if v is None:
         return None
-    return float(min(int(v.strip()), 60))
+    t = v.strip()
+    if re.fullmatch(r"[0-9]{1,9}", t):
+        return float(int(t))
+    if len(t) > 64:
+        return math.inf
+    try:
+        from email.utils import parsedate_to_datetime
+        when = parsedate_to_datetime(t)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return math.inf
+    if when is None or when.tzinfo is None:
+        return math.inf
+    return max(0.0, when.timestamp() - wall())
 
 
 def _headers(key: ApiKey) -> dict:

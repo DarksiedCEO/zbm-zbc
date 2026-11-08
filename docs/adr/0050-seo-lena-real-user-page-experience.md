@@ -154,7 +154,7 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
   `FAILED`** (round 3).
   **Deadline (round 4; the earlier "120 s covers up to 16 paths" was wrong and is withdrawn).** Retry-After is
   honoured within a run only up to 5 s (`crux_client.RETRY_AFTER_MAX_S`); Google asking for longer stops the run
-  (that query `FAILED CRUX_RATE_LIMITED retry_after_over_cap`, the rest `NOT_QUERIED CRUX_RATE_LIMITED`). Worst case
+  (that query `FAILED retry_after_over_cap`, the rest `NOT_QUERIED`, with the status's code — see round 5 below). Worst case
   at the recommended cap, on the stated assumptions — every successful call takes 1 s; each of the R × K = 10
   tolerated failures takes the whole 10 s attempt timeout and is followed by the longest honoured wait (5 s); pacing
   added on top, not overlapped: **`SEO_CRUX_DEADLINE_SECONDS` = ceil((cap − 10) / 1.5 + 1 × (12 + 6N) + 10 × (10 + 5))
@@ -164,7 +164,17 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
   more failures than K, end with the last queries `NOT_QUERIED` — never silent. **A query the deadline leaves no time
   for (none of its attempts sent, including a pacing wait that would pass it) is `NOT_QUERIED CRUX_DEADLINE`; a query
   that started and then ran out of time stays `FAILED` with `attempts_sent`** (tested for an origin record, an
-  origin history, the twin and a URL). Per day about 2,000; per tenant per day about 200.
+  origin history, the twin and a URL).
+  **Assumptions behind 170 + 10 × N (round 5), stated plainly:** (i) the run has the pacer to itself — made true by
+  serialising Lena reads per process (`svc_crux._RUN_LOCK`; a run that cannot start within its own deadline is
+  `BLOCKED CRUX_DEADLINE` with no record and no request); (ii) the 10 s is httpx's per-operation timeout (connect,
+  each read, each write), so one attempt can take longer than 10 s in total — the run's hard deadline still bounds
+  the whole read; (iii) successful calls take 1 s. When reality is worse, the overrun ends as labelled `NOT_QUERIED
+  CRUX_DEADLINE` (or `FAILED` with `attempts_sent` for a query already started), never silently.
+  **Retry-After (round 5):** delay-seconds or an HTTP-date (parsed with `email.utils`, measured on the injected wall
+  clock; a past date is 0), the same ≤ 5 s rule for both; an unreadable value counts as over the cap. Over the cap
+  stops the run without waiting, labelled by the status: 429 `CRUX_RATE_LIMITED`, 5xx `CRUX_UNAVAILABLE` (detail
+  `retry_after_over_cap`). Per day about 2,000; per tenant per day about 200.
 - **L2 — extra fields.** Every documented required field is still validated strictly; unknown extra fields are
   accepted and ignored (never read, never passed on), at most 16 per object (more: that object is malformed), and
   counted in `extra_fields_ignored` per answer and in the section's counts. **Go-live canary:** the first hand-run

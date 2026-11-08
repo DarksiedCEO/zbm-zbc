@@ -26,7 +26,7 @@ GLOBAL_IP = "142.250.80.42"
 def client(fake: FakeCrux, max_calls: int = 100, **kw) -> cx.CruxClient:
     c = fake.clock
     return cx.CruxClient(cx.ApiKey(TEST_KEY), transport=fake.transport(), monotonic=c.mono, sleep=c.sleep,
-                         max_calls=max_calls, **kw)
+                         wall=c.wall, max_calls=max_calls, **kw)
 
 
 def ok_guard():
@@ -294,14 +294,48 @@ def test_timeouts_are_retried_then_unavailable_and_retries_stop_at_the_deadline(
 
 def test_a_retry_after_longer_than_a_run_may_wait_stops_the_run():
     fake = FakeCrux()
-    fake.script = [(503, {}, {"retry-after": "6"})]
-    sec = run(fake, deadline_s=600)
-    first = sec["targets"][0]["form_factors"]["PHONE"]["current"]
-    assert (first["state"], first["reason"], first["detail"], first["attempts_sent"]) == \
-        ("FAILED", "CRUX_RATE_LIMITED", "retry_after_over_cap", 1)
-    assert len(fake.requests) == 1 and fake.clock.sleeps == []
-    later = sec["targets"][0]["form_factors"]["DESKTOP"]["current"]
-    assert later == {"state": "NOT_QUERIED", "reason": "CRUX_RATE_LIMITED"}
+    for status, code in ((429, "CRUX_RATE_LIMITED"), (503, "CRUX_UNAVAILABLE"), (500, "CRUX_UNAVAILABLE")):
+        fake = FakeCrux()
+        fake.script = [(status, {}, {"retry-after": "6"})]
+        sec = run(fake, deadline_s=600)
+        first = sec["targets"][0]["form_factors"]["PHONE"]["current"]
+        assert (first["state"], first["reason"], first["detail"], first["attempts_sent"]) == \
+            ("FAILED", code, "retry_after_over_cap", 1)
+        assert len(fake.requests) == 1 and fake.clock.sleeps == []                  # stopped, no wait
+        later = sec["targets"][0]["form_factors"]["DESKTOP"]["current"]
+        assert later == {"state": "NOT_QUERIED", "reason": code}
+
+
+def _http_date(ts: float) -> str:
+    from email.utils import formatdate
+    return formatdate(ts, usegmt=True)
+
+
+def test_http_date_retry_after_follows_the_same_5_second_rule():
+    fake = FakeCrux()
+    now = fake.clock.wall()
+    fake.script = [(429, {}, {"retry-after": _http_date(now + 4)})]
+    assert rd(fake).record("origin", O, "PHONE")["state"] == "OK"
+    assert len(fake.requests) == 2 and 3.0 <= fake.clock.sleeps[0] <= 5.0          # honoured (whole seconds)
+    fake = FakeCrux()
+    fake.script = [(503, {}, {"retry-after": _http_date(fake.clock.wall() - 3600)})]   # in the past: no extra wait
+    assert rd(fake).record("origin", O, "PHONE")["state"] == "OK" and fake.clock.sleeps == [1.0]
+    for value, status, code in ((_http_date(now + 3600), 429, "CRUX_RATE_LIMITED"),
+                                ("soon, please", 429, "CRUX_RATE_LIMITED"), ("Mon, 99 Foo 2026", 503,
+                                                                             "CRUX_UNAVAILABLE"),
+                                ("x" * 100, 503, "CRUX_UNAVAILABLE")):
+        fake = FakeCrux()
+        fake.script = [(status, {}, {"retry-after": value})]
+        e = err(lambda f=fake: rd(f).record("origin", O, "PHONE"))
+        assert (e.code, e.detail) == (code, "retry_after_over_cap") and len(fake.requests) == 1
+        assert fake.clock.sleeps == []
+
+
+def test_retry_after_parser():
+    import math as _m
+    assert cx._retry_after(None) is None and cx._retry_after(" 3 ") == 3.0 and cx._retry_after("120") == 120.0
+    assert cx._retry_after("garbage") == _m.inf and cx._retry_after("Wed, 21 Oct 2015 07:28:00") == _m.inf  # no zone
+    assert cx._retry_after(_http_date(1000.0), wall=lambda: 990.0) == 10.0
 
 
 def test_the_call_cap_counts_retries_and_stops_the_run():
