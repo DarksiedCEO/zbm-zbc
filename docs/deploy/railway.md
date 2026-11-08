@@ -173,11 +173,13 @@ exactly as if the feature were never configured (`SEO_GSC_SERVICE_ACCOUNT` relie
 PEM with `\n` escapes) reaches the file unchanged, except that trailing newlines are dropped (shell command
 substitution); seo strips surrounding whitespace from the key file anyway.
 
-One built setting is a `*_FILE` setting this deploy does **not** map (no `--secret-file` in its image), so on
-Railway it stays unset and its feature stays off, fail closed:
+Two built settings are `*_FILE` settings this deploy does **not** map (no `--secret-file` in its image), so on
+Railway they stay unset and their features stay off, fail closed:
 
 - `SEO_PERPLEXITY_API_KEY_FILE`: not needed on Railway. seo reads the same key from the plain variable
   `SEO_PERPLEXITY_API_KEY` (ADR 0017 W4; setting both refuses the start).
+- `SEO_CRUX_API_KEY_FILE`: Lena's CrUX key (ADR 0050). Not mapped in this build (fixtures only); unset, Lena stays
+  `NOT_CONNECTED` and `SEO_CRUX_ENABLED` must stay `0`.
 
 ## Secrets
 
@@ -707,6 +709,9 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_PERPLEXITY_MODEL`, `SEO_PERPLEXITY_TIMEOUT_SECONDS`, `SEO_PERPLEXITY_MAX_ATTEMPTS` | no | no | `perplexity/sonar`, `30`, `3` | closed model list per protocol (`perplexity/sonar` on the Agent API; `sonar`, `sonar-pro` on the rollback); hard deadline per question; requests per question |
 | `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD`, `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | no | no | `0` each | daily budgets (UTC day). **0 = OFF: nothing is asked**; all four must be above 0 |
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | no | no | `0.05` | reserved per request before it is sent (0.001..5) |
+| `SEO_CRUX_ENABLED` | no | no | `0` | Lena (CrUX field data, ADR 0050). Leave `0` on Railway: this build is fixtures-only and its key file is not mapped (below); `1` without `SEO_CRUX_API_KEY_FILE` refuses start |
+| `SEO_CRUX_API_KEY_FILE` | no | — | unset | the CrUX API key as a file; not mapped on Railway in this build (stays unset, Lena `NOT_CONNECTED`) |
+| `SEO_CRUX_CALLS_PER_RUN`, `SEO_CRUX_CALLS_PER_DAY`, `SEO_CRUX_TIMEOUT_SECONDS`, `SEO_CRUX_DEADLINE_SECONDS`, `SEO_CRUX_HISTORY_PERIODS` | no | no | `0`, `0`, `10`, `60`, `25` | Lena's call caps (**0 = OFF: nothing is asked**), per-attempt timeout, whole-read deadline, history periods |
 | `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | no | no | `Z Best Media`, `#1f4e79` | white label of the client report (preparer name, `#RRGGBB` accent); a bad value refuses start |
 | `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`, `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`, `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL` | no | — | unset | not built (`SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`: renamed): setting any refuses to start |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | no | no | `10`, `5`, `128`, `0.001`, `512` | launcher tuning |

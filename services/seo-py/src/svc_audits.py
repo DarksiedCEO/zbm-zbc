@@ -59,6 +59,8 @@ NOT_CONNECTED_WHY = {
     "first_party": "Bing Webmaster, analytics and CRM are not connected; Search Console only when a service-account "
                    "key is configured AND Andre bound the tenant's property (see search_performance); server logs "
                    "only as client uploads",
+    "field_data": "Lena's Chrome UX Report field data only when enabled with an API key and call caps (see "
+                  "page_experience)",
     "zero_day / orca_publish": "ports only in Wave 1 (founder-pending flag 5)",
     "clientfix": "fix execution is Department 28's, not in Wave 1",
 }
@@ -213,7 +215,7 @@ class AuditsMixin:
                              "seo", evidence=[("audit_report_recorded", f"audit:{aid}",
                                                {"audit_id": aid, "report_sha256": rsha, "outcome": report["outcome"],
                                                 "findings": report["summary"]["findings"]}, ("report", aid))]
-                             + self.gsc_evidence(aid, report))
+                             + self.gsc_evidence(aid, report) + self.crux_evidence(aid, report))
                 return self.audit_view(tid, aid)
         finally:
             with self.lock:
@@ -270,15 +272,22 @@ class AuditsMixin:
         envs.append(_step(ctx, "osei", "search_performance", lambda: self._gsc_section(aid, tid, ctx.guard, gsc_box)))
         if envs[-1]["outcome"] in ("KILLED", "RESTRICTED") and "state" not in gsc_box:
             gsc_box["state"] = {"outcome": envs[-1]["outcome"], "reason": envs[-1]["reason"]}
+        # Lena's field-data step (ADR 0050): CrUX for the audited origin and paths (svc_crux.py; NOT_CONNECTED unless
+        # enabled with a key, and then no outbound call is made)
+        crux_box: dict = {}
+        envs.append(_step(ctx, "lena", "page_experience",
+                          lambda: self._crux_section(aid, tid, ctx.guard, crux_box, body)))
+        if envs[-1]["outcome"] in ("KILLED", "RESTRICTED") and "state" not in crux_box:
+            crux_box["state"] = {"outcome": envs[-1]["outcome"], "reason": envs[-1]["reason"]}
         # Osei's data-hygiene step (AEGIS 1472041 M2): a restricted Osei reports nothing. The parsers' own fail-closed
         # quarantine of malformed input still applies (refusing bad input is not Osei's judgement).
         envs.append(_step(ctx, "osei", "data_hygiene", lambda: envelope(
             "osei", "data_hygiene", "OK", [], facts=o.summary(), limitations=[],
             methodology="every quarantined input with reason, size and SHA-256; every observation with its time and "
                         "refresh tier")))
-        return self._report(aid, tid, body, ps, envs, o, started, pages, gsc_box)
+        return self._report(aid, tid, body, ps, envs, o, started, pages, gsc_box, crux_box)
 
-    def _report(self, aid, tid, body, ps, envs, o, started, pages, gsc_box=None) -> dict:
+    def _report(self, aid, tid, body, ps, envs, o, started, pages, gsc_box=None, crux_box=None) -> dict:
         all_findings = [f for e in envs for f in e["findings"]]
         by: dict = {"severity": {}, "decision": {}, "data_class": {}, "capability": {}}
         for f in all_findings:
@@ -304,6 +313,7 @@ class AuditsMixin:
             "data_hygiene": next((e["facts"] for e in envs if e["agent"] == "osei" and e["task"] == "data_hygiene"
                                   and e["outcome"] == "OK"), None),
             "search_performance": self.gsc_report_block(gsc_box or {}),
+            "page_experience": self.crux_report_block(crux_box or {}),
             "prompt_set": None if ps is None else {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"],
                                                    "sha256": ps["sha256"]},
             "untrusted_content_rule": "every string quoted from a crawled page or an answer engine is data marked "
@@ -361,9 +371,10 @@ class AuditsMixin:
 # AEGIS gl-gsc M2 (ADR 0017 GSC-7): the Search Console section keeps its own outcome inside its section and is left
 # out of the audit's overall outcome. A kill switch on provider:gsc, a spent read budget or a Google outage is about
 # Google, not about the audited site, and must not relabel the whole audit KILLED / BLOCKED / FAILED.
-OUTSIDE_OVERALL = frozenset({("osei", "search_performance")})
-OUTCOME_RULE = ("the worst outcome over every agent's envelope except Osei's search_performance (Search Console), "
-                "whose outcome stays inside its own section")
+# ADR 0050: Lena's page_experience (CrUX) likewise: Google's availability or a call budget is not the audited site.
+OUTSIDE_OVERALL = frozenset({("osei", "search_performance"), ("lena", "page_experience")})
+OUTCOME_RULE = ("the worst outcome over every agent's envelope except Osei's search_performance (Search Console) "
+                "and Lena's page_experience (Chrome UX Report), whose outcomes stay inside their own sections")
 
 
 def overall_outcome(envs: list) -> str:
@@ -391,7 +402,7 @@ def _step(ctx, agent: str, task: str, fn):
 
 
 _SRC = Path(__file__).resolve().parent
-_AGENTS = frozenset({"selene", "delia", "roman", "entity_check", "callum", "naomi", "osei"})
+_AGENTS = frozenset({"selene", "delia", "roman", "entity_check", "callum", "naomi", "osei", "lena"})
 
 
 def _where(exc: BaseException) -> str:

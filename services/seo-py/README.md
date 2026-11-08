@@ -108,6 +108,11 @@ MUST failure or ERROR.
 | `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD` | `0`, `0` | the global daily budget (UTC day) in requests and US dollars. **0 = OFF: no request is made** (fail closed) |
 | `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | `0`, `0` | the same per tenant. All four must be above 0 before Perplexity is ever asked anything |
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | `0.05` | what each request reserves against the spend budgets before it is sent (0.001..5), and what it costs when Perplexity reports no cost |
+| `SEO_CRUX_ENABLED` | `0` | Lena (real-user page experience, Chrome UX Report field data; ADR 0050). `0` = `NOT_CONNECTED`, no call ever (the key file is not read even if set). `1` requires `SEO_CRUX_API_KEY_FILE`: missing or unusable refuses start |
+| `SEO_CRUX_API_KEY_FILE` | unset | absolute path to a file holding one Google API key for the CrUX API (regular file owned by the service user, mode 0600/0400, no symlink, ≤ 1 KiB). Sent only in the `X-Goog-Api-Key` header, never in a URL, log, error or report |
+| `SEO_CRUX_CALLS_PER_RUN`, `SEO_CRUX_CALLS_PER_DAY` | `0`, `0` | HTTP calls per audit (0..120, retries included) and in any 24 hours across all tenants (0..20000). **0 = OFF: no request is made** (BLOCKED `CRUX_BUDGET_EXHAUSTED`); Google's own quota is 150 queries per minute per project |
+| `SEO_CRUX_TIMEOUT_SECONDS`, `SEO_CRUX_DEADLINE_SECONDS` | `10`, `60` | per-attempt timeout (1..60) and the hard deadline over Lena's whole read (5..300): DNS, connect, TLS, every read and write, every retry |
+| `SEO_CRUX_HISTORY_PERIODS` | `25` | CrUX History API collection periods asked for (1..40; weekly periods) |
 | `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | `Z Best Media` / `#1f4e79` | white label of the client report: the preparer's name (1-60 letters, digits, spaces, `. , & ' ( ) -`) and accent colour (`#RRGGBB`); anything else refuses start |
 | `SEO_BIND_ADDR` / `SEO_PORT` | `127.0.0.1` / `8500` | where the API listens |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
@@ -117,6 +122,14 @@ MUST failure or ERROR.
 two allowlisted Google hosts, a hard deadline, bounded retries and pagination, aggregates only (no query text, no
 URL), a `search_performance` section in every audit report (`NOT_CONNECTED` until a key is configured and Andre binds
 the tenant's property), kill switch `provider:gsc`. Setup steps for Andre: ADR 0017, "Search Console".
+
+**Lena — real-user page experience** (`src/crux_client.py`, `src/svc_crux.py`, `src/agents/lena.py`; ADR 0050):
+one task, reporting Google's Chrome UX Report field data (LCP, INP, CLS, FCP, TTFB at p75, distribution, rating
+against web.dev's thresholds, collection period, freshness, 25-period history trend) for the audited origin and
+URLs per form factor. No lab test, no fix, no forecast, no findings; Google's "no data" is
+`INSUFFICIENT_FIELD_DATA`. A `page_experience` section in every audit report (`NOT_CONNECTED` by default), one
+allowlisted host (`chromeuxreport.googleapis.com`), kill switch `provider:crux`. Fixtures only in this build: never run
+against the live API.
 
 **Client report** (`src/client_report.py`, `src/svc_reports.py`, `devtools/render_report.py`): a completed audit as
 Markdown or one self-contained HTML page (inline CSS, no script, printable to PDF from a browser), rendered
@@ -155,6 +168,7 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `POST /tenants/{tid}/audits/{aid}/client-report` | Andre | the client-facing report of a completed audit, `{"request_id", "format": "markdown" \| "html"}`; recorded first (`client_report_rendered` with the document's SHA-256), answered as JSON with the document in `content` (ADR 0017, "Client report") |
 | `GET /tenants/{tid}/audits/{aid}/client-reports` | dashboard, compliance_38 | the recorded renders of one audit (ids and hashes, never the document) |
 | `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
+| `GET /tenants/{tid}/audits/{aid}/page-experience` | scoped (dashboard, seo_agent, hub, compliance_38) | Lena's CrUX section of a completed audit (ADR 0050); 404 `PAGE_EXPERIENCE_NOT_IN_AUDIT` for an audit made before Lena |
 | `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |
 | `POST /tenants/{tid}/schedules`, `.../{sid}/status`; `GET` both | dashboard, seo_agent (+ Andre for clients) | scheduled re-audits; drift report per consecutive pair (Wave 2) |
 | `GET /department`, `POST /agents/{agent}/lifecycle` | dashboard (+ Andre for restricted / retired), compliance_38 reads | work queues, scorecards, lifecycle (Wave 2) |

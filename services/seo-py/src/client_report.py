@@ -120,6 +120,11 @@ SECTIONS = (
      "Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market "
      "questions, sampled several times each. Cited means the engine's search returned a page of your site for the "
      "answer (cited = returned by search); it does not mean the answer's text linked to that page."),
+    # ADR 0050: shown only for audits that ran Lena (reports made before her have no such area)
+    ("page_experience", "Real-user page experience (Chrome UX Report)", ("lena", "page_experience"),
+     "How fast and stable your pages were for real Chrome users over the last 28 days, as Google's Chrome UX Report "
+     "measured it (field data, not a lab test): LCP, INP and CLS (the Core Web Vitals), plus FCP and TTFB, at the "
+     "75th percentile, per device type."),
 )
 
 EVIDENCE = {
@@ -157,6 +162,16 @@ REASON_TEXT = {
     "GSC_UNAVAILABLE": "Google Search Console did not answer in time.",
     "GSC_PROTOCOL_ERROR": "Google's answer could not be read safely, so none of it was used.",
     "GSC_KILLED": "The Search Console read was stopped by a safety switch.",
+    "CRUX_NOT_CONNECTED": "The Chrome UX Report is not connected to this service.",
+    "CRUX_AUTH_REFUSED": "Google refused this service's Chrome UX Report key.",
+    "CRUX_RATE_LIMITED": "Google asked this service to slow down; the Chrome UX Report read was not completed.",
+    "CRUX_UNAVAILABLE": "The Chrome UX Report did not answer in time.",
+    "CRUX_PROTOCOL_ERROR": "Part of Google's Chrome UX Report answer could not be read safely, so that part was not "
+                           "used.",
+    "CRUX_BUDGET_EXHAUSTED": "The Chrome UX Report call allowance did not allow (more) queries.",
+    "CRUX_KILLED": "The Chrome UX Report read was stopped by a safety switch.",
+    "CRUX_INSUFFICIENT_FIELD_DATA": "Google has too little real-user data for this site to report on it. That says "
+                                    "nothing about speed in either direction.",
     "NO_PROMPT_SET": "No set of market questions was chosen for this audit, so no answer engine was asked anything.",
     "ENGINE_BUDGET_EXHAUSTED": "The answer-engine budget did not allow (more) questions.",
     "ENGINE_AUTH_REFUSED": "The answer engine refused this service's key.",
@@ -188,6 +203,7 @@ NOT_CONNECTED_TEXT = {
     "orca_publish": "ORCA Publish (not part of this audit).",
     "clientfix": "Fix execution: this audit recommends fixes; it does not make changes to your site.",
     "fetch": "Web fetching: no page could be read.",
+    "field_data:crux": "Chrome UX Report (real-user page experience).",
 }
 INTERNAL_CODES = frozenset({"ENGINE_COST_ABOVE_RESERVE"})   # operational, about our spend: in the audit record only
 
@@ -666,6 +682,11 @@ def _search_block(env: Optional[dict], block: Optional[dict]) -> Optional[dict]:
     return out
 
 
+def _page_experience(env: Optional[dict], report: dict, ctx: "_Ctx") -> Optional[dict]:
+    from report_page_experience import field_block                  # Lena's area (ADR 0050)
+    return field_block(env, report.get("page_experience"), ctx)
+
+
 def sp_path(tpl: str) -> str:
     """A recorded Search Console template, re-checked: templated again and every segment re-judged."""
     t = logs_mod.template_path(tpl)
@@ -732,6 +753,9 @@ def _freshness(key: str, report: dict, env: Optional[dict], tiers: dict) -> str:
         if not (isinstance(start, str) and _DAY.fullmatch(start) and isinstance(end, str) and _DAY.fullmatch(end)):
             return "no Search Console data in this report"
         return f"Google data for {start} to {end} (Pacific Time, final data; Google's figures lag about 3 days)"
+    if key == "page_experience":
+        from report_page_experience import field_freshness
+        return field_freshness((report.get("page_experience") or {}).get("section"))
     tier = {"crawlability": ("robots", "page"), "sitemaps": ("sitemap", "llms_txt"), "content": ("page",),
             "entity": ("page",), "ai": ("ai_probe",)}[key]
     days = min(int(tiers.get(t, 7)) for t in tier)
@@ -773,6 +797,8 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
     sections = []
     for key, title, at, what in SECTIONS:
         env = envs.get(at)
+        if key == "page_experience" and env is None:
+            continue                                     # an audit made before Lena (ADR 0050)
         st = _status(env)
         home = _homepage_block(env, ctx) if key == "entity" else None
         if home and "sample: UNKNOWN" in home and st["outcome"] == "OK":
@@ -782,7 +808,8 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
                "groups": _groups(env.get("findings") or [], ctx) if env and st["outcome"] != "NOT_COVERED" else [],
                "dropped": _num(env.get("findings_dropped")) if env and env.get("findings_dropped") else None,
                "search": _search_block(env, report.get("search_performance")) if key == "search" else None,
-               "ai": _ai_block(env) if key == "ai" else None}
+               "ai": _ai_block(env) if key == "ai" else None,
+               "field": _page_experience(env, report, ctx) if key == "page_experience" else None}
         if home is not None:
             sec["homepage"] = home
         if key == "ai":
@@ -962,6 +989,9 @@ def _md_section(s: dict) -> list:
         L += _md_search(s["search"])
     if s["key"] == "ai":
         L += _md_ai(s)
+    if s["key"] == "page_experience" and s.get("field"):
+        from report_page_experience import md_field
+        L += md_field(s["field"])
     if not st["checked"] and s["notes"]:
         L += ["Notes from the run are listed under Methodology and limits.", ""]
     if st["checked"] and not s["groups"]:
@@ -1192,6 +1222,9 @@ def _h_section(s: dict, pages: dict) -> list:
         o += _h_search(s["search"])
     if s["key"] == "ai":
         o += _h_ai(s)
+    if s["key"] == "page_experience" and s.get("field"):
+        from report_page_experience import h_field
+        o += h_field(s["field"])
     if not st["checked"] and s["notes"]:
         o.append("<p>Notes from the run are listed under Methodology and limits.</p>")
     if st["checked"] and not s["groups"]:

@@ -31,7 +31,7 @@ _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules",
                        "reports")
-PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc")
+PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc", "crux")
 
 # Pricing, locked by Andre (spec Oct 6). Config only: nothing in this service charges, quotes or invoices; payments
 # are Finance (31)'s, through Stripe. Above the top tier: "Contact us". Self-serve is not offered until the client
@@ -170,6 +170,13 @@ class Settings:
     perplexity_attempts: int = 3
     perplexity_budget: dict = field(default_factory=lambda: dict(PERPLEXITY_BUDGET_OFF))
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
+    crux_enabled: bool = False                                    # ADR 0050 (Lena): OFF by default
+    crux_key: Optional[object] = field(default=None, repr=False)  # crux_client.ApiKey (masked repr)
+    crux_calls_per_run: int = 0
+    crux_calls_per_day: int = 0
+    crux_timeout_s: int = 10
+    crux_deadline_s: int = 60
+    crux_history_periods: int = 25
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -437,6 +444,39 @@ def _perplexity(env, s: "Settings") -> None:
     s.perplexity_key = key
 
 
+def _crux(env, s: "Settings") -> None:
+    """ADR 0050 (Lena, CrUX field data). OFF unless ``SEO_CRUX_ENABLED=1``; then ``SEO_CRUX_API_KEY_FILE`` is required
+    (the *_FILE rules) and a missing or unusable key refuses start. Disabled, the key file is not read even if set
+    (turning Lena off never needs the secret removed). The call caps default to 0: enabled with a key but no caps,
+    Lena makes no call (BLOCKED CRUX_BUDGET_EXHAUSTED)."""
+    s.crux_enabled = _flag(env, "SEO_CRUX_ENABLED")
+    s.crux_calls_per_run = _int(env, "SEO_CRUX_CALLS_PER_RUN", 0, 0, 120)
+    s.crux_calls_per_day = _int(env, "SEO_CRUX_CALLS_PER_DAY", 0, 0, 20_000)
+    s.crux_timeout_s = _int(env, "SEO_CRUX_TIMEOUT_SECONDS", 10, 1, 60)
+    s.crux_deadline_s = _int(env, "SEO_CRUX_DEADLINE_SECONDS", 60, 5, 300)
+    s.crux_history_periods = _int(env, "SEO_CRUX_HISTORY_PERIODS", 25, 1, 40)
+    if not s.crux_enabled:
+        return
+    if not (env.get("SEO_CRUX_API_KEY_FILE") or "").strip():
+        raise RuntimeError("SEO_CRUX_ENABLED=1 needs SEO_CRUX_API_KEY_FILE (a file holding the CrUX API key); "
+                           "refusing to start rather than run Lena without it")
+    import crux_client
+    raw = _secret_file_bytes(env, "SEO_CRUX_API_KEY_FILE", max_bytes=1024)
+    try:
+        value = raw.decode("ascii")
+        key = crux_client.ApiKey(value)
+    except (UnicodeDecodeError, ValueError):
+        raise RuntimeError("SEO_CRUX_API_KEY_FILE must hold one Google API key (20..128 letters, digits, '-' or "
+                           "'_')") from None
+    finally:
+        raw = None
+    ours = {s.service_token, s.andre_token, s.ledger_token, s.finance_token, s.finance_caller_token,
+            s.compliance_token, s.compliance_caller_token, *s.caller_tokens.values(), *s.tenant_tokens.values()}
+    if value in ours:
+        raise RuntimeError("the CrUX API key must differ from every token this service accepts or sends")
+    s.crux_key = key
+
+
 def _default_branding():
     import client_report
     return client_report.DEFAULT_BRANDING
@@ -502,6 +542,7 @@ def load(env: Optional[dict] = None) -> Settings:
     _compliance(env, s)
     _gsc(env, s)
     _perplexity(env, s)
+    _crux(env, s)
     s.report_branding = _branding(env)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)
