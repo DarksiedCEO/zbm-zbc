@@ -30,6 +30,9 @@ AGENT, TASK = "delia", "sitemaps_and_llms_txt"
 NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 MAX_URLS_PER_FILE = 50_000
 MAX_CHILDREN = 10
+# the most requests one run makes: up to MAX_CHILDREN sitemaps declared in robots.txt (or /sitemap.xml), up to
+# MAX_CHILDREN children of sitemap indexes, and llms.txt (Selene reserves this many before the audit deadline)
+MAX_REQUESTS = 2 * MAX_CHILDREN + 1
 DECOMPRESSED_MAX = 8 * 1024 * 1024
 BLOCK_SAMPLE = 500
 SAMPLE_PATHS = 500

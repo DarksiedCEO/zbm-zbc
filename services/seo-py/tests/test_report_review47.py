@@ -629,3 +629,150 @@ def test_slow_responses_shrink_discovery_so_delias_requests_keep_their_room(srv)
     assert fast.per_request_estimate() == 1.0 and slow.per_request_estimate() >= 3.0
     assert len(fast_s["facts"]["pages_discovered"]) > len(slow_s["facts"]["pages_discovered"])
     assert fast_d["outcome"] == "OK" and slow_d["outcome"] == "OK"     # Delia finished in both
+
+
+# ================================================================ round-3 review of ed79935
+
+# ---------------------------------------------------------------- 1. name resolution inside the fetch deadline
+
+@pytest.fixture(autouse=True)
+def _own_dns_gate(monkeypatch):
+    """Each test gets its own DNS gate: a deliberately hung lookup keeps its slot until it returns (by design), and
+    must not hold a slot another test needs."""
+    import threading
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", threading.BoundedSemaphore(fetch_mod.DNS_WORKERS))
+
+
+def _slow_resolver(seconds, table=("127.0.0.1",), slow_hosts=None):
+    import time as _t
+
+    def resolve(host, port):
+        if slow_hosts is None or host in slow_hosts:
+            _t.sleep(seconds)
+        return list(table)
+    return resolve
+
+
+@pytest.mark.parametrize("hang", [3.0, 6.0])
+def test_a_slow_resolver_never_carries_a_fetch_past_twice_the_timeout(hang):
+    import time as _t
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=_slow_resolver(hang), policy=lambda h, ip, p: True)
+    t0 = _t.monotonic()
+    r = f.fetch("http://slow.test/", honor_robots=False)
+    took = _t.monotonic() - t0
+    assert r.state == "TIMEOUT" and took <= 2 * 1 + 0.5
+    assert fetch_mod._DNS_GATE.acquire(blocking=False)              # the gate is not leaked by a waiting fetch...
+    fetch_mod._DNS_GATE.release()
+
+
+def test_a_resolver_that_fails_is_dns_failed_and_frees_its_slot():
+    def boom(host, port):
+        raise OSError("nxdomain")
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=boom, policy=lambda h, ip, p: True)
+    assert f.fetch("http://nx.test/", honor_robots=False).state == "DNS_FAILED"
+    slots = [fetch_mod._DNS_GATE.acquire(blocking=False) for _ in range(fetch_mod.DNS_WORKERS)]
+    assert all(slots)
+    for _ in slots:
+        fetch_mod._DNS_GATE.release()
+
+
+def test_every_dns_slot_busy_fails_closed_at_once(monkeypatch):
+    import threading
+    import time as _t
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", threading.BoundedSemaphore(1))
+    assert fetch_mod._DNS_GATE.acquire(blocking=False)
+    f = fetch_mod.Fetcher(timeout_s=5, resolver=_slow_resolver(0), policy=lambda h, ip, p: True)
+    t0 = _t.monotonic()
+    r = f.fetch("http://busy.test/", honor_robots=False)
+    assert r.state == "DNS_FAILED" and _t.monotonic() - t0 < 1
+
+
+@pytest.mark.local_http
+def test_a_slow_resolver_on_the_robots_and_redirect_hops_stays_inside_one_fetch_budget(srv):
+    import time as _t
+    install_site(srv)
+    srv.redirect("site.test", "/", "http://www.site.test/")
+    f = srv.site_fetcher(timeout_s=1)
+    real = f.resolver
+    f.resolver = lambda h, p: (_t.sleep(5) if h == "www.site.test" else None) or real(h, p)
+    t0 = _t.monotonic()
+    r = f.fetch("http://site.test/", robots_cache={}, honor_robots=True)
+    assert r.state == "TIMEOUT" and _t.monotonic() - t0 <= 2 * 1 + 0.5
+
+
+@pytest.mark.local_http
+def test_with_slow_dns_the_audit_never_ends_after_its_deadline(srv):
+    import time as _t
+    install_site(srv)
+    srv.html("site.test", "/", _links("/a", "/b"))
+    f = srv.site_fetcher(timeout_s=1)
+    real = f.resolver
+    f.resolver = lambda h, p: _t.sleep(3) or real(h, p)              # every lookup hangs past the fetch budget
+    ctx = _ctx(srv, max_pages=10)
+    ctx.fetcher = f
+    ctx.crawl_delay_s = 0.0
+    start = _t.monotonic()
+    ctx.deadline, ctx.fetch_reserve_s = start + 7.0, 2.0
+    s_env, _ = selene.run(ctx)
+    d_env = delia.run(ctx)
+    assert _t.monotonic() <= ctx.deadline + 0.5
+    assert s_env["outcome"] in ("FAILED", "PARTIAL", "BLOCKED") and d_env["outcome"] in ("FAILED", "PARTIAL")
+
+
+# ---------------------------------------------------------------- 2. Delia's reserve is its true maximum
+
+def test_delias_reserve_is_derived_from_its_own_bounds():
+    assert delia.MAX_REQUESTS == 2 * delia.MAX_CHILDREN + 1 == 21
+    assert selene.DELIA_RESERVE_REQUESTS == delia.MAX_REQUESTS
+
+
+@pytest.mark.local_http
+def test_delia_never_makes_more_requests_than_its_maximum(srv):
+    declared = "".join(f"Sitemap: http://site.test/s{i}.xml\n" for i in range(15))
+    install_site(srv, robots="User-agent: *\nAllow: /\n" + declared)
+    idx = ("<?xml version='1.0'?><sitemapindex xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"
+           + "".join(f"<sitemap><loc>http://site.test/c{i}.xml</loc></sitemap>" for i in range(15))
+           + "</sitemapindex>")
+    for i in range(15):
+        srv.text("site.test", f"/s{i}.xml", idx, ctype="application/xml")
+        srv.text("site.test", f"/c{i}.xml", "<?xml version='1.0'?><urlset xmlns='http://www.sitemaps.org/schemas/"
+                 "sitemap/0.9'><url><loc>http://site.test/</loc></url></urlset>", ctype="application/xml")
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    before = ctx.requests
+    delia.run(ctx)
+    assert 0 < ctx.requests - before <= delia.MAX_REQUESTS
+    assert ctx.requests - before == delia.MAX_REQUESTS                # this site uses all of it
+
+
+# ---------------------------------------------------------------- 3. a page costs up to four requests
+
+@pytest.mark.local_http
+def test_one_page_can_cost_four_requests_and_the_constant_says_so(srv):
+    from fixture_server import by_ua
+    install_site(srv)
+    srv.routes[("site.test", "/")] = by_ua(home_html(canonical="http://site.test/preferred"),
+                                           home_html(canonical="http://site.test/other"))
+    srv.html("site.test", "/preferred", home_html(canonical="http://site.test/preferred"))
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    assert ctx.requests - 1 == selene.REQUESTS_PER_PAGE == 4          # robots.txt, then the page's four
+
+
+def test_readme_states_the_startup_refusal_for_short_deadlines():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    assert "30..39 s with the default 10 s timeout" in readme and "21 requests" in readme
+
+
+def test_a_slot_goes_back_to_the_gate_it_came_from(monkeypatch):
+    import threading
+    import time as _t
+    old = threading.BoundedSemaphore(2)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", old)
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=_slow_resolver(3.0), policy=lambda h, ip, p: True)
+    assert f.fetch("http://slow.test/", honor_robots=False).state == "TIMEOUT"   # its lookup is still running
+    new = threading.BoundedSemaphore(2)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", new)                            # e.g. reset after a fork
+    _t.sleep(2.0)                                                               # the lookup finishes and releases
+    assert [new.acquire(blocking=False) for _ in range(3)] == [True, True, False]
+    assert [old.acquire(blocking=False) for _ in range(3)] == [True, True, False]

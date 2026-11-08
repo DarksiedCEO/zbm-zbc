@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import os
 import re
 import socket
 import ssl
@@ -180,6 +181,19 @@ class _Budget(threading.local):
 
 
 _BUDGET = _Budget()
+# Name lookups in flight across the process (each on its own daemon thread, bounded by the fetch deadline): with every
+# slot taken a lookup is refused at once, never queued, so a hung resolver cannot pile up threads.
+DNS_WORKERS = 8
+_DNS_GATE = threading.BoundedSemaphore(DNS_WORKERS)
+
+
+def _reset_dns_gate_after_fork() -> None:
+    global _DNS_GATE
+    _DNS_GATE = threading.BoundedSemaphore(DNS_WORKERS)      # a forked child has none of the parent's DNS threads
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_dns_gate_after_fork)
 
 
 def _left(timeout: Optional[float], exc: type) -> Optional[float]:
@@ -364,10 +378,7 @@ class Fetcher:
         port = port or (443 if scheme == "https" else 80)
         if port not in self.ports:
             raise _Refused("REFUSED_PORT", "only the standard web ports are fetched")
-        try:
-            addrs = list(self.resolver(host, port))
-        except (OSError, UnicodeError, ValueError):
-            raise _Refused("DNS_FAILED", "the host does not resolve") from None
+        addrs = self._resolve(host, port)
         if not addrs:
             raise _Refused("DNS_FAILED", "the host does not resolve")
         bad = [a for a in addrs if not self.policy(host, a, port)]
@@ -375,6 +386,43 @@ class Fetcher:
             raise _Refused("REFUSED_ADDRESS", "the host resolves to a non-public address; refused (SSRF guard)")
         path = urlunsplit(("", "", parts.path or "/", parts.query, ""))
         return scheme, host, port, path, addrs
+
+    def _resolve(self, host: str, port: int) -> list:
+        """The resolver call INSIDE the current fetch's one deadline (round-3 review of PR 47, item 1; the same shape
+        as finance_client._Resolver): it runs on its own daemon thread under a slot of the process-wide DNS gate and is
+        waited for only for the time left, so a slow or hung resolver never carries a fetch (or its nested robots.txt
+        fetch, or a redirect hop) past twice the timeout. Late: TIMEOUT; every slot busy, failed or empty: DNS_FAILED
+        (fail closed). A hung lookup keeps its thread and slot until the system resolver gives up, never the fetch."""
+        deadline = _BUDGET.deadline
+        left = self.timeout_s if deadline is None else deadline - time.monotonic()
+        if left <= 0:
+            raise _Refused("TIMEOUT", "the fetch deadline passed before the name was resolved")
+        gate = _DNS_GATE                      # the slot goes back to the gate it came from, whatever replaces it
+        if not gate.acquire(blocking=False):
+            raise _Refused("DNS_FAILED", "every DNS worker is busy")
+        box: dict = {}
+        done = threading.Event()
+        resolve = self.resolver
+
+        def work() -> None:
+            try:
+                box["addrs"] = list(resolve(host, port))
+            except BaseException as exc:  # noqa: BLE001 - reported to the waiting fetch as DNS_FAILED
+                box["error"] = exc
+            finally:
+                gate.release()
+                done.set()
+
+        try:
+            threading.Thread(target=work, name="seo-fetch-dns", daemon=True).start()
+        except BaseException:
+            gate.release()
+            raise _Refused("DNS_FAILED", "could not start a DNS lookup") from None
+        if not done.wait(left):
+            raise _Refused("TIMEOUT", "the host did not resolve within the fetch deadline")
+        if "error" in box:
+            raise _Refused("DNS_FAILED", "the host does not resolve")
+        return box["addrs"]
 
     # ------------------------------------------------------------------ one request (no redirects)
 

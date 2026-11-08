@@ -20,6 +20,7 @@ import re
 from typing import Optional
 from urllib.parse import unquote, urlsplit
 
+from agents import delia as delia_mod
 from agents import CRAWL_DELAY_CAP, DEADLINE_REASON, GONE_STATUSES, DeadlineReached, bots, host_of, split_url
 from agents.prompt_guard import personal_data
 from envelope import envelope, finding
@@ -172,8 +173,9 @@ _DISCOVERY_SKIP_SEGMENTS = frozenset({
     "register", "password", "passwd", "unsubscribe", "cart", "checkout", "basket", "admin", "administrator",
     "wp-admin", "wp-login", "wp-json", "xmlrpc", "account", "accounts", "myaccount", "my-account", "delete",
     "destroy", "api", "graphql", "cgi-bin", "cdn-cgi", "auth", "oauth"})
-REQUESTS_PER_PAGE = 3                  # crawler, browser comparison, repeat (the most one page costs)
-DELIA_RESERVE_REQUESTS = 12            # sitemaps (up to 1 + 10 children) and llms.txt, kept free of discovery
+# the most one page costs: our crawler, its canonical target, the browser comparison, the repeat request
+REQUESTS_PER_PAGE = 4
+DELIA_RESERVE_REQUESTS = delia_mod.MAX_REQUESTS   # Delia's true maximum, kept free of discovery
 DISCOVERY_TIME_BUDGET_S = 120.0        # discovered pages stop once the next could take the audit past this
 _DISCOVERY_PATH = re.compile(r"/[\x21-\x7e]{0,500}")
 

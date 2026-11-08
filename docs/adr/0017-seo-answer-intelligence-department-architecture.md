@@ -1378,9 +1378,17 @@ CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch 
      more than half of `SEO_AUDIT_DEADLINE_SECONDS` (the error names both). Work the deadline cut is recorded per kind in
      Selene's `deadline_cut` facts (comparisons, canonical checks, discovered pages): comparisons or canonical checks
      cut make the crawlability area PARTIAL with `AUDIT_DEADLINE`, discovered pages cut leave it OK (optional scope),
-     and the report names each cut as "Cut short by the audit time limit". Discovery reserves Delia's 12 requests at
+     and the report names each cut as "Cut short by the audit time limit". Discovery reserves Delia's maximum requests (`delia.MAX_REQUESTS`, 21: up to 10 declared sitemaps, 10 index
+     children and llms.txt; a page costs at most 4: crawler, canonical target, browser comparison, repeat) at
      the larger of the politeness wait and the slowest response seen so far, plus one worst-case fetch, so on a slow
      site fewer pages are discovered instead of Delia being cut; if still short, Delia is PARTIAL `AUDIT_DEADLINE`.
+   - **Round-3 review of ed79935, closed.** Name resolution is inside each fetch's one deadline
+     (`primitives/fetch.py` `Fetcher._resolve`, the shape of `finance_client._Resolver`): the resolver runs on a daemon
+     thread under a process-wide gate of `DNS_WORKERS` (8) slots and is waited for only for the time left, so a slow
+     or hung resolver on any hop or nested robots.txt fetch ends that fetch as `TIMEOUT` within twice the timeout
+     (every slot busy: `DNS_FAILED` at once; a slot always returns to the gate it was taken from). Delia's reserve is
+     `delia.MAX_REQUESTS` = 2 x `MAX_CHILDREN` + 1 = 21; Selene's `REQUESTS_PER_PAGE` is 4 (the canonical check
+     included).
 
 ## Unlock list
 
