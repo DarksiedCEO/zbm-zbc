@@ -1,0 +1,572 @@
+{
+ "_doc": "Licence texts of the code linked into the vendored restic binary, pinned for devtools/third_party_notices.py: upstream repository, the tag / pseudo-version ref, the immutable commit it resolved to (ls-remote, peeled tag), the licence file and its sha256. collect refuses an unpinned module and verifies every fetched text against its sha256. (The module zips are identified by the h1 go.sum hashes that `go version -m` prints; proxy.golang.org was not reachable from the recording box, so the texts are pinned by commit + sha256 instead of being read from the h1-verified module zip.)",
+ "pins": {
+  "cloud.google.com/go/auth/oauth2adapt@v0.2.8": {
+   "repo": "googleapis/google-cloud-go",
+   "ref": "auth/oauth2adapt/v0.2.8",
+   "commit": "7e600b964c1cae3ba47fc7d1d340a536723d18cb",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "cloud.google.com/go/auth@v0.20.0": {
+   "repo": "googleapis/google-cloud-go",
+   "ref": "auth/v0.20.0",
+   "commit": "9886dcff5240f37ff21e26c7462325f3c1cfafc8",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "cloud.google.com/go/compute/metadata@v0.9.0": {
+   "repo": "googleapis/google-cloud-go",
+   "ref": "compute/metadata/v0.9.0",
+   "commit": "7b2365446764b0bba37198a55644954b437bddd0",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "cloud.google.com/go/iam@v1.7.0": {
+   "repo": "googleapis/google-cloud-go",
+   "ref": "iam/v1.7.0",
+   "commit": "54d941a9a3f5177b37915f89084e4ba7ed3dae6a",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "cloud.google.com/go/monitoring@v1.24.3": {
+   "repo": "googleapis/google-cloud-go",
+   "ref": "monitoring/v1.24.3",
+   "commit": "bf00b9db931a52688d14eb44d4fdf4443338dc9a",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "cloud.google.com/go/storage@v1.62.2": {
+   "repo": "googleapis/google-cloud-go",
+   "ref": "storage/v1.62.2",
+   "commit": "50a575507ac6f3bdcc926dceda45cfa4c943a637",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "cloud.google.com/go@v0.123.0": {
+   "repo": "googleapis/google-cloud-go",
+   "ref": "v0.123.0",
+   "commit": "4e8373586a5e48c18fbfd4bb0a3e259184e49a91",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/Azure/azure-sdk-for-go/sdk/azcore@v1.21.1": {
+   "repo": "Azure/azure-sdk-for-go",
+   "ref": "sdk/azcore/v1.21.1",
+   "commit": "63e4ba18204b0df554e330df8f85662e653e67ab",
+   "file": "LICENSE.txt",
+   "sha256": "99bc3308d3b5f2018c5d7af9239548c6853a01f08db0a1d9247d16be647c5658"
+  },
+  "github.com/Azure/azure-sdk-for-go/sdk/azidentity@v1.13.1": {
+   "repo": "Azure/azure-sdk-for-go",
+   "ref": "sdk/azidentity/v1.13.1",
+   "commit": "6bb9b03b237d03bcfd0b32f0ca5e1b989d74e5e8",
+   "file": "LICENSE.txt",
+   "sha256": "99bc3308d3b5f2018c5d7af9239548c6853a01f08db0a1d9247d16be647c5658"
+  },
+  "github.com/Azure/azure-sdk-for-go/sdk/internal@v1.12.0": {
+   "repo": "Azure/azure-sdk-for-go",
+   "ref": "sdk/internal/v1.12.0",
+   "commit": "923e9ab9f2a22b972491f548aa1d7e3d07729408",
+   "file": "LICENSE.txt",
+   "sha256": "99bc3308d3b5f2018c5d7af9239548c6853a01f08db0a1d9247d16be647c5658"
+  },
+  "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob@v1.7.0": {
+   "repo": "Azure/azure-sdk-for-go",
+   "ref": "sdk/storage/azblob/v1.7.0",
+   "commit": "0f51900c065ecca4799e1ba4f9aeb411ded0511a",
+   "file": "LICENSE.txt",
+   "sha256": "99bc3308d3b5f2018c5d7af9239548c6853a01f08db0a1d9247d16be647c5658"
+  },
+  "github.com/AzureAD/microsoft-authentication-library-for-go@v1.7.2": {
+   "repo": "AzureAD/microsoft-authentication-library-for-go",
+   "ref": "v1.7.2",
+   "commit": "d5e404bd23e59293b8fb38c2f5066fd4a67eccc2",
+   "file": "LICENSE",
+   "sha256": "9906940f61b1f0b533fa7d99baf55178b2808fbe113ea51dfbfad8572ccd5f2b"
+  },
+  "github.com/Backblaze/blazer@v0.7.2": {
+   "repo": "Backblaze/blazer",
+   "ref": "v0.7.2",
+   "commit": "ff5c6977be7c42256308169462b9d6580a8bec86",
+   "file": "LICENSE",
+   "sha256": "e2851ee2c9388d5f19a5bed780dfdc16ec860909545b092a399d4ef73a81b7f7"
+  },
+  "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp@v1.31.0": {
+   "repo": "GoogleCloudPlatform/opentelemetry-operations-go",
+   "ref": "detectors/gcp/v1.31.0",
+   "commit": "316927bd0033e82948538685629172bcc6213562",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric@v0.55.0": {
+   "repo": "GoogleCloudPlatform/opentelemetry-operations-go",
+   "ref": "exporter/metric/v0.55.0",
+   "commit": "316927bd0033e82948538685629172bcc6213562",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping@v0.55.0": {
+   "repo": "GoogleCloudPlatform/opentelemetry-operations-go",
+   "ref": "internal/resourcemapping/v0.55.0",
+   "commit": "316927bd0033e82948538685629172bcc6213562",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/anacrolix/fuse@v0.3.1": {
+   "repo": "anacrolix/fuse",
+   "ref": "v0.3.1",
+   "commit": "e4651fbc304dedafa99ae7779d77e52db229565e",
+   "file": "LICENSE",
+   "sha256": "89200a888c16adac0bf570a9e874e0470bb1dd16f57d261d218e9aeb424de355"
+  },
+  "github.com/cenkalti/backoff/v4@v4.3.0": {
+   "repo": "cenkalti/backoff",
+   "ref": "v4.3.0",
+   "commit": "720b78985a65c0452fd37bb155c7cac4157a7c45",
+   "file": "LICENSE",
+   "sha256": "5c0476add4c38b55d0ed5ac11b85e00c38f26e1caee20dfe3ab58190103d1fbc"
+  },
+  "github.com/cespare/xxhash/v2@v2.3.0": {
+   "repo": "cespare/xxhash",
+   "ref": "v2.3.0",
+   "commit": "998dce232f17418a7a5721ecf87ca714025a3243",
+   "file": "LICENSE.txt",
+   "sha256": "f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c"
+  },
+  "github.com/cpuguy83/go-md2man/v2@v2.0.6": {
+   "repo": "cpuguy83/go-md2man",
+   "ref": "v2.0.6",
+   "commit": "441631534462b74c098953dbd8d5f6210994b0bf",
+   "file": "LICENSE.md",
+   "sha256": "a55959c4e3e8917bfa857359bb641115336276a6cc97408fd8197e079fb18470"
+  },
+  "github.com/dustin/go-humanize@v1.0.1": {
+   "repo": "dustin/go-humanize",
+   "ref": "v1.0.1",
+   "commit": "9ec74ab2f7a7161664182fd4e5e292fccffbc75f",
+   "file": "LICENSE",
+   "sha256": "a973b4498c13eb74baa2a8e5c351426a6826f2fcdd909916dbe53ee2e755fd71"
+  },
+  "github.com/elithrar/simple-scrypt@v1.4.1": {
+   "repo": "elithrar/simple-scrypt",
+   "ref": "v1.4.1",
+   "commit": "3b9f1a22960983f7009dbaa6efa0d39f953af8be",
+   "file": "LICENSE",
+   "sha256": "14f774fccaf6cbffbfcdd8c10f5929d2cb0bb04a90c7845ab99920ada440dc50"
+  },
+  "github.com/felixge/httpsnoop@v1.0.4": {
+   "repo": "felixge/httpsnoop",
+   "ref": "v1.0.4",
+   "commit": "c5817c27ec125409c069052fdd171023c353501c",
+   "file": "LICENSE.txt",
+   "sha256": "8108e14b5cb2b6bcd51583d3849ef0c2b5c4de61758256c20308bc70d1775dbb"
+  },
+  "github.com/go-ini/ini@v1.67.0": {
+   "repo": "go-ini/ini",
+   "ref": "v1.67.0",
+   "commit": "b2f570e5b5b844226bbefe6fb521d891f529a951",
+   "file": "LICENSE",
+   "sha256": "f6918bd93ffe07f4b2c61b8287c32cb3122e08aed0be50f1c7d0eddc87877a8f"
+  },
+  "github.com/go-logr/logr@v1.4.3": {
+   "repo": "go-logr/logr",
+   "ref": "v1.4.3",
+   "commit": "38a1c47ef633fa6b2eee6b8f2e1371ba8626e557",
+   "file": "LICENSE",
+   "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+  },
+  "github.com/go-logr/stdr@v1.2.2": {
+   "repo": "go-logr/stdr",
+   "ref": "v1.2.2",
+   "commit": "521af2addfa7c81c8a65d0e85ed34bb6bb6dc262",
+   "file": "LICENSE",
+   "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  "github.com/golang-jwt/jwt/v5@v5.3.1": {
+   "repo": "golang-jwt/jwt",
+   "ref": "v5.3.1",
+   "commit": "7ceae619e739dc8a7bf577214aa8ebf26668e9db",
+   "file": "LICENSE",
+   "sha256": "fe26ca41577b9b2b4448050a24b25e5753af66b5d5945d5d36094e7790bfcb2f"
+  },
+  "github.com/google/s2a-go@v0.1.9": {
+   "repo": "google/s2a-go",
+   "ref": "v0.1.9",
+   "commit": "b293be1aa7a6e6e4565f9967c093dd412253b267",
+   "file": "LICENSE.md",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/google/uuid@v1.6.0": {
+   "repo": "google/uuid",
+   "ref": "v1.6.0",
+   "commit": "0f11ee6918f41a04c201eceeadf612a377bc7fbc",
+   "file": "LICENSE",
+   "sha256": "0a8d61ed3cbfd5312326e8126c31ce9c627a283adc99131b56896d29ada04b2d"
+  },
+  "github.com/googleapis/enterprise-certificate-proxy@v0.3.16": {
+   "repo": "googleapis/enterprise-certificate-proxy",
+   "ref": "v0.3.16",
+   "commit": "dda839f9206feca5d906e4a36a7d08714c6f767b",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/googleapis/gax-go/v2@v2.22.0": {
+   "repo": "googleapis/gax-go",
+   "ref": "v2.22.0",
+   "commit": "1cdb1c1716745c77ec8538923d1c5b9ff0c1a02c",
+   "file": "LICENSE",
+   "sha256": "b95218cd9607855a6536384c0262922b30a0c2bf56e4ced790240f3a3bac4722"
+  },
+  "github.com/hashicorp/golang-lru/v2@v2.0.7": {
+   "repo": "hashicorp/golang-lru",
+   "ref": "v2.0.7",
+   "commit": "d8515860cebc7b25ff2d29fada3f10a43611c28b",
+   "file": "LICENSE",
+   "sha256": "6c7088eb877b5d7e6e0e9d27e822ea25fcda2e83f9eba59bb5f1418a656796e0"
+  },
+  "github.com/klauspost/compress@v1.18.6": {
+   "repo": "klauspost/compress",
+   "ref": "v1.18.6",
+   "commit": "ac2f5e87a3089bd58c974ca53cef71c7aa8bf877",
+   "file": "LICENSE",
+   "sha256": "0d9e582ee4bff57bf1189c9e514e6da7ce277f9cd3bc2d488b22fbb39a6d87cf"
+  },
+  "github.com/klauspost/cpuid/v2@v2.2.11": {
+   "repo": "klauspost/cpuid",
+   "ref": "v2.2.11",
+   "commit": "02ba1229f12f8ddd79ea520368e1c4028c21a51d",
+   "file": "LICENSE",
+   "sha256": "5d966570d7a442d4e969892860a914e542c97f262c873baee8f0aa48e1f40212"
+  },
+  "github.com/klauspost/crc32@v1.3.0": {
+   "repo": "klauspost/crc32",
+   "ref": "v1.3.0",
+   "commit": "8d0d1a33e57d58da16a93151b564849cbff783d5",
+   "file": "LICENSE",
+   "sha256": "dd26a7abddd02e2d0aba97805b31f248ef7835d9e10da289b22e3b8ab78b324d"
+  },
+  "github.com/kr/fs@v0.1.0": {
+   "repo": "kr/fs",
+   "ref": "v0.1.0",
+   "commit": "1455def202f6e05b95cc7bfc7e8ae67ae5141eba",
+   "file": "LICENSE",
+   "sha256": "dd26a7abddd02e2d0aba97805b31f248ef7835d9e10da289b22e3b8ab78b324d"
+  },
+  "github.com/kylelemons/godebug@v1.1.0": {
+   "repo": "kylelemons/godebug",
+   "ref": "v1.1.0",
+   "commit": "9ff306d4fbead574800b66369df5b6144732d58e",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/minio/crc64nvme@v1.1.1": {
+   "repo": "minio/crc64nvme",
+   "ref": "v1.1.1",
+   "commit": "cc422c7b1355e33091486ab1e6d461aba6fcaf69",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/minio/md5-simd@v1.1.2": {
+   "repo": "minio/md5-simd",
+   "ref": "v1.1.2",
+   "commit": "776275e0c9a74ceebbd50fe5c1d61b0c80c608df",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/minio/minio-go/v7@v7.1.0": {
+   "repo": "minio/minio-go",
+   "ref": "v7.1.0",
+   "commit": "f29e5687f3234ca088afedc03f4096ea50d4e10b",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "github.com/ncw/swift/v2@v2.0.5": {
+   "repo": "ncw/swift",
+   "ref": "v2.0.5",
+   "commit": "3ff07f8f0968c964c685bc53f57cb5c57a3cae61",
+   "file": "COPYING",
+   "sha256": "8cd2e9e750b90a04b7d82dbbca3930c696ae0309d7c10464f90a44f45754cd04"
+  },
+  "github.com/peterbourgon/unixtransport@v0.0.7": {
+   "repo": "peterbourgon/unixtransport",
+   "ref": "v0.0.7",
+   "commit": "6a496cab3b78d81d4f14c875035bb64d4fc0e80b",
+   "file": "LICENSE",
+   "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  "github.com/philhofer/fwd@v1.2.0": {
+   "repo": "philhofer/fwd",
+   "ref": "v1.2.0",
+   "commit": "20a13a1f6b7cb47a126dcb75152e21e1383bbaba",
+   "file": "LICENSE.md",
+   "sha256": "430da36bd967b28fc662f05e9245306da10941e93911052114a20ef10e4410f8"
+  },
+  "github.com/pkg/browser@v0.0.0-20240102092130-5ac0b6a4141c": {
+   "repo": "pkg/browser",
+   "ref": "5ac0b6a4141c",
+   "commit": "5ac0b6a4141c",
+   "file": "LICENSE",
+   "sha256": "4801bb0c5d70b980b3e1f63d1d2df8d84fec22548e3d73f03a68df1fb808791f"
+  },
+  "github.com/pkg/errors@v0.9.1": {
+   "repo": "pkg/errors",
+   "ref": "v0.9.1",
+   "commit": "614d223910a179a466c1767a985424175c39b465",
+   "file": "LICENSE",
+   "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
+  },
+  "github.com/pkg/sftp@v1.13.10": {
+   "repo": "pkg/sftp",
+   "ref": "v1.13.10",
+   "commit": "939b20346433320aab08dfb0f175db0742304cf5",
+   "file": "LICENSE",
+   "sha256": "f5b5087b8e596d015cfea7db26527fe67a196c18ca37415c288dd2534ff74c37"
+  },
+  "github.com/pkg/xattr@v0.4.12": {
+   "repo": "pkg/xattr",
+   "ref": "v0.4.12",
+   "commit": "05b05ed74197ab4456166d9cec4cd868a1a05f35",
+   "file": "LICENSE",
+   "sha256": "2c71fbccf236906a9961d375625a08dc696c112a7ebcfbfd32900e80f8ecaa51"
+  },
+  "github.com/restic/chunker@v0.4.0": {
+   "repo": "restic/chunker",
+   "ref": "v0.4.0",
+   "commit": "4d3a0aa01a2ab1977ae75416443e447a5d00ccde",
+   "file": "LICENSE",
+   "sha256": "9b64cd6b7a148c520b819db0f25a6fc168e25421161be9cb0383a02a2466dc50"
+  },
+  "github.com/restic/restic@v0.19.1": {
+   "repo": "restic/restic",
+   "ref": "v0.19.1",
+   "commit": "6aa3a516ce654808a1f28f9fa21e9b7c8e6e90bf",
+   "file": "LICENSE",
+   "sha256": "6f08a01a9fab5b24e139a09f15cc24a73087c7bc09e3bacf099fdf2d767bf897"
+  },
+  "github.com/rs/xid@v1.6.0": {
+   "repo": "rs/xid",
+   "ref": "v1.6.0",
+   "commit": "7aed5a87c88ebb644e4e6d077f58147ac42f03b9",
+   "file": "LICENSE",
+   "sha256": "c480873f0ff2b7e2c539bdd84fb4da4178d8d02479c94924f7bffeafb7add358"
+  },
+  "github.com/russross/blackfriday/v2@v2.1.0": {
+   "repo": "russross/blackfriday",
+   "ref": "v2.1.0",
+   "commit": "4c9bf9512682b995722660a4196c0013228e2049",
+   "file": "LICENSE.txt",
+   "sha256": "75e1ca97a84a9da6051dee0114333388216f2c4a5a028296b882ff3d57274735"
+  },
+  "github.com/spf13/cobra@v1.10.2": {
+   "repo": "spf13/cobra",
+   "ref": "v1.10.2",
+   "commit": "88b30ab89da2d0d0abb153818746c5a2d30eccec",
+   "file": "LICENSE.txt",
+   "sha256": "5e3400b93bbb099e83e52bab885e7441750673c21f97988ca3f1240639b63283"
+  },
+  "github.com/spf13/pflag@v1.0.10": {
+   "repo": "spf13/pflag",
+   "ref": "v1.0.10",
+   "commit": "0491e5702ad2bb108bc519a5221bcc0f52aa9564",
+   "file": "LICENSE",
+   "sha256": "b8514c577c1c4b46cee454d5a882b15fa411e72c5bd7f801f241591789fce61a"
+  },
+  "github.com/tinylib/msgp@v1.6.1": {
+   "repo": "tinylib/msgp",
+   "ref": "v1.6.1",
+   "commit": "332807098b528e40e5fca255bf0828eae29f42df",
+   "file": "LICENSE",
+   "sha256": "17df22e31ef6a84f70909eed5185f41443a03dd05b14e8dec319d5c2bd7d7b3b"
+  },
+  "github.com/zeebo/xxh3@v1.1.0": {
+   "repo": "zeebo/xxh3",
+   "ref": "v1.1.0",
+   "commit": "84cc04fc61771ea2a564c57277a19f83217a84ff",
+   "file": "LICENSE",
+   "sha256": "f19854b341534d1f2314c0c70d9cd2bb4fa1f7c86fffdc4444ca33cccce412ba"
+  },
+  "go.opentelemetry.io/auto/sdk@v1.2.1": {
+   "repo": "open-telemetry/opentelemetry-go-instrumentation",
+   "ref": "sdk/v1.2.1",
+   "commit": "715f58ce2f17e2176b8e53b871e47531a259cc1d",
+   "file": "LICENSE",
+   "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  "go.opentelemetry.io/contrib/detectors/gcp@v1.42.0": {
+   "repo": "open-telemetry/opentelemetry-go-contrib",
+   "ref": "detectors/gcp/v1.42.0",
+   "commit": "d8dabf67361a4619c353ad0637432f3d0d16ba63",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@v0.67.0": {
+   "repo": "open-telemetry/opentelemetry-go-contrib",
+   "ref": "instrumentation/google.golang.org/grpc/otelgrpc/v0.67.0",
+   "commit": "d8dabf67361a4619c353ad0637432f3d0d16ba63",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@v0.67.0": {
+   "repo": "open-telemetry/opentelemetry-go-contrib",
+   "ref": "instrumentation/net/http/otelhttp/v0.67.0",
+   "commit": "d8dabf67361a4619c353ad0637432f3d0d16ba63",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.opentelemetry.io/otel/metric@v1.43.0": {
+   "repo": "open-telemetry/opentelemetry-go",
+   "ref": "metric/v1.43.0",
+   "commit": "9276201a64b623606e3eaa0d61ae8ee6d62756c0",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.opentelemetry.io/otel/sdk/metric@v1.43.0": {
+   "repo": "open-telemetry/opentelemetry-go",
+   "ref": "sdk/metric/v1.43.0",
+   "commit": "9276201a64b623606e3eaa0d61ae8ee6d62756c0",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.opentelemetry.io/otel/sdk@v1.43.0": {
+   "repo": "open-telemetry/opentelemetry-go",
+   "ref": "sdk/v1.43.0",
+   "commit": "9276201a64b623606e3eaa0d61ae8ee6d62756c0",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.opentelemetry.io/otel/trace@v1.43.0": {
+   "repo": "open-telemetry/opentelemetry-go",
+   "ref": "trace/v1.43.0",
+   "commit": "9276201a64b623606e3eaa0d61ae8ee6d62756c0",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.opentelemetry.io/otel@v1.43.0": {
+   "repo": "open-telemetry/opentelemetry-go",
+   "ref": "v1.43.0",
+   "commit": "9276201a64b623606e3eaa0d61ae8ee6d62756c0",
+   "file": "LICENSE",
+   "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40"
+  },
+  "go.uber.org/automaxprocs@v1.6.0": {
+   "repo": "uber-go/automaxprocs",
+   "ref": "v1.6.0",
+   "commit": "1ea14c35ce47a73089b824e504d1c92eeb61a5a6",
+   "file": "LICENSE",
+   "sha256": "5d7e88625cbc52ce4a5da7902d7afb09255635b5a60de640e202b1af943b9a19"
+  },
+  "go.yaml.in/yaml/v3@v3.0.4": {
+   "repo": "yaml/go-yaml",
+   "ref": "v3.0.4",
+   "commit": "c3552c15f996075a7634df5159d9161c67bf3d76",
+   "file": "LICENSE",
+   "sha256": "d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b"
+  },
+  "go@go1.26.4": {
+   "repo": "golang/go",
+   "ref": "go1.26.4",
+   "commit": "a9ce111d580581fb925ae88f125c69b7d93504ea",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/crypto@v0.52.0": {
+   "repo": "golang/crypto",
+   "ref": "v0.52.0",
+   "commit": "a1c0d9929856c8aba2b31f079340f00578eda803",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/net@v0.55.0": {
+   "repo": "golang/net",
+   "ref": "v0.55.0",
+   "commit": "7770ec48d03fec35e378665337b4faca93c38423",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/oauth2@v0.36.0": {
+   "repo": "golang/oauth2",
+   "ref": "v0.36.0",
+   "commit": "4d954e69a88d9e1ccb8439f8d5b6cbef230c4ef9",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/sync@v0.20.0": {
+   "repo": "golang/sync",
+   "ref": "v0.20.0",
+   "commit": "ec11c4a93de22cde2abe2bf74d70791033c2464c",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/sys@v0.45.0": {
+   "repo": "golang/sys",
+   "ref": "v0.45.0",
+   "commit": "397d5f80920585bc27433d878aba498d062f81e1",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/term@v0.43.0": {
+   "repo": "golang/term",
+   "ref": "v0.43.0",
+   "commit": "3c3e4855f7d2eb06c3e48933554add9ec6b599b5",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/text@v0.37.0": {
+   "repo": "golang/text",
+   "ref": "v0.37.0",
+   "commit": "3ef517e623a4bfc08d6457f87d73afda7af7d8e1",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "golang.org/x/time@v0.15.0": {
+   "repo": "golang/time",
+   "ref": "v0.15.0",
+   "commit": "812b343c8714c317b0dad633efa6d103e554c006",
+   "file": "LICENSE",
+   "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  },
+  "google.golang.org/api@v0.282.0": {
+   "repo": "googleapis/google-api-go-client",
+   "ref": "v0.282.0",
+   "commit": "60aebbd7406af09eb63866ff79f0dbd40cccecbb",
+   "file": "LICENSE",
+   "sha256": "110244b02140866ee37d17fa7449436a377ec3b85a481fbb208f4c87964382de"
+  },
+  "google.golang.org/genproto/googleapis/api@v0.0.0-20260401024825-9d38bb4040a9": {
+   "repo": "googleapis/go-genproto",
+   "ref": "9d38bb4040a9",
+   "commit": "9d38bb4040a9",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "google.golang.org/genproto/googleapis/rpc@v0.0.0-20260523011958-0a33c5d7ca68": {
+   "repo": "googleapis/go-genproto",
+   "ref": "0a33c5d7ca68",
+   "commit": "0a33c5d7ca68",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "google.golang.org/genproto@v0.0.0-20260319201613-d00831a3d3e7": {
+   "repo": "googleapis/go-genproto",
+   "ref": "d00831a3d3e7",
+   "commit": "d00831a3d3e7",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "google.golang.org/grpc@v1.81.1": {
+   "repo": "grpc/grpc-go",
+   "ref": "v1.81.1",
+   "commit": "caf0772c2bcb8bc15d43eb53448e921f34f0b7e8",
+   "file": "LICENSE",
+   "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "google.golang.org/protobuf@v1.36.11": {
+   "repo": "protocolbuffers/protobuf-go",
+   "ref": "v1.36.11",
+   "commit": "96a179180f0ad6bba9b1e7b6e38d0affb0168e9a",
+   "file": "LICENSE",
+   "sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20"
+  }
+ }
+}

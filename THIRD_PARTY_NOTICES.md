@@ -19,3 +19,13 @@ Licence policy (owner ruling 2026-11-08): permissive licences only (MIT, Apache-
 * MPL-2.0 components are listed with the source location of the covered files (MPL-2.0 §3.2); they are used unmodified.
 * The pypdfium2 wheel's `BUILD_LICENSES` (PDFium and its bundled libraries) and onnxruntime's `ThirdPartyNotices.txt` are reproduced in `third_party_notices/python-delivery.md`.
 * restic 0.19.1 is BSD-2-Clause; its linked Go modules and the Go runtime are listed in `third_party_notices/go-restic.md`.
+
+## Operating-system layer (not covered by the licence gate) — PENDING OWNER DECISION
+
+The gate and the tables above cover **application dependencies only** (the lockfiles and the vendored restic binary). Every image also contains its Debian base layer, which carries copyleft system packages that the application never links or modifies:
+
+* `python:3.12-slim` (all Python images, and the runtime stage of the ledger, orchestrator and stripe-gateway images): glibc (LGPL-2.1-or-later), bash, coreutils, dpkg, apt, tar, grep, sed, findutils, util-linux (GPL-2.0/GPL-3.0 family), plus permissive libraries (OpenSSL Apache-2.0, zlib, ...); CPython itself is PSF-2.0.
+* delivery-py image: apt installs `git` (GPL-2.0-only) and `ca-certificates`; the delivery sandbox image also installs `curl` (purged before the image is finished), `build-essential` (gcc, make, binutils, libc6-dev: GPL-3.0 family / LGPL), `pkg-config` and `libssl-dev`.
+* Build stages only (not in the shipped images): `rust:1.99.1-slim-bookworm`, `golang:1.27.3-bookworm`.
+
+Each Debian package's own licence is in the image at `/usr/share/doc/<package>/copyright`. **Carve-out PENDING OWNER DECISION** — recommended: allow unmodified OS/system packages from the distribution, used as-is through their normal interfaces (the 2026-11-08 ruling then binds the application layer, which must stay permissive). See docs/runbooks/dependency-ownership.md.

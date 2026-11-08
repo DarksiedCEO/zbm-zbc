@@ -364,7 +364,13 @@ def parse_go_mod_requires(text: str) -> list[Locked]:
 _SPDX_TOK = re.compile(r"\s*(\(|\)|AND\b|OR\b|WITH\b|[A-Za-z0-9.+\-:]+)")
 
 
-def _spdx_tokens(expr: str) -> list[str]:
+class MissingLicence(ValueError):
+    """A package with no licence value at all (None / empty): always an UNKNOWN-licence violation."""
+
+
+def _spdx_tokens(expr) -> list[str]:
+    if not isinstance(expr, str) or not expr.strip():
+        raise MissingLicence(f"missing licence value ({expr!r}): treated as UNKNOWN")
     expr = expr.replace("/", " OR ")             # legacy cargo "MIT/Apache-2.0"
     pos, out = 0, []
     while pos < len(expr):

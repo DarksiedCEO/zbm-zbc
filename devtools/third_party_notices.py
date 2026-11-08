@@ -36,6 +36,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import tomllib
 import urllib.error
 import urllib.request
 import zipfile
@@ -321,36 +322,63 @@ def collect_git_python(pkg: dict, cache: Path) -> dict:
 # Rust
 # --------------------------------------------------------------------------------------------------------------
 
+def _crate_bytes(name: str, version: str, checksum: str, cache: Path) -> bytes:
+    """The .crate exactly as Cargo.lock names it: the local cargo registry cache if present, else static.crates.io;
+    either way its sha256 must equal the lock's checksum (raises otherwise)."""
+    for d in sorted((Path.home() / ".cargo" / "registry" / "cache").glob("*")):
+        f = d / f"{name}-{version}.crate"
+        if f.is_file():
+            data = f.read_bytes()
+            if hashlib.sha256(data).hexdigest() != checksum:
+                raise RuntimeError(f"{f}: sha256 does not match the Cargo.lock checksum")
+            return data
+    return fetch_verified(f"https://static.crates.io/crates/{name}/{name}-{version}.crate", cache, sha256=checksum)
+
+
+def crate_declared(manifest_text: str, files: dict) -> tuple[str, str, str]:
+    """(spdx, raw, source) from a crate's own Cargo.toml `license` (the value `cargo metadata` reports)."""
+    pkg = tomllib.loads(manifest_text).get("package", {}) if manifest_text else {}
+    lic = pkg.get("license")
+    if isinstance(lic, str) and lic.strip():
+        return lic.replace("/", " OR "), lic, "Cargo.toml license"
+    lf = pkg.get("license-file")
+    if lf:
+        return (fingerprint("\n".join(files.values())) if files else "UNKNOWN"), f"license-file {lf}", "license-file"
+    return "UNKNOWN", "", "none"
+
+
 def collect_cargo(rel: str, cache: Path) -> list[dict]:
-    crate_dir = (REPO / rel).parent
-    proc = subprocess.run(["cargo", "metadata", "--format-version", "1", "--locked", "--offline"], cwd=crate_dir,
-                          capture_output=True, text=True, check=True)
-    meta = json.loads(proc.stdout)
-    members = set(meta["workspace_members"])
-    locked = {(p.name, p.version): p for p in L.parse_cargo_lock((REPO / rel).read_text())}
+    """Every registry crate in Cargo.lock, read from its .crate after verifying the sha256 against the lock's
+    checksum: the declared licence is the crate's own Cargo.toml `license` (what `cargo metadata` reports), the
+    texts are the licence files shipped inside the .crate."""
     out = []
-    for p in sorted(meta["packages"], key=lambda p: (p["name"], p["version"])):
-        if p["id"] in members:
+    for lk in sorted(L.parse_cargo_lock((REPO / rel).read_text()), key=lambda p: (p.name, p.version)):
+        if lk.source != "registry":
             continue
-        lk = locked.get((p["name"], p["version"]))
-        if lk is None:
-            raise RuntimeError(f"cargo metadata package {p['name']} {p['version']} not in {rel}")
-        root = Path(p["manifest_path"]).parent
-        # the registry-cache source must be the one the lock's checksum names: re-hash the .crate when cached
-        files = {}
-        for f in sorted(root.iterdir()):
-            if f.is_file() and LICENCE_FILE.match(f.name):
-                files[f"{p['name']}-{p['version']}/{f.name}"] = _text(f.read_bytes())
-        if p.get("license_file"):
-            lf = root / p["license_file"]
-            if lf.is_file():
-                files[f"{p['name']}-{p['version']}/{p['license_file']}"] = _text(lf.read_bytes())
-        lic = p.get("license") or ("UNKNOWN" if not files else fingerprint("\n".join(files.values())))
-        out.append({"name": p["name"], "version": p["version"], "licence": lic.replace("/", " OR "),
-                    "licence_raw": p.get("license") or f"license-file {p.get('license_file')}",
-                    "licence_source": "Cargo.toml license" if p.get("license") else "license-file",
-                    "artefact": f"{p['name']}-{p['version']}.crate", "artefact_sha256": lk.hashes[0] if lk.hashes else "",
-                    "homepage": p.get("repository") or p.get("homepage") or "", "files": files})
+        if not lk.hashes:
+            raise RuntimeError(f"{rel}: {lk.name} {lk.version} has no checksum")
+        tf = tarfile.open(fileobj=io.BytesIO(_crate_bytes(lk.name, lk.version, lk.hashes[0], cache)))
+        top = f"{lk.name}-{lk.version}"
+        files, manifest = {}, ""
+        for member in tf.getmembers():
+            parts = member.name.split("/")
+            if not member.isfile() or parts[0] != top:
+                continue
+            if len(parts) == 2 and parts[1] == "Cargo.toml":
+                manifest = tf.extractfile(member).read().decode("utf-8", errors="replace")
+            elif len(parts) == 2 and LICENCE_FILE.match(parts[1]):
+                files[f"{top}/{parts[1]}"] = _text(tf.extractfile(member).read())
+        pkg = tomllib.loads(manifest).get("package", {}) if manifest else {}
+        lf = pkg.get("license-file")
+        if lf and f"{top}/{lf}" not in files:
+            try:
+                files[f"{top}/{lf}"] = _text(tf.extractfile(f"{top}/{lf}").read())
+            except KeyError:
+                pass
+        spdx, raw, src = crate_declared(manifest, files)
+        out.append({"name": lk.name, "version": lk.version, "licence": spdx, "licence_raw": raw, "licence_source": src,
+                    "artefact": f"{top}.crate", "artefact_sha256": lk.hashes[0],
+                    "homepage": pkg.get("repository") or pkg.get("homepage") or "", "files": files})
     return out
 
 
@@ -435,46 +463,92 @@ def go_module_refs(module: str, version: str) -> tuple[str, list[str]]:
     return repo, refs
 
 
-def collect_restic(cache: Path) -> list[dict]:
+GO_PINS = LICENCES_DIR / "go-licence-pins.json"
+LICENCE_NAMES = ("LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "LICENCE")
+
+
+def _ls_remote(repo: str, ref: str) -> Optional[str]:
+    """The commit a tag names (peeled for annotated tags), via ls-remote; a 7-40 hex ref is already a commit."""
+    if re.fullmatch(r"[0-9a-f]{7,40}", ref):
+        return ref
+    out = subprocess.run(["git", "ls-remote", f"https://github.com/{repo}", f"refs/tags/{ref}", f"refs/tags/{ref}^{{}}"],
+                         capture_output=True, text=True, timeout=60).stdout
+    rows = {}
+    for line in out.splitlines():
+        if "\t" in line:
+            sha, name = line.split("\t", 1)
+            rows[name] = sha
+    return rows.get(f"refs/tags/{ref}^{{}}") or rows.get(f"refs/tags/{ref}")
+
+
+def pinned_licence_text(key: str, repo: str, refs: list, cache: Path, pins: dict, pin_new: bool) -> tuple:
+    """(text, "repo@commit/file") for an upstream licence text. A recorded pin in devtools/licences/go-licence-pins.json
+    (immutable commit + sha256 of the file) is fetched at that commit and verified; a key without a pin is an error
+    unless ``pin_new``, which resolves the tag to its commit, fetches the file at the commit and records the pin."""
+    pin = pins.get(key)
+    if pin:
+        url = f"https://raw.githubusercontent.com/{pin['repo']}/{pin['commit']}/{pin['file']}"
+        return _text(fetch_verified(url, cache, sha256=pin["sha256"])), f"{pin['repo']}@{pin['commit']}/{pin['file']}"
+    if not pin_new:
+        raise RuntimeError(f"no licence pin for {key} in devtools/licences/go-licence-pins.json; "
+                           "rerun `collect --pin-new` and review the new pins")
+    for ref in refs:
+        commit = _ls_remote(repo, ref)
+        if not commit:
+            continue
+        for fname in LICENCE_NAMES:
+            url = f"https://raw.githubusercontent.com/{repo}/{commit}/{fname}"
+            try:
+                data = _get(url)
+            except urllib.error.HTTPError:
+                continue
+            pins[key] = {"repo": repo, "ref": ref, "commit": commit, "file": fname,
+                         "sha256": hashlib.sha256(data).hexdigest()}
+            print(f"PINNED {key}: {repo}@{commit}/{fname}", file=sys.stderr)
+            return _text(fetch_verified(url, cache, sha256=pins[key]["sha256"])), f"{repo}@{commit}/{fname}"
+    raise RuntimeError(f"no LICENSE found for {key} at {repo} {refs}")
+
+
+def collect_restic(cache: Path, pin_new: bool = False) -> list[dict]:
     binary = REPO / "deploy" / "docker" / "maintenance" / "vendor" / "restic"
     manifest = L.load_json(REPO / "deploy" / "docker" / "maintenance" / "binary-manifest.json")
     if hashlib.sha256(binary.read_bytes()).hexdigest() != manifest["sha256"]["restic"]:
         raise RuntimeError("vendored restic does not match binary-manifest.json")
     info = subprocess.run(["go", "version", "-m", str(binary)], capture_output=True, text=True, check=True).stdout
     go_version = info.splitlines()[0].split(": ", 1)[1].strip()
+    pins = L.load_json(GO_PINS)["pins"] if GO_PINS.exists() else {}
+    src = "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)"
     out = []
-    restic_lic = _text(fetch_verified(f"https://raw.githubusercontent.com/restic/restic/v{RESTIC_VERSION}/LICENSE", cache))
-    out.append({"name": "github.com/restic/restic", "version": f"v{RESTIC_VERSION}", "licence": fingerprint(restic_lic),
-                "licence_raw": "LICENSE", "licence_source": "upstream LICENSE at tag", "artefact": "restic binary",
+    text, used = pinned_licence_text(f"github.com/restic/restic@v{RESTIC_VERSION}", "restic/restic",
+                                     [f"v{RESTIC_VERSION}"], cache, pins, pin_new)
+    out.append({"name": "github.com/restic/restic", "version": f"v{RESTIC_VERSION}", "licence": fingerprint(text),
+                "licence_raw": used, "licence_source": src, "artefact": "restic binary",
                 "artefact_sha256": manifest["sha256"]["restic"], "homepage": "https://github.com/restic/restic",
-                "files": {f"restic@v{RESTIC_VERSION}/LICENSE": restic_lic}})
-    go_lic = _text(fetch_verified(f"https://raw.githubusercontent.com/golang/go/{go_version}/LICENSE", cache))
-    out.append({"name": "go (standard library and runtime)", "version": go_version, "licence": fingerprint(go_lic),
-                "licence_raw": "LICENSE", "licence_source": "upstream LICENSE at tag", "artefact": "linked into restic",
-                "homepage": "https://go.dev", "files": {f"go@{go_version}/LICENSE": go_lic}})
+                "files": {f"restic@v{RESTIC_VERSION}/LICENSE": text}})
+    text, used = pinned_licence_text(f"go@{go_version}", "golang/go", [go_version], cache, pins, pin_new)
+    out.append({"name": "go (standard library and runtime)", "version": go_version, "licence": fingerprint(text),
+                "licence_raw": used, "licence_source": src, "artefact": "linked into restic",
+                "homepage": "https://go.dev", "files": {f"go@{go_version}/LICENSE": text}})
     for line in info.splitlines():
         parts = line.split()
         if len(parts) < 3 or parts[0] != "dep":
             continue
         module, version = parts[1], parts[2]
         repo, refs = go_module_refs(module, version)
-        text, used = None, None
-        for ref in refs:
-            for fname in ("LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "LICENCE"):
-                try:
-                    text = _text(fetch_verified(f"https://raw.githubusercontent.com/{repo}/{ref}/{fname}", cache))
-                    used = f"{repo}@{ref}/{fname}"
-                    break
-                except urllib.error.HTTPError:
-                    continue
-            if text:
-                break
-        if text is None:
-            raise RuntimeError(f"no LICENSE found for {module} {version} at {repo} {refs}")
+        text, used = pinned_licence_text(f"{module}@{version}", repo, refs, cache, pins, pin_new)
         out.append({"name": module, "version": version, "licence": fingerprint(text), "licence_raw": used,
-                    "licence_source": "upstream LICENSE text (fingerprinted)", "artefact": "linked into restic",
+                    "licence_source": src, "artefact": "linked into restic",
                     "go_sum": parts[3] if len(parts) > 3 else "", "homepage": f"https://github.com/{repo}",
                     "files": {f"{module}@{version}/{used.rsplit('/', 1)[-1]}": text}})
+    if pin_new:
+        GO_PINS.write_text(json.dumps({"_doc": (
+            "Licence texts of the code linked into the vendored restic binary, pinned for "
+            "devtools/third_party_notices.py: upstream repository, the tag / pseudo-version ref, the immutable commit "
+            "it resolved to (ls-remote, peeled tag), the licence file and its sha256. collect refuses an unpinned "
+            "module and verifies every fetched text against its sha256. (The module zips are identified by the h1 "
+            "go.sum hashes that `go version -m` prints; proxy.golang.org was not reachable from the recording box, so "
+            "the texts are pinned by commit + sha256 instead of being read from the h1-verified module zip.)"),
+            "pins": dict(sorted(pins.items()))}, indent=1) + "\n")
     return out
 
 
@@ -502,12 +576,20 @@ COMPONENTS = [
 ]
 
 
-def collect(cache: Path) -> None:
+def collect_component(kind: str, lock: Optional[str], cache: Path, pin_new: bool = False) -> list[dict]:
+    """Rows for one component, every artefact verified against its lock hash (also used by licence_gate.py
+    --verify-sources to re-derive each declared licence from the source of truth)."""
+    if kind == "restic":
+        return collect_restic(cache, pin_new)
+    fn = {"requirements": collect_requirements_lock, "uv": collect_uv_lock, "cargo": collect_cargo,
+          "npm": collect_npm}[kind]
+    return fn(lock, cache)
+
+
+def collect(cache: Path, pin_new: bool = False) -> None:
     cache.mkdir(parents=True, exist_ok=True)
     for cid, _title, lock, kind, _where in COMPONENTS:
-        fn = {"requirements": collect_requirements_lock, "uv": collect_uv_lock, "cargo": collect_cargo,
-              "npm": collect_npm}.get(kind)
-        rows = collect_restic(cache) if kind == "restic" else fn(lock, cache)
+        rows = collect_component(kind, lock, cache, pin_new)
         (cache / f"{cid}.json").write_text(json.dumps(rows, indent=1, sort_keys=True))
         print(f"{cid}: {len(rows)} packages", file=sys.stderr)
 
@@ -541,7 +623,8 @@ def render(cache: Path) -> None:
             r["status"] = (e or {}).get("status", "")
         inventory["components"][cid] = {
             "lockfile": lock, "kind": kind,
-            "packages": [{k: r[k] for k in ("name", "version", "licence", "licence_raw", "licence_source")
+            "packages": [{k: r[k] for k in ("name", "version", "licence", "licence_raw", "licence_source",
+                                            "artefact_sha256", "artefact_integrity")
                           if k in r} | ({"shipped": r["shipped"]} if "shipped" in r else {})
                          | ({"dev": r["dev"]} if r.get("dev") else {}) for r in rows]}
         counts: dict = {}
@@ -595,7 +678,24 @@ def render(cache: Path) -> None:
               "* The pypdfium2 wheel's `BUILD_LICENSES` (PDFium and its bundled libraries) and onnxruntime's "
               "`ThirdPartyNotices.txt` are reproduced in `third_party_notices/python-delivery.md`.",
               f"* restic {RESTIC_VERSION} is BSD-2-Clause; its linked Go modules and the Go runtime are listed in "
-              "`third_party_notices/go-restic.md`.", ""]
+              "`third_party_notices/go-restic.md`.", "",
+              "## Operating-system layer (not covered by the licence gate) — PENDING OWNER DECISION", "",
+              "The gate and the tables above cover **application dependencies only** (the lockfiles and the vendored "
+              "restic binary). Every image also contains its Debian base layer, which carries copyleft system "
+              "packages that the application never links or modifies:", "",
+              "* `python:3.12-slim` (all Python images, and the runtime stage of the ledger, orchestrator and "
+              "stripe-gateway images): glibc (LGPL-2.1-or-later), bash, coreutils, dpkg, apt, tar, grep, sed, "
+              "findutils, util-linux (GPL-2.0/GPL-3.0 family), plus permissive libraries (OpenSSL Apache-2.0, "
+              "zlib, ...); CPython itself is PSF-2.0.",
+              "* delivery-py image: apt installs `git` (GPL-2.0-only) and `ca-certificates`; the delivery sandbox "
+              "image also installs `curl` (purged before the image is finished), `build-essential` (gcc, make, "
+              "binutils, libc6-dev: GPL-3.0 family / LGPL), `pkg-config` and `libssl-dev`.",
+              "* Build stages only (not in the shipped images): `rust:1.99.1-slim-bookworm`, "
+              "`golang:1.27.3-bookworm`.", "",
+              "Each Debian package's own licence is in the image at `/usr/share/doc/<package>/copyright`. "
+              "**Carve-out PENDING OWNER DECISION** — recommended: allow unmodified OS/system packages from the "
+              "distribution, used as-is through their normal interfaces (the 2026-11-08 ruling then binds the "
+              "application layer, which must stay permissive). See docs/runbooks/dependency-ownership.md.", ""]
     NOTICES_INDEX.write_text("\n".join(index), encoding="utf-8")
     LICENCES_DIR.mkdir(exist_ok=True)
     INVENTORY.write_text(json.dumps(inventory, indent=1, sort_keys=True) + "\n", encoding="utf-8")
@@ -605,9 +705,11 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", choices=["collect", "render", "all"])
     ap.add_argument("--cache", required=True, type=Path, help="artefact cache directory (outside the repository)")
+    ap.add_argument("--pin-new", action="store_true",
+                    help="record commit + sha256 pins for Go licence texts not yet in devtools/licences/go-licence-pins.json")
     args = ap.parse_args(argv)
     if args.command in ("collect", "all"):
-        collect(args.cache)
+        collect(args.cache, args.pin_new)
     if args.command in ("render", "all"):
         render(args.cache)
     return 0

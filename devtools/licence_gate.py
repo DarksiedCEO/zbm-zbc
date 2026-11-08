@@ -17,7 +17,13 @@ What it checks, for every lockfile in the repository (devtools/licence_lib.py di
 4. none of policy 'forbidden_packages' is installable from any Python lock on any real platform;
 5. go.mod files have no more requires than reviewed; the vendored restic binary matches its manifest sha256 and,
    when a ``go`` toolchain is on PATH, its module list matches the inventory;
-6. no exceptions entry is stale (matches nothing, or is not needed).
+6. no exceptions entry is stale (matches nothing, or is not needed);
+7. the inventory agrees with the lockfiles themselves (offline, always): npm package-lock `license` == inventory
+   licence; every inventory row names an artefact hash the lock pins (sha256 / Cargo.lock checksum / npm integrity);
+8. with ``--verify-sources --cache <dir>``: every declared licence is re-derived from the hash-verified artefact
+   (wheel/sdist METADATA, the .crate's Cargo.toml — the `cargo metadata` value —, npm tarball, restic's pinned Go
+   licence texts) and must equal the inventory. CI should run this mode (it needs network for uncached artefacts).
+A package with no licence value at all is an explicit UNKNOWN-licence violation.
 
 How CI should call it: docs/runbooks/dependency-ownership.md, "CI wiring (for owner review)".
 """
@@ -56,8 +62,9 @@ class Result:
         return 0
 
 
-def locked_set(root: Path, comp: dict, policy: dict, res: Result, cid: str) -> set:
-    """(name, version) pairs the component's lockfile installs."""
+def locked_set(root: Path, comp: dict, policy: dict, res: Result, cid: str) -> dict:
+    """(name, version) -> what the lockfile itself records for the package: 'hashes' (the artefact hashes the lock
+    accepts) and, for npm, 'license' (package-lock's own licence field)."""
     kind, rel = comp["kind"], comp.get("lockfile")
     forbidden = {L.pep503(n) for n in policy["forbidden_packages"]["python"]}
     if kind == "requirements":
@@ -65,7 +72,7 @@ def locked_set(root: Path, comp: dict, policy: dict, res: Result, cid: str) -> s
         for it in items:
             if it.name in forbidden:
                 res.violations.append(f"{cid}: forbidden package {it.name}=={it.version} is pinned in {rel}")
-        return {(it.name, it.version) for it in items}
+        return {(it.name, it.version): {"hashes": {h.split(":", 1)[-1] for h in it.hashes}} for it in items}
     if kind == "uv":
         lock = L.UvLock.load((root / rel).read_text())
         reach = lock.reachable_any(L.REAL_ENVS, lock.dev_groups())
@@ -76,22 +83,31 @@ def locked_set(root: Path, comp: dict, policy: dict, res: Result, cid: str) -> s
                         f"{cid}: forbidden package {name}=={ver} is installable from {rel} on "
                         f"{env['sys_platform']}/{env['platform_machine']} python {env['python_full_version']}")
         roots = {(L.pep503(r["name"]), r.get("version", "")) for r in lock.roots}
-        return {k for k in reach if k not in roots}
+        out = {}
+        for k, pkg in reach.items():
+            if k in roots:
+                continue
+            arts = list(pkg.get("wheels", [])) + ([pkg["sdist"]] if "sdist" in pkg else [])
+            out[k] = {"hashes": {a["hash"].split(":", 1)[-1] for a in arts if a.get("hash")},
+                      "git": "git" in pkg.get("source", {})}
+        return out
     if kind == "cargo":
-        return {(p.name, p.version) for p in L.parse_cargo_lock((root / rel).read_text()) if p.source != "path"}
+        return {(p.name, p.version): {"hashes": set(p.hashes)}
+                for p in L.parse_cargo_lock((root / rel).read_text()) if p.source != "path"}
     if kind == "npm":
-        return {(p.name, p.version) for p in L.parse_package_lock((root / rel).read_text()) if p.source != "path"}
+        return {(p.name, p.version): {"hashes": set(p.hashes), "license": p.extra.get("license")}
+                for p in L.parse_package_lock((root / rel).read_text()) if p.source != "path"}
     if kind == "gomod":
         reqs = L.parse_go_mod_requires((root / rel).read_text())
         if len(reqs) > comp.get("max_requires", 0):
             res.violations.append(f"{cid}: {rel} has {len(reqs)} require(s) ({', '.join(r.name for r in reqs)}); "
                                   f"reviewed maximum is {comp.get('max_requires', 0)} — add a licence review first")
-        return set()
+        return {}
     if kind == "restic":
         binary, manifest = root / comp["binary"], L.load_json(root / comp["manifest"])
         if hashlib.sha256(binary.read_bytes()).hexdigest() != manifest["sha256"]["restic"]:
             res.violations.append(f"{cid}: {comp['binary']} sha256 does not match {comp['manifest']}")
-        return set()
+        return {}
     raise ValueError(f"unknown component kind {kind!r}")
 
 
@@ -105,8 +121,58 @@ def restic_modules(root: Path, comp: dict) -> set | None:
     return mods | {("go (standard library and runtime)", first)}
 
 
+def cross_check_lock(cid: str, kind: str, locked: dict, inv_pkgs: dict, res: Result) -> None:
+    """Offline: the inventory must agree with what the lockfile itself records. npm: package-lock's own `license`
+    field must equal the inventory licence. Every ecosystem: the artefact the inventory read its licence from must be
+    one the lock pins (sha256 among the lock's hashes / the Cargo.lock checksum / the npm integrity), so an inventory
+    row cannot describe a different file than the one that is installed."""
+    for key, pkg in sorted(inv_pkgs.items()):
+        lk = locked.get(key)
+        if lk is None:
+            continue
+        who = f"{cid}: {pkg['name']}=={key[1]}"
+        if kind == "npm":
+            lock_lic = lk.get("license")
+            if not isinstance(lock_lic, str) or not lock_lic.strip():
+                res.violations.append(f"{who}: package-lock.json has no license field — UNKNOWN licence")
+            elif lock_lic != pkg.get("licence"):
+                res.violations.append(f"{who}: inventory licence {pkg.get('licence')!r} differs from package-lock.json "
+                                      f"license {lock_lic!r} (the lock is the source of truth; regenerate the inventory)")
+            if pkg.get("artefact_integrity") not in lk["hashes"]:
+                res.violations.append(f"{who}: inventory artefact integrity is not the lock's integrity")
+        elif kind in ("requirements", "uv", "cargo"):
+            if lk.get("git"):
+                continue                         # git-sourced: bound by commit in the lock (deer-flow; sha256 of LICENSE)
+            if pkg.get("artefact_sha256") not in lk["hashes"]:
+                res.violations.append(f"{who}: inventory artefact sha256 {pkg.get('artefact_sha256')!r} is not one the "
+                                      "lock pins (regenerate the inventory from the hash-verified artefacts)")
+
+
+def verify_sources(cid: str, comp: dict, inv_pkgs: dict, cache: Path, res: Result) -> None:
+    """--verify-sources: re-derive every declared licence from the source of truth — the hash-verified artefact
+    (wheel/sdist METADATA License-Expression / License / classifiers; the .crate's Cargo.toml `license`, which is
+    what `cargo metadata` reports; the npm tarball against package-lock's `license`; restic's Go licence texts at
+    their pinned commit + sha256) — and fail on any difference from the inventory."""
+    import third_party_notices as T
+    try:
+        fresh = T.collect_component(comp["kind"], comp.get("lockfile"), cache)
+    except Exception as exc:                              # noqa: BLE001 — any failure to verify is a violation
+        res.violations.append(f"{cid}: cannot verify sources: {exc}")
+        return
+    key = (lambda r: (r["name"], r["version"])) if comp["kind"] in ("npm", "cargo", "restic") else \
+        (lambda r: (L.pep503(r["name"]), r["version"]))
+    fresh_map = {key(r): r for r in fresh}
+    for k, pkg in sorted(inv_pkgs.items()):
+        r = fresh_map.get(k)
+        if r is None:
+            res.violations.append(f"{cid}: {pkg['name']}=={k[1]}: not produced from the lock's artefacts")
+        elif r["licence"] != pkg.get("licence"):
+            res.violations.append(f"{cid}: {pkg['name']}=={k[1]}: inventory licence {pkg.get('licence')!r} differs from "
+                                  f"the hash-verified artefact's declared licence {r['licence']!r}")
+
+
 def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path: Path = DEFAULT_EXCEPTIONS,
-        inventory_path: Path = DEFAULT_INVENTORY) -> Result:
+        inventory_path: Path = DEFAULT_INVENTORY, verify_cache: Path | None = None) -> Result:
     policy = L.load_json(policy_path)
     exceptions = L.load_json(exceptions_path)["exceptions"]
     inventory = L.load_json(inventory_path)["components"]
@@ -153,18 +219,25 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
                                                              for p in inv["packages"] if p["name"] == "github.com/restic/restic"}:
                 res.violations.append(f"{cid}: restic module list differs from the inventory (regenerate it)")
         else:
-            for k in sorted(locked - set(inv_pkgs)):
+            for k in sorted(set(locked) - set(inv_pkgs)):
                 res.violations.append(f"{cid}: {k[0]}=={k[1]} is locked but not in the inventory (regenerate it)")
-            for k in sorted(set(inv_pkgs) - locked):
+            for k in sorted(set(inv_pkgs) - set(locked)):
                 res.violations.append(f"{cid}: {k[0]}=={k[1]} is in the inventory but no longer locked (regenerate it)")
         res.checked[cid] = len(inv_pkgs)
+        cross_check_lock(cid, comp["kind"], locked, inv_pkgs, res)
+        if verify_cache is not None:
+            verify_sources(cid, comp, inv_pkgs, verify_cache, res)
         for (name, ver), pkg in sorted(inv_pkgs.items()):
             entry = exc_index.get((cid, pkg["name"], ver)) or exc_index.get((cid, name, ver))
-            expr = (entry or {}).get("licence") or pkg["licence"]
+            expr = (entry or {}).get("licence") or pkg.get("licence")
             label = f"{cid}: {pkg['name']}=={ver} [{expr}]"
             try:
                 ok_plain = L.spdx_satisfied(expr, allowed, allowed_exc)
                 ok_flag = L.spdx_satisfied(expr, allowed | flagged, allowed_exc)
+            except L.MissingLicence:
+                res.violations.append(f"{cid}: {pkg['name']}=={ver}: no licence value in the inventory — UNKNOWN "
+                                      "licence (regenerate the inventory, or add a reviewed-metadata exception)")
+                continue
             except ValueError:
                 ok_plain = ok_flag = False
             status = (entry or {}).get("status")
@@ -195,8 +268,13 @@ def main(argv: list[str]) -> int:
                     help="report pending-owner-decision entries but exit 0 (interim CI mode until the owner rules)")
     ap.add_argument("--json", type=Path, help="also write the report as JSON to this path")
     ap.add_argument("--root", type=Path, default=L.REPO)
+    ap.add_argument("--verify-sources", action="store_true",
+                    help="also re-derive every licence from the hash-verified artefacts (network for uncached ones)")
+    ap.add_argument("--cache", type=Path, help="artefact cache for --verify-sources (outside the repository)")
     args = ap.parse_args(argv)
-    res = run(args.root)
+    if args.verify_sources and not args.cache:
+        ap.error("--verify-sources needs --cache <dir>")
+    res = run(args.root, verify_cache=args.cache if args.verify_sources else None)
     for line in res.flagged:
         print(line)
     for line in res.pending:

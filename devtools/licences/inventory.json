@@ -6,569 +6,570 @@
    "lockfile": null,
    "packages": [
     {
+     "artefact_sha256": "20d4142678d0d95ec11a4759def1b73fd9190abc9ca19e4b62d067c0b387e639",
      "licence": "BSD-2-Clause",
-     "licence_raw": "LICENSE",
-     "licence_source": "upstream LICENSE at tag",
+     "licence_raw": "restic/restic@6aa3a516ce654808a1f28f9fa21e9b7c8e6e90bf/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/restic/restic",
      "version": "v0.19.1"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "LICENSE",
-     "licence_source": "upstream LICENSE at tag",
+     "licence_raw": "golang/go@a9ce111d580581fb925ae88f125c69b7d93504ea/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go (standard library and runtime)",
      "version": "go1.26.4"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/google-cloud-go@v0.123.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-cloud-go@4e8373586a5e48c18fbfd4bb0a3e259184e49a91/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "cloud.google.com/go",
      "version": "v0.123.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/google-cloud-go@auth/v0.20.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-cloud-go@9886dcff5240f37ff21e26c7462325f3c1cfafc8/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "cloud.google.com/go/auth",
      "version": "v0.20.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/google-cloud-go@auth/oauth2adapt/v0.2.8/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-cloud-go@7e600b964c1cae3ba47fc7d1d340a536723d18cb/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "cloud.google.com/go/auth/oauth2adapt",
      "version": "v0.2.8"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/google-cloud-go@compute/metadata/v0.9.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-cloud-go@7b2365446764b0bba37198a55644954b437bddd0/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "cloud.google.com/go/compute/metadata",
      "version": "v0.9.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/google-cloud-go@iam/v1.7.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-cloud-go@54d941a9a3f5177b37915f89084e4ba7ed3dae6a/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "cloud.google.com/go/iam",
      "version": "v1.7.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/google-cloud-go@monitoring/v1.24.3/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-cloud-go@bf00b9db931a52688d14eb44d4fdf4443338dc9a/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "cloud.google.com/go/monitoring",
      "version": "v1.24.3"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/google-cloud-go@storage/v1.62.2/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-cloud-go@50a575507ac6f3bdcc926dceda45cfa4c943a637/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "cloud.google.com/go/storage",
      "version": "v1.62.2"
     },
     {
      "licence": "MIT",
-     "licence_raw": "Azure/azure-sdk-for-go@sdk/azcore/v1.21.1/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "Azure/azure-sdk-for-go@63e4ba18204b0df554e330df8f85662e653e67ab/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/Azure/azure-sdk-for-go/sdk/azcore",
      "version": "v1.21.1"
     },
     {
      "licence": "MIT",
-     "licence_raw": "Azure/azure-sdk-for-go@sdk/azidentity/v1.13.1/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "Azure/azure-sdk-for-go@6bb9b03b237d03bcfd0b32f0ca5e1b989d74e5e8/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/Azure/azure-sdk-for-go/sdk/azidentity",
      "version": "v1.13.1"
     },
     {
      "licence": "MIT",
-     "licence_raw": "Azure/azure-sdk-for-go@sdk/internal/v1.12.0/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "Azure/azure-sdk-for-go@923e9ab9f2a22b972491f548aa1d7e3d07729408/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/Azure/azure-sdk-for-go/sdk/internal",
      "version": "v1.12.0"
     },
     {
      "licence": "MIT",
-     "licence_raw": "Azure/azure-sdk-for-go@sdk/storage/azblob/v1.7.0/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "Azure/azure-sdk-for-go@0f51900c065ecca4799e1ba4f9aeb411ded0511a/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob",
      "version": "v1.7.0"
     },
     {
      "licence": "MIT",
-     "licence_raw": "AzureAD/microsoft-authentication-library-for-go@v1.7.2/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "AzureAD/microsoft-authentication-library-for-go@d5e404bd23e59293b8fb38c2f5066fd4a67eccc2/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/AzureAD/microsoft-authentication-library-for-go",
      "version": "v1.7.2"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "Backblaze/blazer@v0.7.2/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "Backblaze/blazer@ff5c6977be7c42256308169462b9d6580a8bec86/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/Backblaze/blazer",
      "version": "v0.7.2"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "GoogleCloudPlatform/opentelemetry-operations-go@detectors/gcp/v1.31.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "GoogleCloudPlatform/opentelemetry-operations-go@316927bd0033e82948538685629172bcc6213562/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
      "version": "v1.31.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "GoogleCloudPlatform/opentelemetry-operations-go@exporter/metric/v0.55.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "GoogleCloudPlatform/opentelemetry-operations-go@316927bd0033e82948538685629172bcc6213562/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric",
      "version": "v0.55.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "GoogleCloudPlatform/opentelemetry-operations-go@internal/resourcemapping/v0.55.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "GoogleCloudPlatform/opentelemetry-operations-go@316927bd0033e82948538685629172bcc6213562/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping",
      "version": "v0.55.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "anacrolix/fuse@v0.3.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "anacrolix/fuse@e4651fbc304dedafa99ae7779d77e52db229565e/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/anacrolix/fuse",
      "version": "v0.3.1"
     },
     {
      "licence": "MIT",
-     "licence_raw": "cenkalti/backoff@v4.3.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "cenkalti/backoff@720b78985a65c0452fd37bb155c7cac4157a7c45/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/cenkalti/backoff/v4",
      "version": "v4.3.0"
     },
     {
      "licence": "MIT",
-     "licence_raw": "cespare/xxhash@v2.3.0/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "cespare/xxhash@998dce232f17418a7a5721ecf87ca714025a3243/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/cespare/xxhash/v2",
      "version": "v2.3.0"
     },
     {
      "licence": "MIT",
-     "licence_raw": "cpuguy83/go-md2man@v2.0.6/LICENSE.md",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "cpuguy83/go-md2man@441631534462b74c098953dbd8d5f6210994b0bf/LICENSE.md",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/cpuguy83/go-md2man/v2",
      "version": "v2.0.6"
     },
     {
      "licence": "MIT",
-     "licence_raw": "dustin/go-humanize@v1.0.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "dustin/go-humanize@9ec74ab2f7a7161664182fd4e5e292fccffbc75f/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/dustin/go-humanize",
      "version": "v1.0.1"
     },
     {
      "licence": "MIT",
-     "licence_raw": "elithrar/simple-scrypt@v1.4.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "elithrar/simple-scrypt@3b9f1a22960983f7009dbaa6efa0d39f953af8be/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/elithrar/simple-scrypt",
      "version": "v1.4.1"
     },
     {
      "licence": "MIT",
-     "licence_raw": "felixge/httpsnoop@v1.0.4/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "felixge/httpsnoop@c5817c27ec125409c069052fdd171023c353501c/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/felixge/httpsnoop",
      "version": "v1.0.4"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "go-ini/ini@v1.67.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "go-ini/ini@b2f570e5b5b844226bbefe6fb521d891f529a951/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/go-ini/ini",
      "version": "v1.67.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "go-logr/logr@v1.4.3/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "go-logr/logr@38a1c47ef633fa6b2eee6b8f2e1371ba8626e557/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/go-logr/logr",
      "version": "v1.4.3"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "go-logr/stdr@v1.2.2/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "go-logr/stdr@521af2addfa7c81c8a65d0e85ed34bb6bb6dc262/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/go-logr/stdr",
      "version": "v1.2.2"
     },
     {
      "licence": "MIT",
-     "licence_raw": "golang-jwt/jwt@v5.3.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang-jwt/jwt@7ceae619e739dc8a7bf577214aa8ebf26668e9db/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/golang-jwt/jwt/v5",
      "version": "v5.3.1"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "google/s2a-go@v0.1.9/LICENSE.md",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "google/s2a-go@b293be1aa7a6e6e4565f9967c093dd412253b267/LICENSE.md",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/google/s2a-go",
      "version": "v0.1.9"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "google/uuid@v1.6.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "google/uuid@0f11ee6918f41a04c201eceeadf612a377bc7fbc/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/google/uuid",
      "version": "v1.6.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "googleapis/enterprise-certificate-proxy@v0.3.16/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/enterprise-certificate-proxy@dda839f9206feca5d906e4a36a7d08714c6f767b/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/googleapis/enterprise-certificate-proxy",
      "version": "v0.3.16"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "googleapis/gax-go@v2.22.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/gax-go@1cdb1c1716745c77ec8538923d1c5b9ff0c1a02c/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/googleapis/gax-go/v2",
      "version": "v2.22.0"
     },
     {
      "licence": "MPL-2.0",
-     "licence_raw": "hashicorp/golang-lru@v2.0.7/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "hashicorp/golang-lru@d8515860cebc7b25ff2d29fada3f10a43611c28b/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/hashicorp/golang-lru/v2",
      "version": "v2.0.7"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "klauspost/compress@v1.18.6/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "klauspost/compress@ac2f5e87a3089bd58c974ca53cef71c7aa8bf877/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/klauspost/compress",
      "version": "v1.18.6"
     },
     {
      "licence": "MIT",
-     "licence_raw": "klauspost/cpuid@v2.2.11/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "klauspost/cpuid@02ba1229f12f8ddd79ea520368e1c4028c21a51d/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/klauspost/cpuid/v2",
      "version": "v2.2.11"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "klauspost/crc32@v1.3.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "klauspost/crc32@8d0d1a33e57d58da16a93151b564849cbff783d5/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/klauspost/crc32",
      "version": "v1.3.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "kr/fs@v0.1.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "kr/fs@1455def202f6e05b95cc7bfc7e8ae67ae5141eba/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/kr/fs",
      "version": "v0.1.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "kylelemons/godebug@v1.1.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "kylelemons/godebug@9ff306d4fbead574800b66369df5b6144732d58e/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/kylelemons/godebug",
      "version": "v1.1.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "minio/crc64nvme@v1.1.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "minio/crc64nvme@cc422c7b1355e33091486ab1e6d461aba6fcaf69/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/minio/crc64nvme",
      "version": "v1.1.1"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "minio/md5-simd@v1.1.2/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "minio/md5-simd@776275e0c9a74ceebbd50fe5c1d61b0c80c608df/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/minio/md5-simd",
      "version": "v1.1.2"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "minio/minio-go@v7.1.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "minio/minio-go@f29e5687f3234ca088afedc03f4096ea50d4e10b/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/minio/minio-go/v7",
      "version": "v7.1.0"
     },
     {
      "licence": "MIT",
-     "licence_raw": "ncw/swift@v2.0.5/COPYING",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "ncw/swift@3ff07f8f0968c964c685bc53f57cb5c57a3cae61/COPYING",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/ncw/swift/v2",
      "version": "v2.0.5"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "peterbourgon/unixtransport@v0.0.7/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "peterbourgon/unixtransport@6a496cab3b78d81d4f14c875035bb64d4fc0e80b/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/peterbourgon/unixtransport",
      "version": "v0.0.7"
     },
     {
      "licence": "MIT",
-     "licence_raw": "philhofer/fwd@v1.2.0/LICENSE.md",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "philhofer/fwd@20a13a1f6b7cb47a126dcb75152e21e1383bbaba/LICENSE.md",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/philhofer/fwd",
      "version": "v1.2.0"
     },
     {
      "licence": "BSD-2-Clause",
      "licence_raw": "pkg/browser@5ac0b6a4141c/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/pkg/browser",
      "version": "v0.0.0-20240102092130-5ac0b6a4141c"
     },
     {
      "licence": "BSD-2-Clause",
-     "licence_raw": "pkg/errors@v0.9.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "pkg/errors@614d223910a179a466c1767a985424175c39b465/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/pkg/errors",
      "version": "v0.9.1"
     },
     {
      "licence": "BSD-2-Clause",
-     "licence_raw": "pkg/sftp@v1.13.10/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "pkg/sftp@939b20346433320aab08dfb0f175db0742304cf5/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/pkg/sftp",
      "version": "v1.13.10"
     },
     {
      "licence": "BSD-2-Clause",
-     "licence_raw": "pkg/xattr@v0.4.12/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "pkg/xattr@05b05ed74197ab4456166d9cec4cd868a1a05f35/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/pkg/xattr",
      "version": "v0.4.12"
     },
     {
      "licence": "BSD-2-Clause",
-     "licence_raw": "restic/chunker@v0.4.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "restic/chunker@4d3a0aa01a2ab1977ae75416443e447a5d00ccde/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/restic/chunker",
      "version": "v0.4.0"
     },
     {
      "licence": "MIT",
-     "licence_raw": "rs/xid@v1.6.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "rs/xid@7aed5a87c88ebb644e4e6d077f58147ac42f03b9/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/rs/xid",
      "version": "v1.6.0"
     },
     {
      "licence": "BSD-2-Clause",
-     "licence_raw": "russross/blackfriday@v2.1.0/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "russross/blackfriday@4c9bf9512682b995722660a4196c0013228e2049/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/russross/blackfriday/v2",
      "version": "v2.1.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "spf13/cobra@v1.10.2/LICENSE.txt",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "spf13/cobra@88b30ab89da2d0d0abb153818746c5a2d30eccec/LICENSE.txt",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/spf13/cobra",
      "version": "v1.10.2"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "spf13/pflag@v1.0.10/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "spf13/pflag@0491e5702ad2bb108bc519a5221bcc0f52aa9564/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/spf13/pflag",
      "version": "v1.0.10"
     },
     {
      "licence": "MIT",
-     "licence_raw": "tinylib/msgp@v1.6.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "tinylib/msgp@332807098b528e40e5fca255bf0828eae29f42df/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/tinylib/msgp",
      "version": "v1.6.1"
     },
     {
      "licence": "BSD-2-Clause",
-     "licence_raw": "zeebo/xxh3@v1.1.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "zeebo/xxh3@84cc04fc61771ea2a564c57277a19f83217a84ff/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "github.com/zeebo/xxh3",
      "version": "v1.1.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "open-telemetry/opentelemetry-go-instrumentation@sdk/v1.2.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go-instrumentation@715f58ce2f17e2176b8e53b871e47531a259cc1d/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/auto/sdk",
      "version": "v1.2.1"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go-contrib@detectors/gcp/v1.42.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go-contrib@d8dabf67361a4619c353ad0637432f3d0d16ba63/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/contrib/detectors/gcp",
      "version": "v1.42.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go-contrib@instrumentation/google.golang.org/grpc/otelgrpc/v0.67.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go-contrib@d8dabf67361a4619c353ad0637432f3d0d16ba63/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
      "version": "v0.67.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go-contrib@instrumentation/net/http/otelhttp/v0.67.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go-contrib@d8dabf67361a4619c353ad0637432f3d0d16ba63/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
      "version": "v0.67.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go@v1.43.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go@9276201a64b623606e3eaa0d61ae8ee6d62756c0/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/otel",
      "version": "v1.43.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go@metric/v1.43.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go@9276201a64b623606e3eaa0d61ae8ee6d62756c0/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/otel/metric",
      "version": "v1.43.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go@sdk/v1.43.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go@9276201a64b623606e3eaa0d61ae8ee6d62756c0/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/otel/sdk",
      "version": "v1.43.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go@sdk/metric/v1.43.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go@9276201a64b623606e3eaa0d61ae8ee6d62756c0/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/otel/sdk/metric",
      "version": "v1.43.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "open-telemetry/opentelemetry-go@trace/v1.43.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "open-telemetry/opentelemetry-go@9276201a64b623606e3eaa0d61ae8ee6d62756c0/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.opentelemetry.io/otel/trace",
      "version": "v1.43.0"
     },
     {
      "licence": "MIT",
-     "licence_raw": "uber-go/automaxprocs@v1.6.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "uber-go/automaxprocs@1ea14c35ce47a73089b824e504d1c92eeb61a5a6/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.uber.org/automaxprocs",
      "version": "v1.6.0"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "yaml/go-yaml@v3.0.4/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "yaml/go-yaml@c3552c15f996075a7634df5159d9161c67bf3d76/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "go.yaml.in/yaml/v3",
      "version": "v3.0.4"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/crypto@v0.52.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/crypto@a1c0d9929856c8aba2b31f079340f00578eda803/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/crypto",
      "version": "v0.52.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/net@v0.55.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/net@7770ec48d03fec35e378665337b4faca93c38423/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/net",
      "version": "v0.55.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/oauth2@v0.36.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/oauth2@4d954e69a88d9e1ccb8439f8d5b6cbef230c4ef9/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/oauth2",
      "version": "v0.36.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/sync@v0.20.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/sync@ec11c4a93de22cde2abe2bf74d70791033c2464c/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/sync",
      "version": "v0.20.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/sys@v0.45.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/sys@397d5f80920585bc27433d878aba498d062f81e1/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/sys",
      "version": "v0.45.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/term@v0.43.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/term@3c3e4855f7d2eb06c3e48933554add9ec6b599b5/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/term",
      "version": "v0.43.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/text@v0.37.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/text@3ef517e623a4bfc08d6457f87d73afda7af7d8e1/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/text",
      "version": "v0.37.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "golang/time@v0.15.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "golang/time@812b343c8714c317b0dad633efa6d103e554c006/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "golang.org/x/time",
      "version": "v0.15.0"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "googleapis/google-api-go-client@v0.282.0/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "googleapis/google-api-go-client@60aebbd7406af09eb63866ff79f0dbd40cccecbb/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "google.golang.org/api",
      "version": "v0.282.0"
     },
     {
      "licence": "Apache-2.0",
      "licence_raw": "googleapis/go-genproto@d00831a3d3e7/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "google.golang.org/genproto",
      "version": "v0.0.0-20260319201613-d00831a3d3e7"
     },
     {
      "licence": "Apache-2.0",
      "licence_raw": "googleapis/go-genproto@9d38bb4040a9/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "google.golang.org/genproto/googleapis/api",
      "version": "v0.0.0-20260401024825-9d38bb4040a9"
     },
     {
      "licence": "Apache-2.0",
      "licence_raw": "googleapis/go-genproto@0a33c5d7ca68/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "google.golang.org/genproto/googleapis/rpc",
      "version": "v0.0.0-20260523011958-0a33c5d7ca68"
     },
     {
      "licence": "Apache-2.0",
-     "licence_raw": "grpc/grpc-go@v1.81.1/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "grpc/grpc-go@caf0772c2bcb8bc15d43eb53448e921f34f0b7e8/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "google.golang.org/grpc",
      "version": "v1.81.1"
     },
     {
      "licence": "BSD-3-Clause",
-     "licence_raw": "protocolbuffers/protobuf-go@v1.36.11/LICENSE",
-     "licence_source": "upstream LICENSE text (fingerprinted)",
+     "licence_raw": "protocolbuffers/protobuf-go@96a179180f0ad6bba9b1e7b6e38d0affb0168e9a/LICENSE",
+     "licence_source": "upstream LICENSE at a pinned commit (sha256-verified, fingerprinted)",
      "name": "google.golang.org/protobuf",
      "version": "v1.36.11"
     }
@@ -579,6 +580,7 @@
    "lockfile": "apps/dashboard-ts/package-lock.json",
    "packages": [
     {
+     "artefact_integrity": "sha512-a7tz1QCcWWkwC/rPJcPMJk/UNRu9CFhDd3OHYE5hddbJrs8BqRTalxI6GlKCWEGzRLHN+S/B7a4PAHCtm25aBQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -586,6 +588,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-4yq5EXBt+VDtAZwTyfijaFp5D2C5oz3Ikw5a2kiX2K9nw72vrZX2q5UuAlkPtUMO1tQz6JTKpaKWjS7OOefTDQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -593,6 +596,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-1Rvkn/LUhnEF8WxnRkOrqGhbwXui1bkWFxONKIbN+r7C+9KHDSZ+iUoj4CzymVMWUyZIyx9szcb9+kbKhD500A==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -600,6 +604,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-dCKpXErGg3abUM6t5JTJV/ottVBTStJB5lRJTbgdUdQaQ+jNHiK56Hsc0YAEg/rinSh42hYG3HWiYmEMdilnxg==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -607,6 +612,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-WwYbhWkhYBvBtib1K4W0kL8MW2snBD2A5b3SN4vPpqalZbZs5+bQ1yzAdepVoOqrFfEW3dmREy4Zs1MrWcrFbw==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -614,6 +620,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-QymWvfUwDEC5/lpJOsxX5VAbyoR2D13+2Jsjz4be7gT4LPqEgdpkeLIR/HFfCLgKzoMhpJbp6I/JnogyNZHcaA==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -621,6 +628,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-Vmjd9D7DpA4Vv3cUlr82QWgJD/BQZmns801vtC5VWHg6jCIA4a5vMKpQnfrM2pyCrp2eV0ENdUg4PlN3bAc2Yw==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -628,6 +636,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-lG1pPdPLk7gTyGb00n5JIMLdBJgjb+UEhSdZvFbhUMg0DyC6z4B7RnpSKF9VCd4imkLObVbXOFA0kFCpw7yFow==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -635,6 +644,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-NmQC9RkJdnPXRaMxtkCzobB3teVjqF33oSOnwDfi+XYGWWYpt+xlGK3mtktSKLbdjwaWbJu2OkkMiRFGUUncKg==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -642,6 +652,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "package-lock license",
@@ -649,6 +660,7 @@
      "version": "0.5.23"
     },
     {
+     "artefact_integrity": "sha512-vuyHg81vvWA1Z1ELfvLko2c8f34gyA0zaic0+Rllc5lbCnbSyuvb2Oxpm6TAUAC/2xZN3QGqxBNggD1nNR2AfQ==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -657,6 +669,7 @@
      "version": "22.9.0"
     },
     {
+     "artefact_integrity": "sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -665,6 +678,7 @@
      "version": "15.7.15"
     },
     {
+     "artefact_integrity": "sha512-D2wOSq/d6Agt28q7rSI3jhU7G6aiuzljDGZ2hTZHIkrTLUI+AF3WMeKkEZ9nN2fkBAlcktT6vcZjDFiIhMYEQw==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -673,6 +687,7 @@
      "version": "18.3.12"
     },
     {
+     "artefact_integrity": "sha512-qW1Mfv8taImTthu4KoXgDfLuk4bydU6Q/TkADnDWWHwi4NX4BR+LWfTp2sVmTqRrsHvyDDTelgelxJ+SsejKKQ==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -681,6 +696,7 @@
      "version": "18.3.1"
     },
     {
+     "artefact_integrity": "sha512-gMmEShwwq7FJqMwvfRwvCl00v4kN+KOfJqXn+f4nrufak5gNHJOksd/60Dvjuz7sI8Y5WiSFBa8FEYr+zoyqCw==",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "package-lock license",
@@ -688,6 +704,7 @@
      "version": "2.11.25"
     },
     {
+     "artefact_integrity": "sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg==",
      "licence": "CC-BY-4.0",
      "licence_raw": "CC-BY-4.0",
      "licence_source": "package-lock license",
@@ -695,6 +712,7 @@
      "version": "1.0.30001810"
     },
     {
+     "artefact_integrity": "sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -702,6 +720,7 @@
      "version": "0.0.1"
     },
     {
+     "artefact_integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -710,6 +729,7 @@
      "version": "3.2.3"
     },
     {
+     "artefact_integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -717,6 +737,7 @@
      "version": "4.0.0"
     },
     {
+     "artefact_integrity": "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -724,6 +745,7 @@
      "version": "1.4.0"
     },
     {
+     "artefact_integrity": "sha512-Y2tUNy4ouw6tq5oDSKeQYGOyhkUBhNOcGV/02KC+6kd9eDGqdZd++mjMiIDilrBYvjEnCYvVtsuHCuP+okSfug==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -731,6 +753,7 @@
      "version": "3.3.19"
     },
     {
+     "artefact_integrity": "sha512-OqxKTGi9u80FydydsMNYNjnuje9Au+kvHlt2GZ//ftdpDHm1dxKqAaENoOOTX5wKzn+9vaKUNIfZeyZUuLhCnA==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -738,6 +761,7 @@
      "version": "16.4.3"
     },
     {
+     "artefact_integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==",
      "licence": "ISC",
      "licence_raw": "ISC",
      "licence_source": "package-lock license",
@@ -745,6 +769,7 @@
      "version": "1.1.1"
     },
     {
+     "artefact_integrity": "sha512-g50586zr4bZmwFiTlflMu8E0bDTb5I5gertgwAKmsdUlTQIhZtunzUlD1WSzwcVWPoAVpsrA6vlfCD7oXvRwgg==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -752,6 +777,7 @@
      "version": "8.5.23"
     },
     {
+     "artefact_integrity": "sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -759,6 +785,7 @@
      "version": "18.3.1"
     },
     {
+     "artefact_integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -766,6 +793,7 @@
      "version": "18.3.1"
     },
     {
+     "artefact_integrity": "sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -773,6 +801,7 @@
      "version": "0.23.2"
     },
     {
+     "artefact_integrity": "sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "package-lock license",
@@ -780,6 +809,7 @@
      "version": "1.2.2"
     },
     {
+     "artefact_integrity": "sha512-qSVyDTeMotdvQYoHWLNGwRFJHC+i+ZvdBRYosOFgC+Wg1vx4frN2/RG/NA7SYqqvKNLf39P2LSRA2pu6n0XYZA==",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "package-lock license",
@@ -787,6 +817,7 @@
      "version": "5.1.6"
     },
     {
+     "artefact_integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
      "licence": "0BSD",
      "licence_raw": "0BSD",
      "licence_source": "package-lock license",
@@ -794,6 +825,7 @@
      "version": "2.8.1"
     },
     {
+     "artefact_integrity": "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw==",
      "dev": true,
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
@@ -802,6 +834,7 @@
      "version": "5.6.3"
     },
     {
+     "artefact_integrity": "sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -816,6 +849,7 @@
    "lockfile": ".railway/package-lock.json",
    "packages": [
     {
+     "artefact_integrity": "sha512-mB9oAsNCm9aM3/SOv4YtBMqZbYj10R7dkq8byBqxGY/ncFwhf2oQzMV+LCRlWoDSEBJ3COiR1yeDvMtsoOsuFQ==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -824,6 +858,7 @@
      "version": "3.2.0"
     },
     {
+     "artefact_integrity": "sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -832,6 +867,7 @@
      "version": "16.14.2"
     },
     {
+     "artefact_integrity": "sha512-kfWBPCfHwLZthD5aFqIXODZTRKS0bJ2D19ibDdPOulinFly1Csdg+O24GrYfn3Z16+zARJxOADoVxn4czmjKCw==",
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
@@ -846,6 +882,7 @@
    "lockfile": "services/delivery-py/uv.lock",
    "packages": [
     {
+     "artefact_sha256": "aaf3cc301ed87d9e2c4ccb91adfe1cd58784355f6ce7e513f50e7ca2391862ef",
      "licence": "UNKNOWN",
      "licence_raw": "",
      "licence_source": "none",
@@ -854,6 +891,7 @@
      "version": "0.12.1"
     },
     {
+     "artefact_sha256": "bbcca45a202abb7cd01162473f01f3218de5037745ef4fa539e617a3cc973896",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -862,6 +900,7 @@
      "version": "0.0.30"
     },
     {
+     "artefact_sha256": "9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472",
      "licence": "PSF-2.0",
      "licence_raw": "PSF-2.0",
      "licence_source": "License",
@@ -870,6 +909,7 @@
      "version": "2.7.1"
     },
     {
+     "artefact_sha256": "c5e93ab6e6330dce40f5b43996f1fc5f2543296d263a5e4b59ff09e73870b7d8",
      "licence": "Apache-2.0 AND MIT",
      "licence_raw": "Apache-2.0 AND MIT",
      "licence_source": "License-Expression",
@@ -878,6 +918,7 @@
      "version": "3.14.4"
     },
     {
+     "artefact_sha256": "053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e",
      "licence": "Apache-2.0",
      "licence_raw": "Apache 2.0",
      "licence_source": "License",
@@ -886,6 +927,7 @@
      "version": "1.4.0"
     },
     {
+     "artefact_sha256": "21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb",
      "licence": "MIT",
      "licence_raw": "Development Status :: 5 - Production/Stable; Framework :: AsyncIO; Intended Audience :: Developers; License :: OSI Approved :: MIT License; Topic :: Software Development :: Libraries",
      "licence_source": "Classifier",
@@ -894,6 +936,7 @@
      "version": "0.22.1"
     },
     {
+     "artefact_sha256": "77eb101048d95f982c0353e9233404889dcd7a6fc244c107836c0e2fc9cf7d9d",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -902,6 +945,7 @@
      "version": "1.20.0"
     },
     {
+     "artefact_sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -910,6 +954,7 @@
      "version": "0.0.5"
     },
     {
+     "artefact_sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -918,6 +963,7 @@
      "version": "0.8.0"
     },
     {
+     "artefact_sha256": "3486013602eca76d8b12540764e53654f02cf4951110bca86cf06e67428a9f21",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -926,6 +972,7 @@
      "version": "0.125.0"
     },
     {
+     "artefact_sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -934,6 +981,7 @@
      "version": "4.15.1"
     },
     {
+     "artefact_sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -942,6 +990,7 @@
      "version": "26.1.0"
     },
     {
+     "artefact_sha256": "e1fb446abbdeccc9759d897898a0fe13141ed29f9ad11fc705f951925822ed59",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -950,6 +999,7 @@
      "version": "1.0.2"
     },
     {
+     "artefact_sha256": "522b4011e8180b1a3dcd2024396a4e7fe9ac37fb8597db47163d230b5efe892d",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -958,6 +1008,7 @@
      "version": "1.41.0"
     },
     {
+     "artefact_sha256": "f4d0b956a8146f30333e071374171f3cfa7bdb8073adb8c3814b65567aa7447c",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -966,6 +1017,7 @@
      "version": "1.25.3"
     },
     {
+     "artefact_sha256": "63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -974,6 +1026,7 @@
      "version": "2.2.1"
     },
     {
+     "artefact_sha256": "d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -982,6 +1035,7 @@
      "version": "4.15.0"
     },
     {
+     "artefact_sha256": "6523ad83aeb5098a4ee597cff0f964442ff74e460bd3fafaffab6a013ff2288c",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -990,6 +1044,7 @@
      "version": "3.0.1"
     },
     {
+     "artefact_sha256": "42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b",
      "licence": "MPL-2.0",
      "licence_raw": "MPL-2.0",
      "licence_source": "License",
@@ -998,6 +1053,7 @@
      "version": "2026.10.19"
     },
     {
+     "artefact_sha256": "c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf",
      "licence": "MIT-0",
      "licence_raw": "MIT-0",
      "licence_source": "License-Expression",
@@ -1006,6 +1062,7 @@
      "version": "2.1.1"
     },
     {
+     "artefact_sha256": "b9af956078716df40d985fb0dfeb2c2120c5ca92ba4ff4b388acfd01cdc14d08",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1014,6 +1071,7 @@
      "version": "3.5.1"
     },
     {
+     "artefact_sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1022,6 +1080,7 @@
      "version": "8.5.0"
     },
     {
+     "artefact_sha256": "36c91b1655e599fd428e2b95fdd5f0da1ca2e9f1abb0bc871dec21a0e78a2b44",
      "licence": "BSD-3-Clause",
      "licence_raw": "Development Status :: 4 - Beta; Intended Audience :: Developers; License :: OSI Approved :: BSD License; Programming Language :: Python; Programming Language :: Python :: 3; Programming Language :: Python :: 3.5; Programming Language :: Python :: 3.6; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Programming Language :: Python :: 3.9; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Operating System :: OS Independent",
      "licence_source": "Classifier",
@@ -1030,6 +1089,7 @@
      "version": "0.1.4"
     },
     {
+     "artefact_sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
      "licence": "BSD-3-Clause",
      "licence_raw": "Development Status :: 5 - Production/Stable; Environment :: Console; Intended Audience :: Developers; License :: OSI Approved :: BSD License; Operating System :: OS Independent; Programming Language :: Python; Programming Language :: Python :: 2; Programming Language :: Python :: 2.7; Programming Language :: Python :: 3; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Programming Language :: Python :: 3.9; Programming Language :: Python :: 3.10; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy; Topic :: Terminals",
      "licence_source": "Classifier",
@@ -1038,6 +1098,7 @@
      "version": "0.4.6"
     },
     {
+     "artefact_sha256": "612ee75c546f53e92e70049c9dbfcc18c935a2b9a53b66085ce9ef6a6e5c0934",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1046,6 +1107,7 @@
      "version": "15.0.1"
     },
     {
+     "artefact_sha256": "8a52e2e92a485fa9681c1101a79a5ebeb31807e3ea3d5aabd41f484a6398bc7b",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1054,6 +1116,7 @@
      "version": "0.11.1"
     },
     {
+     "artefact_sha256": "8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1062,6 +1125,7 @@
      "version": "6.2.4"
     },
     {
+     "artefact_sha256": "ff838d62ec1bfce4f9ba7fa16f4a7b554cd8d0c299e6be37502161a660c84eef",
      "licence": "Apache-2.0 OR BSD-3-Clause",
      "licence_raw": "Apache-2.0 OR BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1070,6 +1134,7 @@
      "version": "50.0.1"
     },
     {
+     "artefact_sha256": "175d9198c958a263f51a06a54368ba0b41294942c0cd29f4aa71be03dbcd5f4a",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1078,6 +1143,7 @@
      "version": "9.16.0"
     },
     {
+     "artefact_sha256": "b23dff4d4bac8d17b6efaaa7e88c2b730149c4dda45699ce676b719cfdffe7e1",
      "licence": "MIT",
      "licence_raw": "LICENSE at bytedance/deer-flow@345f08be00c8a9495079b732a39b46aa9af1584e",
      "licence_source": "git LICENSE (sha256-verified)",
@@ -1086,6 +1152,7 @@
      "version": "0.2.1"
     },
     {
+     "artefact_sha256": "b23dff4d4bac8d17b6efaaa7e88c2b730149c4dda45699ce676b719cfdffe7e1",
      "licence": "MIT",
      "licence_raw": "LICENSE at bytedance/deer-flow@345f08be00c8a9495079b732a39b46aa9af1584e",
      "licence_source": "git LICENSE (sha256-verified)",
@@ -1094,6 +1161,7 @@
      "version": "2.1.0"
     },
     {
+     "artefact_sha256": "a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61",
      "licence": "PSF-2.0",
      "licence_raw": "PSFL",
      "licence_source": "License",
@@ -1102,6 +1170,7 @@
      "version": "0.7.1"
     },
     {
+     "artefact_sha256": "7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2",
      "licence": "Apache-2.0",
      "licence_raw": "Apache License, Version 2.0",
      "licence_source": "License",
@@ -1110,6 +1179,7 @@
      "version": "1.9.0"
     },
     {
+     "artefact_sha256": "bdffd126d2eb26acf1066acb54cb2e336682e1d72b974a40894fac76a4df17f6",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -1118,6 +1188,7 @@
      "version": "2.0.1"
     },
     {
+     "artefact_sha256": "b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1126,6 +1197,7 @@
      "version": "0.18.0"
     },
     {
+     "artefact_sha256": "29cf74a087b31dafdb5a446b6d7e11cbce8ed2741540e2339c69fbef92c94ce9",
      "licence": "UNKNOWN",
      "licence_raw": "UNKNOWN",
      "licence_source": "License(text)",
@@ -1134,6 +1206,7 @@
      "version": "0.9.9"
     },
     {
+     "artefact_sha256": "7a6d2d11859d82a936ebdcb30ce3d8a1cbb3e990bff05c12abb9b54c44fa7bd1",
      "licence": "MIT",
      "licence_raw": "Development Status :: 5 - Production/Stable; License :: OSI Approved :: MIT License; Operating System :: OS Independent; Topic :: Database; Topic :: Database :: Database Engines/Servers; Topic :: Scientific/Engineering; Intended Audience :: Developers; Intended Audience :: Education; Intended Audience :: Information Technology; Intended Audience :: Science/Research; Programming Language :: Python; Programming Language :: Python :: 3; Programming Language :: Python :: 3 :: Only; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: 3.14; Programming Language :: C++",
      "licence_source": "Classifier",
@@ -1142,6 +1215,7 @@
      "version": "1.5.5"
     },
     {
+     "artefact_sha256": "a739fe2b8972c250ff72f8e2c488d18cf25f7b852f49ee76048775d5171df30c",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1150,6 +1224,7 @@
      "version": "0.11"
     },
     {
+     "artefact_sha256": "951d0fd069f017e760b338a435bdb83589b4bfb9574fc5203a7f777e9cb994c2",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1158,6 +1233,7 @@
      "version": "2.51.0"
     },
     {
+     "artefact_sha256": "6ba776122086261875bc6033ef2dc42ac6b6e22cefdffdfd19d30e93bb09786f",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1166,6 +1242,7 @@
      "version": "2.10.0"
     },
     {
+     "artefact_sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1174,6 +1251,7 @@
      "version": "2.0.0"
     },
     {
+     "artefact_sha256": "3f757eae1f9460836bb4689ec27a7b233c023cdba0f8cd3f3a0a106531d7f591",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1182,6 +1260,7 @@
      "version": "2.22.2"
     },
     {
+     "artefact_sha256": "bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1190,6 +1269,7 @@
      "version": "0.141.1"
     },
     {
+     "artefact_sha256": "7ce71b6880181241cf7ac8697a2f1eb6a8bd9b429f7ad6d27b8db9ba5f1c2d25",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1198,6 +1278,7 @@
      "version": "1.2.0"
     },
     {
+     "artefact_sha256": "9e3d183d6cc1278b25186c163ed2377bbd6e79287e5b0f262a84275292d3952a",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -1206,6 +1287,7 @@
      "version": "4.44.0"
     },
     {
+     "artefact_sha256": "7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4",
      "licence": "Apache-2.0",
      "licence_raw": "Apache 2.0",
      "licence_source": "License",
@@ -1214,6 +1296,7 @@
      "version": "25.12.19"
     },
     {
+     "artefact_sha256": "494a5952b1c597ba44e0e78113a7266e656b9794eec897b19ead706bd7074383",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -1222,6 +1305,7 @@
      "version": "1.8.0"
     },
     {
+     "artefact_sha256": "66a63572d0ab629554768544df04018d79178c0bd7439ba31683ac576b79024d",
      "licence": "Apache-2.0",
      "licence_raw": "Apache 2.0",
      "licence_source": "License",
@@ -1230,6 +1314,7 @@
      "version": "2.58.1"
     },
     {
+     "artefact_sha256": "8dc4c096e7d6288c3087f6893f582fe52468932464781edb8193bd92b9fefb2c",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1238,6 +1323,7 @@
      "version": "1.75.0"
     },
     {
+     "artefact_sha256": "e8eb9cffa9a9f3423090cc7a086012004196abab388a0561690e81887fd79cc1",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1246,6 +1332,7 @@
      "version": "1.75.4"
     },
     {
+     "artefact_sha256": "975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1",
      "licence": "MIT AND PSF-2.0",
      "licence_raw": "MIT AND PSF-2.0",
      "licence_source": "License-Expression",
@@ -1254,6 +1341,7 @@
      "version": "3.5.6"
     },
     {
+     "artefact_sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1262,6 +1350,7 @@
      "version": "0.16.0"
     },
     {
+     "artefact_sha256": "0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1270,6 +1359,7 @@
      "version": "4.4.1"
     },
     {
+     "artefact_sha256": "858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1278,6 +1368,7 @@
      "version": "4.2.0"
     },
     {
+     "artefact_sha256": "0d78f8fde1c230e99fe37986a60526d7049ed4bf8a9fadbad5f00e22e58e041d",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -1286,6 +1377,7 @@
      "version": "1.1"
     },
     {
+     "artefact_sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1294,6 +1386,7 @@
      "version": "1.0.9"
     },
     {
+     "artefact_sha256": "e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1302,6 +1395,7 @@
      "version": "2.13.1"
     },
     {
+     "artefact_sha256": "b15fc622b0f869d19207c4089a501d9bcc63ca5e071ffdd2f03f922df882dcb2",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1310,6 +1404,7 @@
      "version": "0.8.0"
     },
     {
+     "artefact_sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -1318,6 +1413,7 @@
      "version": "0.28.1"
     },
     {
+     "artefact_sha256": "0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1326,6 +1422,7 @@
      "version": "0.4.3"
     },
     {
+     "artefact_sha256": "6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1334,6 +1431,7 @@
      "version": "2.13.1"
     },
     {
+     "artefact_sha256": "1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1342,6 +1440,7 @@
      "version": "10.0"
     },
     {
+     "artefact_sha256": "b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5",
      "licence": "MIT",
      "licence_raw": "Development Status :: 5 - Production/Stable; Intended Audience :: Developers; License :: OSI Approved :: MIT License; Programming Language :: Python; Programming Language :: Python :: 3 :: Only; Programming Language :: Python :: 3; Programming Language :: Python :: 3.9; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy",
      "licence_source": "Classifier",
@@ -1350,6 +1449,7 @@
      "version": "6.1.0"
     },
     {
+     "artefact_sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1358,6 +1458,7 @@
      "version": "3.20"
     },
     {
+     "artefact_sha256": "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1366,6 +1467,7 @@
      "version": "2.3.0"
     },
     {
+     "artefact_sha256": "28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15",
      "licence": "BSD-3-Clause",
      "licence_raw": "Development Status :: 4 - Beta; Intended Audience :: Developers; License :: OSI Approved :: BSD License; Operating System :: OS Independent; Programming Language :: Python; Programming Language :: Python :: 3; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Programming Language :: Python :: 3.9; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy; Topic :: Internet; Topic :: Software Development :: Libraries :: Python Modules",
      "licence_source": "Classifier",
@@ -1374,6 +1476,7 @@
      "version": "0.7.2"
     },
     {
+     "artefact_sha256": "8c21265b251d99bbb40080d178a8953e35601d3a1564e05c4de4c0d2ca616797",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1382,6 +1485,7 @@
      "version": "0.17.0"
     },
     {
+     "artefact_sha256": "0ae28c0cd062bbd8b8ecc26d7d164fbbea9652a1a3693f3b956c1eae5145dade",
      "licence": "BSD-3-Clause",
      "licence_raw": "Development Status :: 5 - Production/Stable; Environment :: Console; Intended Audience :: Developers; License :: OSI Approved :: BSD License; Operating System :: OS Independent; Programming Language :: Python; Programming Language :: Python :: 2; Programming Language :: Python :: 2.7; Programming Language :: Python :: 3; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Programming Language :: Python :: 3.9; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy; Topic :: Software Development :: Libraries; Topic :: Utilities",
      "licence_source": "Classifier",
@@ -1390,6 +1494,7 @@
      "version": "1.33"
     },
     {
+     "artefact_sha256": "8ff8b95779d071ba472cf5bc913028df06031797532f08a7d5b602d8b2a488ca",
      "licence": "BSD-3-Clause",
      "licence_raw": "Development Status :: 5 - Production/Stable; Environment :: Console; Intended Audience :: Developers; License :: OSI Approved :: BSD License; Operating System :: OS Independent; Programming Language :: Python; Programming Language :: Python :: 3; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: 3.14; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy; Topic :: Software Development :: Libraries; Topic :: Utilities",
      "licence_source": "Classifier",
@@ -1398,6 +1503,7 @@
      "version": "3.1.1"
     },
     {
+     "artefact_sha256": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1406,6 +1512,7 @@
      "version": "4.26.0"
     },
     {
+     "artefact_sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1414,6 +1521,7 @@
      "version": "2025.9.1"
     },
     {
+     "artefact_sha256": "8fde9241c4b298e6374a069dcf728359b4e72c2fb29489a975ba4e1c047cf10f",
      "licence": "Apache-2.0",
      "licence_raw": "Apache License Version 2.0",
      "licence_source": "License",
@@ -1422,6 +1530,7 @@
      "version": "36.0.3"
     },
     {
+     "artefact_sha256": "4d10dbe91005952cddd56d0dc77aa108964da6bae90ab20063653957e901f782",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1430,6 +1539,7 @@
      "version": "1.3.14"
     },
     {
+     "artefact_sha256": "dbd412a956b6b8b0716d9d8460ef71f834a6731cdbfc59e6160482a4a9fb5200",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1438,6 +1548,7 @@
      "version": "1.4.6"
     },
     {
+     "artefact_sha256": "28e3909e2a10cc81504952d795ac0a9e014c0018121ef89d48dd396fa09ec624",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1446,6 +1557,7 @@
      "version": "1.4.9"
     },
     {
+     "artefact_sha256": "0a9862f335f1873370bb0fe1928ac19b8b9292b014ef5412da462ded8bb82c5a",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1454,6 +1566,7 @@
      "version": "1.0.1"
     },
     {
+     "artefact_sha256": "c8d09aac0304d26f1c2483e41a350f15587af1fbe034c39a304e1e17a3b743f3",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1462,6 +1575,7 @@
      "version": "4.2.2"
     },
     {
+     "artefact_sha256": "d08e64954e86281002653071b7430e0377c9a577cb4ac3143abfeb3e24ef8797",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1470,6 +1584,7 @@
      "version": "0.2.2"
     },
     {
+     "artefact_sha256": "a80732185030d4f453dda6c25feef46f645f665423fdffe38ae3edf1ac3c6c4d",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1478,6 +1593,7 @@
      "version": "1.2.1"
     },
     {
+     "artefact_sha256": "4cdf879a492a35980fd859ae792d3c65458ccaae504e183c9a10d7eac1f0720f",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1486,6 +1602,7 @@
      "version": "0.0.19"
     },
     {
+     "artefact_sha256": "2364d5f17342301a8651ef166abb5bb260aaadd94d1ac72aa30c298b3a395d85",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1494,6 +1611,7 @@
      "version": "4.15.6"
     },
     {
+     "artefact_sha256": "c2d98ad94333937922ba04148641c1da2bfe45b5b8e55d7b6dcb0bb2df809e76",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1502,6 +1620,7 @@
      "version": "1.2.9"
     },
     {
+     "artefact_sha256": "25d29144b082827218e7bc3f1e9b0566a4bb007895cd6cc26f66a8428739f56e",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1510,6 +1629,7 @@
      "version": "4.1.1"
     },
     {
+     "artefact_sha256": "8505c54c94a658080525d7e6780fdd4e0c078ff2566b30d399c02cc9f9af1c63",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1518,6 +1638,7 @@
      "version": "3.1.1"
     },
     {
+     "artefact_sha256": "51e311747d755b751d5c6b39b0c1446124d3a7643d2515017e6714b323508fc9",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1526,6 +1647,7 @@
      "version": "1.1.0"
     },
     {
+     "artefact_sha256": "57122b02bda41d37a97a5e09eb018aa8c9b3dc85c433880073779bd9324b7eea",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1534,6 +1656,7 @@
      "version": "0.4.6"
     },
     {
+     "artefact_sha256": "dcfd8a25ba72d8663024bd87df02e372e470f43e18f4a726f37fbacc772c0193",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1542,6 +1665,7 @@
      "version": "0.14.1"
     },
     {
+     "artefact_sha256": "379f8a75cf6eb7eef0af074b55f49ab73b868388a98de14646abcdfa4564bb11",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -1550,6 +1674,7 @@
      "version": "6.1.3"
     },
     {
+     "artefact_sha256": "3d9661eedbdf445ac9567e97e7ceefb93545d77a6a32858139ea966b5806fb64",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -1558,6 +1683,7 @@
      "version": "0.6.3"
     },
     {
+     "artefact_sha256": "723296007c870bfd6b3f0c3230dba7198096e5269297ebf5e4eff9e7ffa39d4f",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1566,6 +1692,7 @@
      "version": "1.4.3"
     },
     {
+     "artefact_sha256": "c077ab0d450bd7c0c6ecd529a23bf7e0fa8190c929e28998308ff4eada3f063b",
      "licence": "BSD-2-Clause",
      "licence_raw": "BSD-2-Clause",
      "licence_source": "License",
@@ -1574,6 +1701,7 @@
      "version": "1.11.0"
     },
     {
+     "artefact_sha256": "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a",
      "licence": "MIT",
      "licence_raw": "Development Status :: 5 - Production/Stable; Intended Audience :: Developers; License :: OSI Approved :: MIT License; Programming Language :: Python :: 3; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy; Topic :: Software Development :: Libraries :: Python Modules; Topic :: Text Processing :: Markup",
      "licence_source": "Classifier",
@@ -1582,6 +1710,7 @@
      "version": "4.2.0"
     },
     {
+     "artefact_sha256": "a189a0bedfd14009030fde5f85bb6f77c56897cb839b5c25315dd7d4e3e290ba",
      "licence": "MIT",
      "licence_raw": "Environment :: Web Environment; Framework :: Django; Intended Audience :: Developers; License :: OSI Approved :: MIT License; Operating System :: OS Independent; Programming Language :: Python :: 2.5; Programming Language :: Python :: 2.6; Programming Language :: Python :: 2.7; Programming Language :: Python :: 3.6; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Topic :: Utilities",
      "licence_source": "Classifier",
@@ -1590,6 +1719,7 @@
      "version": "1.2.3"
     },
     {
+     "artefact_sha256": "5180a9a841e20fc01c2c09dbc5d039638429bbebcdc2af1b2615c3c427840434",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1598,6 +1728,7 @@
      "version": "0.1.5"
     },
     {
+     "artefact_sha256": "d6dd0be5b5b189d31db7cda48b91d7e0a9795f31430b7f271219ab30f1d3ac9d",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1606,6 +1737,7 @@
      "version": "3.0.3"
     },
     {
+     "artefact_sha256": "666edb5009503e1047c9d60346a756f94b261f05cc2625f23d41c728ffc484d0",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1614,6 +1746,7 @@
      "version": "1.30.0"
     },
     {
+     "artefact_sha256": "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8",
      "licence": "MIT",
      "licence_raw": "License :: OSI Approved :: MIT License; Operating System :: MacOS; Operating System :: Microsoft :: Windows; Operating System :: POSIX :: Linux; Programming Language :: Python :: 3 :: Only; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Programming Language :: Python :: 3.9; Programming Language :: Python :: 3.10; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy; Topic :: Software Development :: Libraries :: Python Modules; Typing :: Typed",
      "licence_source": "Classifier",
@@ -1622,6 +1755,7 @@
      "version": "0.1.2"
     },
     {
+     "artefact_sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -1630,6 +1764,7 @@
      "version": "1.3.0"
     },
     {
+     "artefact_sha256": "2d2577886906cd7293850dffa2da29119966c213bfc6ec0cecf8bf7621e1ca77",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1638,6 +1773,7 @@
      "version": "1.39.0"
     },
     {
+     "artefact_sha256": "96d3de4d034504e969ac5e85bae8106c8373b5c6568e4c8fa7af2eca9dbe6bca",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -1646,6 +1782,7 @@
      "version": "1.3.1"
     },
     {
+     "artefact_sha256": "976fd7689d69ec78d67d31d38d396d8adb562f7e8368279f76aed4aa451fa06d",
      "licence": "Apache-2.0",
      "licence_raw": "Apache License 2.0",
      "licence_source": "License",
@@ -1654,6 +1791,7 @@
      "version": "6.9.1"
     },
     {
+     "artefact_sha256": "87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -1662,6 +1800,7 @@
      "version": "1.6.0"
     },
     {
+     "artefact_sha256": "b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3",
      "licence": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
      "licence_raw": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
      "licence_source": "License-Expression",
@@ -1670,6 +1809,7 @@
      "version": "2.5.3"
     },
     {
+     "artefact_sha256": "498a298876e996301950a5b053d12c31628bb7b895db03666430c69ce182eb61",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -1678,6 +1818,7 @@
      "version": "4.0.1"
     },
     {
+     "artefact_sha256": "543c7da2a7adadf21214938bb79c83ea12b473a4b6ee4ad4bf854e7715e13d1f",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -1686,6 +1827,7 @@
      "version": "0.47"
     },
     {
+     "artefact_sha256": "bb71a814f66517a65628c9e4a2bb530a6edd2cd5d87ffa0af0f6f773a027d99e",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -1694,6 +1836,7 @@
      "version": "1.20.1"
     },
     {
+     "artefact_sha256": "89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -1702,6 +1845,7 @@
      "version": "2.54.0"
     },
     {
+     "artefact_sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1710,6 +1854,7 @@
      "version": "3.1.5"
     },
     {
+     "artefact_sha256": "b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1718,6 +1863,7 @@
      "version": "1.45.1"
     },
     {
+     "artefact_sha256": "2f95404bdee7f9d2d529c7de56c7bd86d014d774d8fbf137810e0167f8a492bf",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1726,6 +1872,7 @@
      "version": "0.66b1"
     },
     {
+     "artefact_sha256": "00ff8592c3a7cb729ff3fdc7ffa12372c243bdf2163e80c180994d0c7bd83ee9",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1734,6 +1881,7 @@
      "version": "0.66b1"
     },
     {
+     "artefact_sha256": "2f446183ae7047b036226f1d846c41a834b0e8755ad13b51a51dd38952eb466c",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1742,6 +1890,7 @@
      "version": "1.45.1"
     },
     {
+     "artefact_sha256": "24a97cf3753c7fb52fad44a696e452ff371686339e2acf3309e2eda3d0230700",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1750,6 +1899,7 @@
      "version": "1.45.1"
     },
     {
+     "artefact_sha256": "f38e2a8413053c180cd3d2637fbb279673ec2f6a6e09c995aafa2f452c52b46e",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1758,6 +1908,7 @@
      "version": "1.45.1"
     },
     {
+     "artefact_sha256": "c604c11dc429810812348989115fa44bd558772a3d7442afc43d024f2c250ca4",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1766,6 +1917,7 @@
      "version": "1.45.1"
     },
     {
+     "artefact_sha256": "d4cddeb4315490b35213f55e2bdc9ac54bb1e4d318927475bed62b35545e581b",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1774,6 +1926,7 @@
      "version": "0.66b1"
     },
     {
+     "artefact_sha256": "1192a7021b6d071aaf909864f6e924d6a2675ca360485b972b8401749311750b",
      "licence": "MPL-2.0 AND (Apache-2.0 OR MIT)",
      "licence_raw": "MPL-2.0 AND (Apache-2.0 OR MIT)",
      "licence_source": "License-Expression",
@@ -1782,6 +1935,7 @@
      "version": "3.12.0"
     },
     {
+     "artefact_sha256": "58d379d72b6c5e964851c77cfedfb386e474adee4fd39791c2c5d9efb53505cc",
      "licence": "Apache-2.0 OR MIT",
      "licence_raw": "Apache-2.0 OR MIT",
      "licence_source": "License-Expression",
@@ -1790,6 +1944,7 @@
      "version": "1.12.2"
     },
     {
+     "artefact_sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
      "licence": "Apache-2.0 OR BSD-2-Clause",
      "licence_raw": "Apache-2.0 OR BSD-2-Clause",
      "licence_source": "License-Expression",
@@ -1798,6 +1953,7 @@
      "version": "26.3"
     },
     {
+     "artefact_sha256": "0704044b676496b8350e023b09f174a26772456c974a2b11c36bebb558c9490d",
      "licence": "BSD-3-Clause",
      "licence_raw": "Development Status :: 5 - Production/Stable; Environment :: Console; Intended Audience :: Science/Research; License :: OSI Approved :: BSD License; Operating System :: OS Independent; Programming Language :: Cython; Programming Language :: Python; Programming Language :: Python :: 3; Programming Language :: Python :: 3 :: Only; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: 3.14; Programming Language :: Python :: 3.15; Topic :: Scientific/Engineering",
      "licence_source": "Classifier",
@@ -1806,6 +1962,7 @@
      "version": "3.0.6"
     },
     {
+     "artefact_sha256": "366585ba97e80dffa8f00cebe303d2f381884d8637af4ce422f1df3ef38111a9",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1814,6 +1971,7 @@
      "version": "20260107"
     },
     {
+     "artefact_sha256": "7741ea81bf165b474b153e6789d10d18e06b6ddcf3ec84289c3ef2fed6802580",
      "licence": "MIT",
      "licence_raw": "Intended Audience :: Developers; License :: OSI Approved :: MIT License; Operating System :: OS Independent; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: 3.14",
      "licence_source": "Classifier",
@@ -1822,6 +1980,7 @@
      "version": "0.11.10"
     },
     {
+     "artefact_sha256": "42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca",
      "licence": "MIT-CMU",
      "licence_raw": "MIT-CMU",
      "licence_source": "License-Expression",
@@ -1830,6 +1989,7 @@
      "version": "13.0.0"
     },
     {
+     "artefact_sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1838,6 +1998,7 @@
      "version": "1.6.0"
     },
     {
+     "artefact_sha256": "9a7be373adfded677a9092ae2743873d5c8a9573148d617a189d26715f7d8ea5",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -1846,6 +2007,7 @@
      "version": "2.0.1"
     },
     {
+     "artefact_sha256": "2814ecd8e818f487bee4b0f921bc4d1c176cc5fc71ac0f072d0fa67eda4ac14b",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -1854,6 +2016,7 @@
      "version": "0.5.4"
     },
     {
+     "artefact_sha256": "e9db7e292e0ab79dd108d7f1a94fe31601ce1ee3f7b79e0692043423020b0593",
      "licence": "BSD-3-Clause",
      "licence_raw": "3-Clause BSD License",
      "licence_source": "License",
@@ -1862,6 +2025,7 @@
      "version": "6.33.6"
     },
     {
+     "artefact_sha256": "efc4f50f275ed6dae10a1f30bb81ad1a75368557b3ff22a532b7a472050368f1",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -1870,6 +2034,7 @@
      "version": "0.1.1"
     },
     {
+     "artefact_sha256": "e7f14f00c2678bfbe7ad46f057b9f9938c1677bcf39e405e163e272c6f9814b8",
      "licence": "UNKNOWN",
      "licence_raw": "",
      "licence_source": "none",
@@ -1878,6 +2043,7 @@
      "version": "0.1.1"
     },
     {
+     "artefact_sha256": "4017b0fce125096b8573b39c989fdb1a4b19cf761e683398184550fea0e66587",
      "licence": "BSD-2-Clause",
      "licence_raw": "BSD-2-Clause",
      "licence_source": "License",
@@ -1886,6 +2052,7 @@
      "version": "0.6.5"
     },
     {
+     "artefact_sha256": "29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -1894,6 +2061,7 @@
      "version": "0.4.2"
     },
     {
+     "artefact_sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -1902,6 +2070,7 @@
      "version": "3.0"
     },
     {
+     "artefact_sha256": "6db14ac8dfc9a1e57f87ea2c0de670c251240f43cb0c30a5130e9720dc612927",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1910,6 +2079,7 @@
      "version": "2.13.3"
     },
     {
+     "artefact_sha256": "fb528e295ed31570ac3dcc9bfdd6e0150bc11ce6168ac87a8082055cf1a67395",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1918,6 +2088,7 @@
      "version": "2.46.3"
     },
     {
+     "artefact_sha256": "0ba092c291c94baceb5eff768aa0d56400a457585bc0175925a5a5510303da42",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1926,6 +2097,7 @@
      "version": "2.15.0"
     },
     {
+     "artefact_sha256": "65617e33033874b59d87db603aa1ed450633288aefead953b30bded59cb599a6",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -1934,6 +2106,7 @@
      "version": "0.25.1"
     },
     {
+     "artefact_sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
      "licence": "BSD-2-Clause",
      "licence_raw": "BSD-2-Clause",
      "licence_source": "License-Expression",
@@ -1942,6 +2115,7 @@
      "version": "2.21.0"
     },
     {
+     "artefact_sha256": "7a3742debf6b879e912dbb9819ceec1594be812452b78c5f2e2dfc56564954f8",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1950,6 +2124,7 @@
      "version": "2.15.0"
     },
     {
+     "artefact_sha256": "81df25c1ab4c13ff773102d3cbea1967511d079123b067fc077bd0c4d57d91d8",
      "licence": "UNKNOWN",
      "licence_raw": "BSD-3-Clause, Apache-2.0, dependency licenses",
      "licence_source": "License(text)",
@@ -1958,6 +2133,7 @@
      "version": "5.13.0"
     },
     {
+     "artefact_sha256": "6bb511c434f79c641efb5573e5795e56dc972252f4b96e52a9636d4ece5231a4",
      "licence": "MIT",
      "licence_raw": "Development Status :: 4 - Beta; Intended Audience :: Developers; License :: OSI Approved :: MIT License; Operating System :: MacOS :: MacOS X; Operating System :: Microsoft :: Windows; Operating System :: POSIX :: Linux; Programming Language :: Python; Programming Language :: Python :: 3; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: 3.14; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Rust; Topic :: Internet :: WWW/HTTP",
      "licence_source": "Classifier",
@@ -1966,6 +2142,7 @@
      "version": "0.10.0"
     },
     {
+     "artefact_sha256": "8449b734232e42a5dcd74048e39b60db2839a4c38cf3ae2bf7707d58b5389c0d",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -1974,6 +2151,7 @@
      "version": "3.5.6"
     },
     {
+     "artefact_sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -1982,6 +2160,7 @@
      "version": "9.1.1"
     },
     {
+     "artefact_sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
      "licence": "Apache-2.0 OR BSD-3-Clause",
      "licence_raw": "Development Status :: 5 - Production/Stable; Intended Audience :: Developers; License :: OSI Approved :: BSD License; License :: OSI Approved :: Apache Software License; Programming Language :: Python; Programming Language :: Python :: 2; Programming Language :: Python :: 2.7; Programming Language :: Python :: 3; Programming Language :: Python :: 3.3; Programming Language :: Python :: 3.4; Programming Language :: Python :: 3.5; Programming Language :: Python :: 3.6; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Programming Language :: Python :: 3.9; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Topic :: Software Development :: Libraries",
      "licence_source": "Classifier",
@@ -1990,6 +2169,7 @@
      "version": "2.9.0.post0"
     },
     {
+     "artefact_sha256": "904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -1998,6 +2178,7 @@
      "version": "1.2.3"
     },
     {
+     "artefact_sha256": "ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -2006,6 +2187,7 @@
      "version": "0.0.32"
     },
     {
+     "artefact_sha256": "160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2014,6 +2196,7 @@
      "version": "1.0.2"
     },
     {
+     "artefact_sha256": "dab4f65ac9c4e48400a2a0530c46c3c579cd5905ecd11b80692373915269208b",
      "licence": "PSF-2.0",
      "licence_raw": "PSF",
      "licence_source": "License",
@@ -2022,6 +2205,7 @@
      "version": "312"
     },
     {
+     "artefact_sha256": "ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2030,6 +2214,7 @@
      "version": "6.0.3"
     },
     {
+     "artefact_sha256": "d106da0fad11d5fdfcde21f5c5385556bfa8ff0258483037d39ea6b1d6db3943",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2038,6 +2223,7 @@
      "version": "0.3.0"
     },
     {
+     "artefact_sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2046,6 +2232,7 @@
      "version": "0.37.0"
     },
     {
+     "artefact_sha256": "2e67f8843f0e4b931f1fa860bf3bbe4134b714c0155cc5c7c0d7ea450230aae0",
      "licence": "Apache-2.0 AND CNRI-Python",
      "licence_raw": "Apache-2.0 AND CNRI-Python",
      "licence_source": "License-Expression",
@@ -2054,6 +2241,7 @@
      "version": "2026.9.10"
     },
     {
+     "artefact_sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -2062,6 +2250,7 @@
      "version": "2.34.2"
     },
     {
+     "artefact_sha256": "7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36",
      "licence": "ISC",
      "licence_raw": "ISC",
      "licence_source": "License",
@@ -2070,6 +2259,7 @@
      "version": "2.0.0"
     },
     {
+     "artefact_sha256": "cccfdd665f0a24fcf4726e690f65639d272bb0637b9b92dfd91a5568ccf6bd06",
      "licence": "Apache-2.0",
      "licence_raw": "Apache 2.0",
      "licence_source": "License",
@@ -2078,6 +2268,7 @@
      "version": "1.0.0"
     },
     {
+     "artefact_sha256": "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2086,6 +2277,7 @@
      "version": "15.0.0"
     },
     {
+     "artefact_sha256": "ecabd69db66de867690f9797f2f8fa27ba501bbc24540cbdbdc649cd15888ba6",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2094,6 +2286,7 @@
      "version": "2026.6.3"
     },
     {
+     "artefact_sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2102,6 +2295,7 @@
      "version": "1.17.0"
     },
     {
+     "artefact_sha256": "2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "License",
@@ -2110,6 +2304,7 @@
      "version": "1.3.1"
     },
     {
+     "artefact_sha256": "95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3",
      "licence": "MIT",
      "licence_raw": "License :: OSI Approved :: MIT License; Programming Language :: Python :: 3.6; Programming Language :: Python :: 3.7; Programming Language :: Python :: 3.8; Programming Language :: Python :: 3.9; Programming Language :: Python :: 3 :: Only; Topic :: Internet :: Proxy Servers",
      "licence_source": "Classifier",
@@ -2118,6 +2313,7 @@
      "version": "1.0.0"
     },
     {
+     "artefact_sha256": "8596eb8967d744174820280fa62b4542a2e955bfaccca73ed8a13c6eb8e9b502",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2126,6 +2322,7 @@
      "version": "2.10"
     },
     {
+     "artefact_sha256": "0fad3dc37851b096ef72538b18152a5c1ae9c8b2013cd89f51eca83fc6eba36b",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2134,6 +2331,7 @@
      "version": "2.1.1"
     },
     {
+     "artefact_sha256": "1515727990b49e79bcaf75fdee2ffc7d461f8b66905013231251f1c8938e7786",
      "licence": "UNKNOWN",
      "licence_raw": "MIT License, Apache License, Version 2.0",
      "licence_source": "License(text)",
@@ -2142,6 +2340,7 @@
      "version": "0.1.9"
     },
     {
+     "artefact_sha256": "c7b2244bdff016fe7f64e10075e89a3e6bbf899649cc89b0fe884b5545042453",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2150,6 +2349,7 @@
      "version": "3.4.11"
     },
     {
+     "artefact_sha256": "67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2158,6 +2358,7 @@
      "version": "1.7.0"
     },
     {
+     "artefact_sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -2166,6 +2367,7 @@
      "version": "1.14.0"
     },
     {
+     "artefact_sha256": "1cbbb6d59ff22e3655586a1c8a1edf28d6abfa29d14da71dcd2922955da2033f",
      "licence": "MIT",
      "licence_raw": "Programming Language :: Python :: 3; License :: OSI Approved :: MIT License; Operating System :: OS Independent",
      "licence_source": "Classifier",
@@ -2174,6 +2376,7 @@
      "version": "0.8.4"
     },
     {
+     "artefact_sha256": "6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55",
      "licence": "Apache-2.0",
      "licence_raw": "Apache 2.0",
      "licence_source": "License",
@@ -2182,6 +2385,7 @@
      "version": "9.1.4"
     },
     {
+     "artefact_sha256": "7896eea257fe497a2b7134474d909156c6744ce8da35bce88011a960e008aa0d",
      "licence": "UNKNOWN",
      "licence_raw": "MIT License\n        \n        Copyright (c) 2022 OpenAI, Shantanu Jain\n        \n        Permission is hereby granted, free of charge, to any person obtaining a copy\n        of this software and associated documentation files (the \"Software\"), to deal\n        in the Software without restriction, inclu",
      "licence_source": "License(text)",
@@ -2190,6 +2394,7 @@
      "version": "0.14.0"
     },
     {
+     "artefact_sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
      "licence": "MPL-2.0 AND MIT",
      "licence_raw": "MPL-2.0 AND MIT",
      "licence_source": "License",
@@ -2198,6 +2403,7 @@
      "version": "4.70.1"
     },
     {
+     "artefact_sha256": "adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2206,6 +2412,7 @@
      "version": "0.10.4"
     },
     {
+     "artefact_sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
      "licence": "PSF-2.0",
      "licence_raw": "PSF-2.0",
      "licence_source": "License-Expression",
@@ -2214,6 +2421,7 @@
      "version": "4.16.0"
     },
     {
+     "artefact_sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2222,6 +2430,7 @@
      "version": "0.4.4"
     },
     {
+     "artefact_sha256": "c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -2230,6 +2439,7 @@
      "version": "2026.4"
     },
     {
+     "artefact_sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2238,6 +2448,7 @@
      "version": "2.8.0"
     },
     {
+     "artefact_sha256": "d45f93f362d39f63ba14bbd9e4e1dd89fbed4de9bbef6bb428a379bd86571da2",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2246,6 +2457,7 @@
      "version": "0.17.1"
     },
     {
+     "artefact_sha256": "bbebbcbed972d162afca128605223022bedd345b7bc7855ce66deb31487a9048",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2254,6 +2466,7 @@
      "version": "0.46.0"
     },
     {
+     "artefact_sha256": "7b5b1ac819a3f946d3b2ee07f09149578ae76066d70b44df3fa990add49a82e4",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -2262,6 +2475,7 @@
      "version": "0.22.1"
     },
     {
+     "artefact_sha256": "89858a7cbb7fd0d9e74fdcdd0f6584bbfc4e8f92fdc4ed4bee5af7e24a36eda7",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License-Expression",
@@ -2270,6 +2484,7 @@
      "version": "5.0.50"
     },
     {
+     "artefact_sha256": "b5768b49e426fd5b550b012c866db347cdf15c398ef98dc557b6e6b72fa74cd1",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2278,6 +2493,7 @@
      "version": "1.3.0"
     },
     {
+     "artefact_sha256": "fd149ecddb9f0a88ea780017d6dde17c994e494e7f7303d4e3c9d6251f978f4b",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2286,6 +2502,7 @@
      "version": "11.0.1"
     },
     {
+     "artefact_sha256": "7fab6269c8bf237c657876b52058ccb182e861518d1c695c1a9aaa8c1c105d5b",
      "licence": "BSD-3-Clause",
      "licence_raw": "Development Status :: 5 - Production/Stable; Intended Audience :: Developers; License :: OSI Approved :: BSD License; Operating System :: OS Independent; Programming Language :: Python; Programming Language :: Python :: 3; Programming Language :: Python :: 3 :: Only; Programming Language :: Python :: 3.10; Programming Language :: Python :: 3.11; Programming Language :: Python :: 3.12; Programming Language :: Python :: 3.13; Programming Language :: Python :: 3.14; Programming Language :: Python :: Implementation :: CPython; Programming Language :: Python :: Implementation :: PyPy; Topic :: Internet :: WWW/HTTP",
      "licence_source": "Classifier",
@@ -2294,6 +2511,7 @@
      "version": "0.6.1"
     },
     {
+     "artefact_sha256": "e1a673830a9c7bfa47b1cd3d5e4178f4c9651d80a4eab02c9c23a1c3ec6250ce",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -2302,6 +2520,7 @@
      "version": "1.9.2"
     },
     {
+     "artefact_sha256": "9b5aca38b67492ef518a8ab76851862488a478602229112c4b0d58d63a7a4d5c",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2310,6 +2529,7 @@
      "version": "16.0"
     },
     {
+     "artefact_sha256": "0cabb9c17ab79b2549d1f23b36f436473ad9253ef53995a817feba26fae69d5b",
      "licence": "BSD-2-Clause",
      "licence_raw": "BSD-2-Clause",
      "licence_source": "License-Expression",
@@ -2318,6 +2538,7 @@
      "version": "2.5.0"
     },
     {
+     "artefact_sha256": "ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD",
      "licence_source": "License",
@@ -2326,6 +2547,7 @@
      "version": "2.0.2"
     },
     {
+     "artefact_sha256": "9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3",
      "licence": "BSD-2-Clause",
      "licence_raw": "BSD-2-Clause",
      "licence_source": "License",
@@ -2334,6 +2556,7 @@
      "version": "3.2.9"
     },
     {
+     "artefact_sha256": "237b8f63a2a0fcfb1ffc06e21dad23add44e6d354b2b014364a1d41e419a4dee",
      "licence": "BSD-2-Clause",
      "licence_raw": "BSD-2-Clause",
      "licence_source": "License",
@@ -2342,6 +2565,7 @@
      "version": "4.0.1"
     },
     {
+     "artefact_sha256": "c6f117789d22dce188e5754e8bc65b7e6ebf8cb73963b9fa761f672a5883769d",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
      "licence_source": "License",
@@ -2350,6 +2574,7 @@
      "version": "1.25.1"
     },
     {
+     "artefact_sha256": "d1874e57de65cf14c9d7d09b2b37c814d6287fa0e770d4922c4cd32a5b3f6c47",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2358,6 +2583,7 @@
      "version": "1.0.3"
     },
     {
+     "artefact_sha256": "5a56ba0db2d244117ed744dfa8f6f5b366e14148e00de44723413b2f3938a902",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2372,6 +2598,7 @@
    "lockfile": "services/delivery-py/docker/sandbox-requirements.lock.txt",
    "packages": [
     {
+     "artefact_sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2379,6 +2606,7 @@
      "version": "0.0.5"
     },
     {
+     "artefact_sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2386,6 +2614,7 @@
      "version": "0.8.0"
     },
     {
+     "artefact_sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2393,6 +2622,7 @@
      "version": "4.15.1"
     },
     {
+     "artefact_sha256": "42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b",
      "licence": "MPL-2.0",
      "licence_raw": "MPL-2.0",
      "licence_source": "License",
@@ -2400,6 +2630,7 @@
      "version": "2026.10.19"
     },
     {
+     "artefact_sha256": "c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf",
      "licence": "MIT-0",
      "licence_raw": "MIT-0",
      "licence_source": "License-Expression",
@@ -2407,6 +2638,7 @@
      "version": "2.1.1"
     },
     {
+     "artefact_sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2414,6 +2646,7 @@
      "version": "8.5.0"
     },
     {
+     "artefact_sha256": "ff838d62ec1bfce4f9ba7fa16f4a7b554cd8d0c299e6be37502161a660c84eef",
      "licence": "Apache-2.0 OR BSD-3-Clause",
      "licence_raw": "Apache-2.0 OR BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2421,6 +2654,7 @@
      "version": "50.0.1"
     },
     {
+     "artefact_sha256": "bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2428,6 +2662,7 @@
      "version": "0.141.1"
     },
     {
+     "artefact_sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2435,6 +2670,7 @@
      "version": "0.16.0"
     },
     {
+     "artefact_sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2442,6 +2678,7 @@
      "version": "1.0.9"
     },
     {
+     "artefact_sha256": "3e3201fe4d46e0d15d7ff9fafc94a605da9eb82d2c5b9837f0368acb325481f1",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2449,6 +2686,7 @@
      "version": "0.9.0"
     },
     {
+     "artefact_sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -2456,6 +2694,7 @@
      "version": "0.28.1"
     },
     {
+     "artefact_sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2463,6 +2702,7 @@
      "version": "3.20"
     },
     {
+     "artefact_sha256": "9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2470,6 +2710,7 @@
      "version": "2.3.1"
     },
     {
+     "artefact_sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
      "licence": "Apache-2.0 OR BSD-2-Clause",
      "licence_raw": "Apache-2.0 OR BSD-2-Clause",
      "licence_source": "License-Expression",
@@ -2477,6 +2718,7 @@
      "version": "26.3"
     },
     {
+     "artefact_sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2484,6 +2726,7 @@
      "version": "1.6.0"
     },
     {
+     "artefact_sha256": "51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2491,6 +2734,7 @@
      "version": "3.11"
     },
     {
+     "artefact_sha256": "6db14ac8dfc9a1e57f87ea2c0de670c251240f43cb0c30a5130e9720dc612927",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2498,6 +2742,7 @@
      "version": "2.13.3"
     },
     {
+     "artefact_sha256": "fb528e295ed31570ac3dcc9bfdd6e0150bc11ce6168ac87a8082055cf1a67395",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2505,6 +2750,7 @@
      "version": "2.46.3"
     },
     {
+     "artefact_sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
      "licence": "BSD-2-Clause",
      "licence_raw": "BSD-2-Clause",
      "licence_source": "License-Expression",
@@ -2512,6 +2758,7 @@
      "version": "2.21.0"
     },
     {
+     "artefact_sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2519,6 +2766,7 @@
      "version": "9.1.1"
     },
     {
+     "artefact_sha256": "42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -2526,6 +2774,7 @@
      "version": "1.2.4"
     },
     {
+     "artefact_sha256": "ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2533,6 +2782,7 @@
      "version": "6.0.3"
     },
     {
+     "artefact_sha256": "67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2540,6 +2790,7 @@
      "version": "1.7.0"
     },
     {
+     "artefact_sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
      "licence": "PSF-2.0",
      "licence_raw": "PSF-2.0",
      "licence_source": "License-Expression",
@@ -2547,6 +2798,7 @@
      "version": "4.16.0"
     },
     {
+     "artefact_sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2554,6 +2806,7 @@
      "version": "0.4.4"
     },
     {
+     "artefact_sha256": "bbebbcbed972d162afca128605223022bedd345b7bc7855ce66deb31487a9048",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2561,6 +2814,7 @@
      "version": "0.46.0"
     },
     {
+     "artefact_sha256": "090865d8ce7a03986755a3ce711b7dd0d4b44eb14ab74368b717f3fad1180208",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -2568,6 +2822,7 @@
      "version": "0.23.0"
     },
     {
+     "artefact_sha256": "b5768b49e426fd5b550b012c866db347cdf15c398ef98dc557b6e6b72fa74cd1",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2575,6 +2830,7 @@
      "version": "1.3.0"
     },
     {
+     "artefact_sha256": "6627b913b8586b1c06db9516b31dd0dfbc621de3bb9312616d92a7e44f268a5b",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2588,6 +2844,7 @@
    "lockfile": "deploy/python/requirements.lock.txt",
    "packages": [
     {
+     "artefact_sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2595,6 +2852,7 @@
      "version": "0.0.5"
     },
     {
+     "artefact_sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2602,6 +2860,7 @@
      "version": "0.8.0"
     },
     {
+     "artefact_sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2609,6 +2868,7 @@
      "version": "4.15.1"
     },
     {
+     "artefact_sha256": "42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b",
      "licence": "MPL-2.0",
      "licence_raw": "MPL-2.0",
      "licence_source": "License",
@@ -2616,6 +2876,7 @@
      "version": "2026.10.19"
     },
     {
+     "artefact_sha256": "c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf",
      "licence": "MIT-0",
      "licence_raw": "MIT-0",
      "licence_source": "License-Expression",
@@ -2623,6 +2884,7 @@
      "version": "2.1.1"
     },
     {
+     "artefact_sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2630,6 +2892,7 @@
      "version": "8.5.0"
     },
     {
+     "artefact_sha256": "ff838d62ec1bfce4f9ba7fa16f4a7b554cd8d0c299e6be37502161a660c84eef",
      "licence": "Apache-2.0 OR BSD-3-Clause",
      "licence_raw": "Apache-2.0 OR BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2637,6 +2900,7 @@
      "version": "50.0.1"
     },
     {
+     "artefact_sha256": "bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2644,6 +2908,7 @@
      "version": "0.141.1"
     },
     {
+     "artefact_sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2651,6 +2916,7 @@
      "version": "0.16.0"
     },
     {
+     "artefact_sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2658,6 +2924,7 @@
      "version": "1.0.9"
     },
     {
+     "artefact_sha256": "3e3201fe4d46e0d15d7ff9fafc94a605da9eb82d2c5b9837f0368acb325481f1",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2665,6 +2932,7 @@
      "version": "0.9.0"
     },
     {
+     "artefact_sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -2672,6 +2940,7 @@
      "version": "0.28.1"
     },
     {
+     "artefact_sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2679,6 +2948,7 @@
      "version": "3.20"
     },
     {
+     "artefact_sha256": "51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2686,6 +2956,7 @@
      "version": "3.11"
     },
     {
+     "artefact_sha256": "6db14ac8dfc9a1e57f87ea2c0de670c251240f43cb0c30a5130e9720dc612927",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2693,6 +2964,7 @@
      "version": "2.13.3"
     },
     {
+     "artefact_sha256": "fb528e295ed31570ac3dcc9bfdd6e0150bc11ce6168ac87a8082055cf1a67395",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2700,6 +2972,7 @@
      "version": "2.46.3"
     },
     {
+     "artefact_sha256": "42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License",
@@ -2707,6 +2980,7 @@
      "version": "1.2.4"
     },
     {
+     "artefact_sha256": "ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2714,6 +2988,7 @@
      "version": "6.0.3"
     },
     {
+     "artefact_sha256": "67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2721,6 +2996,7 @@
      "version": "1.7.0"
     },
     {
+     "artefact_sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
      "licence": "PSF-2.0",
      "licence_raw": "PSF-2.0",
      "licence_source": "License-Expression",
@@ -2728,6 +3004,7 @@
      "version": "4.16.0"
     },
     {
+     "artefact_sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License-Expression",
@@ -2735,6 +3012,7 @@
      "version": "0.4.4"
     },
     {
+     "artefact_sha256": "bbebbcbed972d162afca128605223022bedd345b7bc7855ce66deb31487a9048",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2742,6 +3020,7 @@
      "version": "0.46.0"
     },
     {
+     "artefact_sha256": "090865d8ce7a03986755a3ce711b7dd0d4b44eb14ab74368b717f3fad1180208",
      "licence": "MIT",
      "licence_raw": "MIT License",
      "licence_source": "License",
@@ -2749,6 +3028,7 @@
      "version": "0.23.0"
     },
     {
+     "artefact_sha256": "b5768b49e426fd5b550b012c866db347cdf15c398ef98dc557b6e6b72fa74cd1",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "License",
@@ -2756,6 +3036,7 @@
      "version": "1.3.0"
     },
     {
+     "artefact_sha256": "6627b913b8586b1c06db9516b31dd0dfbc621de3bb9312616d92a7e44f268a5b",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
      "licence_source": "License-Expression",
@@ -2769,6 +3050,7 @@
    "lockfile": "services/ledger-rust/Cargo.lock",
    "packages": [
     {
+     "artefact_sha256": "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2776,6 +3058,7 @@
      "version": "0.1.6"
     },
     {
+     "artefact_sha256": "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0",
      "licence": "Apache-2.0 OR MIT",
      "licence_raw": "Apache-2.0 OR MIT",
      "licence_source": "Cargo.toml license",
@@ -2783,6 +3066,7 @@
      "version": "1.1.2"
     },
     {
+     "artefact_sha256": "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53",
      "licence": "Apache-2.0 OR MIT",
      "licence_raw": "Apache-2.0 OR MIT",
      "licence_source": "Cargo.toml license",
@@ -2790,6 +3074,7 @@
      "version": "1.5.1"
     },
     {
+     "artefact_sha256": "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2797,6 +3082,7 @@
      "version": "0.10.4"
     },
     {
+     "artefact_sha256": "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2804,6 +3090,7 @@
      "version": "3.20.3"
     },
     {
+     "artefact_sha256": "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -2811,6 +3098,7 @@
      "version": "1.12.1"
     },
     {
+     "artefact_sha256": "54413ede23c2daf518f35156dfde027feb2374004d63bd497f983c8db9c0e313",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2818,6 +3106,7 @@
      "version": "1.4.7"
     },
     {
+     "artefact_sha256": "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2825,6 +3114,7 @@
      "version": "1.0.5"
     },
     {
+     "artefact_sha256": "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2832,6 +3122,7 @@
      "version": "0.4.45"
     },
     {
+     "artefact_sha256": "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2839,6 +3130,7 @@
      "version": "0.8.7"
     },
     {
+     "artefact_sha256": "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2846,6 +3138,7 @@
      "version": "0.2.17"
     },
     {
+     "artefact_sha256": "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2853,6 +3146,7 @@
      "version": "0.1.7"
     },
     {
+     "artefact_sha256": "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2860,6 +3154,7 @@
      "version": "0.10.7"
     },
     {
+     "artefact_sha256": "ef25905e51abafe4dcea6c15fec58c57b601cdbd0ee53d22ea1d3016c587d39b",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2867,6 +3162,7 @@
      "version": "0.1.13"
     },
     {
+     "artefact_sha256": "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2874,6 +3170,7 @@
      "version": "0.3.34"
     },
     {
+     "artefact_sha256": "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2881,6 +3178,7 @@
      "version": "0.3.34"
     },
     {
+     "artefact_sha256": "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2888,6 +3186,7 @@
      "version": "0.3.34"
     },
     {
+     "artefact_sha256": "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2895,6 +3194,7 @@
      "version": "0.3.34"
     },
     {
+     "artefact_sha256": "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -2902,6 +3202,7 @@
      "version": "0.14.7"
     },
     {
+     "artefact_sha256": "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2909,6 +3210,7 @@
      "version": "0.4.3"
     },
     {
+     "artefact_sha256": "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2916,6 +3218,7 @@
      "version": "1.5.0"
     },
     {
+     "artefact_sha256": "ca2a8f2913ee65f60facd6a5905613afaa448497a0230cc41ce022d93290bc2c",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -2923,6 +3226,7 @@
      "version": "1.1.0"
     },
     {
+     "artefact_sha256": "23169fe34a5fbcdd3f3862e78fb9b6fccd5f02a6dc6f732547005d45631ce71c",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -2930,6 +3234,7 @@
      "version": "0.1.5"
     },
     {
+     "artefact_sha256": "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2937,6 +3242,7 @@
      "version": "1.10.1"
     },
     {
+     "artefact_sha256": "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2944,6 +3250,7 @@
      "version": "1.0.3"
     },
     {
+     "artefact_sha256": "27b501faa50e7a26c3d3560ca625132f4078a17771f4810baf70475ae48cbe43",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -2951,6 +3258,7 @@
      "version": "1.11.1"
     },
     {
+     "artefact_sha256": "ddc03d96684f9226b8a787cdb71488417b53ab5ea8fdb1dac946cb9431cc8bff",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -2958,6 +3266,7 @@
      "version": "0.1.21"
     },
     {
+     "artefact_sha256": "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2965,6 +3274,7 @@
      "version": "0.1.65"
     },
     {
+     "artefact_sha256": "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2972,6 +3282,7 @@
      "version": "0.1.2"
     },
     {
+     "artefact_sha256": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2979,6 +3290,7 @@
      "version": "1.0.18"
     },
     {
+     "artefact_sha256": "ce57d20d1ea864ce2ac172ab472d409214f4fd359f0b2a2775abdf522e2af99e",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2986,6 +3298,7 @@
      "version": "0.3.105"
     },
     {
+     "artefact_sha256": "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -2993,6 +3306,7 @@
      "version": "0.2.189"
     },
     {
+     "artefact_sha256": "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3000,6 +3314,7 @@
      "version": "0.4.34"
     },
     {
+     "artefact_sha256": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98",
      "licence": "Unlicense OR MIT",
      "licence_raw": "Unlicense OR MIT",
      "licence_source": "Cargo.toml license",
@@ -3007,6 +3322,7 @@
      "version": "2.8.3"
     },
     {
+     "artefact_sha256": "4b18443e9c262bfe8fa82f51666e2642c53393f7e5c27b3e1aeab922cff5b9d8",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -3014,6 +3330,7 @@
      "version": "1.2.3"
     },
     {
+     "artefact_sha256": "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3021,6 +3338,7 @@
      "version": "0.2.19"
     },
     {
+     "artefact_sha256": "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3028,6 +3346,7 @@
      "version": "1.21.4"
     },
     {
+     "artefact_sha256": "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd",
      "licence": "Apache-2.0 OR MIT",
      "licence_raw": "Apache-2.0 OR MIT",
      "licence_source": "Cargo.toml license",
@@ -3035,6 +3354,7 @@
      "version": "0.2.17"
     },
     {
+     "artefact_sha256": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3042,6 +3362,7 @@
      "version": "1.0.107"
     },
     {
+     "artefact_sha256": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3049,6 +3370,7 @@
      "version": "1.0.47"
     },
     {
+     "artefact_sha256": "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3056,6 +3378,7 @@
      "version": "1.0.23"
     },
     {
+     "artefact_sha256": "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3063,6 +3386,7 @@
      "version": "1.0.229"
     },
     {
+     "artefact_sha256": "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3070,6 +3394,7 @@
      "version": "1.0.229"
     },
     {
+     "artefact_sha256": "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3077,6 +3402,7 @@
      "version": "1.0.229"
     },
     {
+     "artefact_sha256": "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3084,6 +3410,7 @@
      "version": "1.0.151"
     },
     {
+     "artefact_sha256": "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3091,6 +3418,7 @@
      "version": "0.10.9"
     },
     {
+     "artefact_sha256": "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3098,6 +3426,7 @@
      "version": "2.0.1"
     },
     {
+     "artefact_sha256": "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -3105,6 +3434,7 @@
      "version": "0.4.12"
     },
     {
+     "artefact_sha256": "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3112,6 +3442,7 @@
      "version": "1.16.1"
     },
     {
+     "artefact_sha256": "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3119,6 +3450,7 @@
      "version": "0.6.5"
     },
     {
+     "artefact_sha256": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3126,6 +3458,7 @@
      "version": "2.0.119"
     },
     {
+     "artefact_sha256": "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3133,6 +3466,7 @@
      "version": "3.0.6"
     },
     {
+     "artefact_sha256": "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
@@ -3140,6 +3474,7 @@
      "version": "1.53.1"
     },
     {
+     "artefact_sha256": "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3147,6 +3482,7 @@
      "version": "1.20.1"
     },
     {
+     "artefact_sha256": "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954",
      "licence": "(MIT OR Apache-2.0) AND Unicode-3.0",
      "licence_raw": "(MIT OR Apache-2.0) AND Unicode-3.0",
      "licence_source": "Cargo.toml license",
@@ -3154,6 +3490,7 @@
      "version": "1.0.26"
     },
     {
+     "artefact_sha256": "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT/Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3161,6 +3498,7 @@
      "version": "0.9.5"
     },
     {
+     "artefact_sha256": "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b",
      "licence": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
      "licence_raw": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
      "licence_source": "Cargo.toml license",
@@ -3168,6 +3506,7 @@
      "version": "0.11.1+wasi-snapshot-preview1"
     },
     {
+     "artefact_sha256": "aecb87a33d3b0c5e3b7aa46336eaf486cffafbd281b195e4c8b80d50df2351bf",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3175,6 +3514,7 @@
      "version": "0.2.128"
     },
     {
+     "artefact_sha256": "a690d511e3c1a8b3a55e33511e3c2c00c78415cd23650f32b808627f5696b9ed",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3182,6 +3522,7 @@
      "version": "0.2.128"
     },
     {
+     "artefact_sha256": "411e4887f0071ef2d2164a9d5fdf2d20efbef78fccd3a78b0c10a1dc5295e48a",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3189,6 +3530,7 @@
      "version": "0.2.128"
     },
     {
+     "artefact_sha256": "81941cd78d0c92026c33e5e01312845a4cb1e9af3407f9134b100dd03144103e",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3196,6 +3538,7 @@
      "version": "0.2.128"
     },
     {
+     "artefact_sha256": "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3203,6 +3546,7 @@
      "version": "0.62.2"
     },
     {
+     "artefact_sha256": "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3210,6 +3554,7 @@
      "version": "0.60.2"
     },
     {
+     "artefact_sha256": "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3217,6 +3562,7 @@
      "version": "0.59.3"
     },
     {
+     "artefact_sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3224,6 +3570,7 @@
      "version": "0.2.1"
     },
     {
+     "artefact_sha256": "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3231,6 +3578,7 @@
      "version": "0.4.1"
     },
     {
+     "artefact_sha256": "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3238,6 +3586,7 @@
      "version": "0.5.1"
     },
     {
+     "artefact_sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
      "licence": "MIT OR Apache-2.0",
      "licence_raw": "MIT OR Apache-2.0",
      "licence_source": "Cargo.toml license",
@@ -3245,6 +3594,7 @@
      "version": "0.61.2"
     },
     {
+     "artefact_sha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b",
      "licence": "MIT",
      "licence_raw": "MIT",
      "licence_source": "Cargo.toml license",
