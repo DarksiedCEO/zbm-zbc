@@ -48,10 +48,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.12"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.13"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.13 (review round 13): one spelled word counts only as a whole word with 9+ real digits, after the
+#    date and year-list exemptions (round 12 over-dropped year / date queries)
 # 2026-11-08.12 (review round 12): filler digit runs on the homoglyph view; one spelled word enough in a 9+ digit
 #    run; spelled digits looked for again with a repeated filler token or an interleaved character removed
 # 2026-11-08.11 (review round 11): no length rule on joined letter-digit text (spec queries kept); 9+ digits across
@@ -471,26 +473,51 @@ _HOMO1 = {"l": "1", "i": "1", "|": "1", "o": "0", "s": "5", "b": "8", "z": "2"}
 _NUMWORD_CONCAT = re.compile(r"(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"|\d){7,}")
 
 
-def spelled_digits(folded: str) -> str:
-    """Runs of 7+ tokens that are spelled-out digits (English or Spanish) or digits, with at least two spelled
-    ones, as digits ("four one one one ..." -> "4111...", "4 one 1 one ..."; rounds 10-11), else ""."""
-    out = []
+_MON = r"(?:0?[1-9]|1[0-2])"
+_DAY = r"(?:0?[1-9]|[12]\d|3[01])"
+# round 13: calendar dates in every common order and separator, months and days in range: 2025/11/08, 11/08/2025,
+# 08.11.2025, 12-25-2024 (the same separator twice)
+_SLASH_DATE = re.compile(r"(?<![\d/.\-])(?:(?:19|20)\d\d([/.\-])" + _MON + r"\1" + _DAY + r"|" + _MON + r"([/.\-])"
+                         + _DAY + r"\2(?:19|20)\d\d|" + _DAY + r"([/.\-])" + _MON + r"\3(?:19|20)\d\d)(?![\d/.\-])")
+_YEAR_WORD = re.compile(r"(?<!\d)(?:19|20)\d\d(?!\d)")
 
-    def enough(toks) -> bool:
-        # round 12: two spelled words, or one when the run holds 9+ digits ("(5) (5) (5) 0 (1) zero 0 (1) (9) (9)")
+
+def _without_dates_and_years(folded: str) -> str:
+    """Round 13: the same exemptions the other digit rules use — ISO and slash / dot / dash dates removed, and
+    year-like numbers (1900-2099) removed when there are two or more of them (``2023 2024``, ``2024-2025``)."""
+    t = _SLASH_DATE.sub(" # ", _ISO_DATE.sub(" # ", folded))
+    if len(_YEAR_WORD.findall(t)) >= 2:
+        t = _YEAR_WORD.sub(" # ", t)
+    return t
+
+
+def spelled_digits(folded: str) -> str:
+    """Runs of 7+ tokens that are spelled-out digits (English or Spanish), digits or digit homoglyphs, as digits
+    ("four one one one ..." -> "4111...", "4 one 1 one ..."; rounds 10-13), else "". A run needs two spelled number
+    words; ONE is enough only when it is a whole word in the query (never part of another word, never found in
+    run-together or reversed text) and the run holds 9+ digits (digit characters, or single homoglyph letters such
+    as ``l``) once dates and year lists are taken out (round 13: ``iphone 2023 2024`` and ``2024-12-25 hotel deals``
+    were dropped by round 12's token count)."""
+    out = []
+    text = _without_dates_and_years(folded)
+
+    def enough(toks, whole_words: bool) -> bool:
         words = sum(1 for t in toks if t in _NUMBER_WORDS)
-        return words >= 2 or (words >= 1 and len(toks) >= 9)
-    for m in _SPELLED.finditer(folded):
+        if words >= 2:
+            return True
+        digits = sum(len(t) for t in toks if t.isdigit()) + sum(1 for t in toks if t in _HOMO1)
+        return whole_words and words == 1 and digits >= 9
+    for m in _SPELLED.finditer(text):
         toks = [t for t in re.findall(r"[a-z]+|\d+|\|", m.group())
                 if t in _NUMBER_WORDS or t.isdigit() or t in _HOMO1]           # filler tokens dropped
-        if enough(toks):
+        if enough(toks, whole_words=True):
             out.append("".join(_NUMBER_WORDS.get(t) or _HOMO1.get(t, t) for t in toks))
-    for view in _defilled_views(folded):
+    for view in _defilled_views(text):
         squashed = re.sub(r"[^a-z0-9]", "", view)
-        for text in (squashed, squashed[::-1]):
-            for m in _NUMWORD_CONCAT.finditer(text):
+        for joined in (squashed, squashed[::-1]):
+            for m in _NUMWORD_CONCAT.finditer(joined):
                 toks = re.findall("|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"|\d", m.group())
-                if enough(toks):
+                if enough(toks, whole_words=False):
                     out.append("".join(_NUMBER_WORDS.get(t, t) for t in toks))
     return " ".join(out)
 
@@ -694,12 +721,13 @@ def classify_query(q: str, brands: list, _depth: int = 0) -> str:
     words = folded.split()
     spelled = spelled_digits(folded)
     glyphs = homoglyph_digits(folded)
+    undated = _SLASH_DATE.sub(" # ", folded)   # round 13: calendar dates are not digit runs, cards or filler runs
     if url_like(folded) or base64_text(t, _depth) or "@" in folded or logs_mod._EMAIL.search(folded) \
             or logs_mod._AT_WORD.search(folded) \
-            or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
-            or card_like(folded) or split_secret(folded) or looks_like_address(folded) \
+            or longest_digit_run(undated) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
+            or card_like(undated) or split_secret(folded) or looks_like_address(folded) \
             or (spelled and (longest_digit_run(spelled) >= PII_DIGIT_RUN or card_like(spelled))) \
-            or filler_digit_run(folded) >= FILLER_DIGIT_RUN \
+            or filler_digit_run(undated) >= FILLER_DIGIT_RUN \
             or (glyphs and (longest_digit_run(glyphs) >= 9 or card_like(glyphs)
                             or filler_digit_run(glyphs) >= FILLER_DIGIT_RUN)):
         return "pii_suspect"

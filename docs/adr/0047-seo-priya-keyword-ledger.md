@@ -145,7 +145,7 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.12`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.13`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -229,7 +229,17 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   alternating positions, removed). **All 18,826 pairs are now dropped, and the committed test runs every pair**
   (`tests/test_query_privacy_r12.py::test_all_composed_pairs_drop`, in the default counted suite, about 10-20 s),
   with round 11's sample kept as a fast check. No composed residual class remains pinned. What is still untested:
-  three or more obfuscations stacked, and obfuscations not in the corpus;
+  three or more obfuscations stacked, and obfuscations not in the corpus.
+- **Round 13 (over-drop fixed).** Round 12 let ONE spelled number word count in a run of 9+ *tokens*, and found
+  that word inside ordinary words (`ph-one`, reversed `ho` in hotel / honda): 32 of the reviewer's 115 year / date
+  queries were dropped (`iphone 2023 2024`, `2024-12-25 hotel deals`, `2010 2020 ohio state`). Now one word counts
+  only as a whole word in the query (never inside another word, never in run-together or reversed text) with 9+
+  real digits, after the year-list (two or more years 1900-2099) and date exemptions; and calendar dates in every
+  common order and separator with months and days in range (`2025/11/08`, `11/08/2025`, `08.11.2025`,
+  `12-25-2024`) are never digit runs, cards or filler runs — closing an older over-drop of non-ISO dates
+  (`11/08/2025 iphone` had been dropped since round 3). A 1,080-query year / date probe (10 year forms and 8 date
+  forms × 30 common words, both orders) drops 0, and 45 curated year / date KEEP tests pass
+  (`tests/test_query_privacy_r13.py`); all 18,826 composed pairs still drop;
   7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
