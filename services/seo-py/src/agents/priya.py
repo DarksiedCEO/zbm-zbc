@@ -138,13 +138,15 @@ LIMITS = [
     "Derived EMERGING variants are pattern transfers from the site's own long tail; they have no volume and are not "
     "evidence of demand.",
     "Personal names cannot be reliably detected in queries: a query naming a person can appear in the ledger as the "
-    "engine reported it. Dropped as personal data: e-mails, phone-like digit runs, id- or token-like words, street "
-    "addresses (house number, street name and suffix, a unit only after one), PO boxes, PMB numbers, rural routes, "
-    "ZIP+4, a state with a ZIP, and any query over 512 characters; the dropped count is of distinct queries. "
-    "Addresses the rule does NOT catch, which can appear in the ledger as the engine reported them: bare named "
-    "streets with no suffix ('1200 broadway'), landmark or building-name addresses, streets with more than three "
-    "name words or an unlisted suffix ('trail', 'pike'), and a state code that is also an English word with its ZIP "
-    "('portland or 97201'). The rule also drops some non-addresses shaped like '<number> <word> st' or "
+    "engine reported it. Dropped as personal data: e-mails, phone-like digit runs, id- or secret-like words (not "
+    "model numbers, tire sizes, decimals or years), street addresses (house number, street name and suffix, a unit "
+    "only after one), PO boxes, PMB numbers, rural routes, ZIP+4, a state with a ZIP, UK and Canadian postcodes, "
+    "French leading forms ('350 rue ...'), and any query over 512 characters; the dropped count is of distinct "
+    "queries. The address rule is US-centric. Addresses it does NOT catch, which can appear in the ledger as the "
+    "engine reported them: bare named streets with no suffix ('1200 broadway', '123 n main'), landmark or "
+    "building-name addresses, streets with more than three name words or an unlisted suffix ('trail', 'pike'), a "
+    "state code that is also an English word with its ZIP ('portland or 97201'), and other countries' postal "
+    "formats. The rule also drops some non-addresses shaped like '<number> <word> st' or "
     "'<number> <word> court'. Derived variants are never built from a query with a "
     "capitalised word, nor from a frame adding a word outside a closed vocabulary.",
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",

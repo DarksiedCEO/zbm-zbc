@@ -45,10 +45,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.3"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.4"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.4 (review round 4): old / new / good allowed as street names; plaza; UK and Canadian postcodes; French
+#    leading forms; the id / token word rule narrowed (model numbers, tire sizes, decimals, years are not identifiers)
 # 2026-11-08.3 (review round 3): ordinary-word suffixes, text after a strong-suffix address, more state codes, unit
 #    words after a state + ZIP, PMB and rural routes; queries over MAX_QUERY_CHARS are pii_suspect
 # .3 (AEGIS gl-gsc certification lows): {other} counts distinct normalised pages; CamelCase segments are {slug};
@@ -151,16 +153,18 @@ def longest_digit_run(text: str) -> int:
 #   - state + ZIP: a state name or a state code that is not one of the English words in, or, me, ok (so "portland or
 #     97201" is NOT caught), a 5-digit ZIP, and not followed by a unit word (btu, miles, jobs, sq, zip ...);
 #   - PO boxes, PMB numbers, rural routes ("rr 2 box 15", "hc 1 box 9") and ZIP+4 anywhere.
-# Known gaps (disclosed in ADR 0047 and ADR 0017 GSC-12): bare named streets with no suffix ("1200 broadway"), landmark
+#   - outside the US: UK postcodes, Canadian postal codes, French / Quebec leading forms ("350 rue sherbrooke").
+# Known gaps (disclosed in ADR 0047 and ADR 0017 GSC-12): the rule is US-centric (other countries' formats are not
+# covered); bare named streets with no suffix ("1200 broadway", "123 n main"), landmark
 # or building-name addresses, addresses with more than three street-name tokens or an unlisted suffix ("10 best
 # hiking trail" is kept on purpose), "portland or 97201". Known over-drops: a non-address shaped like
 # "<number> <word> st|ave|dr|ct|pl ..." or "<number> <word> court|place|way ..." at the end of a query
 # ("5 food court ideas").
 _STRONG_SUFFIX = (r"street|avenue|boulevard|st|ave|av|rd|blvd|ln|dr|ct|pl|ter|cir|hwy|pkwy|trl|cres|aly|plz|rte|fwy|"
                   r"expy|tpke")
-_ORDINARY_SUFFIX = r"road|lane|drive|court|way|terrace|place|loop"
+_ORDINARY_SUFFIX = r"road|lane|drive|court|way|terrace|place|loop|plaza"
 _STREET_SUFFIX = _STRONG_SUFFIX + "|" + _ORDINARY_SUFFIX
-_NOT_NAME = (r"a|an|the|of|for|in|on|at|to|and|or|my|your|with|near|by|from|best|top|cheap|cheapest|good|new|old|"
+_NOT_NAME = (r"a|an|the|of|for|in|on|at|to|and|or|my|your|with|near|by|from|best|top|cheap|cheapest|"
              r"hour|hours|hr|hrs|day|days|week|weeks|month|months|year|years|minute|minutes|bedroom|bedrooms|bed|"
              r"beds|bath|baths|car|cars|star|stars|person|people|room|rooms|story|stories|way|ways|things|tips|step|"
              r"steps|lane|lanes|door|doors|inch|inches|ft|foot|feet|mile|miles|unit|units|flat|apt|suite|ste|places|"
@@ -192,6 +196,13 @@ _ADDRESS = (
     re.compile(r"(?<!\w)pmb\s*#?\s*\d+"),                                                       # pmb 123
     re.compile(r"(?<!\w)(?:rr|hc|rural route)\s*#?\s*\d+\s*,?\s*box\s*#?\s*\d+"),               # rr 2 box 15
     re.compile(r"(?<!\d)\d{5}\s*" + _DASH + r"\s*\d{4}(?!\d)"),                                  # zip+4: 90210-1234
+    # UK postcode (outward + inward; the inward letters exclude c i k m o v): sw1a 1aa, ox1 4ag, m1 1ae
+    re.compile(r"(?<![a-z0-9])[a-z]{1,2}\d[a-z0-9]?\s*\d[abd-hjlnp-uw-z]{2}(?![a-z0-9])"),
+    # Canadian postal code (letters exclude d f i o q u; w z not first): m5v 3l9, m5h 2n2
+    re.compile(r"(?<![a-z0-9])[abceghj-nprstvxy]\d[abceghj-nprstv-z]\s?\d[abceghj-nprstv-z]\d(?![a-z0-9])"),
+    # French / Quebec leading forms: 350 rue sherbrooke, 12 chemin du lac, 4 bis rue de la paix
+    re.compile(r"(?:^|(?<!\btop)(?<!\bbest)\s)\d{1,5}(?:\s*(?:bis|ter))?\s*,?\s+(?:rue|chemin|impasse|allee|all\u00e9e|"
+               r"boulevard|bd|avenue|av|place|quai|route)\s+(?:de\s+la\s+|du\s+|des\s+|de\s+|d'|l')?[a-z][a-z'.-]+"),
     re.compile(r"(?:^|[\s,])" + _STATE + r"\.?\s*,?\s*\d{5}(?!\d)(?!\s*(?:" + _UNIT_WORDS + r")(?!\w))"),  # boise id 83702
 )
 MAX_QUERY_CHARS = 512        # longer text is not classified (it is pii_suspect): bounds the regex work per query
@@ -206,13 +217,40 @@ def looks_like_address(folded: str) -> bool:
     return any(p.search(t) for p in _ADDRESS)
 
 
+_JWT = re.compile(r"[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}")
+_ALNUM_TOKEN = re.compile(r"[a-z0-9_\-=+~]+")
+
+
+def _transitions(w: str) -> int:
+    """How often a word switches between letters and digits (``a1b2c3`` 5, ``24acc636a003`` 5, ``f150`` 1)."""
+    kinds = [c.isdigit() for c in w if c.isalnum()]
+    return sum(1 for x, y in zip(kinds, kinds[1:]) if x != y)
+
+
 def _word_identifies(w: str) -> bool:
-    """A word the log templater would replace (e-mail, UUID, file name, token, a letters-and-digits mix). A word of
-    digits and separators only (``2020-2021``) is left to the digit-run rule instead of the templater's total count."""
+    """A word that looks like an identifier or a secret (review round 4: narrowed from the log templater's rule, which
+    also dropped model numbers, tire sizes, decimals and years such as ``24acc636a003``, ``225/65r17``, ``3.5``,
+    ``2012``). Kept as identifying: an e-mail in any spelling; a UUID; 16+ hex characters; a JWT-like dotted token; 20+
+    token characters; anything over 40 characters; a letters-and-digits word of 16+ characters; a letters-and-digits
+    word of 8+ characters that switches between letters and digits at least 60% of the time (``a1b2c3d4e5f6g7``); a
+    file name (a stem with a letter and a 2-5 letter extension, not a code extension: ``jane_cv.pdf``). Digit runs
+    (phone numbers, SSNs, card and account numbers) are the digit-run rule's (7+ digits in one run)."""
     kind = logs_mod._kind(w)
-    if kind == "{number}" and not any(c.isalpha() for c in w):
-        return False
-    return kind not in (None, "{id}")
+    if kind == "{email}" or kind == "{uuid}":
+        return True
+    if logs_mod._HEX.fullmatch(w) or _JWT.search(w) or len(w) > 40 or logs_mod._TOKENISH.fullmatch(w):
+        return True
+    m = logs_mod._FILE.fullmatch(w)
+    if m and m.group(2).isalpha() and len(m.group(2)) >= 2 and any(c.isalpha() for c in m.group(1)) \
+            and m.group(2).lower() not in logs_mod.STATIC_EXT:
+        return True
+    letters, digits = sum(c.isalpha() for c in w), sum(c.isdigit() for c in w)
+    if letters and digits >= 2 and _ALNUM_TOKEN.fullmatch(w):
+        if len(w) >= 16:
+            return True
+        if len(w) >= 8 and _transitions(w) >= 0.6 * (len(w) - 1):
+            return True
+    return False
 
 
 def classify_query(q: str, brands: list) -> str:
@@ -221,6 +259,8 @@ def classify_query(q: str, brands: list) -> str:
     if len(q or "") > MAX_QUERY_CHARS:          # too long to classify cheaply: dropped as personal data, counted
         return "pii_suspect"
     t = lookalikes.strip_invisible(unicodedata.normalize("NFKC", q or ""))
+    if len(t) > MAX_QUERY_CHARS:                # NFKC can expand a character many times (U+FDFA is 18)
+        return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
     if "@" in folded or logs_mod._EMAIL.search(folded) or logs_mod._AT_WORD.search(folded) \

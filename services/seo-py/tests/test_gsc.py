@@ -851,6 +851,74 @@ def test_overlong_queries_are_not_examined_and_count_as_personal_data():
     assert sp.looks_like_address("a " * 300) is True
 
 
+# Round-4 reviewer's probe set (search_performance 2026-11-08.4): service-business queries by trade, and US, UK,
+# Canadian and French address forms. "123 n main" (a bare named street, no suffix) is a disclosed gap.
+ROUND4_KEEP = (
+    "plumber near me open now", "water heater 50 gal gas", "tankless water heater 199k btu",
+    "leaky faucet repair cost", "sump pump 1/2 hp", "drain cleaning 24/7", "1 1/2 inch pvc pipe",
+    "toilet flange 4 inch", "plumber on oak lane", "plumbing supply on harbor drive",
+    "emergency plumber court street", "hvac repair near me", "2.5 ton heat pump", "16 seer ac unit price",
+    "furnace 80000 btu", "mini split 12k", "ac not cooling 85 degrees", "carrier 24acc636a003 manual",
+    "trane xr14 4 ton", "hvac tune up 89 special", "goodman 3 ton 14 seer", "duct cleaning 3 bedroom house",
+    "house cleaning 3 bed 2 bath price", "move out cleaning 2 bedroom apartment", "carpet cleaning 3 rooms for 99",
+    "maid service 2 hours", "deep clean 1500 sq ft", "office cleaning 5 days a week", "window washing 2 story",
+    "pizza near me", "best tacos on 6th street", "sushi on main street", "brunch on king street",
+    "thai food 2 for 1", "restaurants open till 2am", "diner on route 9", "bbq 3 meat plate",
+    "wings 50 cent tuesday", "food court mall hours", "cafe on sunset boulevard", "steakhouse on park avenue",
+    "hair salon near me", "nail salon open sunday", "balayage 2 hours", "kids haircut 10 dollars",
+    "barber shop on water street", "salon on the way", "lash extensions 3 week fill", "oil change 5w-30",
+    "tires 225/65r17", "brake pads 2015 honda civic", "transmission repair 4l60e", "auto body shop drive thru",
+    "car wash 5 dollar tuesday", "battery group 24f", "2012 ford f150 3.5 ecoboost", "tow truck 10 miles cost",
+    "mechanic on 5th street", "alignment 4 wheel cost", "dui lawyer near me",
+    "divorce attorney 30 minute free consultation", "chapter 7 bankruptcy lawyer",
+    "personal injury lawyer 33 percent", "will and trust 500 flat fee", "lawyer on court street",
+    "law office on main way", "court date lookup", "small claims court 10000 limit",
+    "dentist near me accepting medicaid", "teeth cleaning 99 special", "dental implant 3000", "invisalign 6 months",
+    "emergency dentist open 24 hours", "wisdom teeth removal 4 teeth cost", "dentist on 3rd avenue",
+    "roof replacement 2000 sq ft", "30 year shingles", "gutter cleaning 1 story", "fence 6 ft cedar",
+    "concrete driveway 20x20", "pressure washing 2 car driveway", "garage door 16x7", "lane closures i 35",
+    "4 lane highway construction", "3 way switch wiring", "2 way radio repair", "dead end drive in theater",
+    "16 drive in movie", "cul de sac lot", "10 court cases", "3 court reporters near me", "2 drive shaft repair",
+    "the 5 love languages", "best 2 way mirror", "1 way street ticket",
+)
+ROUND4_DROP = (
+    "742 maple st", "1010 n oak ave", "88 w broad st apt 12", "2301 e camelback rd phoenix az 85016",
+    "15 cedar lane", "4 birch court", "900 river road", "77 sunset way", "12 harbor drive", "600 elm place",
+    "300 pine terrace", "1 market plaza", "5 elm loop", "20 grove st, boston, ma 02114", "1400 n state pkwy chicago",
+    "45 park ave suite 2100 new york ny 10016", "3001 s congress ave austin tx 78704", "250 w 57th st",
+    "17 old mill road", "102 spruce ln unit 4", "8 main st #3", "plumber 742 maple st", "dentist at 45 park ave",
+    "450 oak dr springfield", "9 lakeview cir", "1800 n highland ave los angeles ca 90028", "po box 55",
+    "p.o. box 9921 denver co 80201", "denver co 80202", "miami fl 33101", "seattle, wa 98101",
+    "atlanta ga 30303-1234", "10 elm st apt 5 new haven ct 06510", "5500 n western ave", "16 wedgewood dr",
+    "1225 chestnut street philadelphia pa", "61 bay st san francisco", "321 maple avenue", "100 old country rd",
+    "221b baker street london", "10 downing street", "14 high st oxford ox1 4ag", "sw1a 1aa",
+    "flat 3 22 queens road", "100 queen st w toronto on m5h 2n2", "m5v 3l9", "1 yonge st toronto",
+    "350 rue sherbrooke montreal", "4 privet drive little whinging",
+    "12 new street", "40 good hope rd", "88 old post road", "300 OLD MILL RD",
+)
+WORD_KEEP = ("2.5 ton heat pump", "tires 225/65r17", "2012 ford f150 3.5 ecoboost", "carrier 24acc636a003 manual",
+             "trane xr14 4 ton", "oil change 5w-30", "transmission repair 4l60e", "battery group 24f", "u.s flag",
+             "16 seer ac unit price", "goodman gsx140361 specs")
+WORD_DROP = ("a1b2c3d4e5f6g7", "token abcd1234efgh5678", "-".join(("f47ac10b", "58cc", "4372", "a567", "0e02b2c3d479")),
+             "deadbeefdeadbeef00", "abcdefgh.ijklmnop.qrstuvwx", "x" * 41, "jane_cv.pdf", "q9w8e7r6t5", "order 1234567",
+             "acct ab12345678")
+
+
+@pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND4_KEEP + WORD_KEEP]
+                         + [(q, "DROP") for q in ROUND4_DROP + WORD_DROP])
+def test_osei_round4_keep_drop_table(q, want):
+    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
+
+
+def test_osei_round4_disclosed_gap():
+    assert sp.classify_query("123 n main", ["acme"]) != "pii_suspect"     # bare named street: disclosed, not caught
+
+
+def test_nfkc_expansion_past_the_cap_is_personal_data():
+    q = "\ufdfa" * 40                                                    # 40 characters, 720 after NFKC
+    assert len(q) <= sp.MAX_QUERY_CHARS and sp.classify_query(q, ["acme"]) == "pii_suspect"
+
+
 def test_query_classifier_pii_first_and_closed():
     b = ["acme"]
     for q in ("jane.doe@example.com", "jane (at) example dot com", "acme 5550100199", "call 555-010-0199",

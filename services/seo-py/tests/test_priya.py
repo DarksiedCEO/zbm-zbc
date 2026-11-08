@@ -100,7 +100,10 @@ def test_pii_suspect_queries_never_enter_the_ledger_only_their_counts():
                                "9 n elm blvd.", "po box 1234", "springfield il 62701", "austin, tx 78701",
                                "90210-1234", "plumber at 123 main st", "42 Wallaby Way Sydney", "123 main road",
                                "123 main st springfield il 62701 hours", "55 water st 12th floor", "boston ma 02108",
-                               "rr 2 box 15", "1 main st pmb 123", "x" * 600])
+                               "rr 2 box 15", "1 main st pmb 123", "x" * 600, "17 old mill road",
+                               "100 old country rd", "300 OLD MILL RD", "88 old post road", "12 new street",
+                               "40 good hope rd", "sw1a 1aa", "m5v 3l9", "350 rue sherbrooke montreal",
+                               "1 market plaza"])
 def test_street_addresses_are_dropped_as_personal_data(q):
     led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
     assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"] == {"queries": 1, "clicks": 1,
@@ -112,7 +115,9 @@ def test_street_addresses_are_dropped_as_personal_data(q):
                                "2 bedroom flat close to station", "10 best hiking trail", "2 lane road",
                                "cars under 30000 in 50000 miles", "or 50000 btu", "ohio 45000 jobs",
                                "apt 12 carpet cleaning", "3 days in st louis", "ca 90210 zip code",
-                               "top 5 pizza places 5th ave", "2 rd round draft"])
+                               "top 5 pizza places 5th ave", "2 rd round draft", "2.5 ton heat pump",
+                               "tires 225/65r17", "2012 ford f150 3.5 ecoboost", "carrier 24acc636a003 manual",
+                               "food court mall hours"])
 def test_ordinary_queries_with_numbers_are_kept(q):
     assert by_text(build(gsc([(q, 1, 30, 0.03, 4.0)])))[q]["origin"] == "observed"
 
