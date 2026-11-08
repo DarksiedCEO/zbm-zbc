@@ -369,6 +369,55 @@ class SourceOfTruthCase(_TmpCase):
         self.assertEqual(res.violations, ["py: fastapi==1.0.0: inventory licence 'MIT' differs from the hash-verified "
                                           "artefact's declared licence 'GPL-3.0-only'"])
 
+    def test_verify_sources_reads_npm_licence_from_the_tarball_not_the_lock(self):
+        # the re-review injection: graphql relabelled GPL-3.0-only in BOTH package-lock.json and the inventory while
+        # the hash-verified tarball's own package.json says MIT — the lock must not be the source of truth
+        import base64
+        import tarfile
+        import third_party_notices as T
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            body = json.dumps({"name": "graphql", "version": "16.14.2", "license": "MIT"}).encode()
+            info = tarfile.TarInfo("package/package.json")
+            info.size = len(body)
+            tf.addfile(info, io.BytesIO(body))
+        tgz = buf.getvalue()
+        sri = "sha512-" + base64.b64encode(hashlib.sha512(tgz).digest()).decode()
+        url = "https://registry.npmjs.org/graphql/-/graphql-16.14.2.tgz"
+        cache = self.tmp / "cache"
+        art = cache / "artefacts" / (hashlib.sha256(url.encode()).hexdigest()[:16] + "-graphql-16.14.2.tgz")
+        art.parent.mkdir(parents=True)
+        art.write_bytes(tgz)
+        npm = {"lockfileVersion": 3, "packages": {"": {"name": "web"}, "node_modules/graphql": {
+            "version": "16.14.2", "resolved": url, "integrity": sri, "license": "GPL-3.0-only"}}}
+        inv = inventory(web={"packages": [{"name": "graphql", "version": "16.14.2", "licence": "GPL-3.0-only",
+                                           "artefact_integrity": sri}]})
+        tree = Tree(self.tmp / "repo", npm=npm, inv=inv)
+        offline = tree.run()
+        self.assertFalse([v for v in offline.violations if "differs" in v], "lock and inventory agree offline")
+        saved = T.REPO
+        T.REPO = tree.root
+        try:
+            self.assertEqual(T.collect_npm("web/package-lock.json", cache)[0]["licence"], "MIT")
+            res = G.Result()
+            G.verify_sources("web", {"lockfile": "web/package-lock.json", "kind": "npm"},
+                             {("graphql", "16.14.2"): inv["components"]["web"]["packages"][0]}, cache, res)
+        finally:
+            T.REPO = saved
+        self.assertEqual(res.violations, [
+            "web: graphql==16.14.2: inventory licence 'GPL-3.0-only' differs from the hash-verified artefact's "
+            "declared licence 'MIT'",
+            "web: graphql==16.14.2: package-lock.json license 'GPL-3.0-only' differs from the hash-verified "
+            "tarball's package.json license 'MIT'"])
+
+    def test_npm_package_json_licence_forms(self):
+        import third_party_notices as T
+        self.assertEqual(T.npm_package_json_licence({"license": "ISC"}), "ISC")
+        self.assertEqual(T.npm_package_json_licence({"license": {"type": "MIT"}}), "MIT")
+        self.assertEqual(T.npm_package_json_licence({"licenses": [{"type": "MIT"}, {"type": "Apache-2.0"}]}),
+                         "MIT OR Apache-2.0")
+        self.assertEqual(T.npm_package_json_licence({}), "UNKNOWN")
+
     def test_artefact_with_wrong_hash_is_refused(self):
         import third_party_notices as T
         cache = self.tmp / "cache"

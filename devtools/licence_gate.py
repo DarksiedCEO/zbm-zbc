@@ -21,8 +21,9 @@ What it checks, for every lockfile in the repository (devtools/licence_lib.py di
 7. the inventory agrees with the lockfiles themselves (offline, always): npm package-lock `license` == inventory
    licence; every inventory row names an artefact hash the lock pins (sha256 / Cargo.lock checksum / npm integrity);
 8. with ``--verify-sources --cache <dir>``: every declared licence is re-derived from the hash-verified artefact
-   (wheel/sdist METADATA, the .crate's Cargo.toml — the `cargo metadata` value —, npm tarball, restic's pinned Go
-   licence texts) and must equal the inventory. CI should run this mode (it needs network for uncached artefacts).
+   (wheel/sdist METADATA, the .crate's Cargo.toml — the `cargo metadata` value —, the npm tarball's own
+   package.json, restic's pinned Go licence texts) and must equal the inventory; for npm the tarball value must
+   also equal package-lock's `license`. CI should run this mode (it needs network for uncached artefacts).
 A package with no licence value at all is an explicit UNKNOWN-licence violation.
 
 How CI should call it: docs/runbooks/dependency-ownership.md, "CI wiring (for owner review)".
@@ -151,8 +152,10 @@ def cross_check_lock(cid: str, kind: str, locked: dict, inv_pkgs: dict, res: Res
 def verify_sources(cid: str, comp: dict, inv_pkgs: dict, cache: Path, res: Result) -> None:
     """--verify-sources: re-derive every declared licence from the source of truth — the hash-verified artefact
     (wheel/sdist METADATA License-Expression / License / classifiers; the .crate's Cargo.toml `license`, which is
-    what `cargo metadata` reports; the npm tarball against package-lock's `license`; restic's Go licence texts at
-    their pinned commit + sha256) — and fail on any difference from the inventory."""
+    what `cargo metadata` reports; the npm tarball's OWN package.json `license`; restic's Go licence texts at their
+    pinned commit + sha256) — and fail on any difference from the inventory. For npm the tarball value must also
+    equal package-lock's `license` (both directions: a lock+inventory edited together still differ from the
+    tarball)."""
     import third_party_notices as T
     try:
         fresh = T.collect_component(comp["kind"], comp.get("lockfile"), cache)
@@ -166,9 +169,13 @@ def verify_sources(cid: str, comp: dict, inv_pkgs: dict, cache: Path, res: Resul
         r = fresh_map.get(k)
         if r is None:
             res.violations.append(f"{cid}: {pkg['name']}=={k[1]}: not produced from the lock's artefacts")
-        elif r["licence"] != pkg.get("licence"):
+            continue
+        if r["licence"] != pkg.get("licence"):
             res.violations.append(f"{cid}: {pkg['name']}=={k[1]}: inventory licence {pkg.get('licence')!r} differs from "
                                   f"the hash-verified artefact's declared licence {r['licence']!r}")
+        if comp["kind"] == "npm" and r["licence"] != r.get("lock_licence"):
+            res.violations.append(f"{cid}: {pkg['name']}=={k[1]}: package-lock.json license {r.get('lock_licence')!r} "
+                                  f"differs from the hash-verified tarball's package.json license {r['licence']!r}")
 
 
 def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path: Path = DEFAULT_EXCEPTIONS,

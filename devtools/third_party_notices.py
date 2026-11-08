@@ -4,10 +4,12 @@
     python3 devtools/third_party_notices.py render  --cache <dir>   # offline: rewrite the committed outputs
 
 ``collect`` reads every lockfile the repository ships (devtools/licence_lib.py), downloads each locked artefact from
-its registry — PyPI wheels/sdists, crates (via ``cargo metadata`` over the local registry cache), npm tarballs —
+its registry — PyPI wheels/sdists, crates (.crate files), npm tarballs —
 and VERIFIES each against the hash recorded in the lock (sha256 / sha512 integrity / crate checksum); an artefact
 whose hash does not match is an error, never a warning. From each verified artefact it extracts the declared
-licence (wheel METADATA License-Expression / License / classifiers; Cargo ``license``; package.json ``license``) and
+licence (wheel METADATA License-Expression / License / classifiers; the .crate's own Cargo.toml ``license``, the
+value ``cargo metadata`` reports; the npm tarball's own package.json ``license`` — package-lock's copy is recorded
+beside it, never used in its place) and
 every licence/notice file it ships (LICENSE*, COPYING*, NOTICE*, AUTHORS*, ThirdPartyNotices*, BUILD_LICENSES/**).
 The vendored restic binary's Go module list comes from ``go version -m``; each module's licence text is fetched
 from its upstream repository at the exact tag/commit.
@@ -386,6 +388,23 @@ def collect_cargo(rel: str, cache: Path) -> list[dict]:
 # npm
 # --------------------------------------------------------------------------------------------------------------
 
+def npm_package_json_licence(pkgjson: dict) -> str:
+    """SPDX expression from a package.json: `license` (string or legacy {type}), else legacy `licenses` [{type}]
+    (a list conventionally means a choice, joined with OR); UNKNOWN when absent."""
+    lic = pkgjson.get("license")
+    if isinstance(lic, dict):
+        lic = lic.get("type")
+    if isinstance(lic, str) and lic.strip():
+        return lic.strip()
+    legacy = pkgjson.get("licenses")
+    if isinstance(legacy, list):
+        ids = [x.get("type") if isinstance(x, dict) else x for x in legacy]
+        ids = [i for i in ids if isinstance(i, str) and i.strip()]
+        if ids:
+            return " OR ".join(ids)
+    return "UNKNOWN"
+
+
 def collect_npm(rel: str, cache: Path) -> list[dict]:
     out = []
     for item in L.parse_package_lock((REPO / rel).read_text()):
@@ -402,13 +421,14 @@ def collect_npm(rel: str, cache: Path) -> list[dict]:
                 pkgjson = json.loads(tf.extractfile(member).read())
             elif len(parts) == 2 and LICENCE_FILE.match(parts[1]):
                 files[f"{item.name}@{item.version}/{parts[1]}"] = _text(tf.extractfile(member).read())
-        lic = item.extra.get("license") or pkgjson.get("license") or "UNKNOWN"
-        if isinstance(lic, dict):
-            lic = lic.get("type", "UNKNOWN")
+        # The licence is the one in the hash-verified tarball's own package.json (the source of truth);
+        # package-lock's `license` is a copy npm made of it and is recorded beside it for the gate to compare.
+        lic = npm_package_json_licence(pkgjson)
         repo = pkgjson.get("repository")
         home = pkgjson.get("homepage") or (repo.get("url") if isinstance(repo, dict) else repo) or ""
         out.append({"name": item.name, "version": item.version, "licence": lic, "licence_raw": lic,
-                    "licence_source": "package-lock license", "artefact": item.extra["resolved"].rsplit("/", 1)[-1],
+                    "lock_licence": item.extra.get("license"),
+                    "licence_source": "tarball package.json license", "artefact": item.extra["resolved"].rsplit("/", 1)[-1],
                     "artefact_integrity": item.hashes[0], "homepage": home, "dev": item.extra.get("dev", False),
                     "files": files})
     return out

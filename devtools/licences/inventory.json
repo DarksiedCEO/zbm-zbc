@@ -583,7 +583,7 @@
      "artefact_integrity": "sha512-a7tz1QCcWWkwC/rPJcPMJk/UNRu9CFhDd3OHYE5hddbJrs8BqRTalxI6GlKCWEGzRLHN+S/B7a4PAHCtm25aBQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/env",
      "version": "16.4.3"
     },
@@ -591,7 +591,7 @@
      "artefact_integrity": "sha512-4yq5EXBt+VDtAZwTyfijaFp5D2C5oz3Ikw5a2kiX2K9nw72vrZX2q5UuAlkPtUMO1tQz6JTKpaKWjS7OOefTDQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-darwin-arm64",
      "version": "16.4.3"
     },
@@ -599,7 +599,7 @@
      "artefact_integrity": "sha512-1Rvkn/LUhnEF8WxnRkOrqGhbwXui1bkWFxONKIbN+r7C+9KHDSZ+iUoj4CzymVMWUyZIyx9szcb9+kbKhD500A==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-darwin-x64",
      "version": "16.4.3"
     },
@@ -607,7 +607,7 @@
      "artefact_integrity": "sha512-dCKpXErGg3abUM6t5JTJV/ottVBTStJB5lRJTbgdUdQaQ+jNHiK56Hsc0YAEg/rinSh42hYG3HWiYmEMdilnxg==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-linux-arm64-gnu",
      "version": "16.4.3"
     },
@@ -615,7 +615,7 @@
      "artefact_integrity": "sha512-WwYbhWkhYBvBtib1K4W0kL8MW2snBD2A5b3SN4vPpqalZbZs5+bQ1yzAdepVoOqrFfEW3dmREy4Zs1MrWcrFbw==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-linux-arm64-musl",
      "version": "16.4.3"
     },
@@ -623,7 +623,7 @@
      "artefact_integrity": "sha512-QymWvfUwDEC5/lpJOsxX5VAbyoR2D13+2Jsjz4be7gT4LPqEgdpkeLIR/HFfCLgKzoMhpJbp6I/JnogyNZHcaA==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-linux-x64-gnu",
      "version": "16.4.3"
     },
@@ -631,7 +631,7 @@
      "artefact_integrity": "sha512-Vmjd9D7DpA4Vv3cUlr82QWgJD/BQZmns801vtC5VWHg6jCIA4a5vMKpQnfrM2pyCrp2eV0ENdUg4PlN3bAc2Yw==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-linux-x64-musl",
      "version": "16.4.3"
     },
@@ -639,7 +639,7 @@
      "artefact_integrity": "sha512-lG1pPdPLk7gTyGb00n5JIMLdBJgjb+UEhSdZvFbhUMg0DyC6z4B7RnpSKF9VCd4imkLObVbXOFA0kFCpw7yFow==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-win32-arm64-msvc",
      "version": "16.4.3"
     },
@@ -647,7 +647,7 @@
      "artefact_integrity": "sha512-NmQC9RkJdnPXRaMxtkCzobB3teVjqF33oSOnwDfi+XYGWWYpt+xlGK3mtktSKLbdjwaWbJu2OkkMiRFGUUncKg==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@next/swc-win32-x64-msvc",
      "version": "16.4.3"
     },
@@ -655,7 +655,7 @@
      "artefact_integrity": "sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@swc/helpers",
      "version": "0.5.23"
     },
@@ -664,7 +664,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@types/node",
      "version": "22.9.0"
     },
@@ -673,7 +673,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@types/prop-types",
      "version": "15.7.15"
     },
@@ -682,7 +682,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@types/react",
      "version": "18.3.12"
     },
@@ -691,7 +691,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@types/react-dom",
      "version": "18.3.1"
     },
@@ -699,7 +699,7 @@
      "artefact_integrity": "sha512-gMmEShwwq7FJqMwvfRwvCl00v4kN+KOfJqXn+f4nrufak5gNHJOksd/60Dvjuz7sI8Y5WiSFBa8FEYr+zoyqCw==",
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "baseline-browser-mapping",
      "version": "2.11.25"
     },
@@ -707,7 +707,7 @@
      "artefact_integrity": "sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg==",
      "licence": "CC-BY-4.0",
      "licence_raw": "CC-BY-4.0",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "caniuse-lite",
      "version": "1.0.30001810"
     },
@@ -715,7 +715,7 @@
      "artefact_integrity": "sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "client-only",
      "version": "0.0.1"
     },
@@ -724,7 +724,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "csstype",
      "version": "3.2.3"
     },
@@ -732,7 +732,7 @@
      "artefact_integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "js-tokens",
      "version": "4.0.0"
     },
@@ -740,7 +740,7 @@
      "artefact_integrity": "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "loose-envify",
      "version": "1.4.0"
     },
@@ -748,7 +748,7 @@
      "artefact_integrity": "sha512-Y2tUNy4ouw6tq5oDSKeQYGOyhkUBhNOcGV/02KC+6kd9eDGqdZd++mjMiIDilrBYvjEnCYvVtsuHCuP+okSfug==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "nanoid",
      "version": "3.3.19"
     },
@@ -756,7 +756,7 @@
      "artefact_integrity": "sha512-OqxKTGi9u80FydydsMNYNjnuje9Au+kvHlt2GZ//ftdpDHm1dxKqAaENoOOTX5wKzn+9vaKUNIfZeyZUuLhCnA==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "next",
      "version": "16.4.3"
     },
@@ -764,7 +764,7 @@
      "artefact_integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==",
      "licence": "ISC",
      "licence_raw": "ISC",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "picocolors",
      "version": "1.1.1"
     },
@@ -772,7 +772,7 @@
      "artefact_integrity": "sha512-g50586zr4bZmwFiTlflMu8E0bDTb5I5gertgwAKmsdUlTQIhZtunzUlD1WSzwcVWPoAVpsrA6vlfCD7oXvRwgg==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "postcss",
      "version": "8.5.23"
     },
@@ -780,7 +780,7 @@
      "artefact_integrity": "sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "react",
      "version": "18.3.1"
     },
@@ -788,7 +788,7 @@
      "artefact_integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "react-dom",
      "version": "18.3.1"
     },
@@ -796,7 +796,7 @@
      "artefact_integrity": "sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "scheduler",
      "version": "0.23.2"
     },
@@ -804,7 +804,7 @@
      "artefact_integrity": "sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==",
      "licence": "BSD-3-Clause",
      "licence_raw": "BSD-3-Clause",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "source-map-js",
      "version": "1.2.2"
     },
@@ -812,7 +812,7 @@
      "artefact_integrity": "sha512-qSVyDTeMotdvQYoHWLNGwRFJHC+i+ZvdBRYosOFgC+Wg1vx4frN2/RG/NA7SYqqvKNLf39P2LSRA2pu6n0XYZA==",
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "styled-jsx",
      "version": "5.1.6"
     },
@@ -820,7 +820,7 @@
      "artefact_integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
      "licence": "0BSD",
      "licence_raw": "0BSD",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "tslib",
      "version": "2.8.1"
     },
@@ -829,7 +829,7 @@
      "dev": true,
      "licence": "Apache-2.0",
      "licence_raw": "Apache-2.0",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "typescript",
      "version": "5.6.3"
     },
@@ -838,7 +838,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "undici-types",
      "version": "6.19.8"
     }
@@ -853,7 +853,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "@graphql-typed-document-node/core",
      "version": "3.2.0"
     },
@@ -862,7 +862,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "graphql",
      "version": "16.14.2"
     },
@@ -871,7 +871,7 @@
      "dev": true,
      "licence": "MIT",
      "licence_raw": "MIT",
-     "licence_source": "package-lock license",
+     "licence_source": "tarball package.json license",
      "name": "railway",
      "version": "3.13.1"
     }
