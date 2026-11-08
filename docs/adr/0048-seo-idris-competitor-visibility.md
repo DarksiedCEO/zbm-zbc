@@ -335,8 +335,11 @@ headline until the owner or the tenant confirms it (the gate below, unchanged).
   Partners / Company, initials ("J. Walsh Heating") and honorifics join a name; markdown headings are read ("### 2.
   Name").
 - **Injection.** The whole answer is scanned with the injection guard's pattern families (`agents/injection_guard.py`,
-  a byte-identical copy of Theo's module from `claude/seo-theo-naomi-zara-20261108` at 7b906d15, with its vendored
-  `confusables.txt` and `confusables.NOTICE`, Unicode License V3; to be deduplicated when both branches merge), so line
+  a byte-identical copy of Theo's module from `claude/seo-theo-naomi-zara-20261108`, with its vendored
+  `confusables.txt` and `confusables.NOTICE`, Unicode License V3; since round 5 the copy is Theo's 49732dd3 version,
+  which bounds every repetition (the 7b906d15 copy had a cubic ReDoS in the YAML role pattern) and flags a text over
+  `MAX_SCAN_CHARS` unscanned — so such an answer counts for no Idris candidate (fail closed); Theo's structural
+  pattern tests run on this copy in `tests/test_idris.py`. MERGE INTO ONE MODULE when both branches land), so line
   breaks, spacing, homoglyphs and distance do not hide an injection. An answer that holds one counts for NONE of its
   candidates (each is marked `injection_answers`); a candidate seen only in such answers is never emerging. The
   per-name proximity loop is gone (it was O(names x injections)).

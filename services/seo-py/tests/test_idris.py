@@ -1186,3 +1186,59 @@ def test_ner_on_with_a_broken_install_refuses_start(monkeypatch):
     monkeypatch.setattr(ner_mod, "load", lambda _e: (lambda text: []))
     s = tc.config_mod.load(__import__("helpers").base_env(SEO_IDRIS_NER="1"))
     assert s.idris_ner is True and s.idris_ner_port is not None
+
+
+# ---------------------------------------------------------------------------------------------- round 5: the injection guard copy
+# The structural ReDoS tests of Theo's branch (49732dd3, tests/test_theo.py), run here on Idris's byte-identical copy of
+# agents/injection_guard.py until the two branches share one module.
+
+def _repeats(rx):
+    """Every (min, max) repeat count in a compiled pattern's parse tree."""
+    import re._parser as sp
+    out = []
+
+    def walk(items):
+        for op, av in items:
+            if op in (sp.MAX_REPEAT, sp.MIN_REPEAT, sp.POSSESSIVE_REPEAT):
+                out.append((av[0], av[1]))
+                walk(av[2])
+            elif op is sp.SUBPATTERN:
+                walk(av[-1])
+            elif op is sp.BRANCH:
+                for b in av[1]:
+                    walk(b)
+            elif op in (sp.ASSERT, sp.ASSERT_NOT):
+                walk(av[1])
+            elif op is sp.GROUPREF_EXISTS:
+                walk(av[1])
+                if av[2]:
+                    walk(av[2])
+    walk(sp.parse(rx.pattern, rx.flags))
+    return out
+
+
+def test_every_injection_guard_regex_has_only_bounded_repetition():
+    """Structural ReDoS proof (no wall clock): no repeat in any guard pattern is unbounded, so each match attempt is
+    bounded by a constant and a scan is linear in the (capped) text length."""
+    import re._constants as sc
+
+    from agents import injection_guard as g
+    rxs = list(g._RX) + [g._SPACED, g._B64, g._NONLETTER, g._HYPHEN_SPLIT, g._ZERO_WIDTH]
+    for rx in rxs:
+        for lo, hi in _repeats(rx):
+            assert hi != sc.MAXREPEAT and hi <= 4096, (rx.pattern[:80], lo, hi)
+
+
+@pytest.mark.parametrize("text", [" " * 100_000, "\n" * 100_000, " \n" * 50_000, "\t\n " * 33_000,
+                                  "role:" + " " * 19_000 + "x", "-" * 19_990])
+def test_huge_whitespace_inputs_are_bounded(text):
+    """Structural size bounds (no wall clock): over MAX_SCAN_CHARS a text is not scanned but flagged (fail closed);
+    under it, whitespace runs collapse before any pattern runs."""
+    from agents import injection_guard as g
+    if len(text) > g.MAX_SCAN_CHARS:
+        assert g.suspected(text) is True
+    else:
+        assert all(len(v) <= 2 * g.MAX_SCAN_CHARS for v in g.views(text))
+        assert max((len(x) for x in g.views(text)[0].split("\n")), default=0) <= len(text)
+        g.suspected(text)
+    assert len(g.views(" \n" * 9_000)[0]) == 0                                # 18,000 characters of whitespace
