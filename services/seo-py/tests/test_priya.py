@@ -103,7 +103,9 @@ def test_pii_suspect_queries_never_enter_the_ledger_only_their_counts():
                                "rr 2 box 15", "1 main st pmb 123", "x" * 600, "17 old mill road",
                                "100 old country rd", "300 OLD MILL RD", "88 old post road", "12 new street",
                                "40 good hope rd", "sw1a 1aa", "m5v 3l9", "350 rue sherbrooke montreal",
-                               "1 market plaza", "6 place de la concorde", "m1 1ae manchester"])
+                               "1 market plaza", "6 place de la concorde", "m1 1ae manchester",
+                               "example.com/blog/how-to-clean-rugs", "e.com%2fx%3fpassword%3dhunter2222",
+                               "4000 2019 2020 2021"])
 def test_street_addresses_are_dropped_as_personal_data(q):
     led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
     assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"] == {"queries": 1, "clicks": 1,
@@ -118,8 +120,7 @@ def test_street_addresses_are_dropped_as_personal_data(q):
                                "top 5 pizza places 5th ave", "2 rd round draft", "2.5 ton heat pump",
                                "tires 225/65r17", "2012 ford f150 3.5 ecoboost", "carrier 24acc636a003 manual",
                                "food court mall hours", "bmw x5 3rd row", "ipad pro m4 1tb",
-                               "3 new dr pepper flavors", "2 old court cases", "5 route options",
-                               "example.com/blog/how-to-clean-rugs"])
+                               "3 new dr pepper flavors", "2 old court cases", "5 route options"])
 def test_ordinary_queries_with_numbers_are_kept(q):
     assert by_text(build(gsc([(q, 1, 30, 0.03, 4.0)])))[q]["origin"] == "observed"
 

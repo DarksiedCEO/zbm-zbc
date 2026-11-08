@@ -917,11 +917,14 @@ def test_osei_round4_keep_drop_table(q, want):
 ROUND5_KEEP = ("ps5 2tb ssd upgrade", "ipad pro m4 1tb", "bmw x5 3rd row", "audi q7 3rd row seating",
                "galaxy s9 2nd hand", "m3 2nd gen", "6 place setting dinnerware", "bus 12 route map", "5 route options",
                "3 new dr pepper flavors", "2 old court cases", "10 good place to eat", "5 good drive thru",
-               "tires 225/65r17", "example.com/blog/how-to-clean-rugs", "acme.com/services/rug-cleaning tips",
-               "5/8 inch plywood", "24/7 plumber", "1/2 hp sump pump",
-               # round 6: URL-path queries with digits in a slug
-               "docs.example.com/v2/api/reference", "api.stripe.com/v1/charges docs", "acme.com/blog/5-ways-to-save",
-               "example.org/docs/v3/getting-started", "mysite.com/page2/contact", "moz.com/learn/seo/http2")
+               "tires 225/65r17", "5/8 inch plywood", "24/7 plumber", "1/2 hp sump pump")
+# round 8 (fail safe): URL-like queries are dropped whole; the round-5/6/7 URL KEEP rows moved here
+URL_LIKE_DROP = ("example.com/blog/how-to-clean-rugs", "acme.com/services/rug-cleaning tips",
+                 "docs.example.com/v2/api/reference", "api.stripe.com/v1/charges docs", "acme.com/blog/5-ways-to-save",
+                 "example.org/docs/v3/getting-started", "mysite.com/page2/contact", "moz.com/learn/seo/http2",
+                 "example.com/?page=2", "shop.com/search?q=rugs", "example.com/blog/2024-11-08-rug-care",
+                 "shop.com/products/sku12345678", "example.com/blog/internationalization-guide",
+                 "web2print-shop.com/catalogue/flyers")
 ROUND5_DROP = ("sw1a 1aa", "14 high st oxford ox1 4ag", "m1 1ae manchester", "12 new street", "6 place de la concorde",
                "12 chemin du lac", "12 avenue des champs", "/".join(("wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY")),
                "/".join(("dGhpcy9pcy9h", "c2VjcmV0IGtleQ==")), "+".join(("YWJj/ZGVm", "Z2hp")))
@@ -946,23 +949,9 @@ ROUND7_DROP = (
     "site.com/a?b=1&api_key=" + "".join(("zzzz", "zz9")), "example.com/?t=" + "".join(("a1b2c3d4e5", "f6g7h8i9")),
     "reset ?password=" + "".join(("hunt", "er22")), _AKIA,
 )
-ROUND7_KEEP = ("docs.example.com/v2/api/reference", "api.stripe.com/v1/charges docs", "acme.com/blog/5-ways-to-save",
-               "example.org/docs/v3/getting-started", "mysite.com/page2/contact", "moz.com/learn/seo/http2",
-               "example.com/?page=2", "shop.com/search?q=rugs", "example.com/blog/2024-11-08-rug-care")
-# Known over-drops, by design (privacy beats recall): a path part mixing letters and digits that is not a short
-# version token (sku12345), a slug word over 15 letters, a host label with digits.
-ROUND7_OVERDROP = ("shop.com/products/sku12345678", "example.com/blog/internationalization-guide",
-                   "web2print-shop.com/catalogue/flyers")
-
-
-@pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND7_KEEP] + [(q, "DROP") for q in ROUND7_DROP])
-def test_osei_round7_url_secrets_drop_and_plain_urls_keep(q, want):
-    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
-
-
-@pytest.mark.parametrize("q", ROUND7_OVERDROP)
-def test_osei_round7_disclosed_overdrops(q):
-    assert sp.classify_query(q, ["acme"]) == "pii_suspect", f"{q!r} is now kept: update the disclosed over-drops"
+@pytest.mark.parametrize("q", ROUND7_DROP + URL_LIKE_DROP)
+def test_osei_round7_url_secrets_and_round8_url_like_queries_drop(q):
+    assert sp.classify_query(q, ["acme"]) == "pii_suspect", q
 
 
 def test_osei_round4_disclosed_gap():

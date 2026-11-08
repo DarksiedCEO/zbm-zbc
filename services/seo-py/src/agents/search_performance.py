@@ -45,10 +45,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.7"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.8"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.8 (review round 8): fail safe: URL-like queries dropped whole (no path exemptions); up to three
+#    percent-decodes first; Luhn check over 13-19 digit runs; split secrets judged with separators removed
 # 2026-11-08.7 (review round 7): the round-6 host exemption was too wide (secrets in paths passed): now only plain
 #    slugs and short version tokens are exempt; path pieces, query-string values and known secret prefixes are judged
 #    by the token rules
@@ -244,12 +246,6 @@ def looks_like_address(folded: str) -> bool:
 
 _JWT = re.compile(r"[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}")
 _SLASH_TOKEN = re.compile(r"[a-z0-9_\-=+.~/]{12,}")
-# review round 7 (fail safe): a URL-ish word is exempt from the secret rules only when EVERY part (each "/" segment,
-# each "." label in it) is (a) a slug of hyphen-separated words, each all letters (at most 15) or all digits (at most
-# 4) - "5-ways-to-save", "getting-started", "2024", "example", "com" - or (b) a short version / page token
-# ([a-z]{1,5} then 1-2 digits: v2, page2, http2). Anything else is judged by the token rules.
-_SLUG_WORD = re.compile(r"[a-z]{1,15}|\d{1,4}")
-_VERSION_TOKEN = re.compile(r"[a-z]{1,5}\d{1,2}")
 # known secret prefixes (case-folded): AWS access key ids, Google API keys, GitHub / Slack / Stripe-style tokens
 _SECRET_PREFIX = re.compile(r"(?:akia|asia)[a-z0-9]{12,}|aiza[a-z0-9_-]{20,}|(?:ghp|gho|ghu|ghs|github_pat|xox[abprs]|"
                             r"sk_live|sk_test|rk_live|pk_live)[_-][a-z0-9_-]{8,}")
@@ -257,19 +253,6 @@ _SECRET_PREFIX = re.compile(r"(?:akia|asia)[a-z0-9]{12,}|aiza[a-z0-9_-]{20,}|(?:
 _SECRET_PARAM = re.compile(r"(?:^|[?&;#/])(?:[a-z_]*token|[a-z_]*key|secret|password|passwd|pwd|pass|auth|sig|"
                            r"signature|session|sessionid|sid|code|otp)=[^&#\s]{6,}")
 _URL_SPLIT = re.compile(r"[/?&=#;:]")
-
-
-def _plain_part(part: str) -> bool:
-    if _VERSION_TOKEN.fullmatch(part):
-        return True
-    words = part.split("-")
-    return all(_SLUG_WORD.fullmatch(x) for x in words)
-
-
-def _plain_url(w: str) -> bool:
-    """Every "/" segment and every "." label in it is a plain slug or a short version token (round 7)."""
-    parts = [x for seg in w.split("/") for x in seg.split(".")]
-    return bool(parts) and all(x == "" or _plain_part(x) for x in parts)
 
 
 def _secret_piece(piece: str) -> bool:
@@ -290,12 +273,10 @@ def _secret_piece(piece: str) -> bool:
 def _slash_secret(w: str) -> bool:
     """A base64 / AWS-secret-like word holding "/", "+" or "=" (review round 5): 20+ such characters with a digit, a
     "+" or an "=" (``wjalr.../k7mdeng/...``, ``dghpcy9pcy9h/c2vjcmv0ignszxk=``), or 12+ with two of "/", "+", "="
-    (``ywjj/zgvm+z2hp``). Exempt only when every part is a plain slug or a short version token (``_plain_url``:
-    ``docs.example.com/v2/api/reference``, ``acme.com/blog/5-ways-to-save``); a short tire size (``225/65r17``) is
-    under the length thresholds. Not caught: base64 under 12 characters."""
+    (``ywjj/zgvm+z2hp``). No exemption (review round 8: URL-like queries are dropped before this, see
+    ``url_like``); a short tire size (``225/65r17``) is under the length thresholds. Not caught: base64 under 12
+    characters."""
     if not _SLASH_TOKEN.fullmatch(w) or not any(c in w for c in "/+="):
-        return False
-    if _plain_url(w):
         return False
     marks = sum(1 for c in "/+=" if c in w)
     return (len(w) >= 20 and (any(c.isdigit() for c in w) or "+" in w or "=" in w)) or marks >= 2
@@ -322,7 +303,7 @@ def _word_identifies(w: str) -> bool:
     if logs_mod._HEX.fullmatch(w) or _JWT.search(w) or len(w) > 40 or logs_mod._TOKENISH.fullmatch(w) \
             or _slash_secret(w) or _SECRET_PREFIX.match(w) or _SECRET_PARAM.search(w):
         return True
-    if _URL_SPLIT.search(w) and not _plain_url(w) and any(_secret_piece(x) for x in _URL_SPLIT.split(w)):
+    if _URL_SPLIT.search(w) and any(_secret_piece(x) for x in _URL_SPLIT.split(w)):
         return True                      # a secret inside a path or a query string (evil.com/akia..., ?token=...)
     m = logs_mod._FILE.fullmatch(w)
     if m and m.group(2).isalpha() and len(m.group(2)) >= 2 and any(c.isalpha() for c in m.group(1)) \
@@ -337,19 +318,98 @@ def _word_identifies(w: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------- review round 8: fail safe on URL-like text
+# Path exemptions were an arms race (rounds 6-7), so a query that looks like a URL is dropped whole (URL-shaped search
+# queries are rare and of little value in a keyword ledger). URL-like, after up to three percent-decodes, NFKC and the
+# lookalike fold: a scheme or "://"; "www."; a percent escape still left; an IPv4 address; a host name (label.tld,
+# the gTLDs below or any two-letter country code except file-type words such as js / py / md); host:port; a word
+# holding "/" other than a fraction (1/2, 24/7), a tire size (225/65r17) or one of a few word pairs (a/b, and/or).
+_GTLDS = (r"com|net|org|info|biz|edu|gov|mil|int|io|ai|app|dev|xyz|online|site|shop|store|tech|blog|cloud|page|"
+          r"link|live|news|club|top|pro|art|design|agency|digital|media|world|life|space|website|email|group|"
+          r"services|solutions|company|business|center|network|systems|today|tips|guru|ninja|rocks|zone|global|"
+          r"local|nyc|london|berlin|museum|travel|jobs|mobi|name|asia|aero|coop|tel|cat|post|xxx")
+_NOT_TLD = r"js|ts|py|rb|md|sh|gz|cs|db|ps|vb|rs|go|pl1|jsx|tsx"
+_HOSTNAME = re.compile(r"(?<![\w@-])(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+(?:" + _GTLDS + r"|(?!(?:" + _NOT_TLD
+                       + r")(?![a-z]))[a-z]{2})\.?(?![a-z0-9-])")
+_URL_MARKS = re.compile(r"[a-z][a-z0-9+.-]{0,15}://|://|(?<![a-z0-9])www\.|%[0-9a-f]{2}|"
+                        r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|[a-z0-9]\.[a-z]{2,24}:\d{2,5}(?!\d)")
+_SLASH_OK = re.compile(r"\d+(?:/\d+)+|\d{3}/\d{2}[a-z]{0,2}\d{2}|a/b|and/or|w/o|n/a|on/off|yes/no|his/her|he/she|"
+                       r"s/he|b/w|i/o|a/c|ac/dc|w/|p/e|r/c|f/x")
+URL_LIKE_RULE = ("scheme or '://', 'www.', a percent escape left after three decodes, an IPv4 address, a host name "
+                 "(label.tld), host:port, or a word holding '/' that is not a fraction, a tire size or a listed word "
+                 "pair (a/b, and/or, w/o, n/a ...)")
+
+
+def decode_query(q: str) -> str:
+    """Up to three percent-decodes (a double-encoded secret is decoded too), then NFKC and invisible characters out."""
+    t = q or ""
+    for _ in range(3):
+        u = unquote(t)
+        if u == t:
+            break
+        t = u
+    return lookalikes.strip_invisible(unicodedata.normalize("NFKC", t))
+
+
+def url_like(folded: str) -> bool:
+    """Whether decoded, folded query text looks like a URL (dropped whole; review round 8)."""
+    if _URL_MARKS.search(folded) or _HOSTNAME.search(folded):
+        return True
+    return any("/" in w and not _SLASH_OK.fullmatch(w) for w in folded.split())
+
+
+def _luhn(digits: str) -> bool:
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2:
+            d = d * 2 - 9 if d > 4 else d * 2
+        total += d
+    return total % 10 == 0
+
+
+_CARD_RUN = re.compile(r"\d(?:[\s\-/.]{0,3}\d)+")
+
+
+def card_like(folded: str) -> bool:
+    """A Luhn-valid run of 13-19 digits once spaces, '-', '/' and '.' are removed, whatever its groups look like
+    (``4000 2019 2020 2021``; review round 8). A list of years that happens to pass Luhn is dropped too."""
+    for m in _CARD_RUN.finditer(folded):
+        d = re.sub(r"\D", "", m.group())
+        if 13 <= len(d) <= 19 and _luhn(d):
+            return True
+    return False
+
+
+def split_secret(folded: str) -> bool:
+    """A secret split by separators (review round 8): each space-separated word with '/', '-', '_' and '.' removed
+    is judged by the word rules (``abcd-1234-efgh-5678-ijkl-9012``), and the whole query with spaces removed too by
+    the known-prefix and letter-digit alternation rules only (normal multi-word queries never alternate that much)."""
+    for w in folded.split():
+        j = re.sub(r"[/\-_.]", "", w)
+        if j != w and j and _word_identifies(j):
+            return True
+    whole = re.sub(r"[\s/\-_.]", "", folded)
+    if _SECRET_PREFIX.search(whole):
+        return True
+    alnum = re.sub(r"[^a-z0-9]", "", whole)
+    letters, digits = sum(c.isalpha() for c in alnum), sum(c.isdigit() for c in alnum)
+    return bool(letters and digits >= 4 and len(alnum) >= 12 and _transitions(alnum) >= 0.6 * (len(alnum) - 1))
+
+
 def classify_query(q: str, brands: list) -> str:
     """One query -> one class from ``QUERY_CLASSES``; the text is not kept. PII first (judged on the lookalike fold,
     after invisible characters are removed, like the log templater)."""
     if len(q or "") > MAX_QUERY_CHARS:          # too long to classify cheaply: dropped as personal data, counted
         return "pii_suspect"
-    t = lookalikes.strip_invisible(unicodedata.normalize("NFKC", q or ""))
+    t = decode_query(q)
     if len(t) > MAX_QUERY_CHARS:                # NFKC can expand a character many times (U+FDFA is 18)
         return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
-    if "@" in folded or logs_mod._EMAIL.search(folded) or logs_mod._AT_WORD.search(folded) \
+    if url_like(folded) or "@" in folded or logs_mod._EMAIL.search(folded) or logs_mod._AT_WORD.search(folded) \
             or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
-            or looks_like_address(folded):
+            or card_like(folded) or split_secret(folded) or looks_like_address(folded):
         return "pii_suspect"
     squashed = re.sub(r"[^a-z0-9]", "", folded)
     if any(b in squashed for b in brands):

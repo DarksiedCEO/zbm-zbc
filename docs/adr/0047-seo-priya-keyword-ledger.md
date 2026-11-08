@@ -145,19 +145,29 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.7`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.8`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
   letters-and-digits word of 16+ characters or of 8+ characters switching between letters and digits at least 60% of
   the time (`a1b2c3d4e5f6g7`), a file name (`jane_cv.pdf`), and (round 5) a base64- or AWS-secret-like word holding
-  `/`, `+` or `=` (20+ such characters with a digit, `+` or `=`, or 12+ with two of them), and (round 7, fail safe)
-  any URL-ish word whose parts are not all plain: each `/` segment and `.` label must be a slug of hyphen-separated
-  words, each all letters (≤ 15) or all digits (≤ 4), or a short version / page token (`v2`, `page2`, `http2`);
-  otherwise every piece between `/ ? & = # ; :` is judged by the token rules, plus known secret prefixes (AWS
-  `akia`/`asia`, Google `aiza`, GitHub, Slack, Stripe-style) and credential query parameters (`token=`, `key=`,
-  `password=`, `sig=`, … with 6+ characters). Round 6's wider host exemption let 15 path secrets through and is
-  gone. `docs.example.com/v2/api/reference`, `acme.com/blog/5-ways-to-save` and short tire sizes are kept; 7+ digits in one run stay the digit-run rule's;
+  `/`, `+` or `=` (20+ such characters with a digit, `+` or `=`, or 12+ with two of them); pieces between
+  `/ ? & = # ; :` judged by the token rules; known secret prefixes (AWS `akia`/`asia`, Google `aiza`, GitHub, Slack,
+  Stripe-style); credential query parameters (`token=`, `key=`, `password=`, `sig=`, … with 6+ characters); and
+  **split secrets** (round 8): each word with `/ - _ .` removed is judged by these rules
+  (`abcd-1234-efgh-5678-ijkl-9012`), and the whole query with spaces removed by the prefix and letter-digit
+  alternation rules;
+- **URL-like queries, dropped whole** (round 8, fail safe; rounds 6-7's path exemptions were an arms race and are
+  removed): after up to three percent-decodes, NFKC and the lookalike fold, a query with a scheme or `://`, `www.`,
+  a percent escape still left, an IPv4 address, a host name (label + a listed gTLD or any two-letter country code
+  except file-type words such as `js`, `py`, `md`), `host:port`, or a word holding `/` that is not a fraction
+  (`1/2`, `24/7`), a tire size (`225/65r17`) or a listed pair (`a/b`, `and/or`, `w/o`, `n/a`, …). **Every URL is
+  dropped, ordinary ones included** (`docs.example.com/v2/api/reference`, `shop.com/search?q=rugs`): URL-shaped
+  search queries are rare and of little value in a keyword ledger, and privacy beats recall. Also dropped as URLs:
+  tech names that are domains (`asp.net`); `50% off` and `node.js` are kept;
+- a **card number** (round 8): a Luhn-valid run of 13-19 digits once spaces, `-`, `/` and `.` are removed, whatever
+  its groups look like (`4000 2019 2020 2021`); a list of years that happens to pass Luhn is dropped too;
+  7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
   `lane`, `way`), then a suffix. `old`, `new`, `good` may start a street name (`17 old mill road`, `40 good hope
@@ -195,10 +205,10 @@ Canada and the French leading forms above (and UK / Canadian street addresses wi
 when they use a listed suffix); a UK postcode written without its space (`sw1a1aa`), a real UK postcode whose inward
 part looks like an ordinal or unit (`… 2nd`, `… 1tb`), `12 new street` followed by a city. Secrets not caught:
 base64 under 12 characters, and a random password written as a plain word (`reset password hunter`-style queries;
-no rule can tell such a word from an ordinary one). **Over-drops by design (round 7, privacy over recall):** URLs
-with a path part mixing letters and digits that is not a short version token (`shop.com/products/sku12345678`), a
-slug word over 15 letters (`…/internationalization-guide`), or a host label with digits (`web2print-shop.com/…`);
-pinned in `tests/test_gsc.py`. **Known over-drops:** a non-address shaped like `<number> <word> st|ave|dr|ct|pl…`, or `<number> <word>
+no rule can tell such a word from an ordinary one). **Over-drops by design (round 8, privacy over recall):** every
+URL-like query (above); a Luhn-valid run of year-like digit groups; a word whose letters and digits alternate once
+its separators are removed. The round-8 reviewer's 61 attack strings and the round's smuggles (percent-encoded,
+split, card numbers) are DROP tests in `tests/test_query_privacy_r8.py`. **Known over-drops:** a non-address shaped like `<number> <word> st|ave|dr|ct|pl…`, or `<number> <word>
 court|place|way…` at the end of a query (`5 food court ideas`). A bare ZIP (`plumber 90210`) is kept. Derived variants are checked the same way, and a frame is built only from a query that has no capitalised
 word as the engine reported it, and only when every word it adds around the head is in a closed vocabulary
 (`priya.FRAME_VOCAB`: stop, question, constraint and commercial words and a short list of generic verbs); a head
