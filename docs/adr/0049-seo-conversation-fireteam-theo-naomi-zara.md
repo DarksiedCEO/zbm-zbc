@@ -252,7 +252,7 @@ no market-volume claim; an incomplete chain has no final recommendation; every f
 
 | Item | Fix |
 |---|---|
-| HIGH 1 forged hand-off (a `MEASURED_NOT_TIERED` 10^12 passed → STRONG → CLEARED/TEST) | every item type validated and bounded (§5); verification against Priya's record with the `priya.handoff_record/1` contract; unverified signals capped THIN; `HANDOFF_NOT_VERIFIED` blocking in Zara; the 10^12 forgery refused 422 and a 9,000,000 unverified count FLAGGED, not TEST (tests) |
+| HIGH 1 forged hand-off (a `MEASURED_NOT_TIERED` count of 10^12 was accepted → STRONG → CLEARED/TEST) | every item type validated and bounded (§5); verification against Priya's record with the `priya.handoff_record/1` contract; unverified signals capped THIN; `HANDOFF_NOT_VERIFIED` blocking in Zara; the 10^12 forgery refused 422 and a 9,000,000 unverified count FLAGGED, not TEST (tests) |
 | HIGH 2 the "THIN by construction" claim | corrected in naomi.py and here (§4, Limitations) |
 | MED 3 negation / contrast | the clause-scoped negation rule (§3), ten table cases tested |
 | MED 4 thresholds and strength | one confirmed-mention threshold at both ends; "named first in the final answer" apart; outcome, pattern and strength from the client's own outcome; the 1-of-5 case is MIXED / WEAK (tested); Zara re-derives them |
