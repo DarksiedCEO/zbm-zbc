@@ -108,6 +108,7 @@ MUST failure or ERROR.
 | `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD` | `0`, `0` | the global daily budget (UTC day) in requests and US dollars. **0 = OFF: no request is made** (fail closed) |
 | `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | `0`, `0` | the same per tenant. All four must be above 0 before Perplexity is ever asked anything |
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | `0.05` | what each request reserves against the spend budgets before it is sent (0.001..5), and what it costs when Perplexity reports no cost |
+| `SEO_PERPLEXITY_RUN_MAX_CALLS`, `SEO_PERPLEXITY_RUN_MAX_SPEND_USD` | unset | ADR 0046 review round 1 L4: the per-run caps for Perplexity, **opt-in**. Neither set = no per-run cap (the behaviour before); both set = they bind as for the other engines (`RUN_CALL_CAP`, `RUN_SPEND_CAP`; 0 = OFF); one without the other refuses start |
 | `SEO_OPENAI_ENABLED`, `SEO_ANTHROPIC_ENABLED`, `SEO_GOOGLE_ENABLED` | `0` | ADR 0046: `1` turns that answer engine on. **Every engine is OFF by default.** `1` without a key refuses start; a key without `1` refuses start (which one is meant?) |
 | `SEO_OPENAI_API_KEY_FILE` / `SEO_OPENAI_API_KEY`, `SEO_ANTHROPIC_API_KEY_FILE` / `SEO_ANTHROPIC_API_KEY`, `SEO_GOOGLE_API_KEY_FILE` / `SEO_GOOGLE_API_KEY` | unset | the engine's key: the file form (the *_FILE rules: regular file owned by the service user, mode 0600/0400, no symlink) or the plain variable (Railway); both set refuses start; every key must differ from every token and every other key. Never logged, shown, recorded or reported (`/status` shows `key_source` only) |
 | `SEO_OPENAI_MODEL`, `SEO_ANTHROPIC_MODEL`, `SEO_GOOGLE_MODEL` | `gpt-6-astra` / `claude-sonnet-5-5` / `gemini-3.8-flash` | closed allowlist per engine (`openai_engine.MODELS`, `anthropic_engine.MODELS`, `google_engine.MODELS`); anything else leaves only that engine `NOT_CONNECTED` (`MODEL_NOT_SUPPORTED`), never echoed |
@@ -115,7 +116,7 @@ MUST failure or ERROR.
 | `SEO_OPENAI_MAX_ATTEMPTS`, `SEO_ANTHROPIC_MAX_ATTEMPTS`, `SEO_GOOGLE_MAX_ATTEMPTS` | `2` | requests per question (1..3); retries only on 429, 5xx and transport errors |
 | `SEO_OPENAI_DAILY_CALLS`, `SEO_OPENAI_DAILY_SPEND_USD`, `SEO_OPENAI_TENANT_DAILY_CALLS`, `SEO_OPENAI_TENANT_DAILY_SPEND_USD`, `SEO_ANTHROPIC_DAILY_CALLS`, `SEO_ANTHROPIC_DAILY_SPEND_USD`, `SEO_ANTHROPIC_TENANT_DAILY_CALLS`, `SEO_ANTHROPIC_TENANT_DAILY_SPEND_USD`, `SEO_GOOGLE_DAILY_CALLS`, `SEO_GOOGLE_DAILY_SPEND_USD`, `SEO_GOOGLE_TENANT_DAILY_CALLS`, `SEO_GOOGLE_TENANT_DAILY_SPEND_USD` | `0` | the global and per-tenant daily budgets (UTC day) in requests and dollars. **0 = OFF: nothing is asked** |
 | `SEO_OPENAI_RUN_MAX_CALLS`, `SEO_OPENAI_RUN_MAX_SPEND_USD`, `SEO_ANTHROPIC_RUN_MAX_CALLS`, `SEO_ANTHROPIC_RUN_MAX_SPEND_USD`, `SEO_GOOGLE_RUN_MAX_CALLS`, `SEO_GOOGLE_RUN_MAX_SPEND_USD` | `0` | the per-run caps: requests and dollars ONE audit or ONE citation run may reserve on that engine (`RUN_CALL_CAP`, `RUN_SPEND_CAP`). **0 = OFF.** All six budgets must be above 0 before the engine is asked anything |
-| `SEO_OPENAI_RESERVE_USD_PER_CALL`, `SEO_ANTHROPIC_RESERVE_USD_PER_CALL`, `SEO_GOOGLE_RESERVE_USD_PER_CALL` | `0.10` / `0.10` / `0.05` | what each request reserves before it is sent and what it costs: none of the three reports a dollar cost |
+| `SEO_OPENAI_RESERVE_USD_PER_CALL`, `SEO_ANTHROPIC_RESERVE_USD_PER_CALL`, `SEO_GOOGLE_RESERVE_USD_PER_CALL` | `0.10` / `0.10` / `0.05` | what each request reserves before it is sent and what it is charged. **A reserve ESTIMATE, not a measured cost:** none of the three APIs returns a dollar cost, so every request is booked at its reserve and the dollar budgets count estimates. The 4x cost guard can only act on a reported cost, so it cannot detect an overrun on these engines. Set a hard spend limit at each provider (its console's budget / usage limit) as the real ceiling |
 | `SEO_ANTHROPIC_MAX_SEARCHES` | `3` | the web search tool's `max_uses` per question (1..10) |
 | `SEO_CALLUM_RESOLVE_URLS` | `0` | ADR 0046: `1` lets Callum follow each cited URL's redirects and read its canonical through the SSRF-safe fetcher (robots.txt honoured, kill switches `capability:fetch` / `provider:web`); `0` = a redirector URL (Gemini grounding) is `INCONCLUSIVE` and every other URL is classified by its own host |
 | `SEO_CALLUM_RESOLVE_MAX` | `40` | distinct cited URLs fetched per citation run (1..200) |
@@ -145,6 +146,18 @@ agent): Perplexity (`src/perplexity.py`), OpenAI (`src/openai_engine.py`, Respon
 `generateContent` + Google Search grounding). Each has one allow-listed host, a hard deadline, bounded retries, a
 bounded strict parse, the budget meter and the kill switches `provider:<engine>` and `capability:ai_probe`.
 Switching provider is configuration only. None of the three new adapters has been called against its real API.
+**Spend is estimated, not tracked:** OpenAI, Anthropic and Google return no dollar cost, so each request is booked at
+its reserve ($0.10 / $0.10 / $0.05 by default) and the dollar budgets and per-run caps bound reserve estimates; the
+cost guard cannot see an overrun on these engines. Set a hard spend limit at each provider as the real ceiling.
+Google answers are attributed only to the exact allow-listed model: a `modelVersion` that differs, or is missing,
+is refused (`MODEL_NOT_ALLOWED` / `MODEL_UNVERIFIED`, fail closed). Gemini's grounding-URI format is unverified
+until a first live call; Callum treats every URL on `vertexaisearch.cloud.google.com` as an unresolved redirect.
+
+**Brand matching** (`src/agents/brand_mention.py`, prompt set `brand_term_rules`): whole words, case-insensitive
+unless `case_sensitive`; possessives match (`Acme's`), plurals do not (`Acmes`); optional `context_terms` (one must
+appear in the answer) and `negative_terms` (a match within 40 characters of one is discarded). A single-word
+alphabetic term is treated as possibly a common word (no dictionary is bundled) unless `common_word: false`; without
+disambiguation its Mentioned-Not-Cited hits are `LOW_CONFIDENCE`, kept out of the headline rate and the MNC list.
 
 **Not built — setting any of these refuses start:** `SEO_RENDERER`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed: use `SEO_GSC_SERVICE_ACCOUNT_FILE`), `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,
@@ -166,13 +179,13 @@ Switching provider is configuration only. None of the three new adapters has bee
 | `GET /tenants/{tid}/entity` | scoped | the canonical entity record with source, provenance, authority, freshness, history |
 | `POST /tenants/{tid}/entity` | Andre | create a client tenant canonical record from1–5 supplied field records; exact replay returns its current view |
 | `POST /entities/{eid}/fields` | Andre | set one field (version-checked; the old value goes to history) |
-| `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets |
+| `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets; optional `brand_term_rules` (`[{term, case_sensitive, context_terms, negative_terms, common_word}]`, one per brand term) |
 | `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant and verified with Finance; `invoice_override` (Andre, only when Finance cannot answer) |
 | `GET /tenants/{tid}/audits[/{aid}]` | scoped (finance_31 gets status only) | audits and reports |
 | `POST /tenants/{tid}/audits/{aid}/client-report` | Andre | the client-facing report of a completed audit, `{"request_id", "format": "markdown" \| "html"}`; recorded first (`client_report_rendered` with the document's SHA-256), answered as JSON with the document in `content` (ADR 0017, "Client report") |
 | `GET /tenants/{tid}/audits/{aid}/client-reports` | dashboard, compliance_38 | the recorded renders of one audit (ids and hashes, never the document) |
-| `POST /tenants/{tid}/citation-runs` | dashboard, seo_agent (+ Andre, a bound Finance client and Compliance's ALLOW for clients) | ADR 0046: Callum's citation-source run (`{"request_id", "domain", "prompt_set_id", "engines"?}`): every cited URL classified STRENGTH_URL / OPPORTUNITY_URL / LOOKALIKE_URL / INCONCLUSIVE, Mentioned-Not-Cited per answer; recorded first |
-| `GET /tenants/{tid}/citation-runs[/{cid}]`, `GET .../{cid}/mnc-priority` | dashboard, seo_agent, hub (own tenant), compliance_38 | the runs; one run's rows (dashboard drill-down) and metrics; the `callum.mnc_priority/1` list for Roman and Adaeze |
+| `POST /tenants/{tid}/citation-runs` | dashboard, seo_agent (+ Andre, a bound Finance client and Compliance's ALLOW for clients) | ADR 0046: Callum's citation-source run (`{"request_id", "domain", "prompt_set_id", "engines"?}`): every cited URL classified STRENGTH_URL / CANONICAL_TO_CLIENT / OPPORTUNITY_URL / LOOKALIKE_URL / INCONCLUSIVE, Mentioned-Not-Cited per answer (LOW_CONFIDENCE apart); recorded first |
+| `GET /tenants/{tid}/citation-runs[/{cid}]`, `GET .../{cid}/mnc-priority` | dashboard, seo_agent, hub (own tenant), compliance_38 | the runs; one run's rows (dashboard drill-down) and metrics; the `callum.mnc_priority/2` list for Roman and Adaeze |
 | `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
 | `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |
 | `POST /tenants/{tid}/schedules`, `.../{sid}/status`; `GET` both | dashboard, seo_agent (+ Andre for clients) | scheduled re-audits; drift report per consecutive pair (Wave 2) |

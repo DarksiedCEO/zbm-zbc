@@ -419,6 +419,17 @@ def _perplexity(env, s: "Settings") -> None:
         "tenant_daily_spend_usd": _usd(env, "SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD", "0", "0", "100000"),
         "reserve_usd_per_call": _usd(env, "SEO_PERPLEXITY_RESERVE_USD_PER_CALL", "0.05", "0.001", "5"),
     }
+    # ADR 0046 review round 1 L4: the per-run caps, OPT-IN for Perplexity. Neither set = no per-run cap (exactly the
+    # behaviour before); both set = they bind as for the other engines (0 = OFF: nothing is asked). One without the
+    # other refuses start (which cap is meant?).
+    run_calls = (env.get("SEO_PERPLEXITY_RUN_MAX_CALLS") or "").strip()
+    run_spend = (env.get("SEO_PERPLEXITY_RUN_MAX_SPEND_USD") or "").strip()
+    if bool(run_calls) != bool(run_spend):
+        raise RuntimeError("set both SEO_PERPLEXITY_RUN_MAX_CALLS and SEO_PERPLEXITY_RUN_MAX_SPEND_USD, or neither "
+                           "(neither = no per-run cap for Perplexity)")
+    if run_calls:
+        s.perplexity_budget["run_max_calls"] = _int(env, "SEO_PERPLEXITY_RUN_MAX_CALLS", 0, 0, 100_000)
+        s.perplexity_budget["run_max_spend_usd"] = _usd(env, "SEO_PERPLEXITY_RUN_MAX_SPEND_USD", "0", "0", "10000")
     if not path and not plain:
         return
     if path:

@@ -63,10 +63,16 @@ A5. **Budgets** (svc_engines.py, unchanged mechanism: record-first reservations,
     plus two new **per-run caps** — `SEO_<ENGINE>_RUN_MAX_CALLS` and `SEO_<ENGINE>_RUN_MAX_SPEND_USD`, the calls and
     dollars ONE audit or ONE citation run may reserve on that engine (`RUN_CALL_CAP`, `RUN_SPEND_CAP`) — and the
     reserve per call. **Every one defaults to 0 = OFF**; while any is 0 nothing is asked (`BUDGET_OFF`). Perplexity
-    keeps exactly its four budgets (no per-run cap was added to it: behaviour-preserving). None of the three reports
-    a dollar cost, so every request is charged at its reserve (defaults $0.10 / $0.10 / $0.05, above the documented
-    search charges: Anthropic $10 per 1,000 searches plus tokens, Google $14 per 1,000 queries after a free tier;
-    OpenAI's per-call price was not on the page read). Per-call timeout: the hard deadline per question
+    keeps its four budgets and gains the per-run caps OPT-IN (review round 1 L4): `SEO_PERPLEXITY_RUN_MAX_CALLS` and
+    `SEO_PERPLEXITY_RUN_MAX_SPEND_USD` unset = no per-run cap (exactly the behaviour before, so the Perplexity suite
+    is unchanged); both set = they bind as for the other engines; one alone refuses start. None of the three new
+    engines reports a dollar cost, so every request is charged at its reserve (defaults $0.10 / $0.10 / $0.05, above
+    the documented search charges: Anthropic $10 per 1,000 searches plus tokens, Google $14 per 1,000 queries after a
+    free tier; OpenAI's per-call price was not on the page read). **These are reserve ESTIMATES, not spend
+    tracking** (review round 1 L3): the dollar budgets and caps bound estimates, a request that really costs more is
+    still booked at the reserve, and the 4x cost guard (which acts only on a reported cost) cannot detect an overrun
+    on these engines. The real ceiling must be a hard spend limit set at each provider; nothing here claims to track
+    real spend. Per-call timeout: the hard deadline per question
     (`SEO_<ENGINE>_TIMEOUT_SECONDS`, default 60).
 A6. **Egress / SSRF.** One fixed base URL per engine; `ALLOWED_HOSTS` checked before every request and by the
     network backend before every connect (host and port 443); every resolved address must be public; no redirect
@@ -82,10 +88,11 @@ B1. **One job**: classify where and how AI engines cite the client. Registry ent
     rows, and the `callum.mnc_priority/1` list). The registry now lists all seven agents; shared plumbing (the
     adapter, the engines, the primitives, the ports) is not an agent. Callum keeps one lifecycle state: a restricted
     Callum is refused 403 `AGENT_RESTRICTED` for citation runs as for audits.
-B2. **Classes** (`agents/callum.py`, rules `callum-rules/2026-11-08.1`), per cited URL: `STRENGTH_URL`,
-    `OPPORTUNITY_URL` (competitor pages flagged from the prompt set), `LOOKALIKE_URL` (folds to the client's domain on
-    the shared lookalike table but is not it: never the client, a high-severity WATCH finding), `INCONCLUSIVE` (a
-    redirector URL not resolved, an unreadable URL); per answer: `MENTIONED_NOT_CITED` (a brand term in the text and
+B2. **Classes** (`agents/callum.py`, rules `callum-rules/2026-11-08.2`), per cited URL: `STRENGTH_URL`,
+    `CANONICAL_TO_CLIENT` (a third-party page whose canonical names the client: B4), `OPPORTUNITY_URL` (competitor
+    pages flagged from the prompt set), `LOOKALIKE_URL` (the cited host, or where it lands, folds to the client's
+    domain on the shared lookalike table but is not it: never the client, wherever it redirects, a high-severity
+    WATCH finding), `INCONCLUSIVE` (a URL on a redirector host not resolved, an unreadable URL); per answer: `MENTIONED_NOT_CITED` (a brand term in the text and
     no STRENGTH_URL citation in that answer), its own metric with its own rate and interval. An answer that names the
     brand but has an INCONCLUSIVE citation is INCONCLUSIVE (`MENTION_WITH_UNRESOLVED_CITATIONS`), never MNC. A failed
     engine call is an INCONCLUSIVE row with the engine's code. Citations come only from the adapter's structured
@@ -97,11 +104,21 @@ B3. **Domain matching reuses `agents/domain_match.py`** unchanged: exact host, t
 B4. **Exact-URL resolution** (`callum.Resolver`, OFF unless `SEO_CALLUM_RESOLVE_URLS=1`, at most
     `SEO_CALLUM_RESOLVE_MAX` distinct URLs per run, each fetched once): through the existing SSRF-safe fetcher
     (public addresses only, ports 80/443, redirects by hand with the cap, robots.txt honoured for `ZBM-SEO-Audit`,
-    the run's kill switches before every hop). The landing URL decides; a third-party page whose single valid
-    canonical is the client's page is a STRENGTH_URL `via: canonical` (`THIRD_PARTY_COPY_CANONICAL_TO_CLIENT`); a
-    client URL that redirects off-site is classified where it lands (`REDIRECTED_OFF_CLIENT`); a lookalike anywhere
-    in the chain is flagged. A failed resolution falls back to the cited host (`RESOLUTION_FAILED`), except for a
-    redirector, which stays INCONCLUSIVE. Bodies are parsed in memory and dropped.
+    the run's kill switches before every hop). The landing URL decides, with two exceptions (review round 1):
+    **M1** a citation on a LOOKALIKE host is `LOOKALIKE_URL` wherever it lands (`CITED_HOST_LOOKALIKE`); one that
+    redirects ONTO the client is flagged `REDIRECTED_ONTO_CLIENT` and raises `CALLUM_LOOKALIKE_REDIRECTS_ONTO_CLIENT`
+    (high, WATCH) — a lookalike forwarding to the client is suspicious, never a credit. **M2** a third-party page whose
+    single valid canonical is the client's page is `CANONICAL_TO_CLIENT` `via: canonical` (flag `THIRD_PARTY_PAGE`):
+    the third party controls that tag, so it is excluded from `cited_strength`, counted as
+    `canonical_to_client_urls`, reported by `CALLUM_CANONICAL_TO_CLIENT` (info), and listed in the MNC contract's
+    `cited_instead` with `canonical_to_client: true` (an answer citing only such a copy, naming the brand, is
+    Mentioned-Not-Cited). A client URL that redirects off-site is classified where it lands
+    (`REDIRECTED_OFF_CLIENT`). **M3** the WHOLE host `vertexaisearch.cloud.google.com` is a redirector, whatever the
+    path: Gemini's grounding-URI format is UNVERIFIED until a first live call (the docs show truncated examples), so
+    an unresolved URL there is INCONCLUSIVE, never OPPORTUNITY; one that resolves onto the redirector itself is
+    INCONCLUSIVE (`REDIRECTOR_DID_NOT_REDIRECT`). A failed resolution falls back to the cited host
+    (`RESOLUTION_FAILED`), except for a redirector, which stays INCONCLUSIVE. Bodies are parsed in memory and
+    dropped.
 B5. **Rows and evidence.** Every row: engine, model, model version, provider, `prompt_id`
     (`<prompt_set_id>:v<version>:<index>`), sample, `observed_at` (service clock), `provider_asked_at` (adapter),
     `refresh_tier` `near_real_time` and `refresh_due` (observed + 1 hour), `run_id`, position, the URL chain (cited,
@@ -112,6 +129,18 @@ B5. **Rows and evidence.** Every row: engine, model, model version, provider, `p
     rules) is withheld (`personal_data:<kind>`). URLs are kept as scheme, host and path — query and fragment dropped
     (`query_dropped`) — and a path that looks like personal data is withheld. At most 2,000 rows a run
     (`rows_truncated`). The ledger receives ids, counts and hashes only.
+B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared with the audit summary in
+    `agents/probes.py`): whole words; case-insensitive unless the tenant's rule says `case_sensitive`; possessives
+    match deliberately (`Acme's`, `Acme’s`), plurals and other inflections deliberately do not (`Acmes`, `apples`: a
+    tenant lists another form as its own term); per-tenant rules on the prompt set (`brand_term_rules`: `term`,
+    `case_sensitive`, `context_terms` — one must appear in the answer — `negative_terms` — a match within 40
+    characters of one is discarded — and `common_word`). No dictionary is bundled, so a single-word alphabetic term
+    is treated as possibly a common word unless the tenant sets `common_word: false` (fail closed). A mention made only
+    by such a term with no disambiguation is `MENTIONED_NOT_CITED` `confidence: LOW_CONFIDENCE`
+    (`BRAND_TERM_MAY_BE_COMMON_WORD`): its own `mentioned_not_cited_low_confidence` rate (`headline: false`), the
+    `CALLUM_MENTIONED_NOT_CITED_LOW_CONFIDENCE` finding, never in the headline rate or the MNC list. The audit summary
+    applies the tenant's rules but has no LOW_CONFIDENCE split (its shape is unchanged). A prompt set without rules
+    keeps its content and hash exactly as before.
 B6. **Metrics with provenance and confidence.** Per engine × prompt, per engine and in total: usable answers,
     refusals, inconclusive calls, URL counts per class, zero-citation answers, and the Mentioned-Not-Cited and
     cited-strength rates as `{value, k, n, ci95 (Wilson), interval, directional}` — `directional` under 3 usable
@@ -119,16 +148,17 @@ B6. **Metrics with provenance and confidence.** Per engine × prompt, per engine
     model versions). Pooled rates say they are directional. No visibility score. Findings:
     `CALLUM_MENTIONED_NOT_CITED` (TEST, or INSUFFICIENT_EVIDENCE when directional), `CALLUM_OPPORTUNITY_URLS`,
     `CALLUM_LOOKALIKE_DOMAIN_CITED` (high), `CALLUM_STRENGTH_URLS` (info), `ENGINE_RUN_STOPPED`; effect class null.
-B7. **The Mentioned-Not-Cited output contract `callum.mnc_priority/1`** (`GET .../citation-runs/{cid}/mnc-priority`),
+B7. **The Mentioned-Not-Cited output contract `callum.mnc_priority/2`** (/2 since review round 1: `cited_instead[]`
+    gains `canonical_to_client`, and LOW_CONFIDENCE mentions are excluded) (`GET .../citation-runs/{cid}/mnc-priority`),
     for Roman and Adaeze (neither consumer is built): `{contract, producer: "callum", consumers: {roman:
     "content_structure", adaeze: "content_gap"}, run_id, domain, generated_at, rules, prompt_set {id, version,
     sha256}, order_rule, items[], excluded, data_class: "measured", effect_class: null}`; each item `{rank,
     prompt_id, prompt_index, prompt (untrusted, null when it looks like personal data), mnc_answers, usable_answers,
     mentioned_not_cited (rate as B6), engines[{engine, mnc_answers, usable_answers, mentioned_not_cited,
-    model_versions}], cited_instead[{url, host, answers, competitor}] (top 10), competitor_cited_instead, evidence[≤3
+    model_versions}], cited_instead[{url, host, answers, competitor, canonical_to_client}] (top 10), competitor_cited_instead, evidence[≤3
     {engine, sample, observed_at, basis, excerpt, withheld}], for_roman {task, question}, for_adaeze {task, gap,
     hosts}}`. Order rule (stated in the payload, not a score): MNC answers descending, competitor cited instead
-    first, more engines first, prompt index. INCONCLUSIVE answers are never listed. A change to these fields is a new
+    first, more engines first, prompt index. INCONCLUSIVE answers and LOW_CONFIDENCE mentions are never listed. A change to these fields is a new
     contract version.
 B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate from the audit, which keeps Callum's
     summary unchanged): `POST /seo/v1/tenants/{tid}/citation-runs` (dashboard, seo_agent) with a registered domain and
@@ -155,9 +185,11 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
 - (32) bounded answer excerpts (≤ 160 characters, PII-screened) are kept for citation runs (B5);
 - (33) `anthropic-version: 2026-10-21` and `web_search_20250305` (basic search, no dynamic filtering or code
   execution) for Anthropic;
-- (34) a third-party page whose single canonical names the client's page counts as a STRENGTH_URL (`via:
-  canonical`, flagged). A canonical is the page's own claim, so a third party can declare one; the flag lets the
-  dashboard show it apart, and counting it as OPPORTUNITY instead is one rule change.
+- (34) SUPERSEDED by review round 1 M2: a third-party page whose single canonical names the client's page is its
+  own class, `CANONICAL_TO_CLIENT`, never a STRENGTH_URL (the third party controls the tag);
+- (35) a single-word alphabetic brand term is treated as possibly a common word unless the tenant says otherwise
+  (review round 1 L1);
+- (36) a Google answer without `modelVersion` is refused, not counted under the asked model (review round 1 L2).
 
 ## What is NOT built (deliberately)
 
@@ -182,7 +214,19 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
 - Removing `utm_source=openai` from OpenAI citation URLs is an assumption (the reference was not read); removing an
   absent pair changes nothing.
 - Gemini grounding URIs are treated as redirects (the page's examples show `vertexaisearch.cloud.google.com` URIs but
-  do not say so). With resolution OFF every Gemini citation is INCONCLUSIVE and no Gemini answer can be MNC.
+  do not say so); the URI format is unverified until a first live call, so every path on that host counts. With
+  resolution OFF every Gemini citation is INCONCLUSIVE and no Gemini answer can be MNC.
+- Google model attribution (review round 1 L2) is exact: `modelVersion` must equal the allow-listed model or an
+  alias listed in `google_engine.MODEL_ALIASES` (none yet: what the live API reports is unknown); anything else is
+  `MODEL_NOT_ALLOWED`, and a missing `modelVersion` is `MODEL_UNVERIFIED` — fail closed: the answer is an
+  ENGINE_PROTOCOL_ERROR (INCONCLUSIVE in Callum, two in a row stop the engine), never attributed to a model it may
+  not be. If the live API omits `modelVersion`, Google stays unusable until that is decided.
+- The Anthropic model allowlist has not been checked against the Messages API models list (the Models overview or
+  `GET /v1/models`); the web search tool page names models the tool works with, not the list (review round 1 L5).
+- Brand matching is lexical (B5a): it does not understand the answer; context and negative terms reduce, not remove,
+  false positives.
+- Spend on OpenAI, Anthropic and Google is a reserve estimate (A5, L3); only a provider-side hard limit bounds the
+  real bill.
 - Resolution sees one network location at one time; a site may answer the crawler differently; robots.txt may block
   it (then the cited host decides).
 - Query strings are dropped: two pages that differ only by query string count as one.

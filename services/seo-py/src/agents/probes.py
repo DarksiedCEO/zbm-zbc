@@ -32,7 +32,7 @@ import re
 from typing import Optional
 from urllib.parse import urlsplit
 
-from agents import domain_match
+from agents import brand_mention, domain_match
 from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed
 from perplexity import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
@@ -103,9 +103,10 @@ def _on_site(host: str, domain: str) -> bool:
     return domain_match.on_site(host, domain)
 
 
-def _mentioned(text: str, terms: list) -> bool:
-    t = text or ""
-    return any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", t, re.IGNORECASE) for term in terms)
+def _mentioned(text: str, terms: list, rules: Optional[list] = None) -> bool:
+    """A brand term named (agents/brand_mention.py: whole word, case-insensitive unless the tenant's rule says
+    otherwise, possessives yes, plurals no, the tenant's context / negative terms). Without rules: unchanged."""
+    return brand_mention.mentioned(text, terms, rules)
 
 
 def _valid_answer(a) -> bool:
@@ -222,7 +223,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                 for k in getattr(a, "unmodelled_keys", ()) or ():
                     if isinstance(k, str) and len(drift_keys) < MAX_DRIFT_KEYS:
                         drift_keys.add(k[:40])
-                if _mentioned(a.text, prompt_set["brand_terms"]):
+                if _mentioned(a.text, prompt_set["brand_terms"], prompt_set.get("brand_term_rules")):
                     tally["mentioned"] += 1
                 pos = None
                 for c in cites:

@@ -508,3 +508,24 @@ def test_switching_provider_is_configuration_only():
                                                                  "anthropic": "AnthropicEngine",
                                                                  "google": "GoogleEngine"}
     assert all(p.status()["answer_engines"][n] == "connected" for n in ENGINES)
+
+
+def test_google_attributes_an_answer_only_to_the_exact_model_and_fails_closed_without_one():
+    # review round 1 L2: exact match (or an explicit alias in gg.MODEL_ALIASES, none yet); a missing modelVersion
+    # cannot be attributed to a model, so the answer is refused, never counted under the asked model's name
+    def parse(version):
+        b = fixture("google")
+        if version is None:
+            b.pop("modelVersion")
+        else:
+            b["modelVersion"] = version
+        return lambda: gg.parse_response(json.dumps(b).encode(), ("gemini-3.8-flash",))
+    a = parse("gemini-3.8-flash")()
+    assert (a.model, a.model_version) == ("gemini-3.8-flash", "?")
+    for v in ("gemini-3.8-flash-anything", "gemini-3.8-flash-001", "gemini-3.8-flash2", "GEMINI-3.8-FLASH"):
+        assert code_of(parse(v)) == ("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED"), v
+    assert code_of(parse(None)) == ("ENGINE_PROTOCOL_ERROR", "MODEL_UNVERIFIED")
+    assert gg.model_matches(None, "gemini-3.8-flash") is None
+    blocked = {"promptFeedback": {"blockReason": "SAFETY"}}
+    assert code_of(lambda: gg.parse_response(json.dumps(blocked).encode())) == ("ENGINE_PROTOCOL_ERROR",
+                                                                                "MODEL_UNVERIFIED")

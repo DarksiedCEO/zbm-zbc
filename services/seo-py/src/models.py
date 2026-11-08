@@ -136,11 +136,23 @@ class AgentMove(Strict):
     reason: Annotated[StrictStr, Field(pattern=r"^[A-Z_]{3,40}$")]
 
 
+class BrandTermRule(Strict):
+    """ADR 0046 review round 1 L1 (agents/brand_mention.py): how one brand term is matched. ``term`` must be one of
+    the prompt set's brand terms."""
+    term: Annotated[StrictStr, Field(min_length=2, max_length=80)]
+    case_sensitive: StrictBool = False
+    context_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]], Field(max_length=10)] = []
+    negative_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]],
+                              Field(max_length=10)] = []
+    common_word: Optional[StrictBool] = None
+
+
 class PromptSetCreate(Strict):
     request_id: RequestId
     name: Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9_-]{1,63}$")]
     brand_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]],
                            Field(min_length=1, max_length=10)]
+    brand_term_rules: Annotated[list[BrandTermRule], Field(max_length=10)] = []
     competitor_domains: Annotated[list[Annotated[StrictStr, Field(pattern=DOMAIN)]], Field(max_length=20)] = []
     prompts: Annotated[list[Annotated[StrictStr, Field(min_length=3, max_length=500)]],
                        Field(min_length=1, max_length=50)]

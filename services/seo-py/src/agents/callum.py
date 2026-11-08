@@ -5,19 +5,25 @@ For every tracked prompt x engine answer Callum traces the exact URLs the engine
 structured citations only, through the multi-engine adapter, answer_adapter.py) and classifies each one:
 
   STRENGTH_URL          a page on the client's own site (exact host, the www. twin or a subdomain, IDNA-aware:
-                        agents/domain_match.py) — after following the cited URL's redirects when resolution is on,
-                        or a third-party page whose canonical names the client's page (syndicated copy)
+                        agents/domain_match.py) — after following the cited URL's redirects when resolution is on.
+                        Never a URL cited on a lookalike host, wherever it redirects (review round 1 M1)
+  CANONICAL_TO_CLIENT   a THIRD-PARTY page whose canonical names the client's page (syndicated copy). The third party
+                        controls that tag, so it is never a STRENGTH_URL: counted and reported apart, excluded from
+                        cited_strength (review round 1 M2)
   OPPORTUNITY_URL       a third-party page cited where the client's could be (competitor pages flagged)
-  LOOKALIKE_URL         a host that folds to the client's domain on the shared lookalike table but is not it: never
-                        counted as the client (brand-impersonation risk, reported apart)
-  INCONCLUSIVE          the citation's target is unknown: a grounding redirect (vertexaisearch.cloud.google.com) not
-                        resolved, or a URL that cannot be read
+  LOOKALIKE_URL         the cited host (or where it lands) folds to the client's domain on the shared lookalike table
+                        but is not it: never counted as the client (brand-impersonation risk, reported apart); one that
+                        redirects ONTO the client is flagged REDIRECTED_ONTO_CLIENT, a risk signal of its own
+  INCONCLUSIVE          the citation's target is unknown: any URL on a redirector host (vertexaisearch.cloud.google.com,
+                        any path) not resolved, or a URL that cannot be read
 
 and, per answer, the metric of its own:
 
   MENTIONED_NOT_CITED   a brand term is named in the answer text and no citation of that answer is a STRENGTH_URL
                         (an answer with an INCONCLUSIVE citation cannot be MNC: it is INCONCLUSIVE, reason
-                        MENTION_WITH_UNRESOLVED_CITATIONS)
+                        MENTION_WITH_UNRESOLVED_CITATIONS). Brand matching: agents/brand_mention.py. A mention made
+                        only by a term that may be a common word, with no disambiguation configured, is
+                        ``confidence: LOW_CONFIDENCE``: reported apart, never in the headline rate or the MNC list
 
 An engine call that failed is an INCONCLUSIVE row with the engine's code — never "not cited". A refusal is counted
 apart and excluded from every rate, as are errors. Every rate carries its n and a 95% Wilson interval; under
@@ -40,9 +46,9 @@ from datetime import timedelta
 from typing import Callable, Optional
 from urllib.parse import urlsplit, urlunsplit
 
-from agents import domain_match, split_url
+from agents import brand_mention, domain_match, split_url
 from agents.prompt_guard import personal_data
-from agents.probes import MIN_USABLE, _mentioned, _switch_code, extract_citations, wilson
+from agents.probes import MIN_USABLE, _switch_code, extract_citations, wilson
 from answer_adapter import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
 from clock import iso
 from envelope import envelope, finding, observed
@@ -50,9 +56,10 @@ from ports import NOT_CONNECTED, ProviderAnswer
 from primitives import Killed
 
 AGENT, TASK = "callum", "citation_source_rows"
-VERSION = "callum-rules/2026-11-08.1"
-CONTRACT_MNC = "callum.mnc_priority/1"
-CLASSES = ("STRENGTH_URL", "OPPORTUNITY_URL", "LOOKALIKE_URL", "MENTIONED_NOT_CITED", "INCONCLUSIVE")
+VERSION = "callum-rules/2026-11-08.2"
+CONTRACT_MNC = "callum.mnc_priority/2"           # /2: cited_instead[].canonical_to_client (review round 1 M2)
+CLASSES = ("STRENGTH_URL", "CANONICAL_TO_CLIENT", "OPPORTUNITY_URL", "LOOKALIKE_URL", "MENTIONED_NOT_CITED",
+           "INCONCLUSIVE")
 REFRESH_TIER = "near_real_time"
 REFRESH_INTERVAL = timedelta(hours=1)             # a citation run is due again after this (near-real-time tier)
 EXCERPT_MAX = 160
@@ -60,8 +67,10 @@ URL_MAX = 500
 MAX_ROWS = 2000
 MAX_EVIDENCE_PER_ITEM = 3
 # hosts whose URLs are a redirect to the cited page, not the page itself (google_engine.py: the grounding chunk
-# URIs of the Gemini API); a citation on one is INCONCLUSIVE until resolved
-REDIRECTORS = {"vertexaisearch.cloud.google.com": "/grounding-api-redirect/"}
+# URIs of the Gemini API). The WHOLE host is a redirector, whatever the path (review round 1 M3): the format of
+# Gemini's grounding URIs is UNVERIFIED until a first live call (the docs show truncated examples only), so no path
+# is trusted to be the page. A citation on one is INCONCLUSIVE until resolved, never OPPORTUNITY.
+REDIRECTOR_HOSTS = frozenset({"vertexaisearch.cloud.google.com"})
 LIMITS = ["One sample of N answers per prompt and engine, at one time, from one account: answer engines vary by user, "
           "location, time and model version. Observations, not search truth.",
           "Cited means attributed by the engine's own structured citations (each engine's rule is in its adapter); "
@@ -69,6 +78,11 @@ LIMITS = ["One sample of N answers per prompt and engine, at one time, from one 
           "A cited URL's redirects and canonical are followed only when SEO_CALLUM_RESOLVE_URLS=1 (one fetch per "
           "distinct URL, robots.txt honoured, bounded); otherwise a redirector URL is INCONCLUSIVE and every other "
           "URL is classified by its own host.",
+          "Gemini's grounding URI format is unverified until a first live call: every URL on the redirector host "
+          "(any path) is treated as a redirect whose target is unknown until resolved.",
+          "A brand mention is a whole-word match (possessives yes, plurals no); a single-word term may be an ordinary "
+          "word, so without the tenant's disambiguation its mentions are LOW_CONFIDENCE and kept out of the headline "
+          "rate. Matching is lexical: it does not understand the answer.",
           "Query strings and fragments of cited URLs are not kept; two URLs that differ only there count as one page.",
           "No prompt-volume source is connected: how often real users ask these prompts is unknown.",
           "Nothing here is calibrated against traffic or revenue; no single visibility score is produced."]
@@ -253,8 +267,7 @@ def is_redirector(url: str) -> bool:
     p = split_url(url)
     if p is None or not p.hostname:
         return False
-    prefix = REDIRECTORS.get(p.hostname.lower())
-    return prefix is not None and (p.path or "").startswith(prefix)
+    return p.hostname.lower().rstrip(".") in REDIRECTOR_HOSTS
 
 
 def stored_url(url: Optional[str]) -> Optional[dict]:
@@ -275,6 +288,11 @@ def stored_url(url: Optional[str]) -> Optional[dict]:
     return {"url": kept, "host": host, "query_dropped": bool(p.query or p.fragment), "withheld": withheld}
 
 
+def _host(url: Optional[str]) -> str:
+    p = split_url(url) if url else None
+    return (p.hostname or "").lower() if p is not None else ""
+
+
 def classify_citation(url: str, domain: str, competitors: list, res: dict) -> dict:
     """One cited URL -> its class, the URL that decided it, how (direct / redirect / canonical) and the flags."""
     chain = {"cited": stored_url(url), "resolution": res.get("state"),
@@ -282,7 +300,7 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
              "canonical": stored_url(res.get("canonical_url")) if res.get("canonical_url") else None,
              "redirects": res.get("redirects")}
     flags: list = []
-    cited_host = (split_url(url).hostname or "").lower() if split_url(url) else ""
+    cited_host = _host(url)
     if res.get("state") == "RESOLVED":
         decide, via = res["final_url"], "redirect" if res.get("redirects") else "direct"
     elif is_redirector(url):
@@ -293,31 +311,42 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
         decide, via = url, "direct"
         if res.get("state") in ("FAILED", "KILLED"):
             flags.append("RESOLUTION_" + res["state"])
-    host = (split_url(decide).hostname or "").lower() if split_url(decide) else ""
+    host = _host(decide)
     if not host:
         return {"class": "INCONCLUSIVE", "reason": "CITED_URL_UNREADABLE", "via": None, "chain": chain,
                 "flags": flags, "competitor": False}
+    if is_redirector(decide):                         # resolved, but it landed on the redirector itself: target unknown
+        return {"class": "INCONCLUSIVE", "reason": "CITED_URL_UNRESOLVED", "via": None, "chain": chain,
+                "flags": ["REDIRECTOR_DID_NOT_REDIRECT"], "competitor": False}
     m = domain_match.match(host, domain)
-    if domain_match.match(cited_host, domain) == domain_match.LOOKALIKE and m != domain_match.LOOKALIKE:
+    on_client = m in (domain_match.EXACT, domain_match.SUBDOMAIN)
+    if cited_host and domain_match.match(cited_host, domain) == domain_match.LOOKALIKE:
+        # M1: a citation on a lookalike host is never the client, wherever it redirects; one that lands on the client
+        # is a risk signal (who controls a lookalike that forwards to the client?), surfaced, never credited
         flags.append("CITED_HOST_LOOKALIKE")
-    if m in (domain_match.EXACT, domain_match.SUBDOMAIN):
+        if on_client and via == "redirect":
+            flags.append("REDIRECTED_ONTO_CLIENT")
+        return {"class": "LOOKALIKE_URL", "reason": None, "via": via, "chain": chain, "flags": flags,
+                "competitor": False}
+    if on_client:
         if domain_match.on_site(cited_host, domain) is False and via == "redirect":
             flags.append("REDIRECTED_ONTO_CLIENT")
         return {"class": "STRENGTH_URL", "reason": None, "via": via, "chain": chain, "flags": flags,
                 "competitor": False, "match": m}
     if m == domain_match.LOOKALIKE:
+        if domain_match.on_site(cited_host, domain):
+            flags.append("REDIRECTED_OFF_CLIENT")
         return {"class": "LOOKALIKE_URL", "reason": None, "via": via, "chain": chain, "flags": flags,
                 "competitor": False}
     if domain_match.on_site(cited_host, domain):
         flags.append("REDIRECTED_OFF_CLIENT")
-    canon = res.get("canonical_url")
-    if canon:
-        ch = (split_url(canon).hostname or "").lower() if split_url(canon) else ""
-        if domain_match.on_site(ch, domain):
-            return {"class": "STRENGTH_URL", "reason": None, "via": "canonical", "chain": chain,
-                    "flags": flags + ["THIRD_PARTY_COPY_CANONICAL_TO_CLIENT"], "competitor": False,
-                    "match": domain_match.match(ch, domain)}
     comp = any(domain_match.on_site(host, d) for d in competitors)
+    canon = res.get("canonical_url")
+    if canon and domain_match.on_site(_host(canon), domain):
+        # M2: the third party controls its own canonical tag, so this is never a STRENGTH_URL: a class of its own
+        return {"class": "CANONICAL_TO_CLIENT", "reason": None, "via": "canonical", "chain": chain,
+                "flags": flags + ["THIRD_PARTY_PAGE"], "competitor": comp,
+                "match": domain_match.match(_host(canon), domain)}
     return {"class": "OPPORTUNITY_URL", "reason": None, "via": via, "chain": chain, "flags": flags,
             "competitor": comp}
 
@@ -348,6 +377,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
     """Rows, metrics and the MNC priority list from the collected samples of every engine (``engines``: name ->
     collect() result). Deterministic for the same input."""
     terms, competitors = prompt_set["brand_terms"], list(prompt_set.get("competitor_domains") or [])
+    term_rules = prompt_set.get("brand_term_rules")
     rows: list = []
     per: dict = {}                                   # (engine, prompt_index) -> tallies
     truncated = 0
@@ -363,8 +393,10 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
         for s in r["samples"]:
             pi = s["prompt_index"]
             k = per.setdefault((eng, pi), {"samples": 0, "usable": 0, "refusals": 0, "failed": 0, "strength": 0,
-                                          "mnc": 0, "inconclusive_answers": 0, "opportunity_urls": 0,
-                                          "lookalike_urls": 0, "inconclusive_urls": 0, "strength_urls": 0,
+                                          "mnc": 0, "mnc_low": 0, "inconclusive_answers": 0,
+                                          "opportunity_urls": 0, "lookalike_urls": 0, "inconclusive_urls": 0,
+                                          "strength_urls": 0, "canonical_to_client_urls": 0,
+                                          "lookalike_onto_client": 0,
                                           "zero_citation_answers": 0, "versions": set(), "cited_instead": {},
                                           "evidence": []})
             k["samples"] += 1
@@ -399,13 +431,16 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                 cl = classify_citation(c["url"], domain, competitors, res)
                 classes.append(cl["class"])
                 key = {"STRENGTH_URL": "strength_urls", "OPPORTUNITY_URL": "opportunity_urls",
-                       "LOOKALIKE_URL": "lookalike_urls", "INCONCLUSIVE": "inconclusive_urls"}[cl["class"]]
+                       "LOOKALIKE_URL": "lookalike_urls", "INCONCLUSIVE": "inconclusive_urls",
+                       "CANONICAL_TO_CLIENT": "canonical_to_client_urls"}[cl["class"]]
                 k[key] += 1
-                if cl["class"] == "OPPORTUNITY_URL":
+                if cl["class"] == "LOOKALIKE_URL" and "REDIRECTED_ONTO_CLIENT" in cl["flags"]:
+                    k["lookalike_onto_client"] += 1
+                if cl["class"] in ("OPPORTUNITY_URL", "CANONICAL_TO_CLIENT"):
                     dec = (cl["chain"]["final"] or cl["chain"]["cited"]) or {}
-                    ci = k["cited_instead"].setdefault(dec.get("url") or "?", {"url": dec.get("url"),
-                                                                              "host": dec.get("host"), "answers": 0,
-                                                                              "competitor": cl["competitor"]})
+                    ci = k["cited_instead"].setdefault(dec.get("url") or "?", {
+                        "url": dec.get("url"), "host": dec.get("host"), "answers": 0, "competitor": cl["competitor"],
+                        "canonical_to_client": cl["class"] == "CANONICAL_TO_CLIENT"})
                     ci["answers"] += 1
                 hint = hints.get(c["url"])
                 add({**base, "class": cl["class"], "reason": cl["reason"], "url": cl["chain"]["cited"]["url"]
@@ -416,15 +451,25 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
             strength = "STRENGTH_URL" in classes
             if strength:
                 k["strength"] += 1
-            if _mentioned(text, terms) and not strength:
+            said = brand_mention.mention(text, terms, term_rules)
+            if said["mentioned"] and not strength:
                 if "INCONCLUSIVE" in classes:
                     k["inconclusive_answers"] += 1
                     add({**base, "class": "INCONCLUSIVE", "reason": "MENTION_WITH_UNRESOLVED_CITATIONS",
                          "url": None, "position": None, "evidence": {"url": None, **ev}})
+                elif said["confidence"] == brand_mention.LOW:
+                    # L1: only a term that may be a common word, with no disambiguation configured: reported apart,
+                    # never in the headline rate or the MNC list
+                    k["mnc_low"] += 1
+                    add({**base, "class": "MENTIONED_NOT_CITED", "confidence": "LOW_CONFIDENCE",
+                         "reason": "BRAND_TERM_MAY_BE_COMMON_WORD", "url": None, "position": None,
+                         "citations_in_answer": len(cites), "evidence": {"url": None, **ev}})
                 else:
                     k["mnc"] += 1
-                    add({**base, "class": "MENTIONED_NOT_CITED", "reason": None, "url": None, "position": None,
-                         "citations_in_answer": len(cites), "evidence": {"url": None, **ev}})
+                    add({**base, "class": "MENTIONED_NOT_CITED", "confidence": "HIGH", "reason": None, "url": None,
+                         "position": None, "citations_in_answer": len(cites),
+                         "canonical_to_client_citations": classes.count("CANONICAL_TO_CLIENT"),
+                         "evidence": {"url": None, **ev}})
                     if len(k["evidence"]) < MAX_EVIDENCE_PER_ITEM:
                         k["evidence"].append({"engine": eng, "sample": s["sample"], "observed_at": observed_at,
                                               **ev})
@@ -441,8 +486,9 @@ def _rate(k: int, n: int) -> dict:
 
 def _metrics(per: dict, ps: dict, run_id: str, engines: dict) -> dict:
     out: dict = {"by_engine_prompt": [], "by_engine": {}, "totals": {}}
-    tot: dict = {"usable": 0, "mnc": 0, "strength": 0, "refusals": 0, "failed": 0, "opportunity_urls": 0,
-                 "strength_urls": 0, "lookalike_urls": 0, "inconclusive_urls": 0, "inconclusive_answers": 0}
+    tot: dict = {"usable": 0, "mnc": 0, "mnc_low": 0, "strength": 0, "refusals": 0, "failed": 0,
+                 "opportunity_urls": 0, "strength_urls": 0, "canonical_to_client_urls": 0, "lookalike_urls": 0,
+                 "lookalike_onto_client": 0, "inconclusive_urls": 0, "inconclusive_answers": 0}
     for (eng, pi), k in sorted(per.items()):
         prov = {"data_class": "measured", "source": "answer_engine_samples", "run_id": run_id, "engine": eng,
                 "prompt_id": prompt_id(ps, pi), "prompt_set_sha256": ps["sha256"], "rules": VERSION,
@@ -451,9 +497,11 @@ def _metrics(per: dict, ps: dict, run_id: str, engines: dict) -> dict:
             "engine": eng, "prompt_index": pi, "prompt_id": prompt_id(ps, pi), "samples": k["samples"],
             "usable_answers": k["usable"], "refusals": k["refusals"], "inconclusive_calls": k["failed"],
             "strength_urls": k["strength_urls"], "opportunity_urls": k["opportunity_urls"],
-            "lookalike_urls": k["lookalike_urls"], "inconclusive_urls": k["inconclusive_urls"],
-            "zero_citation_answers": k["zero_citation_answers"],
+            "canonical_to_client_urls": k["canonical_to_client_urls"],
+            "lookalike_urls": k["lookalike_urls"], "lookalike_redirects_onto_client": k["lookalike_onto_client"],
+            "inconclusive_urls": k["inconclusive_urls"], "zero_citation_answers": k["zero_citation_answers"],
             "mentioned_not_cited": _rate(k["mnc"], k["usable"]), "cited_strength": _rate(k["strength"], k["usable"]),
+            "mentioned_not_cited_low_confidence": {**_rate(k["mnc_low"], k["usable"]), "headline": False},
             "mention_with_unresolved_citations": k["inconclusive_answers"],
             "mixed_model_versions": len(k["versions"]) > 1, "provenance": prov})
         e = out["by_engine"].setdefault(eng, {**{x: 0 for x in tot}, "outcome": engines[eng]["outcome"]})
@@ -463,12 +511,15 @@ def _metrics(per: dict, ps: dict, run_id: str, engines: dict) -> dict:
     for eng, e in out["by_engine"].items():
         e["mentioned_not_cited"] = _rate(e["mnc"], e["usable"])
         e["cited_strength"] = _rate(e["strength"], e["usable"])
+        e["mentioned_not_cited_low_confidence"] = {**_rate(e["mnc_low"], e["usable"]), "headline": False}
         e["provenance"] = {"data_class": "measured", "source": "answer_engine_samples", "run_id": run_id,
                            "engine": eng, "prompt_set_sha256": ps["sha256"], "rules": VERSION,
                            "note": "pooled over prompts: prompts are not a random sample, so the interval is "
                                    "directional"}
     out["totals"] = {**tot, "mentioned_not_cited": _rate(tot["mnc"], tot["usable"]),
                      "cited_strength": _rate(tot["strength"], tot["usable"]),
+                     "mentioned_not_cited_low_confidence": {**_rate(tot["mnc_low"], tot["usable"]),
+                                                            "headline": False},
                      "provenance": {"data_class": "measured", "source": "answer_engine_samples", "run_id": run_id,
                                     "prompt_set_sha256": ps["sha256"], "rules": VERSION,
                                     "note": "pooled over engines and prompts: never a visibility score"}}
@@ -484,7 +535,7 @@ ORDER_RULE = ("items with at least one MENTIONED_NOT_CITED answer, ordered by: M
 
 
 def mnc_priority(per: dict, ps: dict, run_id: str, domain: str, generated_at: str) -> dict:
-    """The output contract for Roman (content structure) and Adaeze (content gap): ``callum.mnc_priority/1``."""
+    """The output contract for Roman (content structure) and Adaeze (content gap): ``callum.mnc_priority/2``."""
     by_prompt: dict = {}
     for (eng, pi), k in per.items():
         b = by_prompt.setdefault(pi, {"engines": [], "mnc": 0, "usable": 0, "cited_instead": {}, "evidence": []})
@@ -529,8 +580,9 @@ def mnc_priority(per: dict, ps: dict, run_id: str, domain: str, generated_at: st
             "run_id": run_id, "domain": domain, "generated_at": generated_at, "rules": VERSION,
             "prompt_set": {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"], "sha256": ps["sha256"]},
             "order_rule": ORDER_RULE, "items": items,
-            "excluded": "INCONCLUSIVE answers (an unresolved citation, or a failed engine call) are never listed as "
-                        "Mentioned-Not-Cited",
+            "excluded": "INCONCLUSIVE answers (an unresolved citation, or a failed engine call) and LOW_CONFIDENCE "
+                        "mentions (a brand term that may be a common word, no disambiguation configured) are never "
+                        "listed as Mentioned-Not-Cited",
             "data_class": "measured", "effect_class": None}
 
 
@@ -540,10 +592,12 @@ def run(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard: C
         run_id: str, clock) -> dict:
     """Callum's citation-source run: collect every engine of the prompt set, classify, return the envelope."""
     method = (f"Each prompt of prompt set {{ps}} v{{ver}} asked {n} times per engine through the multi-engine adapter; "
-              "every URL the engine attributed to an answer is classified STRENGTH_URL / OPPORTUNITY_URL / "
-              "LOOKALIKE_URL / INCONCLUSIVE, and every answer that names a brand term without a STRENGTH_URL "
-              "citation is MENTIONED_NOT_CITED (its own metric). Domain matching: exact host, www. twin or subdomain, "
-              "IDNA-aware; a lookalike host never counts as the client. A failed engine call is INCONCLUSIVE, never "
+              "every URL the engine attributed to an answer is classified STRENGTH_URL / CANONICAL_TO_CLIENT / "
+              "OPPORTUNITY_URL / LOOKALIKE_URL / INCONCLUSIVE, and every answer that names a brand term without a "
+              "STRENGTH_URL citation is MENTIONED_NOT_CITED (its own metric; LOW_CONFIDENCE apart when the term may "
+              "be a common word). Domain matching: exact host, www. twin or subdomain, IDNA-aware; a lookalike host "
+              "never counts as the client, wherever it redirects; a third-party page whose canonical names the "
+              "client is CANONICAL_TO_CLIENT, never a strength. A failed engine call is INCONCLUSIVE, never "
               f"'not cited'. Rates exclude refusals and failures; 95% Wilson intervals; under {MIN_USABLE} usable "
               f"answers a rate is directional. Rules {VERSION}.")
     if prompt_set is None:
@@ -599,6 +653,18 @@ def _findings(result: dict, stopped: dict) -> list:
         if m["lookalike_urls"]:
             out.append(finding("CALLUM_LOOKALIKE_DOMAIN_CITED", "high", "measured", "WATCH", capability="P4",
                                detail={**d, "lookalike_urls": m["lookalike_urls"]}))
+        if m["lookalike_redirects_onto_client"]:
+            out.append(finding("CALLUM_LOOKALIKE_REDIRECTS_ONTO_CLIENT", "high", "measured", "WATCH",
+                               capability="P4",
+                               detail={**d, "lookalike_redirects_onto_client": m["lookalike_redirects_onto_client"]}))
+        if m["canonical_to_client_urls"]:
+            out.append(finding("CALLUM_CANONICAL_TO_CLIENT", "info", "measured", "WATCH", capability="P4",
+                               detail={**d, "canonical_to_client_urls": m["canonical_to_client_urls"]}))
+        low = m["mentioned_not_cited_low_confidence"]
+        if low["k"]:
+            out.append(finding("CALLUM_MENTIONED_NOT_CITED_LOW_CONFIDENCE", "low", "measured",
+                               "INSUFFICIENT_EVIDENCE", capability="P4",
+                               detail={**d, "mentioned_not_cited_low_confidence": low}))
         if m["opportunity_urls"] and not m["strength_urls"]:
             out.append(finding("CALLUM_OPPORTUNITY_URLS", "medium", "measured",
                                "INSUFFICIENT_EVIDENCE" if m["usable_answers"] < MIN_USABLE else "TEST",

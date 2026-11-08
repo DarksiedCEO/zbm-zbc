@@ -185,13 +185,71 @@ def test_a_client_url_that_redirects_off_site_is_classified_by_where_it_lands():
     assert r["rows"][0]["class"] == "OPPORTUNITY_URL" and "REDIRECTED_OFF_CLIENT" in r["rows"][0]["flags"]
 
 
-def test_a_third_party_copy_whose_canonical_is_the_clients_page_is_a_strength():
+def test_a_third_party_page_whose_canonical_is_the_clients_page_is_its_own_class_never_a_strength():
+    # review round 1 M2: the third party controls its canonical tag, so it never credits the client
     u = "https://syndicator.test/copy"
-    r = classify(collected((0, answer(text="x", cites=[u]))),
+    r = classify(collected((0, answer(cites=[u]))),
                  resolver({u: ok_page(u, u, 0, canonical="https://site.test/original")}))
     row = r["rows"][0]
-    assert row["class"] == "STRENGTH_URL" and row["via"] == "canonical"
-    assert "THIRD_PARTY_COPY_CANONICAL_TO_CLIENT" in row["flags"]
+    assert row["class"] == "CANONICAL_TO_CLIENT" and row["via"] == "canonical"
+    assert "THIRD_PARTY_PAGE" in row["flags"] and row["chain"]["canonical"]["host"] == "site.test"
+    m = r["metrics"]["by_engine_prompt"][0]
+    assert m["canonical_to_client_urls"] == 1 and m["strength_urls"] == 0 and m["cited_strength"]["k"] == 0
+    assert r["metrics"]["totals"]["canonical_to_client_urls"] == 1 and r["metrics"]["totals"]["strength"] == 0
+    # the brand is named and the client's own page is not cited: Mentioned-Not-Cited, the copy listed as cited instead
+    mnc = [x for x in r["rows"] if x["class"] == "MENTIONED_NOT_CITED"]
+    assert len(mnc) == 1 and mnc[0]["canonical_to_client_citations"] == 1
+    item = r["mnc_priority"]["items"][0]
+    assert item["cited_instead"] == [{"url": u, "host": "syndicator.test", "answers": 1, "competitor": False,
+                                      "canonical_to_client": True}]
+    assert any(f["code"] == "CALLUM_CANONICAL_TO_CLIENT" and f["severity"] == "info" for f in callum._findings(r, {}))
+    assert not any(f["code"] == "CALLUM_STRENGTH_URLS" for f in callum._findings(r, {}))
+
+
+@pytest.mark.parametrize("cited", [
+    "https://\u0430cme.com/go",                      # Cyrillic a (the reviewer's repro)
+    "https://xn--cme-5cd.com/go",                     # the same lookalike as punycode
+    "https://\u0251cme.com/go",                      # Latin alpha
+])
+def test_a_lookalike_host_that_redirects_onto_the_client_is_a_lookalike_never_a_strength(cited):
+    # review round 1 M1: wherever a lookalike-host citation lands, it is never the client; landing ON the client is a
+    # risk signal of its own (high finding), not a credit
+    res = resolver({cited: ok_page(cited, "https://acme.com/pricing", 1)})
+    r = callum.classify(collected((0, answer(text="Acme Corp helps.", cites=[cited]))),
+                        {**PS, "brand_terms": ["Acme Corp"]}, "acme.com", res, "seo-cit-" + "c" * 40,
+                        "2026-10-09T18:00:00Z", "2026-10-09T19:00:00Z")
+    row = r["rows"][0]
+    assert row["class"] == "LOOKALIKE_URL", row
+    assert row["flags"] == ["CITED_HOST_LOOKALIKE", "REDIRECTED_ONTO_CLIENT"]
+    m = r["metrics"]["by_engine_prompt"][0]
+    assert m["strength_urls"] == 0 and m["cited_strength"]["k"] == 0 and m["lookalike_urls"] == 1
+    assert m["lookalike_redirects_onto_client"] == 1 and m["mentioned_not_cited"]["k"] == 1
+    codes = {f["code"]: f["severity"] for f in callum._findings(r, {})}
+    assert codes["CALLUM_LOOKALIKE_REDIRECTS_ONTO_CLIENT"] == "high" and "CALLUM_STRENGTH_URLS" not in codes
+
+
+def test_a_lookalike_host_is_a_lookalike_wherever_it_lands_and_unresolved():
+    cited = "https://xn--cme-5cd.com/go"
+    for res in (resolver({cited: ok_page(cited, "https://competitor.test/x", 1)}), off()):
+        r = callum.classify(collected((0, answer(text="x", cites=[cited]))), PS, "acme.com", res,
+                            "seo-cit-" + "c" * 40, "2026-10-09T18:00:00Z", "2026-10-09T19:00:00Z")
+        assert r["rows"][0]["class"] == "LOOKALIKE_URL" and "REDIRECTED_ONTO_CLIENT" not in r["rows"][0]["flags"]
+
+
+@pytest.mark.parametrize("path", ["/grounding-api-redirect/AAA", "/other-format/AAA", "/", "/AAA?x=1"])
+def test_every_path_on_the_redirector_host_is_unresolved_never_an_opportunity(path):
+    # review round 1 M3: the whole host is a redirector (Gemini's URI format is unverified until a first live call)
+    g = "https://vertexaisearch.cloud.google.com" + path
+    r = classify(collected((0, answer(cites=[g]))))
+    assert [(x["class"], x["reason"]) for x in r["rows"]] == [("INCONCLUSIVE", "CITED_URL_UNRESOLVED"),
+                                                             ("INCONCLUSIVE", "MENTION_WITH_UNRESOLVED_CITATIONS")]
+    assert r["metrics"]["by_engine_prompt"][0]["opportunity_urls"] == 0
+    r2 = classify(collected((0, answer(text="x", cites=[g]))), resolver({}))           # resolution failed
+    assert r2["rows"][0]["class"] == "INCONCLUSIVE" and r2["rows"][0]["flags"] == ["REDIRECTOR_FAILED"]
+    r3 = classify(collected((0, answer(text="x", cites=[g]))), resolver({g: ok_page(g, g, 0)}))   # did not redirect
+    assert r3["rows"][0]["class"] == "INCONCLUSIVE" and r3["rows"][0]["flags"] == ["REDIRECTOR_DID_NOT_REDIRECT"]
+    assert callum.is_redirector("https://VertexAISearch.cloud.google.com." + path)
+    assert not callum.is_redirector("https://cloud.google.com" + path)
 
 
 def test_a_resolution_that_fails_falls_back_to_the_cited_host_and_says_so():
@@ -245,6 +303,58 @@ def test_the_real_fetcher_refuses_a_cited_url_pointing_inside_the_network(srv):
     assert [x["class"] for x in r["rows"]] == ["OPPORTUNITY_URL", "OPPORTUNITY_URL"]     # never followed inside
 
 
+# ---------------------------------------------------------------------------------------------- brand mentions (L1)
+
+def test_brand_matching_possessives_yes_plurals_no_whole_words_only():
+    bm = callum.brand_mention
+    assert bm.mentioned("Acme's prices", ["Acme"]) and bm.mentioned("Acme\u2019s prices", ["Acme"])
+    assert not bm.mentioned("the Acmes of this world", ["Acme"]) and not bm.mentioned("Acmeville", ["Acme"])
+    assert bm.mentioned("ACME rocks", ["Acme"])                                   # case-insensitive by default
+    assert not bm.mentioned("ACME rocks", ["Acme"], [{"term": "Acme", "case_sensitive": True}])
+    assert not bm.mentioned("I ate apples", ["Apple"])                            # plural: not the brand
+
+
+def test_a_common_word_brand_without_disambiguation_is_low_confidence_and_out_of_the_headline_rate():
+    ps = {**PS, "brand_terms": ["Apple"]}
+    r = classify(collected((0, answer(text="Try an apple pie recipe.", cites=["https://recipes.test/pie"])),
+                           (0, answer(text="Bake apple pie.", cites=["https://recipes.test/pie"]))), ps=ps)
+    low = [x for x in r["rows"] if x["class"] == "MENTIONED_NOT_CITED"]
+    assert [(x["confidence"], x["reason"]) for x in low] == [("LOW_CONFIDENCE", "BRAND_TERM_MAY_BE_COMMON_WORD")] * 2
+    m = r["metrics"]["by_engine_prompt"][0]
+    assert m["mentioned_not_cited"]["k"] == 0                                      # never in the headline rate
+    assert m["mentioned_not_cited_low_confidence"]["k"] == 2 and m["mentioned_not_cited_low_confidence"]["headline"] is False
+    assert r["metrics"]["totals"]["mentioned_not_cited"]["k"] == 0 and r["metrics"]["totals"]["mnc_low"] == 2
+    assert r["mnc_priority"]["items"] == []                                       # nor in the MNC list
+    codes = [f["code"] for f in callum._findings(r, {})]
+    assert "CALLUM_MENTIONED_NOT_CITED_LOW_CONFIDENCE" in codes and "CALLUM_MENTIONED_NOT_CITED" not in codes
+
+
+def test_disambiguation_rules_turn_a_common_word_brand_into_a_counted_mention():
+    texts = ["Apple makes the iPhone; see their store.", "Grandma's apple pie with an apple orchard view.",
+             "Apple pie is great, and the iPhone too."]
+    rules = [{"term": "Apple", "context_terms": ["iPhone", "Mac"], "negative_terms": ["pie", "orchard"]}]
+    ps = {**PS, "brand_terms": ["Apple"], "brand_term_rules": rules}
+    r = classify(collected(*[(0, answer(text=t, cites=["https://other.test/"])) for t in texts]), ps=ps)
+    mnc = [x for x in r["rows"] if x["class"] == "MENTIONED_NOT_CITED"]
+    # 1: context present, no negative nearby -> counted (HIGH); 2: no context term -> no mention;
+    # 3: the only match sits next to "pie" -> discarded
+    assert [x["confidence"] for x in mnc] == ["HIGH"]
+    assert r["metrics"]["by_engine_prompt"][0]["mentioned_not_cited"]["k"] == 1
+    # a tenant that says its single-word brand is not a common word gets HIGH without any other rule
+    ps2 = {**PS, "brand_terms": ["Zbestico"], "brand_term_rules": [{"term": "Zbestico", "common_word": False}]}
+    r2 = classify(collected((0, answer(text="Zbestico helps.", cites=[]))), ps=ps2)
+    assert r2["metrics"]["by_engine_prompt"][0]["mentioned_not_cited"]["k"] == 1
+    # a multi-word brand is never treated as a common word
+    r3 = classify(collected((0, answer(text="Z Best Media helps.", cites=[]))))
+    assert [x.get("confidence") for x in r3["rows"]] == ["HIGH"]
+
+
+def test_the_audit_summary_applies_the_tenants_rules_and_is_unchanged_without_them():
+    from agents import probes
+    assert probes._mentioned("apple pie", ["Apple"]) is True                     # no rules: as before
+    assert probes._mentioned("apple pie", ["Apple"], [{"term": "Apple", "negative_terms": ["pie"]}]) is False
+
+
 # ---------------------------------------------------------------------------------------------- evidence
 
 def test_every_row_carries_engine_model_prompt_time_and_bounded_untrusted_evidence():
@@ -287,13 +397,13 @@ def test_the_mentioned_not_cited_priority_list_is_the_documented_contract_in_rul
         (1, answer(cites=["https://competitor.test/x"])), (1, answer(cites=["https://competitor.test/x"])),  # p1: 2
         (2, answer(cites=["https://site.test/"]))), ps=ps)                                 # p2: strength
     mp = r["mnc_priority"]
-    assert mp["contract"] == "callum.mnc_priority/1" and mp["producer"] == "callum"
+    assert mp["contract"] == "callum.mnc_priority/2" and mp["producer"] == "callum"
     assert mp["consumers"] == {"roman": "content_structure", "adaeze": "content_gap"}
     assert [i["prompt_index"] for i in mp["items"]] == [1, 0] and [i["rank"] for i in mp["items"]] == [1, 2]
     top = mp["items"][0]
     assert top["mnc_answers"] == 2 and top["competitor_cited_instead"] is True
     assert top["cited_instead"] == [{"url": "https://competitor.test/x", "host": "competitor.test", "answers": 2,
-                                     "competitor": True}]
+                                     "competitor": True, "canonical_to_client": False}]
     assert top["for_roman"]["task"] == "content_structure" and top["for_adaeze"]["hosts"] == ["competitor.test"]
     assert top["mentioned_not_cited"]["ci95"] == callum.wilson(2, 2) and top["mentioned_not_cited"]["directional"]
     assert len(top["evidence"]) <= callum.MAX_EVIDENCE_PER_ITEM and mp["effect_class"] is None
@@ -388,6 +498,24 @@ def run(h, psid, tid="zbm", caller="seo_agent", andre=False, domain=DOMAIN, **ex
                                                     **extra}, caller=caller, andre=andre)
 
 
+def test_a_prompt_set_keeps_its_brand_term_rules_and_its_hash_without_them(h):
+    body = {"name": "core", "brand_terms": ["Apple", "Apple Inc"], "prompts": ["best phone maker"],
+            "engines": ["openai"]}
+    plain = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), **body}), 201)
+    v1 = plain["versions"]["1"]
+    assert "brand_term_rules" not in v1                                             # the content as before
+    rules = [{"term": "Apple", "context_terms": ["iPhone"], "negative_terms": ["pie"], "case_sensitive": True}]
+    ruled = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), **body, "brand_term_rules": rules}), 201)
+    v2 = ruled["versions"]["2"]
+    assert v2["brand_term_rules"] == [{"term": "Apple", "case_sensitive": True, "context_terms": ["iPhone"],
+                                       "negative_terms": ["pie"], "common_word": None}]
+    assert v2["sha256"] != v1["sha256"]
+    for bad in ([{"term": "Banana"}], [{"term": "Apple"}, {"term": "Apple"}],
+                [{"term": "Apple", "context_terms": ["a\x01b"]}]):
+        h.refused(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), **body, "name": "other",
+                                                      "brand_term_rules": bad}), 422, "PROMPT_SET_INVALID")
+
+
 def test_default_configuration_asks_nothing_and_records_not_connected(h):
     h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": [DOMAIN]}, andre=True))
     v = h.ok(run(h, prompt_set(h)), 201)
@@ -421,7 +549,7 @@ def test_a_full_run_across_three_engines_is_recorded_first_and_classified(tmp_pa
     assert {r["engine"] for r in rows} == {"openai", "anthropic", "google"}
     assert all(r["provider"] in ("openai", "anthropic", "google") and r["model"] for r in rows)
     mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{v['citation_run_id']}/mnc-priority"))
-    assert mp["contract"] == "callum.mnc_priority/1" and mp["items"][0]["engines"][0]["engine"] == "anthropic"
+    assert mp["contract"] == "callum.mnc_priority/2" and mp["items"][0]["engines"][0]["engine"] == "anthropic"
     # record-first: the request, then reservations (subject citation_run:...), settlements, then the result
     kinds = [e["event_type"] for e in h.ledger.events if e["event_type"] != "log_anchor"]
     assert kinds.index("citation_run_requested") < kinds.index("engine_calls_reserved") \
@@ -593,7 +721,7 @@ def test_the_registry_lists_callum_with_one_job_inputs_and_outputs(h):
     d = h.ok(h.get("/department"))
     reg = d["agents"]["callum"]["registry"]
     assert reg["assignment"].startswith("citation sources") and reg["inputs"] and reg["outputs"]
-    assert any("callum.mnc_priority/1" in o for o in reg["outputs"])
+    assert any("callum.mnc_priority/2" in o for o in reg["outputs"])
     assert all(set(a["registry"]) == {"assignment", "inputs", "outputs"} for a in d["agents"].values())
     assert "adaeze" in d["not_built_agents"] and "adaeze" not in d["agents"]
     assert d["agents"]["callum"]["scorecard"]["citation_runs"] == {"runs": 0, "completed": 0, "interrupted": 0,
@@ -652,3 +780,22 @@ def test_resolution_on_with_the_web_switch_engaged_fetches_nothing_and_the_run_s
     assert v["status"] == "completed" and v["result"]["outcome"] == "OK" and len(seen) == 1
     assert {r["class"] for r in v["result"]["facts"]["rows"]} == {"INCONCLUSIVE"}
     assert v["result"]["facts"]["resolution"]["enabled"] is False
+
+
+def test_perplexity_per_run_caps_are_opt_in_and_bind_when_set(tmp_path):
+    # review round 1 L4: neither set = no per-run cap (the behaviour before; the Perplexity suite is unchanged);
+    # both set = they bind as for the other engines; one without the other refuses start
+    assert "run_max_calls" not in base.Harness_env(**base.BUDGET).perplexity_budget
+    with pytest.raises(RuntimeError, match="both"):
+        base.Harness_env(**base.BUDGET, SEO_PERPLEXITY_RUN_MAX_CALLS="9")
+    f = base.FakePerplexity()
+    h = base.svc_harness(tmp_path / "a", f, SEO_PERPLEXITY_RUN_MAX_CALLS="9", SEO_PERPLEXITY_RUN_MAX_SPEND_USD="50")
+    c = base.callum(base.run_audit(h, base.setup_zbm(h, prompts=("q one about seo", "q two about seo"))))
+    e = c["facts"]["engines"]["perplexity"]
+    assert c["outcome"] == "PARTIAL" and e["reason_detail"] == "RUN_CALL_CAP" and len(f.requests) == 3
+    f2 = base.FakePerplexity()
+    h2 = base.svc_harness(tmp_path / "b", f2, SEO_PERPLEXITY_RUN_MAX_CALLS="100",
+                          SEO_PERPLEXITY_RUN_MAX_SPEND_USD="0.30")         # 9 x $0.05 reserve > $0.30
+    c2 = base.callum(base.run_audit(h2, base.setup_zbm(h2)))
+    assert c2["outcome"] == "BLOCKED" and c2["facts"]["engines"]["perplexity"]["reason_detail"] == "RUN_SPEND_CAP"
+    assert f2.requests == []

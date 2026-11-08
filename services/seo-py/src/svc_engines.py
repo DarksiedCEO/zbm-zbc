@@ -133,6 +133,7 @@ class EnginesMixin:
 
     def _engine_limits(self, engine: str) -> dict:
         if engine == "perplexity":
+            # its per-run caps are opt-in (review round 1 L4): present only when both are configured
             return dict(self.settings.perplexity_budget)
         cfg = (getattr(self.settings, "answer_engines", None) or {}).get(engine)
         if cfg is None:

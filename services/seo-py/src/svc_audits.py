@@ -64,10 +64,28 @@ NOT_CONNECTED_WHY = {
 }
 
 
+def _brand_term_rules(raw: list, terms: list) -> list:
+    """ADR 0046 review round 1 L1: one rule per brand term at most, for a term of the set; whitespace folded as the
+    terms are; no control characters."""
+    out, seen = [], set()
+    for r in raw:
+        term = " ".join(r["term"].split())
+        ctx = [" ".join(w.split()) for w in r.get("context_terms") or []]
+        neg = [" ".join(w.split()) for w in r.get("negative_terms") or []]
+        if term not in terms or term in seen or any(not w or any(ord(c) < 0x20 for c in w) for w in ctx + neg):
+            raise Invalid(R("PROMPT_SET_INVALID"))
+        seen.add(term)
+        out.append({"term": term, "case_sensitive": bool(r.get("case_sensitive", False)), "context_terms": ctx,
+                    "negative_terms": neg, "common_word": r.get("common_word")})
+    return sorted(out, key=lambda x: terms.index(x["term"]))
+
+
 class AuditsMixin:
     # ------------------------------------------------------------------ prompt sets (versioned)
 
     def create_prompt_set(self, actor: str, tid: str, body: dict) -> dict:
+        if not body.get("brand_term_rules"):           # no rules: the request (and its idempotency key) as before
+            body = {k: v for k, v in body.items() if k != "brand_term_rules"}
         terms = [" ".join(t.split()) for t in body["brand_terms"]]
         prompts = [" ".join(p.split()) for p in body["prompts"]]
         if any(not t for t in terms) or any(not p for p in prompts) or len(set(prompts)) != len(prompts) \
@@ -77,6 +95,9 @@ class AuditsMixin:
             raise Invalid(R("PROMPT_PERSONAL_DATA"))
         content = {"name": body["name"], "brand_terms": terms, "competitor_domains": sorted(body["competitor_domains"]),
                    "prompts": prompts, "engines": sorted(set(body["engines"]))}
+        rules = _brand_term_rules(body.get("brand_term_rules") or [], terms)
+        if rules:                                      # absent when none: an existing set's content hash is unchanged
+            content["brand_term_rules"] = rules
         with self.lock:
             self._gate()
             self._get(self.tenants, tid, "TENANT_NOT_FOUND")

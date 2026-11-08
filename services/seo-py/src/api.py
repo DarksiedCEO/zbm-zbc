@@ -516,7 +516,7 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get(P + "/tenants/{tid}/citation-runs/{cid}/mnc-priority", dependencies=auth)
     def citation_mnc_priority(cid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
-        """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/1 contract Roman and Adaeze read."""
+        """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/2 contract Roman and Adaeze read."""
         return svc.mnc_priority_view(scope[1], _id(cid))
 
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)

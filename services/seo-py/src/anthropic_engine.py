@@ -21,7 +21,10 @@ Documentation read on Nov 8 2026 (the page's Markdown, fetched with a web-fetch 
     here, the answer is ENGINE_PROTOCOL_ERROR ``RESPONSE_PAUSE_TURN`` (never counted);
   - ``usage.server_tool_use.web_search_requests``; "$10 USD per 1,000 searches, plus standard token costs"; a failed
     search is not billed. The response carries no dollar cost, so a request is charged at the configured reserve.
-  - supported models include ``claude-opus-5-5``, ``claude-sonnet-5-5`` and ``claude-haiku-5-5`` (the closed list).
+  - the page names models the tool works with; it is NOT the model list. The closed list here (``claude-opus-5-5``,
+    ``claude-sonnet-5-5``, ``claude-haiku-5-5``) must be checked against the Messages API models list — the Models
+    overview, https://platform.claude.com/docs/en/about-claude/models/overview, or ``GET /v1/models`` (the Models
+    API) — before a first live call; neither was read for this build.
 The ``type``/``model`` fields of the response object are the Messages API's as known from its reference, which was
 NOT re-read for this build: they are strict here, and a different shape is ENGINE_PROTOCOL_ERROR.
 
@@ -54,6 +57,7 @@ HOST = "api.anthropic.com"
 PATH = "/v1/messages"
 API_VERSION = "2026-10-21"                       # the anthropic-version the page's examples send (read Nov 8 2026)
 TOOL_TYPE = "web_search_20250305"                # basic web search: no dynamic filtering / code execution
+# closed; to be checked against the Messages API models list (Models overview / GET /v1/models) before a live call
 MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5")
 DEFAULT_MODEL = "claude-sonnet-5-5"
 MAX_TOKENS = 1024

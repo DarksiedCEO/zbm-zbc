@@ -126,14 +126,21 @@ class _Response(_Strict):
 _KNOWN_UNREAD = frozenset({"modelStatus"})
 
 
+# review round 1 L2: the ``modelVersion`` values accepted for each allow-listed model, EXACTLY. Empty beyond the
+# model's own name: no alias or dated suffix has been seen (nothing has been called), so ``gemini-3.8-flash-<x>`` is
+# refused until a first live call shows what the API reports and an alias is added here by hand.
+MODEL_ALIASES: dict = {"gemini-3.8-flash": frozenset({"gemini-3.8-flash"})}
+
+
 def model_matches(reported: Optional[str], asked: str) -> Optional[str]:
-    """The version a reported ``modelVersion`` carries when it names the asked model (exactly, or ``<asked>-<suffix>``
-    with a plain suffix), else None. A missing ``modelVersion`` (documented as a plain string, required nowhere) is
-    accepted with an unknown version."""
-    if reported is None or reported == asked:
-        return "?"
-    if reported.startswith(asked + "-") and re.fullmatch(r"[A-Za-z0-9._-]{1,40}", reported[len(asked) + 1:]):
-        return reported[len(asked) + 1:]
+    """The version a reported ``modelVersion`` stands for when it is exactly the asked model or one of its
+    allow-listed aliases (``MODEL_ALIASES``), else None. FAIL CLOSED (review round 1 L2): a missing ``modelVersion``
+    (documented as a plain string, required nowhere) is None too — the answer cannot be attributed to a model, so it
+    is refused (ENGINE_PROTOCOL_ERROR ``MODEL_UNVERIFIED``) rather than counted under the asked model's name."""
+    if reported is None:
+        return None
+    if reported in MODEL_ALIASES.get(asked, frozenset({asked})):
+        return "?" if reported == asked else reported
     return None
 
 
@@ -151,10 +158,13 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
         r = _Response.model_validate(obj)
     except (UnicodeDecodeError, ValueError, RecursionError, ValidationError, TypeError):
         raise EngineError("ENGINE_PROTOCOL_ERROR") from None
-    version = next((v for v in (model_matches(r.modelVersion, m) for m in allowed_models) if v is not None), None)
-    if version is None:
+    if r.modelVersion is None:                     # fail closed (L2): an answer no model can be attributed to
+        raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_UNVERIFIED")
+    hit = next(((m, v) for m, v in ((m, model_matches(r.modelVersion, m)) for m in allowed_models) if v is not None),
+               None)
+    if hit is None:
         raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED")
-    model = allowed_models[0] if r.modelVersion is None else r.modelVersion
+    model, version = hit
     u = r.usageMetadata
     first = min(r.candidates or (), key=lambda c: 0 if c.index is None else c.index, default=None)
     g = first.groundingMetadata if first is not None else None

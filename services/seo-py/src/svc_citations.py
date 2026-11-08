@@ -5,7 +5,7 @@ client", separate from the audit (which keeps Callum's per-prompt summary, agent
   POST /seo/v1/tenants/{tid}/citation-runs                       dashboard / seo_agent (a client tenant: Andre)
   GET  /seo/v1/tenants/{tid}/citation-runs                       + hub (its own tenant only), compliance_38
   GET  /seo/v1/tenants/{tid}/citation-runs/{cid}                 the rows (dashboard drill-down) and the metrics
-  GET  /seo/v1/tenants/{tid}/citation-runs/{cid}/mnc-priority    the callum.mnc_priority/1 list (Roman, Adaeze)
+  GET  /seo/v1/tenants/{tid}/citation-runs/{cid}/mnc-priority    the callum.mnc_priority/2 list (Roman, Adaeze)
 
 Rules (the audit product's, applied here):
   - one of the tenant's registered domains only (DOMAIN_NOT_AUTHORIZED otherwise) and one of its prompt sets (404);
