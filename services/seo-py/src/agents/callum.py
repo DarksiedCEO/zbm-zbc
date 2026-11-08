@@ -44,9 +44,9 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 from typing import Callable, Optional
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from agents import brand_mention, domain_match, split_url
+from agents import brand_mention, domain_match, secret_guard, split_url
 from agents.prompt_guard import personal_data
 from agents.probes import MIN_USABLE, REDIRECTOR_HOSTS, WARN_COMMON, _switch_code, extract_citations, wilson
 from answer_adapter import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
@@ -248,8 +248,20 @@ class Resolver:
             self.enabled = False
             return {"state": "KILLED"}
         if r.state != "OK":
-            return {"state": "FAILED", "detail": r.state, "redirects": len(r.redirects),
-                    "hop_hosts": _hop_hosts(r.redirects)}
+            # WR-F014: the hosts of a chain that stopped are every followed hop, where it stopped, and a refused
+            # redirect's target (raw Unicode included: domain_match converts it with IDNA) — never dropped
+            hops = _hop_hosts(r.redirects)
+            if r.redirects and r.final_url:
+                hops.append(_host(r.final_url)[:253])
+            refused = getattr(r, "refused_redirect", None)
+            if isinstance(refused, dict) and isinstance(refused.get("location"), str):
+                try:
+                    target = urljoin(r.final_url or url, refused["location"])
+                except ValueError:
+                    target = refused["location"]
+                hops = (hops or [_host(url)[:253]]) + [_target_host(target)]
+            return {"state": "FAILED", "detail": r.state, "redirects": len(r.redirects) + (1 if refused else 0),
+                    "hop_hosts": hops[:20], "redirect_refused": bool(refused)}
         canonical = None
         if (r.content_type or "").startswith("text/html") and r.body:
             try:
@@ -272,6 +284,15 @@ def is_redirector(url: str) -> bool:
     return p.hostname.lower().rstrip(".") in REDIRECTOR_HOSTS
 
 
+def url_has_secret(url: Optional[str]) -> bool:
+    """A URL whose path, query, fragment or user part looks like it carries a credential: never fetched (WR-F013)."""
+    p = split_url(url) if url else None
+    if p is None:
+        return False
+    parts = (p.path or "").split("/") + [p.query or "", p.fragment or "", p.username or "", p.password or ""]
+    return any(secret_guard.has_secret(x) for x in parts if x)
+
+
 def stored_url(url: Optional[str]) -> Optional[dict]:
     """What a row keeps of a URL: scheme, host and path (query and fragment dropped), bounded; a path that looks like
     personal data is withheld."""
@@ -282,6 +303,10 @@ def stored_url(url: Optional[str]) -> Optional[dict]:
         return {"url": None, "host": None, "query_dropped": False, "withheld": "UNREADABLE"}
     path = p.path or "/"
     withheld = None
+    segs = path.split("/")
+    if any(secret_guard.has_secret(x) for x in segs):
+        # WR-F013: a secret-shaped path segment is replaced, never kept; host and the other segments stay
+        path, withheld = "/".join("{secret}" if secret_guard.has_secret(x) else x for x in segs), "SECRET_REDACTED"
     if personal_data(path) is not None:
         path, withheld = "/{withheld}", "PERSONAL_DATA"
     host = p.hostname.lower()[:253]
@@ -298,6 +323,15 @@ def _hop_hosts(redirects) -> list:
         u = h.get("url") if isinstance(h, dict) else None
         out.append(_host(u)[:253])
     return out[:20]
+
+
+def _target_host(url: str) -> str:
+    """The host of a refused redirect target, as written (raw Unicode kept; never fetched)."""
+    h = _host(url)
+    if not h:
+        m = re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#@]*@)?([^/?#:]+)", url or "")
+        h = m.group(2).lower() if m else ""
+    return h[:253]
 
 
 def _host(url: Optional[str]) -> str:
@@ -319,9 +353,14 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
         decide, via = res["final_url"], "redirect" if res.get("redirects") else "direct"
     elif is_redirector(url):
         return {"class": "INCONCLUSIVE", "reason": "CITED_URL_UNRESOLVED", "via": None, "chain": chain,
-                "flags": ["REDIRECTOR_" + ("NOT_FOLLOWED" if res.get("state") in ("OFF", "CAP_REACHED", "KILLED")
+                "flags": ["REDIRECTOR_" + ("NOT_FOLLOWED" if res.get("state") in ("OFF", "CAP_REACHED", "KILLED",
+                                                                                     "NOT_FETCHED_SECRET")
                                            else "FAILED")] + (["LOOKALIKE_HOP"] if hop_lookalike else []),
                 "competitor": False}
+    elif res.get("state") == "NOT_FETCHED_SECRET":
+        # WR-F013: resolution is on but this URL carries a secret, so it is never fetched: where it leads is unknown
+        return {"class": "INCONCLUSIVE", "reason": "CITED_URL_NOT_FETCHED", "via": None, "chain": chain,
+                "flags": [], "competitor": False}
     else:
         decide, via = url, "direct"
         if res.get("state") in ("FAILED", "KILLED"):
@@ -347,6 +386,29 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
             flags.append("REDIRECTED_ONTO_CLIENT")
         return {"class": "LOOKALIKE_URL", "reason": None, "via": via, "chain": chain, "flags": flags,
                 "competitor": False}
+    if on_client and res.get("state") == "FAILED" and res.get("redirects"):
+        # WR-F014: the client's URL redirected and the chain stopped (or the target was refused): where it lands is
+        # unknown. Through a lookalike: a lookalike, never the client; elsewhere off the client: INCONCLUSIVE
+        if res.get("redirect_refused"):
+            flags.append("REDIRECT_TARGET_REFUSED")
+        hops = [h for h in (res.get("hop_hosts") or [])[1:] if h]
+        if hop_lookalike:
+            return {"class": "LOOKALIKE_URL", "reason": None, "via": "redirect", "chain": chain,
+                    "flags": flags + ["REDIRECTED_OFF_CLIENT"], "competitor": False}
+        if hops and not domain_match.on_site(hops[-1], domain):
+            return {"class": "INCONCLUSIVE", "reason": "REDIRECT_NOT_RESOLVED", "via": None, "chain": chain,
+                    "flags": flags + ["REDIRECTED_OFF_CLIENT"], "competitor": False}
+    if on_client and res.get("state") == "FAILED" and res.get("detail") == "REFUSED_URL" \
+            and not res.get("redirect_refused"):
+        # WR-F014: the chain from the client's URL was refused by URL rules at some hop, a redirect whose target
+        # could not even be read (or a hop the fetcher will not request): where it lands is unknown, never a credit
+        return {"class": "INCONCLUSIVE", "reason": "REDIRECT_NOT_RESOLVED", "via": None, "chain": chain,
+                "flags": flags, "competitor": False}
+    if on_client and res.get("state") == "RESOLVED" and isinstance(res.get("status"), int) and res["status"] >= 400:
+        # war room (WR-F014 chains): the client page answered an error instead of a page (or instead of the rest of
+        # its redirect chain): nothing citable was found there, so it is never a credit
+        return {"class": "INCONCLUSIVE", "reason": "LANDING_PAGE_ERROR", "via": via, "chain": chain,
+                "flags": flags, "competitor": False}
     if on_client:
         if domain_match.on_site(cited_host, domain) is False and via == "redirect":
             flags.append("REDIRECTED_ONTO_CLIENT")
@@ -373,7 +435,8 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
 def excerpt(text: str, terms: list) -> dict:
     """A short span of the answer for the drill-down: around the first brand mention, else the answer's opening.
     Bounded, marked untrusted (envelope.observed), and withheld when it looks like personal data."""
-    t = " ".join((text or "").split())
+    # WR-F012: secrets are redacted from the whole answer BEFORE a span is chosen, so a cut key never survives
+    t, redacted = secret_guard.redact(" ".join((text or "").split()))
     basis, start = "answer_opening", 0
     for term in terms:
         m = re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", t, re.IGNORECASE)
@@ -384,7 +447,10 @@ def excerpt(text: str, terms: list) -> dict:
     kind = personal_data(span)
     if kind is not None:
         return {"basis": basis, "excerpt": None, "withheld": f"personal_data:{kind}"}
-    return {"basis": basis, "excerpt": observed(span, EXCERPT_MAX), "withheld": None}
+    out = {"basis": basis, "excerpt": observed(span, EXCERPT_MAX), "withheld": None}
+    if redacted:
+        out["secret_redacted"] = True
+    return out
 
 
 def prompt_id(ps: dict, pi: int) -> str:
@@ -446,8 +512,14 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
             hints = getattr(a, "citation_hints", None) or {}
             classes = []
             for c in cites:
-                res = resolver.resolve(c["url"])
+                # WR-F013: a URL carrying a secret is never fetched, whatever the resolution setting
+                secret_url = url_has_secret(c["url"])
+                res = {"state": "NOT_FETCHED_SECRET"} if secret_url and resolver.enabled else (
+                    {"state": "OFF"} if secret_url else resolver.resolve(c["url"]))
                 cl = classify_citation(c["url"], domain, competitors, res)
+                if secret_url or any((cl["chain"].get(x) or {}).get("withheld") == "SECRET_REDACTED"
+                                     for x in ("cited", "final", "canonical")):
+                    cl["flags"] = cl["flags"] + ["SECRET_REDACTED"]
                 classes.append(cl["class"])
                 key = {"STRENGTH_URL": "strength_urls", "OPPORTUNITY_URL": "opportunity_urls",
                        "LOOKALIKE_URL": "lookalike_urls", "INCONCLUSIVE": "inconclusive_urls",
@@ -465,7 +537,8 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                 add({**base, "class": cl["class"], "reason": cl["reason"], "url": cl["chain"]["cited"]["url"]
                      if cl["chain"]["cited"] else None, "position": c["position"], "via": cl["via"],
                      "chain": cl["chain"], "flags": cl["flags"], "competitor": cl["competitor"],
-                     "citation_basis": basis, "engine_hint_unverified": hint[:253] if isinstance(hint, str) else None,
+                     "citation_basis": basis,
+                     "engine_hint_unverified": secret_guard.redact(hint[:253])[0] if isinstance(hint, str) else None,
                      "evidence": {"url": cl["chain"]["cited"]["url"] if cl["chain"]["cited"] else None, **ev}})
             strength = "STRENGTH_URL" in classes
             if strength:

@@ -210,6 +210,36 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
     Tenant isolation: another tenant's run is the same 404 as a missing one. A client tenant's run needs Andre's
     approval, a bound Finance client and Compliance (38)'s current ALLOW (ADR 0024), no override.
 
+B9. **War room fixes (PR #55 findings WR-F011..WR-F014; replays `seo-py-callum/R0001..R0050`).**
+    - **WR-F011** every adapter builds the answer with `answer_adapter.join_text`: adjacent text blocks of one
+      run are concatenated (one space added only where a sentence end would touch the next block), runs separated by
+      anything else (a tool call, a search result, another message item) are joined with a paragraph break, which
+      brand matching reads as a line start. Anthropic: runs split at non-text blocks; OpenAI and Perplexity's Agent
+      API: one run per message item (a Perplexity answer with two message items now reads `one\n\ntwo`, not
+      `onetwo`: its hash changes for such answers); Google: the candidate's parts are one run. A single run is
+      unchanged.
+    - **WR-F012** `agents/secret_guard.py` (documented key prefixes, credential names, JWTs, 16+ hex digits, and
+      high-entropy tokens; standard library) redacts every excerpt BEFORE its span is chosen (`[redacted]`,
+      `secret_redacted: true`) and the engine's chunk-title hints. Rows, the run response and the log carry only
+      redacted text. To unify later with Priya's search-query secret classifier (PR #50), not on this base.
+    - **WR-F013** a cited URL path segment that looks like a secret is stored as `{secret}` (`withheld:
+      SECRET_REDACTED`, row flag `SECRET_REDACTED`); query and fragment were already dropped. A URL whose path,
+      query, fragment or user part carries a secret is NEVER fetched: with resolution on it is INCONCLUSIVE
+      (`CITED_URL_NOT_FETCHED`), with resolution off classified by its host as any URL. Cost: a path segment of 16+
+      hex digits (a commit SHA, a content hash) is redacted too; the host still classifies. The host itself is kept.
+    - **WR-F014** the fetcher records a redirect whose `Location` httpx refuses to parse or encode (a raw-Unicode or
+      invalid IDNA host) as `refused_redirect` {status, location} on the FetchResult (never fetched; `redirects`,
+      `final_url` and `summary()` unchanged for every other reader). Callum adds every followed hop, the host where a
+      failed chain stopped and a refused target to `hop_hosts`, and a client URL whose chain stopped is never a
+      credit: through a lookalike → `LOOKALIKE_URL` (`LOOKALIKE_HOP`, `REDIRECT_TARGET_REFUSED`,
+      `REDIRECTED_OFF_CLIENT`); stopped off the client or refused by URL rules → INCONCLUSIVE
+      (`REDIRECT_NOT_RESOLVED`); a client landing page answering 4xx/5xx → INCONCLUSIVE (`LANDING_PAGE_ERROR`). A
+      failure with no redirect seen (timeout, DNS) still falls back to the cited host.
+    - Note for the war room: its fake web encodes chains as `/wr-<hex>` paths, which the WR-F013 rule now treats as
+      secret-shaped, so with the rule on those cases pass as INCONCLUSIVE without being fetched. All 25 WR-F014
+      replays were also run with the secret-URL rule disabled locally (not committed) and pass on the resolution
+      logic itself; the war room should encode chains without a long hex run.
+
 ## Founder-pending defaults (added by this ADR)
 
 - (27) every new engine OFF; every budget, including the per-run caps, 0;
