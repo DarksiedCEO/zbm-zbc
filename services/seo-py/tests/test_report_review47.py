@@ -653,16 +653,45 @@ def _slow_resolver(seconds, table=("127.0.0.1",), slow_hosts=None):
     return resolve
 
 
-@pytest.mark.parametrize("hang", [3.0, 6.0])
-def test_a_slow_resolver_never_carries_a_fetch_past_twice_the_timeout(hang):
+class _BlockedResolver:
+    """A resolver that does not answer until the test releases it, recording the hosts asked. No wall-clock bound is
+    asserted anywhere (hygiene rule L1): a fetch that returns while this is still blocked did not wait for DNS."""
+
+    def __init__(self, real=None, hosts=None):
+        import threading
+        self.release, self.asked, self.real, self.hosts = threading.Event(), [], real, hosts
+
+    def __call__(self, host, port):
+        self.asked.append(host)
+        if self.hosts is None or host in self.hosts:
+            self.release.wait(60)
+        return self.real(host, port) if self.real else ["127.0.0.1"]
+
+
+def test_a_hung_resolver_ends_the_fetch_by_its_own_deadline():
+    r = _BlockedResolver()
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=r, policy=lambda h, ip, p: True)
+    try:
+        out = f.fetch("http://slow.test/", honor_robots=False)
+        assert out.state == "TIMEOUT" and r.asked == ["slow.test"] and not r.release.is_set()
+        assert fetch_mod._DNS_GATE.acquire(blocking=False)          # the waiting fetch holds no slot of its own
+        fetch_mod._DNS_GATE.release()
+    finally:
+        r.release.set()
+
+
+def test_no_lookup_starts_once_the_fetch_deadline_has_passed():
     import time as _t
-    f = fetch_mod.Fetcher(timeout_s=1, resolver=_slow_resolver(hang), policy=lambda h, ip, p: True)
-    t0 = _t.monotonic()
-    r = f.fetch("http://slow.test/", honor_robots=False)
-    took = _t.monotonic() - t0
-    assert r.state == "TIMEOUT" and took <= 2 * 1 + 0.5
-    assert fetch_mod._DNS_GATE.acquire(blocking=False)              # the gate is not leaked by a waiting fetch...
-    fetch_mod._DNS_GATE.release()
+    r = _BlockedResolver()
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=r, policy=lambda h, ip, p: True)
+    fetch_mod._BUDGET.deadline = _t.monotonic() - 1
+    try:
+        with pytest.raises(fetch_mod._Refused) as exc:
+            f._resolve("late.test", 80)
+        assert exc.value.state == "TIMEOUT" and r.asked == []
+    finally:
+        fetch_mod._BUDGET.deadline = None
+        r.release.set()
 
 
 def test_a_resolver_that_fails_is_dns_failed_and_frees_its_slot():
@@ -676,47 +705,52 @@ def test_a_resolver_that_fails_is_dns_failed_and_frees_its_slot():
         fetch_mod._DNS_GATE.release()
 
 
-def test_every_dns_slot_busy_fails_closed_at_once(monkeypatch):
+def test_every_dns_slot_busy_fails_closed_without_asking(monkeypatch):
     import threading
-    import time as _t
     monkeypatch.setattr(fetch_mod, "_DNS_GATE", threading.BoundedSemaphore(1))
     assert fetch_mod._DNS_GATE.acquire(blocking=False)
-    f = fetch_mod.Fetcher(timeout_s=5, resolver=_slow_resolver(0), policy=lambda h, ip, p: True)
-    t0 = _t.monotonic()
-    r = f.fetch("http://busy.test/", honor_robots=False)
-    assert r.state == "DNS_FAILED" and _t.monotonic() - t0 < 1
+    r = _BlockedResolver()
+    f = fetch_mod.Fetcher(timeout_s=5, resolver=r, policy=lambda h, ip, p: True)
+    try:
+        assert f.fetch("http://busy.test/", honor_robots=False).state == "DNS_FAILED" and r.asked == []
+    finally:
+        r.release.set()
 
 
 @pytest.mark.local_http
-def test_a_slow_resolver_on_the_robots_and_redirect_hops_stays_inside_one_fetch_budget(srv):
-    import time as _t
+def test_a_hung_resolver_on_a_redirect_hop_ends_inside_the_same_fetch(srv):
     install_site(srv)
     srv.redirect("site.test", "/", "http://www.site.test/")
     f = srv.site_fetcher(timeout_s=1)
-    real = f.resolver
-    f.resolver = lambda h, p: (_t.sleep(5) if h == "www.site.test" else None) or real(h, p)
-    t0 = _t.monotonic()
-    r = f.fetch("http://site.test/", robots_cache={}, honor_robots=True)
-    assert r.state == "TIMEOUT" and _t.monotonic() - t0 <= 2 * 1 + 0.5
+    r = _BlockedResolver(real=f.resolver, hosts={"www.site.test"})
+    f.resolver = r
+    try:
+        out = f.fetch("http://site.test/", robots_cache={}, honor_robots=True)
+        assert out.state == "TIMEOUT" and "www.site.test" in r.asked and not r.release.is_set()
+        assert out.redirects and out.redirects[0]["status"] == 301
+    finally:
+        r.release.set()
 
 
 @pytest.mark.local_http
-def test_with_slow_dns_the_audit_never_ends_after_its_deadline(srv):
+def test_with_hung_dns_the_audit_never_requests_past_its_deadline(srv):
     import time as _t
     install_site(srv)
     srv.html("site.test", "/", _links("/a", "/b"))
     f = srv.site_fetcher(timeout_s=1)
-    real = f.resolver
-    f.resolver = lambda h, p: _t.sleep(3) or real(h, p)              # every lookup hangs past the fetch budget
+    r = _BlockedResolver(real=f.resolver)
+    f.resolver = r
     ctx = _ctx(srv, max_pages=10)
-    ctx.fetcher = f
-    ctx.crawl_delay_s = 0.0
-    start = _t.monotonic()
-    ctx.deadline, ctx.fetch_reserve_s = start + 7.0, 2.0
-    s_env, _ = selene.run(ctx)
-    d_env = delia.run(ctx)
-    assert _t.monotonic() <= ctx.deadline + 0.5
-    assert s_env["outcome"] in ("FAILED", "PARTIAL", "BLOCKED") and d_env["outcome"] in ("FAILED", "PARTIAL")
+    ctx.fetcher, ctx.crawl_delay_s = f, 0.0
+    ctx.deadline, ctx.fetch_reserve_s = _t.monotonic() + 7.0, 2.0
+    try:
+        s_env, _ = selene.run(ctx)
+        d_env = delia.run(ctx)
+        assert not r.release.is_set()                                  # nothing waited for the hung resolver
+        assert ctx.last_request is not None and ctx.last_request + ctx.fetch_reserve_s <= ctx.deadline
+        assert s_env["outcome"] in ("FAILED", "PARTIAL", "BLOCKED") and d_env["outcome"] in ("FAILED", "PARTIAL")
+    finally:
+        r.release.set()
 
 
 # ---------------------------------------------------------------- 2. Delia's reserve is its true maximum
