@@ -159,8 +159,8 @@ appear in the answer) and `negative_terms` (a match within 40 characters of a wh
 discarded); whitespace (NBSP, runs of spaces) is normalised first. Mentions are confirmed by default, case-insensitive, as at a4af277 (`try acme`, `the iphone 15`;
 a URL in the answer text such as `github.com/acme` is a mention, never a citation). Only a term on the bundled
 common-word list (`src/agents/common_words.txt`, self-authored) or declared `common_word: true`, without a rule,
-needs confirmation: a capitalised match that does not start a sentence (a line, list item, heading, blockquote, or
-text after `:` or an opening quote counts as a start), the client's domain named, the client cited,
+needs confirmation: a capitalised match that does not start a sentence (a line, list item, task box, heading, blockquote,
+table cell, or text after `:` or an opening quote counts as a start; linear scanners, no regex backtracking), the client's domain named, the client cited,
 or another brand term that is not itself a common word. Unconfirmed hits are `LOW_CONFIDENCE` in citation runs
 and `MENTION_UNCONFIRMED` in the audit ("Possible mention, not confirmed", mention rate UNKNOWN, no page
 recommendation). A prompt set with such a term and no rule returns `warnings` on create and read, and the methodology

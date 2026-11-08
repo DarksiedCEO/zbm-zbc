@@ -1067,3 +1067,39 @@ def test_line_structure_is_kept_but_multi_word_terms_still_span_a_line_break():
     assert bm.mentioned("Try Z Best\nMedia now", ["Z Best Media"])
     _, p = audit_prompt("Target", ["Tips:\n- Target the right audience"] * 3)   # through the real audit path
     assert p["class"] == "MENTION_UNCONFIRMED" and p["mention_rate"] is None
+
+
+@pytest.mark.parametrize("n", [20, 24, 29, 40, 200])
+def test_sentence_start_detection_is_linear_on_adversarial_marker_runs(n):
+    # round 6: the round-5 regex backtracked exponentially on ">>>...>!"; the scanners consume one character per
+    # step, counted here (no wall clock)
+    bm = callum.brand_mention
+    for marker in (">", "#", "> ", "-", "|", "1."):
+        line = marker * n + "! "
+        text = line + "Apple"
+        stats: dict = {}
+        bm._sentence_initial(text, len(line), stats)
+        assert stats.get("scan_steps", 0) <= 2 * (bm._LOOKBACK + 2), (marker, n, stats)
+    answer_text = "\n".join([">" * 23 + "! Apple"] * 5 + [(">" * 29 + "! Apple ") * 2000])
+    stats = {}
+    assert bm.mention(answer_text, ["Apple"], stats=stats)["confidence"] == "LOW"    # after "!": sentence start
+    assert bm.mention(">" * 29 + "! We use Apple", ["Apple"])["confidence"] == "HIGH"   # mid-sentence: a name
+    assert bm.mention(">" * 29 + "! Apple pie", ["Apple"])["mentioned"] is True
+
+
+@pytest.mark.parametrize("terms,text,want", [
+    (["Target"], "| Target | 5 |", "LOW"), (["Target"], "| Store | Target |", "LOW"),
+    (["Zoom"], "- [ ] Zoom in", "LOW"), (["Zoom"], "- [x] Zoom out", "LOW"), (["Zoom"], "* [X] Zoom", "LOW"),
+    (["Target"], ">>>> Target", "LOW"), (["Target"], "### > - Target", "LOW"),
+    (["Target"], "We shop at Target | daily", "HIGH"),
+])
+def test_table_cells_and_task_boxes_start_a_sentence(terms, text, want):
+    assert callum.brand_mention.mention(text, terms)["confidence"] == want, text
+
+
+def test_underscore_emphasis_is_a_boundary_but_identifiers_stay_whole():
+    bm = callum.brand_mention
+    assert bm.mentioned("We use _Acme_ daily", ["Acme"]) and bm.mentioned("__Acme__ rocks", ["Acme"])
+    assert bm.mentioned("*Acme* and **Acme**", ["Acme"])
+    assert not bm.mentioned("call foo_acme_bar()", ["Acme"]) and not bm.mentioned("acme_corp", ["Acme"])
+    assert not bm.mentioned("my_acme", ["Acme"]) and not bm.mentioned("Acmes", ["Acme"])

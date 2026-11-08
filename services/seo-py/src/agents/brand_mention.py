@@ -80,7 +80,11 @@ def common_words() -> frozenset:
 def _pattern(term: str, case_sensitive: bool) -> "re.Pattern":
     # words of a term may be separated by a space or a line break in the answer (the text keeps its line breaks)
     body = r"[ \n]".join(re.escape(w) for w in _ws(term).split(" "))
-    return re.compile(r"(?<!\w)" + body + r"(?!\w)", 0 if case_sensitive else re.IGNORECASE)
+    # boundaries: not inside a word; a markdown emphasis underscore (``_Apple_``) is a boundary when the character
+    # beyond it is not a letter or digit (``foo_apple_bar`` stays one identifier, as at a4af277) (round 6)
+    pre = r"(?:(?<!\w)|(?<=_)(?<![^\W_]_))"
+    post = r"(?:(?!\w)|(?=_(?![^\W_])))"
+    return re.compile(pre + body + post, 0 if case_sensitive else re.IGNORECASE)
 
 
 @functools.lru_cache(maxsize=256)
@@ -165,27 +169,87 @@ def _matches(text: str, rule: dict, stats: Optional[dict] = None) -> list:
     return out
 
 
-# round 5: what may come before a word that starts a sentence. On its line: nothing, or markdown structure — bullets
-# (- * + •), numbered items (1. / 1) / a)), headings (#), blockquotes (>) — optionally then opening quotes/brackets.
-_LINE_START = re.compile(r"^[ \t]*(?:(?:[-*+\u2022\u2023\u25e6]|\d{1,3}[.)]|[A-Za-z][.)]|#{1,6}|>+)[ \t]*)*"
-                         r"['\"\u2018\u201c(\[*_]*$")
-# after sentence punctuation or a colon (optionally closing quotes / brackets), then optional opening quotes; or
-# directly after an opening quote ('He said "Apple is good."': a quoted sentence starts there)
-_AFTER_PUNCT = re.compile(r"(?:[.!?:;]['\"\u2019\u201d)\]*_]*[ \t]+['\"\u2018\u201c(\[*_]*"
-                          r"|(?:^|[ \t(\[])['\"\u2018\u201c])$")
+# Sentence starts (rounds 5-6). NO regex here: two small linear scanners over a bounded look-back, each step
+# consuming at least one character, so the cost per match is O(_LOOKBACK) whatever the input (round 6: the regex of
+# round 5 nested quantifiers and backtracked exponentially on ">>>>...>!").
 _LOOKBACK = 32
+_OPENERS = frozenset("'\"\u2018\u201c([*_")         # opening quotes, brackets, emphasis delimiters
+_QUOTES = frozenset("'\"\u2018\u201c")
+_CLOSERS = frozenset("'\"\u2019\u201d)]*_")
+_BULLETS = frozenset("-*+\u2022\u2023\u25e6>#|")    # list bullets, blockquote, heading, table cell: one char each
+_SPACE = frozenset(" \t")
 
 
-def _sentence_initial(text: str, start: int) -> bool:
-    """The match at ``start`` begins a sentence, a line, a list item, a heading, a quote or follows a colon. Bounded
-    look-back (``_LOOKBACK`` characters), so the check is constant work per match."""
+def _line_initial(line: str, stats: Optional[dict] = None) -> bool:
+    """``line`` (the text from the line start to the match) holds only markdown structure: whitespace, single-char
+    markers (bullets, ``>``, ``#``, ``|``), task boxes ``[ ]`` / ``[x]``, numbered markers ``1.`` / ``1)`` /
+    ``a)``, then opening quotes / brackets / emphasis. One forward pass."""
+    i, n = 0, len(line)
+    while i < n:
+        if stats is not None:
+            stats["scan_steps"] = stats.get("scan_steps", 0) + 1
+        c = line[i]
+        if c in _SPACE or c in _BULLETS:
+            i += 1
+        elif c == "[" and i + 2 < n and line[i + 1] in " xX" and line[i + 2] == "]":
+            i += 3
+        elif c.isdigit():
+            j = i
+            while j < n and j - i < 3 and line[j].isdigit():
+                j += 1
+            if j < n and line[j] in ".)":
+                i = j + 1
+            else:
+                return False
+        elif c.isascii() and c.isalpha() and i + 1 < n and line[i + 1] in ".)" and (i + 2 == n or line[i + 2] in _SPACE):
+            i += 2
+        elif c in _OPENERS:
+            i += 1
+        else:
+            return False
+    return True
+
+
+def _after_break(prefix: str, stats: Optional[dict] = None) -> bool:
+    """The text just before the match ends a sentence (``.``, ``!``, ``?``, ``:``, ``;`` then space), opens a quote
+    (``He said "Apple``), or opens a table cell (``| Apple``). One backward pass."""
+    i = len(prefix)
+
+    def step():
+        if stats is not None:
+            stats["scan_steps"] = stats.get("scan_steps", 0) + 1
+    j = i
+    while j > 0 and prefix[j - 1] in _OPENERS:
+        step()
+        j -= 1
+    quoted = any(prefix[x] in _QUOTES for x in range(j, i))
+    k = j
+    while k > 0 and prefix[k - 1] in _SPACE:
+        step()
+        k -= 1
+    spaced = k < j
+    if quoted and (k == 0 or spaced or prefix[k - 1] in "(["):
+        return True
+    if k > 0 and prefix[k - 1] == "|":
+        return True
+    if not spaced:
+        return False
+    m = k
+    while m > 0 and prefix[m - 1] in _CLOSERS:
+        step()
+        m -= 1
+    return m > 0 and prefix[m - 1] in ".!?:;"
+
+
+def _sentence_initial(text: str, start: int, stats: Optional[dict] = None) -> bool:
+    """The match at ``start`` begins the text, a line, a list item, a task item, a heading, a blockquote, a table
+    cell or a quote, or follows a colon / sentence punctuation. Bounded look-back (``_LOOKBACK`` characters), linear
+    scanners: constant work per match."""
     lo = max(0, start - _LOOKBACK)
     nl = text.rfind("\n", lo, start)
-    if nl != -1 or lo == 0:
-        line = text[nl + 1 if nl != -1 else 0:start]
-        if _LINE_START.search(line):
-            return True
-    return _AFTER_PUNCT.search(text[lo:start]) is not None
+    if (nl != -1 or lo == 0) and _line_initial(text[nl + 1 if nl != -1 else 0:start], stats):
+        return True
+    return _after_break(text[lo:start], stats)
 
 
 def _common(rule: dict) -> bool:

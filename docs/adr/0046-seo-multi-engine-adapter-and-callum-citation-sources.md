@@ -141,7 +141,10 @@ B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared wi
     when a whole-word occurrence of one, found on the full text (never on a slice: round 2), lies within 40
     characters of the brand span — and `common_word`). Whitespace (NBSP, tabs, runs of spaces) is normalised to one
     space in the answer and in every term before matching (negatives looked up by `bisect` in their sorted positions:
-    linear overall, never quadratic). **Confirmed by default (review rounds 3-4, the a4af277 behaviour for
+    linear overall, never quadratic). Round 6: a markdown emphasis underscore is a word boundary (`_Acme_` names
+    Acme) unless the character beyond it is a letter or digit (`foo_acme_bar` does not, as at a4af277); this is the
+    only intended difference from a4af277 for non-dictionary brands (a randomized parity check: every a4af277 match
+    still matches; the extra matches are all underscore emphasis). **Confirmed by default (review rounds 3-4, the a4af277 behaviour for
     ordinary brands):** every term that is not a common word — multi-word terms and single words not on the bundled
     list (`Acme`, `HubSpot`, `eBay`, `iPhone`, `Ünïcorn`) — matches case-insensitively, whole word, and every match
     is confirmed (`try acme`, `the iphone 15`, `buy it on ebay`); a match inside a URL or host written in the answer
@@ -151,7 +154,9 @@ B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared wi
     `common_word: true`, with no disambiguation rule — needs confirmation: a match capitalised as configured that
     does not start a sentence (round 5: a capital is grammar at the start of the text or a line, a markdown list
     item `-`/`*`/`+`/`•`/`1.`/`1)`/`a)`, a heading `#`, a blockquote `>`, after `.`/`!`/`?`/`:`/`;`, or right after an
-    opening quote — `He said "Apple is good."` is a quoted sentence; line structure is read with line breaks kept;
+    opening quote — `He said "Apple is good."` is a quoted sentence; round 6: also a markdown table cell `| Target |`
+    and a task box `- [ ] Zoom`; detected by two linear scanners over a 32-character look-back, never a
+    backtracking regex — the round-5 regex was a ReDoS; line structure is read with line breaks kept;
     so `Zoom in on the map`, `- Target the right audience`, `## Zoom in`, `1) Target buyers`, `Steps: Zoom in` do
     not confirm; a lower-case match never does), the client's domain named in the answer, a
     citation of the client, or another brand term of the set that is not itself a common word (two common words
