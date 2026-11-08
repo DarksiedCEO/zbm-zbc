@@ -139,7 +139,7 @@ class ConversationsMixin:
 
     def _handoff_verification(self, tid: str, body: dict) -> dict:
         """Under the lock. The hand-off against Priya's stored run record (agents/priya_handoff.py RECORD_CONTRACT):
-        Priya's service keeps ``keyword_runs`` (PR #50); on this base it does not exist, so nothing is VERIFIED."""
+        Priya's service keeps ``keyword_runs`` (PR #50); on this base it does not exist yet, so nothing is VERIFIED."""
         doc = body.get("priya_handoff")
         if doc is None:
             return {"state": "NOT_VERIFIED", "reason": "NO_HANDOFF"}

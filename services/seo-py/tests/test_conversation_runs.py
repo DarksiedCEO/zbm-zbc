@@ -270,7 +270,7 @@ def test_the_department_lists_the_fireteam_with_one_job_each(tmp_path):
 
 def bing_doc(impressions):
     return handoff(item("a", "who recovers amazon reimbursement revenue",
-                        counts={**GSC, "impressions": impressions, "clicks": 0, "source": "bing_webmaster"},
+                        counts={**GSC, "impressions": impressions, "clicks": 0, "source": "first_party:bing_webmaster"},
                         status="MEASURED_NOT_TIERED"))
 
 
@@ -541,3 +541,34 @@ def test_provenance_is_bound_to_order_and_turn():
     assert len(fa.requests) == sent                                        # nothing refused was sent
     eng.ask("q3", conversation=conv, history=good)                         # the genuine history still works
     assert len(fa.requests) == sent + 1
+
+
+
+def test_a_real_priya_hand_off_is_accepted_verified_and_used_end_to_end(tmp_path):
+    """The hand-off produced by Priya's own code (agents/priya.py at f759ebaa: priya.build + led['handoff'], recorded
+    in tests/fixtures/priya/handoff_f759ebaa.json with priya.handoff_sha), against Priya's record contract."""
+    from pathlib import Path
+
+    from agents import priya_handoff as ph
+    rec = json.loads((Path(__file__).parent / "fixtures" / "priya" / "handoff_f759ebaa.json").read_text())
+    doc, sha = rec["handoff"], rec["handoff_sha256"]
+    for it in doc["items"]:                                                # rebuild Priya's exact item (see _stored_as)
+        it["key"] = "kw-" + it.pop("id_hex")
+    assert ph.validate(doc, "zbm") == []                                    # every real Priya item accepted
+    assert ph.canonical_sha(doc) == sha                                     # the same canonical form as Priya's
+    assert {it["observed_counts"]["source"] for it in doc["items"]} == {"first_party:search_console",
+                                                                        "first_party:bing_webmaster"}
+    h = svc(tmp_path)
+    psid = pset(h)
+    h.svc.keyword_runs = {doc["run_id"]: {"run_id": doc["run_id"], "tenant_id": "zbm", "status": "completed",
+                                          "handoff_record": "priya.handoff_record/1", "handoff_sha256": sha,
+                                          "handoff_items": len(doc["items"])}}   # Priya's svc_keywords record shape
+    v = h.ok(run(h, psid, priya_handoff=doc, priya_run_id=doc["run_id"], priya_handoff_sha256=sha), 201)
+    assert v["priya_handoff"]["verification"]["state"] == "VERIFIED"
+    vols = v["result"]["naomi"]["facts"]["contract"]["topics"]
+    assert vols[0]["status"] == "DIRECTIONAL_PROXY" and vols[0]["verified"] is True            # the prompt-set topic
+    sources = {s["source"] for x in vols for s in x["signals"]}
+    assert "priya_handoff:first_party:search_console" in sources
+    topics = v["result"]["topics"]
+    assert [t["source"] for t in topics].count("priya") >= 1 and all(t["text"] is None for t in topics
+                                                                      if t["source"] == "priya")

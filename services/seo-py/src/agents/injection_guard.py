@@ -36,6 +36,7 @@ import re
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 VERSION = "injection-guard/2026-11-08.2"
 # .2 (review round 4): multilingual families (es, fr, de, pt, it, zh, ja, ru), homoglyph folding with the Unicode
@@ -298,11 +299,32 @@ def views(text: str) -> list:
     return out
 
 
-def suspected(text: str) -> bool:
+LABELS = ("INJECTION_SUSPECTED", "TOO_LONG_TO_SCAN")
+
+
+def scan(text: str) -> Optional[str]:
+    """None, INJECTION_SUSPECTED, or TOO_LONG_TO_SCAN (review round 6: a long page is not called an injection; it is
+    not scanned, and the caller treats it as unchecked — fail closed — under its own label)."""
     if not text:
-        return False
-    if len(text) > MAX_SCAN_CHARS:                     # too long to scan within the bound: flagged (fail closed)
-        return True
+        return None
+    if len(text) > MAX_SCAN_CHARS:
+        return "TOO_LONG_TO_SCAN"
+    return "INJECTION_SUSPECTED" if _matches(text) else None
+
+
+def scan_all(texts) -> Optional[str]:
+    """The strongest label over several texts (an injection outranks a too-long text)."""
+    got = {scan(x) for x in texts}
+    return "INJECTION_SUSPECTED" if "INJECTION_SUSPECTED" in got else "TOO_LONG_TO_SCAN" if "TOO_LONG_TO_SCAN" in got \
+        else None
+
+
+def suspected(text: str) -> bool:
+    """True only for instruction-like text (never for a text that is merely too long: see ``scan``)."""
+    return scan(text) == "INJECTION_SUSPECTED"
+
+
+def _matches(text: str) -> bool:
     vs = views(text)
     if any(rx.search(v) for v in vs for rx in _RX):
         return True

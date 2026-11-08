@@ -28,7 +28,7 @@ The estimator (``ESTIMATOR``), per topic:
      tests prove the approximation never narrows the exact band). The band models how far such a count could move
      from one window to the next at an unchanged rate (impressions are the engine's full count, not a sample);
   4. reliability from k: THIN (< 20, Priya's threshold), MODERATE (< 1,000), STRONG (>= 1,000) — but ONLY for a
-     VERIFIED hand-off: an unverified signal (the caller's claim; Priya does not record the hand-off hash yet) is
+     VERIFIED hand-off: an unverified signal (the caller's claim, until Priya's run record is present) is
      capped at THIN whatever its count, flagged ``HANDOFF_NOT_VERIFIED``, with the uncapped tier reported as
      ``reliability_if_verified``. Confidence LOW for THIN, MEDIUM otherwise — NEVER HIGH: search impressions on one
      property are a proxy for how often people ask an AI engine about the topic, not a measurement of it.
@@ -64,7 +64,7 @@ LIMITS = [
     "Priya's hand-off carries only EMERGING items: a Search Console count under her 20-impression threshold, or a "
     "Bing-only count of any size. ESTABLISHED queries are not handed off.",
     "A hand-off not verified against Priya's stored run record is a claim: every signal from it is capped at THIN "
-    "(HANDOFF_NOT_VERIFIED). Priya does not record the hand-off hash yet, so today nothing is verified.",
+    "(HANDOFF_NOT_VERIFIED). Priya's run record is not on this base until PR #50 lands, so here nothing is verified.",
     "Search Console omits anonymised queries and returns top rows only; a topic with no row is UNKNOWN, not zero.",
     "The Garwood band models period-to-period variability of a full count at an unchanged rate; it is not a "
     "forecast and not sampling error.",
@@ -165,7 +165,7 @@ def estimate_topic(t: dict, item: Optional[dict], verified: bool = False) -> dic
     sig = _signal(c, item, verified)
     signals = [sig]
     flags = ["SINGLE_SOURCE", "PROXY_NOT_PROMPT_VOLUME"] + ([] if verified else ["HANDOFF_NOT_VERIFIED"])
-    if c["source"] == "bing_webmaster":
+    if c["source"] == "first_party:bing_webmaster":
         flags.append("BING_WINDOW_DIFFERS")
     rel = sig["reliability"]
     return {**base, "status": "DIRECTIONAL_PROXY", "reliability": rel,

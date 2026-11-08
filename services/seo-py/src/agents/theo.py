@@ -489,6 +489,7 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
     history: list = []
     answers_seen: set = set()
     injected = False
+    too_long = False
     # round 3: the adapter's provenance record for this chain (only blocks it returned here may be sent back)
     conv = port.conversation() if mode == NATIVE and callable(getattr(port, "conversation", None)) else None
     status, reason, final = "COMPLETE", None, None
@@ -552,10 +553,12 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
         obs.pop("_on_client")
         ex = excerpt(a.text, ctx["terms"]) if t["source"] == "prompt_set" else \
             {"basis": None, "excerpt": None, "withheld": "PRIYA_QUERY_CONTEXT"}
-        sus = any(injection_guard.suspected(x) for x in injection_guard.resent_texts(a))
-        injected = injected or sus                       # one flagged row flags the whole chain (round 3)
+        label = injection_guard.scan_all(injection_guard.resent_texts(a))
+        injected = injected or label == "INJECTION_SUSPECTED"   # one flagged row flags the whole chain (round 3)
+        too_long = too_long or label == "TOO_LONG_TO_SCAN"       # round 6: its own label, never "injection"
         rows.append({**row, **meta, "status": "ANSWER", **obs, "evidence": ex,
-                     **({"injection_suspected": True} if sus else {})})
+                     **({"injection_suspected": True} if label == "INJECTION_SUSPECTED" else {}),
+                     **({"too_long_to_scan": True} if label == "TOO_LONG_TO_SCAN" else {})})
         done.append({"turn": k + 1, "kind": turn["kind"], "status": "ANSWER", "client": obs["client"],
                      "competitors_mentioned": [c["name"] for c in obs["competitors"] if c["mentioned"]]})
         h = meta["answer_sha256"]
@@ -581,17 +584,26 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
     if status != "COMPLETE":
         final = _unknown()
     divergent = None
-    if check and status == "COMPLETE":
-        divergent = _stacked_check(port, turns, guard, meter, ctx, final)
+    # round 6: no re-ask once the run's cost guard has tripped (the chain still counts; the check stays unchecked)
+    over = meter is not None and getattr(meter, "over_reserve", False)
+    if check and status == "COMPLETE" and not over:
+        divergent, ev = _stacked_check(port, turns, guard, meter, ctx, final)
+        if ev is not None:
+            rows.append({"topic_key": t["topic_key"], "engine": e, "sample": si, "turn": len(turns) + 1,
+                         "kind": "structural_recheck", "turn_source": "template", "priya_key": None,
+                         "context_mode": STACKED, "observed_at": iso(clock.now()), **ev})
+            injected = injected or ev.get("injection_suspected", False)
+            too_long = too_long or ev.get("too_long_to_scan", False)
     return {"sample": si, "status": status, "reason": reason, "turns": done, "final": final,
-            "injection_suspected": injected, "divergent_under_history": divergent}
+            "injection_suspected": injected, "too_long_to_scan": too_long, "divergent_under_history": divergent}
 
 
-def _stacked_check(port, turns, guard, meter, ctx, final) -> Optional[bool]:
+def _stacked_check(port, turns, guard, meter, ctx, final) -> tuple:
     """Round 4, the structural second guard (opt-in, SEO_THEO_STACKED_CHECK): the final question asked once more as
     stacked questions, with NO earlier answers in context. True when the lexical final recommendation differs from the
     native chain's (DIVERGENT_UNDER_HISTORY: the history, an injected one included, may have moved the answer); None
-    when the check could not be made. A heuristic: engines vary between samples anyway."""
+    when the check could not be made. A heuristic: engines vary between samples anyway. Returns (divergent, evidence
+    row fields or None); the re-ask's answer is scanned by the auxiliary guard too (round 6)."""
     try:
         guard(capability="ai_probe", provider=getattr(port, "name", None))
         a = port.ask(render(turns, len(turns) - 1), guard=guard, meter=meter)
@@ -600,13 +612,21 @@ def _stacked_check(port, turns, guard, meter, ctx, final) -> Optional[bool]:
     except EngineError as err:
         if err.code == "ENGINE_KILLED":                # review round 5: never swallowed
             raise Killed(_switch_code(err)) from None
-        return None
+        return None, {"status": "FAILED", "error_code": err.code, "error_detail": err.detail}
     except Exception:  # noqa: BLE001 - a failed check is no finding, never a failed chain
-        return None
+        return None, {"status": "FAILED", "error_code": "ENGINE_UNAVAILABLE", "error_detail": "ADAPTER_FAILED"}
     if not isinstance(a, ProviderAnswer) or a.status != "ANSWER" or not isinstance(a.text, str):
-        return None
+        st = a.status if isinstance(a, ProviderAnswer) and a.status in ("REFUSAL", "ERROR") else "FAILED"
+        return None, {"status": st}
     alt = recommendation(a, ctx)
-    return (alt["winner"], alt["name"], alt["counts"]) != (final["winner"], final["name"], final["counts"])
+    label = injection_guard.scan_all(injection_guard.resent_texts(a))
+    divergent = (alt["winner"], alt["name"], alt["counts"]) != (final["winner"], final["name"], final["counts"])
+    ev = {"status": "ANSWER", "model": a.model, "model_version": a.model_version, "provider_asked_at": a.asked_at,
+          "answer_sha256": a.answer_sha256 or _sha(a.text),
+          "recheck": {"winner": alt["winner"], "name": alt["name"], "counts": alt["counts"], "divergent": divergent},
+          **({"injection_suspected": True} if label == "INJECTION_SUSPECTED" else {}),
+          **({"too_long_to_scan": True} if label == "TOO_LONG_TO_SCAN" else {})}
+    return divergent, ev
 
 
 # ---------------------------------------------------------------------------------------------- summaries
@@ -654,7 +674,9 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
     # (like an unchecked or divergent chain) cannot support the native "invisible -> recommended" pattern
     complete = [c for c in samples if c["status"] == "COMPLETE"]
     injected = [c for c in samples if c.get("injection_suspected")]
-    agreed = [c for c in complete if c.get("divergent_under_history") is False and not c.get("injection_suspected")]
+    agreed = [c for c in complete if c.get("divergent_under_history") is False and not c.get("injection_suspected")
+              and not c.get("too_long_to_scan")]
+    too_long = [c for c in samples if c.get("too_long_to_scan")]
     by_turn = []
     for k, turn in enumerate(turns):
         ans = [c["turns"][k] for c in complete]
@@ -704,6 +726,9 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
                                         "note": "heuristic: the final question re-asked without the earlier answers "
                                                 "(opt-in SEO_THEO_STACKED_CHECK); a different pick may be the "
                                                 "history's influence, or ordinary sampling variation"},
+            "too_long_to_scan": {"chains": len(too_long),
+                                 "note": "a re-sent text over the guard's scan limit was not scanned; not an "
+                                         "injection finding, but it cannot support the native pattern"},
             "injection_suspected": {"chains": len(injected), "complete": sum(1 for c in injected
                                                                              if c["status"] == "COMPLETE"),
                                     "note": "AUXILIARY lexical flag (instruction-like text in a re-sent answer); "
@@ -788,8 +813,18 @@ def _findings(res: dict) -> list:
              "context_mode": c["context_mode"], "pattern": c["pattern"],
              "client_recommended": c["client_recommended"]}
         dec = "INSUFFICIENT_EVIDENCE" if c["complete"] < MIN_USABLE else "TEST"
-        if c["pattern"] == "INVISIBLE_THEN_RECOMMENDED":            # native multi-turn only
+        if c["pattern"] == "INVISIBLE_THEN_RECOMMENDED":            # native, structurally checked on every chain
             out.append(finding("THEO_INVISIBLE_THEN_RECOMMENDED", "info", "measured", dec, capability="P4", detail=d))
+        elif c["pattern"] == "INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED":
+            dv = c["divergent_under_history"]
+            out.append(finding("THEO_NATIVE_PATTERN_NOT_STRUCTURALLY_CHECKED", "info", "measured",
+                               "INSUFFICIENT_EVIDENCE", capability="P4",
+                               detail={**d, "complete_chains": c["complete"], "checked": dv["checked"],
+                                       "divergent": dv["divergent"], "agreed_clean": dv["agreed_clean"],
+                                       "meaning": "the client was not named at turn one and was recommended later, "
+                                                  "but not every chain was re-asked without history with the same "
+                                                  "pick (check off, failed or divergent, or a re-sent text flagged "
+                                                  "or too long to scan); no claim is made"}))
         elif c["pattern"] == "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED":
             out.append(finding("THEO_RECOMMENDED_WHEN_QUESTIONS_STACKED", "info", "measured",
                                "INSUFFICIENT_EVIDENCE", capability="P4", detail=d))

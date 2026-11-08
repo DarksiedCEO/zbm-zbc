@@ -58,7 +58,7 @@ def test_a_strong_chain_with_thin_volume_is_flagged_and_never_ranked_by_volume()
 
 
 def test_a_cleared_topic_with_verified_moderate_volume_may_be_tested_never_acted_on():
-    its = [item("a", PS2["prompts"][0], counts={**GSC, "impressions": 300, "source": "bing_webmaster"},
+    its = [item("a", PS2["prompts"][0], counts={**GSC, "impressions": 300, "source": "first_party:bing_webmaster"},
                 status="MEASURED_NOT_TIERED")]
     t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]}, items=its)
     res, ch = chains_for(t, plans)
@@ -69,7 +69,8 @@ def test_a_cleared_topic_with_verified_moderate_volume_may_be_tested_never_acted
 
 
 def test_an_unverified_hand_off_blocks_test_and_volume_priority_even_at_a_huge_count():
-    its = [item("a", PS2["prompts"][0], counts={**GSC, "impressions": 9_000_000, "source": "bing_webmaster"},
+    its = [item("a", PS2["prompts"][0],
+                counts={**GSC, "impressions": 9_000_000, "source": "first_party:bing_webmaster"},
                 status="MEASURED_NOT_TIERED")]
     t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]}, items=its)
     res, ch = chains_for(t, plans)
@@ -155,7 +156,7 @@ def test_contradictory_member_outputs_are_held_never_repaired():
     hi[k1].update(status="DIRECTIONAL_PROXY", reliability="STRONG", confidence="MEDIUM", band={"low": 1, "high": 2},
                   signals=[{"observed_impressions": 5}])                  # STRONG on 5, band without its count
     r = box_with(t, plans, res, lie, vout, hi)
-    assert [i["hold_reason"] for i in r["items"]] == ["THEO_SELF_CONTRADICTION", "NAOMI_SELF_CONTRADICTION"]
+    assert [i["hold_reason"] for i in r["items"]] == ["THEO_NATIVE_PATTERN_WITHOUT_BASIS", "NAOMI_SELF_CONTRADICTION"]
     hi[k1].update(confidence="HIGH")                                      # outside Naomi's vocabulary: never HIGH
     assert box_with(t, plans, res, ch, vout, hi)["items"][1]["hold_reason"] == "NAOMI_PAYLOAD_INVALID"
 
@@ -248,7 +249,7 @@ def test_a_stacked_chain_claiming_true_multi_turn_invisibility_is_held():
     lie = copy.deepcopy(ch)
     lie[k][0]["pattern"] = "INVISIBLE_THEN_RECOMMENDED"
     vout, vol = volumes_for(t)
-    assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == "THEO_SELF_CONTRADICTION"
+    assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == "THEO_NATIVE_PATTERN_WITHOUT_BASIS"
     strong = copy.deepcopy(ch)
     strong[k][0].update(complete=3, strength="STRONG", client_outcome="MIXED", pattern="MIXED")
     assert box_with(t, plans, res, strong, vout, vol)["items"][0]["hold_reason"] == "THEO_SELF_CONTRADICTION"
@@ -280,3 +281,50 @@ def test_a_partial_item_with_unverified_volume_names_the_blocking_conflict():
     i = b.result()["items"][0]
     assert i["verdict"] == "PARTIAL" and i["conflicts"] == ["HANDOFF_NOT_VERIFIED"]
     assert i["downstream"]["priority_basis"] == "none"
+
+
+
+# ---------------------------------------------------------------------------------------------- review round 6
+
+def _native_checked_chains(stacked_check=True):
+    from test_theo import CTX, NativePort
+    t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]})
+    res = theo.run_chains(t, plans, {"openai": NativePort(WIN)}, ["openai"], 3, lambda **k: None, None,
+                          theo.CallCap(1000), {**CTX, "stacked_check": stacked_check}, Clock())
+    return t, plans, res, {c["topic_key"]: [c] for c in res["chains"]}
+
+
+def test_zara_holds_a_native_claim_without_the_structural_basis():
+    t, plans, res, ch = _native_checked_chains()
+    k = t[0]["topic_key"]
+    assert ch[k][0]["pattern"] == "INVISIBLE_THEN_RECOMMENDED"
+    assert ch[k][0]["divergent_under_history"]["agreed_clean"] == 3
+    vout, vol = volumes_for(t)
+    assert box_with(t, plans, res, ch, vout, vol)["items"][0]["verdict"] != "HELD"      # the honest payload passes
+    for agreed in (2, 0):                                                   # fewer agreeing chains than complete
+        lie = copy.deepcopy(ch)
+        lie[k][0]["divergent_under_history"]["agreed_clean"] = agreed
+        assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == \
+            "THEO_NATIVE_PATTERN_WITHOUT_BASIS"
+    t2, plans2, res2, unchecked = _native_checked_chains(stacked_check=False)
+    k2 = t2[0]["topic_key"]
+    assert unchecked[k2][0]["pattern"] == "INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED"
+    lie = copy.deepcopy(unchecked)
+    lie[k2][0]["pattern"] = "INVISIBLE_THEN_RECOMMENDED"                   # claims it; the check never ran
+    vout2, vol2 = volumes_for(t2)
+    assert box_with(t2, plans2, res2, lie, vout2, vol2)["items"][0]["hold_reason"] == \
+        "THEO_NATIVE_PATTERN_WITHOUT_BASIS"
+
+
+def test_zara_holds_impossible_structural_counts():
+    t, plans, res, ch = _native_checked_chains()
+    k = t[0]["topic_key"]
+    vout, vol = volumes_for(t)
+
+    def hold(**dv):
+        lie = copy.deepcopy(ch)
+        lie[k][0]["divergent_under_history"].update(dv)
+        return box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"]
+    assert hold(checked=4) == "THEO_STRUCTURAL_CHECKED_EXCEEDS_COMPLETE"            # 4 checked of 3 complete
+    assert hold(checked=2, divergent=3, agreed_clean=0) == "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED"
+    assert hold(checked=3, divergent=1, agreed_clean=3) == "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED"

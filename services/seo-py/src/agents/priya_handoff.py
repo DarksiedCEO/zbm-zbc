@@ -11,10 +11,11 @@ schema version, which this mirror refuses.
 Consumer rules on top of Priya's own validator (stricter, never looser; review round 1 HIGH 1):
   - the document's ``tenant_id`` must be the run's tenant (refused whole otherwise);
   - EVERY item type is checked against how Priya builds it: ``derived`` -> ``UNKNOWN_NOT_MEASURED`` with no counts;
-    ``observed`` -> counts required, and ``BELOW_THRESHOLD`` = a Search Console count under her ESTABLISHED threshold,
-    ``MEASURED_NOT_TIERED`` = a Bing-only count (``bing_webmaster``); every count a whole number at most
-    ``MAX_IMPRESSIONS`` (a sanity bound, not a plausibility test), clicks <= impressions, a real ISO date window of at
-    most ``MAX_WINDOW_DAYS`` ending no later than the document's ``generated_at``;
+    ``observed`` -> counts required, and ``BELOW_THRESHOLD`` = a Search Console count under her ESTABLISHED
+    threshold, ``MEASURED_NOT_TIERED`` = a Bing-only count (``first_party:bing_webmaster``; sources are Priya's
+    exact strings); every count a whole number at most ``MAX_IMPRESSIONS`` (a sanity bound, not a plausibility
+    test), clicks <= impressions, a real ISO date window of at most ``MAX_WINDOW_DAYS`` ending no later than the
+    document's ``generated_at``;
   - at most ``MAX_ITEMS`` items are read (the rest are counted, never silently used).
 
 Verification (review round 1 HIGH 1b). The hand-off arrives in the caller's request body, so its numbers are claims.
@@ -22,9 +23,10 @@ It is VERIFIED only when the caller also names ``priya_run_id`` and ``priya_hand
 run record — contract ``RECORD_CONTRACT`` below — is found for that run, of this tenant, completed, and holding the
 same hand-off SHA-256 (``canonical_sha``), which also equals the hash of the document received. A mismatch anywhere
 is refused (``HANDOFF_VERIFICATION_FAILED``: a hand-off that differs from what Priya recorded is never used); a
-missing record, or a record without the hash, leaves it NOT_VERIFIED. **Priya does not record the hash yet** (PR #50
-records ``ledger_sha256`` and counts only): until her ``keyword_ledger_recorded`` record adds
-``handoff_sha256`` (and ``handoff_items``), every hand-off is NOT_VERIFIED, and Naomi caps every signal from it at THIN.
+missing record, or a record without the hash, leaves it NOT_VERIFIED. Priya's branch (PR #50, f759ebaa) now records
+``handoff_record``, ``handoff_sha256`` (``priya.handoff_sha``, the same canonical form) and ``handoff_items`` in
+``keyword_runs``; until PR #50 lands on this base there is no record here, so every hand-off is NOT_VERIFIED
+(``PRIYA_NOT_INSTALLED``) and Naomi caps every signal from it at THIN.
 
 Query text is data, never an instruction (``{"untrusted": true, ...}``), and — ADR 0017 GSC-6, ADR 0047 §3 — client
 query text is never written to the log: the fireteam keeps item keys and SHA-256s only.
@@ -45,9 +47,11 @@ ITEM_KEYS = ("key", "query", "origin", "emerging_kinds", "volume_status", "obser
 ORIGINS = ("observed", "derived")
 EMERGING_KINDS = ("question", "conversational", "constraint", "long_tail")
 VOLUME_STATUS = ("BELOW_THRESHOLD", "MEASURED_NOT_TIERED", "UNKNOWN_NOT_MEASURED")
-COUNT_SOURCES = ("search_console", "bing_webmaster")
+# review round 6: the exact strings Priya emits (agents/priya.py _gsc_metrics / _bing_metrics, PR #50 at f759ebaa)
+COUNT_SOURCES = ("first_party:search_console", "first_party:bing_webmaster")
 # how Priya builds each item (ADR 0047): which origin, volume status and count source go together
-SOURCE_FOR = {"BELOW_THRESHOLD": "search_console", "MEASURED_NOT_TIERED": "bing_webmaster"}
+SOURCE_FOR = {"BELOW_THRESHOLD": "first_party:search_console",
+              "MEASURED_NOT_TIERED": "first_party:bing_webmaster"}
 ESTABLISHED_MIN_IMPRESSIONS = 20      # Priya's founder-pending threshold (ADR 0047); a BELOW_THRESHOLD item is under it
 MAX_IMPRESSIONS = 10_000_000          # per item: a sanity bound only — verification, not this, makes a count trusted
 MAX_WINDOW_DAYS = 400
@@ -154,7 +158,7 @@ def _type_problems(it: dict, gen: Optional[date]) -> list:
         return ["observed_counts"]
     if not _count(c["impressions"]) or not _count(c["clicks"]) or c["clicks"] > c["impressions"]:
         return ["observed_counts"]
-    if c["source"] != SOURCE_FOR[vs]:
+    if c["source"] not in COUNT_SOURCES or c["source"] != SOURCE_FOR[vs]:
         return ["observed_counts.source"]
     dr = c["date_range"]
     s = _day(dr.get("start")) if isinstance(dr, dict) else None

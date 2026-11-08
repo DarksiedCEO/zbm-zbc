@@ -48,7 +48,10 @@ CONFLICTS = ("STRONG_CHAIN_THIN_VOLUME", "STRONG_CHAIN_UNKNOWN_VOLUME", "VOLUME_
              "ENGINES_DISAGREE", "HANDOFF_NOT_VERIFIED")
 HOLDS = ("THEO_PAYLOAD_INVALID", "NAOMI_PAYLOAD_INVALID", "THEO_SELF_CONTRADICTION", "NAOMI_SELF_CONTRADICTION",
          "TOPIC_NOT_PLANNED", "BOTH_MEMBERS_MISSING", "DUPLICATE_PAYLOAD", "THEO_TENANT_OR_RUN_MISMATCH",
-         "NAOMI_TENANT_OR_RUN_MISMATCH")
+         "NAOMI_TENANT_OR_RUN_MISMATCH",
+         # review round 6: the structural basis, each invariant with its own reason (so each is testable alone)
+         "THEO_STRUCTURAL_CHECKED_EXCEEDS_COMPLETE", "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED",
+         "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED", "THEO_NATIVE_PATTERN_WITHOUT_BASIS")
 _CONTRACTS = {"theo": theo.CONTRACT, "naomi": naomi.CONTRACT}
 MEMBERS = ("theo", "naomi")
 MEMBER_STATES = ("DONE", "FAILED", "RESTRICTED", "KILLED", "TIMED_OUT", "NOT_RUN")
@@ -61,7 +64,7 @@ LIMITS = [
 ]
 
 _CHAIN_KEYS = {"topic_key", "engine", "context_mode", "native_status", "injection_suspected",
-               "divergent_under_history", "chains", "complete",
+               "divergent_under_history", "too_long_to_scan", "chains", "complete",
                "loop_stopped", "not_complete",
                "turns_planned", "plan_flags", "by_turn", "final_recommendation", "client_recommended",
                "client_outcome", "unstable", "pattern", "strength"}
@@ -117,15 +120,22 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
             return "THEO_PAYLOAD_INVALID"
         nc = c["complete"]
         if nc > c["chains"] or rec + named + none != nc or unknown != c["chains"] - nc \
-                or inj["chains"] > c["chains"] or dv["checked"] > nc or dv["divergent"] > dv["checked"] \
-                or dv["agreed_clean"] > dv["checked"] - dv["divergent"]:
+                or inj["chains"] > c["chains"]:
             return "THEO_SELF_CONTRADICTION"
+        if dv["checked"] > nc:
+            return "THEO_STRUCTURAL_CHECKED_EXCEEDS_COMPLETE"
+        if dv["divergent"] > dv["checked"]:
+            return "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED"
+        if dv["agreed_clean"] > dv["checked"] - dv["divergent"]:
+            return "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED"
         outcome = theo.client_outcome(fr["recommended"]["client"], nc)
         if outcome != c["client_outcome"] or c["client_recommended"].get("k") != fr["recommended"]["client"]:
             return "THEO_SELF_CONTRADICTION"
         agreed_all = nc > 0 and dv["agreed_clean"] == nc       # the structural basis of the native pattern
-        if theo.pattern_of(outcome, vis, vis + low, nc, c["context_mode"], agreed_all) != c["pattern"]:
-            return "THEO_SELF_CONTRADICTION"
+        derived = theo.pattern_of(outcome, vis, vis + low, nc, c["context_mode"], agreed_all)
+        if derived != c["pattern"]:
+            return "THEO_NATIVE_PATTERN_WITHOUT_BASIS" if c["pattern"] == "INVISIBLE_THEN_RECOMMENDED" \
+                else "THEO_SELF_CONTRADICTION"
         strength = "STRONG" if nc >= theo.MIN_USABLE and outcome in ("RECOMMENDED", "NOT_RECOMMENDED") else \
             "WEAK" if nc else "NONE"
         if strength != c["strength"]:
@@ -334,7 +344,7 @@ class Crosscheck:
 
 def _chain_view(c: dict) -> dict:
     return {k: c[k] for k in ("engine", "context_mode", "native_status", "injection_suspected",
-                              "divergent_under_history", "chains", "complete",
+                              "divergent_under_history", "too_long_to_scan", "chains", "complete",
                               "pattern", "strength", "unstable",
                               "client_outcome", "client_recommended", "final_recommendation")}
 

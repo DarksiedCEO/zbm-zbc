@@ -11,7 +11,7 @@ from agents import fireteam_topics, naomi, priya_handoff
 from test_theo import PS, item
 
 GSC = {"impressions": 7, "clicks": 1, "date_range": {"start": "2026-10-05", "end": "2026-11-01"},
-       "source": "search_console"}
+       "source": "first_party:search_console"}
 
 
 def handoff(*its, tenant="zbm"):
@@ -85,7 +85,7 @@ def test_an_observed_thin_item_is_a_directional_proxy_band_with_low_confidence()
 
 
 def test_an_unverified_signal_is_capped_thin_and_confidence_is_never_high():
-    big = {**GSC, "impressions": 50_000, "clicks": 10, "source": "bing_webmaster"}
+    big = {**GSC, "impressions": 50_000, "clicks": 10, "source": "first_party:bing_webmaster"}
     it = item("a", PS["prompts"][0], counts=big, status="MEASURED_NOT_TIERED")
     est = naomi.estimate_topic(_topic([it])[0], it)
     assert est["reliability"] == "THIN" and est["confidence"] == "LOW" and est["verified"] is False
@@ -133,12 +133,12 @@ def test_a_self_contradicting_count_is_refused():
 
 
 def test_every_item_type_is_bounded_and_checked_against_how_priya_builds_it():
-    forged = item("a", "q one", counts={**GSC, "impressions": 10 ** 12, "source": "bing_webmaster"},
+    forged = item("a", "q one", counts={**GSC, "impressions": 10 ** 12, "source": "first_party:bing_webmaster"},
                   status="MEASURED_NOT_TIERED")                            # the review's 10^12 forgery
     assert priya_handoff.validate(handoff(forged), "zbm") == ["items[0].observed_counts"]
-    wrong_src = item("a", "q one", counts={**GSC, "source": "search_console"}, status="MEASURED_NOT_TIERED")
+    wrong_src = item("a", "q one", counts={**GSC, "source": "first_party:search_console"}, status="MEASURED_NOT_TIERED")
     assert priya_handoff.validate(handoff(wrong_src), "zbm") == ["items[0].observed_counts.source"]
-    bing_below = item("a", "q one", counts={**GSC, "source": "bing_webmaster"})
+    bing_below = item("a", "q one", counts={**GSC, "source": "first_party:bing_webmaster"})
     assert priya_handoff.validate(handoff(bing_below), "zbm") == ["items[0].observed_counts.source"]
     future = item("a", "q one", counts={**GSC, "date_range": {"start": "2026-11-01", "end": "2026-12-01"}})
     assert priya_handoff.validate(handoff(future), "zbm") == ["items[0].observed_counts.date_range"]
@@ -148,7 +148,7 @@ def test_every_item_type_is_bounded_and_checked_against_how_priya_builds_it():
     assert priya_handoff.validate(handoff(unmeasured), "zbm") == ["items[0].volume_status"]
     derived_wrong = item("a", "q one", origin="derived", status="BELOW_THRESHOLD")
     assert priya_handoff.validate(handoff(derived_wrong), "zbm") == ["items[0].volume_status"]
-    ok = item("a", "q one", counts={**GSC, "impressions": 9_000_000, "source": "bing_webmaster"},
+    ok = item("a", "q one", counts={**GSC, "impressions": 9_000_000, "source": "first_party:bing_webmaster"},
               status="MEASURED_NOT_TIERED")
     assert priya_handoff.validate(handoff(ok), "zbm") == []
 

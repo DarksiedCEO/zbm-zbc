@@ -170,8 +170,8 @@ here only while unverified — which, until Priya records the hand-off hash, is 
   15917fc8; to be replaced by `priya.validate_handoff` when both land) and adds consumer rules: the document's tenant
   must be the run's (`403 HANDOFF_TENANT_MISMATCH`, refused whole); at most 50 items; and (review round 1 HIGH 1a)
   EVERY item type is checked against how Priya builds it — `derived` ⇒ `UNKNOWN_NOT_MEASURED` with no counts;
-  `observed` ⇒ counts, with `BELOW_THRESHOLD` ⇔ source `search_console` and < 20 impressions, `MEASURED_NOT_TIERED` ⇔
-  source `bing_webmaster`; every count a whole number ≤ 10,000,000 (a sanity bound, not a plausibility test), clicks
+  `observed` ⇒ counts, with `BELOW_THRESHOLD` ⇔ source `first_party:search_console` and < 20 impressions, `MEASURED_NOT_TIERED` ⇔
+  source `first_party:bing_webmaster` (Priya's exact strings since review round 6); every count a whole number ≤ 10,000,000 (a sanity bound, not a plausibility test), clicks
   ≤ impressions, an ISO window of ≤ 400 days, start ≤ end, ending no later than `generated_at`. Any problem →
   `422 HANDOFF_INVALID`, nothing recorded (the review's 10^12 forgery is refused here).
   **Verification (HIGH 1b).** The request may also carry `priya_run_id` and `priya_handoff_sha256` (the SHA-256 of the
@@ -182,7 +182,8 @@ here only while unverified — which, until Priya records the hand-off hash, is 
   count; any mismatch → `422 HANDOFF_VERIFICATION_FAILED`; a missing record or a record without the hash →
   NOT_VERIFIED (and on this base, where Priya's service is absent, `PRIYA_NOT_INSTALLED`). **Priya must add
   `handoff_sha256` and `handoff_items` to her `keyword_ledger_recorded` record** for any hand-off to be verifiable;
-  PR #50 records `ledger_sha256` and counts only, so today nothing is VERIFIED. **Until verified (HIGH 1c)** every
+  PR #50 now does (f759ebaa: `handoff_record`, `handoff_sha256` via `priya.handoff_sha`, `handoff_items`), so once it
+  lands on this base a genuine hand-off is VERIFIED; until then nothing is. **Until verified (HIGH 1c)** every
   signal is capped at THIN (§4), and Zara treats `HANDOFF_NOT_VERIFIED` as BLOCKING: the topic is FLAGGED, never
   CLEARED, never TEST, and volume is never a `priority_basis`. The verification state is in the run record.
   Query text is data (`untrusted`) and never reaches the log or the ledger: the request record keeps the hand-off's
@@ -438,3 +439,30 @@ numbers below are on fixtures written by the builder and overstate what an adver
    splits (`tests/fixtures/injection/labelled.json`) remain as regression tests only (they assert ≥ 0.85 on text the
    builder wrote) and are not a measure of the guard.
 
+## Review round 6 (49732dd3: CONDITIONAL)
+
+1. **Zara's native-pattern gate is tested.** Each structural invariant has its own hold reason, so each is testable
+   on its own: `THEO_STRUCTURAL_CHECKED_EXCEEDS_COMPLETE`, `THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED`,
+   `THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED`, and `THEO_NATIVE_PATTERN_WITHOUT_BASIS` (a payload claiming
+   `INVISIBLE_THEN_RECOMMENDED` when `agreed_clean < complete`, or when the check never ran). Mutation-checked: forcing
+   `agreed_all = True`, and removing each of the three count invariants, each makes a test fail (as do the mutants
+   of items 2-6 below); a run of the mutants is part of the review evidence, not of the suite.
+2. **`THEO_NATIVE_PATTERN_NOT_STRUCTURALLY_CHECKED` is emitted** (it was named in round 5 but the edit had not
+   landed): for every `INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED` chain set, decision INSUFFICIENT_EVIDENCE, with the
+   counts and the wording "… not every chain was re-asked without history with the same pick …; no claim is made".
+3. **Nested repeats rejected.** The structural regex test now also refuses a quantified group that holds a
+   quantifier (e.g. `(?:\s{0,8}){0,4096}`), from the parse tree; a test feeds the checker known-bad shapes (nested,
+   nested inside a branch, unbounded, over the bound) and a bounded flat one, and the guard's patterns pass it.
+4. **`TOO_LONG_TO_SCAN` is its own label.** `injection_guard.scan()` answers `INJECTION_SUSPECTED`,
+   `TOO_LONG_TO_SCAN` or nothing; a row and a chain carry `too_long_to_scan` apart from `injection_suspected`, and a
+   long page is never called an injection. It still keeps a chain from supporting the native pattern (fail closed).
+5. **The re-ask** is not run once the cost guard has tripped on the final turn (`over_reserve`); its answer is scanned
+   by the auxiliary guard and recorded as an evidence row (`kind: structural_recheck`, stacked mode, the re-ask's
+   pick and whether it diverged); a flagged or too-long re-ask cannot agree.
+6. **Priya's vocabulary.** The hand-off's `observed_counts.source` is Priya's exact string —
+   `first_party:search_console` / `first_party:bing_webmaster` (`agents/priya.py` `_gsc_metrics` / `_bing_metrics`,
+   read on PR #50 at f759ebaa, not changed) — so every real Priya item was being rejected; the mirror now accepts
+   exactly those strings. End-to-end test: a hand-off PRODUCED BY PRIYA'S OWN CODE (`priya.build` on synthetic Search
+   Console and Bing rows, `led["handoff"]`, recorded with `priya.handoff_sha` in
+   `tests/fixtures/priya/handoff_f759ebaa.json`) validates, hashes to the same canonical SHA-256, verifies against a
+   record of Priya's `keyword_runs` shape, and flows through Naomi and Zara.
