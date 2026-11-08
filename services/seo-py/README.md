@@ -19,7 +19,10 @@ switches refuses start. This service never charges anyone and never calls Stripe
 
 **Idris (competitor visibility, ADR 0048):** the client's AI share of voice against up to 20 tracked competitors
 (presence, mention share and citation share per brand × engine × prompt, Wilson intervals, UNKNOWN never 0%) and
-emerging competitors from a deterministic extractor (flagged, listed, dismissible). Idris asks no engine: it reads
+emerging-competitor CANDIDATES for human confirmation, domain-first (a cited registrable domain that is not the client,
+a lookalike, a tracked competitor or a platform / publisher / directory, and that the answer names as a provider;
+text-only names need two independent evidence families) — flagged, listed, dismissible, never in a share until
+confirmed. Idris asks no engine: it reads
 the answers of Callum's citation runs while they are in memory (it keeps counts, pointers and, per emerging
 candidate, at most 3 PII-screened excerpts of at most 160 characters — never a whole answer) and reuses a recent run
 (`max_age_minutes`, ≤ 60, measured from when the answers were observed) before asking for a fresh one; emerging

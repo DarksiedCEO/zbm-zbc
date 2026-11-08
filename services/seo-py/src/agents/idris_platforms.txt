@@ -1,0 +1,40 @@
+# Idris (ADR 0048, review round 4): registrable domains that are NEVER an emerging competitor on their own — search,
+# social, video, marketplaces and app stores, encyclopedias and Q&A, news and trade press, review sites and
+# directories (software, local services, legal, health), platform vendors whose content is cited everywhere, and
+# reference sites. Self-authored from general knowledge (no third-party list, no licence). A tenant whose real
+# competitor is listed here adds it as a tracked competitor (tracked domains are checked first). Comma-separated.
+# search, social, video, Q&A, reference
+google.com, bing.com, yahoo.com, duckduckgo.com, youtube.com, facebook.com, instagram.com, linkedin.com, x.com,
+twitter.com, tiktok.com, pinterest.com, reddit.com, quora.com, medium.com, substack.com, threads.net, discord.com,
+wikipedia.org, wikihow.com, britannica.com, investopedia.com, merriam-webster.com, dictionary.com, archive.org,
+github.com, stackoverflow.com, stackexchange.com, apple.com, microsoft.com, amazon.com, aws.amazon.com, ebay.com,
+etsy.com, walmart.com, target.com, bestbuy.com, alibaba.com, aliexpress.com, play.google.com, apps.apple.com
+# news and trade press
+nytimes.com, wsj.com, washingtonpost.com, usatoday.com, cnn.com, foxnews.com, nbcnews.com, cbsnews.com, abcnews.go.com,
+npr.org, bbc.com, bbc.co.uk, theguardian.com, reuters.com, apnews.com, bloomberg.com, cnbc.com, forbes.com, fortune.com,
+businessinsider.com, inc.com, entrepreneur.com, fastcompany.com, hbr.org, techcrunch.com, theverge.com, wired.com,
+cnet.com, zdnet.com, pcmag.com, techradar.com, tomsguide.com, engadget.com, venturebeat.com, axios.com, ft.com,
+economist.com, marketwatch.com, yahoo.finance.com, kiplinger.com, nerdwallet.com, bankrate.com, thebalancemoney.com,
+investopedia.com, searchenginejournal.com, searchengineland.com, marketingland.com, martech.org, adweek.com,
+digiday.com, modernretail.co, retaildive.com, marketplacepulse.com, practicalecommerce.com, ecommercebytes.com,
+smallbiztrends.com, businessnewsdaily.com, uschamber.com, sba.gov, score.org, denverpost.com, latimes.com, chicagotribune.com
+# software review sites and directories
+g2.com, capterra.com, getapp.com, softwareadvice.com, trustradius.com, trustpilot.com, sitejabber.com, gartner.com,
+forrester.com, producthunt.com, crunchbase.com, pitchbook.com, owler.com, zoominfo.com, glassdoor.com, indeed.com,
+builtin.com, clutch.co, upcity.com, designrush.com, goodfirms.co, sortlist.com, agencyspotter.com, themanifest.com,
+expertise.com, upwork.com, fiverr.com, toptal.com
+# local services, home and contractor directories
+yelp.com, angi.com, angieslist.com, homeadvisor.com, thumbtack.com, houzz.com, porch.com, nextdoor.com, bbb.org,
+yellowpages.com, superpages.com, manta.com, mapquest.com, citysearch.com, bark.com, networx.com, fixr.com,
+homeguide.com, costhelper.com, thisoldhouse.com, bobvila.com, familyhandyman.com, energystar.gov, energy.gov, ahri.org,
+acca.org, natex.org, hvac.com, trane.com, carrier.com, lennox.com, rheem.com, goodmanmfg.com, daikin.com, mitsubishicomfort.com
+# legal directories and references
+avvo.com, justia.com, findlaw.com, nolo.com, martindale.com, lawyers.com, superlawyers.com, bestlawyers.com,
+legalzoom.com, rocketlawyer.com, americanbar.org, law.cornell.edu, uscourts.gov, lawinfo.com, attorneys.com, lawyer.com
+# health directories and references
+healthgrades.com, zocdoc.com, webmd.com, mayoclinic.org, clevelandclinic.org, nih.gov, cdc.gov, ada.org, mouthhealthy.org,
+vitals.com, ratemds.com, sharecare.com, verywellhealth.com, healthline.com, medicalnewstoday.com, opencare.com, 1800dentist.com
+# platform vendors cited for their content (blogs, docs, marketplaces) rather than as rivals
+hubspot.com, salesforce.com, shopify.com, wix.com, squarespace.com, wordpress.org, wordpress.com, mailchimp.com,
+semrush.com, ahrefs.com, moz.com, similarweb.com, statista.com, sellercentral.amazon.com, sell.amazon.com,
+advertising.amazon.com, junglescout.com/blog

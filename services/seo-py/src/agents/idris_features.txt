@@ -1,0 +1,12 @@
+# Idris (ADR 0048, review round 4): product features, certifications, standards, procedures and plan names that are
+# never an emerging competitor (FEATURE, whole-name match after the fold). Self-authored (general knowledge; no
+# third-party list, no licence). Comma-separated.
+soc 2, soc 2 type ii, soc 2 type 2, soc2, iso 27001, iso 9001, pci dss, pci, hipaa, gdpr, ccpa, sox, fedramp, ada,
+osha, epa, ul listed, energy star, seer, seer2, eer, hspf, afue, nate, nate certified, epa 608, board certified,
+board-certified, aba, abota, super lawyers, best lawyers, martindale av, av rated, av preeminent, peer review rated,
+all-on-4, all on 4, invisalign, lumineers, cerec, botox, zoom whitening, root canal, dental implants, same-day crowns,
+single sign-on, sso, saml, scim, two-factor, 2fa, mfa, api access, webhooks, revenue recognition, dunning, proration,
+usage-based billing, net 30, net terms, free trial, money-back guarantee, 24/7 support, 24/7, same-day service,
+flat-rate pricing, financing available, free estimates, no win no fee, contingency fee, free consultation, a+ rating,
+bbb a+, bbb accredited, google guaranteed, angi certified, elite service, five-star, 5-star, prime eligible,
+brand registry, transparency program, project zero, vine, a+ content, premium a+, sponsored brands video

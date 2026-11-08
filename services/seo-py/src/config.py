@@ -176,6 +176,7 @@ class Settings:
     callum_resolve_max: int = 40
     idris_classifier_engine: Optional[str] = None     # ADR 0048 round 2: OFF unless an engine is named
     idris_ner: bool = False                           # ADR 0048 round 3: the optional spaCy NER signal
+    idris_ner_port: Optional[object] = field(default=None, repr=False)   # loaded at start when idris_ner
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
     bind_addr: str = "127.0.0.1"
     port: int = 8500
@@ -569,11 +570,19 @@ def _answer_engines(env, s: "Settings") -> None:
         raise RuntimeError("SEO_IDRIS_CLASSIFIER_ENGINE must be openai, anthropic, google or perplexity (or unset)")
     s.idris_classifier_engine = engine or None
     s.idris_ner = _flag(env, "SEO_IDRIS_NER")
+    s.idris_ner_port = None
     if s.idris_ner:
-        import importlib.util
-        if importlib.util.find_spec("spacy") is None or importlib.util.find_spec("en_core_web_sm") is None:
-            raise RuntimeError("SEO_IDRIS_NER=1 needs spaCy and en_core_web_sm 3.8.0 installed "
-                               "(services/seo-py/requirements-ner.txt); refusing to start without them")
+        # review round 4: a LOAD check at start, not an import probe — a broken install refuses start
+        try:
+            from agents import ner as _ner
+            port = _ner.load(True)
+            if port("Acme Corp") is None:                  # one inference: the pipeline really runs
+                raise RuntimeError("no output")
+        except Exception as exc:  # noqa: BLE001 - any failure refuses start, never log-and-continue
+            raise RuntimeError("SEO_IDRIS_NER=1 but spaCy / en_core_web_sm 3.8.0 could not be loaded and run "
+                               f"({type(exc).__name__}); install services/seo-py/requirements-ner.txt or unset it; "
+                               "refusing to start") from None
+        s.idris_ner_port = port
 
 
 def _default_branding():

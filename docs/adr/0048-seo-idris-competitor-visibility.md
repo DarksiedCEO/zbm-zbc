@@ -22,7 +22,7 @@ provenance and confidence, never 0% for unknown); no paid data.
 ### D1. One job, and what is not Idris's
 
 Idris measures the client's AI share of voice against competitors and detects emerging competitors (`agents/idris.py`,
-rules `idris-rules/2026-11-08.4`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
+rules `idris-rules/2026-11-08.5`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
 (assignment, inputs, outputs; `GET /seo/v1/department`); Idris leaves `NOT_BUILT_AGENTS`; it has its own lifecycle
 state (a restricted Idris is refused 403 `AGENT_RESTRICTED`, and citation runs then record no observations — Callum
 is unaffected). NOT Idris's: asking engines (the adapter and Callum's collection), classifying the client's citations
@@ -232,7 +232,9 @@ a fresh run adds Callum's), `GET` list / one (+ hub own tenant, compliance_38). 
 Owner policy: permissive open source, made our own, rather than paying for data.
 
 - **Self-hosted NER (optional signal).** `agents/ner.py`: spaCy 3.8.7 (MIT) with `en_core_web_sm` 3.8.0 (package
-  licence MIT; its meta lists OntoNotes 5 as training data, "commercial (licensed by Explosion)", and WordNet 3.0).
+  licence MIT; its meta lists OntoNotes 5 as training data, "commercial (licensed by Explosion)", and WordNet 3.0:
+  Explosion holds the commercial OntoNotes licence and releases the trained weights under MIT — see spaCy GitHub
+  discussion #13698).
   Pinned in `services/seo-py/requirements-ner.txt` — every distribution `==`-pinned with a sha256 (CPython 3.13
   manylinux x86_64 / py3-none-any wheels), the model wheel by URL and hash; `pip install --require-hashes -r
   requirements-ner.txt` was run on a fresh environment after `requirements.txt`. **Licence gate:**
@@ -303,6 +305,69 @@ No extracted name ever enters a share, a denominator, an opportunity or a headli
 seo_agent) or the tenant (hub) confirms it (`POST .../competitor-set/confirmations`). Until then every emerging and
 watch item is labelled "candidate — needs confirmation" and reported with its presence only. This is the safety net
 for the precision above: a wrong candidate costs a reviewer a click, never a wrong number.
+
+## Review round 4 (independent review of 7c501fae on a FRESH 216-answer corpus: REJECTED) — redesign
+
+**Baseline being improved on (the reviewer's fresh corpus, which I do not have):** 6 US tenants x 3 prompts x 4 engines
+x 3 runs, about 80% of answers citing 2-6 URLs. At 7c501fae, rules only: emerging precision **0.362** (95% CI
+0.298-0.432), recall **0.861**; NER on: precision 0.389. The round-3 harness numbers above were overfit to that harness.
+
+**Statement of scope.** Rules-only Idris is a CANDIDATE GENERATOR for human confirmation, NOT a competitor list. Every
+emerging item is "candidate — needs confirmation"; nothing enters a share, a denominator, an opportunity or a
+headline until the owner or the tenant confirms it (the gate below, unchanged).
+
+- **Domain-first detection.** The primary candidate is a cited registrable domain (PSL eTLD+1, the vendored list in
+  `domain_match.py`) that is not the client or a lookalike of it (domain fold or name fold), not a tracked
+  competitor's, and not a platform / publisher / directory / marketplace / social / review / government / education
+  site (`idris.non_competitor_domain`: the bundled, self-authored `agents/idris_platforms.txt` — search, social,
+  marketplaces, news and trade press, software review sites, local-service, legal and health directories, platform
+  vendors such as HubSpot and HVAC equipment makers such as Trane, which a tenant can still track explicitly — plus
+  `KNOWN_PUBLISHERS`, any `gov` / `edu` / `mil` / `ac` label, and publisher-like labels such as `news`, `blog`,
+  `herald`). The brand name in the answer is attached to its own domain (`keys_match`: equal, equal without legal
+  suffixes, or a 5+ character prefix; `name_keys` spells `&` as "and"), across the run, so a brand and its domain are
+  ONE candidate. A cited domain becomes `EMERGING_COMPETITOR` only when the answers NAME it as a provider — not mostly
+  as a source (`PUBLISHER_CONTEXT`: "according to X", "X reports", "a X survey", "X, a trade publication"). Text-only
+  names (no domain anywhere in the look-back) need evidence from TWO independent families (shape / context / NER /
+  host name in text) and recurrence; a dictionary word never; `LIST_PEER` is removed entirely.
+- **Failure classes removed.** `DATE` (a month or a year in the name, "Since 2021"); `FEATURE` (the bundled,
+  self-authored `agents/idris_features.txt`: SOC 2, SEER2, Board Certified, All-on-4, ...); sentence-opening verbs and
+  adjectives are stripped ("Hire", "Trusted", "Local", ...); full name spans: `&`, `+`, "and" before Associates / Sons /
+  Partners / Company, initials ("J. Walsh Heating") and honorifics join a name; markdown headings are read ("### 2.
+  Name").
+- **Injection.** The whole answer is scanned with the injection guard's pattern families (`agents/injection_guard.py`,
+  a byte-identical copy of Theo's module from `claude/seo-theo-naomi-zara-20261108` at 7b906d15, with its vendored
+  `confusables.txt` and `confusables.NOTICE`, Unicode License V3; to be deduplicated when both branches merge), so line
+  breaks, spacing, homoglyphs and distance do not hide an injection. An answer that holds one counts for NONE of its
+  candidates (each is marked `injection_answers`); a candidate seen only in such answers is never emerging. The
+  per-name proximity loop is gone (it was O(names x injections)).
+- **Classifier (optional, default OFF, unchanged guarantees).** It now labels each candidate {brand, platform,
+  publisher, person, place, feature, other} from its name, cited domain and the stored PII-screened excerpt (data, not
+  instructions); the reply must label every id once from that closed set or it is `FAILED` and filters nothing; only
+  `brand` survives; it never adds. **Not measured:** no live engine may be called here; with it on, precision is
+  expected to be higher, and nothing more is claimed.
+- **NER fail-closed.** `SEO_IDRIS_NER=1` now LOADS the pipeline and runs one inference in `config.load`; any failure
+  (a broken install, missing model files) refuses start. The loaded port is reused; nothing loads lazily.
+
+### Measured on my own NEW fixtures (self-authored; honest limits)
+
+`tests/fixtures/idris_r4_train.json` and `idris_r4_test.json`: 6 US tenants (subscription billing SaaS, DTC agency,
+Denver HVAC, Houston personal-injury law, Austin dental, Amazon seller services) x 3 prompts x 4 engines x 3 runs = 216
+answers each; every answer cites 2-6 URLs (own domains, review sites, directories, publishers, platforms, government);
+45% name a non-competitor SOURCE that is also cited; 8% carry an injection promoting a fake brand. Train and test use
+DISJOINT brand, person, place, source and template pools. Rules were tuned on train only.
+
+| Split | Mode | Emerging precision (95% Wilson) | Recall |
+|---|---|---|---|
+| train | rules only | 1.000 (0.930-1.000) | 0.981 |
+| test | rules only | 1.000 (0.929-1.000) | 0.980 |
+| test | NER on | 0.980 (0.897-0.997) | 0.980 |
+| round-3 harness (few citations) | rules only | 0.938 | 0.056 |
+
+These numbers are NOT a claim about real answers: the test split comes from the same generator family as train (the
+same answer structure, different names), so it measures generalisation across names, not across writing styles. The
+round-3 harness row shows the cost of domain-first on answers without citations: recall collapses by design. The only
+independent number is the reviewer's, at the baseline above; a re-run of the reviewer's fresh corpus is the
+acceptance test for this round.
 
 ## What is NOT built (deliberately)
 

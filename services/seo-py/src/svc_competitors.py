@@ -175,11 +175,7 @@ class CompetitorsMixin:
             return port
         if not getattr(self.settings, "idris_ner", False):
             return None
-        cached = getattr(self, "_ner_port", None)
-        if cached is None:
-            from agents import ner
-            cached = self._ner_port = ner.load(True)
-        return cached
+        return self.settings.idris_ner_port          # loaded and run once at start (config.load): never lazily
 
     def record_observations(self, tid: str, cid: str, observer: Optional[idris.Observer]) -> None:
         """Under the lock, right after ``citation_run_recorded``: Idris's observations (or its failure). Never raises:
@@ -374,7 +370,13 @@ class CompetitorsMixin:
         port = self.ports.engines.get(eng)
         if port is None or not getattr(port, "connected", False):
             return {"state": "NOT_CONNECTED", "engine": eng}
-        names = [(i, idris._best(c["display"])) for i, c in enumerate(cands)]
+        names = []
+        for i, c in enumerate(cands):
+            dom = sorted(c["domain_hints"], key=lambda h: (-c["domain_hints"][h], h))[:1]
+            snip = next(((e.get("excerpt") or {}).get("text") for e in c.get("evidence") or [] if e.get("excerpt")),
+                        None)
+            names.append((i, idris._best(c["display"]) or (dom[0] if dom else c["key"]), dom[0] if dom else None,
+                          snip))
         prompt = idris.classifier_prompt(names)
         if personal_data(prompt) is not None:
             return {"state": "NOT_RUN", "engine": eng, "reason": "PERSONAL_DATA"}
@@ -391,13 +393,16 @@ class CompetitorsMixin:
                 stop = "ENGINE_UNAVAILABLE"
                 return {"state": "FAILED", "engine": eng, "reason": "NO_ANSWER"}
             answers = 1
-            got = idris.parse_classifier(a.text, {i for i, _n in names})
+            got = idris.parse_classifier(a.text, {i for i, *_r in names})
             if got is None:
                 return {"state": "FAILED", "engine": eng, "reason": "REPLY_NOT_UNDERSTOOD",
                         "model": getattr(a, "model", None)}
+            labels = {cands[i]["key"]: c for i, c in got.items()}
             return {"state": "OK", "engine": eng, "model": getattr(a, "model", None),
                     "model_version": getattr(a, "model_version", None), "asked": len(names),
-                    "not_brand_keys": sorted(cands[i]["key"] for i in got), "filtered": len(got),
+                    "labels": dict(sorted(labels.items())),
+                    "not_brand_keys": sorted(k for k, c in labels.items() if c != "brand"),
+                    "filtered": sum(1 for c in labels.values() if c != "brand"),
                     "note": "the classifier can only remove candidates; it never adds or promotes one"}
         except Killed as k:
             stop = "ENGINE_KILLED"
