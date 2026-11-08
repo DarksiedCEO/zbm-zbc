@@ -73,8 +73,12 @@ class _Meter:
 
 
 class _Run:
-    def __init__(self, svc, tid: str, aid: str, engine: str, model: Optional[str], ps_sha: Optional[str]):
+    def __init__(self, svc, tid: str, aid: str, engine: str, model: Optional[str], ps_sha: Optional[str],
+                 subject: str = "audit"):
         self.svc, self.tid, self.aid, self.engine, self.model, self.ps_sha = svc, tid, aid, engine, model, ps_sha
+        # the ledger subject the reservations are recorded under: ``audit:<aid>`` (audits, unchanged) or
+        # ``citation_run:<cid>`` (Callum's citation runs, ADR 0046)
+        self.subject = subject
         self.run_id = derived_id("egr", aid, engine)
         self.meters: list[_Meter] = []
 
@@ -113,24 +117,29 @@ class _Run:
 
 
 class _Budget:
-    def __init__(self, svc, tid: str, aid: str, ps_sha: Optional[str]):
-        self.svc, self.tid, self.aid, self.ps_sha = svc, tid, aid, ps_sha
+    def __init__(self, svc, tid: str, aid: str, ps_sha: Optional[str], subject: str = "audit"):
+        self.svc, self.tid, self.aid, self.ps_sha, self.subject = svc, tid, aid, ps_sha, subject
 
     def open(self, engine: str, model: Optional[str]) -> _Run:
-        return _Run(self.svc, self.tid, self.aid, engine, model, self.ps_sha)
+        return _Run(self.svc, self.tid, self.aid, engine, model, self.ps_sha, self.subject)
 
 
 class EnginesMixin:
-    METERED = ("perplexity",)
+    # every engine with a real adapter is metered (ADR 0017 W4; ADR 0046 adds openai, anthropic, google)
+    METERED = ("perplexity", "openai", "anthropic", "google")
 
-    def engine_budget(self, tid: str, aid: str, ps: Optional[dict]) -> _Budget:
-        return _Budget(self, tid, aid, None if ps is None else ps.get("sha256"))
+    def engine_budget(self, tid: str, aid: str, ps: Optional[dict], subject: str = "audit") -> _Budget:
+        return _Budget(self, tid, aid, None if ps is None else ps.get("sha256"), subject)
 
     def _engine_limits(self, engine: str) -> dict:
-        if engine != "perplexity":
+        if engine == "perplexity":
+            return dict(self.settings.perplexity_budget)
+        cfg = (getattr(self.settings, "answer_engines", None) or {}).get(engine)
+        if cfg is None:
             return {"daily_calls": 0, "daily_spend_usd": "0", "tenant_daily_calls": 0, "tenant_daily_spend_usd": "0",
                     "reserve_usd_per_call": "0"}
-        return dict(self.settings.perplexity_budget)
+        # ADR 0046: the per-run caps (one audit or one citation run, per engine) bind as well; 0 means OFF
+        return dict(cfg["budget"])
 
     def engine_usage(self, engine: str, day: str, tenant: Optional[str] = None) -> tuple[int, Decimal]:
         calls, spend = 0, ZERO
@@ -167,8 +176,16 @@ class EnginesMixin:
             if min(lim["daily_calls"], lim["tenant_daily_calls"]) <= 0 or \
                     min(_d(lim["daily_spend_usd"]), _d(lim["tenant_daily_spend_usd"])) <= 0:
                 raise EngineError("ENGINE_BUDGET_EXHAUSTED", "BUDGET_OFF")
-            day = self.today()
             spend = (per_call * calls).quantize(MICRO)
+            if "run_max_calls" in lim:
+                # ADR 0046: the per-run caps (calls and spend of ONE audit or citation run on this engine); 0 = OFF
+                if lim["run_max_calls"] <= 0 or _d(lim["run_max_spend_usd"]) <= 0:
+                    raise EngineError("ENGINE_BUDGET_EXHAUSTED", "BUDGET_OFF")
+                if sum(m.reserved_calls for m in run.meters) + calls > lim["run_max_calls"]:
+                    raise EngineError("ENGINE_BUDGET_EXHAUSTED", "RUN_CALL_CAP")
+                if sum((m.reserved_spend for m in run.meters), ZERO) + spend > _d(lim["run_max_spend_usd"]):
+                    raise EngineError("ENGINE_BUDGET_EXHAUSTED", "RUN_SPEND_CAP")
+            day = self.today()
             g_calls, g_spend = self.engine_usage(run.engine, day)
             t_calls, t_spend = self.engine_usage(run.engine, day, run.tid)
             if g_calls + calls > lim["daily_calls"] or g_spend + spend > _d(lim["daily_spend_usd"]):
@@ -178,9 +195,11 @@ class EnginesMixin:
             data = {"run_id": run.run_id, "audit_id": run.aid, "tenant_id": run.tid, "engine": run.engine,
                     "model": run.model, "prompt_index": prompt_index, "calls": calls, "spend_usd": str(spend),
                     "day": day, "prompt_set_sha256": run.ps_sha}
+            if run.subject != "audit":
+                data["run_kind"] = run.subject         # "audit_id" then names the citation run (ADR 0046)
             try:
                 self._commit("engine_calls_reserved", data, "seo",
-                             evidence=("engine_calls_reserved", f"audit:{run.aid}", dict(data),
+                             evidence=("engine_calls_reserved", f"{run.subject}:{run.aid}", dict(data),
                                        ("reserve", run.run_id, prompt_index)))
             except Unavailable:
                 raise EngineError("ENGINE_BUDGET_EXHAUSTED", "RESERVATION_NOT_RECORDED") from None
@@ -194,8 +213,11 @@ class EnginesMixin:
                     "model": run.model, **{k: usage[k] for k in ("calls", "calls_cost_unknown", "spend_usd",
                                                                   "reserved_calls", "reserved_usd", "answers",
                                                                   "stop_reason", "by_day")}}
+            if run.subject != "audit":
+                data["run_kind"] = run.subject
             self._commit("engine_run_settled", data, "seo",
-                         evidence=("engine_run_settled", f"audit:{run.aid}", dict(data), ("settle", run.run_id)))
+                         evidence=("engine_run_settled", f"{run.subject}:{run.aid}", dict(data),
+                                   ("settle", run.run_id)))
 
     def _a_engine_calls_reserved(self, d, at):
         r = self.engine_runs.setdefault(d["run_id"], {"run_id": d["run_id"], "audit_id": d["audit_id"],
@@ -226,7 +248,8 @@ class EnginesMixin:
                 calls, spend = self.engine_usage(e, day)
                 lim = self._engine_limits(e)
                 off = min(lim["daily_calls"], lim["tenant_daily_calls"]) <= 0 or \
-                    min(_d(lim["daily_spend_usd"]), _d(lim["tenant_daily_spend_usd"])) <= 0
+                    min(_d(lim["daily_spend_usd"]), _d(lim["tenant_daily_spend_usd"])) <= 0 or \
+                    ("run_max_calls" in lim and (lim["run_max_calls"] <= 0 or _d(lim["run_max_spend_usd"]) <= 0))
                 out[e] = {**out[e], "budget": {**lim, "state": "OFF" if off else "on", "day": day,
                                                "used_calls": calls, "used_spend_usd": str(spend.quantize(MICRO))},
                           "killed": self.kill_code(capability="ai_probe", provider=e) is not None}

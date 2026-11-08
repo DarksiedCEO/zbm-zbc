@@ -22,6 +22,40 @@ from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
 AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+# The agent registry (ADR 0046, owner rule: every agent has a human name, ONE job, and an entry with its assignment,
+# inputs and outputs). Shared plumbing (primitives/, answer_adapter.py and the engine adapters, the ports) is not an
+# agent and is not listed. Shown on GET /seo/v1/department.
+REGISTRY = {
+    "selene": {"assignment": "crawlability: can search and AI crawlers reach and read the site",
+               "inputs": ["the tenant's registered domain and paths", "robots.txt", "uploaded access logs"],
+               "outputs": ["crawlability envelope (audit)", "log-ingest report"]},
+    "delia": {"assignment": "sitemaps and llms.txt: discovery files present and valid",
+              "inputs": ["robots.txt sitemap lines", "sitemap.xml", "llms.txt"],
+              "outputs": ["sitemaps_and_llms_txt envelope (audit)"]},
+    "roman": {"assignment": "content structure and machine readability (heuristic per-engine checklists)",
+              "inputs": ["fetched pages", "callum.mnc_priority/1 (contract defined; Roman does not read it yet)"],
+              "outputs": ["content_structure envelope (audit)"]},
+    "entity_check": {"assignment": "the site's structured data / NAP against the canonical entity record",
+                     "inputs": ["fetched pages", "the canonical entity record"],
+                     "outputs": ["on_site_entity_consistency envelope (audit)"]},
+    "callum": {"assignment": "citation sources: classify where and how AI answer engines cite the client",
+               "inputs": ["a tenant prompt set (prompts, brand terms, competitor domains, engines)",
+                          "the tenant's registered domain", "answers from the multi-engine adapter (ADR 0046)",
+                          "the SSRF-safe fetcher, to resolve cited URLs (off unless SEO_CALLUM_RESOLVE_URLS=1)"],
+               "outputs": ["citation_sources envelope (audit: per-prompt summary classes)",
+                           "citation_source_rows (citation runs: STRENGTH_URL / OPPORTUNITY_URL / LOOKALIKE_URL / "
+                           "MENTIONED_NOT_CITED / INCONCLUSIVE rows with evidence, metrics with confidence)",
+                           "callum.mnc_priority/1 (the Mentioned-Not-Cited list for Roman and Adaeze)"]},
+    "naomi": {"assignment": "prompt volume with confidence bands",
+              "inputs": ["a prompt-volume source (NOT_CONNECTED)"], "outputs": ["prompt_volume envelope (audit)"]},
+    "osei": {"assignment": "data hygiene, first-party truth and search-truth drift",
+             "inputs": ["every run's quarantines and observations", "Search Console (when bound)",
+                        "two completed audits"],
+             "outputs": ["data_hygiene and search_performance envelopes", "drift reports"]},
+}
+# Named in the spec, NOT built (no code, no registry entry until they are): Adaeze (content gap) is a consumer of
+# callum.mnc_priority/1; Marcus, Priya, Theo, Zara, Idris, Vesper, Julian, Sable, Farrah (ADR 0017).
+NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "idris", "vesper", "julian", "sable", "farrah")
 STATES = ("active", "watch", "retrain", "restricted", "retired")
 MOVES = {"active": ("watch", "restricted"), "watch": ("active", "retrain", "restricted"),
          "retrain": ("active", "watch", "restricted"), "restricted": ("active", "retrain", "retired"),
@@ -127,6 +161,7 @@ class ManagerMixin:
                                        round(sp_outcomes.get("NOT_CONNECTED", 0) / sp_runs, 4)}
                 if agent == "osei" else None,
                 "engine_runs": self.engine_scorecard() if agent == "callum" else None,
+                "citation_runs": self.citation_scorecard() if agent == "callum" else None,
                 "basis": "completed audit reports, finished log ingests, recorded drift reports and (Callum) "
                          "recorded answer-engine reservations and settlements"}
 
@@ -145,6 +180,8 @@ class ManagerMixin:
         with self.lock:
             return {"agents": {a: {"state": self.agent_state(a),
                                    "history": [dict(h) for h in self.agent_states.get(a, {}).get("history", [])],
-                                   "queue": self._queues(a), "scorecard": self._scorecard(a)} for a in AGENTS},
+                                   "queue": self._queues(a), "scorecard": self._scorecard(a),
+                                   "registry": dict(REGISTRY[a])} for a in AGENTS},
+                    "not_built_agents": list(NOT_BUILT_AGENTS),
                     "lifecycle": {"states": list(STATES), "moves": {k: list(v) for k, v in MOVES.items()},
                                   "andre_only": "any move into or out of restricted, and into retired"}}

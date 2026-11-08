@@ -1305,7 +1305,11 @@ Answer-engine adapters with scoped, short-lived credentials (OpenAI, Anthropic, 
 prompt-volume source; Department 28 clientfix hand-off; the remaining agents per the spec's waves; the console pages.
 Search Console is built and NOT_CONNECTED until Andre's steps (section "Search Console"). (Built in Wave 3: the live
 run against ledger-rust, W3-1; the Finance (31) client to verify invoices, W3-2. Built in Wave 4: the Perplexity
-answer-engine adapter, W4.)
+answer-engine adapter, W4. Built Nov 8 2026, ADR 0046: the multi-engine answer adapter (`answer_adapter.py`, with
+the Perplexity adapter refactored onto it unchanged in behaviour) and OFF-by-default OpenAI, Anthropic and Google
+adapters — with long-lived keys and the Perplexity compensating controls (W4-5); scoped short-lived credentials for
+them were not researched for this build and stay on this list — and Callum's citation-source runs. Their settings are listed in
+the service README, "Settings".)
 
 ## Restored log-ingest key continuity (2026-11-01)
 

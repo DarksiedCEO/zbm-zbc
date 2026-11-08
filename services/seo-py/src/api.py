@@ -497,6 +497,28 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
                                                       "compliance_38"))) -> dict:
         return svc.audit_view(scope[1], _id(aid), full=scope[0] != "finance_31")
 
+    # ------------------------------------------------------------------ Callum's citation-source runs (ADR 0046)
+
+    CITATION_READERS = ("dashboard", "seo_agent", "hub", "compliance_38")
+
+    @app.post(P + "/tenants/{tid}/citation-runs", dependencies=auth, status_code=201)
+    def request_citation_run(request: Request, req: dict = Depends(body(m.CitationRunCreate)),
+                             scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.request_citation_run(scope[0], scope[1], req, andre=andre_if_presented(request))
+
+    @app.get(P + "/tenants/{tid}/citation-runs", dependencies=auth)
+    def citation_runs(scope: tuple = Depends(scoped(*CITATION_READERS))) -> list:
+        return svc.citation_runs_view(scope[1])
+
+    @app.get(P + "/tenants/{tid}/citation-runs/{cid}", dependencies=auth)
+    def citation_run(cid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
+        return svc.citation_run_view(scope[1], _id(cid))
+
+    @app.get(P + "/tenants/{tid}/citation-runs/{cid}/mnc-priority", dependencies=auth)
+    def citation_mnc_priority(cid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
+        """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/1 contract Roman and Adaeze read."""
+        return svc.mnc_priority_view(scope[1], _id(cid))
+
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)
 
     LOG_CALLERS = ("dashboard", "seo_agent", "hub")

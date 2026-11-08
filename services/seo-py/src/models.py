@@ -146,3 +146,13 @@ class PromptSetCreate(Strict):
                        Field(min_length=1, max_length=50)]
     engines: Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
                        Field(min_length=1, max_length=4)] = ["openai", "anthropic", "google", "perplexity"]
+
+
+class CitationRunCreate(Strict):
+    """ADR 0046: Callum's citation-source run for one of the tenant's domains and prompt sets; ``engines`` narrows the
+    prompt set's engines (never widens them)."""
+    request_id: RequestId
+    domain: Annotated[StrictStr, Field(pattern=DOMAIN)]
+    prompt_set_id: Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]
+    engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
+                                Field(min_length=1, max_length=4)]] = None
