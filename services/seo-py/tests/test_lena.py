@@ -267,9 +267,9 @@ def test_error_answers_map_to_closed_codes_and_never_echo_google(answer, code, d
 
 def test_429_backs_off_within_bounds_then_rate_limited_and_recovers():
     fake = FakeCrux()
-    fake.script = [(429, {}, {"retry-after": "7"})] * 3
+    fake.script = [(429, {}, {"retry-after": "4"})] * 3
     e = err(lambda: rd(fake).record("origin", O, "PHONE"))
-    assert e.code == "CRUX_RATE_LIMITED" and len(fake.requests) == 3 and fake.clock.sleeps == [7.0, 7.0]
+    assert e.code == "CRUX_RATE_LIMITED" and len(fake.requests) == 3 and fake.clock.sleeps == [4.0, 4.0]
     fake.script = [(429, {})]
     assert rd(fake).record("origin", O, "PHONE")["state"] == "OK"
 
@@ -287,9 +287,21 @@ def test_timeouts_are_retried_then_unavailable_and_retries_stop_at_the_deadline(
     assert err(lambda: rd(fake).record("origin", O, "PHONE")).code == "CRUX_UNAVAILABLE"
     assert len(fake.requests) == 3
     fake = FakeCrux()
-    fake.script = [(503, {}, {"retry-after": "30"})] * 3
-    e = err(lambda: rd(fake, deadline_s=20).record("origin", O, "PHONE"))
-    assert e.code == "CRUX_UNAVAILABLE" and len(fake.requests) == 1          # a 30 s pause would pass the deadline
+    fake.script = [(503, {}, {"retry-after": "5"})] * 3
+    e = err(lambda: rd(fake, deadline_s=4).record("origin", O, "PHONE"))
+    assert e.code == "CRUX_UNAVAILABLE" and len(fake.requests) == 1          # a 5 s pause would pass the deadline
+
+
+def test_a_retry_after_longer_than_a_run_may_wait_stops_the_run():
+    fake = FakeCrux()
+    fake.script = [(503, {}, {"retry-after": "6"})]
+    sec = run(fake, deadline_s=600)
+    first = sec["targets"][0]["form_factors"]["PHONE"]["current"]
+    assert (first["state"], first["reason"], first["detail"], first["attempts_sent"]) == \
+        ("FAILED", "CRUX_RATE_LIMITED", "retry_after_over_cap", 1)
+    assert len(fake.requests) == 1 and fake.clock.sleeps == []
+    later = sec["targets"][0]["form_factors"]["DESKTOP"]["current"]
+    assert later == {"state": "NOT_QUERIED", "reason": "CRUX_RATE_LIMITED"}
 
 
 def test_the_call_cap_counts_retries_and_stops_the_run():
@@ -572,7 +584,7 @@ def test_pacing_that_would_pass_the_deadline_stops_without_sending():
     for _ in range(cx.PACE_BURST + 10):                                 # 10 already queued: ~7 s to wait
         c._pacer.take()
     e = err(lambda: c.open_read(ok_guard).record("origin", O, "PHONE"))
-    assert (e.code, e.detail) == ("CRUX_RATE_LIMITED", "client_pacing") and fake.requests == []
+    assert (e.code, e.detail) == ("CRUX_DEADLINE", "before_first_attempt") and fake.requests == []
 
 
 def _chain(e):
@@ -732,3 +744,106 @@ def test_no_traceback_frame_local_holds_the_key_after_a_forced_error(boom):
 
 def test_recommended_cap_against_the_config_ceiling():
     assert lena.recommended_cap(10) == 82 and lena.recommended_cap(16) == 118 <= 120 < lena.recommended_cap(17)
+
+
+
+# ====================================================================== round 4: the deadline path and its sizing
+
+def _slow(fake, latency: float = 1.0):
+    """Every call takes ``latency`` seconds on the injected clock."""
+    prev = fake.on_request
+
+    def on(fk, req):
+        fk.clock.advance(latency)
+        if prev is not None:
+            prev(fk, req)
+    fake.on_request = on
+
+
+class _ClockedRead:
+    """A provider read that lets time run out right before its ``at``-th query (0-based): the clock jumps to the read's
+    deadline, as if earlier work had used it all, so that query has no time left for its first attempt."""
+
+    def __init__(self, inner, clock, at: int):
+        self.inner, self.clock, self.at, self.n = inner, clock, at, 0
+
+    @property
+    def requests(self):
+        return self.inner.requests
+
+    def _tick(self):
+        if self.n == self.at:
+            self.clock.t = self.inner.end
+        self.n += 1
+
+    def record(self, *a):
+        self._tick()
+        return self.inner.record(*a)
+
+    def history(self, *a):
+        self._tick()
+        return self.inner.history(*a)
+
+
+@pytest.mark.parametrize("which", ["record", "history", "twin", "url"])
+def test_a_query_the_deadline_leaves_no_time_for_is_not_queried(which):
+    """The deadline runs out right before the chosen query: it and every later query are NOT_QUERIED CRUX_DEADLINE
+    (nothing of theirs was sent, never FAILED); the queries before it have data."""
+    at = {"record": 1, "history": 6, "twin": 3, "url": 12}[which]      # queries made before the chosen one
+    fake = FakeCrux()
+    read = _ClockedRead(rd(fake, max_calls=120), fake.clock, at)
+    sec = lena.run(read, O, ["/pricing"], 25, "2026-10-09", "x", twin=W)
+    keys = {"record": (0, "DESKTOP", "current"), "history": (0, "PHONE", "history"),
+            "twin": (1, "PHONE", "current"), "url": (2, "PHONE", "current")}[which]
+    entry = sec["targets"][keys[0]]["form_factors"][keys[1]][keys[2]]
+    assert entry == {"state": "NOT_QUERIED", "reason": "CRUX_DEADLINE", "attempts_sent": 0}, entry
+    assert len(fake.requests) == at and sec["counts"]["failed"] == 0 and sec["counts"]["with_data"] == at
+    assert sec["stopped"]["code"] == "CRUX_DEADLINE" and lena.outcome(sec) == ("PARTIAL", "CRUX_DEADLINE")
+
+
+def test_the_pacing_wait_past_the_deadline_is_not_queried():
+    fake = FakeCrux()
+    c = client(fake, max_calls=120, deadline_s=5)
+    for _ in range(cx.PACE_BURST + 10):
+        c._pacer.take()
+    sec = lena.run(c.open_read(ok_guard), O, [], 25, "2026-10-09", "x")
+    first = sec["targets"][0]["form_factors"]["PHONE"]["current"]
+    assert first == {"state": "NOT_QUERIED", "reason": "CRUX_DEADLINE", "attempts_sent": 0} and fake.requests == []
+
+
+def test_a_query_that_started_and_then_ran_out_of_time_is_failed_with_its_attempts():
+    fake = FakeCrux()
+    fake.script = [(503, {})]
+    _slow(fake, 4.0)
+    sec = run(fake, paths=(), deadline_s=5)                 # 4 s call, then a 1 s backoff would reach the deadline
+    first = sec["targets"][0]["form_factors"]["PHONE"]["current"]
+    assert (first["state"], first["reason"], first["attempts_sent"]) == ("FAILED", "CRUX_UNAVAILABLE", 1)
+
+
+def test_deadline_sizing_formula_and_the_config_ceiling():
+    for n in range(0, 17):
+        assert lena.recommended_deadline(n) == 170 + 10 * n
+    assert lena.recommended_deadline(13) == 300 < lena.recommended_deadline(14)      # SEO_CRUX_DEADLINE_SECONDS max
+
+
+@pytest.mark.parametrize("n", [0, 3, 8, 13])
+def test_the_recommended_deadline_covers_the_worst_case_it_is_sized_for(n):
+    """At the recommended cap and deadline: 1 s per call, and 10 failures (5 queries x 2) that each take the full
+    10 s timeout and ask for the longest Retry-After a run honours (5 s): every query is still sent."""
+    paths = [f"/p{i}" for i in range(n)]
+    fake = FakeCrux()
+    st = {"spent": 0, "query": None, "here": 0}
+
+    def on(fk, req):
+        if req.content != st["query"]:
+            st["query"], st["here"] = req.content, 0
+        if st["spent"] < 10 and st["here"] < 2:
+            st["spent"] += 1
+            st["here"] += 1
+            fk.clock.advance(9.0)                            # + the 1 s latency below = the 10 s timeout
+            fk.script.insert(0, (503, {}, {"retry-after": "5"}))
+    fake.on_request = on
+    _slow(fake, 1.0)
+    sec = run(fake, paths=paths, twin=W, max_calls=lena.recommended_cap(n), deadline_s=lena.recommended_deadline(n))
+    assert sec["stopped"] is None and sec["counts"]["not_queried"] == 0 and sec["counts"]["failed"] == 0
+    assert sec["calls"] == lena.calls_needed(n) + 10

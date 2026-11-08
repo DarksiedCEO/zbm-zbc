@@ -170,6 +170,7 @@ REASON_TEXT = {
                            "used.",
     "CRUX_BUDGET_EXHAUSTED": "The Chrome UX Report call allowance did not allow (more) queries.",
     "CRUX_KILLED": "The Chrome UX Report read was stopped by a safety switch.",
+    "CRUX_DEADLINE": "The Chrome UX Report read ran out of its time allowance; the remaining queries were not made.",
     "CRUX_INSUFFICIENT_FIELD_DATA": "Google has no field data for this exact origin. That says nothing about speed "
                                     "in either direction.",
     "NO_PROMPT_SET": "No set of market questions was chosen for this audit, so no answer engine was asked anything.",

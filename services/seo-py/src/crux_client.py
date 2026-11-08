@@ -103,6 +103,8 @@ MAX_BODY = 1024 * 1024
 MAX_BINS = 10
 MAX_METRICS_IN_ANSWER = 64                                         # unknown metric names are ignored, but bounded
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+# Retry-After is honoured within a run only up to this; a longer wait asked by Google stops the run (round-4 review)
+RETRY_AFTER_MAX_S = 5.0
 DEFAULT_ATTEMPTS = 3                     # HTTP attempts per query (the service never changes it): at most 2 retries
 AUTH_STATUSES = frozenset({"PERMISSION_DENIED", "UNAUTHENTICATED"})
 AUTH_REASONS = frozenset({"API_KEY_INVALID", "SERVICE_DISABLED", "API_KEY_SERVICE_BLOCKED",
@@ -116,10 +118,13 @@ MAX_EXTRA_FIELDS = 16
 DENSITY_TOLERANCE = 0.011              # densities are rounded (history: 4 decimals); a histogram sums to 1 within this
 
 CODES = ("CRUX_NOT_CONNECTED", "CRUX_AUTH_REFUSED", "CRUX_RATE_LIMITED", "CRUX_UNAVAILABLE", "CRUX_PROTOCOL_ERROR",
-         "CRUX_BUDGET_EXHAUSTED", "CRUX_KILLED")
+         "CRUX_BUDGET_EXHAUSTED", "CRUX_KILLED", "CRUX_DEADLINE")
+# NOT-SENT codes: a query that ends with one of these had no attempt of its own sent (BUDGET can also cut a query
+# between its retries); Lena reports such a query NOT_QUERIED, never FAILED
+NOT_SENT = frozenset({"CRUX_BUDGET_EXHAUSTED", "CRUX_DEADLINE"})
 # a read that ends with one of these cannot usefully continue: the rest of the run's queries are not sent
 STOPPING = frozenset({"CRUX_AUTH_REFUSED", "CRUX_RATE_LIMITED", "CRUX_UNAVAILABLE", "CRUX_BUDGET_EXHAUSTED",
-                      "CRUX_KILLED", "CRUX_NOT_CONNECTED"})
+                      "CRUX_KILLED", "CRUX_NOT_CONNECTED", "CRUX_DEADLINE"})
 
 ORIGIN = re.compile(r"https?://[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?")
 _KEY = re.compile(r"[A-Za-z0-9_-]{20,128}")
@@ -603,6 +608,7 @@ class _Read:
         not-found answer; raises CruxError for everything else."""
         check_url(url)
         last: _Retry | None = None
+        sent = 0                                   # attempts of THIS query that went out
         for attempt in range(self.c.attempts):
             if self.left() <= 0:
                 break
@@ -612,12 +618,13 @@ class _Read:
             if wait > 0:
                 if self.c._mono() + wait >= self.end:
                     self.c._pacer.refund()
-                    raise CruxError("CRUX_RATE_LIMITED", "client_pacing")
+                    break
                 self._guard()
                 self.c._sleep(wait)
             self._guard()
             self.requests += 1
             self.c.requests_made += 1
+            sent += 1
             try:
                 status, raw, hdrs = self._once(url, body)
                 if status == 200:
@@ -629,6 +636,10 @@ class _Read:
                 self._classify(status, raw, hdrs)
             except _Retry as r:
                 last = r
+            if last is not None and last.retry_after is not None and last.retry_after > RETRY_AFTER_MAX_S:
+                # Google asks for a longer wait than a run may spend (round-4 review): stop; this query failed,
+                # the run's remaining queries are not sent (NOT_QUERIED CRUX_RATE_LIMITED)
+                raise _detached(CruxError("CRUX_RATE_LIMITED", "retry_after_over_cap"))
             if attempt + 1 < self.c.attempts:
                 pause = self.c.backoff_s[min(attempt, len(self.c.backoff_s) - 1)] if self.c.backoff_s else 0.0
                 if last is not None and last.retry_after is not None:
@@ -638,6 +649,10 @@ class _Read:
                 self._guard()
                 self.c._sleep(pause)
                 self._guard()
+        if sent == 0:
+            # the deadline left no time (or the pacing wait would pass it) before this query's first attempt: a
+            # query not made, never a failure (round-4 review)
+            raise _detached(CruxError("CRUX_DEADLINE", "before_first_attempt"))
         if last is None:
             raise _detached(CruxError("CRUX_UNAVAILABLE", "deadline"))
         raise _detached(CruxError(last.code, last.detail))

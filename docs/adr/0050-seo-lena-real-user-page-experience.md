@@ -90,7 +90,7 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
      query string; checked on the URL and again at connect; no redirect followed; every resolved address globally
      routable. Bodies ≤ 1 MiB, identity encoding only.
    - Retries only on connect errors, timeouts, 429 and 500/502/503/504 (at most 3 attempts, `Retry-After` honoured
-     up to 60 s, never past the deadline). 400 `API_KEY_INVALID` / 401 / 403 `PERMISSION_DENIED` (and the closed set of
+     up to 5 s since round 4 — longer stops the run —, never past the deadline). 400 `API_KEY_INVALID` / 401 / 403 `PERMISSION_DENIED` (and the closed set of
      key-restriction reasons) are `CRUX_AUTH_REFUSED`; 403 `RESOURCE_EXHAUSTED` is `CRUX_RATE_LIMITED`; other 4xx and
      3xx `CRUX_PROTOCOL_ERROR`. Auth, rate, availability, budget and kill codes stop the run; the queries not sent are
      listed `NOT_QUERIED` with that code. Query order: origin current (phone, desktop, tablet), origin history, each
@@ -140,8 +140,8 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
   bucket of 10 refilled at 90 a minute, process-wide, so any 60-second window holds at most 100 requests (retries
   included), under Google's 150. **The bucket is per process:** Gate 5 runs one replica per service, so this is the
   project-wide bound today; with N replicas each would get its own 100 a minute (scale follow-up: a shared limiter,
-  or 100 / N per replica, before seo-py runs more than one replica); a wait that would pass the deadline stops the read `CRUX_RATE_LIMITED`
-  `client_pacing` without sending. Tested structurally on the injected clock (sliding-window counts), no wall clock.
+  or 100 / N per replica, before seo-py runs more than one replica); a pacing wait that would pass the deadline sends nothing: that query and the
+  rest are `NOT_QUERIED CRUX_DEADLINE` (round 4). Tested structurally on the injected clock (sliding-window counts), no wall clock.
   **Recommended go-live values (corrected in rounds 2 and 3):** per run
   **`SEO_CRUX_CALLS_PER_RUN` = calls_needed(N) + R × K = (12 + 6 × N) + 2 × 5 = 22 + 6 × N** for N audited paths
   (`lena.recommended_cap`): calls_needed(N) = 12 + 6 × N is every query of a clean run (origins 6, up to 12 with the
@@ -149,11 +149,22 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
   query (`crux_client.DEFAULT_ATTEMPTS` 3 − 1; retries only on 429 / 5xx / timeouts and each is a call); K = 5 is how
   many queries of one run may each use both retries and the run still sends every query. Tested for N = 0, 3 and 8
   with the twin and 1, 2, 5 and 10 injected retryable errors (every query sent); one retry past the headroom leaves
-  exactly the last query `NOT_QUERIED CRUX_BUDGET_EXHAUSTED`. The config ceiling 120 covers N ≤ 16 (the default
-  `SEO_AUDIT_MAX_PAGES` 10 needs 82). With the cap that large, raise `SEO_CRUX_DEADLINE_SECONDS` to **120**: 82 calls
-  paced at 100 a minute take about 48 s, plus backoff (1 s, 3 s) for retried queries. **A query the cap cuts off —
-  before its first attempt or between its retries — is reported `NOT_QUERIED` with reason `CRUX_BUDGET_EXHAUSTED`
-  (and `attempts_sent`), never `FAILED`** (round 3). Per day about 2,000; per tenant per day about 200.
+  exactly the last query `NOT_QUERIED CRUX_BUDGET_EXHAUSTED`. **A query the cap cuts off — before its first attempt
+  or between its retries — is reported `NOT_QUERIED` with reason `CRUX_BUDGET_EXHAUSTED` (and `attempts_sent`), never
+  `FAILED`** (round 3).
+  **Deadline (round 4; the earlier "120 s covers up to 16 paths" was wrong and is withdrawn).** Retry-After is
+  honoured within a run only up to 5 s (`crux_client.RETRY_AFTER_MAX_S`); Google asking for longer stops the run
+  (that query `FAILED CRUX_RATE_LIMITED retry_after_over_cap`, the rest `NOT_QUERIED CRUX_RATE_LIMITED`). Worst case
+  at the recommended cap, on the stated assumptions — every successful call takes 1 s; each of the R × K = 10
+  tolerated failures takes the whole 10 s attempt timeout and is followed by the longest honoured wait (5 s); pacing
+  added on top, not overlapped: **`SEO_CRUX_DEADLINE_SECONDS` = ceil((cap − 10) / 1.5 + 1 × (12 + 6N) + 10 × (10 + 5))
+  = 170 + 10 × N seconds** (`lena.recommended_deadline`). The setting's ceiling (300 s) therefore covers **N ≤ 13**
+  paths; the default `SEO_AUDIT_MAX_PAGES` 10 needs 270 s. Tested on the injected clock for N = 0, 3, 8 and 13 with
+  1 s per call and ten 10 s failures each answered with Retry-After 5: every query sent. Slower calls than 1 s, or
+  more failures than K, end with the last queries `NOT_QUERIED` — never silent. **A query the deadline leaves no time
+  for (none of its attempts sent, including a pacing wait that would pass it) is `NOT_QUERIED CRUX_DEADLINE`; a query
+  that started and then ran out of time stays `FAILED` with `attempts_sent`** (tested for an origin record, an
+  origin history, the twin and a URL). Per day about 2,000; per tenant per day about 200.
 - **L2 — extra fields.** Every documented required field is still validated strictly; unknown extra fields are
   accepted and ignored (never read, never passed on), at most 16 per object (more: that object is malformed), and
   counted in `extra_fields_ignored` per answer and in the section's counts. **Go-live canary:** the first hand-run
@@ -224,5 +235,7 @@ of the key is accepted by this endpoint.
    after go-live needs a mapping note, before go-live it is free).
 2. Should a POOR / NEEDS_IMPROVEMENT p75 become a finding (decision WATCH or ACT, data class `measured` with a
    third-party source label), or stay data only as built?
-3. Budgets for go-live: per run (12 + 6 × paths) + 2 × 5 = 22 + 6 × paths (`lena.recommended_cap`; ≤ 120, so up to
-   16 paths), deadline 120 s, per day ~2,000, per tenant per day ~200.
+3. Budgets for go-live: per run (12 + 6 × paths) + 2 × 5 = 22 + 6 × paths (`lena.recommended_cap`), deadline
+   170 + 10 × paths seconds (`lena.recommended_deadline`; ≤ 300, so up to 13 paths), per day ~2,000, per tenant per
+   day ~200. Lena's step then holds the audit request up to that long: whether audits with Lena on should be capped
+   at fewer paths is an owner choice.

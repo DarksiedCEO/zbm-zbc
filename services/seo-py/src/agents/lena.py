@@ -203,6 +203,24 @@ RETRIES_PER_QUERY = cx.DEFAULT_ATTEMPTS - 1      # R: at most 2 retries per quer
 RETRIED_QUERIES_TOLERATED = 5                    # K: how many queries of one run may each use every retry
 
 
+# Deadline sizing (round-4 review): the worst case one run at the recommended cap may need, on these assumptions —
+# every successful call takes ASSUMED_LATENCY_S; each of the R x K tolerated failures takes the whole per-attempt
+# timeout and is followed by the longest wait a run honours (backoff or Retry-After, capped at RETRY_AFTER_MAX_S);
+# pacing time is spent on top. Conservative: latency and pacing are added, not overlapped.
+ASSUMED_LATENCY_S = 1.0
+ATTEMPT_TIMEOUT_S = 10.0                         # SEO_CRUX_TIMEOUT_SECONDS default
+
+
+def recommended_deadline(paths: int, twin: bool = True, timeout_s: float = ATTEMPT_TIMEOUT_S) -> int:
+    """ceil( pacing(cap) + ASSUMED_LATENCY_S x calls_needed + R x K x (timeout + RETRY_AFTER_MAX_S) ), pacing(cap) =
+    max(0, cap - burst) / refill-per-second. At the defaults: (22 + 6N - 10) / 1.5 + (12 + 6N) + 150 seconds."""
+    import math
+    cap = recommended_cap(paths, twin)
+    pacing = max(0, cap - cx.PACE_BURST) / (cx.PACE_REFILL_PER_MINUTE / 60.0)
+    failures = RETRIES_PER_QUERY * RETRIED_QUERIES_TOLERATED * (timeout_s + cx.RETRY_AFTER_MAX_S)
+    return math.ceil(pacing + ASSUMED_LATENCY_S * calls_needed(paths, twin) + failures - 1e-9)
+
+
 def recommended_cap(paths: int, twin: bool = True) -> int:
     """The recommended SEO_CRUX_CALLS_PER_RUN: calls_needed(paths) + R x K = (12 + 6 x paths) + 2 x 5 with a twin, so
     a run still sends every query when up to K of its queries each need all R retries. Above the config ceiling (120,
@@ -254,14 +272,15 @@ def run(read, origin: str, paths: list, periods: int, today: str, retrieved_at: 
             else:
                 results[k] = shape_history(read.history(kind, target, ff, periods), today, retrieved_at)
         except cx.CruxError as e:
-            if e.code == "CRUX_BUDGET_EXHAUSTED":
+            if e.code in cx.NOT_SENT:
                 # the call cap ran out before this query got an answer (round-3 review): it is a query not made,
                 # reported NOT_QUERIED like every later one, never FAILED; ``attempts_sent`` says if retries of it
                 # had already gone out
                 results[k] = {"state": "NOT_QUERIED", "reason": e.code,
                               "attempts_sent": getattr(read, "requests", 0) - before}
             else:
-                results[k] = {"state": "FAILED", "reason": e.code, "detail": e.detail}
+                results[k] = {"state": "FAILED", "reason": e.code, "detail": e.detail,
+                              "attempts_sent": getattr(read, "requests", 0) - before}
             if e.code in cx.STOPPING:
                 state["stopped"] = {"code": e.code, "detail": e.detail}
 
