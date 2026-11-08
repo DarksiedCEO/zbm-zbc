@@ -26,6 +26,7 @@ POLICY = {
     "allowed": ["MIT", "Apache-2.0", "BSD-3-Clause"],
     "allowed_with_exceptions": ["LLVM-exception"],
     "flagged": ["MPL-2.0"],
+    "owner_approvable": {"_doc": "closed set", "CC-BY-4.0": "data", "Unicode-3.0": "data"},
     "forbidden_packages": {"python": ["langgraph-api", "forbiddenfruit"]},
     "components": {
         "py": {"lockfile": "svc/uv.lock", "kind": "uv"},
@@ -223,7 +224,8 @@ class GateCase(_TmpCase):
         self.assertEqual(res.exit_code(allow_pending=True), 0)
 
     OWNER_OK = {"component": "web", "name": "next", "version": "16.0.0", "status": "owner-approved",
-                "approved_by": "Owner", "approved_on": "2026-11-08", "attribution": "credit line", "reason": "data"}
+                "approved_by": "Owner", "approved_on": "2026-11-08", "attribution": "credit line", "reason": "data",
+                "licence": "CC-BY-4.0"}
 
     def test_owner_approved_entry_passes_and_is_listed(self):
         inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "CC-BY-4.0"}]})
@@ -241,11 +243,41 @@ class GateCase(_TmpCase):
             res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, entry]).run()
             self.assertViolation(res, f"owner-approved needs '{missing}'")
 
-    def test_owner_approval_cannot_admit_copyleft(self):
-        policy = dict(POLICY, forbidden_ids=["GPL-3.0-only", "LGPL-3.0-or-later"])
-        inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "MIT AND GPL-3.0-only"}]})
-        res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, self.OWNER_OK], policy=policy).run()
-        self.assertViolation(res, "owner-approved entry cannot admit a forbidden licence id")
+    def test_owner_approval_is_an_allow_list_not_a_deny_list(self):
+        # review of fc85c4f2 (LOW): a deny-list let LicenseRef-Proprietary, EUPL, CDDL and CC-BY-NC through. Each
+        # licence below is named in the entry AND is the verified licence; it still fails, because it is not in the
+        # closed owner_approvable set — that needs a policy change.
+        for lic in ("LicenseRef-Proprietary", "EUPL-1.2", "CDDL-1.0", "CC-BY-NC-4.0", "GPL-3.0-only",
+                    "MIT AND LicenseRef-Proprietary", "CC-BY-4.0 AND CC-BY-NC-4.0"):
+            with self.subTest(licence=lic):
+                inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": lic}]})
+                entry = dict(self.OWNER_OK, licence=lic)
+                res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, entry]).run()
+                self.assertViolation(res, "the reviewed 'owner_approvable' set — that needs a policy change")
+                self.assertEqual(res.approved, [])
+
+    def test_owner_approval_must_match_the_verified_licence(self):
+        # the entry approves CC-BY-4.0 but the verified (inventory/lock) licence is CC-BY-NC-4.0
+        inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "CC-BY-NC-4.0"}]})
+        res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, self.OWNER_OK]).run()
+        self.assertViolation(res, "the approval does not cover this licence")
+
+    def test_owner_approval_with_an_unapproved_with_exception_fails(self):
+        lic = "CC-BY-4.0 WITH Classpath-exception-2.0"
+        inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": lic}]})
+        res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, dict(self.OWNER_OK, licence=lic)]).run()
+        self.assertViolation(res, "Classpath-exception-2.0")
+
+    def test_owner_approval_needs_the_approved_expression(self):
+        inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "CC-BY-4.0"}]})
+        entry = {k: v for k, v in self.OWNER_OK.items() if k != "licence"}
+        self.assertViolation(Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, entry]).run(), "owner-approved needs 'licence'")
+
+    def test_real_policy_owner_approvable_is_the_reviewed_closed_set(self):
+        policy = L.load_json(G.DEFAULT_POLICY)
+        self.assertEqual(sorted(k for k in policy["owner_approvable"] if not k.startswith("_")),
+                         ["CC-BY-4.0", "CNRI-Python", "FTL", "IJG", "LicenseRef-AGG-2.3", "MIT-CMU", "Unicode-3.0",
+                          "libpng-2.0", "libtiff"])
 
     def test_owner_approval_for_a_licence_that_passes_anyway_is_stale(self):
         res = Tree(self.tmp, exceptions=[CERTIFI_OK, self.OWNER_OK]).run()

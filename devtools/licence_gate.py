@@ -14,8 +14,9 @@ What it checks, for every lockfile in the repository (devtools/licence_lib.py di
 3. each package's licence (inventory, or a reviewed exceptions.json entry) is satisfiable from policy 'allowed';
    a 'flagged' id (MPL-2.0) passes only with an approved-flagged entry; anything else needs an entry, and a
    pending-owner-decision entry is reported as PENDING (exit 2 unless --allow-pending), never passed silently;
-   an owner-approved entry (approved_by, approved_on, attribution required) passes for that exact package version
-   and is listed as APPROVED on every run — it can never admit a policy 'forbidden_ids' licence;
+   an owner-approved entry (approved_by, approved_on, attribution and the approved expression in 'licence'
+   required) passes for that exact package version and is listed as APPROVED on every run — only if its expression
+   is the verified one and every term is in policy 'allowed' or the closed 'owner_approvable' set (allow-list);
 4. none of policy 'forbidden_packages' is installable from any Python lock on any real platform;
 5. go.mod files have no more requires than reviewed; the vendored restic binary matches its manifest sha256 and,
    when a ``go`` toolchain is on PATH, its module list matches the inventory;
@@ -181,6 +182,30 @@ def verify_sources(cid: str, comp: dict, inv_pkgs: dict, cache: Path, res: Resul
                                   f"differs from the hash-verified tarball's package.json license {r['licence']!r}")
 
 
+def owner_approval_problem(entry: dict, verified: str | None, allowed: set, approvable: set,
+                           allowed_exc: set) -> str | None:
+    """None when an owner-approved entry may pass, else why not. The entry's 'licence' is the expression the owner
+    approved; it must be the package's verified licence (an UNKNOWN / missing one excepted — then the reviewer's
+    expression stands, as for reviewed-metadata); every licence id in it must be in policy 'allowed' or in the
+    closed policy 'owner_approvable' set, and every WITH exception in 'allowed_with_exceptions'."""
+    expr = entry.get("licence")
+    if not expr:
+        return "owner-approved entry must name the approved expression in 'licence'"
+    if verified and verified != "UNKNOWN" and verified != expr:
+        return (f"owner-approved entry approves {expr!r} but the verified licence is {verified!r} — "
+                "the approval does not cover this licence")
+    try:
+        ids, excs = L.spdx_ids(expr), L.spdx_with_exceptions(expr)
+    except ValueError as exc:
+        return f"owner-approved licence is not a valid SPDX expression ({exc})"
+    outside = sorted({i for i in ids if i not in allowed and i not in approvable})
+    bad_exc = sorted({x for x in excs if x not in allowed_exc})
+    if outside or bad_exc:
+        return (f"owner-approved entry names {', '.join(outside + bad_exc)}, which is in neither policy 'allowed' nor "
+                "the reviewed 'owner_approvable' set — that needs a policy change, not an exceptions entry")
+    return None
+
+
 def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path: Path = DEFAULT_EXCEPTIONS,
         inventory_path: Path = DEFAULT_INVENTORY, verify_cache: Path | None = None) -> Result:
     policy = L.load_json(policy_path)
@@ -189,7 +214,7 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
     allowed = set(policy["allowed"])
     allowed_exc = set(policy.get("allowed_with_exceptions", []))
     flagged = set(policy["flagged"])
-    forbidden_ids = set(policy.get("forbidden_ids", []))
+    owner_approvable = {k for k in policy.get("owner_approvable", {}) if not k.startswith("_")}
     comps = {k: v for k, v in policy["components"].items() if not k.startswith("_")}
     res = Result()
 
@@ -207,7 +232,7 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
         if e.get("status") not in ("approved-flagged", "reviewed-metadata", "pending-owner-decision", "owner-approved"):
             res.violations.append(f"exceptions.json entry {e.get('name')}: unknown status {e.get('status')!r}")
         if e.get("status") == "owner-approved":
-            for key in ("approved_by", "approved_on", "attribution"):
+            for key in ("approved_by", "approved_on", "attribution", "licence"):
                 if not e.get(key):
                     res.violations.append(f"exceptions.json entry {e.get('name')}: owner-approved needs '{key}'")
         if e.get("status") == "reviewed-metadata" and not e.get("licence"):
@@ -258,6 +283,14 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
             status = (entry or {}).get("status")
             if entry is not None:
                 used.add((entry["component"], entry["name"], entry["version"]))
+            if status == "owner-approved" and pkg.get("licence") not in (None, "", "UNKNOWN"):
+                try:
+                    if L.spdx_satisfied(pkg["licence"], allowed, allowed_exc):
+                        res.violations.append(f"stale exception: {label} — the verified licence {pkg['licence']!r} "
+                                              "passes without its owner-approved entry — remove it")
+                        continue
+                except ValueError:
+                    pass
             if ok_plain:
                 if status in ("approved-flagged", "pending-owner-decision", "owner-approved"):
                     res.violations.append(f"stale exception: {label} passes without its {status} entry — remove it")
@@ -265,20 +298,17 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
             if ok_flag and status == "approved-flagged":
                 res.flagged.append(f"FLAGGED {label} — {entry['reason']}")
             elif status == "owner-approved":
-                # an owner approval covers a permissive licence the ruling did not name; it can never admit a
-                # forbidden (copyleft / source-available) id
-                try:
-                    ids = set(L.spdx_ids(expr))
-                    clean = L.spdx_satisfied(expr, ids - forbidden_ids, allowed_exc | set(L.spdx_with_exceptions(expr)))
-                except ValueError:
-                    clean = False
-                if clean and all(entry.get(k) for k in ("approved_by", "approved_on", "attribution")):
+                # ALLOW-LIST, not deny-list: the entry names the expression it approves ('licence'), that must be the
+                # package's verified licence (unless the metadata carried none), and EVERY term in it must be in
+                # policy 'allowed' or in the closed, reviewed policy 'owner_approvable' set. Anything else
+                # (LicenseRef-Proprietary, EUPL, CDDL, CC-BY-NC, ...) needs a policy change, never just an entry.
+                problem = owner_approval_problem(entry, pkg.get("licence"), allowed, owner_approvable, allowed_exc)
+                if problem:
+                    res.violations.append(f"{label}: {problem}")
+                elif all(entry.get(k) for k in ("approved_by", "approved_on", "attribution")):
                     res.approved.append(f"APPROVED {label} — {entry['approved_by']} {entry['approved_on']}; "
                                         f"attribution: {entry['attribution']}")
-                elif clean:
-                    pass                                  # the missing field is already a violation (entry check)
-                else:
-                    res.violations.append(f"{label}: owner-approved entry cannot admit a forbidden licence id")
+                # (a missing approved_by/approved_on/attribution is already a violation from the entry check)
             elif status == "pending-owner-decision":
                 res.pending.append(f"PENDING OWNER DECISION {label} — {entry['reason']}")
             elif ok_flag:

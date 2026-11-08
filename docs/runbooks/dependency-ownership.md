@@ -41,9 +41,15 @@ read its licence file in `third_party_notices/<component>.md` and add a `reviewe
 
 All five licences the original ruling did not name were **approved by Andre on 2026-11-08**, each for the exact
 package version below. They are `owner-approved` entries in `devtools/licences/exceptions.json` (with `approved_by`,
-`approved_on` and the attribution obligation, all required by the gate); the gate lists them as `APPROVED` on every
-run and can never use such an entry to admit a forbidden (copyleft / source-available) id. A version bump drops the
-entry and the gate fails until it is re-approved.
+`approved_on`, the attribution obligation and the approved expression in `licence`, all required by the gate); the
+gate lists them as `APPROVED` on every run. Approval is an **allow-list**: the entry's expression must be the
+package's verified licence, and every term in it must be in `policy.json` `allowed` or in the closed, reviewed
+`owner_approvable` set (CC-BY-4.0, Unicode-3.0, MIT-CMU, CNRI-Python and the PDFium set FTL, IJG, libpng-2.0,
+libtiff, LicenseRef-AGG-2.3). Anything else — proprietary, EUPL, CDDL, CC-BY-NC, any copyleft — fails and needs a
+policy change with the owner, never just an exceptions entry. `.github/CODEOWNERS` names @DarksiedCEO for
+`devtools/licences/`, `licence_gate.py` and `licence_lib.py`; that review is enforced only once branch protection
+requires code-owner review (an owner setting). A version bump drops the entry and the gate fails until it is
+re-approved.
 
 | Package | Component (shipped in) | Licence | Attribution obligation (kept in THIRD_PARTY_NOTICES.md) |
 |---|---|---|---|

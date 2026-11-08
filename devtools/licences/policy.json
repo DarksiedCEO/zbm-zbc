@@ -23,6 +23,18 @@
     "Python-2.0": "PSF family: SPDX id of the Python licence stack, of which PSF-2.0 is the current part",
     "LLVM-exception": "a WITH exception that only adds permissions to Apache-2.0"
   },
+  "owner_approvable": {
+    "_doc": "CLOSED set of permissive, attribution-only licences the owner has reviewed (2026-11-08). An exceptions.json owner-approved entry can admit a licence id only if it is listed here (or in 'allowed'); adding an id is a policy change made with the owner, never an exceptions entry. Copyleft, source-available, non-commercial and proprietary licences can never be listed.",
+    "CC-BY-4.0": "Creative Commons Attribution 4.0 (caniuse-lite data; pypdfium2 docs) - attribution only",
+    "Unicode-3.0": "Unicode License v3 (unicode-ident data tables; ICU in pypdfium2's PDFium) - notice only",
+    "MIT-CMU": "CMU/PIL MIT-style notice (pillow) - notice only",
+    "CNRI-Python": "CNRI part of the historical Python licence stack (regex) - notice only",
+    "FTL": "FreeType Project licence (PDFium in pypdfium2) - notice + credit in documentation",
+    "IJG": "Independent JPEG Group licence (libjpeg-turbo in PDFium) - notice + credit in documentation",
+    "libpng-2.0": "PNG Reference Library License v2 (libpng in PDFium) - notice only",
+    "libtiff": "libtiff licence (PDFium) - notice only",
+    "LicenseRef-AGG-2.3": "Anti-Grain Geometry 2.3 notice (PDFium) - notice only"
+  },
   "flagged": [
     "MPL-2.0"
   ],

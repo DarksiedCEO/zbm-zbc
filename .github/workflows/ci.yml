@@ -978,10 +978,6 @@ jobs:
       - name: docs/test-counts.md is present and well-formed
         run: python devtools/hygiene_check.py counts --check
 
-  # ---------------------------------------------------------------------------------------------------------------
-  # The one check branch protection requires. A skipped upstream job (path filter said its inputs did not change)
-  # is fine; a failed or cancelled one is not.
-  # ---------------------------------------------------------------------------------------------------------------
   # Licence gate (owner ruling 2026-11-08; wired in by owner approval 2026-11-08): every lockfile and the vendored
   # restic binary against devtools/licences/policy.json + exceptions.json, with --verify-sources re-deriving every
   # licence from the hash-verified artefact (PyPI wheels/sdists, .crate files, npm tarballs, restic's pinned Go
@@ -1029,6 +1025,10 @@ jobs:
           if [ "$code" = 0 ]; then echo "::notice title=licence gate::${summary}"; else echo "::error title=licence gate (exit $code)::${summary:-no summary - the gate crashed, see the log}"; fi
           exit "$code"
 
+  # ---------------------------------------------------------------------------------------------------------------
+  # The one check branch protection requires. A skipped upstream job (path filter said its inputs did not change)
+  # is fine; a failed or cancelled one is not.
+  # ---------------------------------------------------------------------------------------------------------------
   required:
     name: required
     if: always()
