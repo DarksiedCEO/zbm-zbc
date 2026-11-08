@@ -85,7 +85,7 @@ A6. **Egress / SSRF.** One fixed base URL per engine; `ALLOWED_HOSTS` checked be
 B1. **One job**: classify where and how AI engines cite the client. Registry entry (`svc_manager.REGISTRY`, shown on
     `GET /seo/v1/department`): assignment, inputs (prompt set, registered domain, adapter answers, the fetcher for
     resolution) and outputs (the audit's per-prompt summary — `agents/probes.py`, unchanged — the citation-source
-    rows, and the `callum.mnc_priority/1` list). The registry now lists all seven agents; shared plumbing (the
+    rows, and the `callum.mnc_priority/2` list; /1 until review round 1). The registry now lists all seven agents; shared plumbing (the
     adapter, the engines, the primitives, the ports) is not an agent. Callum keeps one lifecycle state: a restricted
     Callum is refused 403 `AGENT_RESTRICTED` for citation runs as for audits.
 B2. **Classes** (`agents/callum.py`, rules `callum-rules/2026-11-08.2`), per cited URL: `STRENGTH_URL`,
@@ -105,7 +105,10 @@ B4. **Exact-URL resolution** (`callum.Resolver`, OFF unless `SEO_CALLUM_RESOLVE_
     `SEO_CALLUM_RESOLVE_MAX` distinct URLs per run, each fetched once): through the existing SSRF-safe fetcher
     (public addresses only, ports 80/443, redirects by hand with the cap, robots.txt honoured for `ZBM-SEO-Audit`,
     the run's kill switches before every hop). The landing URL decides, with two exceptions (review round 1):
-    **M1** a citation on a LOOKALIKE host is `LOOKALIKE_URL` wherever it lands (`CITED_HOST_LOOKALIKE`); one that
+    **M1** a citation on a LOOKALIKE host — or, since review round 2, one whose redirect chain passes through a
+    lookalike host at ANY hop (the resolver records every hop's host, `chain.hop_hosts`; flag `LOOKALIKE_HOP`), e.g.
+    `t.co` or the Gemini redirector → lookalike → client — is `LOOKALIKE_URL` wherever it lands
+    (`CITED_HOST_LOOKALIKE`); one that
     redirects ONTO the client is flagged `REDIRECTED_ONTO_CLIENT` and raises `CALLUM_LOOKALIKE_REDIRECTS_ONTO_CLIENT`
     (high, WATCH) — a lookalike forwarding to the client is suspicious, never a credit. **M2** a third-party page whose
     single valid canonical is the client's page is `CANONICAL_TO_CLIENT` `via: canonical` (flag `THIRD_PARTY_PAGE`):
@@ -133,13 +136,21 @@ B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared wi
     `agents/probes.py`): whole words; case-insensitive unless the tenant's rule says `case_sensitive`; possessives
     match deliberately (`Acme's`, `Acme’s`), plurals and other inflections deliberately do not (`Acmes`, `apples`: a
     tenant lists another form as its own term); per-tenant rules on the prompt set (`brand_term_rules`: `term`,
-    `case_sensitive`, `context_terms` — one must appear in the answer — `negative_terms` — a match within 40
-    characters of one is discarded — and `common_word`). No dictionary is bundled, so a single-word alphabetic term
+    `case_sensitive`, `context_terms` — one must appear in the answer — `negative_terms` — a match is discarded
+    when a whole-word occurrence of one, found on the full text (never on a slice: round 2), lies within 40
+    characters of the brand span — and `common_word`). Whitespace (NBSP, tabs, runs of spaces) is normalised to one
+    space in the answer and in every term before matching. No dictionary is bundled, so a single-word alphabetic term
     is treated as possibly a common word unless the tenant sets `common_word: false` (fail closed). A mention made only
     by such a term with no disambiguation is `MENTIONED_NOT_CITED` `confidence: LOW_CONFIDENCE`
     (`BRAND_TERM_MAY_BE_COMMON_WORD`): its own `mentioned_not_cited_low_confidence` rate (`headline: false`), the
     `CALLUM_MENTIONED_NOT_CITED_LOW_CONFIDENCE` finding, never in the headline rate or the MNC list. The audit summary
-    applies the tenant's rules but has no LOW_CONFIDENCE split (its shape is unchanged). A prompt set without rules
+    (review round 2) applies the same rule: a LOW-confidence mention is not counted in `mentioned` / `mention_rate`;
+    a prompt not cited whose only mentions are LOW is class `MENTION_UNCONFIRMED` (finding
+    `CITATION_MENTION_UNCONFIRMED`, INSUFFICIENT_EVIDENCE), shown in the client report as "Possible mention, not
+    confirmed" with no page recommendation, never "Mentioned but not cited"; `mentioned_unconfirmed` is added to the
+    prompt's result only when non-zero, so an audit without such mentions is byte-identical to before. NOTE: the
+    fail-closed rule treats every single-word brand (e.g. `Acme`) as possibly common until the tenant sets
+    `common_word: false` or a disambiguation rule. A prompt set without rules
     keeps its content and hash exactly as before.
 B6. **Metrics with provenance and confidence.** Per engine × prompt, per engine and in total: usable answers,
     refusals, inconclusive calls, URL counts per class, zero-citation answers, and the Mentioned-Not-Cited and
@@ -195,7 +206,7 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
 
 - No live call to any provider; no key; no spend. The first real call of each new engine needs a one-call smoke like
   Perplexity's (ADR 0017 W4-6 step 5a); there is no `smoke_one_call.py` mode for the new engines yet.
-- Roman and Adaeze do not read `callum.mnc_priority/1`; Adaeze does not exist (registry: `not_built_agents`).
+- Roman and Adaeze do not read `callum.mnc_priority/2`; Adaeze does not exist (registry: `not_built_agents`).
 - No scheduler for citation runs (the near-real-time tier is on demand; `refresh_due` says when one is due); no drift
   comparison between citation runs; no dashboard pages.
 - No consumer-app scraping, no paid SEO data vendor, no prompt-volume source (Naomi stays NOT_CONNECTED).
@@ -220,7 +231,12 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
   alias listed in `google_engine.MODEL_ALIASES` (none yet: what the live API reports is unknown); anything else is
   `MODEL_NOT_ALLOWED`, and a missing `modelVersion` is `MODEL_UNVERIFIED` — fail closed: the answer is an
   ENGINE_PROTOCOL_ERROR (INCONCLUSIVE in Callum, two in a row stop the engine), never attributed to a model it may
-  not be. If the live API omits `modelVersion`, Google stays unusable until that is decided.
+  not be. If the live API omits `modelVersion`, Google stays unusable until that is decided. SIDE EFFECT (accepted,
+  review round 2): a prompt Gemini blocks (`promptFeedback.blockReason`, no candidate) usually carries no answer and
+  may carry no `modelVersion`; it is then `MODEL_UNVERIFIED`, an ENGINE_PROTOCOL_ERROR instead of a REFUSAL, and two
+  in a row stop the engine for the run. Chosen because the alternative — accepting a response that names no model —
+  is exactly the unattributed answer L2 forbids, and a refusal is excluded from every rate anyway, so the cost is a
+  stopped engine (visible as `ENGINE_RUN_STOPPED`), never a wrong number. Revisit after the first live call.
 - The Anthropic model allowlist has not been checked against the Messages API models list (the Models overview or
   `GET /v1/models`); the web search tool page names models the tool works with, not the list (review round 1 L5).
 - Brand matching is lexical (B5a): it does not understand the answer; context and negative terms reduce, not remove,

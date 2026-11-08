@@ -15,6 +15,8 @@ Callum's classes, per engine and prompt (from the answers actually sampled):
   OPPORTUNITY           neither mentioned nor cited, while the answers cited other sources (listed)
   INSUFFICIENT_EVIDENCE fewer than 3 usable answers (refusals / errors)
   ABSENT                neither mentioned nor cited and no sources cited at all
+  MENTION_UNCONFIRMED   not cited, and the only mentions are LOW confidence (agents/brand_mention.py: a term that may be
+                        a common word, no disambiguation configured): never MENTIONED_NOT_CITED (round 2 item 4)
 
 Provider text is DATA: it is scanned for brand terms and URLs, never followed as an instruction, and dropped; the report
 keeps its SHA-256, the cited hosts (bounded), whether the tenant's site was cited and at which position. Without a
@@ -167,6 +169,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
             other_hosts: dict = {}
             sample_versions = set()
             injection_like = 0
+            unconfirmed = 0                               # LOW-confidence mentions, kept out of "mentioned"
             positions: list = []
             hashes: list = []
             zero_sources = 0
@@ -223,8 +226,11 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                 for k in getattr(a, "unmodelled_keys", ()) or ():
                     if isinstance(k, str) and len(drift_keys) < MAX_DRIFT_KEYS:
                         drift_keys.add(k[:40])
-                if _mentioned(a.text, prompt_set["brand_terms"], prompt_set.get("brand_term_rules")):
+                said = brand_mention.mention(a.text, prompt_set["brand_terms"], prompt_set.get("brand_term_rules"))
+                if said["confidence"] == brand_mention.HIGH:
                     tally["mentioned"] += 1
+                elif said["mentioned"]:
+                    unconfirmed += 1
                 pos = None
                 for c in cites:
                     m = domain_match.match(c["host"], domain)
@@ -248,7 +254,8 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
             for code, k in errors_by.items():
                 errors_seen[code] = errors_seen.get(code, 0) + k
             results.append({**_prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions,
-                                             injection_like, positions, hashes), "zero_source_answers": zero_sources})
+                                             injection_like, positions, hashes, unconfirmed),
+                            "zero_source_answers": zero_sources})
         if stop is None and not answers_total and errors_total:
             # every request failed: never OK (AEGIS H2). The reason is the most frequent error code.
             stop = sorted(errors_seen.items(), key=lambda kv: (-kv[1], kv[0]))[0][0] if errors_seen \
@@ -287,7 +294,7 @@ def _refused_prompt(pi: int, n: int, kind: str) -> dict:
 
 
 def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions, injection_like,
-                   positions, hashes) -> dict:
+                   positions, hashes, unconfirmed: int = 0) -> dict:
     k = tally["answers"]
     rate_m = tally["mentioned"] / k if k else None
     rate_c = tally["cited"] / k if k else None
@@ -303,9 +310,11 @@ def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sa
         cls = "ABSENT"
     else:
         cls = "PARTIAL_CITATION"
+    if unconfirmed and cls in ("OPPORTUNITY", "ABSENT"):
+        cls = "MENTION_UNCONFIRMED"                   # round 2 item 4: never a page recommendation from "apple pie"
     top = sorted(other_hosts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
     cited_at = [p for p in positions if p is not None]
-    return {
+    out = {
         "prompt_index": pi, "prompt": observed(prompt, 500), "samples": n, **tally,
         "errors_by_reason": dict(sorted(errors_by.items())),
         "mention_rate": None if rate_m is None else round(rate_m, 4), "mention_ci95": wilson(tally["mentioned"], k),
@@ -317,6 +326,9 @@ def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sa
         "injection_like_answers": injection_like,
         "cited_positions": positions[:50], "best_position": min(cited_at) if cited_at else None,
         "answers_sha256": hashes[:50]}
+    if unconfirmed:                                   # present only when there is one: otherwise byte-identical
+        out["mentioned_unconfirmed"] = unconfirmed
+    return out
 
 
 def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard, osei, budget=None) -> dict:
@@ -383,7 +395,7 @@ def _class_finding(engine: str, p: dict) -> dict:
     cls = p["class"]
     decision, sev = {"STRENGTH": ("WATCH", "info"), "MENTIONED_NOT_CITED": ("TEST", "medium"),
                      "OPPORTUNITY": ("TEST", "medium"), "ABSENT": ("WATCH", "low"),
-                     "PARTIAL_CITATION": ("WATCH", "low"),
+                     "PARTIAL_CITATION": ("WATCH", "low"), "MENTION_UNCONFIRMED": ("INSUFFICIENT_EVIDENCE", "low"),
                      "INSUFFICIENT_EVIDENCE": ("INSUFFICIENT_EVIDENCE", "info")}[cls]
     return finding(f"CITATION_{cls}", sev, "measured", decision, capability="P4",
                    detail={"engine": engine, "prompt_index": p["prompt_index"], "usable_answers": p["answers"],

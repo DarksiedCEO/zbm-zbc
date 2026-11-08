@@ -10,8 +10,11 @@ Matching, per brand term of the prompt set:
   - PLURALS and other inflections do NOT match deliberately: ``Acmes`` / ``apples`` are not ``Acme`` / ``Apple``.
     A tenant whose brand is usually written in another form lists that form as its own brand term. Not matching
     plurals keeps a common-word brand from matching the ordinary plural noun (``apples``);
-  - ``negative_terms``: a match with one of these words within ``WINDOW`` characters on either side is discarded
-    (``Apple`` next to ``pie`` / ``orchard``);
+  - ``negative_terms``: a match is discarded when a WHOLE-WORD occurrence of one of these words (found on the full
+    text, never on a slice, so a word cut at a window edge never looks whole: ``crispie`` is not ``pie``) lies within
+    ``WINDOW`` characters of the brand span on either side (``Apple`` next to ``pie`` / ``orchard``);
+  - whitespace is normalised first, in the answer and in every term: any run of Unicode whitespace (NBSP, tabs,
+    newlines, repeated spaces) is one space, so ``Z\u00a0Best  Media`` names ``Z Best Media``;
   - ``context_terms``: when given, a match counts only if at least one of them appears anywhere in the answer
     (``Apple`` counts only in an answer that also says ``iPhone`` or ``Mac``).
 
@@ -41,7 +44,11 @@ _SINGLE_WORD = re.compile(r"[^\W\d_]+")
 
 @functools.lru_cache(maxsize=512)
 def _pattern(term: str, case_sensitive: bool) -> "re.Pattern":
-    return re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)", 0 if case_sensitive else re.IGNORECASE)
+    return re.compile(r"(?<!\w)" + re.escape(_ws(term)) + r"(?!\w)", 0 if case_sensitive else re.IGNORECASE)
+
+
+def _ws(text: str) -> str:
+    return " ".join((text or "").split())             # str.split() splits on every Unicode whitespace, NBSP included
 
 
 def _any(text: str, words) -> bool:
@@ -75,11 +82,11 @@ def disambiguated(rule: dict) -> bool:
 def _term_named(text: str, rule: dict) -> bool:
     if rule["context_terms"] and not _any(text, rule["context_terms"]):
         return False
+    negatives = [n.span() for w in rule["negative_terms"] for n in _pattern(w, False).finditer(text)]
     for m in _pattern(rule["term"], rule["case_sensitive"]).finditer(text):
-        if rule["negative_terms"]:
-            near = text[max(0, m.start() - WINDOW):m.end() + WINDOW]
-            if _any(near, rule["negative_terms"]):
-                continue
+        # a negative counts when its whole-word span is within WINDOW characters of the brand span
+        if any(ne > m.start() - WINDOW and ns < m.end() + WINDOW for ns, ne in negatives):
+            continue
         return True
     return False
 
@@ -87,7 +94,7 @@ def _term_named(text: str, rule: dict) -> bool:
 def mention(text: str, terms: list, rules: Optional[list] = None) -> dict:
     """``{"mentioned", "confidence" (HIGH / LOW / None), "terms"}``: LOW only when every term named is a common word
     without disambiguation."""
-    t = text or ""
+    t = _ws(text)
     named = [r for r in normalise(terms, rules) if _term_named(t, r)]
     if not named:
         return {"mentioned": False, "confidence": None, "terms": []}

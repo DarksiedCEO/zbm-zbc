@@ -228,6 +228,32 @@ def test_a_lookalike_host_that_redirects_onto_the_client_is_a_lookalike_never_a_
     assert codes["CALLUM_LOOKALIKE_REDIRECTS_ONTO_CLIENT"] == "high" and "CALLUM_STRENGTH_URLS" not in codes
 
 
+@pytest.mark.parametrize("cited", ["https://t.co/AbC123",
+                                   "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA"])
+def test_a_redirect_chain_through_a_lookalike_hop_onto_the_client_is_a_lookalike(cited):
+    # round 2 item 1: every hop's host is checked, not only the cited and the final one
+    hop = "https://\u0430cme.com/fwd"
+    page = FetchResult(url=cited, state="OK", final_url="https://acme.com/pricing", status=200,
+                       content_type="text/html", charset="utf-8", body=b"<html><body>x</body></html>",
+                       redirects=[{"url": cited, "status": 301}, {"url": hop, "status": 302}])
+    r = callum.classify(collected((0, answer(text="Acme Corp helps.", cites=[cited]))),
+                        {**PS, "brand_terms": ["Acme Corp"]}, "acme.com", resolver({cited: page}),
+                        "seo-cit-" + "c" * 40, "2026-10-09T18:00:00Z", "2026-10-09T19:00:00Z")
+    row = r["rows"][0]
+    assert row["class"] == "LOOKALIKE_URL" and row["flags"] == ["LOOKALIKE_HOP", "REDIRECTED_ONTO_CLIENT"], row
+    assert row["chain"]["hop_hosts"] == [callum._host(cited), "\u0430cme.com"]
+    m = r["metrics"]["by_engine_prompt"][0]
+    assert m["strength_urls"] == 0 and m["lookalike_redirects_onto_client"] == 1
+    assert any(f["code"] == "CALLUM_LOOKALIKE_REDIRECTS_ONTO_CLIENT" and f["severity"] == "high"
+               for f in callum._findings(r, {}))
+    clean = FetchResult(url=cited, state="OK", final_url="https://acme.com/pricing", status=200,
+                        content_type="text/html", charset="utf-8", body=b"<html><body>x</body></html>",
+                        redirects=[{"url": cited, "status": 301}, {"url": "https://news.test/x", "status": 302}])
+    r2 = callum.classify(collected((0, answer(text="x", cites=[cited]))), PS, "acme.com", resolver({cited: clean}),
+                         "seo-cit-" + "c" * 40, "2026-10-09T18:00:00Z", "2026-10-09T19:00:00Z")
+    assert r2["rows"][0]["class"] == "STRENGTH_URL"                                # no lookalike hop: credited
+
+
 def test_a_lookalike_host_is_a_lookalike_wherever_it_lands_and_unresolved():
     cited = "https://xn--cme-5cd.com/go"
     for res in (resolver({cited: ok_page(cited, "https://competitor.test/x", 1)}), off()):
@@ -799,3 +825,45 @@ def test_perplexity_per_run_caps_are_opt_in_and_bind_when_set(tmp_path):
     c2 = base.callum(base.run_audit(h2, base.setup_zbm(h2)))
     assert c2["outcome"] == "BLOCKED" and c2["facts"]["engines"]["perplexity"]["reason_detail"] == "RUN_SPEND_CAP"
     assert f2.requests == []
+
+
+def test_negative_terms_are_whole_words_on_the_full_text_and_whitespace_is_normalised():
+    # round 2 item 3: no slicing before matching, so a word cut at the window edge never looks whole
+    bm = callum.brand_mention
+    neg = [{"term": "Apple", "negative_terms": ["pie"]}]
+    assert bm.mentioned("crispie" + " " * 37 + "Apple ships the iPhone", ["Apple"], neg)
+    assert bm.mentioned("crispie" + "x" * 30 + " Apple ships", ["Apple"], neg)
+    assert not bm.mentioned("Apple pie", ["Apple"], neg)
+    assert not bm.mentioned("pie, " + "a" * 30 + " Apple", ["Apple"], neg)            # within 40 of the span
+    assert bm.mentioned("pie. " + "word " * 10 + "Apple", ["Apple"], neg)              # 50 characters away
+    assert bm.mentioned("Try Z Best   Media\ttoday", ["Z Best Media"])
+    assert bm.mentioned("Try Z Best Media", ["Z Best  Media"])
+    assert bm.mentioned("Z Best\nMedia, again", ["Z Best Media"], [{"term": "Z Best Media", "case_sensitive": True}])
+
+
+def _apple_audit(tmp_path, text, rules=None):
+    import test_client_report as tcr
+    f = base.FakePerplexity(base.ok(base.sonar(text=text, citations=["https://recipes.test/pie"])))
+    h = base.svc_harness(tmp_path, f)
+    h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": ["site.test"]}, andre=True))
+    body = {"request_id": rid(), "name": "core", "brand_terms": ["Apple"], "prompts": ["best dessert ideas"],
+            "engines": ["perplexity"]}
+    if rules:
+        body["brand_term_rules"] = rules
+    ps = h.ok(h.post("/tenants/zbm/prompt-sets", body), 201)["prompt_set_id"]
+    v = base.run_audit(h, ps)
+    p = base.callum(v)["facts"]["engines"]["perplexity"]["prompts"][0]
+    md = h.ok(tcr._report(h, "zbm", v["audit_id"], fmt="markdown"))["content"]
+    return p, md
+
+
+def test_the_audit_never_turns_a_common_word_mention_into_a_client_page_recommendation(tmp_path):
+    # round 2 item 4: the audit path applies the same LOW_CONFIDENCE rule as Callum's citation runs
+    p, md = _apple_audit(tmp_path / "a", "Try this apple pie recipe.")
+    assert p["class"] == "MENTION_UNCONFIRMED" and p["mentioned"] == 0 and p["mentioned_unconfirmed"] == 3
+    assert "Mentioned but not cited" not in md and "Publish a clear, crawlable page" not in md
+    assert "Possible mention, not confirmed" in md and "No page change is suggested" in md
+    # with disambiguation configured the same brand is a confirmed mention again
+    p2, md2 = _apple_audit(tmp_path / "b", "Apple sells the iPhone.", [{"term": "Apple", "context_terms": ["iPhone"]}])
+    assert p2["class"] == "MENTIONED_NOT_CITED" and p2["mentioned"] == 3 and "mentioned_unconfirmed" not in p2
+    assert "Mentioned but not cited" in md2

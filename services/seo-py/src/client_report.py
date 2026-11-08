@@ -329,6 +329,10 @@ _R = {
     "CITATION_ABSENT": ("Not mentioned or cited (no sources cited at all)", "Monitor: the answers cited no sources "
                         "for this question.", (("engine", "token"), ("prompt_index", "prompt"),
                                                ("usable_answers", "num"))),
+    "CITATION_MENTION_UNCONFIRMED": ("Possible mention, not confirmed", "No page change is suggested: your brand "
+                                     "name is also an everyday word, so these answers may not be about you. Add "
+                                     "context or negative terms to the prompt set to confirm.",
+                                     (("engine", "token"), ("prompt_index", "prompt"), ("usable_answers", "num"))),
     "CITATION_PARTIAL_CITATION": ("Cited in some answers", "Monitor and keep the cited pages current.",
                                   (("engine", "token"), ("prompt_index", "prompt"), ("usable_answers", "num"),
                                    ("citation_rate", "rate"), ("mention_rate", "rate"))),

@@ -248,7 +248,8 @@ class Resolver:
             self.enabled = False
             return {"state": "KILLED"}
         if r.state != "OK":
-            return {"state": "FAILED", "detail": r.state, "redirects": len(r.redirects)}
+            return {"state": "FAILED", "detail": r.state, "redirects": len(r.redirects),
+                    "hop_hosts": _hop_hosts(r.redirects)}
         canonical = None
         if (r.content_type or "").startswith("text/html") and r.body:
             try:
@@ -258,6 +259,7 @@ class Resolver:
             except Exception:  # noqa: BLE001 - an unreadable page has no canonical
                 canonical = None
         return {"state": "RESOLVED", "final_url": r.final_url or url, "redirects": len(r.redirects),
+                "hop_hosts": _hop_hosts(r.redirects),
                 "status": r.status, "canonical_url": canonical}
 
 
@@ -288,6 +290,16 @@ def stored_url(url: Optional[str]) -> Optional[dict]:
     return {"url": kept, "host": host, "query_dropped": bool(p.query or p.fragment), "withheld": withheld}
 
 
+def _hop_hosts(redirects) -> list:
+    """The host of every URL the fetcher was redirected FROM, in order (the cited URL first; round 2 item 1). Hosts
+    only, bounded: the paths of intermediate hops are not kept."""
+    out = []
+    for h in redirects or ():
+        u = h.get("url") if isinstance(h, dict) else None
+        out.append(_host(u)[:253])
+    return out[:20]
+
+
 def _host(url: Optional[str]) -> str:
     p = split_url(url) if url else None
     return (p.hostname or "").lower() if p is not None else ""
@@ -298,7 +310,7 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
     chain = {"cited": stored_url(url), "resolution": res.get("state"),
              "final": stored_url(res.get("final_url")) if res.get("state") == "RESOLVED" else None,
              "canonical": stored_url(res.get("canonical_url")) if res.get("canonical_url") else None,
-             "redirects": res.get("redirects")}
+             "redirects": res.get("redirects"), "hop_hosts": list(res.get("hop_hosts") or [])}
     flags: list = []
     cited_host = _host(url)
     if res.get("state") == "RESOLVED":
@@ -320,10 +332,14 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
                 "flags": ["REDIRECTOR_DID_NOT_REDIRECT"], "competitor": False}
     m = domain_match.match(host, domain)
     on_client = m in (domain_match.EXACT, domain_match.SUBDOMAIN)
-    if cited_host and domain_match.match(cited_host, domain) == domain_match.LOOKALIKE:
-        # M1: a citation on a lookalike host is never the client, wherever it redirects; one that lands on the client
-        # is a risk signal (who controls a lookalike that forwards to the client?), surfaced, never credited
-        flags.append("CITED_HOST_LOOKALIKE")
+    hop_lookalike = any(h and domain_match.match(h, domain) == domain_match.LOOKALIKE
+                        for h in (res.get("hop_hosts") or [])[1:])
+    cited_lookalike = bool(cited_host) and domain_match.match(cited_host, domain) == domain_match.LOOKALIKE
+    if cited_lookalike or (hop_lookalike and res.get("state") == "RESOLVED"):
+        # M1 / round 2 item 1: a citation on a lookalike host, or one whose redirect chain passes through a lookalike
+        # host at ANY hop, is never the client wherever it lands; landing on the client is a risk signal (who
+        # controls a lookalike that forwards to the client?), surfaced, never credited
+        flags.append("CITED_HOST_LOOKALIKE" if cited_lookalike else "LOOKALIKE_HOP")
         if on_client and via == "redirect":
             flags.append("REDIRECTED_ONTO_CLIENT")
         return {"class": "LOOKALIKE_URL", "reason": None, "via": via, "chain": chain, "flags": flags,
