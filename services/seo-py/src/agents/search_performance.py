@@ -37,6 +37,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import math
 import re
 import unicodedata
 from collections.abc import Iterable
@@ -47,10 +48,13 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.9"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.10"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.10 (review round 10): one shared character normalisation (clean_text) for the classifier and Priya's
+#    key; the full word rules on secret-chunked queries with separators removed; URL-safe base64 decoded, base64
+#    needs a tell or a sensitive decode; cards across up to three filler characters; spelled-out digit runs
 # 2026-11-08.9 (review round 9): combining marks / format characters stripped before every check; ideographic and
 #    fullwidth full stops; IPv6, hex IPv4, script schemes, spaced / "dot" hosts URL-like; split hex and base64 text;
 #    cards split by single filler letters
@@ -361,25 +365,56 @@ URL_LIKE_RULE = ("scheme or '://', 'www.', a percent escape left after three dec
 _DOTS = str.maketrans({"\u3002": ".", "\uff61": ".", "\uff0e": ".", "\u2024": ".", "\ufe52": "."})
 
 
+_SPACE_CATS = frozenset(("Cc", "Co", "Cs", "Cn", "Zs", "Zl", "Zp"))
+
+
+def clean_text(t: str, keep_script_marks: bool) -> str:
+    """The ONE character normalisation shared by the classifier and Priya's stored key (review round 10). NFKC;
+    format characters (Cf) and default-ignorable code points deleted; variation selectors deleted; control (Cc),
+    private-use (Co), surrogate, unassigned and every space or line / paragraph separator (Zs, Zl, Zp: U+00A0,
+    U+2007, U+202F ...) made one ASCII space; ideographic / fullwidth full stops made '.'. Combining marks (Mn, Me):
+    in the detection form (``keep_script_marks=False``) the text is NFKD-decomposed first and every mark removed
+    (``Á`` is judged as ``A``) and other-script decimal digits are made ASCII; in the key form only marks sitting on an
+    ASCII character are removed, so script marks (Devanagari, Thai, Hebrew points) and NFKC-composed letters
+    (``café``) are kept."""
+    t = unicodedata.normalize("NFKD" if not keep_script_marks else "NFKC", t or "")
+    t = lookalikes.strip_invisible(t)
+    out, base_ascii = [], False
+    for c in t:
+        cat = unicodedata.category(c)
+        if "︀" <= c <= "️" or "\U000e0100" <= c <= "\U000e01ef" or cat == "Cf":
+            continue
+        if cat in _SPACE_CATS:
+            out.append(" ")
+            base_ascii = True
+            continue
+        if cat in ("Mn", "Me"):
+            if not keep_script_marks or base_ascii:
+                continue
+            out.append(c)
+            continue
+        base_ascii = ord(c) < 128
+        if not keep_script_marks and cat == "Nd" and not c.isascii():
+            c = str(unicodedata.digit(c))          # detection form: other-script digits (٤, ४) judged as ASCII
+        out.append(c)
+    return unicodedata.normalize("NFKC", "".join(out)).translate(_DOTS)
+
+
 def strip_marks(t: str) -> str:
-    """Remove every Mn / Me / Cf character and the variation selectors (U+FE00-FE0F), after NFKD, then NFKC again:
-    the detection form (``Á`` is judged as ``A``). Never stored."""
-    t = unicodedata.normalize("NFKD", t)
-    t = "".join(c for c in t if unicodedata.category(c) not in ("Mn", "Me", "Cf") and not "\ufe00" <= c <= "\ufe0f")
-    return unicodedata.normalize("NFKC", t)
+    """The detection form of ``t`` (``clean_text`` without script marks). Never stored."""
+    return clean_text(t, keep_script_marks=False)
 
 
 def decode_query(q: str) -> str:
-    """Up to three percent-decodes (a double-encoded secret is decoded too), then NFKC, invisible characters out,
-    combining marks / format characters stripped (round 9) and ideographic / fullwidth full stops made '.'."""
+    """Up to three percent-decodes (a double-encoded secret is decoded too), then the detection form
+    (``clean_text``)."""
     t = q or ""
     for _ in range(3):
         u = unquote(t)
         if u == t:
             break
         t = u
-    t = lookalikes.strip_invisible(unicodedata.normalize("NFKC", t))
-    return strip_marks(t).translate(_DOTS)
+    return strip_marks(t)
 
 
 def url_like(folded: str) -> bool:
@@ -399,24 +434,53 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
-# digits with separators, or with a single filler letter between groups ("4539 x 1488 x 0343 x 6467"; round 9)
-_CARD_RUN = re.compile(r"\d(?:[\s\-/._]{0,3}(?:[a-z][\s\-/._]{0,3})?\d)+")
+# digit groups joined by separators and at most one short filler token of up to three characters between them
+# ("4539 x 1488", "4111-ab-1111", "4111 xy 1111"; round 10)
+_DIGIT_GROUPS = re.compile(r"\d+(?:[\s\-/._,:;]{0,3}[^\d\s]{0,3}[\s\-/._,:;]{0,3}\d+)*")
+_NUMBER_WORDS = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+                 "seven": "7", "eight": "8", "nine": "9"}
+_SPELLED = re.compile(r"(?:\b(?:" + "|".join(_NUMBER_WORDS) + r")\b[\s\-,.]*){7,}")
+
+
+def spelled_digits(folded: str) -> str:
+    """Runs of 7+ spelled-out digits as digits ("four one one one ..." -> "4111..."; round 10), else ""."""
+    return " ".join("".join(_NUMBER_WORDS[w] for w in re.findall(r"[a-z]+", m.group()))
+                    for m in _SPELLED.finditer(folded))
 
 
 def card_like(folded: str) -> bool:
-    """A Luhn-valid run of 13-19 digits once spaces, '-', '/' and '.' are removed, whatever its groups look like
-    (``4000 2019 2020 2021``; review round 8). A list of years that happens to pass Luhn is dropped too."""
-    for m in _CARD_RUN.finditer(folded):
-        d = re.sub(r"\D", "", m.group())
-        if 13 <= len(d) <= 19 and _luhn(d):
-            return True
+    """A Luhn-valid run of 13-19 digits made of consecutive digit groups, whatever separates the groups (separators
+    and at most one filler token of up to three characters: spaces, '-', '/', '.', ' x ', '-ab-') and whatever the
+    groups look like (``4000 2019 2020 2021``, ``4539 x 1488 x 0343 x 6467``); every window of consecutive groups is
+    tried. A list of years that happens to pass Luhn is dropped too."""
+    for m in _DIGIT_GROUPS.finditer(folded):
+        groups = re.findall(r"\d+", m.group())
+        for i in range(len(groups)):
+            d = ""
+            for g in groups[i:]:
+                d += g
+                if len(d) > 19:
+                    break
+                if len(d) >= 13 and _luhn(d):
+                    return True
     return False
 
 
+def _entropy(w: str) -> float:
+    if not w:
+        return 0.0
+    n = len(w)
+    return -sum((k / n) * math.log2(k / n) for k in (w.count(c) for c in set(w)))
+
+
 def split_secret(folded: str) -> bool:
-    """A secret split by separators (review round 8): each space-separated word with '/', '-', '_' and '.' removed
-    is judged by the word rules (``abcd-1234-efgh-5678-ijkl-9012``), and the whole query with spaces removed too by
-    the known-prefix and letter-digit alternation rules only (normal multi-word queries never alternate that much)."""
+    """A secret split by separators (rounds 8-10): each space-separated word with '/', '-', '_' and '.' removed is
+    judged by the word rules (``abcd-1234-efgh-5678-ijkl-9012``); the whole query with spaces and separators removed
+    by the prefix, alternation and hex rules always, and by the FULL word rule set (20+ token characters, 16+
+    mixed, entropy) when it is chunked like a secret: at least two words mixing letters and digits, and more than
+    half of all words (``9f86d081 884c7d65``, ``ab12 cd34 ef56``; ``ps5 2tb ssd upgrade`` is two of four, kept).
+    Ordinary queries hold at most one model number per few words, so ``trane xr14 4 ton`` and ``3 bed 2 bath 1500
+    sq ft`` are not judged as one token."""
     for w in folded.split():
         j = re.sub(r"[/\-_.]", "", w)
         if j != w and j and _word_identifies(j):
@@ -433,28 +497,50 @@ def split_secret(folded: str) -> bool:
         h = m.group()
         if sum(c.isdigit() for c in h) >= 4 and sum(c.isalpha() for c in h) >= 4:
             return True
-    return False
-
-
-def base64_text(cased: str) -> bool:
-    """Base64 of readable text, split or not (round 9: "amFuZS5kb2 VAZXhhbXBs ZS5jb20="): the query with spaces and
-    separators removed, case kept, decodes as base64 to 9+ bytes that are nearly all printable ASCII. Ordinary
-    words decode to binary noise, so they are not hit."""
-    whole = re.sub(r"[\s\-_.]", "", cased)
-    if len(whole) < 12 or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", whole):
-        return False
-    body = whole.rstrip("=")
-    for cand in (body, body.replace("-", "+")):
-        try:
-            raw = base64.b64decode(cand + "=" * (-len(cand) % 4), validate=True)
-        except (binascii.Error, ValueError):
-            continue
-        if len(raw) >= 9 and sum(32 <= b < 127 for b in raw) >= 0.95 * len(raw):
+    words = folded.split()
+    mixed = [w for w in words if any(c.isalpha() for c in w) and any(c.isdigit() for c in w)]
+    if len(words) >= 2 and len(mixed) >= 2 and 2 * len(mixed) > len(words):
+        if _word_identifies(whole):
+            return True
+        if len(alnum) >= 16 and _entropy(alnum) >= 3.5:
             return True
     return False
 
 
-def classify_query(q: str, brands: list) -> str:
+def _b64_candidates(cased: str) -> list:
+    """Spaceless candidates, case kept (round 10): the URL-safe alphabet mapped to the standard one BEFORE anything
+    else ('-' to '+', '_' to '/'), and, separately, '-', '_' and '.' read as separators and removed."""
+    spaceless = re.sub(r"\s", "", cased)
+    return [spaceless.replace("-", "+").replace("_", "/"), re.sub(r"[\-_.]", "", spaceless)]
+
+
+def base64_text(cased: str, _depth: int = 0) -> bool:
+    """Base64 (standard or URL-safe), split or not, whose decoded bytes are 9+ and nearly all printable, AND that
+    shows a base64 tell or decodes to something sensitive (round 10, against over-drop): a tell is '=' padding, a
+    '+' or '/' inside, or a mixed-case-and-digit body of 16+ characters with entropy 3.5+ whose length is a multiple
+    of 4; sensitive is decoded text the classifier itself calls personal data (one level deep). Mixed-case English
+    ("PlayStation Plus Games") decodes to noise or shows no tell, so it is kept."""
+    for whole in _b64_candidates(cased):
+        if len(whole) < 12 or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", whole):
+            continue
+        body = whole.rstrip("=")
+        try:
+            raw = base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        if len(raw) < 9 or sum(32 <= b < 127 for b in raw) < 0.95 * len(raw):
+            continue
+        tell = whole.endswith("=") or "+" in body or "/" in body or (
+            len(body) >= 16 and len(body) % 4 == 0 and any(c.isdigit() for c in body)
+            and any(c.isupper() for c in body) and any(c.islower() for c in body) and _entropy(body) >= 3.5)
+        if tell:
+            return True
+        if _depth == 0 and classify_query(raw.decode("ascii", "replace"), [], _depth=1) == "pii_suspect":
+            return True
+    return False
+
+
+def classify_query(q: str, brands: list, _depth: int = 0) -> str:
     """One query -> one class from ``QUERY_CLASSES``; the text is not kept. PII first (judged on the lookalike fold,
     after invisible characters are removed, like the log templater)."""
     if len(q or "") > MAX_QUERY_CHARS:          # too long to classify cheaply: dropped as personal data, counted
@@ -464,10 +550,12 @@ def classify_query(q: str, brands: list) -> str:
         return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
-    if url_like(folded) or base64_text(t) or "@" in folded or logs_mod._EMAIL.search(folded) \
+    spelled = spelled_digits(folded)
+    if url_like(folded) or base64_text(t, _depth) or "@" in folded or logs_mod._EMAIL.search(folded) \
             or logs_mod._AT_WORD.search(folded) \
             or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
-            or card_like(folded) or split_secret(folded) or looks_like_address(folded):
+            or card_like(folded) or split_secret(folded) or looks_like_address(folded) \
+            or (spelled and (longest_digit_run(spelled) >= PII_DIGIT_RUN or card_like(spelled))):
         return "pii_suspect"
     squashed = re.sub(r"[^a-z0-9]", "", folded)
     if any(b in squashed for b in brands):

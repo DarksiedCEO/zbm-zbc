@@ -629,7 +629,7 @@ GSC-12. **Limitations (honest).**
      the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
    - Names in queries are not detected as such; they are safe only because no query text is kept. Address-shaped
      queries, PO boxes, PMB numbers, rural routes, ZIP+4, a state with a ZIP, UK and Canadian postcodes, French
-     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.9`
+     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.10`
      (ADR 0047, "Personal data"); the id / token word rule no longer drops model numbers, tire sizes, decimals or
      years (`24acc636a003`, `225/65r17`, `3.5`, `2012`). Not caught: bare named streets with no suffix (`1200
      broadway`, `123 n main`), landmark or building-name addresses, streets with more than three name words or an
@@ -640,8 +640,11 @@ GSC-12. **Limitations (honest).**
      never counted in another class; a Luhn-valid 13-19 digit run is a card number whatever its groups; split
      secrets are judged with separators removed. Round 9: combining marks / format characters are stripped before
      every check; IPv6, hex IPv4, script schemes and spaced / "dot" hosts are URL-like; split hex and base64 text
-     and cards split by filler letters drop. Not caught: dotted octal / hex IPv4, "dot" hosts with uncommon TLDs,
-     split base64 of binary data, numbers spelled out in words. Not caught: base64 under 12 characters, a random password written as a plain word. Over-dropped: a non-address shaped
+     and cards split by filler letters drop. Round 10: one character normalisation shared with Priya's stored key;
+     the full word rules on secret-chunked queries; URL-safe base64 (with a tell); cards across short filler
+     tokens; spelled-out digit runs; a table-driven attack corpus (`tests/attack_corpus.py`). Not caught: dotted
+     octal / hex IPv4, "dot" hosts with uncommon TLDs, split base64 of binary data, a phone or SSN with a filler
+     letter between groups, an address spaced out character by character. Not caught: base64 under 12 characters, a random password written as a plain word. Over-dropped: a non-address shaped
      like `<number> <word> st|ave|dr…` or `<number> <word> court|place|way` at the end of a query. Osei keeps no query
      text, so a miss changes only which class a query is counted in; the client report's label lists what is set
      aside. Page templates

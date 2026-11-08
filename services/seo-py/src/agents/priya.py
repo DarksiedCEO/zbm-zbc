@@ -156,8 +156,11 @@ LIMITS = [
     "Combining marks, keycaps, underlines and format characters are stripped before every check, and stray ones "
     "on ASCII are removed from the stored key; IPv6, hex IPv4, script schemes (javascript:, data:, file:) and "
     "hosts written 'example . com' or 'example dot com' count as URLs; hex and base64 text split by spaces is "
-    "caught. Still not caught: dotted octal or hex IPv4 ('0300.0250.1.1'), a 'dot' host with an uncommon TLD, "
-    "base64 of binary data split into short words, and numbers spelled out in words. The "
+    "caught. One character normalisation is shared by the classifier and the stored key (controls, private-use "
+    "and space variants become spaces), so a split value cannot reappear joined in the ledger; spelled-out digit "
+    "runs, URL-safe base64 and cards across short filler tokens are caught. Still not caught: dotted octal or hex "
+    "IPv4 ('0300.0250.1.1'), a 'dot' host with an uncommon TLD, base64 of binary data split into short words, a "
+    "phone or SSN with a filler letter between its groups, and an address spaced out character by character. The "
     "rule also drops some non-addresses shaped like '<number> <word> st' or '<number> <word> court'. Derived "
     "variants are never built from a query with a capitalised word, nor from a frame adding a word outside a "
     "closed vocabulary.",
@@ -167,32 +170,12 @@ LIMITS = [
 
 # ====================================================================== text
 
-def _strip_stray_marks(t: str) -> str:
-    """Round 9: combining marks (Mn / Me) left after NFKC, format characters (Cf) and variation selectors are removed
-    from the stored key when they sit on an ASCII character (``555\u0301``, ``4\u20e3``, ``1\u0332``) — they can only
-    disguise; marks that belong to a script (Devanagari, Thai, Hebrew points ...) are kept. NFKC has already
-    composed ``é`` and the like into one character, so ``café`` is unchanged."""
-    out, base_ascii = [], False
-    for c in t:
-        cat = unicodedata.category(c)
-        if cat == "Cf" or "\ufe00" <= c <= "\ufe0f":
-            continue
-        if cat in ("Mn", "Me"):
-            if base_ascii:
-                continue
-        else:
-            base_ascii = ord(c) < 128
-        out.append(c)
-    return "".join(out)
-
-
 def normalize(q: str) -> str:
-    """The ledger's key text: NFKC, invisible characters removed, stray combining marks on ASCII removed (round 9),
-    case-folded, whitespace collapsed. Unicode is kept (``café``, ``東京 ホテル``); control characters become
-    spaces."""
-    t = _strip_stray_marks(lookalikes.strip_invisible(unicodedata.normalize("NFKC", q or "")))
-    t = "".join(ch if ch.isprintable() else " " for ch in t)
-    return " ".join(t.casefold().split())
+    """The ledger's key text: ``search_performance.clean_text`` in its key form — the same character normalisation
+    the classifier uses (round 10: NFKC; format characters, default-ignorables and variation selectors deleted;
+    controls, private-use and every space variant made a space; stray combining marks on ASCII removed, script marks
+    kept) — then case-folded, whitespace collapsed. Unicode is kept (``café``, ``東京 ホテル``)."""
+    return " ".join(sp.clean_text(q or "", keep_script_marks=True).casefold().split())
 
 
 def near_key(norm: str) -> str:

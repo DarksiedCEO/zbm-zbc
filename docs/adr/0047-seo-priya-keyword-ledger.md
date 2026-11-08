@@ -145,7 +145,7 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.9`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.10`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -159,6 +159,23 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   alternation and (round 9) hex rules (16+ hex characters with 4+ digits and 4+ letters: `9f86d081 884c7d65 …`);
   base64 of readable text, split or not (round 9: case kept, separators removed, decodes to 9+ nearly all printable
   bytes: `amFuZS5kb2 VAZXhhbXBs ZS5jb20=`);
+- **one shared character normalisation** (round 10, `search_performance.clean_text`): the classifier's detection
+  form and Priya's stored key (`priya.normalize`) use the same rules — NFKC; format characters, default-ignorables
+  and variation selectors deleted; control (Cc), private-use (Co), unassigned and every space / line / paragraph
+  separator (U+00A0, U+2007, U+202F, U+3000 …) made one space; ideographic and fullwidth full stops read as `.`.
+  The detection form also removes every combining mark after NFKD and folds other-script digits (`٤`, `४`) to
+  ASCII; the key form removes only marks sitting on ASCII. A test asserts that `normalize(q)` of every DROP case is
+  itself dropped, so a value split by a control character can never reach the ledger joined;
+- the separator-stripped text of a query **chunked like a secret** (round 10: at least two words mixing letters
+  and digits, and more than half of all words) is judged by the FULL word rule set — 20+ token characters, 16+
+  mixed, alternation, hex, and an entropy check (16+ characters at 3.5+ bits per character);
+- base64 (round 10): the URL-safe alphabet (`-`, `_`) is mapped to the standard one before decoding, and `-` `_` `.`
+  are also tried as separators; a decode counts only with a base64 tell (`=` padding, `+` / `/`, or a 16+
+  character mixed-case-and-digit body of length divisible by 4 with entropy 3.5+) or when the decoded text is
+  itself personal data — 33 mixed-case English and Spanish queries (`PlayStation Plus Games`, `Mejor Restaurante
+  En Madrid`) are KEEP tests;
+- spelled-out digits (round 10): 7+ number words in a row (`four one one one …`) are read as digits for the digit
+  run and card rules;
 - **combining marks and format characters** (round 9): every check runs on a detection form with all Mn / Me / Cf
   characters and variation selectors removed after NFKD (`5́ 5 5`, keycap `4⃣`, underline `1̲`,
   `Á Ḱ …`), and ideographic / fullwidth full stops (`。`, `｡`, `．`) read as `.`. The stored ledger key
@@ -172,16 +189,24 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   dropped, ordinary ones included** (`docs.example.com/v2/api/reference`, `shop.com/search?q=rugs`): URL-shaped
   search queries are rare and of little value in a keyword ledger, and privacy beats recall. Also dropped as URLs:
   tech names that are domains (`asp.net`); `50% off` and `node.js` are kept;
-- a **card number** (round 8): a Luhn-valid run of 13-19 digits once spaces, `-`, `/`, `.`, `_` and (round 9) single
-  filler letters between groups are removed, whatever its groups look like (`4000 2019 2020 2021`,
+- a **card number** (round 8): a Luhn-valid run of 13-19 consecutive digit groups, whatever separates the groups —
+  separators and (rounds 9-10) at most one filler token of up to three characters (` x `, `-ab-`, ` xy `), every
+  window of consecutive groups tried — whatever its groups look like (`4000 2019 2020 2021`,
   `4539 x 1488 x 0343 x 6467`); a list of years that happens to pass Luhn is dropped too;
 - URL-like additions (round 9): IPv6 literals (`2001:db8::1`, `fe80::…`, `::1`), hex IPv4 (`0xc0a80101`; decimal
   `3232235777` is the digit-run rule's), `javascript:` / `vbscript:` / `data:` / `file:` / `blob:` / `mailto:` /
   `ftp:` schemes, and hosts written with spaces or "dot" (`example . com`, `example dot com`, `example (dot) com`,
   `example [.] com`) for common TLDs, the label not a stop word (`the dot com bubble` is kept).
   **Still not caught (round 9, disclosed):** dotted octal or hex IPv4 (`0300.0250.1.1`, `0xc0.0xa8.1.1`); a
-  "dot" host with an uncommon TLD; base64 of binary data split into short words; numbers spelled out in words
-  (`five five five …`); a time-like `hh:mm:ss` is kept and an IPv6 literal of three short groups could be missed;
+  "dot" host with an uncommon TLD; base64 of binary data split into short words; a time-like `hh:mm:ss` is kept
+  and an IPv6 literal of three short groups could be missed. Round 10: a phone or SSN-shaped number with a filler
+  letter between its groups (too few digits for Luhn, and the letter breaks the 7-digit run), and an address
+  (IP, IPv6, URL) spaced out character by character, are not caught — both pinned as known gaps in
+  `tests/attack_corpus.py`, the table-driven corpus (public test card numbers, AWS's documentation example key,
+  RFC 5737 / RFC 3849 addresses, example.com) that applies every obfuscation — combining marks, zero-width, bidi,
+  fullwidth, mathematical, circled, superscript and other-script digits, Cyrillic homoglyphs, eleven separators
+  (each character / each group), spelled-out digits, reversal and filler letters / tokens — and that reviewers
+  can run directly; all of its 388 generated cases drop;
   7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
