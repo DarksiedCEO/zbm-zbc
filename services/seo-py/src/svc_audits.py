@@ -244,7 +244,7 @@ class AuditsMixin:
         started = iso(self.now())
         ctx = RunContext(fetcher=self.ports.fetcher, renderer=self.ports.renderer, guard=self.guard(tid),
                          clock=self.clock, osei=o, domain=body["domain"], scheme=body["scheme"],
-                         paths=list(body["paths"]))
+                         paths=list(body["paths"]), max_pages=self.settings.audit_max_pages)
         envs, pages = [], {}
         if self.ports.fetcher is None:
             envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",
@@ -287,7 +287,10 @@ class AuditsMixin:
         nc = sorted(set(self.ports.not_connected()) | {x for e in envs for x in e["not_connected"]})
         return {
             "report_version": REPORT_VERSION, "audit_id": aid, "tenant_id": tid, "domain": body["domain"],
-            "scheme": body["scheme"], "paths": list(body["paths"]), "started_at": started,
+            "scheme": body["scheme"], "paths": list(body["paths"]),
+            # pages read beyond the request: same-site links of the requested pages (Selene's bounded discovery)
+            "discovered_paths": [p for p in pages if p not in body["paths"]],
+            "started_at": started,
             "finished_at": iso(self.now()), "outcome": overall_outcome(envs),
             "outcome_rule": OUTCOME_RULE,
             "agents": envs,

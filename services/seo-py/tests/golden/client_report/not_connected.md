@@ -2,14 +2,27 @@
 
 Prepared by Z Best Media.
 
-## Cover
+## Executive summary
+
+**No area could be checked (0 of 6).** 1 page(s), as requested.
+
+**Not covered by this report:**
+
+- Crawlability: not checked. No page of your site could be read.
+- Sitemaps and ` llms.txt `: not checked. This audit did not include this check.
+- Content structure: not checked. This audit did not include this check.
+- Entity consistency: not checked. Not enough could be observed to report on this area.
+- Search performance (Google Search Console): not checked. Google Search Console is not connected to this service.
+- AI visibility (answer engines): not checked. No set of market questions was chosen for this audit, so no answer engine was asked anything.
+
+**What to do first:** Nothing could be checked, so there is nothing to act on yet; the audit should be run again.
+
+## Audit details
 
 - **Website audited:** ` https://acme.test `
-- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
-- **Run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
-- **Run outcome:** NOT\_CONNECTED (whether every check could run; not a score)
-- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
-- **Pages audited (1):** ` / `
+- **Audit run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
+- **Coverage:** No area could be checked (0 of 6)
+- **Pages requested (1):** ` / `
 
 ### What was checked
 
@@ -22,7 +35,7 @@ Prepared by Z Best Media.
 | Search performance (Google Search Console) | **NOT CONNECTED** | — | not observed in this audit |
 | AI visibility (answer engines) | **NOT COVERED** | — | not observed in this audit |
 
-Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
+Findings are counted per issue (one issue may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
 
 ### Not connected for this audit
 
@@ -34,10 +47,10 @@ Findings are counted per rule (one rule may affect several pages). An area marke
 
 ### How to read this report
 
-- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption), the **rule** that produced it, and a **recommended fix**.
+- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption) and a **recommended fix**.
 - There is no overall score and no grade. Findings of different kinds are not added together.
 - This report does not promise rankings, traffic or citations by any search or answer engine, and it makes no comparison claims about any other provider.
-- Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.
+- Text from your pages, sitemaps and robots.txt is quoted as data only. Addresses the audit found by following links are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact addresses are in the audit record.
 
 ## Crawlability
 
@@ -45,7 +58,7 @@ Findings are counted per rule (one rule may affect several pages). An area marke
 
 Data freshness: not observed in this audit.
 
-The data source for this area is not connected for this audit. Nothing is reported here because this area was not checked. This is not a clean result.
+No page of your site could be read. Nothing is reported here because this area was not checked. This is not a clean result.
 
 ## Sitemaps and ` llms.txt `
 
@@ -77,7 +90,7 @@ Not enough could be observed to report on this area. Nothing is reported here be
 
 Data freshness: not observed in this audit.
 
-Google Search Console is not connected to this service. Nothing is reported here because this area was not checked. This is not a clean result. (reason ` GSC_NOT_CONNECTED `)
+Google Search Console is not connected to this service. Nothing is reported here because this area was not checked. This is not a clean result.
 
 ## AI visibility (answer engines)
 
@@ -85,7 +98,7 @@ Google Search Console is not connected to this service. Nothing is reported here
 
 Data freshness: not observed in this audit.
 
-No set of market questions was chosen for this audit, so no answer engine was asked anything. Nothing is reported here because this area was not checked. This is not a clean result. (reason ` NO_PROMPT_SET `)
+No set of market questions was chosen for this audit, so no answer engine was asked anything. Nothing is reported here because this area was not checked. This is not a clean result.
 
 Prompt volume: **NOT CONNECTED**. How often real people ask these questions is not known.
 
@@ -93,12 +106,12 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 
 ### Applies to the whole audit
 
-- Wave 1 reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).
+- This audit reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).
 - No single visibility score is produced.
 
 ### Crawlability
 
-**Method.** no fetcher is wired
+**Method.** No page could be read: the page reader was not available for this audit.
 
 ### Entity consistency
 
@@ -112,12 +125,17 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 
 **Method.** No prompt set was given for this audit; no engine was asked anything.
 
+## Appendix: audit record
+
+- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
+- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
+
 ### Versions
 
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/2 `
+- report renderer: ` seo-client-report/4 `
 
 ---
 

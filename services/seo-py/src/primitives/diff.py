@@ -14,6 +14,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 from typing import Optional
+from urllib.parse import urlsplit
 
 DIFF_MAX_LINES = 2000
 TEXT_RATIO_MIN = 0.7          # access-diff: visible text length ratio below this is a differential
@@ -63,6 +64,30 @@ def change_detect(previous: Optional[dict], current: Optional[dict], fetch_state
     return {"state": "CHANGED" if changed else "UNCHANGED", "changed_fields": changed}
 
 
+# A browser-identity request answered with one of these while our crawler was served the page is a bot-protection
+# challenge or refusal of the (datacenter) browser request, not a page served differently to crawlers: INCONCLUSIVE.
+CHALLENGE_STATUSES = (401, 403, 405, 429, 503)
+
+
+def _norm_url(u) -> str:
+    """A URL for comparison: scheme and host without case, default port and one trailing slash ignored."""
+    if not isinstance(u, str):
+        return ""
+    try:
+        p = urlsplit(u.strip())
+        port = p.port
+    except ValueError:
+        return u.strip().rstrip("/")
+    scheme = p.scheme.lower()
+    host = (p.hostname or "").rstrip(".")
+    netloc = host + (f":{port}" if port not in (None, {"http": 80, "https": 443}.get(scheme)) else "")
+    return f"{scheme}://{netloc}{(p.path or '/').rstrip('/') or '/'}" + (f"?{p.query}" if p.query else "")
+
+
+def _norm_urls(urls) -> list:
+    return sorted({_norm_url(u) for u in urls or []})
+
+
 def access_diff(bot_fetch, human_fetch, bot_extract: Optional[dict], human_extract: Optional[dict]) -> dict:
     """SAME, BOT_DIFFERENTIAL or INCONCLUSIVE, with the differing signals."""
     if bot_fetch.state not in ("OK", "BLOCKED_BY_ROBOTS") or human_fetch.state != "OK":
@@ -70,14 +95,20 @@ def access_diff(bot_fetch, human_fetch, bot_extract: Optional[dict], human_extra
     signals = []
     if bot_fetch.state == "BLOCKED_BY_ROBOTS":
         return {"state": "INCONCLUSIVE", "signals": [], "why": "robots.txt disallows our crawler on this path"}
+    if human_fetch.status in CHALLENGE_STATUSES and (bot_fetch.status or 0) < 400:
+        return {"state": "INCONCLUSIVE", "signals": [],
+                "why": "the browser-identity request was challenged or refused (bot protection); no claim either way"}
     if bot_fetch.status != human_fetch.status:
         signals.append({"signal": "status", "bot": bot_fetch.status, "human": human_fetch.status})
-    if (bot_fetch.final_url or "") != (human_fetch.final_url or ""):
+    if _norm_url(bot_fetch.final_url) != _norm_url(human_fetch.final_url):
         signals.append({"signal": "final_url"})
     if bot_extract is not None and human_extract is not None:
-        for k in ("title", "canonicals", "robots_meta"):
-            if bot_extract.get(k) != human_extract.get(k):
-                signals.append({"signal": k})
+        if bot_extract.get("title") != human_extract.get("title"):
+            signals.append({"signal": "title"})
+        if _norm_urls(bot_extract.get("canonicals")) != _norm_urls(human_extract.get("canonicals")):
+            signals.append({"signal": "canonicals"})
+        if bot_extract.get("robots_meta") != human_extract.get("robots_meta"):
+            signals.append({"signal": "robots_meta"})
         if [x["text"] for x in bot_extract["headings"] if x["level"] == 1] != \
                 [x["text"] for x in human_extract["headings"] if x["level"] == 1]:
             signals.append({"signal": "h1"})
@@ -89,3 +120,22 @@ def access_diff(bot_fetch, human_fetch, bot_extract: Optional[dict], human_extra
         if total and (ld["added_count"] + ld["removed_count"]) / total > 1 - TEXT_RATIO_MIN:
             signals.append({"signal": "links", "only_human": ld["added_count"], "only_bot": ld["removed_count"]})
     return {"state": "BOT_DIFFERENTIAL" if signals else "SAME", "signals": signals}
+
+
+def confirm(first: dict, repeat: Optional[dict]) -> dict:
+    """A BOT_DIFFERENTIAL kept only for the signals that are stable. ``repeat`` is ``access_diff`` between our
+    crawler's first fetch and a second fetch by our crawler (None when that fetch failed). A signal that also differs
+    between our own two fetches is the page changing between requests (rotating content, timestamps, A/B tests), not
+    crawler-specific serving, and is dropped. No repeat, or nothing stable left: INCONCLUSIVE (no claim either way)."""
+    if first.get("state") != "BOT_DIFFERENTIAL":
+        return first
+    if repeat is None or repeat.get("state") == "INCONCLUSIVE":
+        return {"state": "INCONCLUSIVE", "signals": [], "why": "the repeat request by our crawler failed; the "
+                "difference could not be confirmed"}
+    unstable = {s["signal"] for s in repeat.get("signals") or []}
+    stable = [s for s in first.get("signals") or [] if s["signal"] not in unstable]
+    if not stable:
+        return {"state": "INCONCLUSIVE", "signals": [], "unstable": sorted(unstable),
+                "why": "the page differed between two requests by our crawler as well; not crawler-specific"}
+    return {"state": "BOT_DIFFERENTIAL", "signals": stable, "confirmed": True,
+            "unstable": sorted(unstable)}

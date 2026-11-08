@@ -2,14 +2,34 @@
 
 Prepared by Z Best Media.
 
-## Cover
+## Executive summary
+
+**Partial audit: 5 of 6 areas checked.** 1 page(s), as requested.
+
+**What was checked:** Crawlability, Sitemaps and ` llms.txt `, Entity consistency, Search performance (Google Search Console), AI visibility (answer engines).
+
+**Not covered by this report:**
+
+- Content structure: not checked. This audit did not include this check.
+
+**Top issues, most important first:**
+
+1. **` robots.txt ` blocks a search crawler** (critical; Crawlability; 1 location(s)). A search engine's crawler is told not to read some or all of your pages, which can keep them out of its results. *Recommended:* Remove or narrow the Disallow rule for this crawler unless blocking it is intended.
+2. **More than one canonical link** (high; Crawlability; 1 location(s)). Several canonical links leave search engines to guess which page to list. *Recommended:* Keep exactly one rel=canonical on the page.
+3. **Business detail differs from your record** (high; Entity consistency; 1 location(s)). Search engines and AI assistants may show business details that differ from your records. *Recommended:* Change the markup to match your business record exactly (the record is the authority). The values are in the audit record.
+4. **Canonical points to another host** (medium; Crawlability; 1 location(s)). Search engines are told another website holds the preferred copy of this page. *Recommended:* Confirm the other host is really the preferred copy; otherwise point the canonical at this page.
+5. **Sitemap lists URLs ` robots.txt ` blocks** (medium; Sitemaps and ` llms.txt `; site-wide). Your sitemap and ` robots.txt ` disagree, which wastes crawl effort. *Recommended:* Remove blocked URLs from the sitemap, or allow them in ` robots.txt `.
+
+7 more issue(s) are listed in the sections below.
+
+**What to do first:** ` robots.txt ` blocks a search crawler (Crawlability). Remove or narrow the Disallow rule for this crawler unless blocking it is intended.
+
+## Audit details
 
 - **Website audited:** ` https://acme.test `
-- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
-- **Run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
-- **Run outcome:** PARTIAL (whether every check could run; not a score)
-- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
-- **Pages audited (1):** ` / `
+- **Audit run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
+- **Coverage:** Partial audit: 5 of 6 areas checked
+- **Pages requested (1):** ` / `
 
 ### What was checked
 
@@ -22,7 +42,7 @@ Prepared by Z Best Media.
 | Search performance (Google Search Console) | **CHECKED** | 0 | Google data for 2026-09-24 to 2026-10-21 (Pacific Time, final data; Google's figures lag about 3 days) |
 | AI visibility (answer engines) | **CHECKED** | 1 | observed during the run; refresh recommended by 2026-10-31 |
 
-Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
+Findings are counted per issue (one issue may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
 
 ### Not connected for this audit
 
@@ -30,10 +50,10 @@ Findings are counted per rule (one rule may affect several pages). An area marke
 
 ### How to read this report
 
-- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption), the **rule** that produced it, and a **recommended fix**.
+- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption) and a **recommended fix**.
 - There is no overall score and no grade. Findings of different kinds are not added together.
 - This report does not promise rankings, traffic or citations by any search or answer engine, and it makes no comparison claims about any other provider.
-- Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.
+- Text from your pages, sitemaps and robots.txt is quoted as data only. Addresses the audit found by following links are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact addresses are in the audit record.
 
 ## Crawlability
 
@@ -44,7 +64,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### ` robots.txt ` blocks a search crawler
 
 - **Severity:** critical · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` ROBOTS_BLOCKS_SEARCH_CRAWLER ` · **Area:** ` P2 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Remove or narrow the Disallow rule for this crawler unless blocking it is intended.
 - **Where:** ` /robots.txt `
 - **Evidence at ` /robots.txt `:** token: ` Googlebot<script> `; blocked paths: ` / `, ` /{slug}/{slug}/{email}/{number} `; rules: ` <script>alert(1)</script>](javascript:alert(1)) **bold** <img src=x onerror=ale… `, ` [withheld: may contain personal data] `
@@ -52,7 +72,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### More than one canonical link
 
 - **Severity:** high · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` CANONICAL_MULTIPLE ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Keep exactly one rel=canonical on the page.
 - **Where:** ` / `
 - **Evidence at ` / `:** count: 3; invalid: 1; canonicals: ` /{slug}/{slug}/{email}/{number} `, ` {offsite} (xn--80ak6aa92e.com) `, ` {unreadable} `
@@ -60,7 +80,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### Canonical points to another host
 
 - **Severity:** medium · **Recommended action:** Test a change
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` CANONICAL_OTHER_HOST ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Confirm the other host is really the preferred copy; otherwise point the canonical at this page.
 - **Where:** ` / `
 - **Evidence at ` / `:** canonical: ` {offsite} (evil.test) `
@@ -68,14 +88,14 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### Estimated thing
 
 - **Severity:** low · **Recommended action:** Test a change
-- **Evidence:** ESTIMATED (an estimate; the assumption is not part of this finding's record, so treat it as unverified) · **Rule:** ` ESTIMATED_THING ` · **Area:** ` P1 `
+- **Evidence:** ESTIMATED (an estimate; the assumption is not part of this finding's record, so treat it as unverified)
 - **Fix:** No standard fix is written for this rule yet; ask us about it (the details are in the audit record).
 - **Where:** ` / `
 
 ### Page is not HTML
 
 - **Severity:** low · **Recommended action:** Monitor (may be intentional)
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` PAGE_NOT_HTML ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Check that this URL is meant to be a web page; serve it as text/html if so.
 - **Where:** ` / `
 - **Evidence at ` / `:** content type: ` <script>alert(1)</script>](javascript:alert(1)) **bold** <i… `
@@ -83,7 +103,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### Page redirects
 
 - **Severity:** low · **Recommended action:** Monitor (may be intentional)
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` REDIRECTED ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Link to the final URL directly; use a permanent redirect if the move is permanent.
 - **Where:** ` /{slug}/{slug}/{email}/{number} `
 - **Evidence at ` /{slug}/{slug}/{email}/{number} `:** statuses: 301; temporary: no; final url: ` {unreadable} `
@@ -91,7 +111,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### Some future rule
 
 - **Severity:** low · **Recommended action:** Monitor (may be intentional)
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` SOME_FUTURE_RULE ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** No standard fix is written for this rule yet; ask us about it (the details are in the audit record).
 - **Where:** ` / `
 
@@ -104,22 +124,22 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### Sitemap lists URLs ` robots.txt ` blocks
 
 - **Severity:** medium · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` SITEMAP_LISTS_ROBOTS_BLOCKED_URL ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Remove blocked URLs from the sitemap, or allow them in ` robots.txt `.
 - **Evidence:** count: 1; examples: ` /{slug}/{slug}/{email}/{number} `
 
 ### ` llms.txt ` does not follow the proposed format
 
 - **Severity:** low · **Recommended action:** Test a change
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` LLMS_TXT_FORMAT ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Optional: follow the ` llmstxt.org ` proposal (a \# title, a \> summary, sections of absolute links).
 - **Where:** ` /llms.txt `
-- **Evidence at ` /llms.txt `:** issues: ` <script>alert(1)</script>](javascript:alert(1)) **bold** <i… `, ` <b>x</b> `
+- **Evidence at ` /llms.txt `:** issues: ` <script>alert(1)</script>](javascript:alert(1)) **bold** <i… `; ` <b>x</b> `
 
 ### Sitemap uses an unexpected XML namespace
 
 - **Severity:** low · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` SITEMAP_NAMESPACE ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Use the ` sitemaps.org ` 0.9 namespace.
 - **Where:** ` /{slug}/{slug}/{email}/{number} `
 
@@ -140,7 +160,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-31.
 ### Business detail differs from your record
 
 - **Severity:** high · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` ENTITY_FIELD_MISMATCH ` · **Area:** ` P6 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Change the markup to match your business record exactly (the record is the authority). The values are in the audit record.
 - **Where:** ` / `
 - **Evidence at ` / `:** field: ` telephone `
@@ -203,15 +223,11 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 ### Not mentioned or cited; other sources were
 
 - **Severity:** medium · **Recommended action:** Test a change
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` CITATION_OPPORTUNITY ` · **Area:** ` P4 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Test a page that answers this question directly; see which kinds of sources were cited instead.
 - **Evidence:** engine: ` perplexity `; question: Question 1; usable answers: 5; cited instead: ` {host} (1 answers) `, ` {host} (1 answers) `
 
 ## Methodology and limits
-
-### Applies to the whole audit
-
-- \[withheld: may contain personal data\]
 
 ### Crawlability
 
@@ -241,12 +257,36 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 
 **Method.** Each prompt of prompt set core\<script\> v2 sent 5 times per engine.
 
+## Appendix: audit record
+
+- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
+- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
+
+### Reference codes
+
+For support requests: the reference code of each finding in this report.
+
+| Finding | Reference |
+|---|---|
+| Business detail differs from your record | ` ENTITY_FIELD_MISMATCH ` |
+| Canonical points to another host | ` CANONICAL_OTHER_HOST ` |
+| Estimated thing | ` ESTIMATED_THING ` |
+| More than one canonical link | ` CANONICAL_MULTIPLE ` |
+| Not mentioned or cited; other sources were | ` CITATION_OPPORTUNITY ` |
+| Page is not HTML | ` PAGE_NOT_HTML ` |
+| Page redirects | ` REDIRECTED ` |
+| Sitemap lists URLs ` robots.txt ` blocks | ` SITEMAP_LISTS_ROBOTS_BLOCKED_URL ` |
+| Sitemap uses an unexpected XML namespace | ` SITEMAP_NAMESPACE ` |
+| Some future rule | ` SOME_FUTURE_RULE ` |
+| ` llms.txt ` does not follow the proposed format | ` LLMS_TXT_FORMAT ` |
+| ` robots.txt ` blocks a search crawler | ` ROBOTS_BLOCKS_SEARCH_CRAWLER ` |
+
 ### Versions
 
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/2 `
+- report renderer: ` seo-client-report/4 `
 
 ---
 

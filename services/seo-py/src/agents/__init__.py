@@ -49,6 +49,8 @@ class RunContext:
     domain: str
     scheme: str = "https"
     paths: list = field(default_factory=lambda: ["/"])
+    # the most pages one audit reads (requested + discovered). 0 = no discovery: only the requested paths are read
+    max_pages: int = 0
     robots_cache: dict = field(default_factory=dict)
     robots: Optional[dict] = None          # filled by Selene, read by Delia and Roman
 

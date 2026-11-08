@@ -16,13 +16,16 @@ Selene returns the page extracts too, so Delia, Roman and the entity check reuse
 
 from __future__ import annotations
 
+import re
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
-from agents import bots, host_of
+from agents import bots, host_of, split_url
+from agents.prompt_guard import personal_data
 from envelope import envelope, finding
 from primitives import Killed
 from primitives import diff as diff_mod
+from primitives import fetch as fetch_mod
 from primitives import render as render_mod
 from primitives.parse import parse_html
 
@@ -32,7 +35,10 @@ METHODOLOGY = ("Fetched robots.txt (RFC 9309: 4xx = no rules, 5xx/unreachable = 
                "token. Each bot family token was evaluated with RFC 9309 longest-match rules against '/' and every "
                "audited path; bot family list version {v}. Where robots.txt allows this service's crawler, pages were "
                "also fetched once with a browser User-Agent (honouring robots.txt for our crawler) to compare what is "
-               "served (user-agent differential only). Raw HTML only; no JavaScript was executed.")
+               "served (user-agent differential only); a difference is reported only when it holds on a repeat "
+               "request by our crawler. Same-site pages linked from the requested pages (one level, no query strings, "
+               "robots.txt honoured) were read too, up to the per-audit page limit. Raw HTML only; no JavaScript was "
+               "executed.")
 LIMITS = ["Observed from one network location at one time; a CDN or firewall may answer other clients differently.",
           "Bot access by VERIFIED IP range (how the major operators identify their crawlers) cannot be observed by "
           "changing the User-Agent; an IP-based block or cloak is not detected.",
@@ -71,52 +77,145 @@ def run(ctx) -> tuple[dict, dict]:
                            "text_sha256": rb.get("text_sha256"),
                            "sitemaps_declared": (rb["parsed"].sitemaps[:50] if rb["parsed"] else [])}
         findings += _robots_findings(ctx, rb, facts)
-        fetched = 0
-        canon_checked = 0
+        state = {"fetched": 0, "canon_checked": 0}
         for path in ctx.paths:
-            url = ctx.url(path)
-            f = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard)
-            if f.state == "KILLED":
-                raise Killed(f.detail or "KILLED")
-            ctx.osei.observed("page", url, f.state)
-            extract = None
-            if f.state == "TOO_LARGE":
-                ctx.osei.quarantine("page", "TOO_LARGE", url, None)
-            if f.ok and f.content_type in HTML_TYPES and f.body is not None:
-                extract = parse_html(f.text(), f.final_url or url)
-            rstate = render_mod.render_state(f, extract, ctx.renderer, ctx.guard)
-            if rstate["state"] == "RAW_OK_RENDER_NOT_CONNECTED":
-                not_connected.add("render")
-            pages[path] = {"fetch": f, "extract": extract, "render": {k: v for k, v in rstate.items()
-                                                                     if k != "rendered_extract"}}
-            if f.ok:
-                fetched += 1
-            page_findings, canon_checked = _page_findings(ctx, path, f, extract, canon_checked)
-            findings += page_findings
-            if f.ok and extract is not None:
-                # AEGIS L3: the browser-identity comparison honours robots.txt for OUR crawler too (it is only made
-                # where our crawler may fetch, and from the same robots cache)
-                human = ctx.fetcher.fetch(url, ua="human", robots_cache=ctx.robots_cache, guard=ctx.guard)
-                if human.state == "KILLED":
-                    raise Killed(human.detail or "KILLED")
-                hx = parse_html(human.text(), human.final_url or url) if human.ok and human.content_type in \
-                    HTML_TYPES else None
-                ad = diff_mod.access_diff(f, human, extract, hx)
-                pages[path]["access_diff"] = ad
-                if ad["state"] == "BOT_DIFFERENTIAL":
-                    findings.append(finding("BOT_DIFFERENTIAL", "high", "measured", "TEST", url=url,
-                                            capability="P2", detail={"signals": ad["signals"]}))
+            findings += _read_page(ctx, path, pages, state, facts, not_connected)
+        # Page discovery (bounded): when the request named fewer pages than the per-audit cap, same-site pages linked
+        # from the requested pages are read too, one level deep, in document order, up to the cap. Every discovered
+        # path goes through the same fetcher (SSRF guard, robots.txt for our crawler, byte / time / redirect budgets)
+        discovered = discover_paths(ctx, pages)
+        facts["pages_discovered"] = list(discovered)
+        for path in discovered:
+            findings += _read_page(ctx, path, pages, state, facts, not_connected)
+        fetched = state["fetched"]
         facts["pages_requested"], facts["pages_fetched"] = len(ctx.paths), fetched
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(v=bots.VERSION),
                         limitations=LIMITS, reason=k.code, facts=facts), pages
+    fetched = sum(1 for p in pages.values() if p["fetch"].ok)
     if fetched == 0:
         outcome = "BLOCKED" if all(p["fetch"].state == "BLOCKED_BY_ROBOTS" for p in pages.values()) else "FAILED"
     else:
-        outcome = "OK" if fetched == len(ctx.paths) else "PARTIAL"
+        outcome = "OK" if fetched == len(pages) else "PARTIAL"
     facts["render_states"] = {p: v["render"]["state"] for p, v in pages.items()}
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(v=bots.VERSION),
                     limitations=LIMITS, not_connected=not_connected, facts=facts), pages
+
+
+# Discovery: what a linked path must look like to be read. Only page-like paths (no file extension, or an HTML one);
+# no query string (faceted, session and tracking URLs are not pages to audit); never an action-like path.
+DISCOVERY_EXTENSIONS = ("", ".html", ".htm", ".php", ".asp", ".aspx")
+_DISCOVERY_SKIP_SEGMENTS = frozenset({"logout", "log-out", "signout", "sign-out", "unsubscribe", "cart", "checkout",
+                                      "wp-admin", "wp-login.php", "admin", "login", "cdn-cgi"})
+_DISCOVERY_PATH = re.compile(r"/[\x21-\x7e]{0,500}")
+
+
+def discover_paths(ctx, pages: dict) -> list:
+    """Same-site paths linked from the pages already read, bounded by ``ctx.max_pages`` (requested + discovered).
+    Deterministic: the requested pages in request order, their links in document order. A path robots.txt disallows
+    for our crawler, a nofollow link, a query string, a non-page file, an action-like path and a path that looks like
+    personal data are skipped (never fetched)."""
+    room = (ctx.max_pages or 0) - len(pages)
+    if room <= 0:
+        return []
+    rb = ctx.robots or {}
+    parsed = rb.get("parsed")
+    if parsed is None and not rb.get("default_allow"):
+        return []                                    # robots.txt unreadable: nothing beyond what was asked for
+    seen = {p.rstrip("/") or "/" for p in pages}
+    out = []
+    for path in list(ctx.paths):
+        pg = pages.get(path) or {}
+        x = pg.get("extract")
+        if x is None or not pg["fetch"].ok:
+            continue
+        for link in x.get("links") or []:
+            if len(out) >= room:
+                return out
+            cand = _candidate(ctx, link)
+            if cand is None:
+                continue
+            key = cand.rstrip("/") or "/"
+            if key in seen:
+                continue
+            allowed = parsed.allowed(fetch_mod.PRODUCT_TOKEN, cand) if parsed is not None else rb["default_allow"]
+            if not allowed:
+                continue
+            seen.add(key)
+            out.append(cand)
+    return out
+
+
+def _candidate(ctx, link) -> Optional[str]:
+    if not isinstance(link, dict) or link.get("nofollow") or not isinstance(link.get("url"), str):
+        return None
+    p = split_url(link["url"])
+    if p is None or p.scheme not in ("http", "https") or p.query or p.port not in (None, 80, 443) \
+            or p.username or p.password or not ctx.same_site(p.hostname):
+        return None
+    path = p.path or "/"
+    if not _DISCOVERY_PATH.fullmatch(path) or path.startswith("//") or "\\" in path or "#" in path:
+        return None
+    last = path.rstrip("/").rsplit("/", 1)[-1].lower()
+    ext = last[last.rfind("."):] if "." in last else ""
+    if ext not in DISCOVERY_EXTENSIONS:
+        return None
+    if any(seg.lower() in _DISCOVERY_SKIP_SEGMENTS for seg in path.split("/")):
+        return None
+    if personal_data(unquote(path)) is not None:
+        return None
+    return path
+
+
+def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connected: set) -> list:
+    """Fetch and judge one page (requested or discovered); fills ``pages[path]``."""
+    findings = []
+    url = ctx.url(path)
+    f = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard)
+    if f.state == "KILLED":
+        raise Killed(f.detail or "KILLED")
+    ctx.osei.observed("page", url, f.state)
+    extract = None
+    if f.state == "TOO_LARGE":
+        ctx.osei.quarantine("page", "TOO_LARGE", url, None)
+    if f.ok and f.content_type in HTML_TYPES and f.body is not None:
+        extract = parse_html(f.text(), f.final_url or url)
+    rstate = render_mod.render_state(f, extract, ctx.renderer, ctx.guard)
+    if rstate["state"] == "RAW_OK_RENDER_NOT_CONNECTED":
+        not_connected.add("render")
+    pages[path] = {"fetch": f, "extract": extract, "render": {k: v for k, v in rstate.items()
+                                                             if k != "rendered_extract"}}
+    if f.ok:
+        state["fetched"] += 1
+    page_findings, state["canon_checked"] = _page_findings(ctx, path, f, extract, state["canon_checked"], facts)
+    findings += page_findings
+    if f.ok and extract is not None:
+        # AEGIS L3: the browser-identity comparison honours robots.txt for OUR crawler too (it is only made
+        # where our crawler may fetch, and from the same robots cache)
+        human = ctx.fetcher.fetch(url, ua="human", robots_cache=ctx.robots_cache, guard=ctx.guard)
+        if human.state == "KILLED":
+            raise Killed(human.detail or "KILLED")
+        hx = _extract_of(human, url)
+        ad = diff_mod.access_diff(f, human, extract, hx)
+        if ad["state"] == "BOT_DIFFERENTIAL":
+            # Gate 4: a differential is reported only when it is stable. Our crawler fetches the page once more;
+            # a signal that also differs between our own two fetches is the page changing between requests, not
+            # the site treating crawlers differently, and is dropped. Nothing stable left: INCONCLUSIVE, never a
+            # finding.
+            again = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard)
+            if again.state == "KILLED":
+                raise Killed(again.detail or "KILLED")
+            ad = diff_mod.confirm(ad, diff_mod.access_diff(f, again, extract, _extract_of(again, url))
+                                  if again.ok else None)
+        pages[path]["access_diff"] = ad
+        if ad["state"] == "BOT_DIFFERENTIAL":
+            findings.append(finding("BOT_DIFFERENTIAL", "high", "measured", "TEST", url=url,
+                                    capability="P2", detail={"signals": ad["signals"], "confirmed": True}))
+    return findings
+
+
+def _extract_of(f, url: str) -> Optional[dict]:
+    return parse_html(f.text(), f.final_url or url) if f.ok and f.content_type in HTML_TYPES else None
 
 
 def _origin_key(origin: str) -> str:
@@ -167,7 +266,21 @@ def _robots_findings(ctx, rb: dict, facts: dict) -> list:
     return out
 
 
-def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: int) -> tuple[list, int]:
+def same_url(a: Optional[str], b: Optional[str]) -> bool:
+    """Two absolute URLs name the same page: scheme and host compared without case, the default port and one
+    trailing slash ignored (a canonical written as ``https://Example.com:443/a/`` is ``https://example.com/a``)."""
+    pa, pb = split_url(a), split_url(b)
+    if pa is None or pb is None:
+        return (a or "").rstrip("/") == (b or "").rstrip("/")
+
+    def key(p):
+        port = p.port if p.port not in (None, {"http": 80, "https": 443}.get(p.scheme.lower())) else None
+        return (p.scheme.lower(), (p.hostname or "").rstrip("."), port, (p.path or "/").rstrip("/") or "/", p.query)
+    return key(pa) == key(pb)
+
+
+def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: int,
+                   facts: Optional[dict] = None) -> tuple[list, int]:
     url = ctx.url(path)
     out = []
     if f.state == "BLOCKED_BY_ROBOTS":
@@ -216,17 +329,24 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
         if not ctx.same_site(host):
             out.append(finding("CANONICAL_OTHER_HOST", "medium", "measured", "TEST", url=url,
                                detail={"canonical": c}))
-        if noindex and c.rstrip("/") != (f.final_url or url).rstrip("/"):
+        if noindex and not same_url(c, f.final_url or url):
             out.append(finding("NOINDEX_CANONICAL_CONFLICT", "high", "measured", "ACT", url=url,
                                detail={"canonical": c, "note": "noindex plus a canonical pointing elsewhere sends "
                                                                "contradictory signals"}))
-        if c.rstrip("/") != (f.final_url or url).rstrip("/") and ctx.same_site(host) \
+        if not same_url(c, f.final_url or url) and ctx.same_site(host) \
                 and canon_checked < CANONICAL_CHECK_MAX:
             canon_checked += 1
             cf = ctx.fetcher.fetch(c, robots_cache=ctx.robots_cache, guard=ctx.guard)
             if cf.state == "KILLED":
                 raise Killed(cf.detail or "KILLED")
-            if not cf.ok or cf.status != 200 or cf.redirects:
+            if not cf.ok:
+                # Gate 4: our own request for the canonical target failed (timeout, refused, robots.txt for our
+                # crawler). That says nothing about what the target answers: inconclusive, recorded as a fact, never
+                # a finding
+                if facts is not None:
+                    facts.setdefault("canonical_checks_inconclusive", []).append(
+                        {"path": path, "fetch_state": cf.state})
+            elif cf.status != 200 or cf.redirects:
                 out.append(finding("CANONICAL_TARGET_NOT_200", "high", "measured", "ACT", url=url,
                                    detail={"canonical": c, "fetch_state": cf.state, "status": cf.status,
                                            "redirected": bool(cf.redirects)}))

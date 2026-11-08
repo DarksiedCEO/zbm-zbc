@@ -97,7 +97,9 @@ def run(ctx) -> dict:
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
                         limitations=LIMITS, reason=k.code, facts=facts)
-    read_any = facts.get("sitemaps_read", 0) > 0 or facts.get("llms_txt", {}).get("state") in ("present", "absent")
+    # a sitemap observed missing (404 / 410) is an observation too: the area was checked
+    observed_sitemaps = facts.get("sitemaps_read", 0) > 0 or facts.get("sitemaps_missing", 0) > 0
+    read_any = observed_sitemaps or facts.get("llms_txt", {}).get("state") in ("present", "absent")
     outcome = "OK" if read_any and not facts.get("sitemap_fetch_failures") else ("PARTIAL" if read_any else "FAILED")
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
                     limitations=LIMITS, not_connected=not_connected, facts=facts)
@@ -117,7 +119,7 @@ def _sitemaps(ctx, facts: dict) -> list:
     facts["sitemaps_declared"] = declared[:50]
     facts["sitemaps_cross_host_not_read"] = [u for u in declared if u not in same][:50]
     queue = same[:MAX_CHILDREN] or [ctx.url("/sitemap.xml")]
-    seen, urls, lastmods, read, failures = set(), [], [], 0, 0
+    seen, urls, lastmods, read, failures, missing_n = set(), [], [], 0, 0, 0
     children_followed = 0
     while queue:
         sm = queue.pop(0)
@@ -127,11 +129,18 @@ def _sitemaps(ctx, facts: dict) -> list:
         f = _fetch(ctx, sm, "application/xml,text/xml;q=0.9,*/*;q=0.5")
         ctx.osei.observed("sitemap", sm, f.state)
         if not f.ok or f.status != 200:
-            failures += 1
+            # Gate 4: a sitemap URL that answers 404 / 410 was OBSERVED to be missing (a finding, SITEMAP_MISSING);
+            # only a fetch that failed or an answer that is neither the sitemap nor "not found" (401/403/5xx...)
+            # leaves the sitemap area unobserved
+            if not (f.ok and f.status in (404, 410)):
+                failures += 1
+            else:
+                missing_n += 1
             if f.state == "TOO_LARGE":
                 ctx.osei.quarantine("sitemap", "TOO_LARGE", sm, None)
-            out.append(finding("SITEMAP_MISSING" if f.ok and f.status == 404 else "SITEMAP_UNREADABLE",
-                               "medium", "measured", "ACT" if f.ok and f.status == 404 else "INSUFFICIENT_EVIDENCE",
+            missing = f.ok and f.status in (404, 410)
+            out.append(finding("SITEMAP_MISSING" if missing else "SITEMAP_UNREADABLE",
+                               "medium", "measured", "ACT" if missing else "INSUFFICIENT_EVIDENCE",
                                url=sm, capability="P3", detail={"fetch_state": f.state, "status": f.status}))
             continue
         body = f.body or b""
@@ -178,7 +187,8 @@ def _sitemaps(ctx, facts: dict) -> list:
         if file_urls > MAX_URLS_PER_FILE:
             out.append(finding("SITEMAP_TOO_MANY_URLS", "high", "measured", "ACT", url=sm, capability="P3",
                                detail={"urls": file_urls, "limit": MAX_URLS_PER_FILE}))
-    facts.update(sitemaps_read=read, sitemap_fetch_failures=failures, sitemap_urls=len(urls),
+    facts.update(sitemaps_read=read, sitemap_fetch_failures=failures, sitemaps_missing=missing_n,
+                 sitemap_urls=len(urls),
                  sitemap_children_followed=children_followed)
     sample = []
     for u, _ in urls:

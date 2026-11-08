@@ -2,14 +2,25 @@
 
 Prepared by Z Best Media.
 
-## Cover
+## Executive summary
+
+**Partial audit: 4 of 6 areas checked.** 1 page(s), as requested.
+
+**What was checked:** Crawlability, Sitemaps and ` llms.txt `, Content structure, Entity consistency.
+
+**Not covered by this report:**
+
+- Search performance (Google Search Console): not checked. No Search Console property is linked to your account here yet.
+- AI visibility (answer engines): not checked. The data source for this area is not connected for this audit.
+
+**What to do first:** No issue needing a change was found in the areas that were checked. Areas that were not checked are not covered by this result.
+
+## Audit details
 
 - **Website audited:** ` https://acme.test `
-- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
-- **Run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
-- **Run outcome:** PARTIAL (whether every check could run; not a score)
-- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
-- **Pages audited (1):** ` / `
+- **Audit run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
+- **Coverage:** Partial audit: 4 of 6 areas checked
+- **Pages requested (1):** ` / `
 
 ### What was checked
 
@@ -22,7 +33,7 @@ Prepared by Z Best Media.
 | Search performance (Google Search Console) | **NOT CONNECTED** | — | not observed in this audit |
 | AI visibility (answer engines) | **NOT CONNECTED** | — | not observed in this audit |
 
-Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
+Findings are counted per issue (one issue may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
 
 ### Not connected for this audit
 
@@ -33,10 +44,10 @@ Findings are counted per rule (one rule may affect several pages). An area marke
 
 ### How to read this report
 
-- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption), the **rule** that produced it, and a **recommended fix**.
+- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption) and a **recommended fix**.
 - There is no overall score and no grade. Findings of different kinds are not added together.
 - This report does not promise rankings, traffic or citations by any search or answer engine, and it makes no comparison claims about any other provider.
-- Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.
+- Text from your pages, sitemaps and robots.txt is quoted as data only. Addresses the audit found by following links are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact addresses are in the audit record.
 
 ## Crawlability
 
@@ -76,7 +87,7 @@ No findings in this area.
 
 Data freshness: not observed in this audit.
 
-No Search Console property is linked to your account here yet. Nothing is reported here because this area was not checked. This is not a clean result. (reason ` GSC_PROPERTY_UNBOUND `)
+No Search Console property is linked to your account here yet. Nothing is reported here because this area was not checked. This is not a clean result.
 
 ## AI visibility (answer engines)
 
@@ -100,40 +111,25 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 
 ### Applies to the whole audit
 
-- Wave 1 reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).
+- This audit reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).
 - No single visibility score is produced.
+- One location, one time.
 
 ### Crawlability
 
 **Method.** checked
 
-**Limits.**
-
-- One location, one time.
-
 ### Sitemaps and ` llms.txt `
 
 **Method.** checked
-
-**Limits.**
-
-- One location, one time.
 
 ### Content structure
 
 **Method.** checked
 
-**Limits.**
-
-- One location, one time.
-
 ### Entity consistency
 
 **Method.** checked
-
-**Limits.**
-
-- One location, one time.
 
 ### Search performance (Google Search Console)
 
@@ -147,12 +143,17 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 
 - The method above is the plan. Not every engine was asked every question that many times; the per-engine lines in the AI visibility section state what was actually asked.
 
+## Appendix: audit record
+
+- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
+- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
+
 ### Versions
 
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/2 `
+- report renderer: ` seo-client-report/4 `
 
 ---
 

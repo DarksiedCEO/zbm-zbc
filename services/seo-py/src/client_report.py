@@ -40,7 +40,11 @@ from agents import search_performance as sp
 from agents import split_url
 from agents.prompt_guard import personal_data
 
-RENDERER_VERSION = "seo-client-report/2"        # 2: the "cited = returned by search" definition
+# 2: the "cited = returned by search" definition; 4: executive summary, client-facing coverage instead of the internal
+# run outcome, plain-language limits (deduplicated), rule codes moved to an appendix, unconfirmed comparisons withheld
+# (5: the same with the homepage phone observation; 3 was that observation on renderer 2)
+RENDERER_VERSION = "seo-client-report/4"
+RENDERER_VERSION_HOMEPAGE = "seo-client-report/5"
 SUPPORTED_REPORT_VERSIONS = ("seo-audit-report/1",)
 FORMATS = {"markdown": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8"}
 
@@ -184,12 +188,107 @@ NOT_CONNECTED_TEXT = {
     "answer_engine:anthropic": "Anthropic answer engine.",
     "answer_engine:google": "Google answer engine.",
     "answer_engine:perplexity": "Perplexity answer engine.",
-    "zero_day": "Zero-Day (not part of this audit).",
-    "orca_publish": "ORCA Publish (not part of this audit).",
     "clientfix": "Fix execution: this audit recommends fixes; it does not make changes to your site.",
     "fetch": "Web fetching: no page could be read.",
 }
 INTERNAL_CODES = frozenset({"ENGINE_COST_ABOVE_RESERVE"})   # operational, about our spend: in the audit record only
+# internal ports that are not part of the product a client buys: in the audit record only, never in the document
+INTERNAL_NOT_CONNECTED = frozenset({"zero_day", "orca_publish"})
+# reasons recorded as plain sentences (not codes) by the agents, in client language
+PLAIN_REASON_TEXT = {
+    "this tenant has no canonical entity record": "Your business details (name, address, phone) are not on file "
+                                                  "for this audit yet, so there was nothing to compare your pages "
+                                                  "against.",
+    "robots.txt not read": "Your robots.txt could not be read, so this check could not start.",
+    "the web fetcher port is not connected": "No page of your site could be read.",
+    "no answer-engine port is connected; no engine was asked anything": "No answer engine is connected for this "
+                                                                        "audit; none was asked anything.",
+    "no prompt-volume source is connected": "No source for how often people ask these questions is connected.",
+}
+FETCH_STATE_TEXT = {
+    "OK": "answered", "REFUSED_URL": "address refused as unsafe or malformed",
+    "REFUSED_PORT": "non-standard port refused",
+    "REFUSED_ADDRESS": "resolves to a private network address (refused)", "DNS_FAILED": "domain name did not resolve",
+    "CONNECT_FAILED": "connection failed", "TLS_FAILED": "secure (TLS) connection failed", "TIMEOUT": "timed out",
+    "TOO_LARGE": "response too large", "UNSUPPORTED_ENCODING": "unsupported compression",
+    "RESOURCE_LIMIT": "stopped at a safety limit", "TOO_MANY_REDIRECTS": "too many redirects",
+    "BLOCKED_BY_ROBOTS": "robots.txt disallows our crawler", "PROTOCOL_ERROR": "unreadable response",
+    "KILLED": "stopped by a safety switch",
+}
+# Issue sentences: "type" and "property" are filled from the crawled markup and always shown as quoted code
+ISSUE_TEXT = {
+    "REQUIRED_MISSING": ("required property", "property", "is missing from", "type"),
+    "RECOMMENDED_MISSING": ("recommended property", "property", "is missing from", "type"),
+    "ADDRESS_PART_MISSING": ("address part", "property", "is missing"),
+    "CONTEXT_NOT_SCHEMA_ORG": ("@context is not schema.org",),
+    "TYPE_MISSING": ("@type is missing",),
+    "NO_H1_TITLE": ("no # title line",), "MORE_THAN_ONE_H1": ("more than one # title line",),
+    "NO_H2_SECTIONS": ("no ## sections",), "NO_LINK_LISTS": ("no lists of links",),
+    "RELATIVE_OR_NON_HTTP_LINKS": ("links that are not absolute http(s) URLs",),
+}
+SIGNAL_TEXT = {"status": "HTTP status", "final_url": "final address after redirects", "title": "page title",
+               "canonicals": "canonical link", "robots_meta": "robots meta tag", "h1": "main heading (H1)",
+               "text_length": "amount of text", "links": "links on the page"}
+
+# Executive summary: business impact per rule. Tier 1: can keep pages out of search or AI answers; tier 2: affects
+# how the business appears (listings, rich results, AI answers); tier 3: hygiene. Ranked by severity, then tier, then
+# recommended action, then pages affected. Impact sentences say "can" / "may": no effect is claimed or promised.
+IMPACT = {
+    "ROBOTS_UNREACHABLE": (1, "Search and AI crawlers that follow the standard treat your whole site as off limits "
+                              "while robots.txt cannot be read."),
+    "ROBOTS_BLOCKS_SEARCH_CRAWLER": (1, "A search engine's crawler is told not to read some or all of your pages, "
+                                        "which can keep them out of its results."),
+    "NOINDEX": (1, "This page asks search engines not to list it, so it can be missing from search results."),
+    "PAGE_HTTP_ERROR": (1, "Visitors and search engines get an error instead of the page."),
+    "PAGE_UNREACHABLE": (1, "The page could not be reached from the public internet."),
+    "BOT_DIFFERENTIAL": (1, "Crawlers are shown something different from visitors, which search engines can treat "
+                            "as a trust problem."),
+    "NOINDEX_CANONICAL_CONFLICT": (1, "Contradictory signals leave search engines to guess which page to list."),
+    "CANONICAL_MULTIPLE": (1, "Several canonical links leave search engines to guess which page to list."),
+    "CANONICAL_TARGET_NOT_200": (1, "The page you name as the preferred version does not load cleanly, so search "
+                                    "engines may ignore your preference."),
+    "CANONICAL_OTHER_HOST": (1, "Search engines are told another website holds the preferred copy of this page."),
+    "CANONICAL_INVALID": (2, "Search engines cannot use a canonical link that is not a valid address."),
+    "SITEMAP_QUARANTINED": (2, "Search engines may not be able to use your sitemap to find your pages."),
+    "SITEMAP_UNREADABLE": (2, "Search engines may not be able to use your sitemap to find your pages."),
+    "SITEMAP_MISSING": (2, "Without a sitemap, search engines rely on links alone to find your pages."),
+    "SITEMAP_TOO_MANY_URLS": (2, "Search engines stop reading a sitemap file past 50,000 addresses."),
+    "SITEMAP_LISTS_ROBOTS_BLOCKED_URL": (2, "Your sitemap and robots.txt disagree, which wastes crawl effort."),
+    "TITLE_MISSING": (2, "Search results have no title of yours to show for this page."),
+    "STRUCTURED_DATA_ERRORS": (2, "Search engines and AI assistants read this markup to understand your business; "
+                                  "with required details missing they may ignore it or show incomplete details."),
+    "STRUCTURED_DATA_INVALID_JSON": (2, "Search engines cannot read markup that is not valid JSON."),
+    "ENTITY_FIELD_MISMATCH": (2, "Search engines and AI assistants may show business details that differ from your "
+                                 "records."),
+    "ENTITY_FIELD_MISSING_IN_MARKUP": (2, "A business detail is missing from the markup search engines read."),
+    "ENTITY_MARKUP_ABSENT": (2, "Search engines and AI assistants get no structured description of your business."),
+    "ENTITY_SAMEAS_MISSING": (2, "Without links to your official profiles, search engines and AI assistants have a "
+                                 "harder time connecting your site to your business elsewhere."),
+    "LITTLE_TEXT_IN_RAW_HTML": (2, "Crawlers that do not run JavaScript may see little or none of this page's "
+                                   "content."),
+    "STRUCTURED_DATA_ABSENT": (2, "Search engines and AI assistants get no structured description of this page."),
+    "PHONE_NOT_IN_VISIBLE_TEXT": (2, "Visitors and search engines may not find your phone number on the page."),
+    "REDIRECT_CHAIN": (3, "Each extra redirect slows the page and can dilute signals search engines pass along."),
+    "H1_COUNT": (3, "A missing or repeated main heading makes the page's topic less clear."),
+    "META_DESCRIPTION_MISSING": (3, "Search engines write their own snippet for this page instead of yours."),
+}
+DECISION_RANK = {"ACT": 0, "TEST": 1, "WATCH": 2}
+SUMMARY_MAX = 5
+# Internal wording that never reaches a client document (plain-language rewrites; applied to text this service wrote,
+# never to crawled text, which is data and shown as quoted)
+_CLIENT_WORDS = (
+    (re.compile(r"\bin Wave[- ]?\d+\b"), "in this audit"),
+    (re.compile(r"(^|(?<=[.;:] ))Wave[- ]?\d+\b"), "This audit"),
+    (re.compile(r"\bWave[- ]?\d+\b"), "this audit"),
+    (re.compile(r" ?\(founder-pending flag \d+\)"), ""),
+    (re.compile(r"\bthe search_performance section\b"), "the Search performance section"),
+    (re.compile(r"\bFirst-party truth\b"), "Your own data"),
+    (re.compile(r"\bNOT_CONNECTED\b"), "not connected"),
+    (re.compile(r"^no fetcher is wired$"), "No page could be read: the page reader was not available for this audit."),
+    (re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b"), lambda m_: m_.group(0).replace("_", " ").lower()),
+)
+_INTERNAL_LINE = re.compile(r"\bORCA\b|Zero-Day|\bDepartment \d+|\bclientfix\b|\bAEGIS\b|\badapter contract\b")
+
 
 # Per rule: (title, plain-English fix, detail keys shown with their kind). A key not listed is never rendered.
 # Kinds: num, bool, nums (list of numbers), text (untrusted text), texts, url (crawled URL -> template),
@@ -240,7 +339,7 @@ _R = {
     "CANONICAL_MISSING": ("No canonical link", "Add a self-referencing rel=canonical to the page.", ()),
     "HTML_PARSE_ERROR": ("HTML could not be fully parsed", "Validate the page's HTML and fix structural errors.", ()),
     "BOT_DIFFERENTIAL": ("Crawlers are served different content than browsers", "Serve crawlers and visitors the "
-                         "same content (check CDN, bot-protection and cloaking rules).", ()),
+                         "same content (check CDN, bot-protection and cloaking rules).", (("signals", "signals"),)),
     # Delia: sitemaps and llms.txt
     "SITEMAP_MISSING": ("No sitemap found", "Publish an XML sitemap and name it in robots.txt with a Sitemap line.",
                         (("status", "num"),)),
@@ -365,6 +464,31 @@ def safe_text(s: Any, limit: int = TEXT_MAX) -> str:
     return t
 
 
+def client_text(s: Any) -> Optional[str]:
+    """Text this service wrote (methodology, limitations, reasons) in client language: internal programme names and
+    code-shaped words rewritten as plain words; a line about an internal product is dropped (None). Never applied to
+    crawled text."""
+    if not isinstance(s, str):
+        return None
+    if _INTERNAL_LINE.search(s):
+        return None
+    t = s
+    for rx, rep in _CLIENT_WORDS:
+        t = rx.sub(rep, t)
+    return " ".join(t.split())
+
+
+def _dedupe(lines: list) -> list:
+    """Order kept; a repeat (ignoring case, spacing and the final full stop) is dropped."""
+    seen, out = set(), []
+    for x in lines:
+        k = " ".join(x.lower().split()).rstrip(".")
+        if k and k not in seen:
+            seen.add(k)
+            out.append(x)
+    return out
+
+
 def safe_token(s: Any) -> str:
     """A code-shaped value (a state, a media type, a rule token); judged for personal data like any text (a crawled
     ``Content-Type`` of ``tel:+15550100199`` is code-shaped too)."""
@@ -447,6 +571,37 @@ def _pct(v: Any) -> Optional[str]:
     return f"{v * 100:.1f}%"
 
 
+def _issue_text(i: Any) -> list:
+    """One structured-data or llms.txt issue in plain words, as segments: ("t", our text) and ("c", a value from the
+    crawled markup, judged as a token: bounded, personal data withheld, always rendered as quoted code)."""
+    code, vals = (i.get("code"), {k: i.get(k) for k in ("type", "property")}) if isinstance(i, dict) else (i, {})
+    tpl = ISSUE_TEXT.get(code) if isinstance(code, str) else None
+    if tpl is not None and all(not (part in ("type", "property")) or isinstance(vals.get(part), str) for part in tpl):
+        return [("c", safe_token(vals[part])) if part in ("type", "property") else ("t", part) for part in tpl]
+    segs = [("c", safe_token(v)) for v in ([code] + [vals.get(k) for k in ("type", "property")])
+            if isinstance(v, str)]
+    return segs or [("t", "issue")]
+
+
+def _segs_text(segs: list) -> str:
+    return " ".join(t for _k, t in segs)
+
+
+def _visible(f: dict) -> bool:
+    """Whether a recorded finding may be shown to a client. An inconclusive comparison never is (Gate 4): a
+    bot-versus-browser difference that was not confirmed on a repeat request (every recorded before the confirmation
+    existed counts as unconfirmed), a canonical target our own request could not read, or any finding whose detail
+    says it was inconclusive."""
+    d = f.get("detail") if isinstance(f.get("detail"), dict) else {}
+    if d.get("state") == "INCONCLUSIVE" or d.get("inconclusive") is True:
+        return False
+    if f.get("code") == "BOT_DIFFERENTIAL" and d.get("confirmed") is not True:
+        return False
+    if f.get("code") == "CANONICAL_TARGET_NOT_200" and d.get("fetch_state") not in (None, "OK"):
+        return False
+    return True
+
+
 def _detail_items(code: str, detail: dict, ctx: _Ctx) -> list:
     """[(label, value-model)] for the keys this rule shows. value-model: {"t": "text"|"code"|"list", ...}."""
     spec = _R.get(code, (None, None, ()))[2]
@@ -467,8 +622,17 @@ def _detail_items(code: str, detail: dict, ctx: _Ctx) -> list:
         elif kind == "nums" and isinstance(v, list):
             nums = [n for n in (_num(x) for x in v[:LIST_MAX]) if n is not None]
             model = {"t": "text", "v": ", ".join(nums) + (" …" if len(v) > LIST_MAX else "")} if nums else None
+        elif kind == "token" and key == "fetch_state":
+            model = None if v is None else {"t": "text", "v": FETCH_STATE_TEXT.get(v, "not answered")
+                                            if isinstance(v, str) else "not answered"}
+            label = "result"
         elif kind == "token":
             model = None if v is None else {"t": "code", "v": safe_token(v)}
+        elif kind == "signals" and isinstance(v, list):
+            names = [SIGNAL_TEXT[x["signal"]] for x in v[:LIST_MAX * 2] if isinstance(x, dict)
+                     and x.get("signal") in SIGNAL_TEXT]
+            model = {"t": "plist", "v": [[("t", x)] for x in sorted(set(names))]} if names else None
+            label = "what differed"
         elif kind == "url":
             model = None if v is None else {"t": "code", "v": ctx.template(v)}
         elif kind == "urls" and isinstance(v, list):
@@ -478,14 +642,7 @@ def _detail_items(code: str, detail: dict, ctx: _Ctx) -> list:
         elif kind == "texts" and isinstance(v, list):
             model = {"t": "list", "v": [safe_text(x, 80) for x in v[:LIST_MAX]], "more": len(v) > LIST_MAX}
         elif kind == "issues" and isinstance(v, list):
-            items = []
-            for i in v[:LIST_MAX]:
-                if isinstance(i, dict):
-                    parts = [safe_token(i[k]) for k in ("code", "type", "property") if isinstance(i.get(k), str)]
-                    items.append(" ".join(parts) or "issue")
-                else:
-                    items.append(safe_token(i))
-            model = {"t": "list", "v": items, "more": len(v) > LIST_MAX}
+            model = {"t": "plist", "v": [_issue_text(i) for i in v[:LIST_MAX]], "more": len(v) > LIST_MAX}
         elif kind == "rate":
             p = _pct(v)
             if p is not None:
@@ -569,6 +726,8 @@ def _status(env: Optional[dict]) -> dict:
     rtext = None
     if isinstance(reason, str) and _CODE.fullmatch(reason):
         rtext = REASON_TEXT.get(reason)
+    elif isinstance(reason, str):
+        rtext = PLAIN_REASON_TEXT.get(reason)
     checked = outcome in ("OK", "PARTIAL")
     return {"outcome": outcome or "NOT_COVERED", "label": label, "why": rtext or why, "checked": checked,
             "reason_code": reason if isinstance(reason, str) and _CODE.fullmatch(reason) else None}
@@ -579,7 +738,7 @@ def _groups(findings: list, ctx: _Ctx) -> list:
     for f in findings:
         if not isinstance(f, dict) or not isinstance(f.get("code"), str) or not _CODE.fullmatch(f["code"]):
             continue
-        if f["code"] in INTERNAL_CODES:
+        if f["code"] in INTERNAL_CODES or not _visible(f):
             continue
         sev, dc, dec = f.get("severity"), f.get("data_class"), f.get("decision")
         if sev not in SEVERITY_ORDER or dc not in EVIDENCE or dec not in DECISION_TEXT:
@@ -611,7 +770,8 @@ def _groups(findings: list, ctx: _Ctx) -> list:
                     "fix": fix or "No standard fix is written for this rule yet; ask us about it (the details are in "
                            "the audit record).",
                     "severity": g["severity"], "evidence": label, "evidence_how": how,
-                    "decision": DECISION_TEXT[g["decision"]], "capability": g["capability"],
+                    "decision": DECISION_TEXT[g["decision"]], "decision_code": g["decision"],
+                    "capability": g["capability"],
                     "locations": locs[:LOCATIONS_MAX], "locations_more": max(0, len(locs) - LOCATIONS_MAX),
                     "instances": inst[:INSTANCES_MAX], "instances_more": max(0, len(inst) - INSTANCES_MAX)})
     return out
@@ -621,9 +781,11 @@ def _note(g: dict) -> str:
     """A finding group of an area that was not checked, as one plain line (values already made safe)."""
     bits = []
     for inst in g["instances"][:INSTANCES_MAX]:
-        bits.append("; ".join(f"{lbl}: " + (", ".join(v["v"]) if v["t"] == "list" else str(v["v"]))
+        bits.append("; ".join(f"{lbl}: " + (", ".join(v["v"]) if v["t"] == "list" else
+                                            "; ".join(_segs_text(x) for x in v["v"]) if v["t"] == "plist"
+                                            else str(v["v"]))
                               for lbl, v in inst["items"]))
-    return (f"Run note: {g['title']} (rule {g['code']})" + (f": {' | '.join(bits)}" if bits else "")
+    return (f"Run note: {g['title']}" + (f": {' | '.join(bits)}" if bits else "")
             + ". This area was not checked; the note explains why, it is not a finding.")[:600]
 
 
@@ -738,6 +900,69 @@ def _freshness(key: str, report: dict, env: Optional[dict], tiers: dict) -> str:
     return f"observed during the run; refresh recommended by {_ts_plus(fin, days)}"
 
 
+def _key(x: str) -> str:
+    return " ".join(x.lower().split()).rstrip(".")
+
+
+def _coverage(sections: list) -> dict:
+    """What the client is told about how much of the audit ran (never the internal run outcome). Honest by
+    construction: an area counts as checked only when its status is checked; a partly checked area says so."""
+    total = len(sections)
+    full = [s for s in sections if s["status"]["outcome"] == "OK"]
+    part = [s for s in sections if s["status"]["outcome"] == "PARTIAL"]
+    off = [s for s in sections if not s["status"]["checked"]]
+    n = len(full) + len(part)
+    if n == total and not part:
+        label = f"Complete audit: all {total} areas checked"
+    elif n:
+        label = f"Partial audit: {n} of {total} areas checked" + (f" ({len(part)} of them only in part)" if part
+                                                                  else "")
+    else:
+        label = f"No area could be checked (0 of {total})"
+    return {"label": label, "checked": n, "partly": len(part), "total": total, "complete": n == total and not part,
+            "not_checked": [{"title": s["title"], "why": s["status"]["why"] or "This check did not run."}
+                            for s in off],
+            "partly_checked": [{"title": s["title"], "why": s["status"]["why"] or ""} for s in part]}
+
+
+def _rank(g: dict) -> tuple:
+    tier = IMPACT.get(g["code"], (3, None))[0]
+    return (SEVERITY_ORDER.index(g["severity"]), tier, DECISION_RANK.get(g["decision_code"], 3),
+            -(len(g["locations"]) + g["locations_more"]), g["code"])
+
+
+def _summary(sections: list, coverage: dict, pages: int) -> dict:
+    """The executive summary: deterministic, derived only from the findings shown below it. Ranked by severity, then
+    business-impact tier, then recommended action, then pages affected; info-level findings and findings with no
+    recommended change are not issues."""
+    cands = []
+    for s in sections:
+        if not s["status"]["checked"]:
+            continue
+        for g in s["groups"]:
+            if g["severity"] == "info" or g["decision_code"] not in DECISION_RANK:
+                continue
+            cands.append((s, g))
+    cands.sort(key=lambda sg: _rank(sg[1]))
+    issues = []
+    for s, g in cands[:SUMMARY_MAX]:
+        where = len(g["locations"]) + g["locations_more"]
+        issues.append({"title": g["title"], "area": s["title"], "severity": g["severity"], "decision": g["decision"],
+                       "impact": IMPACT.get(g["code"], (3, None))[1] or "See the finding for details.",
+                       "fix": g["fix"], "where": where, "anchor": s["key"]})
+    checked = [s["title"] for s in sections if s["status"]["checked"]]
+    if issues:
+        first = issues[0]
+        do_first = f"{first['title']} ({first['area']}). {first['fix']}"
+    elif checked:
+        do_first = ("No issue needing a change was found in the areas that were checked." +
+                    ("" if coverage["complete"] else " Areas that were not checked are not covered by this result."))
+    else:
+        do_first = "Nothing could be checked, so there is nothing to act on yet; the audit should be run again."
+    return {"checked_areas": checked, "pages": pages, "issues": issues, "more": max(0, len(cands) - SUMMARY_MAX),
+            "do_first": do_first}
+
+
 def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, preview: bool = False) -> dict:
     """The neutral report model from one audit view (``SeoService.audit_view``). Refuses anything that is not a
     completed audit of ``tenant_id``."""
@@ -793,11 +1018,17 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
         sec["notes"] = [] if st["checked"] else [_note(g) for g in sec["groups"]]
         if not st["checked"]:
             sec["groups"] = []
+        hidden = sum(1 for f in ((env or {}).get("findings") or []) if isinstance(f, dict)
+                     and f.get("code") not in INTERNAL_CODES and not _visible(f))
+        if hidden and st["checked"]:
+            sec["notes"].append(f"{hidden} comparison(s) could not be confirmed (a difference between what our crawler "
+                                "and a browser were served that did not hold on a repeat request, or a page our own "
+                                "request could not read) and are not reported as findings.")
         sections.append(sec)
-    nc = sorted({x for x in (report.get("not_connected") or []) if isinstance(x, str)})
+    nc = sorted({x for x in (report.get("not_connected") or []) if isinstance(x, str)} - INTERNAL_NOT_CONNECTED)
     not_connected = [NOT_CONNECTED_TEXT[x] for x in nc if x in NOT_CONNECTED_TEXT]
     unknown_nc = [x for x in nc if x not in NOT_CONNECTED_TEXT and _TOKEN.fullmatch(x)]
-    methods = []
+    methods, area_limits = [], []
     for key, title, at, _what in SECTIONS:
         env = envs.get(at)
         if env is None:
@@ -808,27 +1039,53 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
         if key == "ai" and sec["ai"] and any(not e["sampling"].startswith("Each of") for e in sec["ai"]["engines"]):
             notes.append("The method above is the plan. Not every engine was asked every question that many times; "
                          "the per-engine lines in the AI visibility section state what was actually asked.")
-        method = env.get("methodology") if isinstance(env.get("methodology"), str) else ""
-        methods.append({"title": title, "method": safe_text(_PS_HASH.sub("", method), 1500),
-                        "limits": [safe_text(x, 600) for x in lims[:20] if isinstance(x, str)] + notes})
+        method = client_text(env.get("methodology")) or ""
+        own = _dedupe([safe_text(t, 600) for t in (client_text(x) for x in lims[:20]) if t])
+        area_limits.append(own)
+        methods.append({"title": title, "method": safe_text(_PS_HASH.sub("", method), 1500), "limits": own,
+                        "notes": notes})
+    # one statement of each limit (Gate 4: the same line was printed under the whole audit and again under each
+    # area): a line two or more areas share moves to the whole-audit list; a line one area states stays there only
+    counts: dict = {}
+    for own in area_limits:
+        for x in own:
+            counts[_key(x)] = counts.get(_key(x), 0) + 1
+    shared = {k for k, n in counts.items() if n > 1}
+    for meth in methods:
+        meth["limits"] = [x for x in meth["limits"] if _key(x) not in shared] + meth.pop("notes")
+    recorded = [safe_text(t, 600) for t in (client_text(x) for x in (report.get("limitations") or [])[:40]
+                                            if isinstance(x, str)) if t]
+    global_limits = _dedupe([x for x in recorded if _key(x) not in counts or _key(x) in shared]
+                            + [x for own in area_limits for x in own if _key(x) in shared])
     quarantined = hygiene.get("quarantined") if isinstance(hygiene.get("quarantined"), list) else []
     q_counts: dict = {}
     for q in quarantined:
         if isinstance(q, dict) and isinstance(q.get("reason"), str) and _CODE.fullmatch(q["reason"]):
             q_counts[q["reason"]] = q_counts.get(q["reason"], 0) + 1
     versions = report.get("versions") if isinstance(report.get("versions"), dict) else {}
+    disc = report.get("discovered_paths") if isinstance(report.get("discovered_paths"), list) else []
+    # pages the audit found by following links: crawled text, so shown as templates and never as links
+    discovered = sorted({_templated(p) for p in disc[:100] if isinstance(p, str) and _REQ_PATH.fullmatch(p)
+                         and p not in paths})
+    coverage = _coverage(sections)
     return {
-        "renderer_version": "seo-client-report/3" if any("homepage" in x for x in sections) else RENDERER_VERSION, "preview": bool(preview),
+        "renderer_version": RENDERER_VERSION_HOMEPAGE if any("homepage" in x for x in sections) else RENDERER_VERSION,
+        "preview": bool(preview),
         "brand": {"name": branding.name, "accent": branding.accent},
         "audit_id": aid, "report_sha256": rsha, "domain": domain, "scheme": scheme,
         "pages": [{"path": ctx.shown[p][0], "url": ctx.page_url(ctx.shown[p][0]) if ctx.shown[p][1] else None}
                   for p in paths],
+        "discovered_pages": discovered,
         "started": started, "finished": finished,
+        # the recorded outcome stays in the model (API callers, the audit record); the client document shows the
+        # coverage instead (Gate 4: an internal FAILED on the cover of a delivered report)
         "run_outcome": report.get("outcome") if isinstance(report.get("outcome"), str)
         and _CODE.fullmatch(report["outcome"]) else "UNKNOWN",
+        "coverage": coverage, "summary": _summary(sections, coverage, len(paths) + len(discovered)),
         "sections": sections, "not_connected": not_connected, "not_connected_other": unknown_nc,
-        "global_limits": [safe_text(x, 600) for x in (report.get("limitations") or [])[:40] if isinstance(x, str)],
+        "global_limits": global_limits,
         "methods": methods, "quarantined": sorted(q_counts.items()),
+        "reference": sorted({(g["title"], g["code"]) for x in sections for g in x["groups"]}),
         "versions": {k: safe_token(v) for k, v in sorted(versions.items()) if isinstance(k, str) and _TOKEN.fullmatch(k)
                      and isinstance(v, str)},
     }
@@ -869,6 +1126,9 @@ def md_code(text: Any) -> str:
 def _md_val(model: dict) -> str:
     if model["t"] == "text":
         return md(model["v"])
+    if model["t"] == "plist":
+        return "; ".join(" ".join(md(t) if k == "t" else md_code(t) for k, t in item) for item in model["v"]) \
+            + ("; …" if model.get("more") else "")
     if model["t"] == "code":
         return md_code(model["v"])
     items = ", ".join(md_code(x) for x in model["v"])
@@ -881,55 +1141,100 @@ def _md_loc(loc: Optional[dict]) -> str:
     return md_code(loc["path"] if loc["kind"] == "page" else loc["text"])
 
 
+def _pages_line(m: dict) -> str:
+    n, d = len(m["pages"]), len(m["discovered_pages"])
+    if not d:
+        return f"{n} page(s), as requested"
+    return f"{n + d} page(s): {n} requested and {d} found by following links on your site"
+
+
+def _coverage_lines(c: dict) -> list:
+    """(what is not checked, why) lines for the coverage statement, already in plain words."""
+    out = [f"{x['title']}: not checked. {x['why']}" for x in c["not_checked"]]
+    out += [f"{x['title']}: checked only in part. {x['why']}".rstrip() for x in c["partly_checked"]]
+    return out
+
+
+QUOTE_NOTE = ("Text from your pages, sitemaps and robots.txt is quoted as data only. Addresses the audit found by "
+              "following links are shown as templates (identifiers replaced by placeholders such as {slug} or "
+              "{number}); the exact addresses are in the audit record.")
+
+
 def render_markdown(m: dict) -> str:
     L = []
     if m["preview"]:
         L += ["> **PREVIEW.** Rendered offline and not recorded on the ledger. Not for delivery to a client.", ""]
+    c, sm = m["coverage"], m["summary"]
     L += [f"# SEO technical audit: {md_code(m['domain'])}", "",
           f"Prepared by {md(m['brand']['name'])}.", "",
-          "## Cover", "",
+          "## Executive summary", "",
+          f"**{md(c['label'])}.** {md(_pages_line(m))}.", ""]
+    if sm["checked_areas"]:
+        L += ["**What was checked:** " + md(", ".join(sm["checked_areas"])) + ".", ""]
+    cl = _coverage_lines(c)
+    if cl:
+        L += ["**Not covered by this report:**", ""] + [f"- {md(x)}" for x in cl] + [""]
+    if sm["issues"]:
+        L += ["**Top issues, most important first:**", ""]
+        for i, x in enumerate(sm["issues"], 1):
+            where = f"{x['where']} location(s)" if x["where"] else "site-wide"
+            L.append(f"{i}. **{md(x['title'])}** ({md(x['severity'])}; {md(x['area'])}; {md(where)}). "
+                     f"{md(x['impact'])} *Recommended:* {md(x['fix'])}")
+        if sm["more"]:
+            L.append(f"\n{sm['more']} more issue(s) are listed in the sections below.")
+        L.append("")
+    L += [f"**What to do first:** {md(sm['do_first'])}", "",
+          "## Audit details", "",
           f"- **Website audited:** {md_code(m['scheme'] + '://' + m['domain'])}",
-          f"- **Audit ID:** {md_code(m['audit_id'])}",
-          f"- **Run:** {md(m['started'])} to {md(m['finished'])}",
-          f"- **Run outcome:** {md(m['run_outcome'])} (whether every check could run; not a score)",
-          f"- **Audit record:** report SHA-256 {md_code(m['report_sha256'])}, recorded on a tamper-evident ledger "
-          "when the audit completed.",
-          f"- **Pages audited ({len(m['pages'])}):** " + ", ".join(md_code(p["path"]) for p in m["pages"]), "",
-          "### What was checked", "",
+          f"- **Audit run:** {md(m['started'])} to {md(m['finished'])}",
+          f"- **Coverage:** {md(c['label'])}",
+          f"- **Pages requested ({len(m['pages'])}):** " + ", ".join(md_code(p["path"]) for p in m["pages"])]
+    if m["discovered_pages"]:
+        L.append(f"- **Pages found by following links ({len(m['discovered_pages'])}):** "
+                 + ", ".join(md_code(p) for p in m["discovered_pages"]))
+    L += ["", "### What was checked", "",
           "| Area | Status | Findings | Data freshness |", "|---|---|---|---|"]
     for s in m["sections"]:
         n = sum(1 for _ in s["groups"])
         L.append(f"| {md(s['title'])} | **{md(s['status']['label'])}** | "
                  f"{n if s['status']['checked'] else '—'} | {md(s['freshness'])} |")
-    L += ["", "Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT "
+    L += ["", "Findings are counted per issue (one issue may affect several pages). An area marked NOT CONNECTED, NOT "
           "COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because "
           "there is nothing there.", ""]
     if m["not_connected"] or m["not_connected_other"]:
         L += ["### Not connected for this audit", ""]
         L += [f"- {md(x)}" for x in m["not_connected"]]
-        L += [f"- {md_code(x)}" for x in m["not_connected_other"]]
+        if m["not_connected_other"]:
+            L.append(f"- {len(m['not_connected_other'])} other data source(s).")
         L.append("")
     L += ["### How to read this report", "",
           "- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** "
           "(OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate "
-          "with its assumption), the **rule** that produced it, and a **recommended fix**.",
+          "with its assumption) and a **recommended fix**.",
           "- There is no overall score and no grade. Findings of different kinds are not added together.",
           "- This report does not promise rankings, traffic or citations by any search or answer engine, and it makes "
           "no comparison claims about any other provider.",
-          "- Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates "
-          "(identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.",
-          ""]
+          f"- {QUOTE_NOTE}", ""]
     for s in m["sections"]:
         L += _md_section(s)
     L += ["## Methodology and limits", ""]
-    L += ["### Applies to the whole audit", ""] + [f"- {md(x)}" for x in m["global_limits"]] + [""]
+    if m["global_limits"]:
+        L += ["### Applies to the whole audit", ""] + [f"- {md(x)}" for x in m["global_limits"]] + [""]
     for meth in m["methods"]:
         L += [f"### {md(meth['title'])}", "", f"**Method.** {md(meth['method'])}", ""]
         if meth["limits"]:
             L += ["**Limits.**", ""] + [f"- {md(x)}" for x in meth["limits"]] + [""]
+    L += ["## Appendix: audit record", "",
+          f"- **Audit ID:** {md_code(m['audit_id'])}",
+          f"- **Audit record:** report SHA-256 {md_code(m['report_sha256'])}, recorded on a tamper-evident ledger "
+          "when the audit completed.", ""]
+    if m["reference"]:
+        L += ["### Reference codes", "", "For support requests: the reference code of each finding in this report.",
+              "", "| Finding | Reference |", "|---|---|"]
+        L += [f"| {md(t)} | {md_code(code)} |" for t, code in m["reference"]] + [""]
     if m["quarantined"]:
         L += ["### Inputs set aside", "", "Malformed or unsafe inputs were set aside unread (never parsed further):",
-              ""] + [f"- {md_code(r)}: {n}" for r, n in m["quarantined"]] + [""]
+              ""] + [f"- {md(client_text(r) or r)}: {n}" for r, n in m["quarantined"]] + [""]
     if m["versions"]:
         L += ["### Versions", ""] + [f"- {md(k.replace('_', ' '))}: {md_code(v)}" for k, v in m["versions"].items()]
         L += [f"- report renderer: {md_code(m['renderer_version'])}", ""]
@@ -950,10 +1255,7 @@ def _md_section(s: dict) -> list:
     L = [f"## {md(s['title'])}", "", f"**Status: {md(st['label'])}.** {md(s['what'])}", "",
          f"Data freshness: {md(s['freshness'])}.", ""]
     if not st["checked"]:
-        L += [f"{md(st['why'] or '')} {NOT_CLEAN}".strip()]
-        if st["reason_code"]:
-            L[-1] += f" (reason {md_code(st['reason_code'])})"
-        L.append("")
+        L += [f"{md(st['why'] or '')} {NOT_CLEAN}".strip(), ""]
     elif st["why"]:
         L += [md(st["why"]), ""]
     if "homepage" in s:
@@ -971,8 +1273,7 @@ def _md_section(s: dict) -> list:
     for g in s["groups"]:
         L += [f"### {md(g['title'])}", "",
               f"- **Severity:** {md(g['severity'])} · **Recommended action:** {md(g['decision'])}",
-              f"- **Evidence:** {md(g['evidence'])} ({md(g['evidence_how'])}) · **Rule:** {md_code(g['code'])}"
-              + (f" · **Area:** {md_code(g['capability'])}" if g["capability"] else ""),
+              f"- **Evidence:** {md(g['evidence'])} ({md(g['evidence_how'])})",
               f"- **Fix:** {md(g['fix'])}"]
         if g["locations"]:
             L.append("- **Where:** " + ", ".join(_md_loc(x) for x in g["locations"])
@@ -1075,6 +1376,8 @@ th{background:var(--soft)}
 .sev-critical{color:#8a1c1c}.sev-high{color:#b33a00}.sev-medium{color:#8a5a00}.sev-low{color:#35537a}.sev-info{color:#555}
 .meta{color:var(--muted);font-size:13px}
 ul{padding-left:20px}
+.summary{background:var(--soft);border-radius:6px;padding:4px 18px 10px;margin:0 0 24px}
+.summary h2{margin-top:14px}.summary ul{padding-left:22px}.summary li{margin:6px 0}
 .preview{background:#fff4d6;border:1px solid #c9a227;padding:8px 12px;margin-bottom:16px;font-weight:600}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;color:var(--muted);font-size:13px}
 @media print{body{font-size:11pt}main{max-width:none;padding:0}h2{break-after:avoid}section.area{break-before:page}
@@ -1085,6 +1388,9 @@ a{color:inherit;text-decoration:none}}
 def _h_val(model: dict) -> str:
     if model["t"] == "text":
         return h(model["v"])
+    if model["t"] == "plist":
+        return "; ".join(" ".join(h(t) if k == "t" else f"<code>{h(t)}</code>" for k, t in item)
+                         for item in model["v"]) + ("; …" if model.get("more") else "")
     if model["t"] == "code":
         return f"<code>{h(model['v'])}</code>"
     items = ", ".join(f"<code>{h(x)}</code>" for x in model["v"])
@@ -1118,17 +1424,39 @@ def render_html(m: dict) -> str:
     if m["preview"]:
         o.append('<div class="preview">PREVIEW. Rendered offline and not recorded on the ledger. Not for delivery to '
                  "a client.</div>")
+    c, sm = m["coverage"], m["summary"]
     o += ['<header class="cover">', f"<h1>SEO technical audit: <code>{h(m['domain'])}</code></h1>",
-          f'<p class="brand">Prepared by {h(m["brand"]["name"])}</p>', '<dl class="facts">',
+          f'<p class="brand">Prepared by {h(m["brand"]["name"])}</p>', "</header>",
+          '<section class="summary" id="summary">', "<h2>Executive summary</h2>",
+          f'<p class="coverage"><strong>{h(c["label"])}.</strong> {h(_pages_line(m))}.</p>']
+    if sm["checked_areas"]:
+        o.append(f"<p><strong>What was checked:</strong> {h(', '.join(sm['checked_areas']))}.</p>")
+    cl = _coverage_lines(c)
+    if cl:
+        o += ["<p><strong>Not covered by this report:</strong></p>", "<ul>"] + [f"<li>{h(x)}</li>" for x in cl]
+        o.append("</ul>")
+    if sm["issues"]:
+        o += ["<p><strong>Top issues, most important first:</strong></p>", "<ul>"]
+        for n, x in enumerate(sm["issues"], 1):
+            where = f"{x['where']} location(s)" if x["where"] else "site-wide"
+            o.append(f'<li>{n}. <strong>{h(x["title"])}</strong> <span class="meta">('
+                     f'<span class="sev sev-{h(x["severity"])}">'
+                     f'{h(x["severity"])}</span>; {h(x["area"])}; {h(where)})</span>. '
+                     f"{h(x['impact'])} <strong>Recommended:</strong> {h(x['fix'])}</li>")
+        o.append("</ul>")
+        if sm["more"]:
+            o.append(f"<p>{sm['more']} more issue(s) are listed in the sections below.</p>")
+    o += [f"<p><strong>What to do first:</strong> {h(sm['do_first'])}</p>", "</section>",
+          "<section>", "<h2>Audit details</h2>", '<dl class="facts">',
           f"<dt>Website audited</dt><dd><code>{h(m['scheme'] + '://' + m['domain'])}</code></dd>",
-          f"<dt>Audit ID</dt><dd><code>{h(m['audit_id'])}</code></dd>",
-          f"<dt>Run</dt><dd>{h(m['started'])} to {h(m['finished'])}</dd>",
-          f"<dt>Run outcome</dt><dd>{h(m['run_outcome'])} (whether every check could run; not a score)</dd>",
-          f"<dt>Audit record</dt><dd>report SHA-256 <code>{h(m['report_sha256'])}</code>, recorded on a "
-          "tamper-evident ledger when the audit completed</dd>",
-          f"<dt>Pages audited ({len(m['pages'])})</dt><dd>"
-          + ", ".join(_h_loc({"kind": "page", "path": p["path"]}, pages) for p in m["pages"]) + "</dd>",
-          "</dl>", "</header>",
+          f"<dt>Audit run</dt><dd>{h(m['started'])} to {h(m['finished'])}</dd>",
+          f"<dt>Coverage</dt><dd>{h(c['label'])}</dd>",
+          f"<dt>Pages requested ({len(m['pages'])})</dt><dd>"
+          + ", ".join(_h_loc({"kind": "page", "path": p["path"]}, pages) for p in m["pages"]) + "</dd>"]
+    if m["discovered_pages"]:
+        o.append(f"<dt>Pages found by following links ({len(m['discovered_pages'])})</dt><dd>"
+                 + ", ".join(f"<code>{h(p)}</code>" for p in m["discovered_pages"]) + "</dd>")
+    o += ["</dl>", "</section>",
           "<section>", "<h2>What was checked</h2>",
           "<table><thead><tr><th>Area</th><th>Status</th><th>Findings</th><th>Data freshness</th></tr></thead><tbody>"]
     for s in m["sections"]:
@@ -1136,36 +1464,45 @@ def render_html(m: dict) -> str:
         o.append(f"<tr><td>{h(s['title'])}</td><td><span class=\"status {_st_class(st)}\">{h(st['label'])}</span></td>"
                  f"<td>{len(s['groups']) if st['checked'] else '—'}</td><td>{h(s['freshness'])}</td></tr>")
     o += ["</tbody></table>",
-          "<p>Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT "
+          "<p>Findings are counted per issue (one issue may affect several pages). An area marked NOT CONNECTED, NOT "
           "COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because "
           "there is nothing there.</p>"]
     if m["not_connected"] or m["not_connected_other"]:
         o += ["<h3>Not connected for this audit</h3>", "<ul>"]
         o += [f"<li>{h(x)}</li>" for x in m["not_connected"]]
-        o += [f"<li><code>{h(x)}</code></li>" for x in m["not_connected_other"]]
+        if m["not_connected_other"]:
+            o.append(f"<li>{len(m['not_connected_other'])} other data source(s).</li>")
         o.append("</ul>")
     o += ["<h3>How to read this report</h3>", "<ul>",
           "<li>Every finding states its <strong>severity</strong> (critical, high, medium, low, info), its "
           "<strong>evidence class</strong> (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a "
-          "stated rule; ESTIMATED: an estimate with its assumption), the <strong>rule</strong> that produced it, and a "
-          "<strong>recommended fix</strong>.</li>",
+          "stated rule; ESTIMATED: an estimate with its assumption) and a <strong>recommended fix</strong>.</li>",
           "<li>There is no overall score and no grade. Findings of different kinds are not added together.</li>",
           "<li>This report does not promise rankings, traffic or citations by any search or answer engine, and it "
           "makes no comparison claims about any other provider.</li>",
-          "<li>Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates "
-          "(identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit "
-          "record.</li>", "</ul>", "</section>"]
+          f"<li>{h(QUOTE_NOTE)}</li>", "</ul>", "</section>"]
     for s in m["sections"]:
         o += _h_section(s, pages)
-    o += ['<section class="area">', "<h2>Methodology and limits</h2>", "<h3>Applies to the whole audit</h3>", "<ul>"]
-    o += [f"<li>{h(x)}</li>" for x in m["global_limits"]] + ["</ul>"]
+    o += ['<section class="area">', "<h2>Methodology and limits</h2>"]
+    if m["global_limits"]:
+        o += ["<h3>Applies to the whole audit</h3>", "<ul>"] + [f"<li>{h(x)}</li>" for x in m["global_limits"]]
+        o.append("</ul>")
     for meth in m["methods"]:
         o += [f"<h3>{h(meth['title'])}</h3>", f"<p><strong>Method.</strong> {h(meth['method'])}</p>"]
         if meth["limits"]:
             o += ["<p><strong>Limits.</strong></p>", "<ul>"] + [f"<li>{h(x)}</li>" for x in meth["limits"]] + ["</ul>"]
+    o += ["</section>", '<section class="area" id="appendix">', "<h2>Appendix: audit record</h2>",
+          '<dl class="facts">', f"<dt>Audit ID</dt><dd><code>{h(m['audit_id'])}</code></dd>",
+          f"<dt>Audit record</dt><dd>report SHA-256 <code>{h(m['report_sha256'])}</code>, recorded on a "
+          "tamper-evident ledger when the audit completed</dd>", "</dl>"]
+    if m["reference"]:
+        o += ["<h3>Reference codes</h3>", "<p>For support requests: the reference code of each finding in this "
+              "report.</p>", "<table><thead><tr><th>Finding</th><th>Reference</th></tr></thead><tbody>"]
+        o += [f"<tr><td>{h(t)}</td><td><code>{h(code)}</code></td></tr>" for t, code in m["reference"]]
+        o.append("</tbody></table>")
     if m["quarantined"]:
         o += ["<h3>Inputs set aside</h3>", "<p>Malformed or unsafe inputs were set aside unread (never parsed "
-              "further):</p>", "<ul>"] + [f"<li><code>{h(r)}</code>: {n}</li>" for r, n in m["quarantined"]]
+              "further):</p>", "<ul>"] + [f"<li>{h(client_text(r) or r)}: {n}</li>" for r, n in m["quarantined"]]
         o.append("</ul>")
     if m["versions"]:
         o += ["<h3>Versions</h3>", "<ul>"]
@@ -1182,8 +1519,7 @@ def _h_section(s: dict, pages: dict) -> list:
          f"<p><span class=\"status {_st_class(st)}\">{h(st['label'])}</span> {h(s['what'])}</p>",
          f'<p class="meta">Data freshness: {h(s["freshness"])}.</p>']
     if not st["checked"]:
-        reason = f" (reason <code>{h(st['reason_code'])}</code>)" if st["reason_code"] else ""
-        o.append(f'<p class="notclean">{h(st["why"] or "")} {h(NOT_CLEAN)}{reason}</p>')
+        o.append(f'<p class="notclean">{h(st["why"] or "")} {h(NOT_CLEAN)}</p>')
     elif st["why"]:
         o.append(f"<p>{h(st['why'])}</p>")
     if "homepage" in s:
@@ -1202,8 +1538,7 @@ def _h_section(s: dict, pages: dict) -> list:
         o += ['<div class="finding">', f"<h4>{h(g['title'])}</h4>",
               f'<p class="meta"><span class="sev sev-{h(g["severity"])}">{h(g["severity"])}</span> · '
               f"Recommended action: {h(g['decision'])} · Evidence: <strong>{h(g['evidence'])}</strong> "
-              f"({h(g['evidence_how'])}) · Rule <code>{h(g['code'])}</code>"
-              + (f" · Area <code>{h(g['capability'])}</code>" if g["capability"] else "") + "</p>",
+              f"({h(g['evidence_how'])})</p>",
               f"<p><strong>Fix.</strong> {h(g['fix'])}</p>"]
         if g["locations"]:
             o.append("<p><strong>Where.</strong> " + ", ".join(_h_loc(x, pages) for x in g["locations"])

@@ -1299,6 +1299,48 @@ CR-11. **Integration with the Agent API migration (golive-wave2, Oct 25 2026).**
    annotation-only and an `ftp:` tenant URL are not cited; the report shows "Mentioned but not cited", the competitor
    cited instead, and the definition twice), and the hash case, each mutation-checked.
 
+CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch `claude/seo-report-sellable-20261108`).**
+   Supersedes the cover and finding-card parts of CR-2 and CR-4. Renderer `seo-client-report/4` (`/5` with the homepage
+   phone observation). Tests: `tests/test_report_sellable.py`.
+   - **Coverage, not the run outcome.** The document no longer prints the internal run outcome (a delivered report
+     showed "Run outcome: FAILED"). The cover and the executive summary state "Complete audit: all 6 areas checked",
+     "Partial audit: N of 6 areas checked (K of them only in part)" or "No area could be checked (0 of 6)", and list
+     every area not checked with its plain reason. Counted from the same per-area statuses as CR-3, so no area is ever
+     claimed checked that was not. The recorded outcome stays in the model (`run_outcome`) and in the audit record.
+   - **Executive summary** first: what was checked, the top issues (at most 5, plus how many more) and what to do
+     first. Deterministic, derived only from the findings shown below it: ranked by severity, then a closed business-
+     impact tier per rule (`IMPACT`: 1 can keep pages out of search / AI answers, 2 how the business appears, 3
+     hygiene), then decision (ACT, TEST, WATCH), then pages affected; info findings and findings with no recommended
+     change are not issues. Impact sentences say "can" / "may"; nothing is promised.
+   - **Client language.** Rule and reason codes are off the finding cards and status lines; a reference table
+     (finding, code) is in the appendix with the audit id and report hash. Limitations and methods pass through
+     `client_text` (programme names such as "Wave 1" become "this audit"; code-shaped words become plain words; a line
+     about an internal product is dropped); Zero-Day and ORCA Publish are no longer listed as "not connected".
+     Structured-data issues read as sentences ("required property `address` is missing from `ProfessionalService`"),
+     with the crawled names still quoted and screened. Each limitation line is stated once: a line two areas share is
+     under "Applies to the whole audit", a line one area states only under that area.
+   - **Inconclusive comparisons are never findings.** In the document: a `BOT_DIFFERENTIAL` without `confirmed: true`
+     (every one recorded before this change), a `CANONICAL_TARGET_NOT_200` whose own fetch did not answer, and any
+     finding whose detail says `INCONCLUSIVE` are left out, with a note in that area's limits. In the crawl
+     (`primitives/diff.py`, `agents/selene.py`): canonical URLs are compared normalised (scheme and host case, default
+     port, trailing slash); a browser request answered 401/403/405/429/503 while our crawler got the page is a
+     bot-protection challenge, INCONCLUSIVE; a difference is reported only when it holds on a repeat request by our
+     crawler (signals that also differ between our own two requests are dropped; none left = INCONCLUSIVE); a canonical
+     target our request could not read is a fact (`canonical_checks_inconclusive`), not a finding.
+   - **Bounded page discovery.** Root cause of "1 page audited": the request's `paths` default is `["/"]` and only
+     requested paths were read. Selene now also reads same-site pages linked from the requested pages (one level,
+     document order) up to `SEO_AUDIT_MAX_PAGES` in total (default 10, max 25), skipping query strings, non-page files,
+     other hosts and ports, nofollow links, action-like paths (logout, cart, admin, ...), paths that look like personal
+     data and paths robots.txt disallows for our crawler; with robots.txt unreadable nothing is discovered. Every fetch
+     goes through the same fetcher (SSRF guard, budgets, redirects re-checked). The report records `discovered_paths`;
+     the client document lists them as templates, never as links.
+   - **A sitemap observed missing is a finding, not a failed area.** `/sitemap.xml` answering 404 or 410 is
+     `SITEMAP_MISSING` in a checked area; only a fetch that did not answer, or 401/403/5xx, leaves it unobserved.
+   - Not verifiable here: the Gate 4 report itself and zbestmedia.com (no outbound access from the build sandbox). Why
+     4 of 6 areas were not checked is reasoned from the code: Search Console not connected and no market-question set
+     (both expected until connected), no business record on file for the entity check, and the sitemap area failing
+     (a 404 sitemap was counted as a failure before this change, or a fetch that did not answer).
+
 ## Unlock list
 
 Answer-engine adapters with scoped, short-lived credentials (OpenAI, Anthropic, Google); a renderer; Bing Webmaster; a
