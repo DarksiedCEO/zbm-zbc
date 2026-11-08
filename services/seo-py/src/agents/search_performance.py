@@ -45,10 +45,11 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.5"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.6"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.6 (review round 6): a host name with short slug segments is not a "/" secret (URL-path queries kept)
 # 2026-11-08.5 (review round 5): UK postcodes need a real area and a non-ordinal, non-unit inward part; French place /
 #    route need an article; old / new / good alone as a street name only at the end; base64 / AWS-like words with "/"
 # 2026-11-08.4 (review round 4): old / new / good allowed as street names; plaza; UK and Canadian postcodes; French
@@ -241,16 +242,21 @@ def looks_like_address(folded: str) -> bool:
 _JWT = re.compile(r"[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}")
 _SLASH_TOKEN = re.compile(r"[a-z0-9_\-=+.~/]{12,}")
 _PLAIN_SEGMENT = re.compile(r"[a-z]+(?:[-.][a-z]+)*")
+# a URL path of ordinary slugs under a host name: docs.example.com/v2/api/reference, acme.com/blog/5-ways-to-save
+_HOST_PATH = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?:/[a-z0-9-]{1,24})*/?")
 
 
 def _slash_secret(w: str) -> bool:
     """A base64 / AWS-secret-like word holding "/", "+" or "=" (review round 5): 20+ such characters with a digit, a
     "+" or an "=" (``wjalr.../k7mdeng/...``, ``dghpcy9pcy9h/c2vjcmv0ignszxk=``), or 12+ with two of "/", "+", "="
-    (``ywjj/zgvm+z2hp``). A path of plain words (``example.com/blog/how-to-clean``) and a short tire size
-    (``225/65r17``) are not."""
+    (``ywjj/zgvm+z2hp``). A path of plain words (``example.com/blog/how-to-clean``), a host name followed by short slug
+    segments (``docs.example.com/v2/api/reference``, ``mysite.com/page2/contact``; review round 6) and a short tire
+    size (``225/65r17``) are not. Not caught: base64 under 12 characters."""
     if not _SLASH_TOKEN.fullmatch(w) or not any(c in w for c in "/+="):
         return False
     if all(_PLAIN_SEGMENT.fullmatch(seg) for seg in w.split("/") if seg):
+        return False
+    if _HOST_PATH.fullmatch(w):            # a host name, then short slug segments of letters, digits and hyphens
         return False
     marks = sum(1 for c in "/+=" if c in w)
     return (len(w) >= 20 and (any(c.isdigit() for c in w) or "+" in w or "=" in w)) or marks >= 2

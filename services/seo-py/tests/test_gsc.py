@@ -918,7 +918,10 @@ ROUND5_KEEP = ("ps5 2tb ssd upgrade", "ipad pro m4 1tb", "bmw x5 3rd row", "audi
                "galaxy s9 2nd hand", "m3 2nd gen", "6 place setting dinnerware", "bus 12 route map", "5 route options",
                "3 new dr pepper flavors", "2 old court cases", "10 good place to eat", "5 good drive thru",
                "tires 225/65r17", "example.com/blog/how-to-clean-rugs", "acme.com/services/rug-cleaning tips",
-               "5/8 inch plywood", "24/7 plumber", "1/2 hp sump pump")
+               "5/8 inch plywood", "24/7 plumber", "1/2 hp sump pump",
+               # round 6: URL-path queries with digits in a slug
+               "docs.example.com/v2/api/reference", "api.stripe.com/v1/charges docs", "acme.com/blog/5-ways-to-save",
+               "example.org/docs/v3/getting-started", "mysite.com/page2/contact", "moz.com/learn/seo/http2")
 ROUND5_DROP = ("sw1a 1aa", "14 high st oxford ox1 4ag", "m1 1ae manchester", "12 new street", "6 place de la concorde",
                "12 chemin du lac", "12 avenue des champs", "/".join(("wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY")),
                "/".join(("dGhpcy9pcy9h", "c2VjcmV0IGtleQ==")), "+".join(("YWJj/ZGVm", "Z2hp")))

@@ -147,7 +147,8 @@ LIMITS = [
     "engine reported them: bare named streets with no suffix ('1200 broadway', '123 n main'), landmark or "
     "building-name addresses, streets with more than three name words or an unlisted suffix ('trail', 'pike'), a "
     "state code that is also an English word with its ZIP ('portland or 97201'), and other countries' postal "
-    "formats. The rule also drops some non-addresses shaped like '<number> <word> st' or "
+    "formats. Secrets it does NOT catch: base64 under 12 characters, and a random password written as a plain "
+    "word (for example after 'reset'). The rule also drops some non-addresses shaped like '<number> <word> st' or "
     "'<number> <word> court'. Derived variants are never built from a query with a "
     "capitalised word, nor from a frame adding a word outside a closed vocabulary.",
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",
