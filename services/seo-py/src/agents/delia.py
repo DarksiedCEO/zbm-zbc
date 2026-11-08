@@ -115,8 +115,18 @@ def run(ctx) -> dict:
         outcome, reason = "PARTIAL", ("LLMS_TXT_UNREAD" if sitemaps_known else "SITEMAP_UNREAD")
     else:
         outcome, reason = "FAILED", "SITEMAP_UNREAD"
-    if facts.get("service_busy") and outcome != "OK":
-        reason = "SERVICE_BUSY"
+    if outcome != "OK":
+        # round-5 review: a real site failure in this area outranks our own capacity limit; SERVICE_BUSY is the
+        # reason only when being busy is the sole cause
+        llms = facts.get("llms_txt", {})
+        sitemap_real = facts.get("sitemap_fetch_failures", 0) - facts.get("sitemaps_busy", 0) > 0
+        llms_real = llms.get("state") == "unreadable" and llms.get("fetch_state") != "RESOURCE_LIMIT"
+        if sitemap_real:
+            reason = "SITEMAP_UNREAD"
+        elif llms_real:
+            reason = "LLMS_TXT_UNREAD"
+        elif facts.get("service_busy"):
+            reason = "SERVICE_BUSY"
     if deadline and outcome != "OK":
         reason = DEADLINE_REASON
         facts["deadline_reached"] = True
@@ -154,6 +164,7 @@ def _sitemaps(ctx, facts: dict) -> list:
             # our capacity, not the site: no finding about the client's sitemap; the area is incomplete
             failures += 1
             facts["service_busy"] = True
+            facts["sitemaps_busy"] = facts.get("sitemaps_busy", 0) + 1
             continue
         if not f.ok or f.status != 200:
             # Gate 4: a sitemap URL that answers 404 / 410 was OBSERVED to be missing (a finding, SITEMAP_MISSING);

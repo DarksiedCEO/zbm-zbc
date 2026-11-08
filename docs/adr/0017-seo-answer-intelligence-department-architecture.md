@@ -1395,7 +1395,9 @@ CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch 
      `RESOURCE_LIMIT`). Selene, Delia and the pages they read record it (`service_busy_pages`, `service_busy`) with no
      finding; an area it left incomplete carries reason `SERVICE_BUSY` ("Our audit service was busy ... This says
      nothing about your site"); a recorded finding with fetch state `RESOURCE_LIMIT` is never shown. An IP-literal host
-     takes no DNS slot and no lookup (the SSRF policy still applies).
+     takes no DNS slot and no thread; the resolver still sees it, synchronously (a numeric lookup answers at once,
+     and the certified address checks expect the call), and the SSRF policy still applies. A fetch that wins a slot
+     with no time left gives it back and starts no lookup.
 
 ## Unlock list
 

@@ -660,9 +660,11 @@ class _BlockedResolver:
     def __init__(self, real=None, hosts=None):
         import threading
         self.release, self.asked, self.real, self.hosts = threading.Event(), [], real, hosts
+        self.entered = threading.Event()
 
     def __call__(self, host, port):
         self.asked.append(host)
+        self.entered.set()
         if self.hosts is None or host in self.hosts:
             self.release.wait(60)
         return self.real(host, port) if self.real else ["127.0.0.1"]
@@ -901,20 +903,86 @@ def test_readme_states_the_startup_refusal_for_short_deadlines():
 
 
 def test_a_slot_goes_back_to_the_gate_it_came_from(monkeypatch):
-    """Event-driven (no sleeps): a lookup outlives its fetch, the gate is replaced (as after a fork), and the slot
-    is released to the gate it was taken from, never to the new one."""
+    """Event-driven, no sleeps and no timing race: a lookup holds a slot of the old gate, the gate is replaced while it
+    runs (as after a fork), and the slot is released to the gate it was taken from, never to the new one."""
+    import threading
+    import time as _t
     old, new = _FakeGate(allow=1), _FakeGate(allow=1)
     monkeypatch.setattr(fetch_mod, "_DNS_GATE", old)
     r = _BlockedResolver()
-    f = fetch_mod.Fetcher(timeout_s=1, resolver=r, policy=lambda h, ip, p: True)
-    import time as _t
-    fetch_mod._BUDGET.deadline = _t.monotonic() + 0.05                   # the fetch's own deadline, already short
-    try:
-        with pytest.raises(fetch_mod._Refused) as exc:
-            f._resolve("slow.test", 80)
-        assert exc.value.state == "TIMEOUT" and r.asked == ["slow.test"]
-    finally:
-        fetch_mod._BUDGET.deadline = None
+    f = fetch_mod.Fetcher(timeout_s=30, resolver=r, policy=lambda h, ip, p: True)
+    box = {}
+
+    def run():
+        fetch_mod._BUDGET.deadline = _t.monotonic() + 60                 # this thread's fetch deadline
+        try:
+            box["addrs"] = f._resolve("slow.test", 80)
+        finally:
+            fetch_mod._BUDGET.deadline = None
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    assert r.entered.wait(10) and r.asked == ["slow.test"]               # the lookup runs, holding old's slot
     monkeypatch.setattr(fetch_mod, "_DNS_GATE", new)                      # replaced while the lookup still runs
     r.release.set()                                                       # the lookup now returns
-    assert old.released.wait(5) and not new.released.is_set()
+    t.join(10)
+    assert box["addrs"] == ["127.0.0.1"]
+    assert old.released.wait(10) and not new.released.is_set()
+
+
+def test_a_slot_won_with_no_time_left_is_given_back_and_no_lookup_starts(monkeypatch):
+    import time as _t
+
+    class _SlowGate(_FakeGate):
+        def acquire(self, blocking=True, timeout=None):
+            got = super().acquire(blocking, timeout)
+            fetch_mod._BUDGET.deadline = _t.monotonic() - 1               # the wait used the fetch's time up
+            return got
+    gate = _SlowGate(allow=1)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", gate)
+    r = _BlockedResolver()
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=r, policy=lambda h, ip, p: True)
+    fetch_mod._BUDGET.deadline = _t.monotonic() + 60
+    try:
+        with pytest.raises(fetch_mod._Refused) as exc:
+            f._resolve("late.test", 80)
+        assert exc.value.state == "TIMEOUT" and gate.released.is_set()
+        assert r.asked == [] and not r.entered.is_set()                  # no lookup thread was started
+    finally:
+        fetch_mod._BUDGET.deadline = None
+        r.release.set()
+
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("allow,reason", [(1, "SITEMAP_UNREAD"), (0, "SERVICE_BUSY")])
+def test_a_real_site_failure_outranks_service_busy(srv, monkeypatch, allow, reason):
+    """Round-5 review: one sitemap answers 403 (the site) while our gate is busy for the rest: the reason is the
+    site's (SITEMAP_UNREAD); only when being busy is the sole cause is it SERVICE_BUSY."""
+    install_site(srv, robots="User-agent: *\nAllow: /\nSitemap: http://site.test/s1.xml\n"
+                             "Sitemap: http://site.test/s2.xml\n")
+    srv.text("site.test", "/s1.xml", "no", status=403)
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", _FakeGate(allow=allow))  # s1 gets a slot (allow=1), then busy
+    env = delia.run(ctx)
+    assert env["outcome"] == "FAILED" and env["reason"] == reason
+    assert env["facts"]["sitemaps_busy"] == 2 - allow and env["facts"]["service_busy"]
+
+
+@pytest.mark.local_http
+def test_llms_real_failure_outranks_service_busy_on_a_sitemap(srv, monkeypatch):
+    install_site(srv, robots="User-agent: *\nAllow: /\nSitemap: http://site.test/s1.xml\n", llms=None)
+    srv.text("site.test", "/s1.xml", "<?xml version='1.0'?><urlset xmlns='http://www.sitemaps.org/schemas/"
+             "sitemap/0.9'><url><loc>http://site.test/</loc></url></urlset>", ctype="application/xml")
+    srv.text("site.test", "/llms.txt", "no", status=403)
+
+    class _BusyFirst(_FakeGate):                                         # the sitemap finds us busy, llms.txt does not
+        def acquire(self, blocking=True, timeout=None):
+            self.offered.append(timeout)
+            self.allow += 1
+            return self.allow > 1
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", _BusyFirst(allow=0))
+    env = delia.run(ctx)
+    assert env["outcome"] == "FAILED"
+    assert env["reason"] == "LLMS_TXT_UNREAD" and env["facts"]["sitemaps_busy"] == 1

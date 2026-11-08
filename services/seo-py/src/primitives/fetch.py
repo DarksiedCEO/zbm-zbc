@@ -181,8 +181,10 @@ class _Budget(threading.local):
 
 
 _BUDGET = _Budget()
-# Name lookups in flight across the process (each on its own daemon thread, bounded by the fetch deadline): with every
-# slot taken a lookup is refused at once, never queued, so a hung resolver cannot pile up threads.
+# Name lookups in flight across the process (each on its own daemon thread, bounded by the fetch deadline). With every
+# slot taken, a fetch waits for one only within its own deadline and otherwise ends RESOURCE_LIMIT (our capacity, not
+# the site's DNS); at most DNS_WORKERS lookup threads ever exist, so a hung resolver cannot pile up threads. An IP
+# literal takes no slot and no thread.
 DNS_WORKERS = 8
 _DNS_GATE = threading.BoundedSemaphore(DNS_WORKERS)
 
@@ -410,7 +412,11 @@ class Fetcher:
         if not gate.acquire(timeout=left):
             raise _Refused("RESOURCE_LIMIT", "every DNS worker of this service stayed busy (our capacity, not the "
                                              "site's DNS)")
-        left = self.timeout_s if deadline is None else deadline - time.monotonic()
+        left = self.timeout_s if deadline is None else (_BUDGET.deadline or deadline) - time.monotonic()
+        if left <= 0:
+            # the wait for a slot used the fetch's time up: give the slot back, start no lookup
+            gate.release()
+            raise _Refused("TIMEOUT", "the fetch deadline passed while waiting for a DNS worker")
         box: dict = {}
         done = threading.Event()
         resolve = self.resolver
