@@ -1,0 +1,10 @@
+# Supply-chain hardening (2026-11-08): the exact toolchain the Gate 5 ledger image is built with
+# (services/ledger-rust/Dockerfile: FROM rust:1.99.1-slim-bookworm@sha256:24707e70..., unchanged since f5fa44b).
+# rustup reads this file for every cargo/rustc run in this directory, so CI's `rustup toolchain install stable`
+# jobs build, test and lint the ledger with 1.99.1 instead of whatever stable is that day (docs/ci.md, scout C3-12).
+# The Docker build copies only Cargo.toml, Cargo.lock and src/ — this file is not in the image and does not change
+# it. Moving the version is a reviewed change made together with the Dockerfile's rust image tag and digest.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy"]
