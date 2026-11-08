@@ -22,7 +22,7 @@ provenance and confidence, never 0% for unknown); no paid data.
 ### D1. One job, and what is not Idris's
 
 Idris measures the client's AI share of voice against competitors and detects emerging competitors (`agents/idris.py`,
-rules `idris-rules/2026-11-08.3`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
+rules `idris-rules/2026-11-08.4`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
 (assignment, inputs, outputs; `GET /seo/v1/department`); Idris leaves `NOT_BUILT_AGENTS`; it has its own lifecycle
 state (a restricted Idris is refused 403 `AGENT_RESTRICTED`, and citation runs then record no observations — Callum
 is unaffected). NOT Idris's: asking engines (the adapter and Callum's collection), classifying the client's citations
@@ -226,6 +226,83 @@ a fresh run adds Callum's), `GET` list / one (+ hub own tenant, compliance_38). 
   the benchmark automatically"; as built they are listed automatically with their presence only, and enter the shares
   and headlines only once a human confirms them — because an unconfirmed lexical candidate in a share denominator
   would move every brand's number on a guess.
+
+## Review round 3 (independent review of bf15c0eb on an unseen 126-answer harness: CONDITIONAL) — changes
+
+Owner policy: permissive open source, made our own, rather than paying for data.
+
+- **Self-hosted NER (optional signal).** `agents/ner.py`: spaCy 3.8.7 (MIT) with `en_core_web_sm` 3.8.0 (package
+  licence MIT; its meta lists OntoNotes 5 as training data, "commercial (licensed by Explosion)", and WordNet 3.0).
+  Pinned in `services/seo-py/requirements-ner.txt` — every distribution `==`-pinned with a sha256 (CPython 3.13
+  manylinux x86_64 / py3-none-any wheels), the model wheel by URL and hash; `pip install --require-hashes -r
+  requirements-ner.txt` was run on a fresh environment after `requirements.txt`. **Licence gate:**
+  `services/delivery-py/devtools/licence_gate.py --site-packages <that env>` -> "63 distributions ...; ok=True" (the
+  NER set alone: 44 distributions, ok=True). It is NOT in `requirements.txt` or the image (about 300 MB with numpy;
+  the small model is weak on brand names: in spot checks it labelled Recurly PERSON and Getida GPE), so it is OFF
+  unless `SEO_IDRIS_NER=1`; `1` without the packages refuses start; the model is loaded from the installed package (no
+  network). Its output can only LABEL names the extractor found: ORG / PRODUCT is evidence, PERSON / GPE / LOC / NORP
+  / EVENT / DATE ... counter-evidence; it never adds a candidate; a failure adds nothing. Alternative if the size is
+  unacceptable for the image: keep NER in an offline batch worker, or train a small in-repo classifier on our own
+  labelled fixtures (not built).
+- **Domain-backed evidence (strongest).** `DOMAIN_BACKED` when a cited URL's registrable label (or, for a non-generic
+  TLD, the whole registrable name: `eva.guru` -> Eva Guru) equals the compact name or its core, in the same answer or
+  anywhere in the run; a host written in the text is `DOMAIN_NAME` and keyed by its label (`getida.com` -> Getida). A
+  single dictionary word ("Stripe", "Notion") is a candidate ONLY with its domain (or an NER ORG label) — otherwise it
+  is `GENERIC`, so names with no domain anywhere are demoted.
+- **"Distinctive" is gone.** Evidence (`STRONG_SIGNALS`) is now brand SHAPE only: `DOMAIN_BACKED`, `DOMAIN_NAME`, a
+  legal suffix, CamelCase, digits in a token, `INDUSTRY_NAME` (a name ending in a trade noun: "Benjamin Franklin
+  Plumbing"), `PRODUCT_CUES` (TWO independent product / pricing cues in the name's own sentence — the 60-character
+  any-cue window is gone), `CATEGORY_CONTEXT` (apposition "Recurly, a billing platform" or an introduction "agencies
+  such as Kalungi", in the same clause), `LIST_PEER` (enumerated in the same sentence or markdown list as a name with
+  evidence), `NER_ORG`.
+- **Exclusions extended** (`agents/idris_non_brands.txt`, self-authored, provenance in the header): platform
+  features, AI products (GPT-4o, Claude Sonnet, AI Overviews, ...), events (Prosper Show, Prime Big Deal Days,
+  Dreamforce, ...), job titles and teams, generic business phrases, acronyms (MRR, B2B, DTC, ...), nationalities,
+  honorifics; more review / trade-press publishers (Search Engine Journal / Land, Marketplace Pulse, PCMag, TechRadar,
+  TrustRadius, GetApp, UpCity, DesignRush, ...); a bare first name is `PERSON_NAME`; "-based" / "-powered" adjectives
+  are `GENERIC`; the gazetteer gained ~250 cities and regions.
+- **Recall shapes.** A sentence-initial name that opens an enumeration ("Chargebee, Recurly ...") or has category
+  context is kept; "Mr. Rooter" is not split at the honorific period; names ending in a trade noun may run to 7
+  words ("One Hour Heating & Air Conditioning"); "First Last + trade noun" is a business, not a person; a capitalised
+  "The" mid-sentence stays in the name.
+- **Injection proximity.** A name on the same line as, and within 80 characters of, an injection phrase carries
+  `INJECTION_PROXIMITY` and is never `EMERGING_COMPETITOR` (WATCH, `missing: no_injection_nearby`).
+- **Perf.** `publisher()` is a dictionary lookup per label suffix (no table scan); per-sentence product cues are
+  computed once per answer; the list-peer pass no longer copies sets per name; a backtracking regex introduced while
+  building `CATEGORY_CONTEXT` was replaced by a bounded scan before commit. 20,000 hosts in one answer: about 5 s on
+  the development machine (was 31 s at bf15c0eb per the review), growing linearly.
+
+### Measured quality (honest)
+
+Own fixtures (self-authored; in-sample for the rules they were written with):
+
+| Set | Stage | Before (bf15c0eb) | After |
+|---|---|---|---|
+| `tests/fixtures/idris_candidates_corpus.json` (291 answers) | extractor P / R | 1.000 / 0.965 | 1.000 / 0.965 |
+| same | evidence-gated P / R | 1.000 / 0.705 | 1.000 / 0.548 (evidence is stricter) |
+| `tests/fixtures/idris_emerging_train.json` (90 answers, 3 runs, NEW) | emerging P / R, no NER | — | 1.000 / 0.974 |
+| same | emerging P / R, NER on | — | 0.973 / 0.923 |
+
+The reviewer's harness (126 answers, 4 tenants; 1 answer has citations, so DOMAIN_BACKED can barely help there):
+
+| Metric | Before (bf15c0eb) | After, NER off | After, NER on |
+|---|---|---|---|
+| candidate P / R | 0.697 / 0.802 | 0.877 / 0.874 | — |
+| realistic 3-run emerging P / R | 0.632 / 0.592 | 0.829 / 0.528 | 0.863 / 0.543 |
+| 2-run emerging P / R | 0.971 / 0.642 | 1.000 / 0.604 | — |
+| recurring adversarial non-brands made EMERGING (two harness sets of 51) | 46 and 30 | 8 and 2 | — |
+
+**The target (held-out emerging precision ≥ 0.85 at recall ≥ 0.60) is NOT met**: precision reaches 0.86 only with
+NER, at recall 0.54. **The held-out set is not clean**: the review named its categories and examples, and I ran the
+harness about ten times during this round and read its false-positive / false-negative names, so the "after" numbers
+are optimistic. A fresh held-out set is needed for a trustworthy figure.
+
+### The human-confirm gate (stated)
+
+No extracted name ever enters a share, a denominator, an opportunity or a headline until the owner (dashboard,
+seo_agent) or the tenant (hub) confirms it (`POST .../competitor-set/confirmations`). Until then every emerging and
+watch item is labelled "candidate — needs confirmation" and reported with its presence only. This is the safety net
+for the precision above: a wrong candidate costs a reviewer a click, never a wrong number.
 
 ## What is NOT built (deliberately)
 

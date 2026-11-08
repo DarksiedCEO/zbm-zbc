@@ -1,0 +1,45 @@
+# OPTIONAL (ADR 0048 review round 3): the self-hosted NER signal for Idris, used only with SEO_IDRIS_NER=1.
+# Not part of requirements.txt or the service image. Install with hashes enforced:
+#   pip install --require-hashes -r requirements-ner.txt     (after requirements.txt)
+# spaCy is MIT; en_core_web_sm 3.8.0 is MIT (its meta names OntoNotes 5, "commercial (licensed by Explosion)", and
+# WordNet 3.0 as sources). The licence gate (services/delivery-py/devtools/licence_gate.py --site-packages <env>)
+# passed on the resolved set: 44 distributions, ok=True (ADR 0048).
+# The model is loaded from the installed package: no download at runtime.
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl --hash=sha256:1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
+# Hashes are for CPython 3.13 manylinux x86_64 wheels (and py3-none-any); regenerate them for another platform.
+annotated-doc==0.0.5 --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101
+blis==1.3.4 --hash=sha256:3a5cfa3b5cbf79d7e48bb98701bae67e021aa5d84c73458b316fbc74e0545d1e
+catalogue==2.0.10 --hash=sha256:58c2de0020aa90f4a2da7dfad161bf7b3b054c86a5f09fcedc0b2b740c109a9f
+certifi==2026.10.23 --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+charset-normalizer==3.5.2 --hash=sha256:7218e8f32b0956cfcd048fd42d9d5779809745ca1d86113ca56f66e7ae1549c4
+click==8.5.1 --hash=sha256:8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37
+cloudpathlib==0.26.0 --hash=sha256:abcd7f54bcbb2fbb79c0e96b79241f08866760aee6276586882b3558672d571b
+confection==0.1.5 --hash=sha256:e29d3c3f8eac06b3f77eb9dfb4bf2fc6bcc9622a98ca00a698e3d019c6430b14
+cymem==2.0.16 --hash=sha256:284bf2083c9a91e5e59ac1502fff655079eb0bd8bf4155767ea913608723bc5e
+Jinja2==3.1.6 --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
+langcodes==3.5.1 --hash=sha256:b6a9c25c603804e2d169165091d0cdb23934610524a21d226e4f463e8e958a72
+markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
+MarkupSafe==3.0.4 --hash=sha256:434139499bb20b502ed3baa1f169e618f924a97e7a777fea1a49446d80106cf6
+mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+murmurhash==1.0.16 --hash=sha256:569f8ab7691e89301020ef9bc8399a7a61ef1005baf3b4d01fe935a92261f0ed
+numpy==2.5.4 --hash=sha256:6ffa07666f8da0eef81d149934a626d0d95fbd6838432a33e66245423a9062c0
+packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+preshed==3.0.15 --hash=sha256:b82e9771b161dbed924086facbcd91fe19bc36da20dfcfc835b9deabc5dced87
+Pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+setuptools==84.2.1 --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
+shellingham==1.5.4 --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686
+smart_open==7.7.1 --hash=sha256:cb62dc45f519bf39b612564d326d2a17556f3a6056e3c3a86a07215d670d45bc
+spacy==3.8.7 --hash=sha256:46330da2eb357d6979f40ea8fc16ee5776ee75cd0c70aac2a4ea10c80364b8f3
+spacy-legacy==3.0.12 --hash=sha256:476e3bd0d05f8c339ed60f40986c07387c0a71479245d6d0f4298dbd52cda55f
+spacy-loggers==1.0.5 --hash=sha256:196284c9c446cc0cdb944005384270d775fdeaf4f494d8e269466cfa497ef645
+srsly==2.5.6 --hash=sha256:60f47ca9b4b18d467ca029a8c42769fb17ef70562a24a617ae1cb4027e04eb71
+thinc==8.3.11 --hash=sha256:348ff6c7b6a81f433f20cdaf513cb15c47e786b87a9f2b7e0e6b1194c5664de1
+tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
+typer==0.28.0 --hash=sha256:afd18929180b706c5e9a239f53c3c8136903553c0c2d460598bbaa924191d4ab
+typer-slim==0.24.0 --hash=sha256:d5d7ee1ee2834d5020c7c616ed5e0d0f29b9a4b1dd283bdebae198ec09778d0e
+urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+wasabi==1.1.3 --hash=sha256:f76e16e8f7e79f8c4c8be49b4024ac725713ab10cd7f19350ad18a8e3f71728c
+weasel==0.4.3 --hash=sha256:08f65b5d0dbded4879e08a64882de9b9514753d9eaa4c4e2a576e33666ac12cf
+wrapt==2.5.2 --hash=sha256:8b039b3a296762db1908d6108365225393c4fb33c1dbc5f00aa36f8302eaeaa0

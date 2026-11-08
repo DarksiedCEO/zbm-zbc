@@ -84,7 +84,7 @@ from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed, sha
 
 AGENT, TASK = "idris", "competitor_visibility"
-VERSION = "idris-rules/2026-11-08.3"
+VERSION = "idris-rules/2026-11-08.4"
 CONTRACT = "idris.share_of_voice/1"
 REFRESH_TIER = "near_real_time"
 MAX_TRACKED = 20                       # configured competitors per tenant (the 21st is refused: COMPETITOR_LIMIT)
@@ -101,8 +101,9 @@ MAX_ROWS = 2000
 MAX_WORDS = 4
 CUE_WINDOW = 40
 EXCERPT_MAX = 160
-SIGNALS = ("LIST_HEAD", "BOLD", "MIXED_CASE", "CORPORATE_SUFFIX", "DOMAIN_HINT", "DOMAIN_NAME", "PRODUCT_CONTEXT",
-           "NUMBERED_NAME", "DISTINCTIVE_MULTIWORD")   # CORPORATE_SUFFIX: legal forms only
+SIGNALS = ("LIST_HEAD", "BOLD", "MIXED_CASE", "CORPORATE_SUFFIX", "DOMAIN_BACKED", "DOMAIN_NAME", "PRODUCT_CUES",
+           "NUMBERED_NAME", "INDUSTRY_NAME", "NER_ORG", "NER_OTHER", "COMMON_WORD", "INJECTION_PROXIMITY",
+           "CATEGORY_CONTEXT", "LIST_PEER")
 EXCLUSIONS = ("INSTRUCTION_LIKE", "GENERIC", "NON_BRAND_TERM", "SENTENCE_INITIAL", "TITLE_RUN", "ENGINE_SELF",
               "CLIENT_LOOKALIKE", "CLIENT_VARIANT", "TRACKED", "PUBLISHER", "PLACE", "PERSON_NAME", "TOPIC_TERM",
               "EXCLUDED_BY_TENANT")
@@ -135,7 +136,8 @@ teams experts expert specialists specialist reimbursement reimbursements seller 
 data cloud online digital media partners partner technologies technology tech studio studios capital advisor advisors
 advisory group network center centre hub pro pros plus premium advanced suite review reviews guide guides customer
 customers business businesses account accounts policy policies seller program inventory profit profits margin
-margins brand brands owner owners pros cons fees fee claims claim
+margins brand brands owner owners pros cons fees fee claims claim success licensed master certified local
+professional emergency residential commercial affordable trusted top-rated best-rated family-owned
 """.split())
 # a sentence-initial verb glued to the name after it ("Contact Victoria", "Check Reddit"): stripped when the run starts a
 # sentence and carries no layout or form signal
@@ -150,27 +152,63 @@ INJECTION_PHRASES = tuple(tuple(p.split()) for p in (
     "ignore your instructions", "disregard", "forget your instructions", "forget previous", "new instructions",
     "previous instructions", "system prompt", "tell the user", "tell users", "say to the user", "developer mode",
     "jailbreak", "you are now", "as an ai", "do anything now", "override instructions"))
-# names that are platform features, AI assistants or calendar events, never an emerging competitor (whole-name match;
-# self-authored). "Seller Central" is Amazon's console, "Black Friday" a date.
-KNOWN_NON_BRANDS = frozenset("""
-seller central|vendor central|brand registry|buy box|prime day|black friday|cyber monday|meta ai|le chat|deepseek|
-forbes advisor|gemini advanced|chatgpt plus|chatgpt pro|claude pro|copilot pro|google ads|amazon ads|account health|
-seller university|customer service|customer support|terms of service|privacy policy|return policy|small business|
-sponsored products|sponsored brands|a+ content|amazon fba|fulfillment by amazon|google search|search console|
-google analytics|grok|mistral|llama|bard|siri|alexa|new year|q1|q2|q3|q4|holiday season|tell the user
-""".replace("\n", "").split("|"))
-# context words that say a name is a product or company (PRODUCT_CONTEXT, within ``CONTEXT_WINDOW`` characters)
-PRODUCT_CONTEXT = ("pricing", "price", "priced", "plan", "plans", "subscription", "software", "app", "tool", "tools",
-                   "platform", "trial", "per month", "a month", "/month", "integrates", "integration", "extension",
-                   "dashboard", "saas", "repricer", "founded", "headquartered", "customers", "clients")
-CONTEXT_WINDOW = 60
-# brand signals: STRONG ones make a candidate eligible for EMERGING_COMPETITOR (review round 2); LIST_HEAD and BOLD are
-# layout, reported but never enough on their own
-STRONG_SIGNALS = frozenset({"DOMAIN_HINT", "DOMAIN_NAME", "CORPORATE_SUFFIX", "MIXED_CASE", "PRODUCT_CONTEXT",
-                            "NUMBERED_NAME", "DISTINCTIVE_MULTIWORD"})
+# names that are never an emerging competitor: platform features, AI products, events and dates, job titles, generic
+# business phrases, acronyms, nationalities, honorifics (whole-name match). Review round 3: moved to the bundled,
+# self-authored ``idris_non_brands.txt`` (provenance in its header); ``KNOWN_NON_BRANDS`` adds the few written here
+KNOWN_NON_BRANDS = frozenset({"tell the user"})
+# trade / industry nouns: "Benjamin Franklin Plumbing", "One Hour Heating & Air Conditioning" are business names
+# (INDUSTRY_NAME), and a name ending in one may run to ``MAX_WORDS_INDUSTRY`` words
+INDUSTRY_NOUNS = frozenset("""
+plumbing plumbers plumber heating cooling air conditioning electrical electric electricians roofing roofers cleaning
+cleaners maids restoration landscaping lawn pest painting painters flooring movers moving remodeling construction
+contractors handyman solar locksmith locksmiths garage rooter drain septic dental dentistry orthodontics law attorneys
+realty realtors insurance accounting bookkeeping staffing logistics freight trucking autobody towing roofing pools
+""".split())
+MAX_WORDS_INDUSTRY = 7
+HONORIFICS = frozenset({"mr", "mrs", "ms", "dr", "st", "prof"})
+# product / pricing cues (review round 3: narrowed): a name is PRODUCT_CUES only with TWO independent cues in its own
+# sentence ("pricing starts at $49 per month", "the app integrates with Shopify")
+PRODUCT_CUES = ("pricing", "priced", "per month", "/month", "a month", "/mo", "per user", "free trial", "subscription",
+                "integrates with", "integration", "chrome extension", "browser extension", "api", "app", "software",
+                "saas", "dashboard", "plan starts", "plans start", "starts at", "pricing tier", "annual plan")
+_PRICE = re.compile(r"[$\u20ac\u00a3]\s?\d")
+# brand-shape EVIDENCE (review round 3): one of these is required before a candidate can be EMERGING_COMPETITOR. A
+# list head, bold or a merely uncommon word is layout or vocabulary, never evidence
+STRONG_SIGNALS = frozenset({"DOMAIN_BACKED", "DOMAIN_NAME", "CORPORATE_SUFFIX", "MIXED_CASE", "NUMBERED_NAME",
+                            "INDUSTRY_NAME", "PRODUCT_CUES", "NER_ORG", "CATEGORY_CONTEXT", "LIST_PEER"})
 # signals in the NAME's own form: only these keep an all-generic name, a place or a person-shaped name as a candidate
-# (context and layout do not: "Sellers in Leeds" with a price nearby is still a place)
-FORM_SIGNALS = frozenset({"DOMAIN_NAME", "CORPORATE_SUFFIX", "MIXED_CASE", "NUMBERED_NAME"})
+FORM_SIGNALS = frozenset({"DOMAIN_NAME", "CORPORATE_SUFFIX", "MIXED_CASE", "NUMBERED_NAME", "INDUSTRY_NAME",
+                          "DOMAIN_BACKED"})
+# NER labels (optional spaCy step, agents/ner.py): ORG / PRODUCT are evidence; these are counter-evidence
+NER_ORG_LABELS = frozenset({"ORG", "PRODUCT"})
+NER_OTHER_LABELS = frozenset({"PERSON", "GPE", "LOC", "NORP", "EVENT", "DATE", "TIME", "FAC", "LANGUAGE", "LAW",
+                              "MONEY", "PERCENT", "QUANTITY", "ORDINAL", "CARDINAL", "WORK_OF_ART"})
+# a category noun in apposition to the name ("Recurly, a billing platform", "Ramp is a spend-management tool") or
+# introducing it ("agencies such as Directive", "tools like Klaviyo"): CATEGORY_CONTEXT, brand-shape evidence
+_CATEGORY = (r"(?:platforms?|tools?|software|apps?|agency|agencies|company|companies|firms?|providers?|services?|"
+             r"startups?|vendors?|crms?|solutions?|marketplaces?|consultancy|consultancies|studios?|brands?|"
+             r"retailers?|manufacturers?|contractors?|franchises?|networks?|suites?|products?|plugins?|extensions?)")
+_APPOSITION = re.compile(r"(?:['\u2019]s)?\**\s*(?:,\s*|\s+\(|\s*:\s*|\s+[-\u2013\u2014]\s+|\s+(?:is|was|offers|provides|runs)\s+)"
+                         r"(?:a|an|the)?\s*"
+                         r"(?:[\w-]+\s+){0,3}?" + _CATEGORY + r"\b", re.IGNORECASE)
+# no nested quantifier (round 3: the first version backtracked exponentially on host lists): the phrase is found by a
+# plain search in a bounded window, then the text between it and the name is checked by hand
+_INTRO = re.compile(_CATEGORY + r"\s+(?:like|such\s+as|including)\s", re.IGNORECASE)
+_INTRO_BREAK = re.compile(r"[.!?;:\n()]")
+
+
+def _introduced(t: str, start: int) -> bool:
+    """``agencies such as X``, ``tools like A, B and X``: a category phrase at most 6 words before the name, in the
+    same clause."""
+    lo = max(0, start - 90)
+    last = None
+    for m in _INTRO.finditer(t, lo, start):
+        last = m
+    if last is None:
+        return False
+    between = t[last.end():start]
+    return not _INTRO_BREAK.search(between) and len(between.split()) <= 6
+INJECTION_PROXIMITY = 80                  # characters, same line: a name this close to injection-like text is never emerging
 NEEDS_CONFIRMATION = "candidate \u2014 needs confirmation"
 _HERE = Path(__file__).parent
 
@@ -209,6 +247,20 @@ KNOWN_PUBLISHERS = {
     "pinterest.com": "Pinterest", "producthunt.com": "Product Hunt", "crunchbase.com": "Crunchbase",
     "glassdoor.com": "Glassdoor", "indeed.com": "Indeed", "upwork.com": "Upwork", "fiverr.com": "Fiverr",
     "substack.com": "Substack", "wordpress.com": "WordPress",
+    # round 3: review and trade-press sites (self-authored)
+    "searchenginejournal.com": "Search Engine Journal", "searchengineland.com": "Search Engine Land",
+    "marketplacepulse.com": "Marketplace Pulse", "pcmag.com": "PCMag", "techradar.com": "TechRadar",
+    "trustradius.com": "TrustRadius", "getapp.com": "GetApp", "upcity.com": "UpCity",
+    "softwareadvice.com": "Software Advice", "nytimes.com/wirecutter": "Wirecutter", "theverge.com": "The Verge",
+    "cnet.com": "CNET", "zdnet.com": "ZDNet", "wired.com": "Wired", "inc.com": "Inc.", "entrepreneur.com": "Entrepreneur",
+    "fastcompany.com": "Fast Company", "hbr.org": "Harvard Business Review", "venturebeat.com": "VentureBeat",
+    "theinformation.com": "The Information", "axios.com": "Axios", "cnbc.com": "CNBC", "ft.com": "Financial Times",
+    "economist.com": "The Economist", "angi.com": "Angi", "homeadvisor.com": "HomeAdvisor", "houzz.com": "Houzz",
+    "nextdoor.com": "Nextdoor", "bbb.org/us": "Better Business Bureau", "glassdoor.co.uk": "Glassdoor",
+    "sellercentral.amazon.com": "Seller Central", "practicalecommerce.com": "Practical Ecommerce",
+    "modernretail.co": "Modern Retail", "digiday.com": "Digiday", "adweek.com": "Adweek", "martech.org": "MarTech",
+    "designrush.com": "DesignRush", "goodfirms.co": "GoodFirms", "sortlist.com": "Sortlist", "expertise.com": "Expertise",
+    "thumbtack.com/guides": "Thumbtack Guides", "yellowpages.com": "Yellow Pages", "manta.com": "Manta",
 }
 LIMITS = ["Idris reads the answers of Callum's citation runs: one sample of N answers per prompt and engine, at one "
           "time, from one account. Observations, not search truth; answer engines vary by user, location and time.",
@@ -345,11 +397,40 @@ def registrable(host: str) -> Optional[str]:
     return None
 
 
-def publisher(host: str) -> Optional[str]:
-    """The publisher's name when ``host`` is on (a subdomain of) a KNOWN_PUBLISHERS host."""
+GENERIC_TLDS = frozenset("com net org io co ai app us uk biz info dev tech online site store shop".split())
+
+
+def host_key(host: str) -> str:
+    """The brand key a host name stands for: its registrable label for a generic TLD (``getida.com`` -> ``getida``),
+    the whole registrable name otherwise (``eva.guru`` -> ``evaguru``: Eva Guru)."""
+    rg = registrable(host) or host
+    label, _, tld = rg.partition(".")
+    return compact(label if tld.split(".")[-1] in GENERIC_TLDS else rg)
+
+
+@functools.lru_cache(maxsize=1)
+def _publisher_hosts() -> dict:
+    """KNOWN_PUBLISHERS by A-label host (paths in a key are dropped): one dict lookup per label suffix of a host."""
+    out = {}
     for d, name in KNOWN_PUBLISHERS.items():
-        if domain_match.on_site(host, d):
-            return name
+        h = domain_match._ascii(d.split("/", 1)[0])
+        if h is not None:
+            out.setdefault(h[4:] if h.startswith("www.") else h, name)
+    return out
+
+
+def publisher(host: str) -> Optional[str]:
+    """The publisher's name when ``host`` is on (a subdomain of) a KNOWN_PUBLISHERS host. Review round 3 (perf): a
+    dict lookup per label suffix (at most ~127 for a 253-character host), never a scan of the table."""
+    h = domain_match._ascii(host or "")
+    if h is None:
+        return None
+    table = _publisher_hosts()
+    labels = h.split(".")
+    for i in range(len(labels) - 1):
+        got = table.get(".".join(labels[i:]))
+        if got is not None:
+            return got
     return None
 
 
@@ -434,11 +515,13 @@ def _skipped_lines(text: str) -> list:
 
 
 _HOST = re.compile(r"(?<![\w@/.:-])[a-z0-9][a-z0-9-]{0,62}(?:\.[a-z0-9-]{1,62})*\.[a-z]{2,24}(?![\w-]|\.[a-z0-9])")
+_MARKUP_BLANK = str.maketrans({c: " " for c in "*_#>`|"})
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)|\n")
 
 
 @functools.lru_cache(maxsize=1)
 def _non_brand_keys() -> frozenset:
-    return frozenset(compact(x) for x in KNOWN_NON_BRANDS if x.strip())
+    return frozenset(compact(x) for x in KNOWN_NON_BRANDS if x.strip()) | _entries("idris_non_brands.txt")
 
 
 @functools.lru_cache(maxsize=1)
@@ -451,6 +534,21 @@ def _injection(tokens: list) -> bool:
     return any(tokens[i:i + len(p)] == list(p) for p in INJECTION_PHRASES for i in range(n - len(p) + 1))
 
 
+def _injection_spans(t: str) -> list:
+    """(start, end) of every injection phrase in the answer (lower-case tokens; linear: one pass over the words)."""
+    words = [(m.group(0).lower(), m.start(), m.end()) for m in _WORD.finditer(t)]
+    firsts = {p[0] for p in INJECTION_PHRASES}
+    out = []
+    for i, (w, s0, _e) in enumerate(words):
+        if w not in firsts:
+            continue
+        for p in INJECTION_PHRASES:
+            if p[0] == w and [x[0] for x in words[i:i + len(p)]] == list(p):
+                out.append((s0, words[i + len(p) - 1][2]))
+                break
+    return out
+
+
 def _generic_word(w: str) -> bool:
     """A business-generic word (stopwords, generic terms and nouns); dictionary words are NOT generic in a multi-word
     capitalised name ("Jungle Scout", "Seller Snap")."""
@@ -461,18 +559,43 @@ def _dictionary_word(w: str) -> bool:
     return _generic_word(w) or w in brand_mention.common_words()
 
 
-def _context(t: str, start: int, end: int) -> bool:
-    lo, hi = max(0, start - CONTEXT_WINDOW), min(len(t), end + CONTEXT_WINDOW)
-    window = (t[lo:start] + " " + t[end:hi]).lower()
-    return "$" in window or any(brand_mention._pattern(c, False).search(window) for c in PRODUCT_CONTEXT)
+def _product_cues(t: str, start: int, end: int, ends: list, cache: dict) -> bool:
+    """TWO independent product / pricing cues in the name's own sentence (review round 3: narrowed from any cue in a
+    60-character window). Each sentence is scanned once per answer (``cache``), so the cost stays linear."""
+    i = bisect.bisect_left(ends, start)
+    got = cache.get(i)
+    if got is None:
+        lo = ends[i - 1] if i else 0
+        hi = ends[i] if i < len(ends) else len(t)
+        sent = t[lo:hi].lower()
+        found = {c for c in PRODUCT_CUES if brand_mention._pattern(c, False).search(sent)}
+        if _PRICE.search(sent):
+            found.add("$")
+        got = cache[i] = len(found) >= 2
+    return got
+
+
+def _ner_label(spans: list, starts: list, start: int, end: int) -> Optional[str]:
+    """The NER label of the entity that covers the name (overlap of at least half of the name), or None."""
+    i = bisect.bisect_right(starts, end) - 1
+    best = None
+    while i >= 0 and spans[i][1] > start - 200:
+        s0, e0, lab = spans[i]
+        ov = min(e0, end) - max(s0, start)
+        if ov * 2 >= end - start and ov > 0:
+            best = lab
+            break
+        i -= 1
+    return best
 
 
 def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
     """The brand-like names in one answer: ``[{"key", "display", "signals", "at"}]`` (at most
     ``MAX_CANDIDATES_PER_ANSWER``, first occurrence order). ``ctx``: {"client_terms", "client_label", "tracked_terms",
-    "exclude_keys", "prompt_words"}. ``excluded`` (optional) is incremented per exclusion reason; ``ctx`` may carry
-    ``lookalikes_seen`` (dict) to collect client lookalikes. Deterministic; linear in the answer (review round 2:
-    exclusions match WHOLE names and injection PHRASES, never ordinary words; digits and host names stay in names)."""
+    "exclude_keys", "prompt_words"} and optionally ``cited_labels`` (the compact registrable labels of the hosts this
+    answer cites: DOMAIN_BACKED) and ``ner`` (a callable text -> [(start, end, label)], agents/ner.py).
+    ``excluded`` (optional) is incremented per exclusion reason; ``ctx`` may carry ``lookalikes_seen`` (dict) to
+    collect client lookalikes. Deterministic; linear in the answer."""
     t = brand_mention._ws_lines(text)
     skipped = _skipped_lines(t)
     groups: list = []
@@ -489,8 +612,9 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
             si += 1
         in_skip = si < len(skipped) and skipped[si][0] <= m.start() <= skipped[si][1]
         w = m.group(0)
-        joins = bool(cur) and t[cur[-1][2]:m.start()] in (" ", " & ")
-        if not in_skip and joins and w.isdigit() and len(w) <= 4:
+        gap = t[cur[-1][2]:m.start()] if cur else None
+        joins = bool(cur) and (gap in (" ", " & ") or (gap == ". " and cur[-1][0].lower() in HONORIFICS))
+        if not in_skip and joins and w.isdigit() and len(w) <= 4 and gap != ". ":
             cur.append((w, m.start(), m.end()))       # "Helium 10": a number ends a name
             close()
             continue
@@ -506,8 +630,34 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
             close()
     close()
     hosts = [m for m in _HOST.finditer(t) if registrable(m.group(0))]
-
     breaks = [i for i, ch in enumerate(t) if ch == "\n"]
+    ends = [m.end() for m in _SENTENCE_END.finditer(t)]
+    inj = _injection_spans(t)
+    cited = ctx.get("cited_labels") or set()
+    cue_cache: dict = {}
+    ner = ctx.get("ner")
+    ents = []
+    if ner is not None:
+        try:
+            plain = t.translate(_MARKUP_BLANK)              # markdown emphasis blanked, offsets kept
+            ents = sorted((int(a), int(b), str(c)) for a, b, c in ner(plain))
+        except Exception:  # noqa: BLE001 - NER is an optional signal: a failure adds nothing
+            ents = []
+    ent_starts = [e[0] for e in ents]
+    blocks: dict = {}
+    lines = t.split("\n")
+
+    def block_of(line_no: int) -> int:
+        """The first line of the run of consecutive list-item lines holding ``line_no`` (memoised: linear)."""
+        if line_no in blocks:
+            return blocks[line_no]
+        b0 = line_no
+        while b0 > 0 and _LIST_ITEM.match(lines[b0 - 1]) and (b0 - 1) not in blocks:
+            b0 -= 1
+        if b0 > 0 and (b0 - 1) in blocks and _LIST_ITEM.match(lines[b0 - 1]):
+            b0 = blocks[b0 - 1]
+        blocks[line_no] = b0
+        return b0
     counted: set = set()
 
     def bump(reason, key=None):
@@ -524,60 +674,82 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
     for kind, g in items:
         if kind == "host":
             start, end = g.start(), g.end()
+            label = host_key(g.group(0))
             display = g.group(0)
-            label = registrable(display).split(".")[0]
             ws = [(label, start, end)]
             raw = [label]
         else:
             raw = [w.lower() for w, _s, _e in g]
             ws = [(_strip_possessive(w), s0, s0 + len(_strip_possessive(w))) for w, s0, _e in g]
-            while ws and ws[0][0].lower() in STOPWORDS:
-                ws = ws[1:]
+            while ws and ws[0][0].lower() in STOPWORDS and not (
+                    ws[0][0] == "The" and len(ws) > 1 and not brand_mention._sentence_initial(t, ws[0][1])):
+                ws = ws[1:]                           # a capitalised "The" mid-sentence is part of the name
+            while ws and ws[-1][0].lower() in STOPWORDS:
+                ws = ws[:-1]
             if len(ws) >= 2 and ws[0][0].lower() in VERB_STARTERS and brand_mention._sentence_initial(t, ws[0][1]) \
                     and not t.startswith("**", ws[0][1] - 2):
                 ws = ws[1:]                           # "Contact Victoria ..." starts a sentence with a verb
-            while ws and ws[-1][0].lower() in STOPWORDS:
-                ws = ws[:-1]
             if not ws:
                 continue
-            if len(ws) > MAX_WORDS:
+            limit = MAX_WORDS_INDUSTRY if any(w.lower() in INDUSTRY_NOUNS for w, _s, _e in ws[-3:]) else MAX_WORDS
+            if len(ws) > limit:
                 bump("TITLE_RUN", compact(t[ws[0][1]:ws[-1][2]]))
                 continue
             start, end = ws[0][1], ws[-1][2]
             display = t[start:end]
-        key = compact(display)
-        lows = [w.lower() for w, _s, _e in ws]
+        key = label if kind == "host" else compact(display)
+        lows = [w.lower().rstrip(".") for w, _s, _e in ws]
         if "_" in display or _injection(raw):
             bump("INSTRUCTION_LIKE", key)           # an injection phrase or a markdown artefact: never a brand
             continue
         signals = set()
         if kind == "host":
             signals.add("DOMAIN_NAME")
+        if compact(display) in cited or core_name(display) in cited:
+            signals.add("DOMAIN_BACKED")            # this answer cites the name's own domain (junglescout.com)
         li = bisect.bisect_left(breaks, start)                # the line holding the name (no rescan: linear)
         line_start = breaks[li - 1] + 1 if li else 0
         if start - line_start <= 32 and _LIST_PREFIX.match(t, line_start, start):
             signals.add("LIST_HEAD")
         if any(t.startswith(mk, start - 2) and t.startswith(mk, end) for mk in ("**", "__")):
             signals.add("BOLD")
-        if any(_MIXED.search(w) for w, _s, _e in ws):
+        if kind == "words" and any(_MIXED.search(w) for w, _s, _e in ws):
             signals.add("MIXED_CASE")
         if len(ws) >= 2 and lows[-1] in CORPORATE_SUFFIXES:
             signals.add("CORPORATE_SUFFIX")
-        if len(ws) >= 2 and lows[-1].isdigit() or any(any(c.isdigit() for c in w) and any(c.isalpha() for c in w)
-                                                       for w in lows):
+        if (len(ws) >= 2 and lows[-1].isdigit()) or any(any(c.isdigit() for c in w) and any(c.isalpha() for c in w)
+                                                        for w in lows):
             signals.add("NUMBERED_NAME")
-        if _context(t, start, end):
-            signals.add("PRODUCT_CONTEXT")
-        if len(ws) >= 2 and any(not _dictionary_word(w) and compact(w) not in places()
-                                and compact(w) not in first_names() for w in lows):
-            signals.add("DISTINCTIVE_MULTIWORD")
+        if len(ws) >= 2 and lows[-1] in INDUSTRY_NOUNS and not _generic_word(lows[0]):
+            signals.add("INDUSTRY_NAME")              # "Benjamin Franklin Plumbing", "Mr. Rooter"
+        if _product_cues(t, start, end, ends, cue_cache):
+            signals.add("PRODUCT_CUES")
+        if _APPOSITION.match(t, end, min(len(t), end + 70)) or _introduced(t, start):
+            signals.add("CATEGORY_CONTEXT")
+        lab = _ner_label(ents, ent_starts, start, end) if ents else None
+        if lab in NER_ORG_LABELS:
+            signals.add("NER_ORG")
+        elif lab in NER_OTHER_LABELS:
+            signals.add("NER_OTHER")
+        if any(a0 - INJECTION_PROXIMITY <= end and start <= b0 + INJECTION_PROXIMITY
+               and "\n" not in t[min(a0, start):max(b0, end)] for a0, b0 in inj):
+            signals.add("INJECTION_PROXIMITY")
         form = bool(signals & FORM_SIGNALS)
-        generic = all(_generic_word(x) for x in lows) if len(lows) > 1 else _dictionary_word(lows[0])
-        if len(key) < 2 or len(key) > 60 or key.isdigit() or (not form and generic):
+        single = len(lows) == 1
+        if single and _dictionary_word(lows[0]):
+            ok = {"DOMAIN_BACKED", "DOMAIN_NAME"} & signals or ("NER_ORG" in signals and not _generic_word(lows[0]))
+            if not ok:
+                bump("GENERIC", key)                # a common word ("Stripe") counts only when its domain backs it
+                continue
+            signals.add("COMMON_WORD")
+        if len(key) < 2 or len(key) > 60 or key.isdigit() or (lows[0] in HONORIFICS and single) \
+                or (not single and not form and all(_generic_word(x) or x in INDUSTRY_NOUNS
+                                                    or compact(x) in _non_brand_keys() for x in lows)) \
+                or any(x.endswith(("-based", "-powered", "-driven", "-first", "-native")) for x in lows):
             bump("GENERIC", key)
             continue
-        if key in _non_brand_keys():
-            bump("NON_BRAND_TERM", key)                # "Seller Central", "Meta AI", "Black Friday"
+        if key in _non_brand_keys() and "DOMAIN_BACKED" not in signals:
+            bump("NON_BRAND_TERM", key)                # "Seller Central", "Prosper Show", "MRR", "Account Manager"
             continue
         if key in _engine_keys() or (kind == "host" and compact(lows[0]) in _engine_keys()):
             bump("ENGINE_SELF", key)                   # the engine's own name, standalone ("Gemini Refunds" is not)
@@ -596,15 +768,16 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
         if any(key == compact(tt) or _contains_words(display, tt) for tt in ctx["tracked_terms"]):
             bump("TRACKED", key)
             continue
-        if key in _PUBLISHER_KEYS or (kind == "host" and publisher(display)):
+        if key in _PUBLISHER_KEYS or (kind == "host" and publisher(g.group(0))):
             bump("PUBLISHER", key)                     # the publisher's own name, standalone ("NerdWallet", "G2")
             continue
         if key in places() and not form:
             bump("PLACE", key)                         # the WHOLE name is a place ("London", "Kraków")
             continue
-        if 2 <= len(ws) <= 3 and compact(lows[0]) in first_names() and not form \
-                and not any(_generic_word(x) or x in CORPORATE_SUFFIXES for x in lows[1:]):
-            bump("PERSON_NAME", key)                   # "First Last" with no brand signal ("Sarah Johnson")
+        if not form and (single and key in first_names() or (
+                2 <= len(ws) <= 3 and compact(lows[0]) in first_names()
+                and not any(_generic_word(x) or x in CORPORATE_SUFFIXES or x in INDUSTRY_NOUNS for x in lows[1:]))):
+            bump("PERSON_NAME", key)                   # "Sarah", "Neil Patel" with no brand-shape evidence
             continue
         if key in ctx["exclude_keys"]:
             bump("EXCLUDED_BY_TENANT", key)
@@ -612,14 +785,37 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
         if all(x in ctx["prompt_words"] for x in _words(display)):
             bump("TOPIC_TERM", key)
             continue
-        initial_only = len(ws) == 1 and not (signals & (FORM_SIGNALS | {"BOLD", "LIST_HEAD"})) \
+        nxt = t[end:end + 3]
+        listing = nxt.startswith(",") and end + 2 < len(t) and t[end + 2:end + 3].isupper()   # "Chargebee, Recurly"
+        initial_only = len(ws) == 1 and not listing \
+            and not (signals & (FORM_SIGNALS | {"BOLD", "LIST_HEAD", "CATEGORY_CONTEXT", "NER_ORG"})) \
             and brand_mention._sentence_initial(t, start)
         f = found.get(key)
         if f is None:
-            f = found[key] = {"key": key, "display": display, "signals": set(), "at": start, "initial_only": True}
+            f = found[key] = {"key": key, "display": display, "signals": set(), "at": start, "initial_only": True,
+                              "groups": set()}
             order.append(key)
+        si_ = bisect.bisect_left(ends, start)
+        f["groups"].add(("s", si_))
+        if "LIST_HEAD" in signals:
+            f["groups"].add(("l", block_of(li)))
+        if kind == "words" and found[key]["display"] != display and len(display) > len(f["display"]):
+            f["display"] = display
         f["signals"] |= signals
         f["initial_only"] = f["initial_only"] and initial_only
+    # LIST_PEER (round 3): a name enumerated in the same sentence or the same markdown list as a name that HAS brand
+    # evidence ("Chargebee, Recurly and Zuora", one of them "a billing platform") inherits that context
+    evidenced: dict = {}
+    for key in order:
+        f = found[key]
+        if f["signals"] & (STRONG_SIGNALS - {"LIST_PEER"}) and "NER_OTHER" not in f["signals"]:
+            for gk in f["groups"]:
+                evidenced.setdefault(gk, set()).add(key)
+    for key in order:
+        f = found[key]
+        peers = (evidenced.get(gk, ()) for gk in f["groups"])
+        if any(len(e) > 1 or (e and key not in e) for e in peers) and "NER_OTHER" not in f["signals"]:
+            f["signals"].add("LIST_PEER")
     out = []
     for key in order:
         f = found[key]
@@ -708,15 +904,15 @@ class Observer:
     """Called by Callum's run (``callum.run(..., observer=)``) with the collected samples while their text is in
     memory. Never raises: a failure is kept in ``error`` (the citation run is recorded regardless)."""
 
-    def __init__(self, competitor_set: dict, prompt_set: dict, domain: str, run_id: str):
-        self.cs, self.ps, self.domain, self.run_id = competitor_set, prompt_set, domain, run_id
+    def __init__(self, competitor_set: dict, prompt_set: dict, domain: str, run_id: str, ner=None):
+        self.cs, self.ps, self.domain, self.run_id, self.ner = competitor_set, prompt_set, domain, run_id, ner
         self.result: Optional[dict] = None
         self.error: Optional[BaseException] = None
 
     def __call__(self, engines: dict, resolver, observed_at: str, refresh_due: str) -> None:
         try:
             self.result = observe(engines, resolver, self.cs, self.ps, self.domain, self.run_id, observed_at,
-                                  refresh_due)
+                                  refresh_due, ner=self.ner)
         except Exception as exc:  # noqa: BLE001 - Idris failing never loses Callum's run
             self.error = exc
 
@@ -747,7 +943,7 @@ def _owner(url: str, domain: str, tracked: list, res: dict) -> tuple:
 
 
 def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, domain: str, run_id: str,
-            observed_at: str, refresh_due: str) -> dict:
+            observed_at: str, refresh_due: str, ner=None) -> dict:
     """Idris's observations of one citation run's answers (no text kept: counts, pointers, bounded excerpts for
     candidates only). Deterministic for the same input."""
     bl, excluded_tracked = brands(competitor_set, prompt_set, domain)
@@ -759,6 +955,7 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
            "exclude_keys": {compact(x) for x in competitor_set.get("exclude_terms") or []},
            "lookalikes_seen": {}}
     detect = competitor_set.get("emerging_detection", True)
+    run_labels: dict = {}
     tallies: dict = {}
     cands: dict = {}
     excluded: dict = {}
@@ -855,18 +1052,22 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                          "negative_cue": neg, "citations": cited, "evidence": ptr})
             if not detect:
                 continue
-            actx = {**ctx, "prompt_words": set(_words(prompt_set["prompts"][pi]))}
-            found = candidates(text, actx, excluded)
             labels = {}
             for h in hosts:
                 rg = registrable(h)
                 if rg:
+                    labels.setdefault(host_key(h), rg)
                     labels.setdefault(compact(rg.split(".")[0]), rg)
+            run_labels.update({k2: v for k2, v in labels.items() if k2 not in run_labels})
+            actx = {**ctx, "prompt_words": set(_words(prompt_set["prompts"][pi])), "cited_labels": set(labels),
+                    "ner": ner}
+            found = candidates(text, actx, excluded)
             for f in found:
                 c = cands.setdefault(f["key"], {"key": f["key"], "display": {}, "answers": 0, "by_scope": {},
                                                 "engines": set(), "prompts": set(), "signals": set(),
                                                 "co_mentioned_with_client": 0, "co_by_scope": {},
-                                                "domain_hints": {}, "evidence": [], "pointers": []})
+                                                "domain_hints": {}, "evidence": [], "pointers": [],
+                                                "ner_org": 0, "ner_other": 0, "injection_near": 0})
                 c["display"][f["display"]] = c["display"].get(f["display"], 0) + 1
                 c["answers"] += 1
                 sk = f"{eng}|{pi}"
@@ -874,9 +1075,13 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                 c["engines"].add(eng)
                 c["prompts"].add(pid)
                 c["signals"] |= set(f["signals"])
-                if f["key"] in labels:
-                    c["signals"].add("DOMAIN_HINT")
-                    c["domain_hints"][labels[f["key"]]] = c["domain_hints"].get(labels[f["key"]], 0) + 1
+                c["ner_org"] += "NER_ORG" in f["signals"]
+                c["ner_other"] += "NER_OTHER" in f["signals"]
+                c["injection_near"] += "INJECTION_PROXIMITY" in f["signals"]
+                for lk in (f["key"], core_key(f["key"])):
+                    if lk in labels:
+                        c["domain_hints"][labels[lk]] = c["domain_hints"].get(labels[lk], 0) + 1
+                        break
                 if client_named:
                     c["co_mentioned_with_client"] += 1
                     c["co_by_scope"][sk] = c["co_by_scope"].get(sk, 0) + 1
@@ -886,9 +1091,15 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                     c["evidence"].append({**ptr, **_excerpt(text, _approx_at(text, f["display"]))})
             for key in actx.get("lookalikes_this_answer", ()):
                 ctx["lookalikes_seen"][key]["answers"] += 1
+    for c in cands.values():                       # DOMAIN_BACKED across the run: the name's own domain is cited
+        for lk in (c["key"], core_key(c["key"])):
+            if lk in run_labels:
+                c["signals"].add("DOMAIN_BACKED")
+                c["domain_hints"].setdefault(run_labels[lk], 0)
+                break
     kept = sorted(cands.values(), key=lambda c: (-c["answers"], c["key"]))[:MAX_CANDIDATES_PER_RUN]
     return {"rules": VERSION, "citation_run_id": run_id, "domain": domain, "observed_at": observed_at,
-            "refresh_due": refresh_due, "emerging_detection": bool(detect),
+            "refresh_due": refresh_due, "emerging_detection": bool(detect), "ner": "ON" if ner is not None else "OFF",
             "prompt_set": {"prompt_set_id": prompt_set["prompt_set_id"], "version": prompt_set["version"],
                            "sha256": prompt_set["sha256"]},
             "competitor_set": {"version": competitor_set.get("version"), "sha256": competitor_set.get("sha256")},
@@ -980,12 +1191,15 @@ def _scope_metrics(usable: int, unresolved: int, stats: dict, bl: list, prov: di
 
 EMERGING_RULE = (f"a candidate is EMERGING_COMPETITOR when it appeared in at least {EMERGING_MIN_ANSWERS} usable "
                  f"answers over the look-back AND on at least {EMERGING_MIN_SPREAD} engines or in at least "
-                 f"{EMERGING_MIN_SPREAD} runs AND carries at least one STRONG brand signal "
-                 f"({', '.join(sorted(STRONG_SIGNALS))}; LIST_HEAD and BOLD alone are not enough); "
-                 f"confidence HIGH when also seen in at least {HIGH_MIN_ANSWERS} answers, on 2+ engines, in 2+ runs, "
-                 "with its own domain cited (DOMAIN_HINT), else MEDIUM; anything less is WATCH. Every emerging "
-                 f"competitor is a '{NEEDS_CONFIRMATION}': its presence is reported, never a share or a headline, "
-                 "until the owner or the tenant confirms it")
+                 f"{EMERGING_MIN_SPREAD} runs AND carries brand-shape EVIDENCE ({', '.join(sorted(STRONG_SIGNALS))}; "
+                 "layout and a merely uncommon word are not evidence); a single dictionary word also needs its own "
+                 "domain cited (DOMAIN_BACKED) or ORG labels from the optional NER twice; with NER on, an ORG / "
+                 "PRODUCT label, a domain, a legal suffix, an industry name or category context not contradicted by "
+                 "NER; never a name NER labels person / place / event more often than ORG without a domain or legal "
+                 "suffix; never a name next to injection-like text. Confidence HIGH with at least "
+                 f"{HIGH_MIN_ANSWERS} answers, 2+ engines, 2+ runs and DOMAIN_BACKED, else MEDIUM; anything less is "
+                 f"WATCH. Every emerging competitor is a '{NEEDS_CONFIRMATION}': its presence is reported, never a "
+                 "share or a headline, until the owner or the tenant confirms it")
 
 
 def _norm_tokens(name: str) -> tuple:
@@ -1050,6 +1264,7 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
     ``confirmations``: key -> record (confirmed by the owner or the tenant: promoted into the shares);
     ``filtered``: keys the optional classifier said are not brands (it can only remove)."""
     confirmations, filtered = confirmations or {}, filtered or set()
+    ner_on = current.get("ner") == "ON"
     index = DismissalIndex(dismissals)
     agg: dict = {}
     for obs in [current] + list(history):
@@ -1057,7 +1272,8 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
             a = agg.setdefault(c["key"], {"key": c["key"], "display": {}, "answers": 0, "engines": set(),
                                           "prompts": set(), "signals": set(), "runs": set(),
                                           "co_mentioned_with_client": 0, "domain_hints": {}, "evidence": [],
-                                          "first_seen_at": obs["observed_at"], "answers_this_run": 0})
+                                          "first_seen_at": obs["observed_at"], "answers_this_run": 0,
+                                          "ner_org": 0, "ner_other": 0, "injection_near": 0})
             for d, n in c["display"].items():
                 a["display"][d] = a["display"].get(d, 0) + n
             a["answers"] += c["answers"]
@@ -1066,6 +1282,8 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
             a["signals"] |= set(c["signals"])
             a["runs"].add(obs["citation_run_id"])
             a["co_mentioned_with_client"] += c["co_mentioned_with_client"]
+            for x in ("ner_org", "ner_other", "injection_near"):
+                a[x] += c.get(x, 0)
             for h, n in c["domain_hints"].items():
                 a["domain_hints"][h] = a["domain_hints"].get(h, 0) + n
             a["first_seen_at"] = min(a["first_seen_at"], obs["observed_at"])
@@ -1101,16 +1319,29 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
             removed.append({**view, "state": "FILTERED_BY_CLASSIFIER"})
             continue
         spread = len(a["engines"]) >= EMERGING_MIN_SPREAD or len(a["runs"]) >= EMERGING_MIN_SPREAD
-        strong = bool(a["signals"] & STRONG_SIGNALS)
-        if a["answers"] >= EMERGING_MIN_ANSWERS and spread and strong:
+        sig = a["signals"]
+        domain = bool(sig & {"DOMAIN_BACKED", "DOMAIN_NAME"})
+        strong = bool(sig & STRONG_SIGNALS)
+        if "COMMON_WORD" in sig and not (domain or (a["ner_org"] >= 2 and a["ner_org"] > a["ner_other"])):
+            strong = False                              # a dictionary word needs its domain, or ORG labels twice+
+        if ner_on and not (domain or "NER_ORG" in sig or sig & {"CORPORATE_SUFFIX", "INDUSTRY_NAME"}
+                           or (sig & {"CATEGORY_CONTEXT", "LIST_PEER"} and a["ner_other"] <= a["ner_org"])):
+            strong = False                              # with NER on: ORG / PRODUCT or a domain (round 3 item 1)
+        if a["ner_other"] > a["ner_org"] and not (domain or sig & {"CORPORATE_SUFFIX", "INDUSTRY_NAME"}):
+            strong = False                              # NER says person / place / event more often than ORG
+        injected = a["injection_near"] > 0
+        view["evidence_summary"] = {"domain_backed": domain, "ner_org": a["ner_org"], "ner_other": a["ner_other"],
+                                    "injection_near": a["injection_near"]}
+        if a["answers"] >= EMERGING_MIN_ANSWERS and spread and strong and not injected:
             high = a["answers"] >= HIGH_MIN_ANSWERS and len(a["engines"]) >= 2 and len(a["runs"]) >= 2 \
-                and "DOMAIN_HINT" in a["signals"]
+                and domain
             items.append({**view, "state": "EMERGING_COMPETITOR", "confidence": "HIGH" if high else "MEDIUM",
                           "label": NEEDS_CONFIRMATION, "confirmed": False})
         else:
             watch.append({**view, "state": "WATCH", "confidence": "LOW", "label": NEEDS_CONFIRMATION,
                           "missing": [x for x, ok in (("answers", a["answers"] >= EMERGING_MIN_ANSWERS),
-                                                      ("spread", spread), ("brand_signal", strong)) if not ok]})
+                                                      ("spread", spread), ("brand_signal", strong),
+                                                      ("no_injection_nearby", not injected)) if not ok]})
     order = lambda v: (-v["answers"], -v["answers_this_run"], v["key"])  # noqa: E731
     items.sort(key=order)
     watch.sort(key=order)

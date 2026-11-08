@@ -162,10 +162,24 @@ class CompetitorsMixin:
             cs = self.current_competitor_set(tid)
             if cs is None or self.agent_blocked("idris"):
                 return None
-            return idris.Observer(cs, ps, domain, cid)
+            return idris.Observer(cs, ps, domain, cid, ner=self._idris_ner())
         except Exception as exc:  # noqa: BLE001 - review round 1: Idris can never change Callum's run
             log.error("idris observer not built: %s", type(exc).__name__)
             return None
+
+    def _idris_ner(self):
+        """The optional NER port (agents/ner.py), loaded once; None when SEO_IDRIS_NER is off. A port the tests
+        install (``self.ports.idris_ner``) wins."""
+        port = getattr(self.ports, "idris_ner", None)
+        if port is not None:
+            return port
+        if not getattr(self.settings, "idris_ner", False):
+            return None
+        cached = getattr(self, "_ner_port", None)
+        if cached is None:
+            from agents import ner
+            cached = self._ner_port = ner.load(True)
+        return cached
 
     def record_observations(self, tid: str, cid: str, observer: Optional[idris.Observer]) -> None:
         """Under the lock, right after ``citation_run_recorded``: Idris's observations (or its failure). Never raises:

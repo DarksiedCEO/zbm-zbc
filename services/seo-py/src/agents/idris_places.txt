@@ -28,3 +28,23 @@ jakarta, manila, hanoi, taipei
 los angeles, san francisco, san diego, san jose, las vegas, long beach, new orleans, salt lake city, kansas city, st louis
 mexico city, sao paulo, rio de janeiro, buenos aires, tel aviv, kuala lumpur, cape town, abu dhabi, silicon valley, bay area
 leeds, lyon, marseille, guadalajara, monterrey, krakow, kraków, wroclaw, lagos, porto, valencia, seville, naples, turin, rotterdam, antwerp, glasgow, liverpool, birmingham, bristol, cardiff, belfast, ottawa, calgary, perth, adelaide, auckland, osaka, kyoto, nagoya, chennai, hyderabad, pune, kolkata, karachi, lahore, dhaka, riyadh, doha, tehran, baghdad
+# round 3: more cities and regions (self-authored, general knowledge)
+hangzhou, guangzhou, shenzhen, chengdu, wuhan, nanjing, xian, tianjin, chongqing, suzhou, xiamen, ningbo, dongguan, foshan, yiwu,
+bengaluru, ahmedabad, jaipur, surat, lucknow, noida, gurgaon, gurugram, ho chi minh city, da nang, phnom penh, yangon, colombo,
+kathmandu, almaty, tashkent, baku, tbilisi, yerevan, lviv, kyiv, kharkiv, odesa, minsk, vilnius, riga, tallinn, bucharest,
+sofia, belgrade, zagreb, ljubljana, bratislava, athens, thessaloniki, malaga, bilbao, florence, venice, bologna, geneva, basel,
+lausanne, lyon, nice, toulouse, bordeaux, lille, nantes, strasbourg, cologne, dusseldorf, stuttgart, leipzig, dresden, hanover,
+nuremberg, bremen, utrecht, eindhoven, the hague, ghent, bruges, gothenburg, malmo, bergen, aarhus, tampere, cork, galway,
+leeds, sheffield, newcastle, nottingham, leicester, southampton, brighton, oxford, cambridge, aberdeen, dundee, swansea,
+medellin, medellín, bogota, bogotá, lima, quito, santiago, montevideo, asuncion, caracas, havana, san juan, monterrey, tijuana,
+cancun, guadalajara, puebla, scottsdale, tempe, mesa, tucson, albuquerque, el paso, fort worth, san antonio, corpus christi,
+oklahoma city, tulsa, omaha, wichita, des moines, minneapolis, st paul, milwaukee, madison, indianapolis, columbus, cincinnati,
+louisville, memphis, charlotte, raleigh, durham, greensboro, richmond, norfolk, virginia beach, charleston, savannah,
+jacksonville, tampa, st petersburg, st. petersburg, fort lauderdale, boca raton, west palm beach, birmingham, montgomery,
+jackson, little rock, baton rouge, shreveport, buffalo, rochester, albany, syracuse, newark, jersey city, hoboken, brooklyn,
+queens, manhattan, bronx, staten island, long island, providence, hartford, new haven, burlington, portland maine, boise,
+spokane, tacoma, reno, fresno, bakersfield, riverside, san bernardino, santa ana, irvine, long beach, glendale, burbank,
+santa monica, malibu, orange county, inland empire, silicon valley, palo alto, mountain view, sunnyvale, cupertino,
+santa clara, berkeley, honolulu, anchorage, salt lake city, provo, colorado springs, boulder, kansas city, st louis,
+detroit, grand rapids, ann arbor, toledo, akron, dayton, knoxville, chattanooga, lexington, greenville, columbia
+
