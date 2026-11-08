@@ -136,13 +136,19 @@ signed approval (as in ooh-py's gate) is the upgrade path.
 - **Bounded response:** 2 MiB per answer, `Accept-Encoding: identity` (a compressed answer is refused, so the cap
   counts received bytes), JSON content type required.
 - **Throttling (S5, S6, S7):** `THROTTLED` (HTTP 200 + `errors[].extensions.code`) waits
-  `(requestedQueryCost - currentlyAvailable) / restoreRate`, clamped to 1-10 s; HTTP 429 waits 1 s; at most 8 waits
+  `(requestedQueryCost - currentlyAvailable) / restoreRate`, clamped to 1-10 s; HTTP 429 waits its `Retry-After`
+  (clamped to 1-10 s; 1 s when absent or unreadable; Nov 8 2026); at most 8 waits
   per request (`STORE_THROTTLED`); between pages the client paces when the bucket cannot cover the next page. 5xx
-  and `INTERNAL_SERVER_ERROR` retry at most twice. A wait that would cross the deadline is not slept.
+  and `INTERNAL_SERVER_ERROR` retry at most twice. A wait that would cross the deadline is not slept. A refused
+  query with no `actualQueryCost` (`THROTTLED`, `MAX_COST_EXCEEDED`) counts 0 against `max_cost_points`.
 - **Pagination (S8):** `orders(first, after, query: "created_at:>='<start>'", sortKey: CREATED_AT, reverse: true)`,
   newest first; 10 orders per page, halved down to 1 on `MAX_COST_EXCEEDED` (S6: 1,000-point single-query cap); a
   cursor that does not advance is refused; caps: `max_orders` (≤ 1,000), `max_cost_points` per sync, 1,000 pages.
-  Hitting a cap is recorded as `truncated_by` and the window actually read is in the coverage note.
+  Hitting a cap is recorded as `truncated_by` and the window actually read is in the coverage note. Nov 8 2026
+  (large stores): `deadline` is a cap too. Once one page is read, the read stops before the next page when less
+  than `min(30 s, deadline / 4)` is left or a pacing wait would cross into that reserve, and stops when a later
+  page runs out of time; the newest-first pages already read are kept. With no page read it is still
+  `STORE_DEADLINE_EXCEEDED`; the kill switch is never a truncation.
 - **Bulk operations: not used.** They need the `bulkOperationRunQuery` mutation, deliver results from a signed URL on
   another host (S9: `storage.googleapis.com` in the example), and complete asynchronously over minutes to days —
   against the read-only, `*.myshopify.com`-only, hard-deadline constraints. Capped pagination covers a 1,000-order
@@ -150,10 +156,25 @@ signed approval (as in ooh-py's gate) is the upgrade path.
 - **Strict parsing:** every node model forbids unknown fields and is parsed in strict JSON mode; a node carrying a
   field the query never asked for (an email, a customer) is `STORE_RESPONSE_INVALID` and nothing is kept; partial
   answers (`data` + `errors`) are refused.
-- **Unverified details, failing closed:** the GraphQL error code `MAX_COST_EXCEEDED` (not on the pages read; an
-  unrecognised code is `STORE_RESPONSE_INVALID`, never a retry loop), and `>=` with a quoted timestamp in the
-  `created_at` filter (the orders query documents `created_at:<=2024` and quoted values; checked on the first live
-  sync).
+- **Unverified details, failing closed:** `>=` with a quoted timestamp in the `created_at` filter (Nov 8 2026: the
+  search-syntax page lists the `:>=` comparator and says "Date values must be a string surrounded by quotes"; still
+  to be seen on the first live sync). An unrecognised GraphQL error code is `STORE_RESPONSE_INVALID`, never a retry
+  loop. `MAX_COST_EXCEEDED` is now verified (Nov 8 2026, the GraphQL Admin API reference's sample 200 error:
+  `"extensions": {"code": "MAX_COST_EXCEEDED", "cost": 2003, "maxCost": 1000}`).
+- **Diagnostics (Nov 8 2026):** a failed sync's answer and its `rr_store_read_failed` record carry `upstream`:
+  the stage (`token`, `preflight`, `orders`), Shopify's HTTP status and the `errors[].extensions.code` values from a
+  fixed list (`ACCESS_DENIED`, `SHOP_INACTIVE`, `INTERNAL_SERVER_ERROR`, `THROTTLED`, `MAX_COST_EXCEEDED`); any
+  other code, or none, is `OTHER`. Never an upstream message, header or body. A service clock without a timezone is
+  `STORE_CLOCK_INVALID` (500), before any outbound byte.
+- **Truncation boundary (PR #45 review):** a truncated read's window is `(oldest_order_read, taken_at]`
+  (`oldest_order_read_exclusive: true`): orders created exactly at the oldest time read may continue on the unread
+  page, so they are excluded (`at_truncation_boundary`) rather than analysed as if all were read.
+- **Report projections (PR #45 review):** the window is measured in exact fractional days (never rounded to whole
+  days). No yearly projection under 14 days, nor for a truncated read covering under 25% of the lookback asked; the
+  report then shows the measured figures with a note saying why.
+- **Money (Nov 8 2026):** Shopify's `Decimal` "supports arbitrary precision and is serialized as a string" (Admin
+  schema). Amounts up to 18 decimals parse; a cent-exact amount with trailing zeros (`"29.990"`) is that many cents;
+  an amount that is not a whole number of cents excludes its order (`money_format_or_currency`), never the read.
 
 ### 5. Gates before the first outbound byte; reason codes
 

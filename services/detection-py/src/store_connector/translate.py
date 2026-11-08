@@ -28,6 +28,7 @@ counted; the report lists them as left out.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -58,16 +59,30 @@ AGENT_COVERAGE = {
 }
 
 
+CENT = Decimal("0.01")
+
+
 def _usd(money: m.MoneyV2) -> Optional[Decimal]:
+    """A non-negative USD amount that is a whole number of cents, as an exact Decimal (never a float), or None.
+
+    Shopify's Decimal is arbitrary precision: "29.990" is exactly $29.99 and is accepted; "29.999" is not a whole
+    number of cents and is None (the caller excludes the order, it never rounds a store's figure)."""
     if money.currencyCode != "USD":
         return None
     try:
         d = Decimal(money.amount)
     except InvalidOperation:
         return None
-    if d < 0 or d.as_tuple().exponent < -2:
+    if not d.is_finite() or d < 0:
         return None
-    return d.quantize(Decimal("0.01"))
+    try:
+        if d != d.quantize(CENT):
+            return None
+    except InvalidOperation:
+        return None
+    if d.is_zero():
+        return Decimal("0.00")                           # never Decimal('-0.00') (PR #45 review L-c)
+    return d.quantize(CENT)
 
 
 def _discount(app: m.DiscountApplicationNode) -> tuple[Optional[DiscountApplication], Optional[str]]:
@@ -119,8 +134,13 @@ def _recorded_by_index(n: m.OrderNode) -> tuple[Optional[dict], Optional[str]]:
     return by_index, None
 
 
-def translate(nodes: list) -> tuple[list[Order], dict]:
-    """(orders the agents can read, aggregate counts). Nothing per-order is kept beyond the Order itself."""
+def translate(nodes: list, *, boundary: Optional[datetime] = None) -> tuple[list[Order], dict]:
+    """(orders the agents can read, aggregate counts). Nothing per-order is kept beyond the Order itself.
+
+    ``boundary`` (a truncated read only; PR #45 review L-a): the oldest ``createdAt`` read. Orders sharing that exact
+    time may have continued on the page that was never read, so the window is exclusive of it: orders AT the
+    boundary are excluded (``at_truncation_boundary``) and every analysed order is strictly newer than it, a range
+    that was read in full."""
     orders: list[Order] = []
     excluded: Counter = Counter()
     zero_lines = non_code_discounts = 0
@@ -131,6 +151,9 @@ def translate(nodes: list) -> tuple[list[Order], dict]:
             excluded["duplicate_in_read"] += 1
             continue
         seen.add(oid)
+        if boundary is not None and n.createdAt <= boundary:
+            excluded["at_truncation_boundary"] += 1
+            continue
         if n.test:
             excluded["test_order"] += 1
             continue

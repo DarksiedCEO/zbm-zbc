@@ -49,7 +49,11 @@ ORDERS_QUERY = (
 FORBIDDEN_FIELDS = ("email", "phone", "customer", "billingAddress", "shippingAddress", "displayAddress", "firstName",
                     "lastName", "note", "clientIp", "customAttributes", "name")
 
-_DECIMAL = r"^-?[0-9]{1,15}(\.[0-9]{1,6})?$"
+# Shopify's ``Decimal`` scalar "supports arbitrary precision and is serialized as a string" (examples "29.99",
+# "29.999"; Admin schema, Nov 8 2026). The shape is bounded here; whether an amount is a whole number of cents is the
+# translator's per-order decision (an order with such an amount is excluded, never the whole read refused).
+_DECIMAL = r"^-?[0-9]{1,15}(\.[0-9]{1,18})?$"
+_DECIMAL_MAX_LEN = 35
 
 
 class _Node(BaseModel):
@@ -57,7 +61,7 @@ class _Node(BaseModel):
 
 
 class MoneyV2(_Node):
-    amount: str = Field(pattern=_DECIMAL, max_length=24)
+    amount: str = Field(pattern=_DECIMAL, max_length=_DECIMAL_MAX_LEN)
     currencyCode: str = Field(pattern=r"^[A-Z]{3}$")
 
 
@@ -97,7 +101,7 @@ class LineItems(_Node):
 
 class MoneyValue(_Node):
     typename: Literal["MoneyV2"] = Field(alias="__typename")
-    amount: str = Field(pattern=_DECIMAL, max_length=24)
+    amount: str = Field(pattern=_DECIMAL, max_length=_DECIMAL_MAX_LEN)
     currencyCode: str = Field(pattern=r"^[A-Z]{3}$")
 
 

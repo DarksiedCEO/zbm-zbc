@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from urllib.parse import urlencode
 
@@ -42,6 +42,14 @@ READ_ORDERS_WINDOW_DAYS = 60            # S10: read_orders alone covers orders c
 MIN_THROTTLE_WAIT_S = 1.0               # S7: "The recommended backoff time is one second"
 MAX_THROTTLE_WAIT_S = 10.0
 RETRY_STATUSES = frozenset({500, 502, 503, 504})
+# Upstream diagnostics (PCA first-connection hardening, Nov 8 2026): Shopify's machine-readable error codes
+# (``errors[].extensions.code``) are reported only from this fixed list — the GraphQL Admin API's documented codes
+# (S5) and the one this client acts on (MAX_COST_EXCEEDED). Any other code, or an error without one, is "OTHER":
+# never a message, a header value, a body or an upstream-chosen token (PR #45 review L-b).
+DIAG_GQL_CODES = frozenset({"ACCESS_DENIED", "SHOP_INACTIVE", "INTERNAL_SERVER_ERROR", "THROTTLED",
+                            "MAX_COST_EXCEEDED"})
+DIAG_OTHER = "OTHER"
+MAX_DIAG_CODES = 6
 
 
 class _Retry(Exception):
@@ -67,6 +75,9 @@ class ReadStats:
     page_size_final: int = m.ORDERS_PAGE_SIZE
     api_version: str = m.API_VERSION
     granted_scopes: list = field(default_factory=list)
+    # The last answer Shopify gave, as closed tokens only: {"stage", "http_status", "graphql_codes"}. Reported with a
+    # failure so the operator can tell a refused credential from a frozen shop from an unapproved field without logs.
+    upstream: Optional[dict] = None
 
 
 @dataclass
@@ -77,6 +88,25 @@ class OrdersRead:
     lookback_days: int
     lookback_limited_by_scope: bool
     stats: ReadStats
+
+
+def _retry_after(value: Optional[str]) -> float:
+    """HTTP 429 ``Retry-After`` in seconds (Shopify sends e.g. ``2.0``), clamped to 1-10 s; anything else is 1 s."""
+    try:
+        wait = float((value or "").strip())
+    except ValueError:
+        return MIN_THROTTLE_WAIT_S
+    if wait != wait:                                     # NaN
+        return MIN_THROTTLE_WAIT_S
+    return min(MAX_THROTTLE_WAIT_S, max(MIN_THROTTLE_WAIT_S, wait))
+
+
+def _gql_codes(env: m.Envelope) -> list:
+    codes = set()
+    for e in env.errors or ():
+        code = e.extensions.code if e.extensions else None
+        codes.add(code if code in DIAG_GQL_CODES else DIAG_OTHER)
+    return sorted(codes)[:MAX_DIAG_CODES]
 
 
 def _throttle_wait(cost: Optional[m.Cost]) -> float:
@@ -99,6 +129,9 @@ class ShopifySession:
         self.handle = handle
         self._mono, self._sleep = monotonic, sleep
         self._end = monotonic() + deadline_s
+        # Stop asking for another orders page when less than this is left (a page might not finish in time); what was
+        # already read is kept as a read truncated by "deadline" (read_orders).
+        self._page_reserve = min(request_timeout_s, deadline_s / 4.0)
         self._transport = transport
         self._resolver = Resolver(resolve, dns_gate if dns_gate is not None else DNS_GATE)
         self._timeout = request_timeout_s
@@ -156,7 +189,8 @@ class ShopifySession:
                             raise StoreError("STORE_RESPONSE_INVALID")
                         chunks.append(chunk)
                     picked = {"content-type": resp.headers.get("content-type", ""),
-                              "x-shopify-api-version": resp.headers.get("x-shopify-api-version")}
+                              "x-shopify-api-version": resp.headers.get("x-shopify-api-version"),
+                              "retry-after": resp.headers.get("retry-after")}
                     return resp.status_code, picked, b"".join(chunks)
         except StoreError:
             raise
@@ -198,7 +232,9 @@ class ShopifySession:
                    "Accept-Encoding": "identity"}
 
         def once():
+            self.stats.upstream = {"stage": "token", "http_status": None, "graphql_codes": []}
             status, picked, raw = self._post(token_url(self.handle), headers, body)
+            self.stats.upstream["http_status"] = status
             if status == 200:
                 if not picked["content-type"].lower().startswith("application/json"):
                     raise StoreError("STORE_RESPONSE_INVALID")
@@ -212,7 +248,7 @@ class ShopifySession:
             if status in (402, 423):
                 raise StoreError("STORE_SHOP_UNAVAILABLE")
             if status == 429:
-                raise _Throttled(MIN_THROTTLE_WAIT_S)
+                raise _Throttled(_retry_after(picked["retry-after"]))
             if status in RETRY_STATUSES:
                 raise _Retry()
             raise StoreError("STORE_RESPONSE_INVALID")
@@ -224,7 +260,7 @@ class ShopifySession:
 
     # ---- GraphQL --------------------------------------------------------------------------------------------
 
-    def _graphql(self, query: str, variables: dict, model):
+    def _graphql(self, query: str, variables: dict, model, stage: str):
         if self._token is None:
             raise StoreError("STORE_CREDENTIAL_UNREADABLE")
         body = json.dumps({"query": query, "variables": variables}, separators=(",", ":")).encode("utf-8")
@@ -233,13 +269,15 @@ class ShopifySession:
         url = graphql_url(self.handle, m.API_VERSION)
 
         def once():
+            self.stats.upstream = {"stage": stage, "http_status": None, "graphql_codes": []}
             status, picked, raw = self._post(url, headers, body)
+            self.stats.upstream["http_status"] = status
             if status in (401, 403):
                 raise StoreError("STORE_AUTH_REFUSED")
             if status in (402, 423):
                 raise StoreError("STORE_SHOP_UNAVAILABLE")
             if status == 429:
-                raise _Throttled(MIN_THROTTLE_WAIT_S)
+                raise _Throttled(_retry_after(picked["retry-after"]))
             if status in RETRY_STATUSES:
                 raise _Retry()
             if status != 200:
@@ -254,9 +292,13 @@ class ShopifySession:
                 raise StoreError("STORE_RESPONSE_INVALID") from None
             cost = env.extensions.cost if env.extensions else None
             if cost is not None:
-                self.stats.cost_points += (cost.actualQueryCost if cost.actualQueryCost is not None
-                                           else cost.requestedQueryCost or 0.0)
+                if cost.actualQueryCost is not None:
+                    self.stats.cost_points += cost.actualQueryCost
+                elif not env.errors:                      # a good answer without an actual cost: count the estimate
+                    self.stats.cost_points += cost.requestedQueryCost or 0.0
+                # a refused query (THROTTLED, MAX_COST_EXCEEDED) with no actual cost ran nothing and costs 0
             if env.errors:
+                self.stats.upstream["graphql_codes"] = _gql_codes(env)
                 codes = {(e.extensions.code if e.extensions else None) for e in env.errors}
                 if "THROTTLED" in codes:
                     raise _Throttled(_throttle_wait(cost))
@@ -281,7 +323,7 @@ class ShopifySession:
 
     def preflight(self) -> m.PreflightData:
         """Scopes, shop identity and currency, before any order is read."""
-        data, _ = self._graphql(m.PREFLIGHT_QUERY, {}, m.PreflightData)
+        data, _ = self._graphql(m.PREFLIGHT_QUERY, {}, m.PreflightData, "preflight")
         granted = {s.handle for s in data.currentAppInstallation.accessScopes}
         check_scopes(granted)
         self.stats.granted_scopes = sorted(granted)
@@ -293,7 +335,17 @@ class ShopifySession:
 
     def read_orders(self, *, now: datetime, lookback_days: int, max_orders: int, max_cost_points: float,
                     max_pages: int = 1000) -> OrdersRead:
-        """Orders created in the lookback window, newest first, capped. ``preflight`` must have run."""
+        """Orders created in the lookback window, newest first, capped. ``preflight`` must have run.
+
+        A capped read is kept and labelled (``truncated_by``): ``max_orders``, ``cost_budget``, ``max_pages`` or
+        ``deadline``. ``deadline`` (Nov 8 2026, large stores): once at least one page is read, the read stops before
+        the next page when less than the page reserve is left or a pacing wait would cross into it, and stops when a
+        later page runs out of time; the newest-first pages already read are complete and strictly parsed. With no
+        page read, running out of time is still STORE_DEADLINE_EXCEEDED. The kill switch is never a truncation: it
+        is STORE_READS_DISABLED and the read is discarded."""
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        now = now.astimezone(timezone.utc)               # the created_at filter is written in UTC ("Z")
         limited = False
         if lookback_days > READ_ORDERS_WINDOW_DAYS and "read_all_orders" not in self.stats.granted_scopes:
             lookback_days, limited = READ_ORDERS_WINDOW_DAYS, True
@@ -307,9 +359,18 @@ class ShopifySession:
             raise StoreError("STORE_COST_BUDGET_EXHAUSTED")
         for _ in range(max_pages):
             self._check_alive()
+            if orders and self._left() < self._page_reserve:
+                truncated = "deadline"
+                break
             want = min(size, max_orders - len(orders))
             try:
-                data, cost = self._graphql(m.ORDERS_QUERY, {"first": want, "after": after, "q": q}, m.OrdersData)
+                data, cost = self._graphql(m.ORDERS_QUERY, {"first": want, "after": after, "q": q}, m.OrdersData,
+                                           "orders")
+            except StoreError as e:
+                if e.code == "STORE_DEADLINE_EXCEEDED" and orders and not self._kill():
+                    truncated = "deadline"
+                    break
+                raise
             except _TooCostly:
                 if size == 1:
                     raise StoreError("STORE_QUERY_TOO_COSTLY") from None
@@ -335,7 +396,11 @@ class ShopifySession:
             if cost is not None and cost.requestedQueryCost is not None:
                 deficit = cost.requestedQueryCost - cost.throttleStatus.currentlyAvailable
                 if deficit > 0:                                   # pace before the bucket runs dry
-                    self._wait(min(MAX_THROTTLE_WAIT_S, deficit / cost.throttleStatus.restoreRate))
+                    pause = min(MAX_THROTTLE_WAIT_S, deficit / cost.throttleStatus.restoreRate)
+                    if self._left() - pause < self._page_reserve:
+                        truncated = "deadline"
+                        break
+                    self._wait(pause)
         else:
             truncated = "max_pages"
         return OrdersRead(orders=orders, truncated_by=truncated, window_start=start, lookback_days=lookback_days,
