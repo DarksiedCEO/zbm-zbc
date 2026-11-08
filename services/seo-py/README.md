@@ -156,10 +156,11 @@ until a first live call; Callum treats every URL on `vertexaisearch.cloud.google
 **Brand matching** (`src/agents/brand_mention.py`, prompt set `brand_term_rules`): whole words, case-insensitive
 unless `case_sensitive`; possessives match (`Acme's`), plurals do not (`Acmes`); optional `context_terms` (one must
 appear in the answer) and `negative_terms` (a match within 40 characters of a whole-word occurrence of one is
-discarded); whitespace (NBSP, runs of spaces) is normalised first. Mentions are confirmed by default; a single-word
-term is unconfirmed only when it is on the bundled common-word list (`src/agents/common_words.txt`, self-authored) or
-declared `common_word: true`, or it is capitalised and matched only in lower case — and the answer does not name the
-client's domain, cite the client or name another brand term. Unconfirmed hits are `LOW_CONFIDENCE` in citation runs
+discarded); whitespace (NBSP, runs of spaces) is normalised first. Mentions are confirmed by default, case-insensitive, as at a4af277 (`try acme`, `the iphone 15`;
+a URL in the answer text such as `github.com/acme` is a mention, never a citation). Only a term on the bundled
+common-word list (`src/agents/common_words.txt`, self-authored) or declared `common_word: true`, without a rule,
+needs confirmation: a capitalised match that does not start a sentence, the client's domain named, the client cited,
+or another brand term that is not itself a common word. Unconfirmed hits are `LOW_CONFIDENCE` in citation runs
 and `MENTION_UNCONFIRMED` in the audit ("Possible mention, not confirmed", mention rate UNKNOWN, no page
 recommendation). A prompt set with such a term and no rule returns `warnings` on create and read, and the methodology
 names it.

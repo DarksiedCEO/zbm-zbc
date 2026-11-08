@@ -508,7 +508,7 @@ def _mnc_rate(mnc: int, low: int, n: int) -> dict:
     unconfirmed (review round 3)."""
     r = _rate(mnc, n)
     if mnc == 0 and low:
-        r = {**r, "value": None, "unknown": "MENTIONS_UNCONFIRMED"}
+        r = {**r, "value": None, "ci95": None, "unknown": "MENTIONS_UNCONFIRMED"}   # no interval for an unknown
     return r
 
 

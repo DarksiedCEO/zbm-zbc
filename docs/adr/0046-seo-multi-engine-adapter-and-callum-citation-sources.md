@@ -141,13 +141,18 @@ B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared wi
     when a whole-word occurrence of one, found on the full text (never on a slice: round 2), lies within 40
     characters of the brand span — and `common_word`). Whitespace (NBSP, tabs, runs of spaces) is normalised to one
     space in the answer and in every term before matching (negatives looked up by `bisect` in their sorted positions:
-    linear overall, never quadratic). **Confirmed by default (review round 3, restoring the a4af277 behaviour for
-    ordinary brands):** a single-word term is unconfirmed-prone only when (a) it is on the bundled common-English list
-    (`agents/common_words.txt`, self-authored for this repository, ~300 words, no third-party licence) or declared
-    `common_word: true`, or (b) it is written with a capital (`HubSpot`) and every match in the answer is all lower
-    case. `Acme`, `HubSpot`, `Ünïcorn` matched as written, and every multi-word term, are confirmed. A prone match is
-    still confirmed when the same answer names the client's domain (`Acme (acme.com)`), cites the client, or names
-    another brand term of the set. A mention made only by unconfirmed terms is `MENTIONED_NOT_CITED`
+    linear overall, never quadratic). **Confirmed by default (review rounds 3-4, the a4af277 behaviour for
+    ordinary brands):** every term that is not a common word — multi-word terms and single words not on the bundled
+    list (`Acme`, `HubSpot`, `eBay`, `iPhone`, `Ünïcorn`) — matches case-insensitively, whole word, and every match
+    is confirmed (`try acme`, `the iphone 15`, `buy it on ebay`); a match inside a URL or host written in the answer
+    text (`acme.io/pricing`, `github.com/acme`) is a mention as at a4af277, never a citation of the client. Only a
+    COMMON-WORD term — on the bundled list (`agents/common_words.txt`, self-authored for this repository, ~325 words
+    incl. ford, zoom, stripe, oracle, visa, subway, ring, monday; no third-party licence) or declared
+    `common_word: true`, with no disambiguation rule — needs confirmation: a match capitalised as configured that
+    does not start a sentence (a capital at the start of the text or after `.`/`!`/`?` is grammar: `Zoom in on the
+    map` alone does not confirm; a lower-case match never does), the client's domain named in the answer, a
+    citation of the client, or another brand term of the set that is not itself a common word (two common words
+    never confirm each other: `the notion of apple pie` with Apple and Notion stays unconfirmed). A mention made only by unconfirmed terms is `MENTIONED_NOT_CITED`
     `confidence: LOW_CONFIDENCE`
     (`BRAND_TERM_MAY_BE_COMMON_WORD`): its own `mentioned_not_cited_low_confidence` rate (`headline: false`), the
     `CALLUM_MENTIONED_NOT_CITED_LOW_CONFIDENCE` finding, never in the headline rate or the MNC list. The audit summary
@@ -157,7 +162,7 @@ B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared wi
     confirmed" with no page recommendation, never "Mentioned but not cited"; `mentioned_unconfirmed` is added to the
     prompt's result only when non-zero. When a prompt's ONLY mentions are unconfirmed its mention rate is UNKNOWN
     (`mention_rate: null`, `mention_rate_unknown`; the client report prints "UNKNOWN", never 0%), and Callum's
-    Mentioned-Not-Cited rate likewise (`value: null`, `unknown: MENTIONS_UNCONFIRMED`). An answer that cites the
+    Mentioned-Not-Cited rate likewise (`value: null`, `ci95: null`, `unknown: MENTIONS_UNCONFIRMED`). An answer that cites the
     client confirms its own mention, so a partly cited prompt keeps a real mention rate. A not-cited verdict needs
     certainty in the audit as in Callum: when every not-cited mention (either confidence) had a citation on a
     redirector host, the prompt is `INCONCLUSIVE` ("Could not tell whether you were cited"). **Never silent:** a
@@ -211,8 +216,9 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
   execution) for Anthropic;
 - (34) SUPERSEDED by review round 1 M2: a third-party page whose single canonical names the client's page is its
   own class, `CANONICAL_TO_CLIENT`, never a STRENGTH_URL (the third party controls the tag);
-- (35) a single-word brand term is confirmed unless it is on the bundled common-word list or matched only in lower
-  case where it is written with a capital (review round 3; round 1's "every single word" default was a regression);
+- (35) a brand term is confirmed unless it is on the bundled common-word list (or declared common) and the answer
+  does not confirm it (review rounds 3-4; round 1's "every single word" default and round 3's lower-case downgrade
+  for non-dictionary brands were regressions);
 - (36) a Google answer without `modelVersion` is refused, not counted under the asked model (review round 1 L2).
 
 ## What is NOT built (deliberately)

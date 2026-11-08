@@ -20,20 +20,28 @@ Matching, per brand term of the prompt set:
 
 Context and negative terms are matched whole-word and case-insensitive.
 
-Confidence (review round 3: confirmed by default). A brand term's mentions are CONFIRMED unless the term may be an
-ordinary word and nothing in the answer confirms it. A term is UNCONFIRMED-PRONE when:
+Confidence (review rounds 3-4: confirmed by default, as at a4af277). Every term that is NOT a common word —
+multi-word terms and single words not on the list (``Acme``, ``HubSpot``, ``eBay``, ``iPhone``, ``Ünïcorn``) — is
+matched case-insensitively, whole word, and every match is CONFIRMED, whatever its case (``try acme``, ``the iphone
+15``, ``buy it on ebay``). A match inside a URL or host written in the answer text (``acme.io/pricing``,
+``github.com/acme``) is a MENTION as at a4af277: it is text, never a citation of the client (citations come only
+from the engine's structured fields).
 
-  (a) it is a single word on the bundled list of common English words (``common_words.txt``, self-authored, small:
-      ``apple``, ``square``, ``notion``, ...), or the tenant declares ``common_word: true``; or
-  (b) it is a single word written with a capital letter (``HubSpot``, ``Acme``) and every match in the answer is
-      all lower case (``hubspot``).
+A COMMON-WORD term — a single word on the bundled list of common English words (``common_words.txt``,
+self-authored: ``apple``, ``zoom``, ``notion``, ...) or one the tenant declares ``common_word: true`` — with no
+disambiguation rule (``case_sensitive``, ``context_terms``, ``negative_terms``; ``common_word: false`` opts out) has
+UNCONFIRMED matches unless one of these confirms them:
 
-``common_word: false`` or any disambiguation rule (``case_sensitive``, ``context_terms``, ``negative_terms``) makes
-the term confirmed. A single word that is NOT on the list and matched as written (``Acme``, ``HubSpot``, ``Ünïcorn``)
-is confirmed, as is every multi-word term. Even an unconfirmed-prone match is confirmed when the same answer names
-the client's domain (``acme.com``), cites the client, or names another of the prompt set's brand terms. Otherwise
-the mention is LOW confidence: reported apart (``LOW_CONFIDENCE`` / ``MENTION_UNCONFIRMED``) and never counted in a
-headline rate.
+  - a match capitalised as the term is configured (``Apple``, ``Zoom``) that does NOT start a sentence: a
+    capital at the start of the text or after ``.``, ``!``, ``?`` (optionally through a quote or bracket; line breaks
+    are spaces after whitespace normalisation) is grammar, not a name, so ``Zoom in on the map`` alone is not confirmation; a lower-case match
+    (``apple pie``) never confirms;
+  - the same answer names the client's domain (``acme.com``) or cites the client;
+  - the same answer names another brand term of the set that is NOT itself a common word (two common words never
+    confirm each other: ``the notion of apple pie`` with terms Apple and Notion stays unconfirmed).
+
+An unconfirmed mention is LOW confidence: reported apart (``LOW_CONFIDENCE`` / ``MENTION_UNCONFIRMED``) and never
+counted in a headline rate.
 
 ``warnings()`` lists the terms that are on the list (or declared common) with no disambiguation rule: the prompt-set
 API and the audit methodology show them, so the effect is never silent.
@@ -117,7 +125,7 @@ def warnings(terms: list, rules: Optional[list] = None) -> list:
 
 
 def _matches(text: str, rule: dict, stats: Optional[dict] = None) -> list:
-    """The brand matches (strings) that survive the context and negative rules."""
+    """The brand matches ``(text, start)`` that survive the context and negative rules."""
     if rule["context_terms"] and not _any(text, rule["context_terms"]):
         return []
     negs = sorted(n.span() for w in rule["negative_terms"] for n in _pattern(w, False).finditer(text))
@@ -137,24 +145,36 @@ def _matches(text: str, rule: dict, stats: Optional[dict] = None) -> list:
                 near = True
                 break
         if not near:
-            out.append(m.group(0))
+            out.append((m.group(0), m.start()))
     return out
 
 
-def _prone(rule: dict, found: list) -> bool:
-    """The term's matches in this answer are unconfirmed on their own: (a) or (b) above."""
-    if rule.get("common_word") is False or disambiguated(rule):
-        return False
-    if common_word(rule):
-        return True
+_SENTENCE_START = re.compile(r"(?:^|[.!?]['\"\u2019\u201d)\]]*\s)['\"\u2018\u201c(\[]*$")
+
+
+def _sentence_initial(text: str, start: int) -> bool:
+    return _SENTENCE_START.search(text[max(0, start - 8):start] if start > 8 else text[:start]) is not None
+
+
+def _common(rule: dict) -> bool:
+    """A common-word term without disambiguation: its matches need confirmation."""
+    return rule.get("common_word") is not False and not disambiguated(rule) and common_word(rule)
+
+
+def _prone(rule: dict, found: list, text: str) -> bool:
+    """The term's matches in this answer are unconfirmed on their own (see the module docstring)."""
+    if not _common(rule):
+        return False                                  # not a common word: confirmed whatever the case (a4af277)
     term = _ws(rule["term"])
-    return single_word(term) and term != term.lower() and all(f == f.lower() for f in found)
+    if term == term.lower():
+        return True                                   # configured lower case: capitalisation tells nothing
+    return not any(f != f.lower() and not _sentence_initial(text, at) for f, at in found)
 
 
 def mention(text: str, terms: list, rules: Optional[list] = None, domain: Optional[str] = None,
             client_cited: bool = False, stats: Optional[dict] = None) -> dict:
-    """``{"mentioned", "confidence" (HIGH / LOW / None), "terms"}``. LOW only when every term named is unconfirmed
-    on its own and the answer neither names ``domain``, nor cites the client, nor names two of the terms."""
+    """``{"mentioned", "confidence" (HIGH / LOW / None), "terms"}``. LOW only when every term named is an
+    unconfirmed common word and the answer neither names ``domain`` nor cites the client."""
     t = _ws(text)
     named = []
     for r in normalise(terms, rules):
@@ -163,7 +183,8 @@ def mention(text: str, terms: list, rules: Optional[list] = None, domain: Option
             named.append((r, found))
     if not named:
         return {"mentioned": False, "confidence": None, "terms": []}
-    confirmed = any(not _prone(r, found) for r, found in named) or client_cited or len(named) > 1 \
+    # another brand term confirms only when it is not itself a common word, which is already "not prone" here
+    confirmed = any(not _prone(r, found, t) for r, found in named) or client_cited \
         or bool(domain and _domain_pattern(domain.lower()).search(t))
     return {"mentioned": True, "confidence": HIGH if confirmed else LOW, "terms": [r["term"] for r, _ in named]}
 

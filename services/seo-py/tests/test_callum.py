@@ -914,12 +914,10 @@ def test_a_common_word_brand_and_a_lowercase_only_match_are_unconfirmed_with_an_
     assert p["mention_rate"] is None and p["mention_ci95"] is None and p["mention_rate_unknown"]
     assert "Apple" in env["methodology"] and "may be ordinary words" in env["methodology"]
     assert "MENTION_UNCONFIRMED" in env["methodology"]
-    _, low = audit_prompt("HubSpot", ["hubspot is a word here."] * 3)                 # (b): lowercase only
+    _, low = audit_prompt("Zoom", ["zoom in on the map."] * 3)                      # common word, lower case only
     assert low["class"] == "MENTION_UNCONFIRMED" and low["mention_rate"] is None
-    _, two = audit_prompt("HubSpot", ["hubspot and HubSpot CRM."] * 3)              # one match as written
-    assert two["class"] == "MENTIONED_NOT_CITED"
     _, other = audit_prompt("Apple", ["apple pie from Z Best Media."] * 3, extra_terms=("Z Best Media",))
-    assert other["class"] == "MENTIONED_NOT_CITED" and other["mentioned"] == 3      # another brand term confirms
+    assert other["class"] == "MENTIONED_NOT_CITED" and other["mentioned"] == 3      # a non-common term confirms
 
 
 def test_a_partly_cited_prompt_never_shows_a_zero_mention_rate_from_unconfirmed_mentions():
@@ -999,3 +997,44 @@ def test_a_prompt_set_with_a_common_word_brand_warns_on_create_and_on_read(h):
     plain = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "acme", "brand_terms": ["Acme"],
                                                      "prompts": ["best rugs"], "engines": ["openai"]}), 201)
     assert "warnings" not in plain
+
+
+
+@pytest.mark.parametrize("brand,text", [
+    ("Acme", "Try acme for this."), ("HubSpot", "hubspot is popular"), ("eBay", "Buy it on ebay"),
+    ("eBay", "Buy it on eBay today."), ("iPhone", "the iphone 15"), ("iPhone", "The iPhone 15 is out."),
+    ("Acme", "See acme.io/pricing for plans."), ("Acme", "Code at github.com/acme is public."),
+    ("HubSpot", "HUBSPOT IS POPULAR"),
+])
+def test_non_dictionary_brands_match_case_insensitively_as_at_a4af277(brand, text):
+    # round 4 item 1: the lowercase downgrade applies only to common words; a URL / host written in the text is a
+    # mention (text), never a citation of the client
+    env, p = audit_prompt(brand, [text] * 3)
+    assert p["class"] == "MENTIONED_NOT_CITED" and p["mentioned"] == 3 and p["mention_rate"] == 1.0, (text, p)
+    assert p["cited"] == 0 and "mentioned_unconfirmed" not in p
+
+
+@pytest.mark.parametrize("terms,text,want", [
+    (["Zoom"], "Zoom in on the map to see it.", "LOW"),           # sentence-initial capital is grammar
+    (["Zoom"], "Done. Zoom in again.", "LOW"),
+    (["Zoom"], 'He said: "Zoom works." Then left.', "HIGH"),      # after a colon: mid-sentence
+    (["Zoom"], "We met on Zoom yesterday.", "HIGH"),               # capitalised mid-sentence: a name
+    (["Zoom"], "zoom in on the map", "LOW"),
+    (["Apple", "Notion"], "the notion of apple pie", "LOW"),       # two common words never confirm each other
+    (["Apple", "Notion"], "the Notion app and apple pie", "HIGH"),
+    (["Ford"], "Ford the river at the shallow end.", "LOW"),
+    (["Stripe"], "Payments run through Stripe here.", "HIGH"),
+])
+def test_common_word_brands_need_a_capitalised_mid_sentence_match_or_another_confirmation(terms, text, want):
+    assert callum.brand_mention.mention(text, terms)["confidence"] == want, text
+    words = callum.brand_mention.common_words()
+    assert {"ford", "zoom", "stripe", "oracle", "visa", "subway", "ring", "monday"} <= words
+
+
+def test_an_unknown_mentioned_not_cited_rate_has_no_interval_either():
+    # round 4 item 2
+    r = classify(collected(*[(0, answer(text="bake an apple pie", cites=["https://recipes.test/p"]))] * 3),
+                 ps={**PS, "brand_terms": ["Apple"]})
+    for rate in (r["metrics"]["by_engine_prompt"][0]["mentioned_not_cited"], r["metrics"]["totals"]["mentioned_not_cited"],
+                 r["metrics"]["by_engine"]["openai"]["mentioned_not_cited"]):
+        assert rate["value"] is None and rate["ci95"] is None and rate["unknown"] == "MENTIONS_UNCONFIRMED", rate
