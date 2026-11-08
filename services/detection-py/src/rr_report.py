@@ -38,6 +38,9 @@ AGENT_TITLES = {
     "contract-pricing-term-drift-v1": "Contract pricing drift",
 }
 MIN_PROJECTION_WINDOW_DAYS = 14
+# PR #45 review H: a truncated read (e.g. stopped at the deadline) is projected only if it covers at least this share
+# of the lookback asked, on top of the 14-day minimum.
+MIN_TRUNCATED_SHARE = Decimal("0.25")
 CENT = Decimal("0.01")
 
 
@@ -99,27 +102,75 @@ def _md(text: str) -> str:
     return "".join(out)
 
 
-def _window_days(window: dict, taken: datetime | None) -> tuple[int | None, str | None]:
-    """(days, basis) of the window the observed figures cover (AEGIS golive-rr M2).
+def _exact_days(start: datetime, end: datetime) -> Decimal | None:
+    """Exact days from ``start`` to ``end`` (PR #45 review H: never rounded to whole days), or None if not positive."""
+    delta = end - start
+    micros = (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+    if micros <= 0:
+        return None
+    return Decimal(micros) / Decimal(86400 * 1_000_000)
+
+
+def _window_days(window: dict, taken: datetime | None) -> tuple[Decimal | None, str | None]:
+    """(exact days, basis) of the window the observed figures cover (AEGIS golive-rr M2).
 
     Not truncated: every order in the requested lookback was read, so the window is the lookback itself
     (``requested_start`` to the snapshot time, else ``lookback_days``) however few orders it held: measuring from the
     oldest order would shrink the window and inflate a yearly projection. Truncated: older orders were not read, so
-    the figures cover only back to the oldest order read."""
+    the figures cover only back to the oldest order read.
+
+    PR #45 review H: the days are exact (fractional), never rounded: a 35-hour window is 1.458 days, not 1 or 2."""
     if not taken:
         return None, None
     if window.get("truncated_by"):
         oldest = _dt(window.get("oldest_order_read"))
         if not oldest:
             return None, None
-        return max(1, round((taken - oldest).total_seconds() / 86400)), "oldest_order_read"
+        days = _exact_days(oldest, taken)
+        return (days, "oldest_order_read") if days else (None, None)
     start = _dt(window.get("requested_start"))
     if start:
-        return max(1, round((taken - start).total_seconds() / 86400)), "requested_window"
+        days = _exact_days(start, taken)
+        return (days, "requested_window") if days else (None, None)
     lb = window.get("lookback_days")
     if isinstance(lb, int) and not isinstance(lb, bool) and lb >= 1:
-        return lb, "requested_window"
+        return Decimal(lb), "requested_window"
     return None, None
+
+
+def _days_text(days: Decimal) -> str:
+    """60 -> "60"; 1.4583... -> "1.46" (display only; arithmetic uses the exact value)."""
+    if days == days.to_integral_value():
+        return str(int(days))
+    return str(days.quantize(CENT, ROUND_HALF_UP))
+
+
+def _display_days(days: Decimal | None) -> int | float | None:
+    if days is None:
+        return None
+    return int(days) if days == days.to_integral_value() else float(days.quantize(CENT, ROUND_HALF_UP))
+
+
+def projection_withheld(window: dict, days: Decimal | None, basis: str | None) -> str | None:
+    """Why no yearly projection is made, or None when one may be (PR #45 review H).
+
+    Any window: at least MIN_PROJECTION_WINDOW_DAYS exact days. A truncated read (older orders not read, e.g. at the
+    deadline) must also cover at least MIN_TRUNCATED_SHARE of the lookback asked: a short slice of a busy store's
+    newest orders is no base for a year."""
+    if days is None:
+        return "the window the figures cover is not known, so they are not extended to a year"
+    if days < MIN_PROJECTION_WINDOW_DAYS:
+        return (f"the figures cover {_days_text(days)} days, under the {MIN_PROJECTION_WINDOW_DAYS}-day minimum for a "
+                "yearly projection; only the measured figures are shown")
+    if basis == "oldest_order_read":
+        lb = window.get("lookback_days")
+        if not (isinstance(lb, int) and not isinstance(lb, bool) and lb >= 1):
+            return "the read was cut short and the lookback asked is not known, so the figures are not extended"
+        if days < Decimal(lb) * MIN_TRUNCATED_SHARE:
+            return (f"the read stopped at the {str(window.get('truncated_by')).replace('_', ' ')} limit after "
+                    f"{_days_text(days)} of the {lb} days asked (under {int(MIN_TRUNCATED_SHARE * 100)}%); only the "
+                    "measured figures are shown")
+    return None
 
 
 PROJECTION_ASSUMPTION = ("the store keeps the same order volume, the same codes and the same stacking rate for a "
@@ -127,16 +178,18 @@ PROJECTION_ASSUMPTION = ("the store keeps the same order volume, the same codes 
                          "above) are not in the base")
 
 
-def _projection(agent_id: str, ev_class: str, total: Decimal, window_days: int, window_basis: str | None,
+def _projection(agent_id: str, ev_class: str, total: Decimal, window_days: Decimal, window_basis: str | None,
                 window: dict) -> dict:
     """One ESTIMATED yearly projection from one evidence class of one check's figures in the window (H-1: the base
-    is the corrected findings, and an ESTIMATED base says so and keeps its findings' assumption)."""
+    is the corrected findings, and an ESTIMATED base says so and keeps its findings' assumption). ``window_days`` is
+    exact (PR #45 review H)."""
     base = f"{_fmt(total)} observed" if ev_class == "OBSERVED" else f"est. {_fmt(total)} ({ev_class} findings)"
+    d = _days_text(window_days)
     if window_basis == "requested_window":
-        basis = f"{base} in the {window_days}-day window read (every order in it was read) x 365/{window_days}"
+        basis = f"{base} in the {d}-day window read (every order in it was read) x 365/{d}"
     else:
-        basis = (f"{base} over the {window_days} days back to the oldest order read (the read stopped at the "
-                 f"{str(window.get('truncated_by')).replace('_', ' ')} limit) x 365/{window_days}")
+        basis = (f"{base} over the {d} days back to the oldest order read (the read stopped at the "
+                 f"{str(window.get('truncated_by')).replace('_', ' ')} limit) x 365/{d}")
     assumption = PROJECTION_ASSUMPTION
     if ev_class != "OBSERVED":
         assumption += "; and the assumption stated on each finding holds"
@@ -178,6 +231,7 @@ def build_report(scan: dict) -> dict:
     window = cov.get("window") or {}
     taken = _dt(cov.get("taken_at"))
     window_days, window_basis = _window_days(window, taken)
+    withheld = projection_withheld(window, window_days, window_basis)
 
     agents = []
     projections = []
@@ -197,7 +251,7 @@ def build_report(scan: dict) -> dict:
                  "modeled_usd_in_window": str(sum(modeled, Decimal(0)).quantize(CENT)) if modeled else None,
                  "findings_without_figure": sum(1 for r in a_rows if r["evidence_class"] == "UNKNOWN")}
         agents.append(entry)
-        if window_days and window_days >= MIN_PROJECTION_WINDOW_DAYS:
+        if withheld is None:
             for ev_class, figures in (("OBSERVED", observed), ("ESTIMATED", estimated), ("MODELED", modeled)):
                 if figures:
                     projections.append(_projection(agent_id, ev_class, sum(figures, Decimal(0)), window_days,
@@ -209,8 +263,12 @@ def build_report(scan: dict) -> dict:
         "report_version": "rr-client-report-1",
         "client_id": client, "shop": cov.get("shop"), "scan_id": scan["scan_id"], "as_of": scan["as_of"],
         "data_source": src, "snapshot_id": scan.get("store_snapshot_id"), "api_version": cov.get("api_version"),
-        "window": window, "window_days": window_days, "window_basis": window_basis, "counts": cov.get("counts") or {},
+        "window": window, "window_days": _display_days(window_days),
+        "window_days_exact": str(window_days) if window_days is not None else None,
+        "window_basis": window_basis, "counts": cov.get("counts") or {},
         "agents": agents, "findings": rows, "projections": projections,
+        # why no yearly projection was made (None when projections were allowed); shown with the measured figures
+        "projection_withheld": withheld if any(r["amount_usd"] for r in rows) else None,
         "overlapping_entities": sorted(overlap_entities),
         "evidence_counts": {k: sum(1 for r in rows if r["evidence_class"] == k)
                             for k in ("OBSERVED", "ESTIMATED", "MODELED", "UNKNOWN")},
@@ -285,6 +343,10 @@ def render_markdown(rep: dict) -> str:
         if r["also_claimed_by_another_agent"]:
             L.append("- Also flagged by another check: do not add the two figures together.")
         L.append("")
+    if rep.get("projection_withheld"):
+        L += ["## Projections", "",
+              f"- No yearly projection: {rep['projection_withheld']}. The figures above are what was measured in the "
+              "window read, not a yearly amount.", ""]
     if rep["projections"]:
         L += ["## Projections (ESTIMATED — not findings)", ""]
         for p in rep["projections"]:

@@ -162,8 +162,16 @@ signed approval (as in ooh-py's gate) is the upgrade path.
   loop. `MAX_COST_EXCEEDED` is now verified (Nov 8 2026, the GraphQL Admin API reference's sample 200 error:
   `"extensions": {"code": "MAX_COST_EXCEEDED", "cost": 2003, "maxCost": 1000}`).
 - **Diagnostics (Nov 8 2026):** a failed sync's answer and its `rr_store_read_failed` record carry `upstream`:
-  the stage (`token`, `preflight`, `orders`), Shopify's HTTP status and up to five `errors[].extensions.code` values
-  (`^[A-Z][A-Z0-9_]{0,63}$` only). Never an upstream message, header or body.
+  the stage (`token`, `preflight`, `orders`), Shopify's HTTP status and the `errors[].extensions.code` values from a
+  fixed list (`ACCESS_DENIED`, `SHOP_INACTIVE`, `INTERNAL_SERVER_ERROR`, `THROTTLED`, `MAX_COST_EXCEEDED`); any
+  other code, or none, is `OTHER`. Never an upstream message, header or body. A service clock without a timezone is
+  `STORE_CLOCK_INVALID` (500), before any outbound byte.
+- **Truncation boundary (PR #45 review):** a truncated read's window is `(oldest_order_read, taken_at]`
+  (`oldest_order_read_exclusive: true`): orders created exactly at the oldest time read may continue on the unread
+  page, so they are excluded (`at_truncation_boundary`) rather than analysed as if all were read.
+- **Report projections (PR #45 review):** the window is measured in exact fractional days (never rounded to whole
+  days). No yearly projection under 14 days, nor for a truncated read covering under 25% of the lookback asked; the
+  report then shows the measured figures with a note saying why.
 - **Money (Nov 8 2026):** Shopify's `Decimal` "supports arbitrary precision and is serialized as a string" (Admin
   schema). Amounts up to 18 decimals parse; a cent-exact amount with trailing zeros (`"29.990"`) is that many cents;
   an amount that is not a whole number of cents excludes its order (`money_format_or_currency`), never the read.

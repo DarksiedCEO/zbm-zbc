@@ -20,14 +20,18 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import httpx
 import pytest
 
-from _store_fakes import NOW, SECRETS, TOKEN, Clock, FakeShopify, MemoryLedger, code_app, money, order
+import rr_report
+from _store_fakes import (NOW, SECRETS, TOKEN, Clock, FakeShopify, MemoryLedger, code_app, conn, money, order,
+                          write_secret)
 from store_connector import shopify_models as m
-from store_connector.shopify_client import MAX_THROTTLE_WAIT_S, _retry_after
-from store_connector.translate import translate
+from store_connector.reasons import NO_OUTBOUND, StoreError
+from store_connector.shopify_client import DIAG_GQL_CODES, MAX_THROTTLE_WAIT_S, _gql_codes, _retry_after
+from store_connector.translate import _usd, translate
 from test_store_connector import _err, _service, _session
 
 
@@ -281,6 +285,16 @@ def test_a_naive_now_is_refused():
         s.read_orders(now=datetime(2026, 10, 24, 12, 0, 0), lookback_days=30, max_orders=10, max_cost_points=10_000)
 
 
+def test_a_naive_service_clock_is_a_clear_error_before_any_outbound_call(tmp_path):
+    """PR #45 review L-e: a programming error gets its own code (not STORE_RESPONSE_INVALID), and nothing is sent."""
+    fake = FakeShopify(orders=[order(1)])
+    ledger = MemoryLedger()
+    svc = _service(tmp_path, fake, ledger=ledger, now=datetime(2026, 10, 24, 12, 0, 0))
+    assert _err(svc.sync, "acme") == "STORE_CLOCK_INVALID"
+    assert fake.requests == [] and ledger.events == []
+    assert "STORE_CLOCK_INVALID" in NO_OUTBOUND and StoreError("STORE_CLOCK_INVALID").http_status == 500
+
+
 # ---- upstream diagnostics ------------------------------------------------------------------------------------------
 
 def test_a_failed_sync_reports_closed_upstream_tokens(tmp_path):
@@ -293,13 +307,41 @@ def test_a_failed_sync_reports_closed_upstream_tokens(tmp_path):
     with pytest.raises(Exception) as e:
         svc.sync("acme")
     assert e.value.code == "STORE_AUTH_REFUSED"
-    assert e.value.upstream == {"stage": "preflight", "http_status": 200, "graphql_codes": ["ACCESS_DENIED"]}
+    # PR #45 review L-b: only allow-listed codes pass; any other upstream-chosen code is "OTHER"
+    assert e.value.upstream == {"stage": "preflight", "http_status": 200,
+                                "graphql_codes": ["ACCESS_DENIED", "OTHER"]}
     failed = ledger.events[-1]
     assert failed["event_type"] == "rr_store_read_failed"
     assert failed["payload"]["upstream"] == e.value.upstream
-    assert "stage=preflight http=200 gql=ACCESS_DENIED" in failed["summary"]
+    assert "stage=preflight http=200 gql=ACCESS_DENIED,OTHER" in failed["summary"]
     dumped = json.dumps(ledger.events) + json.dumps(e.value.upstream)
     assert not any(sec in dumped for sec in SECRETS) and "jane@" not in dumped and "leak" not in dumped
+    assert "9STARTS" not in dumped and "lower case" not in dumped
+
+
+@pytest.mark.parametrize("code", ["SECRET_SHPAT_ABC", "EMAIL_JANE_EXAMPLE_COM", "BAD_REQUEST", "", None])
+def test_unlisted_or_missing_graphql_codes_become_other(tmp_path, code):
+    err = {"message": "m", "extensions": {"code": code}} if code is not None else {"message": "m"}
+    svc = _service(tmp_path, FakeShopify(script=[FakeShopify().json({"errors": [err]})]))
+    with pytest.raises(StoreError) as e:
+        svc.sync("acme")
+    assert e.value.code == "STORE_RESPONSE_INVALID" and e.value.upstream["graphql_codes"] == ["OTHER"]
+
+
+@pytest.mark.parametrize("code", sorted(DIAG_GQL_CODES))
+def test_listed_graphql_codes_are_reported_as_is(code):
+    env = m.Envelope.model_validate_json(json.dumps({"errors": [{"message": "m", "extensions": {"code": code}},
+                                                                {"message": "m", "extensions": {"code": code}}]}))
+    assert _gql_codes(env) == [code]
+
+
+def test_the_allow_list_is_fixed():
+    assert DIAG_GQL_CODES == {"ACCESS_DENIED", "SHOP_INACTIVE", "INTERNAL_SERVER_ERROR", "THROTTLED",
+                              "MAX_COST_EXCEEDED"}
+
+
+def test_store_error_declares_upstream():
+    assert StoreError.upstream is None and StoreError("NOT_CONNECTED").upstream is None
 
 
 def test_a_transport_failure_reports_no_http_status(tmp_path):
@@ -322,11 +364,126 @@ def test_a_refusal_before_any_request_has_no_upstream(tmp_path):
 
 
 def test_the_ledger_summary_stays_within_its_contract(tmp_path):
-    codes = [{"message": "m", "extensions": {"code": f"CODE_{c}_" + "Z" * 57}} for c in "ABCDEFG"]   # 64 chars
+    codes = [{"message": "m", "extensions": {"code": c}} for c in sorted(DIAG_GQL_CODES - {"THROTTLED"})]
+    codes += [{"message": "m", "extensions": {"code": f"CODE_{c}_" + "Z" * 57}} for c in "ABCDEFG"]   # 64 chars
     ledger = MemoryLedger()
     svc = _service(tmp_path, FakeShopify(script=[FakeShopify().json({"errors": codes})]), ledger=ledger)
     with pytest.raises(Exception):
         svc.sync("acme")
     s = ledger.events[-1]["summary"]
     assert len(s) <= 280 and all(0x20 <= ord(ch) <= 0x7e for ch in s)
-    assert len(ledger.events[-1]["payload"]["upstream"]["graphql_codes"]) == 5
+    got = ledger.events[-1]["payload"]["upstream"]["graphql_codes"]
+    assert set(got) <= DIAG_GQL_CODES | {"OTHER"} and "OTHER" in got and len(got) <= 6
+
+
+# ---- PR #45 review L-c: no negative zero ----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw", ["-0.00", "-0", "0.000", "-0.0000000"])
+def test_zero_is_never_negative_zero(raw):
+    d = _usd(m.MoneyV2(amount=raw, currencyCode="USD"))
+    assert d == 0 and str(d) == "0.00" and not d.is_signed()
+
+
+# ---- PR #45 review L-a: the truncation boundary is exclusive --------------------------------------------------------
+
+def test_orders_at_the_truncation_timestamp_are_left_out(tmp_path):
+    """A truncated read's oldest timestamp may continue on the page never read: orders AT it are excluded, so every
+    analysed order lies in (oldest_order_read, taken_at], a range read in full."""
+    tie = NOW - timedelta(hours=50)
+    nodes = [order(i) for i in range(1, 9)] + [order(100 + i, created=tie) for i in range(4)]
+    tok = write_secret(tmp_path, "t", TOKEN)
+    svc = _service(tmp_path, FakeShopify(orders=nodes), [conn("acme", "acme-store", tok, max_orders=10)])
+    out = svc.sync("acme")
+    assert out["truncated_by"] == "max_orders" and out["orders_read"] == 10
+    assert out["orders_excluded"] == {"at_truncation_boundary": 2} and out["orders_analysed"] == 8
+    snap = json.loads(svc.snapshot("acme"))
+    w = snap["coverage"]["window"]
+    assert datetime.fromisoformat(w["oldest_order_read"]) == tie and w["oldest_order_read_exclusive"] is True
+    assert all(datetime.fromisoformat(o["placed_at"].replace("Z", "+00:00")) > tie for o in snap["orders"])
+
+
+def test_an_untruncated_read_keeps_its_oldest_orders(tmp_path):
+    tie = NOW - timedelta(hours=50)
+    nodes = [order(i) for i in range(1, 4)] + [order(100 + i, created=tie) for i in range(2)]
+    svc = _service(tmp_path, FakeShopify(orders=nodes))
+    out = svc.sync("acme")
+    assert out["truncated_by"] is None and out["orders_analysed"] == 5 and out["orders_excluded"] == {}
+    assert json.loads(svc.snapshot("acme"))["coverage"]["window"]["oldest_order_read_exclusive"] is False
+
+
+# ---- PR #45 review H: a report from a deadline-truncated read -------------------------------------------------------
+
+def _scan_from(svc, client_id: str, amount: str = "100.00") -> dict:
+    snap = json.loads(svc.snapshot(client_id))
+    f = {"client_id": client_id, "entity_id": snap["orders"][0]["order_id"], "finding_id": "f1",
+         "agent_id": "discount-misuse-v1", "cause_description": "2 discount codes stacked on one order (A, B)",
+         "methodology": "m", "evidence_class": "OBSERVED",
+         "recoverable_value": {"amount_usd": amount, "classification": "observed", "confidence": "high"}}
+    return {"scan_id": "s", "client_id": client_id, "as_of": NOW.isoformat(),
+            "data_source": f"shopify:{snap['snapshot_id']}", "non_live_data_source": False,
+            "store_coverage": snap["coverage"], "store_snapshot_id": snap["snapshot_id"], "findings": [f],
+            "ledger_verify": {"valid": True}}
+
+
+def test_a_report_from_a_deadline_truncated_read_shows_measured_figures_only(tmp_path):
+    clock = Clock()
+    fake = _SlowShop(clock, 9.0, orders=[order(i) for i in range(1, 1001)])     # one order an hour, newest first
+    svc = _service(tmp_path, fake, clock=clock, deadline=120.0)
+    out = svc.sync("acme")
+    assert out["truncated_by"] == "deadline" and out["orders_read"] == 110
+    rep = rr_report.build_report(_scan_from(svc, "acme"))
+    # the oldest order read is 110 h old: exactly 4.5833... days, never rounded to 5 (or to 1)
+    assert Decimal(rep["window_days_exact"]) == Decimal(110) / Decimal(24)
+    assert rep["window_days"] == 4.58 and rep["window_basis"] == "oldest_order_read"
+    assert rep["projections"] == []
+    assert "under the 14-day minimum" in rep["projection_withheld"]
+    md = rr_report.render_markdown(rep)
+    assert "No yearly projection" in md and "a year**" not in md
+    assert "$100.00" in md and "deadline limit" in md
+    assert "at truncation boundary" in md                                       # the boundary order is listed
+
+
+def _truncated_scan(oldest: str, lookback: int = 60, truncated_by: str | None = "deadline") -> dict:
+    window = {"requested_start": "2026-08-25T12:00:00+00:00", "lookback_days": lookback, "truncated_by": truncated_by,
+              "oldest_order_read": oldest, "newest_order_read": "2026-10-24T11:00:00+00:00"}
+    cov = {"shop": "acme-store", "api_version": "2026-10", "taken_at": "2026-10-24T12:00:00+00:00", "window": window,
+           "counts": {}, "customer_data": "none", "agents": {"discount-misuse-v1": {"covered": True, "why": "x"}}}
+    f = {"client_id": "acme", "entity_id": "shopify-order-1", "finding_id": "f1", "agent_id": "discount-misuse-v1",
+         "cause_description": "c", "methodology": "m", "evidence_class": "OBSERVED",
+         "recoverable_value": {"amount_usd": "100.00", "classification": "observed", "confidence": "high"}}
+    return {"scan_id": "s", "client_id": "acme", "as_of": "2026-10-24T12:00:00Z", "data_source": "shopify:snap-x",
+            "non_live_data_source": False, "store_coverage": cov, "store_snapshot_id": "snap-x", "findings": [f],
+            "ledger_verify": {"valid": True}}
+
+
+def test_projection_uses_exact_fractional_days():
+    rep = rr_report.build_report(_truncated_scan("2026-10-04T00:00:00+00:00"))     # 20.5 days of 60 (34%)
+    (p,) = rep["projections"]
+    assert Decimal(rep["window_days_exact"]) == Decimal("20.5")
+    assert p["amount_usd"] == "1780.49"                     # 100 x 365 / 20.5; whole days gave 1825.00 or 1738.10
+    assert "20.50 days" in p["basis"] and "x 365/20.50" in p["basis"]
+
+
+@pytest.mark.parametrize("oldest", [
+    "2026-10-10T21:36:00+00:00",     # 13.6 days: rounding to whole days made this 14 and projected it
+    "2026-10-23T01:00:00+00:00",     # 35 h
+    "2026-10-24T06:00:00+00:00",     # 6 h
+])
+def test_short_truncated_windows_get_no_projection(oldest):
+    rep = rr_report.build_report(_truncated_scan(oldest))
+    assert rep["projections"] == [] and "under the 14-day minimum" in rep["projection_withheld"]
+    assert "No yearly projection" in rr_report.render_markdown(rep)
+
+
+def test_a_truncated_window_under_a_quarter_of_the_lookback_gets_no_projection():
+    rep = rr_report.build_report(_truncated_scan("2026-10-09T00:00:00+00:00", lookback=90))   # 15.5 of 90 days
+    assert rep["projections"] == []
+    assert "15.50 of the 90 days asked (under 25%)" in rep["projection_withheld"]
+    rep = rr_report.build_report(_truncated_scan("2026-10-09T00:00:00+00:00", lookback=60))   # 15.5 of 60: 26%
+    assert len(rep["projections"]) == 1 and rep["projection_withheld"] is None
+
+
+def test_a_full_window_still_projects_and_never_shows_the_note():
+    rep = rr_report.build_report(_truncated_scan("2026-10-04T00:00:00+00:00", truncated_by=None))
+    assert rep["window_days"] == 60 and rep["projections"][0]["amount_usd"] == "608.33"
+    assert rep["projection_withheld"] is None and "No yearly projection" not in rr_report.render_markdown(rep)

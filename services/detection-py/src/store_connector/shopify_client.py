@@ -20,7 +20,6 @@ Rules:
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -43,10 +42,14 @@ READ_ORDERS_WINDOW_DAYS = 60            # S10: read_orders alone covers orders c
 MIN_THROTTLE_WAIT_S = 1.0               # S7: "The recommended backoff time is one second"
 MAX_THROTTLE_WAIT_S = 10.0
 RETRY_STATUSES = frozenset({500, 502, 503, 504})
-# Upstream diagnostics (PCA first-connection hardening, Nov 8 2026): only Shopify's machine-readable error codes are
-# kept (``errors[].extensions.code``, e.g. ACCESS_DENIED), never a message, a header value or a body.
-_GQL_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
-MAX_DIAG_CODES = 5
+# Upstream diagnostics (PCA first-connection hardening, Nov 8 2026): Shopify's machine-readable error codes
+# (``errors[].extensions.code``) are reported only from this fixed list — the GraphQL Admin API's documented codes
+# (S5) and the one this client acts on (MAX_COST_EXCEEDED). Any other code, or an error without one, is "OTHER":
+# never a message, a header value, a body or an upstream-chosen token (PR #45 review L-b).
+DIAG_GQL_CODES = frozenset({"ACCESS_DENIED", "SHOP_INACTIVE", "INTERNAL_SERVER_ERROR", "THROTTLED",
+                            "MAX_COST_EXCEEDED"})
+DIAG_OTHER = "OTHER"
+MAX_DIAG_CODES = 6
 
 
 class _Retry(Exception):
@@ -99,9 +102,11 @@ def _retry_after(value: Optional[str]) -> float:
 
 
 def _gql_codes(env: m.Envelope) -> list:
-    codes = sorted({e.extensions.code for e in env.errors or () if e.extensions and e.extensions.code
-                    and _GQL_CODE.fullmatch(e.extensions.code)})
-    return codes[:MAX_DIAG_CODES]
+    codes = set()
+    for e in env.errors or ():
+        code = e.extensions.code if e.extensions else None
+        codes.add(code if code in DIAG_GQL_CODES else DIAG_OTHER)
+    return sorted(codes)[:MAX_DIAG_CODES]
 
 
 def _throttle_wait(cost: Optional[m.Cost]) -> float:

@@ -28,6 +28,7 @@ counted; the report lists them as left out.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -79,7 +80,9 @@ def _usd(money: m.MoneyV2) -> Optional[Decimal]:
             return None
     except InvalidOperation:
         return None
-    return d.quantize(Decimal("0.01"))
+    if d.is_zero():
+        return Decimal("0.00")                           # never Decimal('-0.00') (PR #45 review L-c)
+    return d.quantize(CENT)
 
 
 def _discount(app: m.DiscountApplicationNode) -> tuple[Optional[DiscountApplication], Optional[str]]:
@@ -131,8 +134,13 @@ def _recorded_by_index(n: m.OrderNode) -> tuple[Optional[dict], Optional[str]]:
     return by_index, None
 
 
-def translate(nodes: list) -> tuple[list[Order], dict]:
-    """(orders the agents can read, aggregate counts). Nothing per-order is kept beyond the Order itself."""
+def translate(nodes: list, *, boundary: Optional[datetime] = None) -> tuple[list[Order], dict]:
+    """(orders the agents can read, aggregate counts). Nothing per-order is kept beyond the Order itself.
+
+    ``boundary`` (a truncated read only; PR #45 review L-a): the oldest ``createdAt`` read. Orders sharing that exact
+    time may have continued on the page that was never read, so the window is exclusive of it: orders AT the
+    boundary are excluded (``at_truncation_boundary``) and every analysed order is strictly newer than it, a range
+    that was read in full."""
     orders: list[Order] = []
     excluded: Counter = Counter()
     zero_lines = non_code_discounts = 0
@@ -143,6 +151,9 @@ def translate(nodes: list) -> tuple[list[Order], dict]:
             excluded["duplicate_in_read"] += 1
             continue
         seen.add(oid)
+        if boundary is not None and n.createdAt <= boundary:
+            excluded["at_truncation_boundary"] += 1
+            continue
         if n.test:
             excluded["test_order"] += 1
             continue

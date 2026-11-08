@@ -119,7 +119,8 @@ HTTP **200** with these fields (numbers here are made up; yours will differ):
 - `orders_excluded` is **normal**: test orders, cancelled, refunded or edited orders, and orders with automatic
   discounts are left out on purpose, so no number is overstated.
 - `truncated_by: null` → every order from the last 60 days was read. A value (`max_orders`, `cost_budget`,
-  `deadline`, `max_pages`) means it stopped early on purpose; the report says how far back it got.
+  `deadline`, `max_pages`) means it stopped early on purpose; the report says how far back it got, and gives no
+  yearly projection if that is under 14 days or under a quarter of the 60 days (measured figures only).
 - **Few or zero orders is still a pass**: it proves the path. Only the discount-code check is fed by Shopify orders;
   the other seven checks show as NOT COVERED.
 
@@ -138,7 +139,8 @@ text from Shopify.
 | `STORE_TOKEN_EXCESS_SCOPE` / `STORE_TOKEN_HAS_WRITE_SCOPE` | the app has more than `read_orders` | new version with `read_orders` only, re-approve it in PCA's admin |
 | `STORE_SCOPE_MISSING` | `read_orders` not granted | Part 1 steps 4-5 |
 | `STORE_SHOP_UNAVAILABLE` | PCA is frozen (unpaid bill) or locked | fix the store's Shopify account |
-| `STORE_RESPONSE_INVALID` | Shopify answered something unexpected; `upstream.graphql_codes` names it | send Claude the `reason` + `upstream` block only |
+| `STORE_RESPONSE_INVALID` | Shopify answered something unexpected; `upstream.graphql_codes` names it if it is a known code (else `OTHER`) | send Claude the `reason` + `upstream` block only |
+| `STORE_CLOCK_INVALID` | a bug in detection itself (nothing was sent to Shopify) | send Claude the answer |
 | `STORE_API_VERSION_MISMATCH` | the pinned API version (`2026-10`) is no longer served | engineering bumps it (see "Calendar" below) |
 | `STORE_CONFIG_INVALID` | the approval JSON is wrong | recheck Part 2 |
 | `STORE_CREDENTIAL_UNREADABLE` | a secret variable is missing or empty | recheck Part 2 |

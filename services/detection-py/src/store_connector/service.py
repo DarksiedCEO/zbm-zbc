@@ -229,6 +229,9 @@ class StoreService:
 
     def _sync_locked(self, conn: Connection) -> dict:
         now = self._now()
+        if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+            raise StoreError("STORE_CLOCK_INVALID")       # a programming error; checked before any outbound byte
+        now = now.astimezone(timezone.utc)
         day = (conn.client_id, now.date().isoformat())
         with self._state:
             if self._syncs_today.get(day, 0) >= conn.budget.syncs_per_day:
@@ -265,7 +268,8 @@ class StoreService:
             read = session.read_orders(now=now, lookback_days=conn.budget.lookback_days,
                                        max_orders=conn.budget.max_orders,
                                        max_cost_points=conn.budget.max_cost_points)
-            orders, counts = translate(read.orders)
+            boundary = min(n.createdAt for n in read.orders) if read.truncated_by and read.orders else None
+            orders, counts = translate(read.orders, boundary=boundary)
             snap = self._build(conn, now, orders, counts, read)
         except StoreError as e:
             self._record_failed(sync_id, conn, e.code, session)
@@ -330,6 +334,8 @@ class StoreService:
             "lookback_limited_by_scope": read.lookback_limited_by_scope,
             "truncated_by": read.truncated_by,
             "oldest_order_read": min(n.createdAt for n in read.orders).isoformat() if read.orders else None,
+            # truncated read: the window is (oldest_order_read, taken_at]; orders AT oldest_order_read are excluded
+            "oldest_order_read_exclusive": bool(read.truncated_by),
             "newest_order_read": max(n.createdAt for n in read.orders).isoformat() if read.orders else None,
             "oldest_order_analysed": min(created).isoformat() if created else None,
             "newest_order_analysed": max(created).isoformat() if created else None,
