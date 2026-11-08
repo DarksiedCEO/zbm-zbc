@@ -89,7 +89,7 @@ from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed, sha
 
 AGENT, TASK = "idris", "competitor_visibility"
-VERSION = "idris-rules/2026-11-08.5"
+VERSION = "idris-rules/2026-11-08.6"
 CONTRACT = "idris.share_of_voice/1"
 REFRESH_TIER = "near_real_time"
 MAX_TRACKED = 20                       # configured competitors per tenant (the 21st is refused: COMPETITOR_LIMIT)
@@ -110,7 +110,7 @@ SIGNALS = ("LIST_HEAD", "BOLD", "MIXED_CASE", "CORPORATE_SUFFIX", "DOMAIN_BACKED
            "NUMBERED_NAME", "INDUSTRY_NAME", "NER_ORG", "NER_OTHER", "COMMON_WORD", "CATEGORY_CONTEXT",
            "PUBLISHER_CONTEXT", "CITED_DOMAIN")
 EXCLUSIONS = ("INSTRUCTION_LIKE", "GENERIC", "NON_BRAND_TERM", "DATE", "FEATURE", "SENTENCE_INITIAL", "TITLE_RUN",
-              "ENGINE_SELF",
+              "ENGINE_SELF", "PLATFORM_PRODUCT",
               "CLIENT_LOOKALIKE", "CLIENT_VARIANT", "TRACKED", "PUBLISHER", "PLACE", "PERSON_NAME", "TOPIC_TERM",
               "EXCLUDED_BY_TENANT")
 _TABLE = lookalikes.Table()
@@ -269,16 +269,16 @@ KNOWN_PUBLISHERS = {
     "searchenginejournal.com": "Search Engine Journal", "searchengineland.com": "Search Engine Land",
     "marketplacepulse.com": "Marketplace Pulse", "pcmag.com": "PCMag", "techradar.com": "TechRadar",
     "trustradius.com": "TrustRadius", "getapp.com": "GetApp", "upcity.com": "UpCity",
-    "softwareadvice.com": "Software Advice", "nytimes.com/wirecutter": "Wirecutter", "theverge.com": "The Verge",
+    "softwareadvice.com": "Software Advice", "theverge.com": "The Verge",
     "cnet.com": "CNET", "zdnet.com": "ZDNet", "wired.com": "Wired", "inc.com": "Inc.", "entrepreneur.com": "Entrepreneur",
     "fastcompany.com": "Fast Company", "hbr.org": "Harvard Business Review", "venturebeat.com": "VentureBeat",
     "theinformation.com": "The Information", "axios.com": "Axios", "cnbc.com": "CNBC", "ft.com": "Financial Times",
     "economist.com": "The Economist", "angi.com": "Angi", "homeadvisor.com": "HomeAdvisor", "houzz.com": "Houzz",
-    "nextdoor.com": "Nextdoor", "bbb.org/us": "Better Business Bureau", "glassdoor.co.uk": "Glassdoor",
+    "nextdoor.com": "Nextdoor", "glassdoor.co.uk": "Glassdoor",
     "sellercentral.amazon.com": "Seller Central", "practicalecommerce.com": "Practical Ecommerce",
     "modernretail.co": "Modern Retail", "digiday.com": "Digiday", "adweek.com": "Adweek", "martech.org": "MarTech",
     "designrush.com": "DesignRush", "goodfirms.co": "GoodFirms", "sortlist.com": "Sortlist", "expertise.com": "Expertise",
-    "thumbtack.com/guides": "Thumbtack Guides", "yellowpages.com": "Yellow Pages", "manta.com": "Manta",
+    "yellowpages.com": "Yellow Pages", "manta.com": "Manta",
 }
 LIMITS = ["Idris reads the answers of Callum's citation runs: one sample of N answers per prompt and engine, at one "
           "time, from one account. Observations, not search truth; answer engines vary by user, location and time.",
@@ -424,20 +424,88 @@ _INSTITUTIONAL = frozenset({"gov", "mil", "edu", "ac", "gob", "gouv", "govt", "n
 
 @functools.lru_cache(maxsize=1)
 def _platform_domains() -> frozenset:
+    """The bundled platform / publisher list: bare host names only (round 5). An entry with a path, a scheme, a port
+    or anything that is not a host name refuses to load (fail closed: the list is data the build checks)."""
     out = set()
-    for line in (_HERE / "idris_platforms.txt").read_text(encoding="utf-8").splitlines():
+    for n, line in enumerate((_HERE / "idris_platforms.txt").read_text(encoding="utf-8").splitlines(), start=1):
         if line.strip().startswith("#"):
             continue
-        for e in line.split(","):
-            e = e.strip().split("/", 1)[0]
-            h = domain_match._ascii(e) if e else None
-            if h:
-                out.add(h[4:] if h.startswith("www.") else h)
+        for e in (x.strip() for x in line.split(",")):
+            if not e:
+                continue
+            h = domain_match._ascii(e)
+            if h is None or "/" in e or ":" in e:
+                raise ValueError(f"idris_platforms.txt line {n}: {e[:60]!r} is not a bare host name")
+            out.add(h[4:] if h.startswith("www.") else h)
     for d in KNOWN_PUBLISHERS:
-        h = domain_match._ascii(d.split("/", 1)[0])
-        if h:
-            out.add(h)
+        h = domain_match._ascii(d)
+        if h is None:
+            raise ValueError(f"KNOWN_PUBLISHERS: {d[:60]!r} is not a bare host name")
+        out.add(h)
     return frozenset(out)
+
+
+# URL shorteners and link-in-bio redirectors (round 5): their target is unknown unless resolution followed it, so a
+# citation on one is UNRESOLVED (never a candidate, never anybody's)
+SHORTENER_HOSTS = frozenset("""
+bit.ly t.co tinyurl.com ow.ly rb.gy lnkd.in goo.gl linktr.ee buff.ly is.gd cutt.ly shorturl.at tiny.cc bl.ink
+rebrand.ly s.id t.ly dlvr.it fb.me amzn.to amzn.eu youtu.be forms.gle tr.im su.pr qr.ae v.gd shor.by snip.ly
+beacons.ai lnk.bio linkin.bio campsite.bio msha.ke hubs.ly hubs.la mailchi.mp eepurl.com trib.al wp.me spoti.fi
+apple.co g.co db.tt 1drv.ms
+""".split())
+
+
+def shortener(host: str) -> bool:
+    h = domain_match._ascii(host or "")
+    if h is None:
+        return False
+    labels = h.split(".")
+    return any(".".join(labels[i:]) in SHORTENER_HOSTS for i in range(len(labels) - 1))
+
+
+@functools.lru_cache(maxsize=1)
+def _private_suffixes() -> frozenset:
+    """The PRIVATE section of the vendored Public Suffix List (github.io, myshopify.com, ...): a registrable name under
+    one keys as the WHOLE name (acme.github.io != acme.myshopify.com != acme.com; round 5)."""
+    out, on = set(), False
+    for line in domain_match._PSL_FILE.read_text(encoding="utf-8").splitlines():
+        if "===BEGIN PRIVATE DOMAINS===" in line:
+            on = True
+            continue
+        if "===END PRIVATE DOMAINS===" in line:
+            break
+        rule = line.strip().split()[0] if line.strip() else ""
+        if on and rule and not rule.startswith("//"):
+            rule = rule.lstrip("!").removeprefix("*.")
+            h = domain_match._ascii(rule)
+            if h:
+                out.add(h)
+    return frozenset(out)
+
+
+@functools.lru_cache(maxsize=1)
+def _platform_keys() -> frozenset:
+    return frozenset(host_key(d) for d in _platform_domains() if len(host_key(d)) >= 5)
+
+
+PRODUCT_WORDS = frozenset("""
+billing payments pay ads advertising hub sales marketing service services cloud shop store analytics crm suite pro
+plus business seller sellers connect checkout terminal capital radar one prime go lite studio workspace drive maps
+search central console manager platform app apps api enterprise premium starter essentials home
+""".split())
+
+
+def platform_product(tokens: list) -> Optional[str]:
+    """The platform key when a name is a platform's name followed only by product words (``Stripe Billing`` when
+    stripe.com is a platform, ``HubSpot Sales Hub``), or is the platform's name alone; word-aligned, so ``Apple Valley
+    Dental`` is not Apple's. Round 5: such a name keys to the platform and is never an emerging competitor unless the
+    tenant tracks the platform."""
+    keys = _platform_keys()
+    for j in range(len(tokens), 0, -1):
+        k = compact("".join(tokens[:j]))
+        if k in keys and all(t in PRODUCT_WORDS or t in GENERIC_NOUNS for t in tokens[j:]):
+            return k
+    return None
 
 
 def non_competitor_domain(host: str) -> Optional[str]:
@@ -487,6 +555,8 @@ def host_key(host: str) -> str:
     the whole registrable name otherwise (``eva.guru`` -> ``evaguru``: Eva Guru)."""
     rg = registrable(host) or host
     label, _, tld = rg.partition(".")
+    if tld in _private_suffixes():
+        return compact(rg)                         # acme.github.io: the whole registrable name (round 5)
     return compact(label if tld.split(".")[-1] in GENERIC_TLDS else rg)
 
 
@@ -849,6 +919,9 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
         if key in _PUBLISHER_KEYS or (kind == "host" and publisher(g.group(0))):
             bump("PUBLISHER", key)                     # the publisher's own name, standalone ("NerdWallet", "G2")
             continue
+        if kind == "words" and platform_product(lows) is not None:
+            bump("PLATFORM_PRODUCT", key)              # "HubSpot", "HubSpot Sales Hub": a platform or its product
+            continue
         if key in places() and not form:
             bump("PLACE", key)                         # the WHOLE name is a place ("London", "Kraków")
             continue
@@ -984,6 +1057,8 @@ def _owner(url: str, domain: str, tracked: list, res: dict) -> tuple:
     cl = callum.classify_citation(url, domain, [], res)
     dec = (cl["chain"].get("final") or cl["chain"].get("cited")) or {}
     host = dec.get("host") or ""
+    if shortener(host):                            # a shortener the resolver did not follow: target unknown
+        return "unresolved", host
     if cl["class"] == "STRENGTH_URL":
         return "client", host
     if cl["class"] == "LOOKALIKE_URL":
@@ -1150,30 +1225,32 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                 pa["domain"] = rg
                 pa["signals"].add("CITED_DOMAIN")
             sk = f"{eng}|{pi}"
+            aid = f"{sk}|{s['sample']}"                 # one answer: every count below is a SET of these (round 5)
             for key, pa in per.items():
                 c = cands.setdefault(key, _new_candidate(key))
+                ids = c["_ids"]
                 if injected:
                     # an answer that holds an injection marks every candidate in it and counts for NONE of them
-                    c["injection_answers"] += 1
+                    ids["inj"].add(aid)
                     continue
                 if pa["display"]:
                     c["display"][pa["display"]] = c["display"].get(pa["display"], 0) + 1
-                c["answers"] += 1
-                c["by_scope"][sk] = c["by_scope"].get(sk, 0) + 1
+                ids["all"][aid] = sk
                 c["engines"].add(eng)
                 c["prompts"].add(pid)
                 c["signals"] |= pa["signals"]
-                c["ner_org"] += "NER_ORG" in pa["signals"]
-                c["ner_other"] += "NER_OTHER" in pa["signals"]
-                c["named_answers"] += pa["named"]
-                c["publisher_context_answers"] += "PUBLISHER_CONTEXT" in pa["signals"]
+                for flag, name in (("NER_ORG", "ner_org"), ("NER_OTHER", "ner_other"),
+                                   ("PUBLISHER_CONTEXT", "pub")):
+                    if flag in pa["signals"]:
+                        ids[name].add(aid)
+                if pa["named"]:
+                    ids["named"].add(aid)
                 if pa["domain"]:
-                    c["cited_answers"] += 1
-                    c["domain_hints"][pa["domain"]] = c["domain_hints"].get(pa["domain"], 0) + 1
+                    ids["cited"].add(aid)
+                    ids["dom"].setdefault(pa["domain"], set()).add(aid)
                 if client_named:
-                    c["co_mentioned_with_client"] += 1
-                    c["co_by_scope"][sk] = c["co_by_scope"].get(sk, 0) + 1
-                if len(c["pointers"]) < MAX_POINTERS:
+                    ids["co"].add(aid)
+                if len(c["pointers"]) < MAX_POINTERS and ptr not in c["pointers"]:
                     c["pointers"].append(ptr)
                 if len(c["evidence"]) < MAX_EVIDENCE:
                     at = _approx_at(text, pa["display"]) if pa["display"] else 0
@@ -1181,6 +1258,8 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
             for key in actx.get("lookalikes_this_answer", ()):
                 ctx["lookalikes_seen"][key]["answers"] += 1
     _merge_names_into_domains(cands)
+    for c in cands.values():
+        _finalise(c)
     kept = sorted(cands.values(), key=lambda c: (-c["answers"], c["key"]))[:MAX_CANDIDATES_PER_RUN]
     return {"rules": VERSION, "citation_run_id": run_id, "domain": domain, "observed_at": observed_at,
             "refresh_due": refresh_due, "emerging_detection": bool(detect), "ner": "ON" if ner is not None else "OFF",
@@ -1202,19 +1281,39 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
 
 
 def _new_candidate(key: str) -> dict:
-    return {"key": key, "display": {}, "answers": 0, "by_scope": {}, "engines": set(), "prompts": set(),
-            "signals": set(), "co_mentioned_with_client": 0, "co_by_scope": {}, "domain_hints": {}, "evidence": [],
-            "pointers": [], "ner_org": 0, "ner_other": 0, "named_answers": 0, "cited_answers": 0,
-            "injection_answers": 0, "publisher_context_answers": 0}
+    """A run's candidate. Every count is derived from SETS of answer ids (``_ids``, round 5): a merge is a union, so
+    the same answer is never counted twice (``answers`` <= usable answers by construction)."""
+    return {"key": key, "display": {}, "engines": set(), "prompts": set(), "signals": set(), "evidence": [],
+            "pointers": [], "_ids": {"all": {}, "named": set(), "cited": set(), "pub": set(), "ner_org": set(),
+                                     "ner_other": set(), "co": set(), "inj": set(), "dom": {}}}
+
+
+def _finalise(c: dict) -> None:
+    """Counts from the answer-id sets (the recorded observation keeps counts only)."""
+    ids = c.pop("_ids")
+    scope: dict = {}
+    for _aid, sk in ids["all"].items():
+        scope[sk] = scope.get(sk, 0) + 1
+    co: dict = {}
+    for aid in ids["co"]:
+        sk = ids["all"].get(aid)
+        if sk is not None:
+            co[sk] = co.get(sk, 0) + 1
+    c.update(answers=len(ids["all"]), by_scope=dict(sorted(scope.items())), co_by_scope=dict(sorted(co.items())),
+             named_answers=len(ids["named"]), cited_answers=len(ids["cited"]),
+             publisher_context_answers=len(ids["pub"]), ner_org=len(ids["ner_org"]), ner_other=len(ids["ner_other"]),
+             co_mentioned_with_client=len(ids["co"] & set(ids["all"])), injection_answers=len(ids["inj"]),
+             domain_hints={d: len(v) for d, v in sorted(ids["dom"].items())})
 
 
 def _merge_names_into_domains(cands: dict) -> None:
     """A text-only name whose own domain is cited elsewhere in the run is the same candidate (dedupe a brand and its
-    domain, review round 4). Each text-only key is compared with the run's cited domain keys (bounded per run)."""
-    dom_keys = sorted(k for k, c in cands.items() if c["cited_answers"])
+    domain, review round 4). Round 5: answer-id sets are UNITED, never summed — an answer that named two spellings
+    of one brand, or the name and the domain, counts once."""
+    dom_keys = sorted(k for k, c in cands.items() if c["_ids"]["cited"])
     for k in sorted(cands):
         c = cands.get(k)
-        if c is None or c["cited_answers"]:
+        if c is None or c["_ids"]["cited"]:
             continue
         nks = {k, *(x for d in c["display"] for x in name_keys(d))}
         dk = next((d for d in dom_keys if d != k and any(keys_match(nk, d) for nk in nks)), None)
@@ -1223,16 +1322,16 @@ def _merge_names_into_domains(cands: dict) -> None:
         t = cands[dk]
         for d, n in c["display"].items():
             t["display"][d] = t["display"].get(d, 0) + n
-        for x in ("answers", "ner_org", "ner_other", "named_answers", "injection_answers", "co_mentioned_with_client",
-                  "publisher_context_answers"):
-            t[x] += c[x]
-        for m in ("by_scope", "co_by_scope"):
-            for sk, n in c[m].items():
-                t[m][sk] = t[m].get(sk, 0) + n
+        ti, ci = t["_ids"], c["_ids"]
+        ti["all"].update(ci["all"])
+        for name in ("named", "cited", "pub", "ner_org", "ner_other", "co", "inj"):
+            ti[name] |= ci[name]
+        for d, v in ci["dom"].items():
+            ti["dom"].setdefault(d, set()).update(v)
         t["engines"] |= c["engines"]
         t["prompts"] |= c["prompts"]
         t["signals"] |= c["signals"]
-        t["pointers"] = (t["pointers"] + c["pointers"])[:MAX_POINTERS]
+        t["pointers"] = (t["pointers"] + [p for p in c["pointers"] if p not in t["pointers"]])[:MAX_POINTERS]
         t["evidence"] = (t["evidence"] + c["evidence"])[:MAX_EVIDENCE]
         del cands[k]
 
@@ -1268,7 +1367,15 @@ def _approx_at(text: str, display: str) -> int:
 
 # ---------------------------------------------------------------------------------------------- rates
 
+STRICT_INVARIANTS = False        # tests set True: an inconsistent count raises instead of being marked (round 5)
+
+
 def _rate(k: int, n: int, unknown: Optional[str] = None) -> dict:
+    if not (0 <= k <= n) and n > 0 and unknown is None:
+        # k > n can only come from a counting bug: never crash compute (wilson would raise), mark it and exclude it
+        if STRICT_INVARIANTS:
+            raise AssertionError(f"rate invariant broken: k={k} > n={n}")
+        return {"value": None, "k": k, "n": n, "ci95": None, "interval": "wilson_95", "unknown": "INCONSISTENT"}
     if unknown is not None or n <= 0:
         return {"value": None, "k": k, "n": n, "ci95": None, "interval": "wilson_95",
                 "unknown": unknown or "NO_DATA"}
@@ -1428,6 +1535,7 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
                 "prompts": sorted(a["prompts"]), "runs": len(a["runs"]), "signals": sorted(a["signals"]),
                 "co_mentioned_with_client": a["co_mentioned_with_client"],
                 "origin": "cited_domain" if a["cited_answers"] else "text_only", "domains": domains[:3],
+                "names": sorted(a["display"], key=lambda d: (-a["display"][d], d))[:5],
                 "named_answers": a["named_answers"], "cited_answers": a["cited_answers"],
                 "first_seen_at": a["first_seen_at"], "evidence": a["evidence"]}
         by = index.covers(key, name)

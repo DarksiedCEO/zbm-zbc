@@ -22,7 +22,7 @@ provenance and confidence, never 0% for unknown); no paid data.
 ### D1. One job, and what is not Idris's
 
 Idris measures the client's AI share of voice against competitors and detects emerging competitors (`agents/idris.py`,
-rules `idris-rules/2026-11-08.5`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
+rules `idris-rules/2026-11-08.6`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
 (assignment, inputs, outputs; `GET /seo/v1/department`); Idris leaves `NOT_BUILT_AGENTS`; it has its own lifecycle
 state (a restricted Idris is refused 403 `AGENT_RESTRICTED`, and citation runs then record no observations — Callum
 is unaffected). NOT Idris's: asking engines (the adapter and Callum's collection), classifying the client's citations
@@ -371,6 +371,47 @@ same answer structure, different names), so it measures generalisation across na
 round-3 harness row shows the cost of domain-first on answers without citations: recall collapses by design. The only
 independent number is the reviewer's, at the baseline above; a re-run of the reviewer's fresh corpus is the
 acceptance test for this round.
+
+## Review round 5 (independent review of 659a5e8e on the reviewer's fresh corpus) — changes
+
+**The reviewer's fresh-corpus numbers (the only independent ones):**
+
+| Version | Mode | Emerging precision (95% CI) | Recall |
+|---|---|---|---|
+| 7c501fae (baseline) | rules only | 0.362 (0.298-0.432) | 0.861 |
+| 659a5e8e (domain-first) | rules only | **0.928 (0.841-0.969)** | **0.785** |
+| 659a5e8e | NER on | 0.678 | 0.772 |
+
+The precision bar was met on the numbers; the round was rejected for the two blockers below. **NER stays OFF by
+default** (`SEO_IDRIS_NER` unset): on the fresh corpus it made precision WORSE (0.678 against 0.928), so it is an
+experimental option, not a recommended setting.
+
+- **BLOCKER fixed — double counting.** `compute()` could raise (`wilson` math domain error) because an emerging
+  presence k exceeded the usable answers n: `_merge_names_into_domains` SUMMED a text-only name's answers and
+  per-scope counts onto its domain candidate, so an answer that named the brand two ways, or named it and cited its
+  domain, counted twice (and inflated the eligibility count). Every candidate count is now derived from SETS of answer
+  ids (`_new_candidate` / `_finalise`); a merge is a union. Invariant k <= n is enforced in `_rate`: in tests
+  (`STRICT_INVARIANTS`, set by `tests/test_idris.py`) a violation raises; in production the rate is marked
+  `INCONSISTENT` (no interval, never a crash) and so stays out of every view. Regression tests cover a name and its
+  domain in the same answers, and two spellings in one answer.
+- **BLOCKER fixed — injection guard.** The copy is Theo's 49732dd3 version byte-for-byte (separate commit), with Theo's
+  structural per-pattern ReDoS test and size test run on this copy.
+- **Shorteners and link-in-bio redirectors** (`SHORTENER_HOSTS`: bit.ly, t.co, tinyurl.com, ow.ly, rb.gy, lnkd.in,
+  goo.gl, linktr.ee, amzn.to, ...) are UNRESOLVED citations — never a candidate — unless Callum's resolver followed
+  them (`SEO_CALLUM_RESOLVE_URLS=1`), when the landing domain decides.
+- **News aggregators and communities** (news.ycombinator.com, Techmeme, Flipboard, Google News, MSN, ...) are on the
+  platform list. **PSL private suffixes** keep the whole registrable name as the key (acme.github.io, acme.myshopify.com
+  and acme.com are three candidates). **`idris_platforms.txt` is domain-only** (the one path entry, junglescout.com/blog,
+  is gone; path entries in `KNOWN_PUBLISHERS` too) and validated at load: any entry that is not a bare host name refuses
+  to load.
+- **Products, decided consistently:** a product name keys to its maker's domain. When the maker is on the platform
+  list, the platform's name alone or followed only by product words (`PRODUCT_WORDS`: "HubSpot", "HubSpot Sales Hub")
+  is `PLATFORM_PRODUCT` — never a candidate unless the tenant tracks the platform; word-aligned, so "Apple Valley Dental"
+  is not Apple's. When the maker is not a platform, the product name merges into the maker's cited-domain candidate and
+  is listed in its `names` ("Stripe Billing" -> key `stripe`, domain stripe.com, names ["Stripe Billing"]).
+
+My own cited fixtures after this round (self-authored, same caveats as round 4): train 1.000 / 0.981, test 1.000 /
+0.980, rules only.
 
 ## What is NOT built (deliberately)
 

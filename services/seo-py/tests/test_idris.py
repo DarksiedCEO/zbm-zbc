@@ -15,6 +15,8 @@ import test_answer_engines as te
 import test_callum as tc
 import test_perplexity as base
 from agents import callum, idris
+
+idris.STRICT_INVARIANTS = True                 # round 5: a broken rate invariant fails the tests loudly
 from helpers import rid
 from ports import ProviderAnswer
 
@@ -30,7 +32,7 @@ CS = {"version": 1, "sha256": "c" * 64, "emerging_detection": True, "exclude_ter
                        "domains": []}]}
 CID = "seo-cit-" + "c" * 40
 CTX = {"client_terms": ["Z Best Media"], "client_label": "site", "tracked_terms": ["Acme Recovery"],
-       "exclude_keys": set(), "prompt_words": {"best", "shopify", "reimbursement", "agency"}}
+       "exclude_keys": set(), "prompt_words": {"best", "tradezy", "reimbursement", "agency"}}
 
 
 def ans(text, cites=(), status="ANSWER", provider="openai"):
@@ -68,20 +70,20 @@ def keys(found):
 
 def test_the_extractor_finds_brand_like_names_with_their_signals():
     t = ("Here are options:\n1. **Refund Rangers** - great for sellers.\n2. **Getida** helps with claims.\n"
-         "- Seller Labs Inc offers tools.\nThe HubSpot blog covers it.")
+         "- Seller Labs Inc offers tools.\nThe QuillDesk blog covers it.")
     found = idris.candidates(t, CTX)
-    assert keys(found) == ["refundrangers", "getida", "sellerlabsinc", "hubspot"]
+    assert keys(found) == ["refundrangers", "getida", "sellerlabsinc", "quilldesk"]
     sig = {c["key"]: c["signals"] for c in found}
     assert {"BOLD", "LIST_HEAD"} <= set(sig["refundrangers"])               # layout: never evidence on its own
     assert {"CORPORATE_SUFFIX", "LIST_HEAD"} <= set(sig["sellerlabsinc"])
-    assert "MIXED_CASE" in sig["hubspot"]
+    assert "MIXED_CASE" in sig["quilldesk"]
 
 
 @pytest.mark.parametrize("text,reason", [
     ("We use Zoom daily and Monday too.", "GENERIC"),                      # common words, weekdays
     ("Quillford has many agencies.", "SENTENCE_INITIAL"),                   # only ever starts a sentence
     ("California has many agencies.", "PLACE"),
-    ("Sellers on Shopify often file claims.", "TOPIC_TERM"),                # the prompt's own topic
+    ("Sellers on Tradezy often file claims.", "TOPIC_TERM"),                # the prompt's own topic
     ("Threads on Reddit discuss it.", "PUBLISHER"),
     ("I asked ChatGPT and Gemini about it.", "ENGINE_SELF"),
     ("Try Z-Best Media for claims.", "CLIENT_LOOKALIKE"),
@@ -1242,3 +1244,81 @@ def test_huge_whitespace_inputs_are_bounded(text):
         assert max((len(x) for x in g.views(text)[0].split("\n")), default=0) <= len(text)
         g.suspected(text)
     assert len(g.views(" \n" * 9_000)[0]) == 0                                # 18,000 characters of whitespace
+
+
+# ---------------------------------------------------------------------------------------------- review round 5
+
+def test_a_name_and_its_domain_never_count_one_answer_twice():
+    a = idris._new_candidate("quillford")
+    a["_ids"]["all"]["openai|0|0"] = "openai|0"
+    a["_ids"]["cited"].add("openai|0|0")
+    a["_ids"]["dom"]["quillford.com"] = {"openai|0|0"}
+    b = idris._new_candidate("quillfordlabs")
+    b["display"]["Quillford Labs"] = 1
+    b["_ids"]["all"]["openai|0|0"] = "openai|0"                              # the SAME answer, another spelling
+    b["_ids"]["named"].add("openai|0|0")
+    cands = {"quillford": a, "quillfordlabs": b}
+    idris._merge_names_into_domains(cands)
+    idris._finalise(cands["quillford"])
+    c = cands["quillford"]
+    assert list(cands) == ["quillford"] and c["answers"] == 1 and c["named_answers"] == 1 and c["by_scope"] == {
+        "openai|0": 1}
+    # end to end: two spellings and the domain in the same answers; presence k <= n everywhere (STRICT is on)
+    t = "Quillford Labs, a claims service, helps. Many also call it QuillFord."
+    e = engines(openai=[(0, ans(t, ["https://quillford.com/"]))] * 3, anthropic=[(0, ans(t, []))] * 3)
+    env = compute(observe(e))
+    for sc in env["facts"]["benchmark"]["by_engine_prompt"]:
+        for v in sc["emerging"].values():
+            assert v["presence"]["k"] <= v["presence"]["n"] and v["presence"]["unknown"] != "INCONSISTENT"
+    it = env["facts"]["emerging"]["items"][0]
+    assert it["key"] == "quillford" and it["answers"] == 6
+
+
+def test_the_rate_invariant_fails_loudly_in_tests_and_is_marked_never_raised_in_production(monkeypatch):
+    with pytest.raises(AssertionError):
+        idris._rate(5, 3)
+    monkeypatch.setattr(idris, "STRICT_INVARIANTS", False)
+    assert idris._rate(5, 3)["unknown"] == "INCONSISTENT" and idris._rate(5, 3)["ci95"] is None
+
+
+@pytest.mark.parametrize("url", ["https://bit.ly/3abc", "https://t.co/xyz", "https://tinyurl.com/q1", "https://lnkd.in/a",
+                                 "https://linktr.ee/quillford", "https://amzn.to/x"])
+def test_shorteners_are_never_candidates_unless_resolution_followed_them(url):
+    t = "Quillford, a claims service, helps."
+    em = _em(t, [url])
+    assert all(i["origin"] != "cited_domain" for i in em["items"]) and "bitly" not in {i["key"] for i in em["items"]}
+    assert idris.shortener(__import__("urllib.parse").parse.urlsplit(url).hostname)
+    res = callum.Resolver(None, lambda **k: None, False, 10)
+    res.cache[url] = {"state": "RESOLVED", "final_url": "https://www.quillford.com/", "redirects": 1, "hop_hosts": []}
+    e = engines(openai=[(0, ans(t, [url]))] * 3, anthropic=[(0, ans(t, [url]))] * 3)
+    em = compute(idris.observe(e, res, CS, PS, DOMAIN, CID, "2026-10-09T18:00:00Z", "x"))["facts"]["emerging"]
+    assert [(i["key"], i["domains"]) for i in em["items"]] == [("quillford", ["quillford.com"])]
+
+
+def test_news_aggregators_are_publishers_and_private_suffix_names_keep_the_whole_name():
+    assert idris.non_competitor_domain("news.ycombinator.com") == "PLATFORM"
+    assert idris.host_key("acme.github.io") != idris.host_key("acme.myshopify.com") != idris.host_key("www.acme.com")
+    assert idris.host_key("www.acme.com") == "acme" and idris.host_key("acme.co.uk") == "acme"
+
+
+def test_the_platform_list_is_domain_only_and_validated_at_load(tmp_path, monkeypatch):
+    assert all("/" not in d for d in idris._platform_domains())
+    (tmp_path / "idris_platforms.txt").write_text("yelp.com, junglescout.com/blog\n", encoding="utf-8")
+    monkeypatch.setattr(idris, "_HERE", tmp_path)
+    idris._platform_domains.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="not a bare host name"):
+            idris._platform_domains()
+    finally:
+        monkeypatch.undo()
+        idris._platform_domains.cache_clear()
+        idris._platform_keys.cache_clear()
+
+
+def test_platform_products_key_to_the_platform_and_other_products_to_their_makers_domain():
+    assert idris.platform_product(["hubspot", "sales", "hub"]) == "hubspot"
+    assert idris.platform_product(["apple", "valley", "dental"]) is None                # word-aligned, not a prefix
+    assert _keys("Many teams use HubSpot Sales Hub for this.") == {}
+    em = _em("Many teams use Stripe Billing, a billing platform.", ["https://stripe.com/billing"])
+    it = em["items"][0]
+    assert (it["key"], it["domains"], it["names"]) == ("stripe", ["stripe.com"], ["Stripe Billing"])

@@ -37,4 +37,7 @@ vitals.com, ratemds.com, sharecare.com, verywellhealth.com, healthline.com, medi
 # platform vendors cited for their content (blogs, docs, marketplaces) rather than as rivals
 hubspot.com, salesforce.com, shopify.com, wix.com, squarespace.com, wordpress.org, wordpress.com, mailchimp.com,
 semrush.com, ahrefs.com, moz.com, similarweb.com, statista.com, sellercentral.amazon.com, sell.amazon.com,
-advertising.amazon.com, junglescout.com/blog
+advertising.amazon.com
+# news aggregators and communities (round 5)
+news.ycombinator.com, slashdot.org, lobste.rs, indiehackers.com, hackernoon.com, dev.to, flipboard.com, feedly.com,
+news.google.com, msn.com, apple.news, smartnews.com, ground.news, digg.com, fark.com, alltop.com, techmeme.com
