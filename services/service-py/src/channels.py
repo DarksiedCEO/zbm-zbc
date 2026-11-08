@@ -700,6 +700,28 @@ def names_email(text: Optional[str]) -> bool:
     return False
 
 
+# Review of PR #46 (H1): the words an SMS / chat opt-out may hold and still be only an SMS keyword ("STOP", "stop
+# texting me please", "unsubscribe now"). Anything else ("STOP ALL", "stop contacting me", "unsubscribe from
+# everything", "STOP correos", "stop em ails") reaches further than texts in a way the scope rules cannot read.
+SMS_KEYWORD_ONLY = frozenset({"stop", "unsubscribe", "unsub", "cancel", "end", "quit", "halt", "revoke", "optout",
+                              "opt", "out", "please", "pls", "plz", "now", "thanks", "thank", "you", "thx", "me", "it",
+                              "ok", "okay", "already", "texting", "texts", "text", "txt", "txts", "txting", "sms",
+                              "texted", "my", "number", "this", "to", "the", "your"})
+
+
+def broad_opt_out(text: Optional[str]) -> bool:
+    """An opt-out that holds a word beyond an SMS keyword and its courtesy words (``SMS_KEYWORD_ONLY``), read with
+    leet undone and repeated letters collapsed: if ANY reading is keyword-only, it is not broad."""
+    if not text:
+        return False
+    t = _read(text)
+    for norm in (normalise(t), normalise(_leet(t))):
+        toks = {_collapse(w) for w in norm.split()}
+        if toks and toks <= SMS_KEYWORD_ONLY:
+            return False
+    return True
+
+
 def cross_channel_email_decision(text: Optional[str]) -> Optional[str]:
     """What an opt-out received by CHAT or SMS does to EMAIL consent (hardening 2026-11-08). The same reading as an
     email (``email_opt_out_decision``) — there is no quoted thread on these channels — but an opt-out revokes email

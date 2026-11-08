@@ -106,7 +106,10 @@ is the main control.
 Opt-outs across channels (hardening 2026-11-08): an opt-out received by chat or SMS that names email ("stop emailing
 me", "remove me from your mailing list", "no more texts or emails") also revokes EMAIL consent (`revoked_via:
 email_opt_out_by_chat` / `_by_sms`); one whose email scope is unclear keeps email and raises `EMAIL_OPT_OUT_UNCLEAR`;
-a bare STOP by text revokes SMS only. A survey (NPS) comment is never answered, so it pauses proactive SMS and email
+a bare STOP by text revokes SMS only (and, like every opt-out, pauses proactive email); a short opt-out that reaches
+further but names no channel ("STOP ALL", "stop contacting me") keeps email consent and raises `OPT_OUT_POSSIBLE`.
+Rollback limit: a log holding `email_paused` lines refuses start on builds before this one (ADR 0014, Nov 8 2026
+amendment). A survey (NPS) comment is never answered, so it pauses proactive SMS and email
 like any unanswered inbound and, with opt-out wording in it, raises `OPT_OUT_POSSIBLE`; the survey form never changes
 consent itself. Legal's intake kind reads every contract term of the body and subject, typos and inflections included
 ("my lawyr", "litigating" reach Legal as `litigation_threat`).

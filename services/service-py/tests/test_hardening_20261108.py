@@ -488,3 +488,90 @@ def test_nonprod_sender_raises_on_a_zero_write(tmp_path, monkeypatch):
     s = nonprod_sender.NonProdFileSender(str(tmp_path / "outbox.jsonl"))
     with pytest.raises(OSError):
         s.send(Outbound("m1", "zbm", "sms", PHONE, "+13105550100", None, "hello"))
+
+
+# ============================================================================== 9. review of PR #46 (CONDITIONAL)
+
+@pytest.mark.parametrize("text", ["stop contacting me", "STOP all messages", "unsubscribe from everything", "STOP ALL",
+                                  "STOP correos", "stop em ails"])
+def test_h1_short_broad_sms_opt_outs_pause_email_and_alert_andre(h, text):
+    cid = _contact(h)
+    _survey_ready(h, cid)
+    r = h.ok(h.sms(text), 201)
+    st = _status(h, cid)
+    assert st["sms"]["status"] == "revoked" and r.get("ticket_id") is None        # still the short opt-out path
+    assert h.svc.email_paused_for(h.svc.contacts[cid])
+    assert "OPT_OUT_POSSIBLE" in _codes(h)
+    assert _survey(h).json()["detail"] in ("EMAIL_PAUSED", "EMAIL_CONSENT_REVOKED")
+
+
+@pytest.mark.parametrize("text", ["stop texts, emails?", "stop txt n mail"])
+def test_h1_short_unclear_email_scope_pauses_email_and_asks(h, text):
+    cid = _contact(h)
+    h.ok(h.sms(text), 201)
+    assert _status(h, cid)["email"]["status"] == "active"
+    assert h.svc.email_paused_for(h.svc.contacts[cid])
+    assert "EMAIL_OPT_OUT_UNCLEAR" in _codes(h) and "OPT_OUT_POSSIBLE" not in _codes(h)
+
+
+@pytest.mark.parametrize("text", ["STOP", "stop texting me please", "st0p", "STOPPP", "unsubscribe"])
+def test_h1_boundary_a_bare_sms_keyword_pauses_email_but_raises_no_alert(h, text):
+    cid = _contact(h)
+    h.ok(h.sms(text), 201)
+    st = _status(h, cid)
+    assert st["sms"]["status"] == "revoked" and st["email"]["status"] == "active"
+    assert h.svc.email_paused_for(h.svc.contacts[cid])                              # fail closed
+    assert "OPT_OUT_POSSIBLE" not in _codes(h)
+
+
+def test_h1_short_email_opt_out_by_sms_still_revokes_email(h):
+    cid = _contact(h)
+    h.ok(h.sms("stop emailing me"), 201)
+    assert _status(h, cid)["email"]["status"] == "revoked"
+
+
+def test_h1_long_broad_chat_opt_out_alerts_and_pauses(h):
+    cid = _contact(h)
+    h.ok(h.chat("STOP contacting me through any of your channels whatsoever"), 201)
+    assert h.svc.email_paused_for(h.svc.contacts[cid]) and "OPT_OUT_POSSIBLE" in _codes(h)
+
+
+def test_broad_opt_out_unit():
+    assert not channels.broad_opt_out(None) and not channels.broad_opt_out("")
+    assert not channels.broad_opt_out("Stop texting me, thanks")
+    assert channels.broad_opt_out("stop everything")
+
+
+def test_m1_an_unknown_pause_effect_from_a_newer_version_is_skipped_on_replay(h):
+    cid = _contact(h)
+    h.svc._apply("x", {"effects": [{"op": "push_paused", "contact_id": cid}]}, "2026-10-06T18:00:00Z")
+    h.svc._apply("x", {"effects": [{"op": "push_pause_cleared", "contact_id": cid}]}, "2026-10-06T18:00:00Z")
+
+
+@pytest.mark.parametrize("op", ["consent_withdrawn", "push_revoked", "paused", "x_paused_extra", "PUSH_PAUSED"])
+def test_m1_any_other_unknown_effect_still_refuses_start(h, op):
+    from store import StoreCorrupt
+    with pytest.raises(StoreCorrupt):
+        h.svc._apply("x", {"effects": [{"op": op}]}, "2026-10-06T18:00:00Z")
+
+
+def test_l1_a_replayed_clear_answers_with_the_live_state(h):
+    cid = _contact(h)
+    h.ok(h.chat("Hello there, about my account"), 201)
+    body = {"request_id": rid()}
+    path = f"/svc/v1/contacts/{cid}/email-pause/clear"
+    assert h.ok(h.post(path, body, andre=True))["email_paused"] is False
+    h.ok(h.chat("Hello again, a different thing"), 201)                             # paused again
+    again = h.ok(h.post(path, body, andre=True))                                    # same request replayed
+    assert again["email_paused"] is True and again["contact_id"] == cid
+
+
+@pytest.mark.parametrize("text,kind", [
+    ("I loved Tom Sawyer, cancel my contract", "contract_dispute"),
+    ("Sawyer here, please cancel the agreement", "contract_dispute"),
+    ("My lawyr will be in touch about the contract", "litigation_threat"),
+    ("my attorny says cancel the contract", "litigation_threat"),
+    ("the lawsiut over the contract", "litigation_threat"),
+])
+def test_l2_short_typos_need_context_for_legal_kind(text, kind):
+    assert triage.legal_kind(triage.classify(text)) == kind

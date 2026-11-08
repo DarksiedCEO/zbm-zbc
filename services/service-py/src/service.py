@@ -19,6 +19,7 @@ is committed, and an outbound message is recorded on the ledger (``message_sent`
 from __future__ import annotations
 
 import base64
+import logging
 import hashlib
 import hmac
 import json
@@ -42,6 +43,7 @@ from ports import NOT_WIRED, Alert, HandoffRequest, Outbound, Ports
 from reasons import R
 from store import BodyStore, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 
+log = logging.getLogger("service.core")
 INTERNAL = "service_desk"
 INTEGRITY_RETRY_S = 15
 FORCED_MIN_S = 10
@@ -60,6 +62,7 @@ PLACEHOLDERS = ("first_name", "brand_name", "offer_title", "offer_terms", "offer
 TEMPLATE_PURPOSES = ("check_in", "nps_survey", "offer")
 PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(PLACEHOLDERS) + r")\}")
 SMS_FOOTER = "\nReply STOP to opt out."
+FORWARD_PAUSE_OP = re.compile(r"[a-z]{1,20}_(paused|pause_cleared)")
 OPT_OUT_ONLY_WORDS = 4          # an opt-out of at most this many words is only that: no ticket
 MAX_SEND_ATTEMPTS = 5
 KEY_FINGERPRINT_LABEL = b"service-py SVC_HMAC_KEY fingerprint v1"
@@ -350,6 +353,12 @@ class SupportService:
     def _apply(self, kind: str, d: dict, at: str) -> None:
         for e in d.get("effects", ()):
             handler = getattr(self, f"_e_{e.get('op')}", None)
+            if handler is None and isinstance(e.get("op"), str) and FORWARD_PAUSE_OP.fullmatch(e["op"]):
+                # review of PR #46 (M1): a pause / pause-clear effect written by a NEWER version (a rollback) is
+                # skipped and logged, never fatal. Only pauses: an unknown consent, message or any other effect still
+                # refuses start (skipping a revocation would send to someone who opted out)
+                log.warning("skipping unknown pause effect %r from a newer version (rollback)", e["op"][:40])
+                continue
             if handler is None:
                 raise StoreCorrupt(f"log record carries an unknown effect {str(e.get('op'))[:40]!r}")
             handler(e, at)
@@ -930,9 +939,11 @@ class SupportService:
         with self.lock:
             self._gate()
             prev = self._idem("andre", "email_pause_clear", contact_id, body)
-            if prev is not None:
-                return prev
             c = self.contacts.get(contact_id)
+            if prev is not None:
+                # review of PR #46 (L1): a replay answers with the state NOW (a later inbound may have paused again)
+                return {**prev, "email_paused": bool(c) and self.email_paused_for(c),
+                        "email_consent": (self.consents.get((contact_id, "email")) or {}).get("status")}
             if c is None:
                 raise NotFound(R("CONTACT_NOT_FOUND"))
             if not self.email_paused_for(c):
@@ -1277,6 +1288,12 @@ class SupportService:
                 if email_revoke:
                     effects.append(email_effect)
                     resp["email_opted_out"] = True
+                elif channel != "email" and decision != "ask" and contact.get("email") \
+                        and channels.broad_opt_out(text):
+                    # review of PR #46 (H1): "stop contacting me", "STOP ALL", "unsubscribe from everything",
+                    # "STOP correos", "stop em ails" carry more than an SMS keyword but name no channel this reading
+                    # can scope: email consent is kept, proactive email is paused (below) and Andre reads it
+                    effects.append(self._alert_effect("OPT_OUT_POSSIBLE", contact["contact_id"], rid))
                 resp["action"] = "opted_out"
                 if tail_opt_out:
                     effects.append(self._alert_effect("OPT_OUT_IN_QUOTED_TEXT", contact["contact_id"], rid))
@@ -1290,7 +1307,8 @@ class SupportService:
                     # V3-M2: an opt-out from an address no contact had (or naming another contact): Andre sees it
                     effects.append(self._alert_effect("OPT_OUT_UNKNOWN_SENDER", contact["contact_id"], rid))
                 elif channel == "sms" and len(triage_mod.normalise(text).split()) <= OPT_OUT_ONLY_WORDS:
-                    self._commit("sms_opt_out", {"effects": effects + pause,
+                    # review of PR #46 (H1): the short path paused SMS only; proactive email is paused here too
+                    self._commit("sms_opt_out", {"effects": effects + pause + self._email_pause_effects([contact] + named),
                                                  "request": self._req(actor, f"inbound_{channel}", target, body),
                                                  "response": resp}, actor)
                     return resp

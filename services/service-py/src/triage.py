@@ -494,6 +494,22 @@ LITIGATION_TERMS = frozenset({"sue", "sues", "suing", "sued", "sueing", "lawsuit
 IP_PREFIXES = ("dmca", "copyright", "infring", "takedown", "taken_down", "take_down", "trademark")
 
 
+# Review of PR #46 (L2): a one-typo match on a short word reads names as legal words ("Tom Sawyer" is one letter
+# from "lawyer"). For Legal's intake kind a typo of six letters or fewer counts only right after a possessive or an
+# article ("my lawyr", "our atorney"); longer typos ("attorny", "lawsiut") count anywhere.
+_TYPO_CONTEXT = frozenset({"my", "our", "his", "her", "their", "your", "a", "the"})
+
+
+def _legal_typo_hits(norm: str) -> set:
+    toks = norm.split()
+    out = set()
+    for i, tok in enumerate(toks):
+        if len(tok) < 5 or (len(tok) <= 6 and not (i > 0 and toks[i - 1] in _TYPO_CONTEXT)):
+            continue
+        out |= {stem for stem in FUZZY["contract"] if _one_edit(tok, stem)}
+    return out
+
+
 def contract_terms(text: str, subject: Optional[str] = None) -> tuple:
     """Every contract term in the body and subject, by its base word (spaces as underscores): lexicon phrases, the
     one-typo stems (FUZZY) and the inflection stems (STEMS) and exact words. Sorted, so it is deterministic."""
@@ -503,7 +519,7 @@ def contract_terms(text: str, subject: Optional[str] = None) -> tuple:
             continue
         norm = normalise(t)
         out |= {normalise(w).strip().replace(" ", "_") for w in LEXICON["contract"] if _has(norm, w)}
-        out |= set(_fuzzy_hits(norm, "contract"))
+        out |= _legal_typo_hits(norm)
         # the stem "court" also starts "courtesy" / "courteous": the exact word "court" (LEXICON) stands for it here
         out |= {st.replace(" ", "_") for c, st in stem_hits(norm) if c == "contract" and st != "court"}
     return tuple(sorted(out))
