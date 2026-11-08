@@ -75,6 +75,16 @@ def _same_registration(snap: Snapshot, conn: Connection) -> bool:
     return (snap.shop, snap.credential, snap.approval_ref) == _registration(conn)
 
 
+def upstream_diagnostic(session) -> Optional[dict]:
+    """What Shopify last answered, as closed tokens only (stage, HTTP status, GraphQL error codes), or None when no
+    request was made. Never a message, a header, a body, a token or a customer field."""
+    up = getattr(getattr(session, "stats", None), "upstream", None)
+    if not up:
+        return None
+    return {"stage": up.get("stage"), "http_status": up.get("http_status"),
+            "graphql_codes": list(up.get("graphql_codes") or [])}
+
+
 def _canonical(obj) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
@@ -259,10 +269,13 @@ class StoreService:
             snap = self._build(conn, now, orders, counts, read)
         except StoreError as e:
             self._record_failed(sync_id, conn, e.code, session)
+            e.upstream = upstream_diagnostic(session)
             raise
         except Exception:
             self._record_failed(sync_id, conn, "STORE_RESPONSE_INVALID", session)
-            raise StoreError("STORE_RESPONSE_INVALID") from None
+            err = StoreError("STORE_RESPONSE_INVALID")
+            err.upstream = upstream_diagnostic(session)
+            raise err from None
         if not self._registration_unchanged(conn):
             # AEGIS M1: re-registered (another shop, credential or approval) or deregistered while reading
             self._record_failed(sync_id, conn, "STORE_REGISTRATION_CHANGED", session)
@@ -296,12 +309,16 @@ class StoreService:
                 "pages": st.pages, "cost_points": round(st.cost_points, 2), "throttle_waits": st.throttle_waits}
 
     def _record_failed(self, sync_id: str, conn: Connection, code: str, session: ShopifySession) -> None:
+        up = upstream_diagnostic(session)
         payload = {"sync_id": sync_id, "client_id": conn.client_id, "reason": code,
-                   "requests": session.stats.requests, "pages": session.stats.pages}
+                   "requests": session.stats.requests, "pages": session.stats.pages, "upstream": up}
+        summary = f"rrs1 failed client={conn.client_id} reason={code} requests={session.stats.requests}"
+        if up is not None:
+            summary += (f" stage={up['stage']} http={up['http_status'] if up['http_status'] is not None else '-'}"
+                        f" gql={','.join(up['graphql_codes']) or '-'}")
         try:
             self._ledger.record(f"rrs.{sync_id}.failed", "rr_store_read_failed", conn.client_id, payload,
-                                f"rrs1 failed client={conn.client_id} reason={code} "
-                                f"requests={session.stats.requests}")
+                                summary[:280])
         except Exception:  # noqa: BLE001, S110 - best effort: the sync already failed; its requested record stands
             pass
 

@@ -665,7 +665,11 @@ def store_sync(req: StoreRequest = Depends(wire_body(StoreRequest))) -> Response
     try:
         return JSONResponse(STORE.sync(req.client_id))
     except StoreError as e:
-        return _store_error(e)
+        resp = _store_error(e)
+        up = getattr(e, "upstream", None)
+        if up is not None:      # closed tokens only (stage, HTTP status, Shopify error codes): the operator's clue
+            resp = JSONResponse(status_code=e.http_status, content={"detail": e.detail(), "upstream": up})
+        return resp
 
 
 @app.post("/stores/snapshot", dependencies=[Depends(require_auth)])

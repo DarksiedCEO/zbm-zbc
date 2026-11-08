@@ -58,14 +58,26 @@ AGENT_COVERAGE = {
 }
 
 
+CENT = Decimal("0.01")
+
+
 def _usd(money: m.MoneyV2) -> Optional[Decimal]:
+    """A non-negative USD amount that is a whole number of cents, as an exact Decimal (never a float), or None.
+
+    Shopify's Decimal is arbitrary precision: "29.990" is exactly $29.99 and is accepted; "29.999" is not a whole
+    number of cents and is None (the caller excludes the order, it never rounds a store's figure)."""
     if money.currencyCode != "USD":
         return None
     try:
         d = Decimal(money.amount)
     except InvalidOperation:
         return None
-    if d < 0 or d.as_tuple().exponent < -2:
+    if not d.is_finite() or d < 0:
+        return None
+    try:
+        if d != d.quantize(CENT):
+            return None
+    except InvalidOperation:
         return None
     return d.quantize(Decimal("0.01"))
 
