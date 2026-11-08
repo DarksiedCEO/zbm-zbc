@@ -34,6 +34,8 @@ NOT_CONNECTED, so every decision drawn from them is INSUFFICIENT_EVIDENCE). It p
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import re
 import unicodedata
@@ -45,10 +47,13 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.8"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.9"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.9 (review round 9): combining marks / format characters stripped before every check; ideographic and
+#    fullwidth full stops; IPv6, hex IPv4, script schemes, spaced / "dot" hosts URL-like; split hex and base64 text;
+#    cards split by single filler letters
 # 2026-11-08.8 (review round 8): fail safe: URL-like queries dropped whole (no path exemptions); up to three
 #    percent-decodes first; Luhn check over 13-19 digit runs; split secrets judged with separators removed
 # 2026-11-08.7 (review round 7): the round-6 host exemption was too wide (secrets in paths passed): now only plain
@@ -332,7 +337,18 @@ _NOT_TLD = r"js|ts|py|rb|md|sh|gz|cs|db|ps|vb|rs|go|pl1|jsx|tsx"
 _HOSTNAME = re.compile(r"(?<![\w@-])(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+(?:" + _GTLDS + r"|(?!(?:" + _NOT_TLD
                        + r")(?![a-z]))[a-z]{2})\.?(?![a-z0-9-])")
 _URL_MARKS = re.compile(r"[a-z][a-z0-9+.-]{0,15}://|://|(?<![a-z0-9])www\.|%[0-9a-f]{2}|"
-                        r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|[a-z0-9]\.[a-z]{2,24}:\d{2,5}(?!\d)")
+                        r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|[a-z0-9]\.[a-z]{2,24}:\d{2,5}(?!\d)|"
+                        # round 9: script-ish schemes, hex IPv4 (0xc0a80101), IPv6 literals (2001:db8::1, fe80::1)
+                        r"(?<![a-z])(?:javascript|vbscript|data|file|blob|mailto|ftp|sftp|ssh)\s*:|"
+                        r"(?<![0-9a-z])0x[0-9a-f]{8}(?![0-9a-z])|"
+                        r"(?<![0-9a-z:])(?:[0-9a-f]{1,4}:){1,7}:(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?(?![0-9a-z:])|"
+                        r"(?<![0-9a-z:])(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}(?![0-9a-z:])|"
+                        r"(?<![0-9a-z:])::(?:ffff:)?[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}(?![0-9a-z:])")
+# round 9: a host written with spaces or "dot" ("example . com", "example dot com"), common TLDs only; the label
+# may not be a stop word ("the dot com bubble" is kept)
+_SPACED_HOST = re.compile(r"(?<![a-z0-9-])(?!(?:the|a|an|of|in|on|at|to|and|or|is)\s)[a-z0-9][a-z0-9-]{0,62}"
+                          r"\s*(?:\.|\(\.\)|\[\.\]|\s\(?dot\)?|\[dot\])\s*"
+                          r"(?:com|net|org|io|co|uk|us|ca|de|fr|au|info|biz|edu|gov|app|dev|ai)(?![a-z0-9])")
 _SLASH_OK = re.compile(r"\d+(?:/\d+)+|\d{3}/\d{2}[a-z]{0,2}\d{2}|a/b|and/or|w/o|n/a|on/off|yes/no|his/her|he/she|"
                        r"s/he|b/w|i/o|a/c|ac/dc|w/|p/e|r/c|f/x")
 URL_LIKE_RULE = ("scheme or '://', 'www.', a percent escape left after three decodes, an IPv4 address, a host name "
@@ -340,20 +356,35 @@ URL_LIKE_RULE = ("scheme or '://', 'www.', a percent escape left after three dec
                  "pair (a/b, and/or, w/o, n/a ...)")
 
 
+# review round 9: marks and format characters that can hide a digit or letter from every rule ("5\u0301 5 5",
+# "4\u20e3", "1\u0332"): nonspacing (Mn) and enclosing (Me) marks, format characters (Cf), variation selectors
+_DOTS = str.maketrans({"\u3002": ".", "\uff61": ".", "\uff0e": ".", "\u2024": ".", "\ufe52": "."})
+
+
+def strip_marks(t: str) -> str:
+    """Remove every Mn / Me / Cf character and the variation selectors (U+FE00-FE0F), after NFKD, then NFKC again:
+    the detection form (``Á`` is judged as ``A``). Never stored."""
+    t = unicodedata.normalize("NFKD", t)
+    t = "".join(c for c in t if unicodedata.category(c) not in ("Mn", "Me", "Cf") and not "\ufe00" <= c <= "\ufe0f")
+    return unicodedata.normalize("NFKC", t)
+
+
 def decode_query(q: str) -> str:
-    """Up to three percent-decodes (a double-encoded secret is decoded too), then NFKC and invisible characters out."""
+    """Up to three percent-decodes (a double-encoded secret is decoded too), then NFKC, invisible characters out,
+    combining marks / format characters stripped (round 9) and ideographic / fullwidth full stops made '.'."""
     t = q or ""
     for _ in range(3):
         u = unquote(t)
         if u == t:
             break
         t = u
-    return lookalikes.strip_invisible(unicodedata.normalize("NFKC", t))
+    t = lookalikes.strip_invisible(unicodedata.normalize("NFKC", t))
+    return strip_marks(t).translate(_DOTS)
 
 
 def url_like(folded: str) -> bool:
     """Whether decoded, folded query text looks like a URL (dropped whole; review round 8)."""
-    if _URL_MARKS.search(folded) or _HOSTNAME.search(folded):
+    if _URL_MARKS.search(folded) or _HOSTNAME.search(folded) or _SPACED_HOST.search(folded):
         return True
     return any("/" in w and not _SLASH_OK.fullmatch(w) for w in folded.split())
 
@@ -368,7 +399,8 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
-_CARD_RUN = re.compile(r"\d(?:[\s\-/.]{0,3}\d)+")
+# digits with separators, or with a single filler letter between groups ("4539 x 1488 x 0343 x 6467"; round 9)
+_CARD_RUN = re.compile(r"\d(?:[\s\-/._]{0,3}(?:[a-z][\s\-/._]{0,3})?\d)+")
 
 
 def card_like(folded: str) -> bool:
@@ -394,7 +426,32 @@ def split_secret(folded: str) -> bool:
         return True
     alnum = re.sub(r"[^a-z0-9]", "", whole)
     letters, digits = sum(c.isalpha() for c in alnum), sum(c.isdigit() for c in alnum)
-    return bool(letters and digits >= 4 and len(alnum) >= 12 and _transitions(alnum) >= 0.6 * (len(alnum) - 1))
+    if letters and digits >= 4 and len(alnum) >= 12 and _transitions(alnum) >= 0.6 * (len(alnum) - 1):
+        return True
+    # round 9: hex split by spaces ("9f86d081 884c7d65 ..."): 16+ hex characters with 4+ digits and 4+ letters
+    for m in re.finditer(r"[0-9a-f]{16,}", whole):
+        h = m.group()
+        if sum(c.isdigit() for c in h) >= 4 and sum(c.isalpha() for c in h) >= 4:
+            return True
+    return False
+
+
+def base64_text(cased: str) -> bool:
+    """Base64 of readable text, split or not (round 9: "amFuZS5kb2 VAZXhhbXBs ZS5jb20="): the query with spaces and
+    separators removed, case kept, decodes as base64 to 9+ bytes that are nearly all printable ASCII. Ordinary
+    words decode to binary noise, so they are not hit."""
+    whole = re.sub(r"[\s\-_.]", "", cased)
+    if len(whole) < 12 or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", whole):
+        return False
+    body = whole.rstrip("=")
+    for cand in (body, body.replace("-", "+")):
+        try:
+            raw = base64.b64decode(cand + "=" * (-len(cand) % 4), validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        if len(raw) >= 9 and sum(32 <= b < 127 for b in raw) >= 0.95 * len(raw):
+            return True
+    return False
 
 
 def classify_query(q: str, brands: list) -> str:
@@ -407,7 +464,8 @@ def classify_query(q: str, brands: list) -> str:
         return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
-    if url_like(folded) or "@" in folded or logs_mod._EMAIL.search(folded) or logs_mod._AT_WORD.search(folded) \
+    if url_like(folded) or base64_text(t) or "@" in folded or logs_mod._EMAIL.search(folded) \
+            or logs_mod._AT_WORD.search(folded) \
             or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
             or card_like(folded) or split_secret(folded) or looks_like_address(folded):
         return "pii_suspect"
