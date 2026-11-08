@@ -182,6 +182,11 @@ def dedupe(urls) -> list:
     return out[:MAX_SOURCES]
 
 
+def history_bytes(history: list) -> int:
+    """The size of a multi-turn history as it is sent (JSON, UTF-8)."""
+    return len(json.dumps(history, separators=(",", ":"), ensure_ascii=False).encode("utf-8", "surrogatepass"))
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -326,7 +331,10 @@ class HttpAnswerEngine:
     MULTI_TURN = False
     MULTI_TURN_DOCS: Optional[dict] = None
     MAX_HISTORY_TURNS = 8
-    MAX_HISTORY_CHARS = 40_000
+    # the whole history as JSON (texts and the provider-native content blocks sent back as received): a bigger
+    # history is refused, never truncated (review round 2: a cut content block would change what the engine saw)
+    MAX_HISTORY_BYTES = 256 * 1024
+    MAX_CONTENT_BLOCKS = 128
 
     def _init_http(self, key: ApiKey, timeout_s: float, attempts: int, backoff_s: tuple,
                    transport: Optional[httpx.BaseTransport], network_backend, monotonic: Callable[[], float],
@@ -371,21 +379,26 @@ class HttpAnswerEngine:
 
     def _check_history(self, history) -> None:
         """Alternating user / assistant turns starting with user, bounded: anything else is refused before a
-        request is built (ADR 0049)."""
+        request is built (ADR 0049). An assistant turn may carry ``content``: the provider's own content blocks of
+        that answer exactly as received (``ProviderAnswer.turn_content``), which a MULTI_TURN engine sends back
+        unchanged instead of the text."""
         if not self.MULTI_TURN:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "MULTI_TURN_NOT_SUPPORTED")
         if not isinstance(history, list) or not history or len(history) > 2 * self.MAX_HISTORY_TURNS \
                 or len(history) % 2:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
-        total = 0
         for i, h in enumerate(history):
-            if not isinstance(h, dict) or set(h) != {"role", "text"} \
-                    or h["role"] != ("user" if i % 2 == 0 else "assistant") \
-                    or not isinstance(h["text"], str) or not h["text"]:
+            role = "user" if i % 2 == 0 else "assistant"
+            keys = {"role", "text"} if role == "user" else ({"role", "text"}, {"role", "text", "content"})
+            if not isinstance(h, dict) or (set(h) != keys if role == "user" else set(h) not in keys) \
+                    or h["role"] != role or not isinstance(h["text"], str) or not h["text"]:
                 raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
-            total += len(h["text"])
-        if total > self.MAX_HISTORY_CHARS:
-            raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+            if "content" in h and (not isinstance(h["content"], list) or not h["content"]
+                                   or len(h["content"]) > self.MAX_CONTENT_BLOCKS
+                                   or not all(isinstance(b, dict) for b in h["content"])):
+                raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+        if history_bytes(history) > self.MAX_HISTORY_BYTES:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_TOO_LARGE")
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         raise NotImplementedError

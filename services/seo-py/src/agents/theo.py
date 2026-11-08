@@ -29,6 +29,12 @@ Two context modes, chosen per engine and named in every output (review round 1, 
   ``stacked_questions``  the fallback for an engine whose multi-turn shape was not read (OpenAI, Perplexity): ONE
                          request per turn carrying the earlier USER questions only. It approximates a conversation and
                          its pattern says so (``INVISIBLE_AT_OPENING_RECOMMENDED_STACKED``).
+Injection (review round 2): in native mode an earlier answer is re-sent, so text injected into it may steer the
+engine's later answers, the classified final one included; Theo's plan and logic cannot be altered by it. A chain
+whose re-sent answer matches ``_INJECTION`` (instruction-like text aimed at the model) is INJECTION_SUSPECTED: kept
+out of every rate and pattern, its finals reported apart. An earlier answer goes back as the provider's content blocks
+exactly as received (Anthropic: server_tool_use / web_search_tool_result / cited text blocks; Gemini: the parts,
+PROVISIONAL), never truncated: a history over the adapter's cap ends the chain INCOMPLETE (``HISTORY_TOO_LARGE``).
 Budget: a native turn k carries k-1 earlier answers, so it is reserved and charged as k reserve units (a stacked turn
 as 1); a whole chain is reserved before its first turn, so a cap never cuts a chain in half.
 
@@ -40,10 +46,12 @@ competitor domains cited.
 
 The final answer (complete chains only) is read LEXICALLY (``recommendation``): the first entity named, and not
 negated or contrasted away (``not``, ``n't``, ``avoid``, ``instead of``, ``rather than``, ``over``, ``<x>er than``,
-``... is not recommended``; within the clause), in the first sentence holding a recommendation cue is
-``recommended`` — counted as a recommendation only when its mention is confirmed (HIGH), the same threshold the
-opening turn uses; otherwise the first such entity in the answer is only ``named first in the final answer``,
-reported apart and never counted as a win. An incomplete chain's final answer is UNKNOWN.
+``... is not recommended``; within the clause; ``not only``, "would not hesitate to recommend", "don't overlook",
+"can't recommend X enough" are positive, and "not only X but also Y" / "both X and Y" is a shared pick with no
+winner), in the first sentence holding a recommendation cue is ``recommended`` — counted as a recommendation only
+when its mention is confirmed (HIGH), the same threshold the opening turn uses; otherwise the first such entity in
+the answer is only ``named first in the final answer``, reported apart and never counted as a win. An incomplete
+chain's final answer is UNKNOWN.
 
 No agent touches service state, the ledger or the log: the service records what this module returns.
 """
@@ -58,7 +66,7 @@ from agents import brand_mention, domain_match, priya_handoff, split_url
 from agents.callum import excerpt
 from agents.probes import MIN_USABLE, REDIRECTOR_HOSTS, _switch_code, extract_citations, wilson
 from agents.prompt_guard import personal_data
-from answer_adapter import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
+from answer_adapter import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError, history_bytes
 from envelope import envelope, finding
 from ports import NOT_CONNECTED, ProviderAnswer
 from primitives import Killed
@@ -73,7 +81,19 @@ NATIVE, STACKED = "native_multi_turn", "stacked_questions"
 CONTEXT_MODES = (NATIVE, STACKED)
 MAX_TURNS = 4
 MAX_ROWS = 2000
-MAX_ASSISTANT_CHARS = 4000            # one earlier answer sent back in native mode (longer: cut, flagged)
+# review round 2: an earlier answer goes back as the provider's content blocks exactly as received, never cut; a
+# history over the adapter's MAX_HISTORY_BYTES makes the chain INCOMPLETE (HISTORY_TOO_LARGE) before any request
+HISTORY_BYTES_DEFAULT = 256 * 1024
+# instruction-like text aimed at the model inside an answer (review round 2): in native mode that answer is re-sent to
+# the engine and may steer its later answers, the final one included; such a chain is INJECTION_SUSPECTED and kept out
+# of every pattern (reported apart). Lexical, a closed list: it reduces, not removes, the risk.
+_INJECTION = re.compile(
+    r"(\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+)?(?:previous|prior|above|earlier|"
+    r"system)\s+(?:instructions?|prompts?|messages?|rules)|\bsystem\s*(?:prompt|message|override)\s*:|"
+    r"^\s*(?:system|assistant|developer)\s*:|\byou are now\b|\bfrom now on,?\s+(?:you|always|only|never)\b|"
+    r"\bnew instructions?\s*:|\b(?:you )?(?:must|should) (?:always |only )?recommend\b|\balways recommend\b|"
+    r"\bin (?:all|every|any) (?:future|later|subsequent|following) (?:answers?|responses?|turns?)\b|"
+    r"<\|im_(?:start|end)\|>|\[/?inst\]|\bdo not (?:mention|recommend) (?:any|other)\b)", re.IGNORECASE | re.MULTILINE)
 PRIYA_FOLLOWUP_MIN_SHARED = 2
 FOLLOWUPS = {"compare": "What are the main options to compare for this, and how do they differ?",
              "decide": "Which one would you recommend, and why?"}
@@ -90,7 +110,8 @@ STRENGTHS = ("STRONG", "WEAK", "NONE")
 CUES = re.compile(r"\b(recommend|recommended|recommendation|best choice|best option|top pick|go with|i would choose|"
                   r"i'd choose|my pick|the winner)\b", re.IGNORECASE)
 # negation / contrast before an entity, within its clause; and after it ("Acme is not recommended")
-_NEG_BEFORE = re.compile(r"(\bnot\b|n't\b|\bnever\b|\bavoid\w*|\binstead of\b|\brather than\b|\bover\b|\bunlike\b|"
+_NEG_BEFORE = re.compile(r"(\bnot\b(?!\s+only\b)|n['\u2019]t\b|\bnever\b|\bavoid\w*|\binstead of\b|\brather than\b|"
+                         r"\bover\b|\bunlike\b|"
                          r"\bstay away from\b|\bskip\b|\bno longer\b|\b\w+er than\b|\b(?:more|less) \w+ than\b|"
                          r"\bsuperior to\b|\bexcept\b)", re.IGNORECASE)
 _NEG_AFTER = re.compile(r"^[^.;:!?]{0,30}?\b(is not|isn't|are not|aren't|was not|wasn't|would not|wouldn't|"
@@ -101,9 +122,14 @@ _CONTENT = re.compile(r"[^\W\d_]{3,}")
 _STOP = frozenset({"the", "and", "for", "with", "what", "which", "who", "how", "why", "when", "where", "does", "are",
                    "can", "best", "near", "about", "this", "that", "your", "from", "into", "than"})
 LIMITS = [
-    "Context mode is per engine: native_multi_turn (the engine's earlier answers sent back as assistant messages; "
-    "Anthropic and Gemini, whose documented multi-turn shapes were read) or stacked_questions (OpenAI and "
-    "Perplexity: earlier USER questions re-sent in one request). A stacked chain approximates a conversation.",
+    "Context mode is per engine: native_multi_turn (the engine's earlier answers sent back as assistant messages, "
+    "as the provider's content blocks exactly as received; Anthropic, and Gemini PROVISIONALLY: its thought-"
+    "signature rule was not confirmed in the pages read) or stacked_questions (OpenAI and Perplexity: earlier USER "
+    "questions re-sent in one request). A stacked chain approximates a conversation.",
+    "In native multi-turn, text injected into an engine's answer is re-sent to that engine and may steer its later "
+    "answers, the classified final one included. Theo's plan and logic cannot be altered by it (the user turns are "
+    "fixed before turn one), but the engine can. A chain whose re-sent answer holds instruction-like text is "
+    "INJECTION_SUSPECTED and excluded from every rate and pattern (reported apart); the detection is lexical.",
     "Follow-ups are fixed templates plus at most one of Priya's emerging queries; real users ask other follow-ups. "
     "No LLM-generated follow-up exists (not built).",
     "The final answer is read lexically (a cue word, the first entity named and not negated or contrasted away in "
@@ -192,6 +218,17 @@ def _mentions(text: str, ctx: dict) -> list:
     return sorted(out, key=lambda e: (e[0], e[1], e[2] or "")), t
 
 
+# idioms that look negated and are not (review round 2): "would not hesitate to recommend X", "don't overlook X",
+# "can't recommend X enough"
+_POSITIVE_BEFORE = re.compile(r"(?:\b(?:not|never)|n['\u2019]t)\s+hesitate\s+to\s+(?:recommend|choose|use|suggest|"
+                              r"go\s+with)\s*$|(?:\bdo\s+not|\bdon['\u2019]t|\bnever)\s+(?:overlook|ignore|forget|"
+                              r"miss|underestimate|rule\s+out|sleep\s+on)\s*$", re.IGNORECASE)
+_CANT_RECOMMEND = re.compile(r"(?:\bcannot|\bcan\s+not|\bcan['\u2019]t|\bcouldn['\u2019]t)\s+recommend\s*$",
+                             re.IGNORECASE)
+_ENOUGH = re.compile(r"^\s*(?:highly\s+|strongly\s+)?enough\b", re.IGNORECASE)
+_TOGETHER = re.compile(r"\bnot only\b.+\bbut (?:also|as well)\b|\bboth\b.+\band\b", re.IGNORECASE)
+
+
 def negated(t: str, start: int, end: int) -> bool:
     """The mention at [start, end) is negated or contrasted away within its clause (lexical; module docstring)."""
     pre = t[max(0, start - 80):start]
@@ -200,6 +237,8 @@ def negated(t: str, start: int, end: int) -> bool:
         pass
     if cut is not None:
         pre = pre[cut.end():]
+    if _POSITIVE_BEFORE.search(pre) or (_CANT_RECOMMEND.search(pre) and _ENOUGH.match(t[end:end + 30])):
+        return False
     return bool(_NEG_BEFORE.search(pre) or _NEG_AFTER.search(t[end:end + 60]))
 
 
@@ -243,6 +282,12 @@ def recommendation(a: ProviderAnswer, ctx: dict) -> dict:
         if not CUES.search(sm.group(0)):
             continue
         inside = [e for e in live if sm.start() <= e[0] < sm.end()]
+        if len({(e[1], e[2]) for e in inside}) > 1 and _TOGETHER.search(sm.group(0)):
+            # "not only X but also Y", "both X and Y": several picks, no single decisive one (review round 2)
+            return {"winner": "none", "name": None, "basis": "recommended_together", "counts": False,
+                    "confidence": "LOW", "together": sorted({e[1] if e[1] == "client" else f"competitor:{e[2]}"
+                                                             for e in inside}),
+                    "wording": "several recommended together in the final answer (no single pick)"}
         if inside:
             e = inside[0]
             high = e[4] == brand_mention.HIGH
@@ -333,6 +378,9 @@ def run_chains(topics: list, plans: dict, engines: dict, engine_names: list, n: 
         port = engines.get(e)
         s = {"port": port, "outcome": None, "stop": None, "stop_detail": None, "answers": 0, "errors": 0,
              "protocol_run": 0, "chains_asked": 0, "chains_not_asked": 0, "run": None, "mode": mode_of(port)}
+        docs = getattr(port, "MULTI_TURN_DOCS", None)
+        s["native_status"] = None if s["mode"] != NATIVE else \
+            (docs.get("status", "documented") if isinstance(docs, dict) else "unknown")
         if port is None or not getattr(port, "connected", False):
             s["outcome"] = NOT_CONNECTED
         elif getattr(port, "metered", False):
@@ -368,7 +416,7 @@ def run_chains(topics: list, plans: dict, engines: dict, engine_names: list, n: 
                    "ENGINE_NOT_CONNECTED": NOT_CONNECTED}.get(s["stop"], "FAILED")
         view[e] = {"outcome": out, "reason": s["stop"], "reason_detail": s["stop_detail"], "usage": s["usage"],
                    "chains_asked": s["chains_asked"], "chains_not_asked": s["chains_not_asked"],
-                   "context_mode": s["mode"]}
+                   "context_mode": s["mode"], "native_status": s["native_status"]}
     return {"engines": view, "chains": chains, "rows": rows[:MAX_ROWS], "rows_truncated": len(rows) > MAX_ROWS}
 
 
@@ -386,7 +434,7 @@ def _chains_for(t, ti, plan, e, s, n, guard, cap, ctx, clock, iso, rows) -> dict
                             "final": _unknown()})
             continue
         samples.append(_one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows))
-    return _summary(t, e, turns, plan["flags"], samples, s["mode"])
+    return _summary(t, e, turns, plan["flags"], samples, s["mode"], s["native_status"])
 
 
 def _unknown() -> dict:
@@ -417,9 +465,14 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
     done: list = []
     history: list = []
     answers_seen: set = set()
+    injected = False
     status, reason, final = "COMPLETE", None, None
     takes_guard = bool(getattr(port, "accepts_guard", False))
     for k, turn in enumerate(turns):
+        if mode == NATIVE and history and history_bytes(history) > int(getattr(port, "MAX_HISTORY_BYTES",
+                                                                                 HISTORY_BYTES_DEFAULT)):
+            status, reason = "INCOMPLETE", "HISTORY_TOO_LARGE"       # never truncated: what was seen would change
+            break
         guard(capability="ai_probe", provider=e)
         row = {"topic_key": t["topic_key"], "engine": e, "sample": si, "turn": k + 1, "kind": turn["kind"],
                "turn_source": turn["source"], "priya_key": turn["priya_key"], "context_mode": mode,
@@ -473,9 +526,10 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
         obs.pop("_on_client")
         ex = excerpt(a.text, ctx["terms"]) if t["source"] == "prompt_set" else \
             {"basis": None, "excerpt": None, "withheld": "PRIYA_QUERY_CONTEXT"}
-        cut = mode == NATIVE and len(a.text) > MAX_ASSISTANT_CHARS
+        sus = bool(_INJECTION.search(a.text)) and k + 1 < len(turns)   # a prior answer, re-sent in native mode
+        injected = injected or (sus and mode == NATIVE)
         rows.append({**row, **meta, "status": "ANSWER", **obs, "evidence": ex,
-                     **({"history_answer_truncated": True} if cut else {})})
+                     **({"injection_suspected": True} if sus else {})})
         done.append({"turn": k + 1, "kind": turn["kind"], "status": "ANSWER", "client": obs["client"],
                      "competitors_mentioned": [c["name"] for c in obs["competitors"] if c["mentioned"]]})
         h = meta["answer_sha256"]
@@ -494,11 +548,14 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
             if not a.text.strip():                      # nothing to send back as the assistant's turn
                 status, reason = "INCOMPLETE", "EMPTY_ANSWER_MID_CHAIN"
                 break
+            blocks = getattr(a, "turn_content", None)
             history += [{"role": "user", "text": turn["_text"]},
-                        {"role": "assistant", "text": a.text[:MAX_ASSISTANT_CHARS]}]
+                        {"role": "assistant", "text": a.text,
+                         **({"content": blocks} if isinstance(blocks, list) and blocks else {})}]
     if status != "COMPLETE":
         final = _unknown()
-    return {"sample": si, "status": status, "reason": reason, "turns": done, "final": final}
+    return {"sample": si, "status": status, "reason": reason, "turns": done, "final": final,
+            "injection_suspected": injected}
 
 
 # ---------------------------------------------------------------------------------------------- summaries
@@ -533,8 +590,11 @@ def pattern_of(outcome: Optional[str], visible: int, any_mention: int, nc: int, 
     return "VISIBLE_THEN_NOT_RECOMMENDED" if vis else "NOT_RECOMMENDED"
 
 
-def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str) -> dict:
-    complete = [c for c in samples if c["status"] == "COMPLETE"]
+def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str,
+             native_status: Optional[str] = None) -> dict:
+    # an INJECTION_SUSPECTED chain (native mode) is kept out of every rate and pattern and reported apart
+    complete = [c for c in samples if c["status"] == "COMPLETE" and not c.get("injection_suspected")]
+    injected = [c for c in samples if c["status"] == "COMPLETE" and c.get("injection_suspected")]
     by_turn = []
     for k, turn in enumerate(turns):
         ans = [c["turns"][k] for c in complete]
@@ -568,6 +628,17 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
         if c["status"] != "COMPLETE":
             key = c["reason"] or c["status"]
             incomplete[key] = incomplete.get(key, 0) + 1
+    if injected:
+        incomplete["INJECTION_SUSPECTED"] = len(injected)
+    inj_final = {"client": 0, "competitor": {}, "other": 0}
+    for c in injected:
+        f = c["final"]
+        if f["counts"] and f["winner"] == "client":
+            inj_final["client"] += 1
+        elif f["counts"] and f["winner"] == "competitor":
+            inj_final["competitor"][f["name"]] = inj_final["competitor"].get(f["name"], 0) + 1
+        else:
+            inj_final["other"] += 1
     nc = len(complete)
     outcome = client_outcome(rec["client"], nc)
     first = by_turn[0]
@@ -575,7 +646,11 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
                          first["client_mentioned"]["k"] + first["client_mentioned_unconfirmed"], nc, mode)
     strength = "STRONG" if nc >= MIN_USABLE and outcome in ("RECOMMENDED", "NOT_RECOMMENDED") else \
         "WEAK" if nc else "NONE"
-    return {"topic_key": t["topic_key"], "engine": e, "context_mode": mode, "chains": len(samples), "complete": nc,
+    return {"topic_key": t["topic_key"], "engine": e, "context_mode": mode, "native_status": native_status,
+            "injection_suspected": {"chains": len(injected), "final_recommended": inj_final,
+                                    "note": "an answer held instruction-like text and was re-sent to the engine; "
+                                            "these chains are excluded from every rate and pattern"},
+            "chains": len(samples), "complete": nc,
             "loop_stopped": sum(1 for c in samples if c["status"] == "LOOP_STOPPED"),
             "not_complete": dict(sorted(incomplete.items())), "turns_planned": len(turns),
             "plan_flags": list(flags), "by_turn": by_turn,

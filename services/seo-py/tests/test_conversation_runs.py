@@ -364,3 +364,47 @@ def test_native_multi_turn_bodies_follow_each_providers_documented_shape():
     plain = te.fake("anthropic")
     te.make("anthropic", plain).ask("only question")                        # no history: the body as before
     assert plain.requests[0]["body"]["messages"] == [{"role": "user", "content": "only question"}]
+
+
+def test_anthropic_multi_turn_sends_the_recorded_tool_blocks_back_unchanged():
+    import copy
+
+    import answer_adapter as aa
+    import pytest
+    rec = te.fixture("anthropic")                                          # server_tool_use + web_search_tool_result
+    fa = te.fake("anthropic")
+    eng = te.make("anthropic", fa)
+    a = eng.ask("first question")
+    assert a.turn_content == rec["content"]
+    hist = [{"role": "user", "text": "first question"}, {"role": "assistant", "text": a.text,
+                                                         "content": copy.deepcopy(a.turn_content)}]
+    eng.ask("second question", history=hist)
+    sent = fa.requests[1]["body"]["messages"]
+    assert sent[1] == {"role": "assistant", "content": rec["content"]}       # encrypted_content included, unchanged
+    assert any(b["type"] == "web_search_tool_result" for b in sent[1]["content"])
+    eng.MAX_HISTORY_BYTES = 100
+    with pytest.raises(aa.EngineError) as e:
+        eng.ask("third question", history=hist)
+    assert e.value.detail == "HISTORY_TOO_LARGE" and len(fa.requests) == 2
+
+
+def test_gemini_multi_turn_sends_the_parts_back_as_received_and_is_provisional():
+    import google_engine as gg
+    body = te.fixture("google")
+    body["candidates"][0]["content"]["parts"][0]["thoughtSignature"] = "c2lnbmF0dXJl"   # as a thinking model sends it
+    fg = te.fake("google", body)
+    eng = te.make("google", fg)
+    a = eng.ask("first question")
+    assert a.turn_content == body["candidates"][0]["content"]["parts"]
+    eng.ask("second question", history=[{"role": "user", "text": "first question"},
+                                        {"role": "assistant", "text": a.text, "content": a.turn_content}])
+    model_turn = fg.requests[1]["body"]["contents"][1]
+    assert model_turn == {"role": "model", "parts": body["candidates"][0]["content"]["parts"]}
+    assert model_turn["parts"][0]["thoughtSignature"] == "c2lnbmF0dXJl"
+    assert gg.MULTI_TURN_DOCS["status"] == "provisional_until_first_live_call"
+    from agents import theo
+    from test_theo import CTX, Clock, topics
+    t, plans = topics()
+    r = theo.run_chains(t, plans, {"google": eng}, ["google"], 1, lambda **k: None, None, theo.CallCap(10), CTX,
+                        Clock())
+    assert r["engines"]["google"]["native_status"] == "provisional_until_first_live_call"

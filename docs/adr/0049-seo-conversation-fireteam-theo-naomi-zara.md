@@ -59,8 +59,38 @@ read for ADR 0017 documents a plain-string `input` for single-turn prompts. Thei
 (`MULTI_TURN_NOT_SUPPORTED`), and Theo uses `stacked_questions` for them: ONE request per turn carrying the earlier
 USER questions only, named as such. The follow-up PLAN (the user turns) stays fixed before turn one in both modes;
 an earlier answer (an injection included) can only appear as an assistant message, never as a user turn or in
-Theo's logic (tested). An earlier answer longer than 4,000 characters is cut and the row flagged; an empty answer
-mid-chain stops a native chain (`EMPTY_ANSWER_MID_CHAIN`): nothing is invented to fill the assistant turn.
+Theo's logic (tested). An empty answer mid-chain stops a native chain (`EMPTY_ANSWER_MID_CHAIN`): nothing is invented
+to fill the assistant turn.
+
+**Assistant turns go back as received (review round 2, items 1-2).** An answer's provider-native content is kept in
+memory (`ProviderAnswer.turn_content`, never stored) and sent back unchanged as that assistant turn:
+- *Anthropic*: the response's `content` blocks exactly as received — text blocks with their citations
+  (`encrypted_index`), `server_tool_use`, `web_search_tool_result` with each result's `encrypted_content`. The web
+  search tool page (platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool, read Nov 8 2026; this
+  adapter uses tool `web_search_20250305`, `anthropic-version: 2026-10-21`): "To continue a conversation that contains
+  search results, send the assistant's content blocks back exactly as you received them, including each result's
+  `encrypted_content` ... If `encrypted_content` is missing or modified, the request fails with a 400 validation
+  error"; `encrypted_index` "must be passed back for multi-turn conversations". The page shows no multi-turn request
+  example; the shape follows the Messages page above. Tested with the recorded synthetic fixture's tool blocks.
+- *Gemini*: the chosen candidate's `content.parts` exactly as received (any `thoughtSignature` and thought parts
+  included), as role `model`. **PROVISIONAL**: the pages read (the API reference's first 100,000 characters, the
+  Google Search grounding page) do not state the thought-signature rule; the grounding page only links a "Thought
+  signatures" page, which was not read. `google_engine.MULTI_TURN_DOCS.status` is
+  `provisional_until_first_live_call` and every Gemini chain carries `native_status` saying so.
+- No truncation: the adapter refuses a history over `MAX_HISTORY_BYTES` (256 KiB of JSON, `HISTORY_TOO_LARGE`), and
+  Theo checks the same cap before asking, ending the chain INCOMPLETE (`HISTORY_TOO_LARGE`) with no request: a cut
+  block would change what the engine saw (round 1's 4,000-character text cut is gone).
+
+**Injected text in native mode (review round 2, item 3) — disclosed.** In native multi-turn an engine's earlier
+answer is re-sent to it, so text injected into that answer (by a page the engine read, say) may steer the engine's
+later answers, **the classified final one included**. Theo's plan and logic cannot be altered by it (the user turns
+are fixed before turn one; the classification reads the answer lexically), but the engine's behaviour can. Guard: an
+earlier answer that will be re-sent and matches `theo._INJECTION` (instruction-like text aimed at the model: "ignore
+previous instructions", "system:", "you are now", "from now on you", "always recommend", "in all future answers",
+chat-template tokens, …) flags its row `injection_suspected` and the chain INJECTION_SUSPECTED: it is excluded from
+every rate, outcome and pattern (so never "invisible → recommended") and its finals are reported apart under
+`injection_suspected`. The detection is lexical and reduces, not removes, the risk; the disclosure is in every Theo
+envelope's limitations. In stacked mode answers are never re-sent, so the row is flagged but the chain is counted.
 **Budget for growing context:** a native turn k carries k-1 earlier answers and is reserved and charged as k reserve
 units (a 3-turn chain = 6 units, a stacked one = 3), both in Theo's own cap and in the engine reservation; a request
 of unknown cost books k reserves (`_Meter.charge_context`, svc_engines.py) and must fit the reservation before it is
@@ -79,7 +109,13 @@ mention is dropped when, within its clause (cut at `. ! ? ; , : ( ) —`, `but`,
 preceded by `not`, `n't`, `never`, `avoid…`, `instead of`, `rather than`, `over`, `unlike`, `stay away from`, `skip`,
 `no longer`, `<x>er than` / `more|less <x> than`, `superior to`, `except`, or followed by `is not` / `isn't` /
 `not recommended` / … ("I would not recommend Acme. I recommend Beta." → Beta; "Avoid Acme, go with Beta" → Beta;
-"Beta is better than Acme" → Acme is never the pick). The first remaining entity in the first sentence holding a cue
+"Beta is better than Acme" → Acme is never the pick). Review round 2: `not only` is not a negation, and a cue sentence
+naming several entities with "not only … but also" or "both … and" is a shared pick (`recommended_together`, no
+winner); "would not hesitate to recommend X", "don't overlook X" and "can't recommend X enough" are positive. Seven
+fallbacks are tested as reading "no recommendation" (never a wrong win): double negatives ("can't think of a reason
+not to recommend X", "it's not that I don't recommend X", "I'd never not recommend X"), litotes without a cue
+("hardly anyone would avoid X"), a pick made by pronoun ("X is not bad at all; I recommend it"), a hedge ("you cannot
+go wrong with X, though I would not pick it myself") and a real refusal ("I can't recommend X"). The first remaining entity in the first sentence holding a cue
 (`recommend`, `best choice`, `top pick`, `go with`, …) is **recommended in the final answer** — and counts as a
 recommendation ONLY when its mention is confirmed (HIGH), the same threshold the opening turn uses (review round 1
 MED 4). Otherwise the first remaining entity is reported as **"named first in the final answer"**
@@ -172,7 +208,8 @@ band holds the count, reliability matches the count when verified and is THIN wh
 no unplanned or duplicate topic payload. Conflicts: `STRONG_CHAIN_THIN_VOLUME`, `STRONG_CHAIN_UNKNOWN_VOLUME`,
 `VOLUME_WITHOUT_CHAIN`, `UNSTABLE_CHAIN`, `ENGINES_DISAGREE`, `HANDOFF_NOT_VERIFIED` (blocking). Verdicts: CLEARED, FLAGGED (passes, decision
 INSUFFICIENT_EVIDENCE, `priority_basis` `chain_only` when volume is thin or unknown — a consumer must not rank by
-volume), PARTIAL (a member missing: its half `null` with the reason, never filled in), NOTHING_OBSERVED (no complete
+volume), PARTIAL (a member missing: its half `null` with the reason, never filled in; an unverified volume half
+still lists `HANDOFF_NOT_VERIFIED`), NOTHING_OBSERVED (no complete
 chain and no volume: not "cleared", nothing passes), HELD (invalid, contradictory, foreign or duplicate: nothing passes).
 Decisions never ACT; TEST only for CLEARED with a STRONG chain and VERIFIED MODERATE+ volume.
 
@@ -185,7 +222,9 @@ engine. No new kill switch, so the switch view is unchanged. **Bounded wait (LOW
 members, `SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS` (default 600, 1..3600, anything else refuses start); a member still
 running at the end is closed `TIMED_OUT` (Zara reports PARTIAL, its half `null`), told to stop at its next step (its
 guard raises `MEMBER_TIMED_OUT`), never waited for, and anything it emits afterwards is counted in `late_payloads` and
-never used.
+never used. Cancellation happens at the member's NEXT guard check, so **at most one request already in flight**
+completes after the close — bounded by that engine's own hard deadline and inside its recorded reservation (its
+settlement is still recorded); no further request starts.
 
 ### 7. Routes, records, budgets, isolation
 
@@ -259,6 +298,16 @@ no market-volume claim; an incomplete chain has no final recommendation; every f
 | MED 5 native multi-turn | adapter `history`, Anthropic and Gemini bodies (doc URLs above), stacked fallback named honestly, plan fixed before turn one, context-weighted reservations, caps fail closed |
 | LOW 6 Garwood speed | exact to k = 100, Wilson–Hilferty with an outward margin above, outward-only proven against the exact band (no timing assertion) |
 | LOW 7 bounded member wait | `SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS`, TIMED_OUT → PARTIAL, late payloads unused |
+
+## Review round 2 (ab285510: CONDITIONAL, no HIGH)
+
+| Item | Fix |
+|---|---|
+| 1 Anthropic assistant turns re-sent as cut text | content blocks sent back exactly as received (tool-result blocks, `encrypted_content`, citations); a size cap that ends the chain INCOMPLETE instead of cutting; the tool page URL and version cited (§2); tested with the recorded fixture's blocks |
+| 2 Gemini thought signatures | the candidate's parts sent back as received (`thoughtSignature` included, tested); the rule was not confirmed in the pages read, so Gemini native is `provisional_until_first_live_call` on every chain |
+| 3 injection steering the engine | disclosed (§2, every Theo envelope); INJECTION_SUSPECTED chains excluded from every rate and pattern, reported apart (tested) |
+| 4 "not only X but also Y" and idioms | shared pick, no winner; three positive idioms fixed; seven fallbacks tested as "no recommendation" |
+| 5 small | Zara names `HANDOFF_NOT_VERIFIED` on PARTIAL items; the at-most-one-in-flight-request behaviour of a timed-out member documented (§6) |
 
 ## Tests
 

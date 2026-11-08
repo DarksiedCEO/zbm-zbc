@@ -233,7 +233,10 @@ class ConversationsMixin:
         results: dict = {}
         killed: Optional[str] = None
         # one bounded overall wait for the members (SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS): a member still running at
-        # the end is closed TIMED_OUT (Zara reports PARTIAL), told to stop, and never waited for
+        # the end is closed TIMED_OUT (Zara reports PARTIAL), told to stop, and never waited for. It is cancelled at
+        # its NEXT guard check: at most the one request already in flight completes (bounded by that engine's own
+        # hard deadline and inside its recorded reservation); no further request starts, and anything it emits after
+        # the close is counted as late and never used
         end = time.monotonic() + self.settings.fireteam_member_timeout_s
         pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="seo-fireteam")
         try:

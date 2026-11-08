@@ -60,7 +60,8 @@ LIMITS = [
     "reason to hold back a priority, not proof that either is wrong.",
 ]
 
-_CHAIN_KEYS = {"topic_key", "engine", "context_mode", "chains", "complete", "loop_stopped", "not_complete",
+_CHAIN_KEYS = {"topic_key", "engine", "context_mode", "native_status", "injection_suspected", "chains", "complete",
+               "loop_stopped", "not_complete",
                "turns_planned", "plan_flags", "by_turn", "final_recommendation", "client_recommended",
                "client_outcome", "unstable", "pattern", "strength"}
 _VOL_KEYS = {"topic_key", "proxy_for", "estimator", "status", "verified", "reliability", "confidence", "band", "unit",
@@ -98,6 +99,9 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
         fr, bt = c["final_recommendation"], c["by_turn"]
         if not isinstance(fr, dict) or not isinstance(bt, list) or not bt or not isinstance(bt[0], dict):
             return "THEO_PAYLOAD_INVALID"
+        inj = c["injection_suspected"]
+        if not isinstance(inj, dict) or not isinstance(inj.get("chains"), int) or inj["chains"] < 0:
+            return "THEO_PAYLOAD_INVALID"
         rec, named = _counts(fr.get("recommended")), _counts(fr.get("named_first_only"))
         none, unknown = fr.get("none"), fr.get("unknown")
         if rec is None or named is None or not isinstance(none, int) or not isinstance(unknown, int):
@@ -108,7 +112,8 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
         except (KeyError, TypeError):
             return "THEO_PAYLOAD_INVALID"
         nc = c["complete"]
-        if nc > c["chains"] or rec + named + none != nc or unknown != c["chains"] - nc:
+        if nc > c["chains"] or rec + named + none != nc or unknown != c["chains"] - nc \
+                or inj["chains"] > c["chains"] - nc:
             return "THEO_SELF_CONTRADICTION"
         outcome = theo.client_outcome(fr["recommended"]["client"], nc)
         if outcome != c["client_outcome"] or c["client_recommended"].get("k") != fr["recommended"]["client"]:
@@ -264,7 +269,9 @@ class Crosscheck:
                 "volume": None if not has_v else _volume_view(vo),
                 "volume_missing": None if has_v else self._missing("naomi")}
         if not (has_c and has_v):
-            item.update(verdict="PARTIAL", conflicts=[],
+            # review round 2: an unverified volume half is named on a PARTIAL item too
+            unv = has_v and vo["status"] != "UNKNOWN" and vo["verified"] is not True
+            item.update(verdict="PARTIAL", conflicts=["HANDOFF_NOT_VERIFIED"] if unv else [],
                         downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
                                     "priority_basis": "chain_only" if has_c else
                                     "volume_only" if vo["status"] != "UNKNOWN" and vo["verified"] is True else "none"})
@@ -320,7 +327,8 @@ class Crosscheck:
 
 
 def _chain_view(c: dict) -> dict:
-    return {k: c[k] for k in ("engine", "context_mode", "chains", "complete", "pattern", "strength", "unstable",
+    return {k: c[k] for k in ("engine", "context_mode", "native_status", "injection_suspected", "chains", "complete",
+                              "pattern", "strength", "unstable",
                               "client_outcome", "client_recommended", "final_recommendation")}
 
 

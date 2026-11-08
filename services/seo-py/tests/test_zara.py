@@ -266,3 +266,17 @@ def test_a_payload_arriving_after_its_member_was_closed_is_never_used():
     r = b.result()
     assert r["late_payloads"] == [{"member": "theo", "topic_key": t[0]["topic_key"]}]
     assert r["items"][0]["chain"] is None and r["items"][0]["chain_missing"] == "THEO_TIMED_OUT:MEMBER_TIMED_OUT"
+
+
+def test_a_partial_item_with_unverified_volume_names_the_blocking_conflict():
+    its = [item("a", PS2["prompts"][0], counts=dict(GSC))]
+    t, _plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]}, items=its)
+    vout, vol = volumes_for(t, its)
+    b = zara.Crosscheck("zbm", RUN, t)
+    b.receive("naomi", t[0]["topic_key"], vol[t[0]["topic_key"]])
+    b.member_contract("naomi", vout)
+    b.member_closed("naomi", "DONE")
+    b.member_closed("theo", "FAILED", "MEMBER_FAILED")
+    i = b.result()["items"][0]
+    assert i["verdict"] == "PARTIAL" and i["conflicts"] == ["HANDOFF_NOT_VERIFIED"]
+    assert i["downstream"]["priority_basis"] == "none"
