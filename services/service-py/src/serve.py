@@ -45,23 +45,36 @@ three chatty threads beside it, nothing when it runs alone.
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import dual_stack
 import launch_guard
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 
+# Hardening 2026-11-08: the tuning values were "any positive number" — nan passed the `<= 0` check (a nan head
+# deadline never fires: idle sockets are never closed), inf too, and 1e9 connections or a 30-year keep-alive were
+# accepted. Now each is finite and within a bound; anything else refuses start (unset or blank: the default).
+TUNING_BOUNDS = {"SVC_REQUEST_HEAD_TIMEOUT_SECONDS": (0.5, 300.0), "SVC_KEEP_ALIVE_TIMEOUT_SECONDS": (1, 300),
+                 "SVC_LIMIT_CONCURRENCY": (1, 10_000)}
+
+
 def _positive(name: str, default: float, conv=float):
     raw = os.environ.get(name)
-    if not raw:
+    if raw is None or not raw.strip():
         return default
-    value = conv(raw)
-    if value <= 0:
-        raise RuntimeError(f"{name} must be positive")
+    lo, hi = TUNING_BOUNDS[name]
+    try:
+        value = conv(raw.strip())
+    except ValueError:
+        value = math.nan
+    if not (isinstance(value, (int, float)) and math.isfinite(value) and lo <= value <= hi):
+        raise RuntimeError(f"{name} must be a finite number from {lo} to {hi}; this service refuses to start")
     return value
 
 
@@ -149,4 +162,7 @@ def run(app, host: str, port: int) -> None:
     # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
     # normal exit (status 143) and exit handlers run.
     with launch_guard.sigterm_exits():
-        uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())
+        # Hardening 2026-11-08 (finance-py's golive-combined fix): SVC_BIND_ADDR=:: is bound dual-stack by
+        # dual_stack.serve (asyncio alone binds it IPv6-only, refusing every IPv4 peer); any other host goes to
+        # uvicorn.run unchanged. src/dual_stack.py is byte-for-byte finance-py's.
+        dual_stack.serve(uvicorn, app, host, port, "service-py", **uvicorn_kwargs())
