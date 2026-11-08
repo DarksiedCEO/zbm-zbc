@@ -176,7 +176,7 @@ These figures are not paired with revenue (analytics and CRM are not connected),
 
 | Class | Clicks | Impressions | CTR |
 |---|---|---|---|
-| set aside (looked like personal data; dropped) | 2 | 5 | 40.0% |
+| set aside (looked like personal data: e-mails, phone numbers, ids, address-shaped text; dropped) | 2 | 5 | 40.0% |
 | brand | 20 | 100 | 20.0% |
 | questions | 10 | 150 | 6.7% |
 | local intent | 5 | 60 | 8.3% |

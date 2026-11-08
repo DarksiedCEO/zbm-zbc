@@ -144,14 +144,21 @@ account and developer token: a founder decision, not built.
 ## Personal data
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
-an ISO date, id- or token-like words, and — added in review round 1, `search_performance` rules `2026-11-08.1`, so
-Osei's query classes use it too — street addresses: a house number, one to four words and a street suffix, full or
-abbreviated (`st`, `ave`, `blvd`, `rd`, `ln`, `dr`, `ct`, `pl`, `hwy`, `pkwy`, …); unit, apartment, suite and flat
-numbers; `#12`; PO boxes; ZIP+4; a 5-digit ZIP next to a US state name or code), on the raw or the normalised text
-(fullwidth digits, lookalikes), never enters the ledger; only `pii_suspect_dropped` {queries, clicks, impressions},
-where `queries` counts **distinct** normalised queries (a query in both sources, or on many Bing dates, is one). The
-address rule is conservative and over-drops (`10 things to do in st louis` is dropped); a bare ZIP (`plumber 90210`)
-is kept. Derived variants are checked the same way, and a frame is built only from a query that has no capitalised
+an ISO date, id- or token-like words, and — added in review round 1, tightened in round 2, `search_performance` rules
+`2026-11-08.2`, so Osei's query classes use it too — address-shaped text: a house number at the start or after a
+space, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`), a street
+suffix (abbreviations that are not English words — `st`, `ave`, `blvd`, `rd`, `dr`, `ln`, `ct`, `pl`, `hwy`, `pkwy`, …
+— plus `street`, `avenue`, `boulevard`), then only up to three city words, an optional state and an optional ZIP to
+the end; a unit (`apt` / `suite` / `unit` / `#` N) only right after such an address; PO boxes; ZIP+4; a final 5-digit
+ZIP after a state name or a state code that is not an English word (`in`, `or`, `me`, `oh`, `ok`, `hi`, `id`, `la`,
+`ma`, `pa`, `de`, `co`, `al` excluded, deliberately)), on the raw or the normalised text (fullwidth digits,
+lookalikes), never enters the ledger; only `pii_suspect_dropped` {queries, clicks, impressions}, where `queries`
+counts **distinct** normalised queries (a query in both sources, or on many Bing dates, is one). Round 1's rule
+over-dropped service queries (`#1 rug cleaner`, `ac unit 12000 btu`, `2 lane road`, `ohio 45000 jobs`); those are now
+kept, with a regression table in `tests/test_priya.py` and `tests/test_gsc.py`. **Remaining errors, disclosed:**
+over-drop of a non-address shaped like `<number> <word> st|ave|dr…` at the end of a query; under-detection of
+addresses with an ordinary-word suffix (`123 main road`, `9 oak lane`), with an excluded state code (`portland or
+97201`) or with more than three city words; a bare ZIP (`plumber 90210`) is kept. Derived variants are checked the same way, and a frame is built only from a query that has no capitalised
 word as the engine reported it, and only when every word it adds around the head is in a closed vocabulary
 (`priya.FRAME_VOCAB`: stop, question, constraint and commercial words and a short list of generic verbs); a head
 with a capitalised word is not used. The ledger is handed out once and not stored; the recorded summary holds hashes

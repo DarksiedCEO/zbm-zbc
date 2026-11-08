@@ -627,7 +627,11 @@ GSC-12. **Limitations (honest).**
      GSC-2; the first real read will be the first contact. U1 is unverified.
    - Strictness has a cost: a new top-level field from Google, or a row Google sends with clicks > impressions, stops
      the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
-   - Names in queries are not detected as such; they are safe only because no query text is kept. Page templates
+   - Names in queries are not detected as such; they are safe only because no query text is kept. Address-shaped
+     queries are `pii_suspect` since rules `2026-11-08.2` (ADR 0047, "Personal data"): the rule needs address
+     structure, still over-drops a non-address shaped like `<number> <word> st|ave|dr…`, and misses addresses with an
+     ordinary-word suffix (`123 main road`) or an English-word state code (`portland or 97201`); the client report's
+     label says "address-shaped text". Page templates
      collapse every multi-word slug to `{slug}` and send templates of fewer than 3 URLs to `{other}`, but a plain
      one-word segment shared by 3 or more URLs is kept as written: a site whose paths name people with single words
      (`/users/jsmith/{slug}` across three posts) can still show such a word. The threshold of 3 is this service's

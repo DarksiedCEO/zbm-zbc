@@ -96,16 +96,20 @@ def test_pii_suspect_queries_never_enter_the_ledger_only_their_counts():
     assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"]["queries"] == 2
 
 
-@pytest.mark.parametrize("q", ["123 main st springfield", "42 Wallaby Way Sydney", "1200 5th ave new york",
-                               "9 n elm blvd.", "flat 4b rug", "apt 12 carpet cleaning", "suite 200 dental",
-                               "po box 77", "springfield il 62701", "austin, tx 78701", "90210-1234 rug"])
+@pytest.mark.parametrize("q", ["123 main st springfield", "45 oak avenue apt 3", "1200 5th ave new york",
+                               "9 n elm blvd.", "po box 1234", "springfield il 62701", "austin, tx 78701",
+                               "90210-1234", "plumber at 123 main st"])
 def test_street_addresses_are_dropped_as_personal_data(q):
     led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
     assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"] == {"queries": 1, "clicks": 1,
                                                                           "impressions": 30}
 
 
-@pytest.mark.parametrize("q", ["rug cleaner near me", "4 way stop", "top 10 rug cleaners", "rug cleaner 90210"])
+@pytest.mark.parametrize("q", ["rug cleaner near me", "4 way stop", "top 10 rug cleaners", "rug cleaner 90210",
+                               "#1 rug cleaner", "ac unit 12000 btu", "24 hour emergency plumber near dr",
+                               "2 bedroom flat close to station", "10 best hiking trail", "2 lane road",
+                               "cars under 30000 in 50000 miles", "or 50000 btu", "ohio 45000 jobs",
+                               "apt 12 carpet cleaning", "3 days in st louis"])
 def test_ordinary_queries_with_numbers_are_kept(q):
     assert by_text(build(gsc([(q, 1, 30, 0.03, 4.0)])))[q]["origin"] == "observed"
 

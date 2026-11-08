@@ -782,6 +782,30 @@ def test_drift_rules_for_search_performance():
     assert c({}, {}) is None
 
 
+# Osei's query classes use the same address rule (search_performance 2026-11-08.2): ordinary service queries with
+# numbers are KEPT in their class; address-shaped ones are pii_suspect. Known gap, by choice: "portland or 97201"
+# (state codes that are English words are not used) and "123 main road" (road is an ordinary word) are not caught.
+ADDRESS_TABLE = [(q, "KEEP") for q in (
+    "#1 rug cleaner", "ac unit 12000 btu", "24 hour emergency plumber near dr", "2 bedroom flat close to station",
+    "10 best hiking trail", "2 lane road", "cars under 30000 in 50000 miles", "or 50000 btu", "ohio 45000 jobs",
+    "portland or 97201", "123 main road")] + [(q, "DROP") for q in (
+    "123 main st springfield", "45 oak avenue apt 3", "po box 1234", "springfield il 62701", "90210-1234")]
+
+
+@pytest.mark.parametrize("q,want", ADDRESS_TABLE)
+def test_osei_address_rule_keeps_service_queries_and_drops_addresses(q, want):
+    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
+    assert sp.looks_like_address(q) == (want == "DROP")
+
+
+def test_osei_query_classes_count_addresses_as_pii_and_keep_the_rest():
+    from collections import Counter
+    got = Counter(sp.classify_query(q, ["acme"]) for q, _ in ADDRESS_TABLE)
+    assert got["pii_suspect"] == 5 and sum(got.values()) == len(ADDRESS_TABLE)
+    assert sp.classify_query("24 hour emergency plumber near dr", ["acme"]) == "other"
+    assert sp.classify_query("ac unit 12000 btu", ["acme"]) == "other"
+
+
 def test_query_classifier_pii_first_and_closed():
     b = ["acme"]
     for q in ("jane.doe@example.com", "jane (at) example dot com", "acme 5550100199", "call 555-010-0199",

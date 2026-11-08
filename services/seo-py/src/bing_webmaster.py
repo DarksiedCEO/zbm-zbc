@@ -61,8 +61,6 @@ BLOCKED = frozenset({"BING_AUTH_REFUSED", "BING_REFUSED", "BING_BUDGET_EXHAUSTED
 MAX_BODY = 8 * 1024 * 1024
 MAX_ROWS = 50_000
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
-ROW_FIELDS = frozenset({"__type", "AvgClickPosition", "AvgImpressionPosition", "Clicks", "Date", "Impressions",
-                        "Query"})
 ROW_REQUIRED = frozenset({"Clicks", "Date", "Impressions", "Query"})
 ROW_MAX_FIELDS = 64                                  # unknown fields are ignored, but a row is never unbounded
 _DATE = re.compile(r"/Date\((-?[0-9]{1,15})([+-][0-9]{4})?\)/")

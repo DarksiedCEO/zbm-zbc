@@ -642,7 +642,7 @@ def _search_block(env: Optional[dict], block: Optional[dict]) -> Optional[dict]:
            "classes": [], "unattributed": None, "templates": [], "templates_more": 0}
     qc = s.get("by_query_class")
     if isinstance(qc, dict) and isinstance(qc.get("classes"), dict):
-        names = {"pii_suspect": "set aside (looked like personal data; dropped)", "brand": "brand", "question":
+        names = {"pii_suspect": "set aside (looked like personal data: e-mails, phone numbers, ids, address-shaped text; dropped)", "brand": "brand", "question":
                  "questions", "local": "local intent", "commercial": "commercial intent", "other": "other"}
         for k in sp.QUERY_CLASSES:
             v = qc["classes"].get(k)

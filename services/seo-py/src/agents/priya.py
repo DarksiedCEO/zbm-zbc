@@ -26,7 +26,8 @@ What a number in the ledger is, and is not:
   - ``difficulty`` is null: no owned data supports an Ahrefs-style keyword difficulty, and none is invented.
 
 Personal data: a query that looks like personal data (``search_performance.classify_query`` -> ``pii_suspect``:
-e-mails, phone-like digit runs, id- or token-like words, street addresses, US ZIP+4 and ZIP-with-state) never enters
+e-mails, phone-like digit runs, id- or token-like words, address-shaped text, PO boxes, ZIP+4, a final ZIP after a
+state; the rules and their gaps are in ``search_performance``) never enters
 the ledger; only how many distinct queries there were and their summed counts. Derived variants are checked the same
 way, and a frame is built only from a query with no capitalised word whose added words are all in a closed vocabulary
 (``FRAME_VOCAB``): personal names cannot be reliably detected, so a word that could be one is never transferred.
@@ -138,8 +139,10 @@ LIMITS = [
     "evidence of demand.",
     "Personal names cannot be reliably detected in queries: a query naming a person can appear in the ledger as the "
     "engine reported it. Dropped as personal data: e-mails, phone-like digit runs, id- or token-like words, street "
-    "addresses (number plus street suffix, unit or apartment numbers, PO boxes), ZIP+4 codes and a ZIP next to a "
-    "state; the dropped count is of distinct queries. Derived variants are never built from a query with a "
+    "addresses (house number, street name and suffix, with a unit only right after one), PO boxes, ZIP+4 codes and "
+    "a final ZIP after a state; the dropped count is of distinct queries. The address rule needs address structure; "
+    "some addresses pass (e.g. '123 main road', 'portland or 97201'), and a non-address shaped like "
+    "'<number> <word> st' is dropped. Derived variants are never built from a query with a "
     "capitalised word, nor from a frame adding a word outside a closed vocabulary.",
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",
 ]
